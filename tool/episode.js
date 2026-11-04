@@ -240,6 +240,12 @@ const isPlanned = (p) => isObject(p) && PLANNED_ROUTES.includes(p.route) && isTe
 export const isPlannedRecord = (r) => isObject(r) && r.version === PLANNED_VERSION && r.kind === null && r.video === null && isPlannedAnswer(r.answer) && isPlanned(r.planned)
   && (r.session === undefined || r.session === null);
 
+/** Whether a record is a video made from a plan (PR H5b): the plan's own record, written once more as the video its footage made when she said
+    all the footage was in (`join`). It holds the plan it was (`planned`, whole), the video that was made (`video`) and a kind of its own, "raw"
+    or "short video". It is no plan waiting for its footage (isPlannedRecord is false of it: it has a video and a kind), and it is gated as any
+    answered video is. Its plan is kept in it, so that it stays at layout 5; its `planned.filmed` says when and of which parts it was made. */
+export const isFromPlan = (r) => isObject(r) && isObject(r.video) && KINDS.includes(r.kind) && isPlanned(r.planned);
+
 /** The kind of a record as a person means it: "raw", "finished", "session" or "short video", or null while the video waits for
     its answer. An "episode" is a raw recording imported before the switch. */
 export function kindOf(r) {

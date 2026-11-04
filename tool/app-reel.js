@@ -49,8 +49,8 @@ import { existsSync, readFileSync, renameSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { clockText } from "./clock.js";
 import { runningCommand } from "./detached.js";
-import { kindOf, localStamp } from "./episode.js";
-import { graphicCuesOf, graphicCuesOfPlan, REEL_CUES_MOST } from "./graphic-cues.js";
+import { isFromPlan, kindOf, localStamp } from "./episode.js";
+import { graphicCuesOf, graphicCuesOfPlan, REEL_CUES_MOST, SHOT_KINDS } from "./graphic-cues.js";
 import { cliPath } from "./hyperframes.js";
 import { projectCues, projectFiles, projectName, writeProject } from "./project.js";
 import { refNamesOf, withReferences } from "./references.js";
@@ -173,12 +173,16 @@ function adoptReel(ctx, { found, record, n, at, dir }) {
     - a video her editor finished is given `reelCues`: the cues the run that made the Reel's video kept beside it (workcopy.js
       keepCues), read as cues are read, three at most. A file that is not there, is not whole JSON, or holds no list of cues is no cues,
       and the Reel is made all the same. Its cut plan's cues are not the Reel's: a finished video is not edited whole.
+    - a Reel of a video made from a plan (episode.js isFromPlan; PR H5b) is given `graphicCues` too, but the plan's guide's (planned.cues, read
+      again as a package's are), graphic and words cues alone: a b-roll or screen cue is footage, which is the main video's and a Reel never
+      holds (no footage is moved in, and its notes have no rule for it). The cut plan's own cues, the reading's, are not used: the guide's are.
     No other kind has a Reel. */
-function cuesFor(kind, { plan, file }) {
+function cuesFor(kind, { plan, file, record }) {
   if (kind === "finished") {
     const held = factsIn(file);
     return { reelCues: graphicCuesOf(Array.isArray(held?.cues) ? held.cues : [], { most: REEL_CUES_MOST }).cues };
   }
+  if (isFromPlan(record)) return { graphicCues: graphicCuesOf(record.planned.cues, { kinds: SHOT_KINDS }).cues };
   return { graphicCues: graphicCuesOfPlan(plan) };
 }
 
@@ -241,7 +245,7 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   const plan = jsonIn(join(found.folder, `${stem}.cut-plan.json`));
   const input = {
     kind: "reel", part: { reel: n }, id: record.id, name, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words, stretch,
-    plan, faces: factsIn(copy.faces), ...cuesFor(kindOf(record), { plan, file: copy.cues }),
+    plan, faces: factsIn(copy.faces), ...cuesFor(kindOf(record), { plan, file: copy.cues, record }),
     video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
   };
   // The pictures that the cues of this Reel alone name by a ref come from the reference folder into its project (references.js; PR H3); a picture

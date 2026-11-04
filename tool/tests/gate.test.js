@@ -28,8 +28,8 @@ describe("the gate's lists", () => {
     assert.deepEqual(SESSION, [...UNANSWERED, "name"]);
     assert.deepEqual(SESSION_TAUGHT, [...SESSION, "teachings", "principles", "ideas", "finish", "reel", "render", "read"]);
   });
-  it("have a list of a planned episode's own (PR H4), apart from the three that hold the one before: plan and name, and no command that needs footage", () => {
-    assert.deepEqual(PLANNED, ["plan", "name"]);
+  it("have a list of a planned episode's own (PR H4), apart from the three that hold the one before: plan, name and (PR H5b) join, and no command that needs footage", () => {
+    assert.deepEqual(PLANNED, ["plan", "name", "join"]);
     for (const list of [UNSCOPED, UNANSWERED, SESSION_TAUGHT]) assert.ok(!list.includes("plan"), "plan runs for a plan alone: it is in none of the lists of a video not yet answered or a session");
     for (const name of PLANNED) assert.ok(!UNSCOPED.includes(name) && !UNANSWERED.includes(name), `${name} is no command of the lists before it`);
   });
@@ -62,11 +62,11 @@ describe("the gate and plan (PR H4)", () => {
     assert.equal(gateFor("plan", session(), ON), NOT_FOR_SESSION);
     assert.equal(gateFor("plan", finished, OFF), "", "an answered video is let through, and plan says it is no plan");
   });
-  it("has the planned episode's own list: plan and name run, leave says how to drop a plan, and every other command is refused for want of footage", () => {
-    assert.deepEqual(PLANNED, ["plan", "name"]);
+  it("has the planned episode's own list: plan, name and join run, leave says how to drop a plan, and every other command is refused as the plan is not made from its footage yet", () => {
+    assert.deepEqual(PLANNED, ["plan", "name", "join"]);
     for (const name of COMMAND_NAMES) assert.equal(gateFor(name, PLAN, OFF) === "", UNSCOPED.includes(name) || PLANNED.includes(name), name);
     assert.equal(gateFor("leave", PLAN, OFF), 'To drop a plan, say "drop the plan for Too many SKUs".');
-    assert.equal(gateFor("open", PLAN, OFF), '"Too many SKUs" is a planned video, and there\'s no footage for it yet.');
+    assert.equal(gateFor("open", PLAN, OFF), '"Too many SKUs" is a planned video, and it isn\'t made from its footage yet.');
   });
 });
 
@@ -90,7 +90,7 @@ describe("the gate and footage (PR H5a)", () => {
     }
   });
   it("refuses footage for a planned episode, which has no video to be footage, in the words it refuses every other command", () => {
-    for (const on of [ON, OFF]) assert.equal(gateFor("footage", PLAN, on), '"Too many SKUs" is a planned video, and there\'s no footage for it yet.');
+    for (const on of [ON, OFF]) assert.equal(gateFor("footage", PLAN, on), '"Too many SKUs" is a planned video, and it isn\'t made from its footage yet.');
   });
   it("refuses footage for a video held beside a session, in HELD's words, as it refuses every command but the unanswered ones", () => {
     const HELD = "This video is a version of a client or group session: answer it as a session too, or ask Jason.";
@@ -107,6 +107,28 @@ describe("the gate and footage (PR H5a)", () => {
       for (const record of [unanswered, part]) assert.equal(gateFor(name, record, ON) === "", UNANSWERED.includes(name) || FOOTAGE.includes(name), `${name} ${JSON.stringify(record)}`);
       assert.equal(gateFor(name, left, ON) === "", UNANSWERED.includes(name) || FOOTAGE.includes(name), `${name} left alone`);
     }
+  });
+});
+
+describe("the gate and the join (PR H5b)", () => {
+  const left = { kind: null, answer: { state: "not for brimm-video" } };
+  const part = { kind: null, answer: { state: "part" }, partOf: { id: "e-20261104-3fa9c1", as: "talking", shot: null, client: false } };
+  it("has join in the planned episode's list alone: it is in none of the lists of a video not yet answered, a session or footage", () => {
+    assert.ok(PLANNED.includes("join") && COMMAND_NAMES.includes("join"));
+    for (const list of [UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, FOOTAGE]) assert.ok(!list.includes("join"), "join is the detached run that makes a plan its video: no other record with no kind runs it");
+  });
+  it("lets join run for a plan, and refuses it for a video waiting, one left alone, a part and a session, in the gate's words, as it refuses workcopy", () => {
+    for (const on of [ON, OFF]) {
+      assert.equal(gateFor("join", PLAN, on), "");
+      for (const record of [unanswered, part]) assert.equal(gateFor("join", record, on), gateFor("workcopy", record, on), JSON.stringify(record));
+      assert.equal(gateFor("join", left, on), gateFor("workcopy", left, on));
+      assert.equal(gateFor("join", session(), on), gateFor("workcopy", session(), on));
+    }
+    assert.equal(gateFor("join", unanswered, ON), WAITING);
+    assert.equal(gateFor("join", session(), ON), NOT_FOR_SESSION);
+  });
+  it("lets an answered video through join, which says it is made from its footage already", () => {
+    assert.equal(gateFor("join", finished, OFF), "");
   });
 });
 

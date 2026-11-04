@@ -53,7 +53,7 @@ const dayText = (t) => `${new Date(t.now()).getDate()} ${MONTHS[new Date(t.now()
 const PLAIN = /\/|--|\bnpx\b|\bnode\b|edit\.js|\bplan (?:new|set)\b/;
 const isPlain = (line) => !PLAIN.test(line);
 
-const NOT_PLANNED_YET = `"${TITLE}" is a planned video, and there's no footage for it yet.`;
+const NOT_PLANNED_YET = `"${TITLE}" is a planned video, and it isn't made from its footage yet.`;
 const TO_DROP = `To drop a plan, say "drop the plan for ${TITLE}".`;
 const NOT_SAVED = "Nothing was saved.";
 
@@ -671,11 +671,11 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     bring: ["--now", TITLE], title: [TITLE], reel: ["drop", TITLE, "1"], reels: [TITLE, "--no-play"], ask: [TITLE], finish: [TITLE], release: [TITLE], show: [TITLE, "transcript"], resolve: [TITLE], free: [TITLE],
     spell: [TITLE], logo: [TITLE, "on"], captions: [TITLE, "reel", "1", "on"], text: [TITLE], graphic: [TITLE], preset: [TITLE], cut: [TITLE, "remove", "--words", "x"], teachings: [TITLE], principles: [TITLE], ideas: [TITLE],
     refs: ["use", TITLE, "blue carousel"],
-    // A plan is no video, so it is no footage for a plan (PR H5a): the gate says there is no footage for it yet.
+    // A plan is no video, so it is no footage for a plan (PR H5a): the gate says it isn't made from its footage yet.
     footage: [TITLE, "Another plan", "talking", "--client", "no"]
   };
   it("refuses every other command in the same words, ends with 1, and starts and writes nothing", async () => {
-    const names = COMMAND_NAMES.filter((name) => !UNSCOPED.includes(name) && !["plan", "name"].includes(name));
+    const names = COMMAND_NAMES.filter((name) => !UNSCOPED.includes(name) && !["plan", "name", "join"].includes(name));
     for (const name of names) assert.ok(name in ASKED, `${name} names an episode: give it its words here, or the plan is not tried on it`);
     const t = setup();
     const folder = await planned(t);
@@ -696,7 +696,7 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     assert.deepEqual([r.code, r.said], [0, [`It is called "Why SKUs sink you" now. Nothing was renamed.`]]);
     assert.equal(recordOf(t).name.text, "Why SKUs sink you");
     assert.equal((await on(depsOf(t), "plan", "Why SKUs sink you")).said[0], `"Why SKUs sink you" is planned, and its guide, its shot list and its teleprompter script aren't made yet.`);
-    assert.equal((await on(depsOf(t), "open", "Why SKUs sink you")).said[0], `"Why SKUs sink you" is a planned video, and there's no footage for it yet.`);
+    assert.equal((await on(depsOf(t), "open", "Why SKUs sink you")).said[0], `"Why SKUs sink you" is a planned video, and it isn't made from its footage yet.`);
     t.done();
   });
   it("lists it in episodes, with the made-up episode beside it", async () => {

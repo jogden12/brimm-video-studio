@@ -462,7 +462,7 @@ describe("footage, what it refuses", () => {
     assert.deepEqual([r.code, r.said[0].startsWith("No episode fits")], [1, true]);
     // A plan is no video: the gate says it has no footage yet.
     const plan = await on(depsOf(t), "footage", TITLE, TITLE, "talking", "--client", "no");
-    assert.deepEqual([plan.code, plan.said], [1, [`"${TITLE}" is a planned video, and there's no footage for it yet.`]]);
+    assert.deepEqual([plan.code, plan.said], [1, [`"${TITLE}" is a planned video, and it isn't made from its footage yet.`]]);
     unchanged(t, before);
     t.done();
   });
@@ -636,7 +636,7 @@ describe("the receipts and the sessions", () => {
     const t = setup();
     await planned(t);
     receipts(t, { label: TITLE });
-    for (const deps of [open(t), depsOf(t)]) await refusedFor(t, deps, ["footage", TITLE, TITLE, "b-roll", "--client", "no", "--shot", "2"], [`"${TITLE}" is a planned video, and there's no footage for it yet.`]);
+    for (const deps of [open(t), depsOf(t)]) await refusedFor(t, deps, ["footage", TITLE, TITLE, "b-roll", "--client", "no", "--shot", "2"], [`"${TITLE}" is a planned video, and it isn't made from its footage yet.`]);
     t.done();
   });
 });
@@ -696,7 +696,9 @@ describe("footage … none, taking a part back", () => {
     await planned(t);
     video(t, 1);
     await on(depsOf(t), "footage", labelOf(1), TITLE, "b-roll", "--client", "yes", "--shot", "2");
-    assert.equal((await on(depsOf(t), "plan", TITLE, "drop")).code, 0);
+    // A plan with footage is not dropped by `plan … drop` (PR H5b, ruling 2): this one was dropped by a brimm-video before that, or by the other Mac.
+    const before = planOf(t);
+    writeEpisode(folderOf(t), { ...before, archived: { at: atOf(t) } }, { expectRev: before.rev, writeText: (to, text) => writeFileSync(to, text), writer: before.writer, home: t.home });
     const plan = planOf(t);
     const r = await on(depsOf(t), "footage", labelOf(1), "none");
     assert.deepEqual([r.code, r.said], [0, [`${labelOf(1)} is no longer footage for "${TITLE}": it waits for its answer again.`]]);
@@ -929,7 +931,9 @@ describe("plan … agreed: asking on a dialog Claude cannot press", () => {
     for (const words of [["plan", TITLE, "agreed"], ["plan", TITLE, "agreed", labelOf(1), "extra"], ["plan", TITLE, "agreed", labelOf(1), "--zzz"], ["plan", TITLE, "agree", labelOf(1)]]) {
       assert.equal((await d.ask(...words)).code, 2, words.join(" "));
     }
-    assert.equal((await on(depsOf(t), "plan", TITLE, "drop")).code, 0);
+    // A plan with footage is not dropped by `plan … drop` (PR H5b, ruling 2): this one was dropped by the other Mac, or by a brimm-video before that.
+    const record = planOf(t);
+    writeEpisode(folderOf(t), { ...record, archived: { at: atOf(t) } }, { expectRev: record.rev, writeText: (to, text) => writeFileSync(to, text), writer: record.writer, home: t.home });
     const r = await d.ask(...AGREE());
     assert.deepEqual([r.code, r.said, d.asked.length], [1, [`The plan for "${TITLE}" was dropped.`], 0]);
     t.done();

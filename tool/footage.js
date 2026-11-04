@@ -19,11 +19,11 @@
 // own they need (the `kit`: how it saves a record, asks on a dialog, writes its log, and says what it says of a record it cannot read). Nothing
 // here posts, sends or publishes anything.
 //
-// plan.js and this file import each other: plan.js says the footage of a plan and notes a client's agreement, and this file reads a plan's
-// title (textArg) and says shots as it says them. Each is used only when called, so neither needs the other to have been read first.
+// plan.js imports this file, to say the footage of a plan and to note a client's agreement; this file reads a plan's title (textArg) and says
+// shots as plan.js does through sentences.js, a leaf that neither needs to have been read first (they were plan.js's own until PR H5b).
 import { appendFileSync, chmodSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { PART_KINDS, heldElsewhere, isPart, isPlannedRecord, kindOf, localStamp, readEpisode, recordNumbers, shownName, undone, acceptRev } from "./episode.js";
+import { PART_KINDS, heldElsewhere, isFromPlan, isPart, isPlannedRecord, kindOf, localStamp, readEpisode, recordNumbers, shownName, undone, acceptRev } from "./episode.js";
 import { episodesFolder, episodeWork } from "./settings.js";
 import { linksOf } from "./finish.js";
 import { gatedName } from "./gate.js";
@@ -31,7 +31,7 @@ import { isSeenLine, isZoomName, withoutNames } from "./kinds.js";
 import { lockFor } from "./loosened.js";
 import { NO_RECEIPT, expectedFootage, footageOption, partCardOf, plannedCardOf, receiptWhy } from "./receipts.js";
 import { localDay } from "./shared/text.js";
-import { SHOT_SAID, counted, dayText, joined, plainly, sentence, textArg } from "./plan.js";
+import { SHOT_SAID, counted, dayText, joined, plainly, sentence, textArg } from "./sentences.js";
 
 export { PART_KINDS };
 
@@ -50,6 +50,14 @@ const refuse = (ctx, why) => {
     guide, shot list and teleprompter script are made: `planned.set`), not yet filmed (`planned.filmed`, PR H5b) and not dropped. */
 const waitsForFootage = (record) => isPlannedRecord(record) && record.planned.route === "script" && !record.archived && record.planned.filmed === null;
 
+/** Whether a record is a plan made from its footage that still takes footage (PR H5b): the join made its talking parts its video (episode.js
+    isFromPlan), and until it is handed off a screen recording or b-roll may still be added to it, to be moved into its project. A talking part may
+    not: the plan is made from its talking parts already. */
+const joinedPlan = (record) => isFromPlan(record) && record.planned.route === "script" && !record.archived && !record.finished;
+
+/** Whether a plan takes more footage: it waits for its footage, or it is made from it and not handed off yet. */
+const takesFootage = (record) => waitsForFootage(record) || joinedPlan(record);
+
 /** The moment a plan was planned, in milliseconds, for ordering: 0 for one that cannot be read. */
 const plannedAt = (record) => {
   const at = Date.parse(record.planned.at);
@@ -58,14 +66,15 @@ const plannedAt = (record) => {
 
 /** The plans a video may be for, from the records `records` (the plans among them are looked at, every other record passed over): each as
     { record, option }, the plan's record and its answer on the planned card, as Footage for its title (receipts.js footageOption), newest
-    first by the moment it was planned, and at most three. In PR H5a a plan is offered for a video with a picture (`picture`): a script
-    whose package is set (a plan with no shot list yet has nothing to show), not filmed and not dropped. `sound` is whether the video has any;
+    first by the moment it was planned, and at most three. A plan is offered for a video with a picture (`picture`): a script whose package is
+    set (a plan with no shot list yet has nothing to show), not filmed and not dropped; and (PR H5b) a video made from a plan with no hand-off
+    yet (joinedPlan), which takes b-roll and a screen recording still (`footage` refuses it a talking part). `sound` is whether the video has any;
     a picture with none is footage all the same (b-roll and a screen recording go in mute), and PR H6 offers the voiceover of an explainer
     to sound alone. A plan is named as every line names it (shownName), the name she gave it or its title. */
 export function plannedOffers(records, { picture = false, sound = true } = {}) {
   if (!Array.isArray(records) || picture !== true) return [];
   return records
-    .filter((record) => waitsForFootage(record) && record.planned.set !== null)
+    .filter((record) => takesFootage(record) && record.planned.set !== null)
     .map((record, order) => ({ record, order }))
     .sort((a, b) => plannedAt(b.record) - plannedAt(a.record) || a.order - b.order)
     .slice(0, MOST_OFFERS)
@@ -74,8 +83,10 @@ export function plannedOffers(records, { picture = false, sound = true } = {}) {
 
 /** The episodes in Episodes, each as { name, folder, record }, by the record in force of each: the newest whole record, read past any
     conflicted copy Dropbox has kept, as plan.js reads the plans. An episode with no whole record, one a newer brimm-video wrote and a name
-    that starts with a dot (the folder of the import's status files) are passed over. [] when Episodes cannot be read. */
-function episodesIn(root) {
+    that starts with a dot (the folder of the import's status files) are passed over. [] when Episodes cannot be read. With `newer`, one a newer
+    brimm-video wrote is listed too, flagged `newer: true`, its record as this brimm-video can read it (the id, the rev and little more): it is
+    for a caller that makes something of a part and must know of one it cannot use (partsOf). */
+function episodesIn(root, { newer = false } = {}) {
   const episodes = episodesFolder(root);
   let names = [];
   try {
@@ -87,31 +98,38 @@ function episodesIn(root) {
   for (const name of names) {
     const folder = join(episodes, name);
     const read = readEpisode(folder, { pastCopies: true });
-    if (read.record && !read.newer) found.push({ name, folder, record: read.record });
+    if (!read.record) continue;
+    if (!read.newer) found.push({ name, folder, record: read.record });
+    else if (newer) found.push({ name, folder, record: read.record, newer: true });
   }
   return found;
 }
 
-/** Every plan in Episodes, as { name, folder, record }: a planned record (episode.js isPlannedRecord), whatever its state. */
-export const plansIn = (root) => episodesIn(root).filter(({ record }) => isPlannedRecord(record));
+/** Every plan in Episodes, as { name, folder, record }: a planned record (episode.js isPlannedRecord), whatever its state, and (PR H5b) a plan
+    made its video by the join (isFromPlan), which a part still names by its id. */
+export const plansIn = (root) => episodesIn(root).filter(({ record }) => isPlannedRecord(record) || isFromPlan(record));
 
 /** The parts of the plan with the id `id`, as { name, folder, record }: the dropped videos answered as footage for it (episode.js isPart),
     by their records in force, whole and not archived, in the order they were answered. A plan's record is never written for a part. A
     part in a conflicted episode is read past its copies, as every record in force is: whoever uses a part to make something checks that
-    its folder is not conflicted. */
-export function partsOf(root, id) {
-  return partsAmong(episodesIn(root), id);
+    its folder is not conflicted (mayBeUsed, partHeld). With `newer`, a part whose record a newer brimm-video wrote is listed too (flagged
+    `newer: true`, found by the plan id its record names), last of the answered ones, so that a caller that makes something of the parts can
+    refuse it and say which it is; a list for a person (`plan "<planned>"`, the guide) never has it. */
+export function partsOf(root, id, { newer = false } = {}) {
+  return partsAmong(episodesIn(root, { newer }), id);
 }
 
-/** The parts of the plan with the id `id` among `episodes`, as episodesIn gives them: partsOf, for a caller that has read Episodes already. */
+/** The parts of the plan with the id `id` among `episodes`, as episodesIn gives them: partsOf, for a caller that has read Episodes already. A
+    record a newer brimm-video wrote (`newer: true`) is a part of the plan when its record names it as one: a `partOf` with the plan's id. */
 function partsAmong(episodes, id) {
   const at = ({ record }) => {
-    const answered = Date.parse(record.answer.at);
+    const answered = Date.parse(record.answer?.at);
     return Number.isFinite(answered) ? answered : 0;
   };
+  const aPart = (entry) => (entry.newer === true ? isObject(entry.record.partOf) && entry.record.partOf.id === id : isPart(entry.record) && entry.record.partOf.id === id);
   return episodes
-    .filter(({ record }) => isPart(record) && record.partOf.id === id && !record.archived)
-    .sort((a, b) => at(a) - at(b) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    .filter((entry) => aPart(entry) && !entry.record.archived)
+    .sort((a, b) => Number(a.newer === true) - Number(b.newer === true) || at(a) - at(b) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 /** The parts of any plan from one look at Episodes: a function of a plan's id that says what partsOf says, reading Episodes when it is first
@@ -133,6 +151,31 @@ export function mayGoIn(part, planned) {
   const consent = isObject(planned) && Array.isArray(planned.consent) ? planned.consent : [];
   return consent.some((one) => isObject(one) && one.id === record.id);
 }
+
+/** A part as every line names it: by its label, which names it as `episodes` listed it and never by its file, or by its short id when it has none. */
+export const labelOf = (part) => (typeof part?.record?.label === "string" && part.record.label !== "" ? part.record.label : shownName(part?.record));
+
+/** Why a part must not be used to make anything, or null when its episode is as its record in force says (PR H5b, ruling 1). `mayGoIn` judges
+    the record in force, which partsOf reads past any conflicted copy Dropbox kept, so that a part can be listed; but a conflicted copy may
+    say what the record in force does not (that the part shows a client), and nothing is made of a part until a person has sorted that out. So
+    a part is held when its episode's folder holds a conflicted copy of any file (episode.js conflictedCopies, as every command that names
+    an episode refuses it), when its newest record is one a newer brimm-video wrote, and when its record cannot be read whole at all.
+    { why: "conflicted" | "newer" | "unreadable", read, record }: `read` is readEpisode's of the folder, `record` the newer record. A part is
+    one of partsOf's, { name, folder, record }, with `newer: true` when partsOf listed it as a newer brimm-video's. */
+export function partHeld(part) {
+  if (!isObject(part) || typeof part.folder !== "string") return { why: "unreadable" };
+  if (part.newer === true) return { why: "newer", record: part.record };
+  const read = readEpisode(part.folder);
+  if (read.code === "CONFLICTED") return { why: "conflicted", read };
+  if (!read.record) return { why: "unreadable", read };
+  if (read.newer) return { why: "newer", read, record: read.record };
+  return null;
+}
+
+/** Whether a part may be used to make something: a joined video, a copy of its footage with no sound, a file in a project's media/. It may when
+    `mayGoIn` says it may (it shows no client, or the plan holds her client's agreement for it) and its episode is not held (partHeld). It is
+    the question every consumer of a part asks (PR H5b); `mayGoIn` alone is for what is said of a part (the guide's "shows a client" line). */
+export const mayBeUsed = (part, planned) => mayGoIn(part, planned) && partHeld(part) === null;
 
 // --- What is said of the footage ---
 
@@ -233,7 +276,7 @@ function plansCalled(waiting, said) {
 
 /** The plan's title is hers, known to the chat, so a line that says it is not to lose it to the names of a video kept from the chat (a file
     named as the plan is, for one): it is kept in what `ctx.say` leaves alone. */
-function keepTitle(ctx, title) {
+export function keepTitle(ctx, title) {
   if (ctx.hidden && Array.isArray(ctx.hidden.keep) && !ctx.hidden.keep.includes(title)) ctx.hidden.keep.push(title);
 }
 
@@ -297,16 +340,17 @@ function offersNaming(records, plan) {
 /** `footage "<video>" "<planned>" talking|screen|b-roll --client yes|no [--shot <n>]`, once edit.js has found the video through the gate, holds its
     answer lock and read its record: it is answered as footage for the plan, in one write by the rule, which claims nothing (the plan's record is not
     written). In this order it refuses, with 1 and nothing written:
-    - the plan: none called so waits for its footage; it is not made yet;
+    - the plan: none called so waits for its footage (or, PR H5b, is made from it already and takes b-roll and a screen recording still); it is not
+      made yet;
     - the video: Zoom, a session's words, answered already, footage already, sound alone;
-    - the kind: no sound, or a client, for a talking part;
+    - the kind: a talking part for a plan made from its footage already (its talking parts are joined), no sound, or a client, for a talking part;
     - the shot: a talking part's, none of the kind, one not of the kind, which one, one with its footage already;
     - the other Mac's claim;
     - and, under Claude Code on a Mac whose lock is open, a video she has not answered on both cards (NO_RECEIPT and the cards).
     Then it says what it did, and that she says when all the footage is in. */
 async function makePart(ctx, found, record, name, asked, kit) {
   const plans = plansIn(ctx.root);
-  const waiting = plans.filter(({ record: one }) => waitsForFootage(one));
+  const waiting = plans.filter(({ record: one }) => takesFootage(one));
   const fits = plansCalled(waiting, asked.planned);
   if (!fits.length) return refuse(ctx, `There's no planned video called "${asked.planned}" waiting for its footage.`);
   if (fits.length > 1) return refuse(ctx, `More than one planned video is called "${asked.planned}": ask Jason.`);
@@ -316,6 +360,8 @@ async function makePart(ctx, found, record, name, asked, kit) {
   if (plan.planned.set === null) return refuse(ctx, `The plan for "${title}" isn't made yet: its guide, its shot list and its teleprompter script come first.`);
   const why = videoWhy(ctx, found, record, name, plans, kit);
   if (why) return refuse(ctx, why);
+  // A plan made from its footage already takes b-roll and a screen recording still, and no talking part (PR H5b): its talking parts are joined.
+  if (asked.as === "talking" && isFromPlan(plan)) return refuse(ctx, `"${title}" is made from its footage already: a talking part can't be added.`);
   if (asked.as === "talking" && isObject(record.video) && record.video.sound === false) return refuse(ctx, `${name} has no sound, so it can't be a talking part: it is b-roll or a screen recording.`);
   if (asked.as === "talking" && asked.client) return refuse(ctx, "A talking part is you talking to the camera. A video that shows a client is b-roll or a screen recording.");
   let shot = null;
@@ -398,7 +444,7 @@ const LINE_BREAKS = new RegExp(`[\\r\\n\\t\\v\\f\\u0085${String.fromCharCode(0x2
 
 /** The part of `parts` that `said` names: by its label, in any case and spacing, by its id or its short id, or by the label and short id the lists
     give it ("<label> (3fa9c1)"). */
-function partNamed(parts, said) {
+export function partNamed(parts, said) {
   const word = plainly(said);
   return parts.find(({ record }) => [record.label, record.id, record.id.slice(-6), record.label ? `${record.label} (${record.id.slice(-6)})` : ""].some((known) => known !== "" && plainly(known) === word));
 }
@@ -456,7 +502,8 @@ export async function agreedFor(ctx, got, asked, kit) {
   const planNow = readEpisode(found.folder);
   if (!planNow.record) return stop(kit.notRead(found, planNow));
   if (planNow.newer) return stop(kit.newerWhy(planNow.record));
-  if (planNow.record.rev !== record.rev || !isPlannedRecord(planNow.record) || planNow.record.archived) return stop(`${title} changed on the other Mac meanwhile. Say it again.`);
+  // The plan is still a plan, or (PR H5b) the video it was made into: a client's agreement is noted for either, in the record that holds the plan.
+  if (planNow.record.rev !== record.rev || !(isPlannedRecord(planNow.record) || isFromPlan(planNow.record)) || planNow.record.archived) return stop(`${title} changed on the other Mac meanwhile. Say it again.`);
   const partNow = readEpisode(part.folder);
   if (!partNow.record || partNow.newer || partNow.record.rev !== part.record.rev || !isPart(partNow.record) || partNow.record.partOf.id !== record.id || partNow.record.partOf.client !== true) {
     return stop(`${label} changed meanwhile. Say it again.`);

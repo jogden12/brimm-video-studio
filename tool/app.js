@@ -60,7 +60,7 @@ import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, r
 import { basename, dirname, extname, join } from "node:path";
 import { chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
 import { runningCommand } from "./detached.js";
-import { kindOf, localStamp } from "./episode.js";
+import { isFromPlan, kindOf, localStamp } from "./episode.js";
 import { sessionNotCleared } from "./gate.js";
 import { copyIn as copyTakes } from "./guide.js";
 import { chatHeld } from "./held.js";
@@ -450,7 +450,7 @@ function adoptProject(ctx, { found, record, at, projects }) {
     written over: it throws. Its name is the first that no project the record keeps has (nextMain), so after a correction of the
     kind it is "main 2", and a folder the record does not know at that name is taken before this (adoptProject): what is left to
     throw is a folder that appeared between the two. */
-async function makeProject(ctx, { found, record, at, projects }, { cli, guidance }) {
+async function makeProject(ctx, { found, record, at, projects }, { cli, guidance, planned }) {
   const { home } = ctx;
   const stem = basename(record.video.file, extname(record.video.file));
   const words = wordsIn(join(found.folder, `${stem}.words.json`));
@@ -478,9 +478,13 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   // or for a plan made before them its ideas for graphics as cues (graphic-cues.js graphicCuesOfPlan). An iPhone clip's are the ones its
   // reading kept in its record (graphicCuesOfRecord, PR H2): its cut plan is the import's, and holds none.
   const short = record.kind === "short video";
+  // A video made from a plan (PR H5b) takes the plan's guide's cues in place of the reading's, each b-roll and screen cue naming its footage's file,
+  // and the footage whose copies are made already is moved in with the recording; the rest comes at an open (placeFootage).
+  const kit = isFromPlan(record) && typeof planned === "function" ? planned({ found, record }) : null;
   const input = {
     kind: "main", number, short, id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words,
-    plan, graphicCues: short ? graphicCuesOfRecord(record) : graphicCuesOfPlan(plan), reels: reels?.candidates, video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at
+    plan, graphicCues: kit ? kit.cues : short ? graphicCuesOfRecord(record) : graphicCuesOfPlan(plan), reels: reels?.candidates, video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at,
+    ...(kit ? { footage: kit.footage.filter((item) => item.from !== null).map(({ path, from }) => ({ path, from })) } : {})
   };
   // The pictures its cues name by a ref come from the reference folder into the project (references.js; PR H3): those that are not there are said, and
   // their cues keep their styles. A project whose cues name none looks at no folder and says nothing of it.
@@ -677,6 +681,36 @@ export function keptFits(ctx, { found, kept, copy, was, made, starts = true }) {
   return copyFits({ was, made, size, starts });
 }
 
+/** What she is told while the copies of the footage of a video made from a plan are being made, at an open (PR H5b): the project opens, and the
+    footage comes into it the next time she opens it. */
+export const FOOTAGE_COMING = 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.';
+/** What she is told when a copy of footage that is made could not be moved into the project. */
+export const FOOTAGE_NOT_IN = "Some of its footage could not be put into the project. Ask Jason.";
+
+/** Put the footage of a video made from a plan into its main project at `dir`, at every open of it (PR H5b). `kit` is what the plan gives the
+    project (join.js planProject, given as the `plan` dep: footage.js reaches this module through finish.js, so it is not imported here), read just
+    now, so that a part her client has agreed to since, and a copy made since, are found: its `footage` are the files that may go into media/, each
+    { path, from } with `from` the copy made of it, or null while there is none. Each that is not in the project already is moved in from its
+    copy (moveIn: a rename on the same disk, nothing copied); one with no copy is asked for, once for all (workcopy.js requestWorkCopy with
+    `footage`, which starts nothing while a run is at work), and she is told the footage is being made (FOOTAGE_COMING); a copy that cannot be
+    moved is left where it is and she is told (FOOTAGE_NOT_IN). Nothing here stops the project opening, and a null `kit` does nothing. */
+function placeFootage(ctx, { found, dir, kit }, { rename }) {
+  if (!kit) return;
+  let waiting = false;
+  let stuck = false;
+  for (const item of kit.footage) {
+    const to = join(dir, item.path);
+    if (existsSync(to)) continue;
+    if (item.from === null) waiting = true;
+    else if (!moveIn(item.from, to, rename)) stuck = true;
+  }
+  if (waiting) {
+    requestWorkCopy(ctx, { folder: found.name, footage: true });
+    ctx.say(FOOTAGE_COMING);
+  }
+  if (stuck) ctx.say(FOOTAGE_NOT_IN);
+}
+
 /** Open the episode's main video in the HyperFrames app, making its project first when it has none, and resolve the exit code: 0
     when the app opened on the project, or when the working copy is being made and she has been told to say it again; 1 when the
     app did not open, or the episode's words are not on this Mac, or a project folder of this Mac cannot be read, or the record
@@ -724,7 +758,11 @@ export function keptFits(ctx, { found, kept, copy, was, made, starts = true }) {
     - `running(name)` says whether the program of that name is running (free.js hyperFramesRunning): asked before an older project is set
       aside, and its default cannot tell, so that nothing is set aside without it (edit.js gives the real one);
     - `chat()` gives { sessionId, held } for the chat that asked (chatOf). It is asked only when this Mac's setting wants the
-      handover, since that is all it decides. */
+      handover, since that is all it decides;
+    - `plan({ found, record })` gives what the plan a video was made from gives its project, { cues, footage }, for a record that is such a video
+      (episode.js isFromPlan; edit.js gives join.js planProject): the project is made from its guide's cues, with the footage whose copies are
+      made, and at every open the footage that may go in and is not in media/ is moved in, the copies not made are asked for, and she is told
+      (placeFootage; PR H5b). None given, a video made from a plan is a raw video's. */
 export async function openInApp(ctx, { found, record }, deps = {}) {
   const { save, spawn = spawnSync, env = process.env, node = process.execPath, rename = renameSync } = deps;
   if (typeof save !== "function") throw new Error("openInApp: no save was given, so the record could not be written");
@@ -785,10 +823,13 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
       ctx.say(recordingChanged(record.name.text));
     }
   } else {
-    const taken = adoptProject(ctx, { found, record, at, projects }) ?? await makeProject(ctx, { found, record, at, projects }, { cli, guidance: deps.guidance ?? guidanceOf(home) });
+    const taken = adoptProject(ctx, { found, record, at, projects }) ?? await makeProject(ctx, { found, record, at, projects }, { cli, guidance: deps.guidance ?? guidanceOf(home), planned: deps.plan });
     if (taken.code !== undefined) return taken.code;
     ({ project } = taken);
   }
+  // The footage of a video made from a plan, at every open (PR H5b): what may go in and is not in media/ is moved in from its copy, and the copies
+  // that are not made are asked for. The project opens whatever comes of that: footage is added to it, never needed for it.
+  if (typeof deps.plan === "function" && isFromPlan(record)) placeFootage(ctx, { found, dir: join(work, project.name), kit: deps.plan({ found, record }) }, { rename });
   return openProjectInApp(ctx, { record, project, dir: join(work, project.name), projects, keeps: (p) => !isMain(p), at, restored }, { save, cli, spawn, env, node, chat: deps.chat });
 }
 

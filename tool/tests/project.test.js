@@ -890,6 +890,104 @@ describe("the notes and facts of a main project, on its graphic cues (PR H1)", (
   });
 });
 
+describe("the footage of a video made from a plan, in its main project (PR H5b)", () => {
+  const rulesOf = (files) => {
+    const notes = files.get("CLAUDE.md");
+    return notes.slice(notes.indexOf("# The BRIMM: rules for this project"), notes.indexOf("\n# ", notes.indexOf("# The BRIMM: rules for this project") + 1));
+  };
+  const labels = (rules) => rules.split("\n").filter((line) => line.startsWith("- **")).map((line) => line.match(/^- \*\*([^*]+)\*\*/)[1]);
+  /** Jason and A1's rule for footage cues, the exact line: "Full cutaway is fine". */
+  const FOOTAGE_RULE = "- **Footage cues.** A cue whose kind is `b-roll` or `screen` shows footage she filmed for it: its `material`, a video in `media/` with no sound. When she takes it, put that video at the cue's words for its `seconds`, muted, as a full cutaway over the recording, and keep the recording's sound. Wide footage fills the frame. Upright footage goes in the middle as a rounded panel on a plain mist background, hiding the recording for those seconds. A cue whose `material` is not in `media/` has no footage yet, or waits for her client's agreement: tell her, and never build it.";
+  const COPIES = "/Users/sallie/BRIMM Video Work/E/working copy";
+  const FOOTAGE = [{ path: "media/b-roll-2.mp4", from: `${COPIES}/footage-2-5-7.mp4` }, { path: "media/screen-4.mp4", from: `${COPIES}/footage-4-5-8.mp4` }];
+  const CUES = [
+    { n: 1, words: "Pricing", kind: "graphic", show: "A chart of costs.", seconds: 4, style: null },
+    { n: 2, words: "is a skill", kind: "b-roll", show: "Sallie at her desk.", seconds: 5, style: null, shot: 2, material: "media/b-roll-2.mp4" },
+    { n: 3, words: "says Hormozy", kind: "screen", show: "Her dashboard.", seconds: 6, style: null, shot: 4, material: "media/screen-4.mp4" }
+  ];
+  it("has the rule for footage cues, as it is written, right after the rule for graphic cues, when it is given a list of footage, an empty one too", () => {
+    for (const footage of [FOOTAGE, []]) {
+      const files = projectFiles(main({ footage }));
+      const lines = rulesOf(files).split("\n");
+      assert.equal(lines.filter((line) => line.startsWith("- **Footage cues.**")).length, 1);
+      assert.equal(lines[lines.findIndex((line) => line.startsWith("- **Graphic cues.**")) + 1], FOOTAGE_RULE);
+      assert.equal(files.get("AGENTS.md"), files.get("CLAUDE.md"));
+    }
+  });
+  it("puts it among the rules in this order, and no other rule moves", () => {
+    const mainLabels = ["A draft only.", "On this Mac only.", "Sharing.", "AI-generated people.", "Commands never run here.", "The words.", "Cutting.", "Graphic cues.", "Reels.", "Spellings.", "The brand.", "Captions.", "Versions.", "When she is done."];
+    assert.deepEqual(labels(rulesOf(projectFiles(main({ footage: FOOTAGE })))), [...mainLabels.slice(0, 8), "Footage cues.", ...mainLabels.slice(8)]);
+    assert.deepEqual(labels(rulesOf(projectFiles(main({ footage: FOOTAGE, short: true })))).filter((label) => label === "Footage cues."), ["Footage cues."]);
+  });
+  it("says to put footage in as a full cutaway, muted, keeping the recording's sound, and to build nothing whose material is not in media/", () => {
+    assert.match(FOOTAGE_RULE, /as a full cutaway over the recording, and keep the recording's sound/);
+    assert.match(FOOTAGE_RULE, /Upright footage goes in the middle as a rounded panel on a plain mist background/);
+    assert.match(FOOTAGE_RULE, /A cue whose `material` is not in `media\/` has no footage yet, or waits for her client's agreement: tell her, and never build it\./);
+  });
+  it("is not in the notes of a project given no list of footage: a raw video's, a Reel's, and a session clip's", () => {
+    for (const files of [projectFiles(main()), projectFiles(reel()), projectFiles(clip()), projectFiles(reel({ footage: FOOTAGE })), projectFiles(clip({ footage: FOOTAGE }))]) {
+      // (HyperFrames' own guidance, which follows the rules, says "footage" in its own way.)
+      assert.doesNotMatch(rulesOf(files), /Footage cues|footage/i);
+      assert.doesNotMatch([...files.keys()].join("\n"), /b-roll|screen-/);
+    }
+  });
+  it("moves each footage copy in under the name its cue gives it, and lists it among the files, with what it is", () => {
+    const files = projectFiles(main({ footage: FOOTAGE }));
+    assert.deepEqual(files.get("media/b-roll-2.mp4"), { move: FOOTAGE[0].from });
+    assert.deepEqual(files.get("media/screen-4.mp4"), { move: FOOTAGE[1].from });
+    assert.deepEqual(files.get("media/recording.mp4"), { move: "/Users/sallie/BRIMM Video Work/E/working copy/k.mp4" });
+    const facts = json(files, "brimm/facts.json").files;
+    assert.equal(facts["media/b-roll-2.mp4"], "b-roll she filmed for shot 2, with no sound");
+    assert.equal(facts["media/screen-4.mp4"], "a screen recording she made for shot 4, with no sound");
+    assert.ok(files.get("CLAUDE.md").includes("  - `media/b-roll-2.mp4`: b-roll she filmed for shot 2, with no sound."));
+    assert.ok(files.get("CLAUDE.md").includes("  - `media/screen-4.mp4`: a screen recording she made for shot 4, with no sound."));
+  });
+  it("is exactly a main project's files and the footage's: the file list of a plan's main project", () => {
+    const sorted = (paths) => [...paths].sort();
+    assert.deepEqual(sorted(projectFiles(main({ footage: FOOTAGE })).keys()), sorted([...projectFiles(main()).keys(), "media/b-roll-2.mp4", "media/screen-4.mp4"]));
+    assert.deepEqual(sorted(projectFiles(main({ footage: [] })).keys()), sorted(projectFiles(main()).keys()));
+  });
+  it("writes the cues it is given with their material, placed on the words", () => {
+    const cues = json(projectFiles(main({ footage: FOOTAGE, graphicCues: CUES })), "brimm/graphic-cues.json").cues;
+    assert.deepEqual(cues.map((c) => [c.kind, c.material, c.shot]), [["graphic", undefined, undefined], ["b-roll", "media/b-roll-2.mp4", 2], ["screen", "media/screen-4.mp4", 4]]);
+    assert.ok(cues.every((c) => c.at !== undefined), "each is placed, or null when its words are not said");
+    assert.equal(cues[1].at.from, "w3");
+  });
+  it("names the file of a cue whose footage is not in yet all the same: the material is the cue's, whether or not the file is there", () => {
+    const files = projectFiles(main({ footage: [], graphicCues: CUES }));
+    assert.deepEqual(json(files, "brimm/graphic-cues.json").cues.map((c) => c.material), [undefined, "media/b-roll-2.mp4", "media/screen-4.mp4"]);
+    assert.ok(!files.has("media/b-roll-2.mp4"));
+  });
+  it("takes only a copy of footage in a name of media/ that its shot gives, and a whole path to move it from", () => {
+    for (const footage of [
+      [{ path: "media/recording.mp4", from: `${COPIES}/x.mp4` }], [{ path: "media/../x.mp4", from: `${COPIES}/x.mp4` }], [{ path: "media/b-roll-0.mp4", from: `${COPIES}/x.mp4` }],
+      [{ path: "media/b-roll-2.mp4", from: "x.mp4" }], [{ path: "/media/b-roll-2.mp4", from: `${COPIES}/x.mp4` }], [{ path: "media/talking-2.mp4", from: `${COPIES}/x.mp4` }],
+      [FOOTAGE[0], FOOTAGE[0]], "media/b-roll-2.mp4", [null], [{ path: 5, from: 6 }]
+    ]) assert.throws(() => projectFiles(main({ footage })), /projectFiles: footage/, JSON.stringify(footage));
+  });
+  it("gives a Reel or a session clip no footage, whatever it is given, and no rule", () => {
+    assert.deepEqual([...projectFiles(reel({ footage: FOOTAGE })).keys()].filter((p) => /b-roll|screen/.test(p)), []);
+    assert.deepEqual([...projectFiles(clip({ footage: FOOTAGE })).keys()].filter((p) => /b-roll|screen/.test(p)), []);
+  });
+  it("is written to disk with the footage renamed in beside the recording, whole or not at all", () => {
+    const dir = fs.mkdtempSync(join(tmpdir(), "brimm-footage-"));
+    try {
+      const copies = join(dir, "copies");
+      fs.mkdirSync(copies);
+      const from = [join(copies, "footage-2.mp4"), join(copies, "footage-4.mp4"), join(copies, "recording.mp4")];
+      from.forEach((p, i) => fs.writeFileSync(p, `video ${i}`));
+      fs.writeFileSync(join(dir, "mark.svg"), "<svg/>");
+      const files = projectFiles(main({ footage: [{ path: "media/b-roll-2.mp4", from: from[0] }, { path: "media/screen-4.mp4", from: from[1] }], video: from[2], logos: [join(dir, "mark.svg")] }));
+      const at = writeProject(join(dir, "Project"), files);
+      assert.equal(fs.readFileSync(join(at, "media", "b-roll-2.mp4"), "utf8"), "video 0");
+      assert.equal(fs.readFileSync(join(at, "media", "screen-4.mp4"), "utf8"), "video 1");
+      assert.deepEqual(from.map((p) => fs.existsSync(p)), [false, false, false], "moved in, not copied");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("the reference pictures a project holds (PR H3)", () => {
   const WORK = "/Users/sallie/BRIMM Video Work/.reference-x";
   const BLUE = { name: "blue carousel.png", path: `${WORK}/blue carousel.png` };

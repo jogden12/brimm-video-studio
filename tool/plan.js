@@ -17,17 +17,19 @@
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { countWords, localDay } from "./shared/text.js";
-import { SHOT_LIST_KINDS, acceptRev, isPlannedRecord, localStamp, newId, newPlannedEpisode, readEpisode, shownName, undone, writeEpisode } from "./episode.js";
+import { SHOT_LIST_KINDS, acceptRev, isFromPlan, isPlannedRecord, localStamp, newId, newPlannedEpisode, readEpisode, shownName, undone, writeEpisode } from "./episode.js";
 import { GRAPHIC_CUE_KINDS, SHOT_KINDS, graphicCuesOf } from "./graphic-cues.js";
 import { findReference } from "./references.js";
 import { referencesFolder, runsFolder } from "./settings.js";
 import { episodeFolderName } from "./names.js";
 import { textWriter } from "./dropbox.js";
 import { commitOf, thisCheckout } from "./filing.js";
-// footage.js and this file import each other (see footage.js): each is used only when called.
-import { agreedFor, partLine, partsOf as footageParts } from "./footage.js";
+import { agreedFor, labelOf, partLine, partsOf as footageParts } from "./footage.js";
+import { joinFor } from "./join.js";
+import { SHOT_SAID, counted, dayText, joined, number, plainly, sentence, textArg } from "./sentences.js";
 
-export { SHOT_LIST_KINDS };
+// The helpers that say things in her chat stand in sentences.js, where footage.js reads them too; they are said from here as they always were.
+export { SHOT_LIST_KINDS, SHOT_SAID, counted, dayText, joined, plainly, sentence, textArg };
 
 /** What a plan may hold (design 5, PR H4): 60 cues, 40 shots and 400 lines of the teleprompter script, of at most 2,000 characters each; a
     title of at most 80 characters. A cue's words are those graphic-cues.js holds (30 words, 200 characters) and what it shows its 300; a
@@ -44,27 +46,12 @@ const KEYS = ["shot", "ref", "inspiration", "link"];
 
 // --- The words of a command ---
 
-/** The six marks a command's words cannot carry through the shell and the cue format, written as a % and two hex digits in either case:
-    %22 is a double quote, %24 a dollar sign, %25 a percent sign, %5C a backslash, %60 a backtick and %7C a pipe, which splits a cue's
-    parts. Nothing else is turned: a % with any other letters after it, or none, such as "100% sure", is a % as it stands. */
-const ESCAPES = { 22: '"', 24: "$", 25: "%", "5c": "\\", 60: "`", "7c": "|" };
-/** A command's word with its six escapes turned, once, from left to right: "%2522" is "%22", the text of a percent sign and "22". */
-export const textArg = (word) => String(word ?? "").replace(/%(22|24|25|5c|60|7c)/gi, (_, code) => ESCAPES[code.toLowerCase()]);
-
 /** A text on one line, trimmed: its white space, line breaks included, is a single space. */
 const oneLine = (text) => text.replace(/\s+/g, " ").trim();
 /** A text's length as a person counts it: in characters, an emoji being one. */
 const length = (text) => Array.from(text).length;
-/** A whole number, with its thousands in commas. */
-const number = (n) => n.toLocaleString("en-US");
-/** Some things in a row: "a", "a and b", "a, b and c"; with `word` "or", "a or b". */
-export const joined = (things, word = "and") => (things.length < 2 ? things.join("") : `${things.slice(0, -1).join(", ")} ${word} ${things[things.length - 1]}`);
-/** A count with its noun. */
-export const counted = (n, one, many = `${one}s`) => `${number(n)} ${n === 1 ? one : many}`;
 /** The first letter of a text in capitals. */
 const capital = (text) => text[0].toUpperCase() + text.slice(1);
-/** A text as a sentence: it ends with a stop, a question or an exclamation mark, or a full stop is put there. */
-export const sentence = (text) => (/[.!?…]["”']?$/.test(text) ? text : `${text}.`);
 
 // --- Reading a package out of the words a command is given ---
 
@@ -84,8 +71,7 @@ function secureLink(text) {
 /** Whether a text is the name of a file, and not a path to one: a cue's ref names a file in the reference folder. */
 const fileName = (text) => !/[\\/\u0000-\u001f]/.test(text) && !text.startsWith(".");
 
-/** How a shot is said where a cue names it, and what a cue of each kind that shows footage shows. */
-export const SHOT_SAID = { talking: "talking to the camera", screen: "a screen recording", "b-roll": "b-roll" };
+/** What a cue of each kind that shows footage shows. */
 const FOOTAGE_SAID = { "b-roll": "b-roll", screen: "a screen recording" };
 /** A part that is not a key and a value, as it is quoted in what is said of it: its first 30 characters. */
 const quoted = (part) => `"${length(part) > 30 ? `${Array.from(part).slice(0, 30).join("")}…` : part}"`;
@@ -270,13 +256,6 @@ export function planLines(title, plan, { explainer = false, voice = null } = {})
   ];
 }
 
-const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-/** A day as the record's moment keeps it, as a person says it: "4 November". The day is the one the stamp itself names, where she was. */
-export const dayText = (at) => {
-  const m = /^\d{4}-(\d{2})-(\d{2})/.exec(String(at));
-  return m ? `${Number(m[2])} ${MONTHS[Number(m[1]) - 1]}` : String(at);
-};
-
 /** What `episodes` says of a planned episode (the record's `planned`), after its two spaces: its name, the day it was planned, what it
     waits for, and its short id. A script waits for its footage, and says how many shots its list has; an explainer waits for its voice. */
 export function plannedLine(record) {
@@ -293,9 +272,10 @@ export function plannedLine(record) {
 
 /** What `plan` is told, from the words after the command and its flags (edit.js flagsOf gives them, with --cue, --shot, --line and --voice
     taking a value each time they are given): { form: "new", title, explainer, voice }, { form: "show", episode }, { form: "set", episode, cues,
-    shots, lines }, { form: "drop", episode } or (PR H5a) { form: "agreed", episode, video }; or null for anything else, which is the help. `new` is
-    followed by the title, one word in quotes. A flag no form has is none. The episode is one word, as every command has it. A `set` gives at least
-    one cue, shot or line. `agreed` is followed by the video, one word, and takes no flag. */
+    shots, lines }, { form: "drop", episode }, (PR H5a) { form: "agreed", episode, video } or (PR H5b) { form: "join", episode, videos }; or null for
+    anything else, which is the help. `new` is followed by the title, one word in quotes. A flag no form has is none. The episode is one word, as every
+    command has it. A `set` gives at least one cue, shot or line. `agreed` is followed by the video, one word, and takes no flag. `join` is followed by
+    the talking parts in the order she wants them, each one word, and by none when she has not said an order; it takes no flag. */
 export function planAsked(words, flags) {
   const [first, second, ...more] = words;
   const only = (...allowed) => Object.keys(flags).every((flag) => allowed.includes(flag));
@@ -305,6 +285,7 @@ export function planAsked(words, flags) {
     return { form: "new", title: second, explainer: flags.explainer === true, voice: flags.voice === undefined ? null : flags.voice[flags.voice.length - 1] };
   }
   if (said(first) && second === "agreed") return more.length === 1 && said(more[0]) && only() ? { form: "agreed", episode: first, video: more[0] } : null;
+  if (said(first) && second === "join") return more.every(said) && only() ? { form: "join", episode: first, videos: more } : null;
   if (!said(first) || more.length) return null;
   if (second === undefined) return only() ? { form: "show", episode: first } : null;
   if (second === "drop") return only() ? { form: "drop", episode: first } : null;
@@ -317,9 +298,6 @@ const refuse = (ctx, why) => {
   ctx.say(why);
   return 1;
 };
-
-/** A name or a title as it is compared with another: whatever its case, its accents and its spacing. */
-export const plainly = (text) => String(text ?? "").normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim();
 
 /** What a plan is made of, as it is said: its guide, its shot list (a script's alone) and its teleprompter script. */
 const madeOf = (explainer) => joined(["its guide", ...(explainer ? [] : ["its shot list"]), "its teleprompter script"]);
@@ -466,22 +444,32 @@ function showPlan(ctx, { record }) {
 }
 
 /** `plan "<planned>" drop`: the plan archived as an episode is (`archived`), so that `episodes` and the guide no longer show it. Its files stay
-    in its folder. */
+    in its folder. A plan that has footage (PR H5b, ruling 2) is not dropped before the join: its pieces are listed by no list but the plan's own, so a
+    drop would leave her footage unlisted. It is refused, writing nothing, naming each piece by its label, and she takes each back first. */
 function dropPlan(ctx, { found, record }) {
+  const title = shownName(record);
+  const parts = footageParts(ctx.root, record.id, { newer: true });
+  if (parts.length) return refuse(ctx, `"${title}" has footage: ${parts.map(labelOf).join(", ")}. To drop it, first say "that's not footage for ${title}" for each.`);
   const code = writeNext(ctx, found, record, { ...record, archived: { at: localStamp(new Date(ctx.now())) } });
-  if (code === 0) ctx.say(`The plan for "${shownName(record)}" is dropped.`);
+  if (code === 0) ctx.say(`The plan for "${title}" is dropped.`);
   return code;
 }
 
-/** `plan "<planned>" …` once edit.js has found the episode `got` (its gate has run): the plan shown, set or dropped, or (PR H5a) a client's
-    agreement to a part noted (footage.js agreedFor, which edit.js has the plan's answer lock held for, and gives the `kit` of its own). An episode
-    that is not a planned video is told so, and a plan that was dropped is told so; neither is changed. Ends with 0, or 1, having said why; a
-    promise of it, for an agreement, which waits for her click. */
+/** `plan "<planned>" …` once edit.js has found the episode `got` (its gate has run): the plan shown, set or dropped, a client's agreement to a part
+    noted (PR H5a; footage.js agreedFor, which edit.js has the plan's answer lock held for, and gives the `kit` of its own), or (PR H5b) all its
+    footage said to be in (join.js joinFor). An episode that is not a planned video is told so, and a plan that was dropped is told so; neither is
+    changed. A video made from a plan (episode.js isFromPlan) shows its plan and notes a client's agreement as a plan does, and is told that it is
+    made from its footage already for `set`, `drop` and `join`: its plan can't be changed. Ends with 0, or 1, having said why; a promise of it, for
+    an agreement, which waits for her click. */
 export function planFor(ctx, got, asked, kit) {
   const { record } = got;
-  if (!isPlannedRecord(record)) return refuse(ctx, `"${shownName(record)}" is not a planned video.`);
+  const made = isFromPlan(record);
+  if (!isPlannedRecord(record) && !made) return refuse(ctx, `"${shownName(record)}" is not a planned video.`);
   if (record.archived) return refuse(ctx, `The plan for "${shownName(record)}" was dropped.`);
+  if (made && asked.form === "join") return refuse(ctx, `"${shownName(record)}" is made from its footage already.`);
+  if (made && (asked.form === "set" || asked.form === "drop")) return refuse(ctx, `"${shownName(record)}" is made from its footage already: its plan can't be changed.`);
   if (asked.form === "set") return setPlan(ctx, got, asked);
   if (asked.form === "agreed") return agreedFor(ctx, got, asked, kit);
+  if (asked.form === "join") return joinFor(ctx, got, asked, kit);
   return asked.form === "drop" ? dropPlan(ctx, got) : showPlan(ctx, got);
 }

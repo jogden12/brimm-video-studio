@@ -15,7 +15,7 @@ import { childEnv, PIN } from "../hyperframes.js";
 import { projectOnAnotherMac } from "../app.js";
 import { REEL_COPY_KINDS, madeInApp, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "../app-reel.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
-import { episodeFault, layoutOf, localStamp, newEpisode } from "../episode.js";
+import { episodeFault, layoutOf, localStamp, newEpisode, newPlannedEpisode } from "../episode.js";
 import { reelEntries, reelsFile } from "../reels.js";
 import { episodeWork } from "../settings.js";
 import { workCopyLockOf } from "../workcopy.js";
@@ -244,6 +244,34 @@ describe("openReelInApp: a Reel opened in HyperFrames", () => {
       const e = episode(c, { record: { kind: "finished" }, plan: planWith(PLAN_CUES) });
       assert.equal(await run(e), 0);
       assert.deepEqual(cuesFile(e).cues, []);
+    });
+    describe("of a video made from a plan (PR H5b)", () => {
+      /** The plan's guide's cues: a graphic before the Reel, the words in it, and a b-roll and a screen cue in it too. */
+      const GUIDE = [
+        { n: 1, words: "Pricing says", kind: "graphic", show: "The word pricing.", seconds: 3, style: null },
+        { n: 2, words: "says Sally", kind: "words", show: "Her name.", seconds: 4, style: null },
+        { n: 3, words: "Sally", kind: "b-roll", show: "Her desk.", seconds: 4, style: null, shot: 2 },
+        { n: 4, words: "Sally", kind: "screen", show: "Her dashboard.", seconds: 4, style: null, shot: 4 }
+      ];
+      const SHOTS = [{ n: 1, kind: "talking", what: "Open." }, { n: 2, kind: "b-roll", what: "Her desk." }, { n: 3, kind: "talking", what: "Why." }, { n: 4, kind: "screen", what: "Her dashboard." }];
+      const ON = "2026-10-28T09:00:00-04:00";
+      const plannedOf = (cues) => ({ ...newPlannedEpisode({ id: "e-20261028-3fa9c1", machine: "Mac Studio", at: ON, title: "Pricing talk", route: "script", voice: null, writer: { commit: "c709b57", on: "Mac Studio" } }).planned, set: ON, shots: SHOTS, cues, lines: ["Pricing says Sally."], filmed: { at: ON, parts: [] } });
+      it("takes the plan's guide's graphic and words cues that fall in the Reel's stretch, in place of the cut plan's, and no footage cue: footage is the main video's", async (c) => {
+        const e = episode(c, { plan: planWith(PLAN_CUES), record: { planned: plannedOf(GUIDE) } });
+        assert.equal(await run(e), 0);
+        const made = cuesFile(e);
+        // "Pricing says" starts before the Reel, so it is not in it; "says Sally" is, as a words cue with no material; the b-roll and the screen cue
+        // are of footage, which a Reel never holds, and the cut plan's own cues (the reading's) are not the Reel's either.
+        assert.deepEqual(made.cues.map((cue) => [cue.n, cue.kind, cue.words, cue.material ?? null, cue.at !== null]), [[2, "words", "says Sally", null, true]]);
+        assert.equal(made.cues[0].show, "Her name.");
+        assert.ok(!existsSync(join(e.project, "media", "b-roll-2.mp4")) && !existsSync(join(e.project, "media", "screen-4.mp4")));
+        assert.doesNotMatch(readFileSync(join(e.project, "CLAUDE.md"), "utf8"), /Footage cues/);
+      });
+      it("takes no cue at all when the guide has none of the two kinds, and none of the cut plan's", async (c) => {
+        const e = episode(c, { plan: planWith(PLAN_CUES), record: { planned: plannedOf(GUIDE.filter((cue) => cue.kind === "b-roll" || cue.kind === "screen")) } });
+        assert.equal(await run(e), 0);
+        assert.deepEqual(cuesFile(e).cues, []);
+      });
     });
     it("says nothing of them to her, and puts no cue in the record", async (c) => {
       const e = episode(c, { plan: planWith(PLAN_CUES) });

@@ -197,6 +197,16 @@ describe("workcopy: only for a raw video or an iPhone clip", () => {
     assert.deepEqual([r.code, guarded, readResult(t.home, FOLDER, "workcopy").failed], [1, [], [NOT_RAW_OR_CLIP]]);
     t.done();
   });
+  it("makes the footage's copies alone for a video made from a plan, and says in words that a raw video is none (`--footage`, PR H5b)", async () => {
+    for (const record of [RAW, CLIP, FINISHED]) {
+      const { t, found, paths, guarded } = world({ record });
+      const before = dropbox(found);
+      const r = await on(t.ctx.deps, "workcopy", "--now", FOLDER, "--footage");
+      assert.deepEqual([r.code, guarded, existsSync(paths.video), existsSync(paths.dir), dropbox(found)], [1, [], false, false, before]);
+      assert.deepEqual(readResult(t.home, FOLDER, "workcopy").failed, [record === FINISHED ? NOT_RAW_OR_CLIP : "It can't be used: it is not a video made from its footage."]);
+      t.done();
+    }
+  });
 });
 
 describe("workcopy: what it cannot make, it says in words", () => {

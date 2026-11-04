@@ -519,6 +519,12 @@ const REFERENCES_SENTENCE = " Files in `brimm/references/` are style references 
 
 const GRAPHIC_CUES_RULE = `${CUES_RULE}${REFERENCES_SENTENCE}`;
 
+/** The rule for the footage cues of a video made from a plan (PR H5b; Jason and A1: "Full cutaway is fine"), in its main project's notes right after the
+    rule for graphic cues, and in no other project's: a cue of kind `b-roll` or `screen` shows the footage she filmed for it, a video in media/ with no
+    sound, which she takes as she takes a graphic. A cue whose material is not in media/ has no footage yet, or waits for her client's agreement
+    (footage.js mayGoIn), and is never built. */
+const FOOTAGE_RULE = "- **Footage cues.** A cue whose kind is `b-roll` or `screen` shows footage she filmed for it: its `material`, a video in `media/` with no sound. When she takes it, put that video at the cue's words for its `seconds`, muted, as a full cutaway over the recording, and keep the recording's sound. Wide footage fills the frame. Upright footage goes in the middle as a rounded panel on a plain mist background, hiding the recording for those seconds. A cue whose `material` is not in `media/` has no footage yet, or waits for her client's agreement: tell her, and never build it.";
+
 /** A Reel's rule for the same (PR H2): the same line, but that its times are on the Reel's own clock, which starts where the Reel does
     and is never moved, and that the Reel's frame is upright, with the top 14% and the bottom 35% kept clear for its captions. */
 const REEL_GRAPHIC_CUES_RULE = `${CUES_RULE.replace("on the recording's clock, so add the recording's `data-start` if it has moved", "on the Reel's clock")} On this upright Reel, keep graphics and words out of the top 14% and the bottom 35%.${REFERENCES_SENTENCE}`;
@@ -527,8 +533,10 @@ const REEL_GRAPHIC_CUES_RULE = `${CUES_RULE.replace("on the recording's clock, s
     video's main project (`short`) has no Reels to ask for, and `app … reel` answers that a short video has none, so it is not told
     to send her to "Open Reel 2 in HyperFrames", and has no line about the Reels Studio suggests; it has one line in their place
     (SHORT_VIDEO_NO_NEW_PROJECTS). A Reel's project has a line about its own page (thisReel), from the `crop` it was made with. A
-    session clip's rule about generated people is its old one (NO_GENERATED_PEOPLE), and the other kinds' is AI_PEOPLE. */
-function brimmRules(kind, short = false, crop = null) {
+    session clip's rule about generated people is its old one (NO_GENERATED_PEOPLE), and the other kinds' is AI_PEOPLE. The main project of a video
+    made from a plan (`footage`, true when projectFiles was given a list of footage, an empty one too; PR H5b) has the rule for its footage cues
+    (FOOTAGE_RULE) right after the rule for graphic cues. */
+function brimmRules(kind, short = false, crop = null, footage = false) {
   const episode = kind !== "clip";
   return [
     "# The BRIMM: rules for this project",
@@ -542,7 +550,7 @@ function brimmRules(kind, short = false, crop = null) {
     `- **Commands never run here.** Never run these HyperFrames commands, however they are spelled (\`npx hyperframes …\`, \`hyperframes …\`): ${inWords(barredList("denied"))}. Never run \`npm run publish\` either. ${inWords(barredList("edit"))} are Studio's to run, never this project's.`,
     "- **The words.** Every word said, with its time and its id, is in `transcript.json`, made on this Mac. Use it, and never transcribe again.",
     `- **Cutting.** Cut whole phrases at pauses, never in the middle of a word.${kind === "main" ? " When she asks to clean up retakes, propose the cuts in `brimm/cut-suggestions.json` first, by their word ids." : ""}`,
-    ...(kind === "main" ? [GRAPHIC_CUES_RULE] : []),
+    ...(kind === "main" ? [GRAPHIC_CUES_RULE, ...(footage ? [FOOTAGE_RULE] : [])] : []),
     ...(kind === "reel" ? [REEL_GRAPHIC_CUES_RULE] : []),
     ...(kind === "main" ? [short ? SHORT_VIDEO_NO_NEW_PROJECTS : `- **Reels.** The Reels Studio suggests are in \`brimm/reel-suggestions.json\`, by their word ids. ${REELS_ARE_STUDIOS}`] : []),
     ...(kind === "reel" ? [`- **Reels.** ${REELS_ARE_STUDIOS}`, thisReel(crop)] : []),
@@ -581,9 +589,21 @@ const ABOUT = {
     other file by its path. */
 const listed = (paths) => [...new Set(paths.filter((path) => path !== "AGENTS.md").map((path) => (path.startsWith("assets/") ? `${path.slice(0, path.indexOf("/", 7) + 1)}` : path.startsWith("brimm/references/") ? "brimm/references/" : path)))];
 
+/** The name of a footage file in a project's media/ (PR H5b): `media/b-roll-<shot>.mp4` or `media/screen-<shot>.mp4`, the shot a whole number from 1.
+    It is the name a cue's `material` gives it (join.js footagePath). */
+const FOOTAGE_PATH = /^media\/(b-roll|screen)-([1-9]\d*)\.mp4$/;
+
+/** What a footage file is, as the notes and the facts say it: "b-roll she filmed for shot 2, with no sound", "a screen recording she made for shot 4,
+    with no sound"; none for any other path. */
+function footageAbout(path) {
+  const found = FOOTAGE_PATH.exec(path);
+  if (!found) return undefined;
+  return found[1] === "b-roll" ? `b-roll she filmed for shot ${found[2]}, with no sound` : `a screen recording she made for shot ${found[2]}, with no sound`;
+}
+
 /** What a file is, as a project of this kind says it: a Reel's video is a stretch of the recording, and any other project's is the
-    recording itself. */
-const aboutOf = (kind, path) => (kind === "reel" && path === "media/recording.mp4" ? "the Reel's stretch of the recording, made ready for HyperFrames and not cut inside it" : ABOUT[path]);
+    recording itself; a footage file is the footage of its shot. */
+const aboutOf = (kind, path) => (kind === "reel" && path === "media/recording.mp4" ? "the Reel's stretch of the recording, made ready for HyperFrames and not cut inside it" : ABOUT[path] ?? footageAbout(path));
 
 /** The line that says what a project's times are on (5.4, item 2). The main video's and a clip's video is the recording itself, so
     its clock is the recording's own. A Reel's video is a stretch of the recording (architecture 4.3), so its clock starts where
@@ -608,10 +628,10 @@ function thisProject({ kind, what, name, offset, files }) {
 
 /** The notes for the agent (5.4), the text of both CLAUDE.md and AGENTS.md: a session clip's own rules first, then BRIMM's rules,
     then what the project is, then HyperFrames' own guidance without what conflicts. */
-function notesText({ kind, what, name, offset, files, guidance, short, crop }) {
+function notesText({ kind, what, name, offset, files, guidance, short, crop, footage = false }) {
   return [
     ...(kind === "clip" ? [CLIP_RULES] : []),
-    brimmRules(kind, short, crop),
+    brimmRules(kind, short, crop, footage),
     thisProject({ kind, what, name, offset, files }),
     "# HyperFrames' own guidance\n\nWhat follows is the guidance the pinned HyperFrames ships, without what the rules above forbid.",
     hyperframesGuidance(guidance).trim()
@@ -635,6 +655,19 @@ const jsonText = (value) => `${JSON.stringify(value, null, 2)}\n`;
     with a dot (snapshot.js). */
 export const settingsText = (kind) => jsonText(settingsFor(kind));
 
+/** The footage a main project is given (PR H5b), [{ path, from }]: the copies with no sound of a plan's b-roll and screen recordings that may go in
+    (join.js footageToUse), each `path` the name its cue gives it in media/ (FOOTAGE_PATH) and once, each `from` the whole path of the copy to move
+    there. null for a project given none, which is every project but a video made from a plan's main one: a Reel or a clip is given no footage
+    whatever it is handed. A list of another shape throws: a name outside media/ would lead out of it, or over the recording. */
+function footageOf(input) {
+  if (input.kind !== "main" || input.footage === undefined || input.footage === null) return null;
+  const sound = (f) => f !== null && typeof f === "object" && typeof f.path === "string" && FOOTAGE_PATH.test(f.path) && typeof f.from === "string" && isAbsolute(f.from);
+  if (!Array.isArray(input.footage) || !input.footage.every(sound) || new Set(input.footage.map((f) => f.path)).size !== input.footage.length) {
+    throw new Error(`projectFiles: footage is a list of { path, from }, each path a footage file of media/ (media/b-roll-2.mp4) once and each from a whole path, and ${JSON.stringify(input.footage)} is not`);
+  }
+  return input.footage;
+}
+
 /** The whole file set of a project (5.2), a Map from each path in the project to what goes there: a text, or {copy: path} for a
     file to copy, {link: path} for the link to the toolchain, or {move: path} for the working copy, which is renamed in last.
     `input` is {kind, id, facts, words, video, cli, guidance, createdAt}, and:
@@ -657,6 +690,11 @@ export const settingsText = (kind) => jsonText(settingsFor(kind));
       from the reference folder, each `name` the file's name there and `path` the file to copy, which for a HEIC or TIFF picture is the JPEG made
       of it (references.js). Each is copied to brimm/references/<name as Claude reads it> and listed as a folder, and a cue that names one names
       that file (a cue that names a picture not given keeps its style as it came);
+    - for the main video of a video made from a plan (PR H5b), `footage` too: [{ path, from }], the copies with no sound of its b-roll and screen
+      recordings that may go in (join.js footageToUse), each moved in under the name its cue gives it in media/ (`media/b-roll-2.mp4`; footageOf).
+      Its `graphicCues` are then the plan's guide's, each b-roll and screen cue naming that file as its `material` whether or not the file is
+      in yet (join.js withMaterial). The list may be empty; given one, the notes have the rule for footage cues (FOOTAGE_RULE). A Reel and a
+      clip are given no footage, whatever is handed them;
     - for a session's clip, `clip`, its number. A clip has no spellings, suggestions, logos or references, whatever it is given, and nothing
       of its name or its file's is written anywhere.
     `facts` are the working copy's, `words` the episode's (or the clip's, with names muted), `video` the working copy's path,
@@ -679,6 +717,7 @@ export function projectFiles(input) {
   // A Reel's page is upright and cropped on the speaker the finder found; a main video's and a clip's is the working copy's own shape.
   const crop = kind === "reel" ? reelCrop(input.facts, track) : null;
   const references = referencesOf(input, episode);
+  const footage = footageOf(input);
 
   const files = new Map();
   files.set("index.html", indexHtml(input.facts, crop));
@@ -704,6 +743,8 @@ export function projectFiles(input) {
   for (const reference of references) files.set(`brimm/references/${projectNameOf(reference.name)}`, { copy: reference.path });
   files.set("node_modules/.bin/hyperframes", { link: input.cli });
   files.set("media/recording.mp4", { move: input.video });
+  // The copies of a video made from a plan's footage, with no sound, each under the name its cue gives it (PR H5b): moved in as the recording is.
+  for (const { path, from } of footage ?? []) files.set(path, { move: from });
 
   const paths = listed([...files.keys(), "brimm/facts.json", "CLAUDE.md"]);
   const facts = input.facts;
@@ -713,7 +754,7 @@ export function projectFiles(input) {
     ...(kind === "reel" ? { reel: { n: input.part.reel, offset: input.stretch.start } } : {}),
     files: Object.fromEntries(paths.map((path) => [path, aboutOf(kind, path) ?? ""]))
   }));
-  const notes = notesText({ kind, what, name, offset: kind === "reel" ? input.stretch.start : 0, files: paths, guidance: input.guidance, short: kind === "main" && input.short === true, crop });
+  const notes = notesText({ kind, what, name, offset: kind === "reel" ? input.stretch.start : 0, files: paths, guidance: input.guidance, short: kind === "main" && input.short === true, crop, footage: footage !== null });
   files.set("CLAUDE.md", notes);
   files.set("AGENTS.md", notes);
   return files;

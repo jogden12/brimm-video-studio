@@ -12,11 +12,12 @@ import { childEnv, PIN, readHistory, readOpen } from "../hyperframes.js";
 import { openInApp, projectOnAnotherMac, NOT_SET_UP } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { processTable } from "../chain.js";
-import { episodeFault, layoutOf, localStamp, newEpisode } from "../episode.js";
+import { episodeFault, layoutOf, localStamp, newEpisode, newPlannedEpisode, recordFile, recordText } from "../episode.js";
+import { planProject } from "../join.js";
 import { markChat } from "../held.js";
 import { claudeDirName } from "../places.js";
 import { episodeWork } from "../settings.js";
-import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
+import { footageCopyPaths, workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 import { psText } from "./open-world.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
@@ -962,5 +963,205 @@ describe("app: opening an episode in HyperFrames", () => {
   });
   it("says this Mac is not set up for HyperFrames in words that hold no path", () => {
     assert.equal(NOT_SET_UP, "This Mac isn't set up for HyperFrames yet: ask Jason.");
+  });
+});
+
+// --- A video made from a plan: the guide's cues, and its footage at every open (PR H5b) ---
+
+describe("app: a video made from a plan, and its footage (PR H5b)", () => {
+  const PLAN_ID = "e-20261028-3fa9c1";
+  const ON = "2026-10-28T09:00:00-04:00";
+  const WRITER = { commit: "c709b57", on: "Mac Studio" };
+  const SHOTS = [{ n: 1, kind: "talking", what: "Open on the problem." }, { n: 2, kind: "b-roll", what: "Her desk." }, { n: 3, kind: "talking", what: "Why it matters." }, { n: 4, kind: "screen", what: "Her dashboard." }];
+  const GUIDE_CUES = [
+    { n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null },
+    { n: 2, words: "Pricing", kind: "b-roll", show: "Her desk.", seconds: 4, style: null, shot: 2 },
+    { n: 3, words: "Sally", kind: "screen", show: "Her dashboard.", seconds: 4, style: null, shot: 4 }
+  ];
+  const COMING = 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.';
+  const NOT_IN = "Some of its footage could not be put into the project. Ask Jason.";
+  /** The plan a video was made from, as the join leaves it in the record. */
+  const plannedOf = (more = {}) => ({ ...newPlannedEpisode({ id: PLAN_ID, machine: "Mac Studio", at: ON, title: "Pricing talk", route: "script", voice: null, writer: WRITER }).planned, set: ON, shots: SHOTS, cues: GUIDE_CUES, lines: ["Pricing says Sally."], filmed: { at: ON, parts: [] }, ...more });
+  /** An episode that is a video made from a plan, with the real choice of what its project is given. */
+  function made(c, { planned = plannedOf(), plan, copy = true } = {}) {
+    const e = episode(c, { record: { id: PLAN_ID, kind: "raw", planned }, ...(plan ? { plan } : {}), copy });
+    e.deps.plan = ({ found, record }) => planProject({ ...e.ctx, root: e.ctx.settings.root }, { found, record });
+    return e;
+  }
+  /** A part of the plan: its episode in Episodes beside the plan's, with its video; `made` has the copy of its footage there, as the run leaves it. */
+  function part(e, n, as, shot, { client = false, made: copied = false } = {}) {
+    const folder = join(e.ctx.settings.root, "Episodes", `2026-10-28 Drop ${n} (Mac Studio)`);
+    mkdirSync(join(folder, "record"), { recursive: true });
+    writeFileSync(join(folder, `Take ${n}.mov`), `the video of take ${n}`);
+    const base = newEpisode({
+      id: `e-20261028-a${String(n).repeat(5)}`, machine: "Mac Studio", at: ON, video: { file: `Take ${n}.mov`, bytes: 21, seconds: 8, created: null, sound: false }, kind: null, writer: WRITER, label: `Video ${n}`,
+      answer: { state: "needs your answer", guess: null, seen: "upright, 0:08, no sound", came: "phone", match: null }
+    });
+    const record = { ...base, rev: 2, version: 5, answer: { ...base.answer, state: "part", by: "Mac Studio", on: "Mac Studio", at: ON, private: "no" }, partOf: { id: PLAN_ID, as, shot, client } };
+    writeFileSync(recordFile(folder, 2), recordText(record));
+    const raw = statSync(join(folder, `Take ${n}.mov`));
+    const copy = footageCopyPaths(e.home, FOLDER, shot, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+    if (copied) {
+      mkdirSync(copy.dir, { recursive: true });
+      writeFileSync(copy.video, `the footage of shot ${shot}`);
+      writeFileSync(copy.facts, "{}");
+    }
+    return { folder, record, copy };
+  }
+  const mediaOf = (e) => readdirSync(join(e.project, "media")).sort();
+  const cuesOf = (e) => JSON.parse(readFileSync(join(e.project, "brimm", "graphic-cues.json"), "utf8")).cues;
+
+  it("makes the main project from the plan's guide: its cues name their footage, the copies that are made are moved in, and the notes have the rule for footage cues", async (c) => {
+    // The reading of the joined video wrote a cue of its own in its cut plan: it is not the project's. The guide's are.
+    const e = made(c, { plan: { ...PLAN, claude: { graphicCues: [{ n: 1, words: "the moon", kind: "graphic", show: "The moon.", seconds: 4, style: null, phrase: "p2" }] } } });
+    const broll = part(e, 2, "b-roll", 2, { made: true });
+    part(e, 3, "screen", 4, { made: true });
+    assert.equal(await run(e), 0);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
+    assert.deepEqual(mediaOf(e), ["b-roll-2.mp4", "recording.mp4", "screen-4.mp4"]);
+    assert.equal(readFileSync(join(e.project, "media", "b-roll-2.mp4"), "utf8"), "the footage of shot 2");
+    assert.deepEqual([existsSync(broll.copy.video), existsSync(broll.copy.facts)], [false, true], "moved in, not copied; its facts stay where they were");
+    assert.deepEqual(cuesOf(e).map((cue) => [cue.kind, cue.words, cue.material ?? null, cue.at !== null]), [["words", "says Sally", null, true], ["b-roll", "Pricing", "media/b-roll-2.mp4", true], ["screen", "Sally", "media/screen-4.mp4", true]]);
+    const notes = readFileSync(join(e.project, "CLAUDE.md"), "utf8");
+    assert.match(notes, /- \*\*Footage cues\.\*\* A cue whose kind is `b-roll` or `screen` shows footage she filmed for it/);
+    assert.match(notes, /  - `media\/b-roll-2\.mp4`: b-roll she filmed for shot 2, with no sound\./);
+    assert.equal(JSON.parse(readFileSync(join(e.project, "brimm", "facts.json"), "utf8")).files["media/screen-4.mp4"], "a screen recording she made for shot 4, with no sound");
+    // The record keeps the project as it keeps any: this is a raw video's main project.
+    assert.deepEqual(e.saved[0].app.projects.map((p) => [p.key, p.state]), [["main", "opened"]]);
+    plain(e.said);
+  });
+  it("makes the project all the same when no part is in yet, with the cues' material naming the files that will be", async (c) => {
+    const e = made(c);
+    assert.equal(await run(e), 0);
+    assert.deepEqual(mediaOf(e), ["recording.mp4"]);
+    assert.deepEqual(cuesOf(e).map((cue) => cue.material ?? null), [null, "media/b-roll-2.mp4", "media/screen-4.mp4"]);
+    assert.match(readFileSync(join(e.project, "CLAUDE.md"), "utf8"), /- \*\*Footage cues\.\*\*/);
+    assert.deepEqual(e.started, [], "nothing is asked for: no part is footage yet");
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
+  });
+  it("footage goes in at an open only once agreed", async (c) => {
+    const e = made(c);
+    part(e, 2, "b-roll", 2, { made: true });
+    // The screen recording shows a client, who has not agreed: a copy that is there anyway (from a run before the click was withdrawn) is not moved in.
+    const client = part(e, 3, "screen", 4, { client: true, made: true });
+    assert.equal(await run(e), 0);
+    assert.deepEqual(mediaOf(e), ["b-roll-2.mp4", "recording.mp4"]);
+    assert.equal(existsSync(client.copy.video), true, "its copy stays where it is");
+    assert.deepEqual(e.started, [], "and none is asked for: it waits for her click and not for a copy");
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
+    assert.equal(cuesOf(e)[2].material, "media/screen-4.mp4", "the cue names its file all the same, and the notes say it has no footage yet or waits for her client's agreement");
+    // Her click is noted in the plan: the next open moves it in.
+    const agreed = { ...e.saved[0], planned: { ...e.saved[0].planned, consent: [{ id: client.record.id, label: "Video 3", at: "2026-10-28" }] } };
+    assert.equal(await run(e, agreed), 0);
+    assert.deepEqual(mediaOf(e), ["b-roll-2.mp4", "recording.mp4", "screen-4.mp4"]);
+    assert.equal(readFileSync(join(e.project, "media", "screen-4.mp4"), "utf8"), "the footage of shot 4");
+    assert.equal(existsSync(client.copy.video), false);
+    assert.deepEqual(e.started, []);
+  });
+  it("makes the project without the footage of a client whose click is not noted, though its copy is there, and the project is being made", async (c) => {
+    const e = made(c);
+    const client = part(e, 2, "b-roll", 2, { client: true, made: true });
+    assert.equal(await run(e), 0);
+    assert.deepEqual(mediaOf(e), ["recording.mp4"]);
+    assert.equal(existsSync(client.copy.video), true);
+  });
+  it("moves a copy in at an open of a project made before it was, and keeps what is in already", async (c) => {
+    const e = made(c);
+    part(e, 2, "b-roll", 2);
+    const screen = part(e, 3, "screen", 4);
+    assert.equal(await run(e), 0);
+    assert.deepEqual(mediaOf(e), ["recording.mp4"]);
+    assert.deepEqual(e.started, [["workcopy", "--now", FOLDER, "--footage"]]);
+    // The run made the copies, the b-roll's first. The next open moves them in; the project is the one it was.
+    for (const [n, shot] of [[2, 2], [3, 4]]) {
+      const raw = statSync(join(e.ctx.settings.root, "Episodes", `2026-10-28 Drop ${n} (Mac Studio)`, `Take ${n}.mov`));
+      const copy = footageCopyPaths(e.home, FOLDER, shot, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+      mkdirSync(copy.dir, { recursive: true });
+      writeFileSync(copy.video, `the footage of shot ${shot}`);
+      writeFileSync(copy.facts, "{}");
+    }
+    e.started.length = 0;
+    e.said.length = 0;
+    assert.equal(await run(e, e.saved[0]), 0);
+    assert.deepEqual(mediaOf(e), ["b-roll-2.mp4", "recording.mp4", "screen-4.mp4"]);
+    assert.deepEqual([e.started, e.said], [[], ["It's open in HyperFrames.", BUTTONS]]);
+    assert.equal(existsSync(screen.copy.video), false);
+    assert.deepEqual(e.saved[1].app.projects.map((p) => [p.name, p.opened.length]), [["Pricing talk main 3fa9c1", 2]]);
+    // Opened again, everything is in: nothing is moved, asked for or said.
+    e.said.length = 0;
+    assert.equal(await run(e, e.saved[1]), 0);
+    assert.deepEqual([e.started, e.said], [[], ["It's open in HyperFrames.", BUTTONS]]);
+  });
+  it("asks for the copies that are not made, once, says they are being made, and opens the project all the same", async (c) => {
+    const e = made(c);
+    part(e, 2, "b-roll", 2, { made: true });
+    part(e, 3, "screen", 4);
+    assert.equal(await run(e), 0);
+    assert.deepEqual(e.started, [["workcopy", "--now", FOLDER, "--footage"]]);
+    assert.deepEqual(e.said, [COMING, "It's open in HyperFrames.", BUTTONS]);
+    assert.deepEqual(mediaOf(e), ["b-roll-2.mp4", "recording.mp4"]);
+    assert.equal(e.saved.length, 1, "the project is recorded, opened");
+    assert.equal(COMING, 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.');
+    plain(e.said.filter((line) => line !== COMING));
+  });
+  it("does not start a second run while one is at work, and says all the same that the footage is being made", async (c) => {
+    const e = made(c);
+    part(e, 2, "b-roll", 2);
+    assert.equal(takeEpisodeLock(workCopyLockOf(e.home, FOLDER), "workcopy", () => true).taken, true);
+    assert.equal(await run(e), 0);
+    assert.deepEqual(e.started, []);
+    assert.deepEqual(e.said, [COMING, "It's open in HyperFrames.", BUTTONS]);
+  });
+  it("leaves the footage of a part out when its episode holds a conflicted copy, or a newer brimm-video wrote its record, though its record in force shows no client (ruling 1)", async (c) => {
+    const e = made(c);
+    const conflicted = part(e, 2, "b-roll", 2, { made: true });
+    const newer = part(e, 3, "screen", 4, { made: true });
+    writeFileSync(join(conflicted.folder, "record", "0002 (Sallie's conflicted copy 2026-10-28).json"), recordText({ ...conflicted.record, partOf: { ...conflicted.record.partOf, client: true } }));
+    writeFileSync(recordFile(newer.folder, 3), recordText({ ...newer.record, rev: 3, version: 9 }));
+    assert.equal(await run(e), 0);
+    assert.deepEqual(mediaOf(e), ["recording.mp4"]);
+    assert.deepEqual([existsSync(conflicted.copy.video), existsSync(newer.copy.video)], [true, true]);
+    assert.deepEqual(e.started, []);
+    assert.deepEqual(cuesOf(e).map((cue) => cue.material ?? null), [null, null, null], "a held part's cue is given no material either");
+  });
+  it("leaves out the footage of a part whose shot is no longer a shot of its kind in the plan (ruling 4)", async (c) => {
+    const e = made(c, { planned: plannedOf({ shots: SHOTS.map((s) => (s.n === 4 ? { ...s, kind: "b-roll" } : s)) }) });
+    part(e, 2, "b-roll", 2, { made: true });
+    const screen = part(e, 3, "screen", 4, { made: true });
+    assert.equal(await run(e), 0);
+    assert.deepEqual(mediaOf(e), ["b-roll-2.mp4", "recording.mp4"]);
+    assert.equal(existsSync(screen.copy.video), true);
+    assert.deepEqual(cuesOf(e).map((cue) => cue.material ?? null), [null, "media/b-roll-2.mp4", null]);
+  });
+  it("says the footage could not be put in when a copy cannot be moved, and opens the project all the same", async (c) => {
+    const e = made(c);
+    part(e, 2, "b-roll", 2);
+    assert.equal(await run(e), 0);
+    const raw = statSync(join(e.ctx.settings.root, "Episodes", "2026-10-28 Drop 2 (Mac Studio)", "Take 2.mov"));
+    const copy = footageCopyPaths(e.home, FOLDER, 2, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+    mkdirSync(copy.dir, { recursive: true });
+    writeFileSync(copy.video, "the footage of shot 2");
+    writeFileSync(copy.facts, "{}");
+    e.said.length = 0;
+    const refused = { ...e.deps, rename: () => { throw new Error("EXDEV"); } };
+    assert.equal(await openInApp(e.ctx, { found: e.found, record: e.saved[0] }, refused), 0);
+    assert.deepEqual(e.said, [NOT_IN, "It's open in HyperFrames.", BUTTONS]);
+    assert.deepEqual([mediaOf(e), existsSync(copy.video)], [["recording.mp4"], true]);
+    assert.equal(NOT_IN, "Some of its footage could not be put into the project. Ask Jason.");
+  });
+  it("is for a video made from a plan alone: any other has its cut plan's cues and no footage, whatever the open is given", async (c) => {
+    const cue = { n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null, phrase: "p2" };
+    const e = episode(c, { plan: { ...PLAN, claude: { graphicCues: [cue] } } });
+    e.deps.plan = () => {
+      throw new Error("a raw video has no plan to ask");
+    };
+    assert.equal(await run(e), 0);
+    assert.deepEqual(mediaOf(e), ["recording.mp4"]);
+    assert.deepEqual(cuesOf(e).map((cue) => cue.words), ["says Sally"]);
+    assert.doesNotMatch(readFileSync(join(e.project, "CLAUDE.md"), "utf8"), /Footage cues/);
+    // A video made from a plan that is opened by something that gives no plan is a raw video's, and opens.
+    const bare = episode(c, { record: { id: PLAN_ID, kind: "raw", planned: plannedOf() } });
+    assert.equal(await run(bare), 0);
+    assert.doesNotMatch(readFileSync(join(bare.project, "CLAUDE.md"), "utf8"), /Footage cues/);
   });
 });

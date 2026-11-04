@@ -1137,6 +1137,24 @@ describe("a script she has, and the plan made from it: the skill's rows and scri
     assert.deepEqual(rows(openFiles()[SKILL], AGREED), rows(strict[SKILL], AGREED));
     assert.deepEqual(rows(openFiles()[SKILL], BACK), rows(strict[SKILL], BACK));
   });
+  it("has both skills the row for \"that's all the footage\", the very same in both: the order said in plain words, one question, then the join in her order, in the background (PR H5b)", () => {
+    const JOIN = '| "That\'s all the footage for <title>" |';
+    const rows = (skill) => skill.split("\n").filter((line) => line.startsWith(JOIN));
+    for (const [which, skill] of [["strict", strict[SKILL]], ["open", openFiles()[SKILL]]]) {
+      const [row, ...more] = rows(skill);
+      assert.deepEqual(more, [], which);
+      for (const words of ['`plan "<title>" join`', "with two talking parts or more it prints their order", "and writes nothing", "tell her that order in plain words",
+        'ask on one `AskUserQuestion`, "Join them in this order?": "Yes", "Another order"', '`plan "<title>" join "<label>" "<label>"`, the talking parts\' labels in that order',
+        "ask her the order she wants, then run it the same way, in her order", "With one talking part it starts at once", "no more talking parts can be added once it starts",
+        'go on as "Guide her" says for work in the background']) assert.ok(row.includes(words), `${which}: ${words}`);
+      // The order is asked before the join is run in it, and the plan's command is the first thing the row runs.
+      assert.ok(row.indexOf('`plan "<title>" join`') < row.indexOf("Join them in this order?") && row.indexOf("Join them in this order?") < row.indexOf('`plan "<title>" join "<label>" "<label>"`'), which);
+      for (const span of commandsIn(row)) assert.ok(COMMAND_NAMES.includes(span.split(" ")[0]), `${which}: ${span}`);
+      // It names no flag and no file: what she is told is in its own words.
+      assert.doesNotMatch(row, /--parts|--now|\bjoin --/, which);
+    }
+    assert.deepEqual(rows(openFiles()[SKILL]), rows(strict[SKILL]));
+  });
   it("keeps both skills under 180 lines with the rows in", () => {
     for (const skill of [strict[SKILL], openFiles()[SKILL]]) assert.ok(skill.split("\n").length < 180, `${skill.split("\n").length} lines`);
   });

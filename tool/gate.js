@@ -18,8 +18,11 @@ export const UNANSWERED = ["kind", "leave", "which", "show", "release", "resolve
 /** The commands that run for a session not cleared, with this Mac's training gate on or off: those, and `name`. */
 export const SESSION = [...UNANSWERED, "name"];
 /** The commands that run for a planned episode (isPlannedRecord), beside those that name no episode: `plan`, which shows and sets its
-    package, and `name`. `leave` says how to drop a plan; every other command is refused, for there is no footage. */
-export const PLANNED = ["plan", "name"];
+    package, `name`, and (PR H5b) `join`, the detached run that makes the plan its video once its footage is in, which `plan … join` starts.
+    `join` is in no list of a record with no kind but this one: a video not yet answered, one left alone, a part and a session are refused
+    it in the gate's words, as `workcopy` is. `leave` says how to drop a plan; every other command is refused, for it is not made from its
+    footage yet. */
+export const PLANNED = ["plan", "name", "join"];
 /** The commands that run for a record with no kind, beside those of UNANSWERED (PR H5a): `footage`, which answers a dropped video as
     footage for a planned video, or takes it back. It runs for a video waiting for its answer, one she left alone, and a part, and for no
     other record: a session not cleared is refused it in the gate's words (it is in none of the lists of a session), and so is a video held
@@ -35,9 +38,10 @@ const WAITING = "This video is waiting for its answer: say what it is first.";
 /** What a video she left alone is refused in, by the gate and by askBlocked: it is not waiting for anything. */
 export const LEFT = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
-/** Why a command is refused for a planned episode (isPlannedRecord), which has no footage yet, naming the title she gave it. `leave` is
-    answered by how to drop a plan instead: a plan is not left alone as a video is, it is dropped. */
-const NO_FOOTAGE = (record) => `"${shownName(record)}" is a planned video, and there's no footage for it yet.`;
+/** Why a command is refused for a planned episode (isPlannedRecord), which is not made from its footage yet, naming the title she gave it: true
+    whether it has footage or none (PR H5b). `leave` is answered by how to drop a plan instead: a plan is not left alone as a video is, it is
+    dropped. */
+const NO_FOOTAGE = (record) => `"${shownName(record)}" is a planned video, and it isn't made from its footage yet.`;
 const TO_DROP = (record) => `To drop a plan, say "drop the plan for ${shownName(record)}".`;
 export const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac yet: ask Jason.";
 /** What the training gate says once Jason's check of it is 90 days old or more (settings.js teachingsLapsed): he checks again. */
@@ -133,7 +137,7 @@ const transcriptOnly = (words) => wordsOf(words).includes("--transcript-only");
     `said` is what the episode was asked for by (findEpisode's second argument), with which the words of a Reel are matched.
     - A command that names no episode (UNSCOPED) is not gated.
     - A planned episode (isPlannedRecord), only the commands of PLANNED; `leave` is told how to drop a plan, and any other is refused
-      in words that say there is no footage for it yet. A record that only claims to be planned is none, and is gated as follows.
+      in words that say it is not made from its footage yet. A record that only claims to be planned is none, and is gated as follows.
     - A record with no kind, whatever its answer says (a video left alone as not for brimm-video included and a part, PR H5a), only the
       commands of UNANSWERED, and `footage` (FOOTAGE). Any other is refused in the words of a video waiting for its answer, or, for one
       she left alone, in words that say so: it is not waiting for an answer.

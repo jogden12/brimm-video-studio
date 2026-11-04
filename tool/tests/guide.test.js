@@ -805,8 +805,8 @@ describe("what counts as a change while the guide waits", () => {
     assert.notEqual(signatureOf([at({}), at({})]), base);
     assert.notEqual(signatureOf([at({}, { done: false, stage: "arriving", text: "x", step: "", after: "" })]), base);
   });
-  it("waits only while a video is coming in, being imported, being read or having its video for HyperFrames made", () => {
-    assert.deepEqual(COMING, ["arriving", "importing", "reading-later", "reading", "session-reading", "making-copy"]);
+  it("waits only while a video is coming in, being imported, being read, having its video for HyperFrames made, or (PR H5b) a plan's footage made into one video", () => {
+    assert.deepEqual(COMING, ["arriving", "importing", "reading-later", "reading", "session-reading", "making-copy", "joining"]);
   });
   it("sees a video pass from the video for HyperFrames being made to its being opened, and not the time left", () => {
     const at = (over) => ({ facts: { ...BASE, ...APP(over) }, next: nextFor({ ...BASE, ...APP(over) }, NONE, NOW), folder: null, record: null });
@@ -984,5 +984,48 @@ describe("the step of a planned video: film it, then what its footage is (PR H4,
     assert.equal(opsText(HANDOFF(), "taken", false, null), OPS_TEXTS.taken);
     assert.equal(opsText(HANDOFF({ kind: "raw" }), "taken", false, null), OPS_TEXTS.taken + OPS_TEXTS.online);
     assert.equal(opsText(HANDOFF(), "cascade", false, NOTE({ step: "cascade" })), OPS_TEXTS.cascade);
+  });
+});
+
+describe("the step of a planned video whose footage is being made into one video, or could not be (PR H5b)", () => {
+  const NOTES = { version: 1, handoffs: {}, finished: {} };
+  const NOW = Date.parse("2026-11-04T12:00:00-05:00");
+  const plan = (planned) => ({ name: "Too many SKUs (400000)", id: "e-20261104-400000", kind: null, waiting: false, planned });
+  const SCRIPT = { route: "script", voice: null, footage: "1 talking part and 2 b-roll clips" };
+  const JOINING = "Its footage is being made into one video. A notice comes when it is ready.";
+  const FAILED = 'Its footage could not be made into one video. Say "how far is it?" to see why.';
+  it("is joining while the run that makes its video is at work: a script's, with a notice to come, ahead of the footage it has", () => {
+    assert.deepEqual(nextFor(plan({ ...SCRIPT, joining: true }), NOTES, NOW), { done: false, stage: "joining", text: JOINING, step: "", after: "" });
+    assert.equal(nextFor(plan({ ...SCRIPT, footage: "", joining: true }), NOTES, NOW).stage, "joining");
+    assert.equal(JOINING, "Its footage is being made into one video. A notice comes when it is ready.");
+  });
+  it("is join-failed when its last run ended and it is still a plan, and says how to see why", () => {
+    assert.deepEqual(nextFor(plan({ ...SCRIPT, joinFailed: true }), NOTES, NOW), { done: false, stage: "join-failed", text: FAILED, step: "", after: "" });
+    // A run at work again is the run that is at work, not the one before.
+    assert.equal(nextFor(plan({ ...SCRIPT, joining: true, joinFailed: true }), NOTES, NOW).stage, "joining");
+    assert.equal(FAILED, 'Its footage could not be made into one video. Say "how far is it?" to see why.');
+  });
+  it("is the step it was for a plan with neither, and for an explainer, which has no footage to join", () => {
+    assert.equal(nextFor(plan(SCRIPT), NOTES, NOW).stage, "footage");
+    assert.equal(nextFor(plan({ ...SCRIPT, joining: false, joinFailed: false }), NOTES, NOW).stage, "footage");
+    for (const flags of [{ joining: true }, { joinFailed: true }]) assert.equal(nextFor(plan({ route: "explainer", voice: null, ...flags }), NOTES, NOW).stage, "film");
+  });
+  it("comes before the BRIMM Ops page's steps and changes none of them", () => {
+    for (const planned of [{ ...SCRIPT, joining: true }, { ...SCRIPT, joinFailed: true }]) {
+      const next = nextFor(plan(planned), NOTES, NOW);
+      assert.deepEqual([next.stage === "ops", next.step, next.after], [false, "", ""]);
+    }
+    assert.deepEqual(OPS, { episode: ["taken", "kit", "posted", "live", "cascade"], "short video": ["taken", "posttext", "posted"], session: ["taken", "checked"], withdrawal: ["withdrawn"] });
+  });
+  it("is on its way, for `guide wait` and `guide tell`, while it is joining: and it says its next step, in one line, when the run has ended", () => {
+    assert.ok(COMING.includes("joining"));
+    const item = (facts) => ({ facts, next: nextFor(facts, NOTES, NOW), folder: null, record: null });
+    const joining = item(plan({ ...SCRIPT, joining: true }));
+    const video = item({ ...BASE, kind: "raw", way: "unopened", app: true, reading: "later", readsAt: "12:20" });
+    const failed = item(plan({ ...SCRIPT, joinFailed: true }));
+    assert.equal(told(joining, joining, joining), null);
+    assert.equal(told(joining, joining, failed), `Too many SKUs (400000): ${FAILED}`);
+    assert.equal(told(joining, joining, video), `${video.facts.name}: ${video.next.text}`);
+    assert.equal(told(joining, joining, null), 'Too many SKUs (400000) is not under way any more. Say "what\'s next?" to see the ones that are.');
   });
 });

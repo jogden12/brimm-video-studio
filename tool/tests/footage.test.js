@@ -5,11 +5,11 @@
 // Nothing here runs a program or touches Dropbox: each test has a folder of its own under the temp folder.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PART_KINDS, newEpisode, newPlannedEpisode, recordFile, recordText } from "../episode.js";
 import { footageOption } from "../receipts.js";
-import { footageAsked, footageCounts, mayGoIn, partLine, partsOf, partsReader, plannedOffers } from "../footage.js";
+import { footageAsked, footageCounts, mayBeUsed, mayGoIn, partHeld, partLine, partsOf, partsReader, plannedOffers } from "../footage.js";
 import { setup } from "./episodes.js";
 
 const WRITER = { commit: "c709b57", on: "Mac Studio" };
@@ -105,6 +105,39 @@ describe("plannedOffers, the plans a dropped video may be for", () => {
   });
 });
 
+describe("plannedOffers, a plan made from its footage (PR H5b)", () => {
+  const PICTURE = { picture: true, sound: true };
+  /** The plan as the join leaves it: a video of its own, answered, with its plan kept and filmed. */
+  const madeFrom = (over = {}) => {
+    const { planned = {}, ...rest } = over;
+    const base = plan(rest);
+    return {
+      ...base, kind: "raw", video: { file: "Too many SKUs.mov", bytes: 16, seconds: 120, recorded: "2026-11-04", recordedFrom: "import" },
+      answer: { state: "answered", guess: null, seen: "wide, 2:00, no retakes", came: "camera", by: "Mac Studio", on: "Mac Studio", at: AT, private: "no" },
+      planned: { ...base.planned, filmed: { at: AT, parts: [] }, ...planned }
+    };
+  };
+  it("offers a video made from a plan, with no hand-off yet, for a video with a picture: it takes b-roll and a screen recording still", () => {
+    const offers = plannedOffers([madeFrom()], PICTURE);
+    assert.deepEqual(offers.map((o) => o.option), ['Footage for "Too many SKUs"']);
+    assert.equal(offers[0].record.id, PLAN_ID);
+    for (const sound of [true, false]) assert.equal(plannedOffers([madeFrom()], { picture: true, sound }).length, 1, String(sound));
+    assert.deepEqual(plannedOffers([madeFrom()], { picture: false, sound: true }), []);
+  });
+  it("offers none that has a hand-off, was dropped, is an explainer's, is not set, or is a video that is no plan's", () => {
+    const finished = { at: AT, revision: 1, on: "Mac Studio" };
+    for (const [what, record] of [["handed off", madeFrom({ finished })], ["dropped", madeFrom({ archived: { at: AT } })], ["an explainer", madeFrom({ route: "explainer" })], ["not set", madeFrom({ planned: { set: null } })],
+      ["a video of its own", { ...madeFrom(), planned: undefined }], ["no kind", { ...madeFrom(), kind: null }]]) {
+      assert.deepEqual(plannedOffers([record], PICTURE), [], what);
+    }
+  });
+  it("offers it among the plans waiting for their footage, newest first, at most three", () => {
+    const newer = plan({ id: "e-20261105-000001", title: "A newer plan", at: "2026-11-05T09:00:00-05:00" });
+    const older = madeFrom({ id: "e-20261103-000001", title: "An older plan", at: "2026-11-03T09:00:00-05:00" });
+    assert.deepEqual(plannedOffers([older, plan(), newer], PICTURE).map((o) => o.option), [footageOption("A newer plan"), footageOption("Too many SKUs"), footageOption("An older plan")]);
+  });
+});
+
 describe("partsOf, the parts of a plan", () => {
   it("is the dropped videos answered as footage for the plan, by their records in force, in the order they were answered", () => {
     const t = setup();
@@ -157,6 +190,77 @@ describe("partsOf, the parts of a plan", () => {
     put(t, "2026-11-04 One (Mac Studio)", part({ id: "e-20261104-aa1111" }));
     writeFileSync(join(t.root, "Episodes", "notes.txt"), "not an episode");
     assert.deepEqual(partsOf(t.root, PLAN_ID).map((p) => p.record.id), ["e-20261104-aa1111"]);
+    t.done();
+  });
+  it("lists a part a newer brimm-video wrote only when it is asked to (newer: true): flagged, after the others, by the plan its record names (PR H5b)", () => {
+    const t = setup();
+    put(t, "2026-11-04 Whole (Mac Studio)", part({ id: "e-20261104-aa1111" }));
+    put(t, "2026-11-04 Newer (Mac Studio)", { ...part({ id: "e-20261104-cc3333", at: "2026-11-04T08:00:00-05:00" }), version: 6 });
+    put(t, "2026-11-04 Newer of another plan (Mac Studio)", { ...part({ id: "e-20261104-dd4444", of: OTHER_ID }), version: 6 });
+    put(t, "2026-11-04 Newer, no part (Mac Studio)", { ...waitingVideo({ id: "e-20261104-ee5555" }), version: 6 });
+    assert.deepEqual(partsOf(t.root, PLAN_ID).map((p) => p.record.id), ["e-20261104-aa1111"]);
+    const all = partsOf(t.root, PLAN_ID, { newer: true });
+    assert.deepEqual(all.map((p) => [p.record.id, p.newer === true]), [["e-20261104-aa1111", false], ["e-20261104-cc3333", true]]);
+    assert.deepEqual(Object.keys(all[0]).sort(), ["folder", "name", "record"], "a whole part is listed as it always was");
+    t.done();
+  });
+});
+
+describe("partHeld and mayBeUsed, whether a part may be used to make anything (PR H5b, ruling 1)", () => {
+  const CONFLICT = "record/0001 (Sallie's laptop's conflicted copy 2026-11-04).json";
+  it("holds nothing back of a part whose episode is as its record in force says", () => {
+    const t = setup();
+    put(t, "2026-11-04 One (Mac Studio)", part({ id: "e-20261104-aa1111" }));
+    const [listed] = partsOf(t.root, PLAN_ID);
+    assert.equal(partHeld(listed), null);
+    assert.equal(mayBeUsed(listed, plan().planned), true);
+    t.done();
+  });
+  it("holds back a part whose episode holds a conflicted copy, though its record in force shows no client, and a conflicted copy of anything else in it", () => {
+    for (const copy of [CONFLICT, "Sorting invoices (Sallie's laptop's conflicted copy 2026-11-04).mov"]) {
+      const t = setup();
+      const folder = put(t, "2026-11-04 One (Mac Studio)", part({ id: "e-20261104-aa1111" }));
+      writeFileSync(join(folder, copy), copy.startsWith("record") ? recordText(part({ id: "e-20261104-aa1111", client: true })) : "video");
+      const [listed] = partsOf(t.root, PLAN_ID);
+      assert.equal(listed.record.partOf.client, false, "its record in force shows no client");
+      assert.equal(mayGoIn(listed, plan().planned), true, "mayGoIn judges the record in force alone, as the guide's line needs it to");
+      const held = partHeld(listed);
+      assert.equal(held.why, "conflicted");
+      assert.equal(held.read.code, "CONFLICTED");
+      assert.equal(mayBeUsed(listed, plan().planned), false);
+      t.done();
+    }
+  });
+  it("holds back a part whose newest record a newer brimm-video wrote, listed as newer or found so when it is looked at", () => {
+    const t = setup();
+    const folder = put(t, "2026-11-04 One (Mac Studio)", part({ id: "e-20261104-aa1111" }));
+    const [listed] = partsOf(t.root, PLAN_ID);
+    writeFileSync(recordFile(folder, 2), recordText({ ...part({ id: "e-20261104-aa1111" }), rev: 2, version: 9 }));
+    // Looked at again, it is a newer brimm-video's.
+    assert.deepEqual([partHeld(listed).why, mayBeUsed(listed, plan().planned)], ["newer", false]);
+    // Listed as newer, it is held without a look.
+    const [flagged] = partsOf(t.root, PLAN_ID, { newer: true });
+    assert.deepEqual([partHeld(flagged).why, flagged.newer, mayBeUsed(flagged, plan().planned)], ["newer", true, false]);
+    t.done();
+  });
+  it("holds back a part whose record cannot be read, and anything that is no part", () => {
+    const t = setup();
+    const folder = put(t, "2026-11-04 One (Mac Studio)", part({ id: "e-20261104-aa1111" }));
+    const [listed] = partsOf(t.root, PLAN_ID);
+    rmSync(join(folder, "record"), { recursive: true });
+    assert.equal(partHeld(listed).why, "unreadable");
+    assert.equal(mayBeUsed(listed, plan().planned), false);
+    for (const nothing of [null, undefined, {}, { folder: 5 }]) assert.notEqual(partHeld(nothing), null);
+    t.done();
+  });
+  it("asks the client's agreement too: a part that shows a client is used only once the plan holds it, and never while its episode is held", () => {
+    const t = setup();
+    const folder = put(t, "2026-11-04 One (Mac Studio)", part({ id: "e-20261104-aa1111", client: true }));
+    const [listed] = partsOf(t.root, PLAN_ID);
+    const agreed = { ...plan().planned, consent: [{ id: "e-20261104-aa1111", label: "Video of 4 Nov, 09:12 (Mac Studio)", at: "2026-11-04" }] };
+    assert.deepEqual([mayBeUsed(listed, plan().planned), mayBeUsed(listed, agreed)], [false, true]);
+    writeFileSync(join(folder, CONFLICT), "x");
+    assert.equal(mayBeUsed(listed, agreed), false);
     t.done();
   });
 });

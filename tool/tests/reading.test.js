@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { editMain, pickReels } from "../edit.js";
-import { localStamp, recordFile, recordText } from "../episode.js";
+import { episodeFault, isFromPlan, localStamp, newPlannedEpisode, recordFile, recordText } from "../episode.js";
 import { episodeWork, pendingFolder, writeSettings } from "../settings.js";
 import { readResult, resultFile } from "../detached.js";
 import { writePending } from "../filing.js";
@@ -416,6 +416,27 @@ describe("read, an iPhone clip", () => {
       assert.deepEqual([r.code, r.said], [1, ["A short video has no Reels."]], words.join(" "));
     }
     assert.equal(reread(found).rev, 1);
+    t.done();
+  });
+});
+
+describe("read, a video made from a plan (PR H5b)", () => {
+  /** The plan, kept whole in the record of the video its footage made (episode.js isFromPlan): the record is at layout 5. */
+  const planned = () => ({
+    ...newPlannedEpisode({ id: ID, machine: "Mac Studio", at: AT, title: "Pricing talk", route: "script", voice: null, writer: { commit: "c709b57", on: "Mac Studio" } }).planned,
+    set: AT, shots: [{ n: 1, kind: "talking", what: "Open." }], cues: [{ n: 1, words: "know your costs", kind: "words", show: "Her title.", seconds: 3, style: null }], lines: ["Know your costs."], filmed: { at: AT, parts: [ID] }
+  });
+  it("reads it as it reads a raw video: its plan stays whole in its record, and its cues are the guide's, which the reading does not change", async () => {
+    const { t, found, asks } = reading("raw", { over: { version: 5, planned: planned() } });
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 0, r.text);
+    assert.equal(asks.length, 1);
+    const record = reread(found);
+    assert.deepEqual([record.kind, record.reading.kind, isFromPlan(record), record.rev], ["raw", "raw", true, found.record.rev + 1]);
+    assert.deepEqual(record.planned, planned());
+    assert.equal(episodeFault(record), "");
+    // The reading kept its own cues in the cut plan, as for any raw video; the project is made from the guide's.
+    assert.deepEqual(JSON.parse(readFileSync(join(found.folder, "Pricing talk.cut-plan.json"), "utf8")).claude.graphicCues, RAW_CUES);
     t.done();
   });
 });

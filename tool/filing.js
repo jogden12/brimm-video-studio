@@ -105,8 +105,18 @@ export const thisCheckout = () => dirname(dirname(fileURLToPath(import.meta.url)
     file is cloned in from the run's folder; and the first record is written last, by the rule, its work copy kept. Gives
     back { name, path, record, entries }, where `entries` are the late check's: { from, to, bytes } for every file put in,
     the record's among them. Throws, saying why, when a file cannot be put in: then no record is written, and the next run
-    uses the folder again. */
-export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, reels = [], work, dropFile, answer = null, label = "", fingerprint = "" }, deps) {
+    uses the folder again.
+    `into` (PR H5b) files the video into an episode that is there already, not a new one: the plan the join makes a video of.
+    { folder, record, change }: `folder` is the episode's own folder, `record` the record it was read at, and `change(first)`
+    gives the record to write, from the record this call would have written for a new episode (`first`, which has the video,
+    the files put in, the kind and the fingerprint), as the plan's record written once more as the video. That record is
+    written as the episode's next one, by the rule, with the rev the episode was read at (`record.rev`), so that a record
+    written meanwhile is never written over (CHANGED), and `first` takes the episode's own id. `change` is called last,
+    after every file is put in, and may throw to stop it. Files go in by clones and never over a file: one of the names is
+    there already, and the call throws. And when it throws, for that or for a record that cannot be written, every file this
+    call put in is taken away again, so that the episode is as it was. `file` and `made` are then wherever the call's
+    caller made them, and there is no drop folder: `dropFile` is not asked. */
+export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, reels = [], work, dropFile, answer = null, label = "", fingerprint = "", into = null }, deps) {
   const { episode, log = () => {} } = deps;
   // The video in the drop folder must still be the one that was worked on: one put in its place meanwhile, as a corrected
   // export, is another recording, and is never filed with this one's transcript and cuts.
@@ -117,44 +127,65 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
   const day = deps.today ? deps.today() : localDay();
   const episodes = episodesFolder(episode.root);
   mkdirSync(episodes, { recursive: true });
-  const found = findFolder(episodes, { video, bytes, machine: episode.machine, day });
-  const path = join(episodes, found.name);
+  const found = into ? { name: basename(into.folder), reused: false } : findFolder(episodes, { video, bytes, machine: episode.machine, day });
+  const path = into ? into.folder : join(episodes, found.name);
   if (fcpxml) mkdirSync(join(path, "edit"), { recursive: true });
   // A stopped import may have left a record that is not whole. It is no one's record, and the first one is written anew.
   if (found.reused) rmSync(join(path, RECORD_DIR), { recursive: true, force: true });
   const entries = [];
   const files = {};
+  // What this call put into an episode that was there before it, to take away again if it cannot finish.
+  const placed = [];
   const put = (from, rel) => {
     const to = join(path, rel);
     mkdirSync(dirname(to), { recursive: true });
     (found.reused ? replaceIn : cloneIn)(from, to, opts);
+    if (into) placed.push(to);
     entries.push({ from, to, bytes: statSync(from).size });
     files[rel] = statSync(from).size;
   };
-  put(file, video);
-  for (const to of made) put(at(to), to === fcpxml ? timelineFile({ part: "main", v: 0 }) : relative(dirname(file), to).split(sep).join("/"));
   const writer = { commit: deps.commit || commitOf(episode.checkout), on: episode.machine };
   const write = textWriter({ work: join(work, "record"), keep: true, ...opts });
   const title = read && typeof read.title === "string" && read.title.trim() ? { text: read.title.trim(), from: "claude", approved: false } : null;
-  const first = newEpisode({
-    id: newId(day, deps.rand),
-    machine: episode.machine,
-    at: localStamp(deps.now ? deps.now() : new Date()),
-    video: { file: video, bytes, seconds: facts.duration, created: createdOf(printed), ...(facts.sound === false ? { sound: false } : {}) },
-    kind,
-    writer,
-    files,
-    title,
-    reels,
-    answer,
-    label,
-    fingerprint
-  });
-  const record = writeEpisode(path, first, { expectRev: 0, writeText: (to, text) => entries.push(write(to, text)), writer, home: episode.home });
+  let record;
+  try {
+    put(file, video);
+    for (const to of made) put(at(to), to === fcpxml ? timelineFile({ part: "main", v: 0 }) : relative(dirname(file), to).split(sep).join("/"));
+    const first = newEpisode({
+      id: into ? into.record.id : newId(day, deps.rand),
+      machine: episode.machine,
+      at: localStamp(deps.now ? deps.now() : new Date()),
+      video: { file: video, bytes, seconds: facts.duration, created: createdOf(printed), ...(facts.sound === false ? { sound: false } : {}) },
+      kind,
+      writer,
+      files,
+      title,
+      reels,
+      answer,
+      label,
+      fingerprint
+    });
+    record = writeEpisode(path, into ? into.change(first) : first, { expectRev: into ? into.record.rev : 0, writeText: (to, text) => entries.push(write(to, text)), writer, home: episode.home });
+  } catch (e) {
+    // An episode that was there before is left as it was: the files this call put in are taken away.
+    for (const to of placed) rmSync(to, { force: true });
+    throw e;
+  }
   // A light import's video is named by its label, and its episode by its id: the folder's name is the file's.
   const reused = found.reused ? ", in the folder an import that stopped had made" : "";
   log(label ? `${label}: filed into Episodes as ${record.id}${reused}.` : `${video}: filed into Episodes as "${found.name}"${reused}.`);
   return { name: found.name, path, record, entries };
+}
+
+/** The late check still to be made of the episode just filed (`filed`, fileEpisode's), as this Mac keeps it on its own disk until it is made
+    (writePending): the episode's id, its folder and name, the video and its size and length, `drop`, the file in the drop folder that the check
+    takes away once it has passed, and `dropFile`, what that file was when it was imported (so that another of its name is never taken), the
+    import's id, `work`, the run's own folder, which holds the work copies the check puts a file in again from, `planTxt`, the cut plan's text by
+    its name, and `label`, the name a status and a notice give it in place of its file's. `deps` gives `episode` ({ root, machine }) and the clock
+    (`clock`, in milliseconds), which says when the last file was put in. `drop` is a file that is nobody's but the run's when the video was not
+    dropped there (PR H5b: the join makes one, and one of its parts is another episode's own video). */
+export function pendingFor(filed, { video, drop, dropFile = null, importId = "", work, planTxt, label = "" }, { episode, clock = Date.now }) {
+  return { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop, dropFile, importId, work, entries: filed.entries, lastCopy: clock(), root: episode.root, machine: episode.machine, planTxt, ...(label ? { label } : {}) };
 }
 
 /** How often a status is written while a step runs: once a minute, so that one not written for 10 minutes is an import that

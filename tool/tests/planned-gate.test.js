@@ -20,7 +20,7 @@ const FOLDER = "2026-11-04 Too many SKUs (Mac Studio)";
 const WRITER = { commit: "c709b57", on: "Mac Studio" };
 const WAITING = "This video is waiting for its answer: say what it is first.";
 const LEFT = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
-const NOT_PLANNED_YET = `"${TITLE}" is a planned video, and there's no footage for it yet.`;
+const NOT_PLANNED_YET = `"${TITLE}" is a planned video, and it isn't made from its footage yet.`;
 const TO_DROP = `To drop a plan, say "drop the plan for ${TITLE}".`;
 
 /** A whole planned record at rev 1, and the video it must not have. */
@@ -101,8 +101,8 @@ describe("shownName, a planned record and a record that only claims to be one", 
 });
 
 describe("gateFor, a planned episode", () => {
-  it("lets through the commands that name no episode, plan and name, and nothing else", () => {
-    assert.deepEqual(PLANNED, ["plan", "name"]);
+  it("lets through the commands that name no episode, plan, name and (PR H5b) join, which makes a plan its video, and nothing else", () => {
+    assert.deepEqual(PLANNED, ["plan", "name", "join"]);
     for (const name of [...UNSCOPED, ...PLANNED]) for (const on of [ON, OFF]) assert.equal(gateFor(name, planned(), on), "", name);
   });
   it("says how to drop a plan to leave, and writes nothing", () => {
@@ -115,7 +115,7 @@ describe("gateFor, a planned episode", () => {
   });
   it("names the plan by its name when she has given it another, as every line does", () => {
     const renamed = planned({ name: { text: "Why SKUs sink you", placeholder: false } });
-    assert.equal(gateFor("open", renamed, ON), `"Why SKUs sink you" is a planned video, and there's no footage for it yet.`);
+    assert.equal(gateFor("open", renamed, ON), `"Why SKUs sink you" is a planned video, and it isn't made from its footage yet.`);
     assert.equal(gateFor("leave", renamed, ON), `To drop a plan, say "drop the plan for Why SKUs sink you".`);
   });
   it("gates a record that only claims to be planned as it gates a video with no kind: waiting for its answer, naming no title", () => {

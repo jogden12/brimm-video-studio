@@ -58,7 +58,9 @@ const ASKED = {
   plan: [FOLDER],
   // `footage` names the video it answers as footage for a planned video (PR H5a). It runs for a record with no kind alone (gate.js FOOTAGE): the form
   // walked here is the one that answers (tests/edit-footage.test.js pins its words and its refusals).
-  footage: [FOLDER, "Too many SKUs", "talking", "--client", "no"]
+  footage: [FOLDER, "Too many SKUs", "talking", "--client", "no"],
+  // `join` is a detached run's alone (PR H5b), which `plan … join` starts, as `workcopy` is: the gate lets it run for a plan, and refuses every other record with no kind.
+  join: ["--now", FOLDER, "--parts", "e-20261104-a11111"]
 };
 const NAMES_NO_EPISODE = [];
 /** The commands that name an episode, each of COMMAND_NAMES but those that name none. */
@@ -281,12 +283,13 @@ describe("the gate, wherever a command names its episode", () => {
       t.done();
     }
   });
-  it("refuses the other detached runs' way in: bring --now, finish --now and workcopy --now", async () => {
+  it("refuses the other detached runs' way in: bring --now, finish --now, workcopy --now and (PR H5b) join --now", async () => {
     for (const [record, name, why] of [[UNANSWERED_RECORD, "bring", WAITING], [SESSION_RECORD, "bring", NOT_FOR_SESSION], [UNANSWERED_RECORD, "finish", WAITING], [SESSION_RECORD, "finish", TEACHINGS_OFF],
-      [UNANSWERED_RECORD, "workcopy", WAITING], [LEFT_RECORD, "workcopy", LEFT_ALONE], [SESSION_RECORD, "workcopy", NOT_FOR_SESSION]]) {
+      [UNANSWERED_RECORD, "workcopy", WAITING], [LEFT_RECORD, "workcopy", LEFT_ALONE], [SESSION_RECORD, "workcopy", NOT_FOR_SESSION],
+      [UNANSWERED_RECORD, "join", WAITING], [LEFT_RECORD, "join", LEFT_ALONE], [SESSION_RECORD, "join", NOT_FOR_SESSION]]) {
       const t = setup();
       const found = episodeFor(t, { record });
-      const r = await on(t.ctx.deps, name, "--now", FOLDER);
+      const r = await on(t.ctx.deps, name, "--now", FOLDER, ...(name === "join" ? ["--parts", "e-20261104-a11111"] : []));
       assert.deepEqual([r.code, r.said, t.calls, reread(found).rev], [1, [why], [], 1], name);
       t.done();
     }
@@ -294,7 +297,8 @@ describe("the gate, wherever a command names its episode", () => {
   it("leaves a result in the gate's words when a detached run is refused, as a run that failed does, naming no folder or file", async () => {
     for (const [record, name, why, argv] of [[UNANSWERED_RECORD, "bring", WAITING, ["--now", FOLDER]], [SESSION_RECORD, "bring", NOT_FOR_SESSION, ["--now", FOLDER]], [UNANSWERED_RECORD, "finish", WAITING, ["--now", FOLDER]],
       [SESSION_RECORD, "finish", TEACHINGS_OFF, ["--now", FOLDER]], [UNANSWERED_RECORD, "ask", WAITING, ["--now", FOLDER]], [SESSION_RECORD, "ask", NOT_FOR_SESSION, ["--now", FOLDER]],
-      [UNANSWERED_RECORD, "read", WAITING, ["--now", FOLDER, "--kind", "raw", "--rev", "1"]], [LEFT_RECORD, "workcopy", LEFT_ALONE, ["--now", FOLDER]], [SESSION_RECORD, "workcopy", NOT_FOR_SESSION, ["--now", FOLDER]]]) {
+      [UNANSWERED_RECORD, "read", WAITING, ["--now", FOLDER, "--kind", "raw", "--rev", "1"]], [LEFT_RECORD, "workcopy", LEFT_ALONE, ["--now", FOLDER]], [SESSION_RECORD, "workcopy", NOT_FOR_SESSION, ["--now", FOLDER]],
+      [UNANSWERED_RECORD, "join", WAITING, ["--now", FOLDER, "--parts", "e-20261104-a11111"]], [LEFT_RECORD, "join", LEFT_ALONE, ["--now", FOLDER, "--parts", "e-20261104-a11111"]], [SESSION_RECORD, "join", NOT_FOR_SESSION, ["--now", FOLDER, "--parts", "e-20261104-a11111"]]]) {
       const t = setup();
       const found = episodeFor(t, { record });
       const r = await on(t.ctx.deps, name, ...argv);

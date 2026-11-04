@@ -18,7 +18,7 @@ import { STILL_EVERY } from "../reframe.js";
 import {
   rateOf, workCopySize, isHdr, storedOf, workCopyArgs, workCopyFault, workCopyKey, workCopyPaths, workCopyFacts, workCopyLimits, workCopyNotes,
   canNotBeUsed, hasFilters, hasHwaccel, makeWorkCopy, requestWorkCopy, workCopyLockOf, WORK_COPY_STEP, WORK_COPY_STEPS, WORK_COPY_DONE, WORK_COPY_CRF, WORK_COPY_PRESET,
-  reelCopyKey, reelCopyPaths, FACES_STEP, REEL_COPY_STEPS, CUES_STEP, FINISHED_REEL_COPY_STEPS
+  reelCopyKey, reelCopyPaths, FACES_STEP, REEL_COPY_STEPS, CUES_STEP, FINISHED_REEL_COPY_STEPS, FOOTAGE_STEP, footageCopyPaths, makeFootageCopies
 } from "../workcopy.js";
 
 /** What ffprobe writes of a video, cut down to what the tool reads: its picture (null for none), then its sounds in the order
@@ -1890,5 +1890,222 @@ describe("the graphic cues asked for a Reel of a finished video, while its video
     await job(t);
     assert.deepEqual(t.events.find(([what]) => what === "steps"), ["steps", [WORK_COPY_STEP, CUES_STEP]]);
     assert.deepEqual(JSON.parse(readFileSync(pathsOf(t).cues, "utf8")).cues, CUES);
+  });
+});
+
+// --- The footage of a plan's video: a copy of each b-roll and screen recording, with no sound (PR H5b) ---
+
+describe("the arguments ffmpeg is given for a footage copy: mute (PR H5b)", () => {
+  it("maps no sound and gives -an, though the video has one, and changes nothing else", () => {
+    const printed = printedOf();
+    const quiet = argsFor(printed, { mute: true });
+    assert.ok(quiet.includes("-an"), quiet.join(" "));
+    assert.deepEqual(quiet.filter((a) => a === "-map").length, 1);
+    assert.deepEqual(quiet.slice(quiet.indexOf("-map"), quiet.indexOf("-vf")), ["-map", "0:0"]);
+    assert.ok(!quiet.includes("-af"), "no sound filter");
+    // The picture is made as any working copy's is: the same chain, the same encoder, the same tags.
+    const loud = argsFor(printed);
+    assert.equal(after(quiet, "-vf"), after(loud, "-vf"));
+    assert.deepEqual(quiet.slice(quiet.indexOf("-sn")), loud.slice(loud.indexOf("-sn")));
+  });
+  it("is what a video with no sound is made with already: the same words, so that a mute copy of a video with sound is the copy of one without", () => {
+    const silent = printedOf({ sounds: [] });
+    assert.deepEqual(argsFor(printedOf(), { mute: true }), argsFor(silent));
+  });
+  it("makes a video whose only sound this Mac cannot read, an iPhone's APAC, with no refusal: it is dropped, and the copy is made", () => {
+    const apac = printedOf({ sounds: [{ codec_name: "apple_apac" }] });
+    assert.equal(workCopyArgs("/in/a.mov", "/out.mp4", { ...factsFrom(apac) }), null);
+    assert.ok(argsFor(apac, { mute: true }).includes("-an"));
+    assert.equal(workCopyFault({ ...factsFrom(apac), freeBytes: 1e12, rawBytes: 1 }), "its sound is in a form this Mac can't read");
+    assert.equal(workCopyFault({ ...factsFrom(apac), freeBytes: 1e12, rawBytes: 1, mute: true }), null);
+  });
+});
+
+describe("the key and the places of a footage copy (PR H5b)", () => {
+  const KEY = "5242880-1760000000123";
+  it("is named for its shot and its own video's key, beside the working copy's, with its facts beside it", () => {
+    const place = footageCopyPaths("/home", "2026-11-04 Too many SKUs (Mac Studio)", 2, KEY);
+    assert.deepEqual(place, {
+      dir: join("/home", "BRIMM Video Work", "2026-11-04 Too many SKUs (Mac Studio)", "working copy"),
+      video: join("/home", "BRIMM Video Work", "2026-11-04 Too many SKUs (Mac Studio)", "working copy", `footage-2-${KEY}.mp4`),
+      facts: join("/home", "BRIMM Video Work", "2026-11-04 Too many SKUs (Mac Studio)", "working copy", `footage-2-${KEY}.json`)
+    });
+    assert.equal(workCopyPaths("/home", "2026-11-04 Too many SKUs (Mac Studio)", KEY).dir, place.dir);
+  });
+  it("is made for a shot that is a whole number from 1, a key a copy's own video could have, and a folder that is one folder's name", () => {
+    for (const shot of [0, -1, 1.5, "2", null, undefined]) assert.throws(() => footageCopyPaths("/home", "x", shot, KEY), /shot/, String(shot));
+    for (const key of ["", "abc", "1-2-4k", "1-2-3-4", undefined]) assert.throws(() => footageCopyPaths("/home", "x", 2, key), /key/, String(key));
+    for (const folder of ["", ".", "..", "a/b", undefined]) assert.throws(() => footageCopyPaths("/home", folder, 2, KEY), /folder|episode/i, String(folder));
+  });
+  it("has one step, the footage's own, which the progress panel shows", () => {
+    assert.equal(FOOTAGE_STEP, "Making the footage for HyperFrames");
+    assert.ok(plain(FOOTAGE_STEP));
+  });
+});
+
+describe("making a footage copy (PR H5b)", () => {
+  const SILENT = (extra = {}) => printedOf({ sounds: [], ...extra });
+  const footagePaths = (t, shot = 2) => {
+    const raw = statSync(t.video);
+    return footageCopyPaths(t.home, t.folder, shot, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+  };
+  const job = (t, more = {}) => t.job({ name: "Sorting invoices", footage: { shot: 2 }, ...more });
+  it("has ffmpeg make it mute under the watchdog, and puts it, with its facts, in the folder of the copies, named for its shot and its video's key", async (c) => {
+    const t = setup({ copy: SILENT({ picture: { codec_name: "h264", width: 1920, height: 1080 }, duration: "23.436000" }) });
+    c.after(t.done);
+    const result = await job(t);
+    assert.deepEqual([result.ok, result.failed, result.words], [true, [], "Done"]);
+    const paths = footagePaths(t);
+    assert.equal(t.guarded.length, 1);
+    const { args } = t.guarded[0];
+    assert.ok(args.includes("-an") && !args.includes("-af"), args.join(" "));
+    assert.equal(args.at(-1), join(t.runFolder, basename(paths.video)));
+    assert.equal(readFileSync(paths.video, "utf8"), "THE WORKING COPY");
+    assert.deepEqual(JSON.parse(readFileSync(paths.facts, "utf8")), { seconds: 23.436, fps: 30, width: 1920, height: 1080, bytes: 16 });
+    assert.deepEqual(t.inWork(), [t.shown(paths.facts), t.shown(paths.video)].sort());
+    assert.deepEqual(entries(runsFolder(t.home)), []);
+    assert.deepEqual(result.paths, paths);
+    assert.deepEqual(result.made, ["the footage for HyperFrames"]);
+  });
+  it("is made mute whatever sound the video has: the video's sound, an unreadable one included, is never mapped", async (c) => {
+    for (const source of [printedOf(), printedOf({ sounds: [{ codec_name: "apple_apac" }] }), printedOf({ sounds: [{ codec_name: "aac" }, { codec_name: "aac" }] })]) {
+      const t = setup({ source, copy: SILENT({ duration: "23.436000" }) });
+      c.after(t.done);
+      const result = await job(t);
+      assert.equal(result.ok, true, result.words);
+      assert.ok(t.guarded[0].args.includes("-an"));
+      assert.equal(t.guarded[0].args.filter((a) => a === "-map").length, 1);
+    }
+  });
+  it("tells the panel its step, the footage's own, and not the working copy's", async (c) => {
+    const t = setup({ copy: SILENT({ duration: "23.436000" }) });
+    c.after(t.done);
+    await job(t);
+    assert.deepEqual(t.events.find(([what]) => what === "steps"), ["steps", [FOOTAGE_STEP]]);
+    assert.deepEqual(t.events.filter(([what]) => what === "step"), [["step", FOOTAGE_STEP]]);
+  });
+  it("says in the log that it is the footage that is made, and never the video", async (c) => {
+    const t = setup({ copy: SILENT({ duration: "23.436000" }) });
+    c.after(t.done);
+    await job(t);
+    assert.ok(t.logs.some((line) => line.includes("the footage for HyperFrames is made")), t.logs.join("\n"));
+    assert.ok(!t.logs.some((line) => line.includes("the video for")), t.logs.join("\n"));
+  });
+  it("a footage copy is made mute, and one with sound is refused", async (c) => {
+    // The copy that ffmpeg wrote has a sound stream, which a copy never has: it is not put in place, and the run's own folder goes.
+    const t = setup({ copy: copyOf({ duration: "23.436000" }) });
+    c.after(t.done);
+    const result = await job(t);
+    assert.deepEqual([result.ok, result.made, result.failed], [false, [], ["It can't be used: what was made has sound."]]);
+    assert.deepEqual([t.inWork(), entries(runsFolder(t.home))], [[], []]);
+    assert.ok(t.logs.some((line) => line.includes("the footage for HyperFrames could not be made")), t.logs.join("\n"));
+    // Made mute, it is put in place.
+    const u = setup({ copy: SILENT({ duration: "23.436000" }) });
+    c.after(u.done);
+    assert.equal((await job(u)).ok, true);
+    assert.ok(u.guarded[0].args.includes("-an"));
+  });
+  it("replaces its shot's older copy only once it is whole, and leaves every other shot's, the working copy and a Reel's", async (c) => {
+    const t = setup({ copy: SILENT({ duration: "23.436000" }) });
+    c.after(t.done);
+    const mine = footagePaths(t);
+    t.earlier("footage-2-1-1.mp4");
+    t.earlier("footage-2-1-1.json", "{}");
+    t.earlier("footage-4-1-1.mp4");
+    t.earlier("footage-4-1-1.json", "{}");
+    t.earlier("1-1.mp4");
+    t.earlier("reel-2-1-1-1-2.mp4");
+    t.earlier("footage-22-1-1.mp4");
+    const result = await job(t);
+    assert.equal(result.ok, true, result.words);
+    assert.deepEqual(entries(mine.dir), ["1-1.mp4", basename(mine.facts), basename(mine.video), "footage-22-1-1.mp4", "footage-4-1-1.json", "footage-4-1-1.mp4", "reel-2-1-1-1-2.mp4"].sort());
+  });
+  it("makes none when it is made already, and says so", async (c) => {
+    const t = setup({ copy: SILENT({ duration: "23.436000" }) });
+    c.after(t.done);
+    assert.equal((await job(t)).ok, true);
+    const again = await job(t);
+    assert.deepEqual([again.ok, again.words, t.guarded.length], [true, "Done", 1]);
+  });
+  it("is refused in words, with nothing left, when ffmpeg fails, as any copy is", async (c) => {
+    const t = setup({ ffmpeg: "fail" });
+    c.after(t.done);
+    const result = await job(t);
+    assert.deepEqual([result.ok, result.failed], [false, ["It can't be used: it could not be converted."]]);
+    assert.deepEqual(t.inWork(), []);
+  });
+  it("asks for the room twice the video's size, and refuses a video with no picture, as any copy is", async (c) => {
+    const short = setup({ free: 100, copy: SILENT() });
+    c.after(short.done);
+    assert.equal((await job(short)).ok, false);
+    const none = setup({ source: printedOf({ picture: null }) });
+    c.after(none.done);
+    assert.deepEqual((await job(none)).failed, ["It can't be used: there is no picture in it."]);
+  });
+});
+
+describe("asking for the footage copies (PR H5b)", () => {
+  it("starts the run `workcopy --now <folder> --footage`, and none while a run is at work", () => {
+    const home = mkdtempSync(join(tmpdir(), "brimm-footage-ask-"));
+    const started = [];
+    const ctx = { home, alive: () => true, start: (cmd, args) => started.push(args.slice(1)) };
+    assert.deepEqual(requestWorkCopy(ctx, { folder: "2026-11-04 Too many SKUs (Mac Studio)", footage: true }), { started: true, running: "" });
+    assert.deepEqual(started, [["workcopy", "--now", "2026-11-04 Too many SKUs (Mac Studio)", "--footage"]]);
+    const lock = workCopyLockOf(home, "2026-11-04 Too many SKUs (Mac Studio)");
+    mkdirSync(episodeWork(home, "2026-11-04 Too many SKUs (Mac Studio)"), { recursive: true });
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, command: "workcopy", nonce: "x" }));
+    assert.deepEqual(requestWorkCopy(ctx, { folder: "2026-11-04 Too many SKUs (Mac Studio)", footage: true }), { started: false, running: "workcopy" });
+    assert.equal(started.length, 1);
+    rmSync(home, { recursive: true, force: true });
+  });
+});
+
+describe("making the footage copies of a plan's video (PR H5b)", () => {
+  const SILENT = printedOf({ sounds: [], duration: "23.436000" });
+  /** Three videos in a folder of their own, and a job that is given the folder of the copies; `fail` names the ones ffmpeg cannot make. */
+  function copies(fail = []) {
+    const t = setup({ copy: SILENT });
+    const items = [2, 4, 5].map((shot) => {
+      const video = join(t.dir, `Footage ${shot}.mov`);
+      writeFileSync(video, Buffer.alloc(100 + shot, 1));
+      return { video, shot, name: `Video ${shot}` };
+    });
+    const guarded = t.deps.runGuarded;
+    t.deps.runGuarded = async (cmd, args, limits) => {
+      const made = await guarded(cmd, args, limits);
+      return fail.some((n) => args.includes(join(t.dir, `Footage ${n}.mov`))) ? { ...made, code: 1, stderr: "Error while encoding\n" } : made;
+    };
+    return { t, items };
+  }
+  it("makes a copy of each in turn, each mute, and says which it made", async (c) => {
+    const { t, items } = copies();
+    c.after(t.done);
+    const result = await makeFootageCopies({ home: t.home, folder: t.folder, items }, t.deps);
+    assert.deepEqual([result.ok, result.failed], [true, []]);
+    assert.deepEqual(result.made, ["the footage for shot 2", "the footage for shot 4", "the footage for shot 5"]);
+    assert.equal(t.guarded.length, 3);
+    for (const { args } of t.guarded) assert.ok(args.includes("-an"));
+    assert.equal(entries(t.paths.dir).filter((n) => n.startsWith("footage-") && n.endsWith(".mp4")).length, 3);
+  });
+  it("logs the one that fails and goes on with the others: a failed footage copy costs the rest nothing, and says why in the result", async (c) => {
+    const { t, items } = copies([4]);
+    c.after(t.done);
+    const result = await makeFootageCopies({ home: t.home, folder: t.folder, items }, t.deps);
+    assert.deepEqual(result.made, ["the footage for shot 2", "the footage for shot 5"]);
+    assert.deepEqual(result.failed, ["The footage for shot 4 could not be made: it could not be converted."]);
+    assert.equal(result.ok, false);
+    assert.ok(t.logs.some((line) => line.includes("Video 4") && line.includes("could not be made")), t.logs.join("\n"));
+  });
+  it("makes none for an empty list, and reads a video through first when Dropbox has not brought it over", async (c) => {
+    const { t, items } = copies();
+    c.after(t.done);
+    assert.deepEqual(await makeFootageCopies({ home: t.home, folder: t.folder, items: [] }, t.deps), { ok: true, made: [], failed: [] });
+    const brought = [];
+    let here = false;
+    const result = await makeFootageCopies({ home: t.home, folder: t.folder, items: items.slice(0, 1) }, { ...t.deps, isWhole: () => here, readAll: async (path) => { brought.push(basename(path)); here = true; } });
+    assert.equal(result.ok, true);
+    assert.deepEqual(brought, ["Footage 2.mov"]);
+    const stuck = await makeFootageCopies({ home: t.home, folder: t.folder, items: items.slice(1, 2) }, { ...t.deps, isWhole: () => false, readAll: async () => {} });
+    assert.deepEqual(stuck.failed, ["The footage for shot 4 could not be made: Dropbox is still bringing Video 4 over to this Mac."]);
   });
 });

@@ -62,7 +62,7 @@ import { previewSteps, previewLimits, previewPath, reelCandidates, reelsFile, re
 import { runGuarded } from "./guard.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, lateCheck, LATE_CHECK_MS } from "./dropbox.js";
-import { episodeMode, episodeKind, fileEpisode, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
+import { episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
 import { readSettings, runsFolder, episodeWork, episodesFolder, lightImport } from "./settings.js";
 import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf, ofTheSwitch } from "./episode.js";
 import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
@@ -713,31 +713,39 @@ function labelsGiven(root, machine, { video, importId }) {
     in the video, or null (versionIn), as `answer.match`; and the fingerprint of its words. The match is only what her card
     offers first: the record's `versionOf` is set by her answer alone, never here. `name` is the file's, which only says
     whether it came from Zoom. With no plan the rules counted no retakes, so there is no guess. With no `facts`, when ffprobe
-    could not read the file, nothing is said of how it came or what was seen: `came` is null and `seen` is "". */
-function lightFields({ name, facts, plan, words, root }, deps) {
+    could not read the file, nothing is said of how it came or what was seen: `came` is null and `seen` is "". The words are
+    compared with the episodes on this Mac unless `matching` is false (PR H5b: the video the join makes of a plan is nobody's new
+    version, and its own parts' words would be what it matched). */
+function lightFields({ name, facts, plan, words, root, matching = true }, deps) {
   const came = facts ? cameFrom({ name, facts }) : null;
   const fingerprint = fingerprintOf(words);
-  const match = fingerprint && facts ? versionIn(root, { seconds: facts.duration, fingerprint, words }, deps) : null;
+  const match = matching && fingerprint && facts ? versionIn(root, { seconds: facts.duration, fingerprint, words }, deps) : null;
   const answer = { state: "needs your answer", guess: facts && plan ? guessKind({ facts, plan, came }) : null, seen: facts ? seenLine({ facts, plan, came }) : "", came, match: match ? match.id : null };
   return { answer, fingerprint };
 }
 
 async function workOn(file, deps) {
-  const { run, tools, model, notify = () => {}, wait, sizeOf = sizeOnDisk } = deps;
+  const { run, tools, model, wait, sizeOf = sizeOnDisk } = deps;
   let progress = deps.progress || noProgress;
   const name = basename(file);
   const out = cutOutputs(file, deps.outDir || undefined);
   const { episode } = deps;
+  // The video the join makes of a plan's talking parts (importInto) is taken in by the light import's own steps, but it was made outside
+  // any drop folder, into an episode that is there already: `into` (fileEpisode's). It is waited for nowhere, named by no label (the plan's
+  // title names it, `deps.shown`), written in no status, and it posts no notice of its own: the join run says when it is ready.
+  const into = deps.into || null;
+  const notify = into ? () => {} : deps.notify || (() => {});
   // With this Mac's settings saying `import: "light"`, an episode's import is the light one (below). Its every log line names the
   // video by its label (`shown`), and until the label is known as "A video in the drop folder"; and what a step logs on the
   // way, as a program's error or a file that could not be put somewhere, is logged with nothing of the file's names or a path
   // in it (kinds.js withoutNames), as is why it failed in its status. Its file is often named for a client.
   const light = Boolean(episode && deps.light);
-  const hide = { names: light ? namesOf(file) : [], keep: [] };
-  const plain = (text) => (light ? withoutNames(text, hide.names, hide.keep) : text);
+  const quiet = light && !into;
+  const hide = { names: quiet ? namesOf(file) : [], keep: [] };
+  const plain = (text) => (quiet ? withoutNames(text, hide.names, hide.keep) : text);
   const said = deps.log || (() => {});
-  const log = light ? (line) => said(plain(line)) : said;
-  let shown = light ? "A video in the drop folder" : name;
+  const log = quiet ? (line) => said(plain(line)) : said;
+  let shown = into ? deps.shown || name : quiet ? "A video in the drop folder" : name;
   // A file has arrived when its size has settled and it is whole on this Mac: Dropbox can show a file at its full size before
   // it has brought any of it over, and ffprobe could then hang on it or fail.
   const whole = deps.isWhole || isWhole;
@@ -752,7 +760,7 @@ async function workOn(file, deps) {
     return id ? `${name}:${id.ino}:${id.size}` : name;
   };
   const sizes = [sizeOf(file)];
-  while (!settled(sizes) || !whole(file)) {
+  while (!into && (!settled(sizes) || !whole(file))) {
     if (settled(sizes) && !broughtDown.has(readKey())) {
       broughtDown.add(readKey());
       log(`${shown}: Dropbox has not brought it down to this Mac yet, so it is asked for.`);
@@ -766,7 +774,7 @@ async function workOn(file, deps) {
     sizes.push(sizeOf(file));
   }
   // What the video in the drop folder is when its import begins, so that one put in its place meanwhile is told apart.
-  const arrived = episode ? fileId(file) : null;
+  const arrived = episode && !into ? fileId(file) : null;
   // With this Mac's settings saying `import: "light"`, an episode's import is the light one (spec 2026-10-22, section 1): the
   // transcript, the cut plan and its text, and the rough cut's captions, worked out from the plan; no Claude, no video made,
   // no Final Cut file, no reels.json and no notes. Its record waits for her answer. Her screen may be shared, so the progress
@@ -775,33 +783,36 @@ async function workOn(file, deps) {
   // this Mac first saw the video in its drop folder (seen.json, filing.js noteSeen), so that a queue of drops keeps their own
   // times; when that was not noted, it is the moment this import began. Videos first seen at one look of the folder share
   // that moment, so a label this Mac has given already is numbered, "(2)", "(3)", as a session's is.
-  const noted = light && arrived ? readSeen(episode.home)[seenKey(name, arrived)] : null;
+  const noted = quiet && arrived ? readSeen(episode.home)[seenKey(name, arrived)] : null;
   const dropped = noted && Number.isFinite(noted.at) ? new Date(noted.at) : deps.now ? deps.now() : new Date();
-  const unnumbered = light ? labelFor({ seconds: 0, machine: episode.machine, at: localStamp(dropped) }).short : "";
-  const label = light ? numbered(unnumbered, labelsGiven(episode.root, episode.machine, { video: name, importId: importIdOf(arrived) })) : "";
-  if (light) {
+  const unnumbered = quiet ? labelFor({ seconds: 0, machine: episode.machine, at: localStamp(dropped) }).short : "";
+  const label = quiet ? numbered(unnumbered, labelsGiven(episode.root, episode.machine, { video: name, importId: importIdOf(arrived) })) : "";
+  if (quiet) {
     shown = label;
     hide.keep.push(label);
   }
   // An episode's import keeps its own folder in BRIMM Video Work, on the same disk as Dropbox, until the late check: macOS
-  // may clear the temp folder before a late check that a restart left is made.
-  const work = episode ? join(runsFolder(episode.home), `${process.pid}-${Date.now()}`) : join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
+  // may clear the temp folder before a late check that a restart left is made. The join's run gives the folder it made the video in
+  // (`deps.work`), which holds the video and is the one kept.
+  const work = deps.work || (episode ? join(runsFolder(episode.home), `${process.pid}-${Date.now()}`) : join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`));
   mkdirSync(work, { recursive: true });
   // Whether the run's folder stays when the run ends: it does once an episode's files are in Dropbox, for the late check.
   let keepWork = false;
   // What the run writes goes through `files`. For a watched folder each file is held in the run's own folder until the video
   // is filed away with them, and otherwise each is put beside the video, or in --out, as soon as it is whole.
-  const files = filesOf(work, { name: shown, hold: Boolean(deps.watched), log, move: deps.move, copy: deps.copy });
+  const files = filesOf(work, { name: shown, hold: Boolean(deps.watched) || Boolean(into), log, move: deps.move, copy: deps.copy });
   // An episode's import also says how far it has got in a status file in Episodes/.importing/, for both Macs to see. A light
-  // import's status carries the video's label, for the commands to name it by in place of its file (Part F).
-  if (episode) {
+  // import's status carries the video's label, for the commands to name it by in place of its file (Part F). The join writes none: its
+  // run holds the plan's lock, and the guide says it is at work.
+  if (episode && !into) {
     const writeText = textWriter({ work: join(work, "status"), ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}) });
     progress = statusReporter(progress, { root: episode.root, machine: episode.machine, video: name, bytes: sizeOf(file), importId: importIdOf(arrived), label, writeText, log, ...(deps.every ? { every: deps.every } : {}), ...(deps.cancel ? { cancel: deps.cancel } : {}) });
   }
   deps = { ...deps, log, files, progress };
   /** Keep the late check of the episode just filed (`filed`) on this Mac's own disk, so that a run stopped first leaves it for the next. */
   const keepLateCheck = (filed) => {
-    const pending = { version: 1, id: filed.record.id, name: filed.name, folder: filed.path, video: name, bytes: filed.record.video.bytes, seconds: filed.record.video.seconds, drop: file, dropFile: arrived, importId: importIdOf(arrived), work, entries: filed.entries, lastCopy: (deps.clock || Date.now)(), root: episode.root, machine: episode.machine, planTxt: basename(out.planTxt), ...(light ? { label } : {}) };
+    // The video the join made is not in a drop folder: the file the check takes away is one in the run's own folder that is nobody's.
+    const pending = pendingFor(filed, { video: name, drop: into ? join(work, "not in a drop folder") : file, dropFile: arrived, importId: importIdOf(arrived), work, planTxt: basename(out.planTxt), label: into ? shown : light ? label : "" }, { episode, clock: deps.clock || Date.now });
     try {
       writePending(episode.home, pending);
       log(`${shown}: copied into Dropbox. Its late check is due at ${new Date(dueAt(pending)).toTimeString().slice(0, 5)}.`);
@@ -811,8 +822,11 @@ async function workOn(file, deps) {
   };
   const fail = (given) => {
     const why = plain(given);
-    // An episode's import writes nothing into the drop folder: its status file says why (importing.js).
-    if (episode) progress.fail(why);
+    // An episode's import writes nothing into the drop folder: its status file says why (importing.js). The join's has no status, and
+    // its run says why in its result.
+    if (into) {
+      // Nothing is written anywhere.
+    } else if (episode) progress.fail(why);
     else {
       writeFileSync(files.at(out.failed), `No transcript could be made from ${name}.\n\nWhy: ${why}.\n\nTo try again, delete this note. The video is taken again the next time something changes in this folder.\n`);
       files.put(out.failed);
@@ -841,7 +855,7 @@ async function workOn(file, deps) {
     // import of an episode files it alone, with its record waiting for her answer. Any other file with no sound fails, as it always did:
     // one with no picture too, a heavy import's, and one given to the import alone.
     if (facts && !facts.sound) {
-      if (!(light && facts.height > 0)) return fail("there is no sound in the file");
+      if (!(light && !into && facts.height > 0)) return fail("there is no sound in the file");
       progress.steps(SILENT_STEPS);
       progress.step("Filing");
       log(`${shown}: it has a picture and no sound, so it is filed with nothing made of it.`);
@@ -1145,7 +1159,7 @@ async function workOn(file, deps) {
       }
     }
     const held = [out.srt, out.txt, out.words, out.planTxt, out.rough, out.roughSrt, out.roughTxt, out.vertical, out.fcpxml, out.notes, ...(episode ? [reelsAt] : []), ...cut.flatMap((made) => made.files), out.plan];
-    if (deps.watched) progress.step("Filing");
+    if (deps.watched || into) progress.step("Filing");
     const unasked = asked && !asked.read ? " Claude could not be asked, so the plan is the rules' alone." : "";
     if (episode) {
       // An episode is filed into its own folder in Episodes, by clones, and the raw video stays in the drop folder until the
@@ -1156,8 +1170,9 @@ async function workOn(file, deps) {
         const given = { file, made: held.filter((f) => files.has(f)), at: files.at, fcpxml: out.fcpxml, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: kind || "episode", read: asked && asked.read, reels: kind === "short video" ? [] : reelEntries(candidates), work, dropFile: arrived };
         // A light import's video waits for her answer: it has no kind yet and no Final Cut file, and it has its label, its guess,
         // the fingerprint of its words, and the episode whose words it holds, when they match one on this Mac, for her card to
-        // offer first. It is a new version of that one only once she says so.
-        filed = fileEpisode(light ? { ...given, fcpxml: "", kind: null, label, ...lightFields({ name, facts, plan, words: planned.words || [], root: episode.root }, { log, whole }) } : given, deps);
+        // offer first. It is a new version of that one only once she says so. The video the join made is filed into its plan
+        // instead (`into`), as the kind the rule gives it ("raw", or "short video"), and is nobody's new version.
+        filed = fileEpisode(light ? { ...given, fcpxml: "", kind: into ? (kind === "short video" ? "short video" : "raw") : null, label, ...(into ? { into } : {}), ...lightFields({ name, facts, plan, words: planned.words || [], root: episode.root, matching: !into }, { log, whole }) } : given, deps);
         const match = light && filed.record.answer ? filed.record.answer.match : null;
         if (match) log(`${shown}: its words are those of the episode ${match}, so her card offers it as a new version of that one.`);
         keepWork = true;
@@ -1174,8 +1189,8 @@ async function workOn(file, deps) {
         // status with nothing of the file's names in it.
         const why = plain(`it could not be filed into Episodes: ${String(e.message).replace(/\.$/, "")}`);
         missing.push(why);
-        progress.fail(why);
-        log(`${shown}: ${why}. It stays in the drop folder, and is done again the next time.`);
+        if (!into) progress.fail(why);
+        log(into ? `${shown}: ${why}.` : `${shown}: ${why}. It stays in the drop folder, and is done again the next time.`);
       }
       // The label names the Mac it was dropped on, so the notice does not say it again.
       if (filed && light) notify(`Ready: ${label}. In Claude, say "what's waiting?"`);
@@ -1193,7 +1208,7 @@ async function workOn(file, deps) {
   } catch (e) {
     // Something nobody foresaw stopped an episode's import: its status says so, so that both Macs see it failed, and it is not
     // taken again until a person says to. A light import's label goes with the error, for the log to name the video by it.
-    if (episode) progress.fail(plain(`the work stopped (${e.code || e.message})`));
+    if (episode && !into) progress.fail(plain(`the work stopped (${e.code || e.message})`));
     if (light && e !== null && typeof e === "object") e.label = label;
     throw e;
   } finally {
@@ -1222,6 +1237,32 @@ export async function uneditedFile(file, deps) {
     const why = light ? withoutNames(String(e.code || e.message), namesOf(file)) : String(e.code || e.message);
     (deps.log || (() => {}))(`${light ? (e && e.label) || "A video in the drop folder" : basename(file)}: the work stopped (${why}).`);
     return { ok: false, name: basename(file), message: why };
+  }
+}
+
+/** The light import's own steps on a video made outside any drop folder (PR H5b): the talking parts of a plan, joined by the run of `join` into
+    one file of its own folder. The sound is read, the words written with a time for each, the rules' cut plan and the rough cut's captions
+    made, and the video and what was made of it filed, by the rule, into an episode that is there already (`into`, filing.js fileEpisode's:
+    { folder, record, change }) and not into a new one, with its late check kept on this Mac (writePending) as an import keeps it. It is
+    uneditedFile's work with the light import's, with these differences, since the video was not dropped and the episode is no new one:
+    - it is waited for nowhere: it is whole already;
+    - it is named in the log and the panel by `deps.shown`, the plan's title, in place of a label made of the moment it was dropped;
+    - the work goes on in the folder the caller gives (`deps.work`), where the video is, and which is kept for the late check when the video
+      is filed; otherwise it is taken away;
+    - no status is written into Episodes/.importing, and no notice is posted: the run of `join` says when the plan is its video;
+    - the episode's words are compared with no other episode's, and a video with no sound is not filed alone, as the light import of a drop
+      files one: it fails, as any file with no sound does;
+    - the kind the rule gives it ("raw", or "short video") is filed with it, and `into.change` writes the rest of the record.
+    Resolves what uneditedFile does: { ok, name, captions, kept, cut, folder, filed, message }, `filed` being fileEpisode's. A video that was
+    filed with something missing (no cut plan could be made) has `filed` and is not `ok`. Nothing is thrown from here. `deps` are the light
+    import's, with `episode` ({ root, machine, checkout, home }): `run`, `tools`, `model`, `progress`, `log`, `clock`, `now` (which gives a
+    Date), and the rule's `clone` and `sameDisk`. */
+export async function importInto(file, into, deps) {
+  try {
+    return await workOn(file, { ...deps, into, light: true });
+  } catch (e) {
+    (deps.log || (() => {}))(`${deps.shown || basename(file)}: the work stopped (${e.code || e.message}).`);
+    return { ok: false, name: basename(file), message: String(e.code || e.message) };
   }
 }
 

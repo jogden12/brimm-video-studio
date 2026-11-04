@@ -10,6 +10,7 @@ import { editMain } from "../edit.js";
 import { notesText } from "../notes.js";
 import { studioFiles } from "../studio.js";
 import { EPISODE, episode } from "./phase4.js";
+import { newPlannedEpisode } from "../episode.js";
 import { setup, episodeFor, reread, FOLDER } from "./episodes.js";
 
 async function on(deps, ...argv) {
@@ -327,6 +328,53 @@ describe("graphic ideas, from graphic cues", () => {
     const { t } = episode(WAITING, {}, withCues(CUES));
     const r = await on(t.ctx.deps, "graphic", FOLDER, "ideas");
     assert.deepEqual([r.code, r.text], [1, "This video is waiting for its answer: say what it is first."]);
+    t.done();
+  });
+});
+
+describe("graphic ideas, for a video made from a plan (PR H5b)", () => {
+  /** The cues of the plan's video guide, which its project is made from: the reading of the joined video wrote cues of its own into the cut plan (CUES), and they are not these. */
+  const GUIDE = [
+    { n: 1, words: "Welcome to the show", kind: "words", show: "Her show's name.", seconds: 3, style: null },
+    { n: 2, words: "know your costs", kind: "graphic", show: "A chart of costs.", seconds: 4, style: null },
+    { n: 3, words: "so the first thing", kind: "b-roll", show: "Sallie at her desk.", seconds: 5, style: null, shot: 2 },
+    { n: 4, words: "the moon landing", kind: "screen", show: "Her dashboard.", seconds: 4, style: null, shot: 4 }
+  ];
+  const planned = (cues = GUIDE) => ({
+    ...newPlannedEpisode({ id: "e-20261104-400000", machine: "Mac Studio", at: AT, title: "Pricing", route: "script", voice: null, writer: { commit: "c709b57", on: "Mac Studio" } }).planned,
+    set: AT, shots: [{ n: 1, kind: "talking", what: "Open." }, { n: 2, kind: "b-roll", what: "Her desk." }, { n: 3, kind: "talking", what: "Why." }, { n: 4, kind: "screen", what: "Her dashboard." }], cues, lines: ["Welcome to the show."], filmed: { at: AT, parts: [] }
+  });
+  const made = (cues) => rawWithCues(CUES, { version: 5, planned: planned(cues) });
+  it("lists the cues of its video guide, every kind among them, in place of the reading's, under their own head", async () => {
+    const { t } = made();
+    const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(r.text.split("\n"), [
+      "The graphics of its video guide: 4, with times on main v0.",
+      `Idea 1, 0:00 to 0:01: Her show's name. Over "Welcome to the show"`,
+      'Idea 2, 0:06 to 0:07: A chart of costs. Over "know your costs"',
+      'Idea 3, 0:04 to 0:05: Sallie at her desk. Over "so the first thing"',
+      'Idea 4: Her dashboard. Its words, "the moon landing", were not found in the video.',
+      ask(1)
+    ]);
+    t.done();
+  });
+  it("says its video guide has none when it holds no cue, and does not fall back on the reading's", async () => {
+    const { t } = made([]);
+    assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing", "ideas"), { code: 0, text: "The graphics of its video guide: none." });
+    t.done();
+  });
+  it("puts one up by the number the list gave it, from the same cues: idea 3 is the guide's, where the reading's third is cut", async () => {
+    const { t } = made();
+    picture(t, "chart.png", 1600, 900);
+    const r = await on(t.ctx.deps, "graphic", "Pricing", "add", "chart.png", "--idea", "3");
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.text, /^Graphic g1, chart\.png, full, idea 3, on main v0 at 0:04, for 5 seconds\./);
+    t.done();
+  });
+  it("lists a video that was not made from a plan as it always did", async () => {
+    const { t } = rawWithCues();
+    assert.equal((await on(t.ctx.deps, "graphic", "Pricing", "ideas")).text.split("\n")[0], "Claude's ideas for graphics on the main video: 4, with times on main v0.");
     t.done();
   });
 });
