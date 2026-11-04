@@ -9,19 +9,20 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, st
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HELP, editMain } from "../edit.js";
-import { episodeFault, isPlannedRecord, layoutOf, localStamp, newEpisode, newPlannedEpisode, readEpisode, recordFile, recordText, writeEpisode } from "../episode.js";
+import { episodeFault, isPart, isPlannedRecord, layoutOf, localStamp, newEpisode, newPlannedEpisode, readEpisode, recordFile, recordText, writeEpisode } from "../episode.js";
 import { concatList, footageOf, footageToUse, footageWithheld, isFromPlan, joinArgs, partOrder, partsFault, withMaterial } from "../join.js";
 import { lockOf, readResult, takeEpisodeLock } from "../detached.js";
 import { guardDecision } from "../studio.js";
 import { CHECKOUT, EDIT, NODE } from "./guard-cases.js";
 import { fileSafe } from "../names.js";
-import { readPendings } from "../filing.js";
+import { fileEpisode, readPendings } from "../filing.js";
+import { importInto } from "../unedited.js";
 import { holds } from "../snapshot.js";
 import { episodeWork } from "../settings.js";
 import { localDay } from "../shared/text.js";
 import { FOOTAGE_STEP, WORK_COPY_STEP, footageCopyPaths, workCopyDir, workCopyKey, workCopyPaths } from "../workcopy.js";
 import { probed } from "./fixtures.js";
-import { setup, listAll, reread } from "./episodes.js";
+import { setup, listAll, otherMac, reread } from "./episodes.js";
 
 const WRITER = { commit: "c709b57", on: "Mac Studio" };
 const PLAN_ID = "e-20261104-3fa9c1";
@@ -352,8 +353,10 @@ const SHOT_ARGS = ["--shot", "talking | Open on the problem, to the camera.", "-
 /** What ffprobe prints of a talking part by default: a wide picture of a minute with sound, which every part shares so that they can be joined. */
 const WIDE = (over = {}) => probed({ picture: { codec_name: "h264", width: 1920, height: 1080, r_frame_rate: "30/1", avg_frame_rate: "30/1", pix_fmt: "yuv420p", ...(over.picture || {}) }, sound: { codec_name: "aac", sample_rate: "48000", channels: 2, ...(over.sound || {}) }, duration: over.duration || "60.000000" });
 
+/** What ffprobe prints of a video with the picture of WIDE's and no sound, `duration` seconds long. */
+const silentOf = (duration) => probed({ picture: { codec_name: "h264", width: 1920, height: 1080, r_frame_rate: "30/1", avg_frame_rate: "30/1", pix_fmt: "yuv420p" }, sound: null, duration });
 /** What ffprobe prints of a footage copy: the same picture as WIDE's, a minute of it, and no sound. */
-const SILENT = probed({ picture: { codec_name: "h264", width: 1920, height: 1080, r_frame_rate: "30/1", avg_frame_rate: "30/1", pix_fmt: "yuv420p" }, sound: null, duration: "60.000000" });
+const SILENT = silentOf("60.000000");
 
 /** A folder for one test with the programs' stand-ins: ffprobe prints what `script.probes` has for the file's name (WIDE otherwise, and for the joined
     file one that is `script.joined` long), ffmpeg joins by writing the file it is told to when it is told to concat (unless `script.concat` says it
@@ -828,6 +831,148 @@ describe("the join run, with several talking parts (PR H5b)", () => {
     assert.equal(r.code, 1);
     assert.deepEqual(resultOf(t).failed, [COULD_NOT("Invalid data found when processing input")]);
     assert.deepEqual([planOf(t), readPendings(t.home), t.started.length, t.notices], [before, [], 0, []]);
+    t.done();
+  });
+});
+
+describe("the join run, the kind of the video several parts make (PR H5b)", () => {
+  it("files a joined video that is short as an iPhone clip, and one that is long as a raw video, by today's rule, and starts the reading as that kind", async () => {
+    for (const [what, probes, joinedSeconds, kind] of [
+      ["short by its length", { "Take 1.mov": WIDE({ duration: "30.000000" }), "Take 2.mov": WIDE({ duration: "30.000000" }) }, "60.000000", "short video"],
+      ["long", { "Take 1.mov": WIDE({ duration: "100.000000" }), "Take 2.mov": WIDE({ duration: "100.000000" }) }, "200.000000", "raw"]
+    ]) {
+      const t = world({ probes, joined: joinedSeconds });
+      const folder = await planned(t);
+      const a = part(t, 1, { words: SCRIPT[0].split(" ") });
+      const b = part(t, 2, { words: SCRIPT[1].split(" ") });
+      t.started.length = 0;
+      const r = await joinRun(t, [b.record.id, a.record.id]);
+      assert.equal(r.code, 0, `${what}: ${r.text}`);
+      const now = readEpisode(folder).record;
+      assert.deepEqual([now.kind, now.video.file, now.video.seconds, isFromPlan(now), episodeFault(now)], [kind, "Too many SKUs.mov", Number(joinedSeconds), true, ""], what);
+      assert.deepEqual(now.planned.filmed.parts, [b.record.id, a.record.id], what);
+      assert.deepEqual(t.started.map(([, args]) => args.slice(1))[0], ["read", "--now", FOLDER_NAME(t), "--kind", kind, "--rev", String(now.rev)], what);
+      t.done();
+    }
+  });
+  it("files a joined video that is upright as an iPhone clip, however long it is", async () => {
+    const upright = { picture: { width: 1080, height: 1920 } };
+    const t = world({ probes: { "Take 1.mov": WIDE(upright), "Take 2.mov": WIDE(upright), "Too many SKUs.mov": WIDE({ ...upright, duration: "300.000000" }) } });
+    const folder = await planned(t);
+    const a = part(t, 1, { words: SCRIPT[0].split(" ") });
+    const b = part(t, 2, { words: SCRIPT[1].split(" ") });
+    assert.equal((await joinRun(t, [a.record.id, b.record.id])).code, 0);
+    assert.deepEqual([readEpisode(folder).record.kind, readEpisode(folder).record.video.seconds], ["short video", 300]);
+    t.done();
+  });
+});
+
+describe("the join run, a talking part with no sound (PR H5b, ruling 5: a video with no sound takes no kind)", () => {
+  const NO_SOUND = (n) => `${labelOf(n)} has no sound, so it can't be a talking part`;
+  /** A talk with a picture and a sound this Mac's ffmpeg has no decoder for, an iPhone's APAC alone. */
+  const APAC = (duration = "120.000000") => WIDE({ sound: { codec_name: "apple_apac" }, duration });
+  /** The folder of the run's own result, the one file a run that stopped leaves. */
+  const resultFile = (t) => `home/BRIMM Video Work/${FOLDER_NAME(t)}/join.result.json`;
+  it("stops one that is alone, in words, before anything is filed, and leaves the plan, its folder and Dropbox as they were", async () => {
+    for (const [what, probe] of [["no sound at all", silentOf("120.000000")], ["only a sound this Mac cannot read", APAC()]]) {
+      const t = world({ probes: { "Take 1.mov": probe } });
+      await planned(t);
+      const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+      const before = snapshot(t);
+      const r = await joinRun(t, [one.record.id]);
+      assert.equal(r.code, 1, `${what}: ${r.text}`);
+      assert.deepEqual(resultOf(t).failed, [COULD_NOT(NO_SOUND(1))], what);
+      assert.equal(COULD_NOT(NO_SOUND(1)), `The footage of "${TITLE}" couldn't be made into one video: ${labelOf(1)} has no sound, so it can't be a talking part.`);
+      assert.deepEqual(snapshot(t), { ...before, [resultFile(t)]: snapshot(t)[resultFile(t)] }, `${what}: nothing is written but its result`);
+      assert.deepEqual([planOf(t).kind, isPlannedRecord(planOf(t)), readPendings(t.home), t.started, t.notices, t.kicks], [null, true, [], [], [], []], what);
+      assert.equal(readdirSync(join(t.home, "BRIMM Video Work", ".runs")).filter((n) => n.startsWith("join-")).length, 0, `${what}: the run's own folder is gone`);
+      t.done();
+    }
+  });
+  it("stops one among several in the words of the checks the parts are held to, and joins nothing", async () => {
+    const mute = silentOf("60.000000");
+    for (const [what, probes, why] of [
+      ["the second has no sound", { "Take 2.mov": mute }, "talking part 2 has its sound in another form"],
+      ["the first has no sound", { "Take 1.mov": mute }, "talking part 2 has its sound in another form"],
+      ["none has any", { "Take 1.mov": mute, "Take 2.mov": mute }, "talking part 1 has no picture or no sound this Mac can read, so the parts cannot be joined"],
+      ["none has a sound this Mac can read", { "Take 1.mov": APAC("60.000000"), "Take 2.mov": APAC("60.000000") }, "talking part 1 has no picture or no sound this Mac can read, so the parts cannot be joined"]
+    ]) {
+      const t = world({ probes });
+      await planned(t);
+      const a = part(t, 1, { words: SCRIPT[0].split(" ") });
+      const b = part(t, 2, { words: SCRIPT[1].split(" ") });
+      const before = planOf(t);
+      assert.equal((await joinRun(t, [a.record.id, b.record.id])).code, 1, what);
+      assert.deepEqual(resultOf(t).failed, [COULD_NOT(why)], what);
+      assert.deepEqual([planOf(t), t.joins.filter((c) => c.cmd === "FFMPEG").length, readPendings(t.home)], [before, 0, []], what);
+      t.done();
+    }
+  });
+  it("fails a joined file with no sound in the light import's steps, writing nothing into the plan and never asking for its record", async () => {
+    const t = world({ probes: { "Too many SKUs.mov": silentOf("120.000000") } });
+    const folder = await planned(t);
+    const plan = planOf(t);
+    const work = join(t.home, "BRIMM Video Work", ".runs", "join-by-hand");
+    mkdirSync(work, { recursive: true });
+    const file = join(work, "Too many SKUs.mov");
+    writeFileSync(file, "the joined video, with no sound");
+    const before = listAll(join(t.root, "Episodes"));
+    let asked = 0;
+    const into = { folder, record: plan, change: () => { asked += 1; return plan; } };
+    const deps = { run: t.ctx.deps.run, tools: t.ctx.deps.tools, log: () => {}, now: () => new Date(t.now()), clock: t.now, wait: t.ctx.deps.wait, isWhole: () => true, clone: t.ctx.deps.clone, sameDisk: () => true, commit: "c709b57", episode: { root: t.root, machine: "Mac Studio", checkout: "/checkout", home: t.home }, work, shown: TITLE };
+    const done = await importInto(file, into, deps);
+    assert.deepEqual([done.ok, done.filed, done.message], [false, undefined, "there is no sound in the file"]);
+    assert.equal(asked, 0);
+    assert.deepEqual([listAll(join(t.root, "Episodes")), readEpisode(folder).record.rev, readPendings(t.home), t.notices, existsSync(work)], [before, plan.rev, [], [], false]);
+    t.done();
+  });
+  it("is refused by the filing itself, whoever asks: a record with a kind and a video with no sound is never written into a plan, and what was put in is taken out again", async () => {
+    const t = world();
+    const folder = await planned(t);
+    const plan = planOf(t);
+    const work = join(t.home, "BRIMM Video Work", ".runs", "filing-by-hand");
+    mkdirSync(work, { recursive: true });
+    const file = join(work, "Take 1.mov");
+    writeFileSync(file, "a talk");
+    const before = listAll(folder);
+    const into = {
+      folder, record: plan,
+      change: (first) => ({
+        ...plan, kind: first.kind, video: first.video, files: { ...plan.files, ...first.files },
+        answer: { state: "answered", guess: null, seen: "wide, 1:00", came: "camera", by: "Mac Studio", on: "Mac Studio", at: atOf(t), private: "no" }, planned: { ...plan.planned, filmed: { at: atOf(t), parts: [] } }
+      })
+    };
+    const deps = { episode: { root: t.root, machine: "Mac Studio", checkout: "/checkout", home: t.home }, clone: t.ctx.deps.clone, sameDisk: () => true, commit: "c709b57" };
+    const filing = (facts, printed, kind) => fileEpisode({ file, made: [], at: (to) => to, fcpxml: "", facts, printed, kind, read: null, reels: [], work, fingerprint: "", into }, deps);
+    const SILENT_FACTS = { duration: 60, width: 1920, height: 1080, fps: "30/1", sound: false };
+    for (const kind of ["raw", "short video"]) {
+      assert.throws(() => filing(SILENT_FACTS, silentOf("60.000000"), kind), /^Error: a video with no sound takes no kind, so it is not filed as one$/, kind);
+      assert.deepEqual([listAll(folder), readEpisode(folder).record.rev], [before, plan.rev], `${kind}: the episode is as it was`);
+    }
+    // A video with sound is filed by the same call, and a video with no sound is filed with no kind, as the light import files one it finds.
+    const filed = filing({ ...SILENT_FACTS, sound: true }, WIDE(), "raw");
+    assert.deepEqual([filed.record.kind, filed.record.video.file, filed.record.rev, episodeFault(filed.record)], ["raw", "Take 1.mov", plan.rev + 1, ""]);
+    t.done();
+  });
+  it("leaves a silent b-roll or screen part what it was after the join, a part with no kind, and `kind` gives it none", async () => {
+    const t = world({ probes: longTalk("Take 1") });
+    await planned(t);
+    const talk = part(t, 1, { words: SCRIPT[0].split(" ") });
+    const parts = [part(t, 2, { as: "b-roll", shot: 2 }), part(t, 3, { as: "screen", shot: 4 })];
+    const was = parts.map((p) => [readFileSync(recordFile(p.folder, 2), "utf8"), listAll(p.folder)]);
+    assert.equal((await joinRun(t, [talk.record.id])).code, 0);
+    parts.forEach((p, i) => {
+      const now = readEpisode(p.folder).record;
+      assert.deepEqual([now.kind, now.video.sound, isPart(now), now.rev], [null, false, true, 2], labelOf(i + 2));
+      assert.deepEqual([readFileSync(recordFile(p.folder, 2), "utf8"), listAll(p.folder)], was[i], `${labelOf(i + 2)} is as it was, file for file`);
+    });
+    // It is footage for the plan, and stays so: asked to be a kind, it is told to be taken back first, and taken back, that the plan is made.
+    for (const [n, kind] of [[2, "raw"], [3, "clip"]]) {
+      const asked = await on(depsOf(t), "kind", labelOf(n), kind, "--private", "no");
+      assert.deepEqual([asked.code, asked.said], [1, [`${labelOf(n)} is footage for "${TITLE}". Say "that's not footage for ${TITLE}" first.`]], kind);
+    }
+    assert.deepEqual((await on(depsOf(t), "footage", labelOf(2), "none")).said, [`"${TITLE}" is made from its footage already: ask Jason.`]);
+    assert.deepEqual(parts.map((p) => readEpisode(p.folder).record.kind), [null, null]);
     t.done();
   });
 });
@@ -1439,7 +1584,7 @@ describe("the README on the join (PR H5b)", () => {
   it("has a row for `plan … join`, with the order it says, the refusals, the run, the copies and what the project is given", () => {
     const row = rows.find((line) => line.startsWith('| `plan "<planned>" join ["<video>"…]` |')) || "";
     for (const words of ['`The talking parts of "Too many SKUs", in the order of its script:`', "Once they are joined, no more talking parts can be added.", '`"Too many SKUs" is being made from its footage. A notice comes when it is ready.`',
-      "`join --now <the plan's folder> --parts <id>[,<id>…]`", "Those aren't the talking parts of", "a talking part held by a conflict in its episode or a record a newer brimm-video wrote", "talking part 2 is 3840 by 2160, and talking part 1 is 1920 by 1080",
+      "`join --now <the plan's folder> --parts <id>[,<id>…]`", "Those aren't the talking parts of", "a talking part held by a conflict in its episode or a record a newer brimm-video wrote", "talking part 2 is 3840 by 2160, and talking part 1 is 1920 by 1080", "has no sound, so it can't be a talking part", "a video with no sound takes no kind",
       "`Making the footage for HyperFrames`", "`--footage` makes these alone", "a copy in which ffprobe finds a sound stream is never put in place", "`media/b-roll-<n>.mp4`", "her client has not agreed to", "Its footage is still being made for HyperFrames: say \"open it in HyperFrames\" again when it is done."]) assert.ok(row.includes(words), words);
   });
   it("lists the two modules, and says the gate's words for a plan as they are now", () => {
@@ -1513,6 +1658,75 @@ describe("from the parts to the project: the join, the copies and the open, run 
     // Nothing of any of it was written into Dropbox but the join's files and the records: no part's video was taken, and the footage is only on this Mac.
     for (const one of [broll, screen, client, talk]) assert.ok(existsSync(join(one.folder, one.record.video.file)), "a part's own video stays in its own episode");
     assert.deepEqual(listAll(folder).filter((rel) => /b-roll|screen|footage/.test(rel)), []);
+    t.done();
+  });
+  it("rebuilds the project on the other Mac from its snapshot, and gives it the footage her client agreed to and none that waits for a click", async () => {
+    const t = world({ probes: longTalk("Take 1"), copy: "120.000000" });
+    t.ctx.deps.running = async () => false;
+    writeFileSync(join(t.home, "hyperframes-stand-in.json"), JSON.stringify({ open: "opened" }));
+    await planned(t, { shots: [...SHOT_ARGS, ...CUES] });
+    const talk = part(t, 1, { words: SCRIPT.join(" ").split(" ") });
+    part(t, 2, { as: "b-roll", shot: 2 });
+    part(t, 3, { as: "screen", shot: 4, client: true });
+    part(t, 4, { as: "b-roll", shot: 5, client: true });
+    const studio = (more = {}) => appDeps(t, { app: { cli: STAND_IN, node: process.execPath, guidance: GUIDANCE }, ...more });
+    // The plan is its video; the launch agent's late check of it passes; her click is noted for the screen recording of one client and not for the b-roll of the other.
+    assert.equal((await joinRun(t, [talk.record.id])).code, 0);
+    const { finishLate } = await import("../filing.js");
+    const [pending] = readPendings(t.home);
+    assert.deepEqual(finishLate(pending, { episode: { root: t.root, machine: "Mac Studio", home: t.home }, log: () => {}, notify: () => {}, clone: t.ctx.deps.clone, sameDisk: () => true }).problems, []);
+    const run = async (cmd, args, opts) => (cmd === "/usr/bin/osascript" ? { code: 0, stdout: `button returned:They agreed, text returned:${TYPED}\n`, stderr: "" } : t.ctx.deps.run(cmd, args, opts));
+    assert.equal((await on(depsOf(t, { run }), "plan", TITLE, "agreed", labelOf(3))).code, 0);
+    // Mac Studio makes the copies and the project, which holds the footage that may go in, and hands it over.
+    assert.equal((await on(studio(), "workcopy", "--now", FOLDER_NAME(t))).code, 0);
+    assert.equal((await on(studio(), "app", TITLE)).code, 0);
+    const name = planOf(t).app.projects[0].name;
+    const here = join(episodeWork(t.home, FOLDER_NAME(t)), name);
+    assert.deepEqual(readdirSync(join(here, "media")).sort(), ["b-roll-2.mp4", "recording.mp4", "screen-4.mp4"]);
+    const handed = await on(studio(), "release", TITLE);
+    assert.equal(handed.code, 0, handed.text);
+    // The snapshot holds the project but for its media/: the notes and the cues are in it, the footage is not.
+    const snapshotted = Object.keys(planOf(t).files).filter((rel) => rel.startsWith("app-snapshot/"));
+    assert.ok(snapshotted.some((rel) => rel.endsWith(`/${name}/CLAUDE.md`)) && snapshotted.some((rel) => rel.endsWith("/brimm/graphic-cues.json")), snapshotted.join("\n"));
+    assert.deepEqual(snapshotted.filter((rel) => rel.includes("/media/")), []);
+    // Sallie's laptop has no folder for the project and no copy of anything: it rebuilds the project from the snapshot, and its video is to be made.
+    const b = otherMac(t);
+    b.deps.settings = { ...b.deps.settings, app: "hyperframes", handoffVersion: 2 };
+    b.deps.running = async () => false;
+    b.deps.app = { cli: STAND_IN, node: process.execPath, guidance: GUIDANCE };
+    writeFileSync(join(b.home, "hyperframes-stand-in.json"), JSON.stringify({ open: "opened" }));
+    const there = join(episodeWork(b.home, FOLDER_NAME(t)), name);
+    const rebuilt = await on(b.deps, "app", TITLE);
+    assert.equal(rebuilt.code, 0, rebuilt.text);
+    assert.ok(rebuilt.said.some((line) => line.includes("is rebuilt on this Mac from what Mac Studio handed over")), rebuilt.text);
+    assert.equal(existsSync(join(there, "index.html")), true);
+    assert.equal(existsSync(join(there, "media", "screen-4.mp4")), false, "the snapshot has no media/");
+    // The run that makes the video makes the copies of the footage that may go in, here too; the open after it puts the video back and the footage in.
+    assert.equal((await on(b.deps, "workcopy", "--now", FOLDER_NAME(t))).code, 0);
+    assert.deepEqual(readdirSync(workCopyDir(b.home, FOLDER_NAME(t))).filter((n) => n.startsWith("footage-") && n.endsWith(".mp4")).map((n) => n.split("-")[1]), ["2", "4"], "no copy for the client who has not agreed");
+    const opened = await on(b.deps, "app", TITLE);
+    assert.equal(opened.code, 0, opened.text);
+    assert.ok(opened.said.includes("It's open in HyperFrames."), opened.text);
+    assert.deepEqual(readdirSync(join(there, "media")).sort(), ["b-roll-2.mp4", "recording.mp4", "screen-4.mp4"]);
+    assert.equal(existsSync(join(there, "media", "b-roll-5.mp4")), false);
+    // The rebuilt project still names the file of the cue whose client has not agreed, and the notes still say a cue with no file has no footage yet.
+    const cues = JSON.parse(readFileSync(join(there, "brimm", "graphic-cues.json"), "utf8")).cues;
+    assert.deepEqual(cues.map((cue) => cue.material ?? null), [null, "media/b-roll-2.mp4", "media/screen-4.mp4", "media/b-roll-5.mp4"]);
+    assert.match(readFileSync(join(there, "CLAUDE.md"), "utf8"), /A cue whose `material` is not in `media\/` has no footage yet, or waits for her client's agreement/);
+    // No second run was asked for: nothing was missing.
+    assert.deepEqual(t.started.filter(([, args]) => args.includes("--footage")), []);
+    t.done();
+  });
+  it("keeps, in the record of the video a plan made, nothing a record's own judge would refuse: a record with a kind and no sound is the filing's to refuse, not the judge's", async () => {
+    // episode.js faultFor is the judge of a record written and of every record read back from disk (recordIn): a rule in it would make a record
+    // already written with a kind and a video with no sound unreadable, so the rule stands in the filing (filing.js fileEpisode's `into`).
+    const t = world();
+    const folder = await planned(t);
+    const plan = planOf(t);
+    const odd = { ...plan, kind: "raw", video: { file: "Odd.mov", bytes: 5, seconds: 8, recorded: "2026-10-20", recordedFrom: "import", sound: false }, files: { ...plan.files, "Odd.mov": 5 }, answer: { state: "answered", guess: null, seen: "", came: "phone", by: "Mac Studio", on: "Mac Studio", at: atOf(t), private: "no" } };
+    assert.equal(episodeFault(odd), "");
+    writeEpisode(folder, odd, { expectRev: plan.rev, writeText: (to, text) => writeFileSync(to, text), writer: plan.writer, home: t.home });
+    assert.deepEqual([readEpisode(folder).record.kind, readEpisode(folder).record.video.sound], ["raw", false]);
     t.done();
   });
 });

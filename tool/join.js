@@ -360,13 +360,17 @@ function videoOf(plan, made, { at, machine, ids, came, seen }) {
     conflicted copy in its episode, a record a newer brimm-video wrote), with its label first; and parts that are not the plan's talking parts, each
     once. Then each part's video is read through from Dropbox when it is not whole here, and ffprobe reads it.
     - One talking part: its video and the files its light import filed are cloned into the plan's folder under their own names (ruling 12 of the
-      plan: Dropbox holds it twice), and its words, plan and fingerprint are the part's.
-    - Several: partsFault says whether they can be joined by copying, in the words of the first that cannot; ffmpeg joins them in the order given
-      (joinArgs, concatList) into `<file-safe title>.mov` in the run's own folder, in BRIMM Video Work and not in Dropbox; and that file is taken in
-      with the light import's own steps (unedited.js importInto), so its words are transcribed across the joins.
+      plan: Dropbox holds it twice), and its words, plan and fingerprint are the part's. A talking part has sound, and a video with no sound takes
+      no kind (ruling 5): one with no sound this Mac can read (streamsOf) is stopped before anything is filed, `<label> has no sound, so it can't be
+      a talking part`.
+    - Several: partsFault says whether they can be joined by copying, in the words of the first that cannot (a part with no sound among parts that
+      have some is another form of sound); ffmpeg joins them in the order given (joinArgs, concatList) into `<file-safe title>.mov` in the run's own
+      folder, in BRIMM Video Work and not in Dropbox, unless the first has no picture or no sound this Mac can read; and that file is taken in with
+      the light import's own steps (unedited.js importInto), so its words are transcribed across the joins. A joined file with no sound fails there.
     The video is filed as an import files one (filing.js fileEpisode, `into`): by clones, never over a file, the record last with the rev the plan was
     read at (a record written meanwhile stops it), and the run's own folder kept for the late check, which is kept on this Mac (writePending). Right
     before the record is written the talking parts are looked at again: one that has changed, been taken back or been held, or a new one, stops it.
+    The filing itself refuses a record with a kind and a video with no sound, whoever asks.
     `deps` is what edit.js gives the run: `run`, `runGuarded`, `tools`, `model`, `progress`, `log`, `now` (a Date), `clock` (ms), `wait`, `isWhole`,
     `readAll`, `commit` and the rule's `clone` and `sameDisk`. `kit` is edit.js's (notRead, newerWhy, hide). */
 export async function joinRun(ctx, { found }, ids, deps, kit) {
@@ -455,6 +459,9 @@ export async function joinRun(ctx, { found }, ids, deps, kit) {
     let filed;
     if (chosen.length === 1) {
       const [part] = chosen;
+      // A talking part has sound, and a video with no sound takes no kind (ruling 5): one alone with no sound this Mac can read is never taken in
+      // as the plan's video. Several are held to the sound of the first by partsFault, and to a sound to join by the check of its streams below.
+      if (streamsOf(printeds[0]).audio === null) return stop(`${labelOf(part)} has no sound, so it can't be a talking part`);
       const facts = factsOf(printeds[0]);
       const video = join(part.folder, part.record.video.file);
       // The files its light import filed beside it: the part's record lists them.

@@ -112,10 +112,11 @@ export const thisCheckout = () => dirname(dirname(fileURLToPath(import.meta.url)
     the files put in, the kind and the fingerprint), as the plan's record written once more as the video. That record is
     written as the episode's next one, by the rule, with the rev the episode was read at (`record.rev`), so that a record
     written meanwhile is never written over (CHANGED), and `first` takes the episode's own id. `change` is called last,
-    after every file is put in, and may throw to stop it. Files go in by clones and never over a file: one of the names is
-    there already, and the call throws. And when it throws, for that or for a record that cannot be written, every file this
-    call put in is taken away again, so that the episode is as it was. `file` and `made` are then wherever the call's
-    caller made them, and there is no drop folder: `dropFile` is not asked. */
+    after every file is put in, and may throw to stop it. A record it gives that has a kind and a video with no sound
+    (`video.sound` false) is refused too, whoever the caller is: a video with no sound takes no kind. Files go in by clones and
+    never over a file: one of the names is there already, and the call throws. And when it throws, for that or for a record that
+    cannot be written, every file this call put in is taken away again, so that the episode is as it was. `file` and `made` are
+    then wherever the call's caller made them, and there is no drop folder: `dropFile` is not asked. */
 export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, reels = [], work, dropFile, answer = null, label = "", fingerprint = "", into = null }, deps) {
   const { episode, log = () => {} } = deps;
   // The video in the drop folder must still be the one that was worked on: one put in its place meanwhile, as a corrected
@@ -165,7 +166,12 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
       label,
       fingerprint
     });
-    record = writeEpisode(path, into ? into.change(first) : first, { expectRev: into ? into.record.rev : 0, writeText: (to, text) => entries.push(write(to, text)), writer, home: episode.home });
+    const next = into ? into.change(first) : first;
+    // A video with no sound takes no kind (PR H5b, ruling 5), and no caller of `into` may give it one: it is refused here, before the record is written,
+    // and the files put in are taken away again. (The record's own judge, episode.js faultFor, is also what reads every record back from disk, and a
+    // rule there would make a record already written with a kind and no sound unreadable; so the rule is kept to what is filed into a plan.)
+    if (into && next.kind !== null && next.video && next.video.sound === false) throw new Error("a video with no sound takes no kind, so it is not filed as one");
+    record = writeEpisode(path, next, { expectRev: into ? into.record.rev : 0, writeText: (to, text) => entries.push(write(to, text)), writer, home: episode.home });
   } catch (e) {
     // An episode that was there before is left as it was: the files this call put in are taken away.
     for (const to of placed) rmSync(to, { force: true });
