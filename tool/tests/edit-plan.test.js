@@ -23,7 +23,7 @@ import { localDay } from "../shared/text.js";
 import { guardDecision } from "../studio.js";
 import { CHECKOUT, EDIT, NODE } from "./guard-cases.js";
 import { probed, TOLD, SRT, PAUSES } from "./fixtures.js";
-import { setup, episodeFor, listAll, FOLDER, NAME } from "./episodes.js";
+import { setup, episodeAs, episodeFor, listAll, FOLDER, NAME } from "./episodes.js";
 import { episode } from "./phase4.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
@@ -166,6 +166,65 @@ describe("plan new", () => {
     assert.equal((await on(depsOf(t), "plan", "new", "%24".repeat(80))).code, 0);
     assert.equal((await on(depsOf(t), "plan", "new", "🙂".repeat(81))).code, 1);
     assert.equal(readdirSync(join(t.root, "Episodes")).length, 2);
+    t.done();
+  });
+  it("is named by the string it was made with when its title holds a code: shown, set, left alone and dropped by it", async () => {
+    const t = setup();
+    const made = "Make %2410k %22fast%22 %7C 100%25";
+    const title = `Make $10k "fast" | 100%`;
+    assert.equal((await on(depsOf(t), "plan", "new", made)).code, 0);
+    const folder = join(t.root, "Episodes", `${dayOf(t)} Make $10k -fast- - 100% (Mac Studio)`);
+    const shown = await on(depsOf(t), "plan", made);
+    assert.deepEqual([shown.code, shown.said], [0, [`"${title}" is planned, and its guide, its shot list and its teleprompter script aren't made yet.`]]);
+    const saved = await on(depsOf(t), "plan", made, "set", "--line", "Make %2410k.");
+    assert.equal(saved.code, 0, saved.text);
+    assert.deepEqual([readEpisode(folder).record.rev, readEpisode(folder).record.planned.lines], [2, ["Make $10k."]]);
+    // Told to leave it, it says how a plan is dropped, as it does for a title with no code, and writes nothing.
+    const left = await on(depsOf(t), "leave", made);
+    assert.deepEqual([left.code, left.said], [1, [`To drop a plan, say "drop the plan for ${title}".`]]);
+    assert.equal(readEpisode(folder).record.rev, 2);
+    const dropped = await on(depsOf(t), "plan", made, "drop");
+    assert.deepEqual([dropped.code, dropped.said], [0, [`The plan for "${title}" is dropped.`]]);
+    assert.deepEqual([readEpisode(folder).record.rev, readEpisode(folder).record.archived], [3, { at: atOf(t) }]);
+    // Asked for again by the same string, it is the plan that was dropped: found, as a dropped plan is by a title with no code.
+    const again = await on(depsOf(t), "plan", made);
+    assert.deepEqual([again.code, again.said], [1, [`The plan for "${title}" was dropped.`]]);
+    assert.deepEqual(readdirSync(join(t.root, "Episodes")), [`${dayOf(t)} Make $10k -fast- - 100% (Mac Studio)`]);
+    t.done();
+  });
+  it("tries the word as given before its codes turned, and looks a word with no code up as it always did", async () => {
+    const t = setup();
+    // %2524 is the text "%24": a plan whose title is a code written out, and a plan whose title is a dollar sign.
+    assert.equal((await on(depsOf(t), "plan", "new", "Pay %252410k")).code, 0);
+    assert.equal((await on(depsOf(t), "plan", "new", "Pay %2410k")).code, 0);
+    assert.deepEqual(readdirSync(join(t.root, "Episodes")).sort(), [`${dayOf(t)} Pay $10k (Mac Studio)`, `${dayOf(t)} Pay %2410k (Mac Studio)`]);
+    const shownAs = async (word) => (await on(depsOf(t), "plan", word)).said;
+    // As given, "Pay %2410k" is the title of the first. Its codes turned, "Pay $10k", it would be the second: the word as given comes first.
+    assert.deepEqual(await shownAs("Pay %2410k"), [`"Pay %2410k" is planned, and its guide, its shot list and its teleprompter script aren't made yet.`]);
+    assert.deepEqual(await shownAs("Pay %252410k"), [`"Pay %2410k" is planned, and its guide, its shot list and its teleprompter script aren't made yet.`]);
+    // A word with no code is found as it was found: by its whole title, and by its words.
+    assert.deepEqual(await shownAs("Pay $10k"), [`"Pay $10k" is planned, and its guide, its shot list and its teleprompter script aren't made yet.`]);
+    assert.equal((await on(depsOf(t), "plan", "new", "Is 100% sure")).code, 0);
+    for (const word of ["Is 100% sure", "is   100% SURE", "100% sure"]) assert.deepEqual(await shownAs(word), [`"Is 100% sure" is planned, and its guide, its shot list and its teleprompter script aren't made yet.`], word);
+    // A word that fits no episode, with a code in it or not, says so as it was given.
+    for (const word of ["nothing like it", "nothing %24 like it", "%7C"]) {
+      const none = await on(depsOf(t), "plan", word);
+      assert.equal(none.code, 1, word);
+      assert.match(none.text, new RegExp(`^No episode fits "${word}"\\. The episodes are: `), word);
+    }
+    t.done();
+  });
+  it("turns the codes of a word only to find a plan: a word that fits an ordinary video once they are turned fits none, in plan and in leave", async () => {
+    const t = setup();
+    episodeAs(t, { id: "e-20261022-c0c0c0", name: "2026-10-22 100% sure (Mac Studio)", record: { name: { text: "100% sure", placeholder: false } } });
+    const bytes = bytesIn(join(t.root, "Episodes"));
+    for (const words of [["plan", "100%25 sure"], ["plan", "100%25 sure", "drop"], ["plan", "100%25 sure", "set", "--line", "x"], ["leave", "100%25 sure"]]) {
+      const r = await on(depsOf(t), ...words);
+      assert.deepEqual([r.code, r.said], [1, [`No episode fits "100%25 sure". The episodes are: 2026-10-22 100% sure (Mac Studio).`]], words.join(" "));
+    }
+    // Said as it is, with no code, it is that video, as it always was.
+    assert.deepEqual((await on(depsOf(t), "plan", "100% sure")).said, [`"100% sure" is not a planned video.`]);
+    assert.deepEqual(bytesIn(join(t.root, "Episodes")), bytes);
     t.done();
   });
   it("says nothing she reads with a path, a flag or the name of a command in it", async () => {

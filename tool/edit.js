@@ -113,7 +113,7 @@ import { freeEpisode, hyperFramesRunning } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
 import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 import { lookAt, referencesAsked, sayReferences, useIn } from "./references.js";
-import { newPlan, planAsked, planFor, plannedLine } from "./plan.js";
+import { newPlan, planAsked, planFor, plannedLine, textArg } from "./plan.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -709,18 +709,22 @@ function handOverWords(ctx, code) {
     the title and short id as `episodes` could list it), and by words of its folder and its name, as any episode is; a plan she
     dropped is not found by its title, so that a new plan of that title is. A record that only claims to be planned is gated, and
     found by none of that.
+    `plannedAs` is for a plan alone (`plan` and `leave`; episodeFor's `codes`): the word `said` with the codes of plan.js textArg
+    turned, as `plan new` turned them in the title it was given, so that a plan is named by the string it was made with. It is tried
+    only when `said` as it is fits no episode, and is taken only when it fits one episode alone and that one is a planned episode
+    (episode.js isPlannedRecord of the record in force, a plan she dropped as well), which the gate then runs for as for any. What
+    else it fits is not taken, and the word as given says what it says when it fits none. No other command gives it, so that no
+    other command's word is turned.
     When it finds one episode for a command that editMain is running (`ctx.asked`), it gives that episode back only if the
     gate lets the command run for it (gateOf), and otherwise { why }, the gate's words, so that the command ends there, having
     read nothing but records. Without `ctx.asked`, as in a test or a helper, it is not gated. A gated episode it finds has every
     line the command says after hold nothing of its names (hideNames). */
-export function findEpisode(ctx, said) {
+export function findEpisode(ctx, said, { plannedAs } = {}) {
   // An import that has not finished has no whole record, and is not an episode yet. The versions of each are read once.
   const links = linksOf(ctx.root);
   const all = folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE");
   const known = (e) => e.records;
   const nameOf = (r) => (r.name && typeof r.name.text === "string" ? r.name.text : "");
-  const words = plainly(said).split(/\s+/).filter(Boolean);
-  const exact = all.filter((e) => plainly(e.name) === plainly(said));
   // A label, and a label with the short id after it as the lists name a gated video ("<label> (3fa9c1)"). A planned episode's title is its
   // label too, the whole of it, so that "Too many SKUs" fits it alone when the words of another episode's name fit as well; a plan she
   // dropped is not found so, and a new plan of that title is.
@@ -728,20 +732,36 @@ export function findEpisode(ctx, said) {
     const labels = [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : e.held ? heldName(r) : isPlannedRecord(r) && !r.archived ? shownName(r) : ""].filter(Boolean);
     return typeof r.id === "string" ? [...labels, ...labels.map((label) => `${label} (${r.id.slice(-6)})`)] : labels;
   };
-  const byLabel = all.filter((e) => known(e).some((r) => labelled(e, r).some((label) => spaced(label) === spaced(said))));
-  const byId = all.filter((e) => known(e).some((r) => typeof r.id === "string" && (r.id === said || r.id.slice(-6) === said)));
-  // A gated video is never found by words of its folder or its name, which are its file's: words that fit would tie them to its
-  // label. One a newer brimm-video wrote is found by them as always: it is named by its short id alone, and its kind cannot be
-  // read here.
-  const byWords = all.filter((e) => (e.newer || !isGated(e)) && words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
-  const fits = exact.length ? exact : byLabel.length ? byLabel : byId.length ? byId : byWords;
+  // The episodes that fit what a person said, by the first way that fits any: its folder's name, a label, an id, then words.
+  const fitting = (word) => {
+    const words = plainly(word).split(/\s+/).filter(Boolean);
+    const exact = all.filter((e) => plainly(e.name) === plainly(word));
+    const byLabel = all.filter((e) => known(e).some((r) => labelled(e, r).some((label) => spaced(label) === spaced(word))));
+    const byId = all.filter((e) => known(e).some((r) => typeof r.id === "string" && (r.id === word || r.id.slice(-6) === word)));
+    // A gated video is never found by words of its folder or its name, which are its file's: words that fit would tie them to its
+    // label. One a newer brimm-video wrote is found by them as always: it is named by its short id alone, and its kind cannot be
+    // read here.
+    const byWords = all.filter((e) => (e.newer || !isGated(e)) && words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
+    return exact.length ? exact : byLabel.length ? byLabel : byId.length ? byId : byWords;
+  };
+  let fits = fitting(said);
+  let named = said;
+  // The word as it was given comes first. A plan's title written with codes, as `plan new` was given it, fits no episode as it is: with its
+  // codes turned it may fit a plan, and a plan alone is taken (plannedAs).
+  if (!fits.length && plannedAs !== undefined && plannedAs !== said) {
+    const turned = fitting(plannedAs);
+    if (turned.length === 1 && isPlannedRecord(turned[0].inForce)) {
+      fits = turned;
+      named = plannedAs;
+    }
+  }
   if (fits.length === 1) {
     const e = fits[0];
     hideNames(ctx, e);
     // A record of the switch's layout (3) or a later one may be a light import's, whose folder and file are named for a client:
     // an error nobody foresaw names none of it (editMain).
     if (ctx.hidden && e.records.some((r) => recordShaped(r) && ofTheSwitch(r))) ctx.hidden.switched = true;
-    return gateOf(ctx, e, known(e), said, e.inForce) || holdWords(ctx, e) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
+    return gateOf(ctx, e, known(e), named, e.inForce) || holdWords(ctx, e) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
   }
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => listedAs(ctx, e)))}. Say which.` };
   // A detached run is given its episode's folder, which is named for the video's file: when it is gone, or has no whole record,
@@ -1060,14 +1080,17 @@ function startProgram(cmd, args) {
 }
 
 /** The episode a command is asked about, by what the person said, with its record: { found, record }, or { code } when the
-    command is to end, having said why. A record of a newer layout is shown as such and goes no further. */
-function episodeFor(ctx, rest, { newerEnds = 0 } = {}) {
+    command is to end, having said why. A record of a newer layout is shown as such and goes no further. `codes` is for `plan` and
+    `leave` alone: what was said may be a plan's title as `plan new` was given it, with the codes of plan.js textArg in it, so that
+    a plan is named by the string it was made with. What was said as it is comes first; with its codes turned it is tried for a
+    plan alone (findEpisode's `plannedAs`). */
+function episodeFor(ctx, rest, { newerEnds = 0, codes = false } = {}) {
   const said = rest.join(" ").trim();
   if (!said) {
     ctx.say(HELP);
     return { code: 2 };
   }
-  const found = findEpisode(ctx, said);
+  const found = findEpisode(ctx, said, codes ? { plannedAs: textArg(said) } : undefined);
   if (found.why) {
     ctx.say(found.why);
     return { code: found.newer ? newerEnds : 1 };
@@ -6259,7 +6282,8 @@ async function waitForReading(ctx, found, name, previous, began) {
     does not claim. */
 export async function leaveCommand(ctx, rest) {
   const { words } = flagsOf(rest, []);
-  const got = episodeFor(ctx, words, { newerEnds: 1 });
+  // A plan she is told to leave is named as `plan` names it, by the string its title was made with: the gate then says how a plan is dropped.
+  const got = episodeFor(ctx, words, { newerEnds: 1, codes: true });
   if (!got.found) return got.code;
   const { found } = got;
   const lock = takeAnswerLock(ctx, found.name, "leave");
@@ -7272,7 +7296,8 @@ async function plan(ctx, rest) {
     return 2;
   }
   if (asked.form === "new") return newPlan(ctx, asked);
-  const got = episodeFor(ctx, [asked.episode], { newerEnds: 1 });
+  // A plan is named by the string `plan new` was given for its title, codes and all (episodeFor's `codes`).
+  const got = episodeFor(ctx, [asked.episode], { newerEnds: 1, codes: true });
   if (!got.found) return got.code;
   return planFor(ctx, { found: got.found, record: got.record }, asked);
 }
