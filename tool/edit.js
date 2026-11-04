@@ -662,6 +662,14 @@ function hideNames(ctx, e) {
     video's names. Undefined, so that runDetached writes it as it is, for any other. */
 const resultClean = (ctx) => (ctx.hidden && ctx.hidden.names.length ? (text) => withoutNames(text, ctx.hidden.names, ctx.hidden.keep, { paths: false }) : undefined);
 
+/** The same, for a detached run that finds other episodes as it works, whose names are hidden only then (PR H5b: the join finds its parts, which
+    the gate holds as videos with no kind, and hides them while it reads them): resultClean is asked when the run starts, when nothing of them is
+    hidden yet, and would give nothing; this is asked for each line as the result is written, and takes out every name hidden by then. */
+const lateClean = (ctx) => (text) => {
+  const clean = resultClean(ctx);
+  return clean ? clean(text) : text;
+};
+
 /** What is said of the episode `found` when its record cannot be gone on with, as `found.read` says why (a conflicted copy, a
     folder that cannot be read): "<said>: <why>.", as always, where `said` is the folder as the command was given it. But a
     gated episode is named by its label and short id, and its why names no file of its video; one a newer brimm-video wrote is
@@ -7515,7 +7523,9 @@ async function joinCommand(ctx, rest) {
     ...(ctx.deps.readAll ? { readAll: ctx.deps.readAll } : {}), ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {}), ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {})
   };
   let started = null;
-  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "join", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
+  // The result is cleaned late: the parts are hidden while the run reads them (joinRun, kit.hide), after this is made, and a reason that names a file of
+  // one (the filing's, Dropbox's, ffmpeg's last words) must not reach the result, or `status`, which says it, with a name in it.
+  const result = await runDetached({ home: ctx.home, folder: found.name, clean: lateClean(ctx), command: "join", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
     const done = await joinRun(ctx, { found }, ids, deps, editKit(ctx));
     started = done.started ?? null;
     return done;

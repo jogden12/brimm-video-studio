@@ -376,6 +376,11 @@ function world(script = {}) {
       FFMPEG: (args) => {
         if (args.includes("concat")) {
           if (script.concat === "fail") return { code: 1, stderr: "[concat @ 0x1] Impossible to open 'x'\nInvalid data found when processing input\n" };
+          // ffmpeg's last line names the second file of its list, as it does when it cannot open one.
+          if (script.concat === "names") {
+            const second = readFileSync(args[args.indexOf("-i") + 1], "utf8").split("\n").filter((line) => line.startsWith("file '"))[1];
+            return { code: 1, stderr: `[concat @ 0x1] Impossible to open '${second.slice(6, -1)}'\n` };
+          }
           writeFileSync(args[args.length - 1], "the joined video");
           return { code: 0, stderr: "" };
         }
@@ -1053,7 +1058,8 @@ describe("the join run, what stops it (PR H5b)", () => {
     writeFileSync(join(folder, "Take 1.words.json"), "hers");
     const r = await joinRun(t, [one.record.id]);
     assert.equal(r.code, 1);
-    assert.match(resultOf(t).failed[0], new RegExp(`^The footage of "${TITLE}" couldn't be made into one video: Take 1\\.words\\.json is in .* already, and a file there is never written over\\.$`));
+    // The part's file is named as the gate names a gated video's files wherever it says them: a part is gated, and no result holds a name of its video.
+    assert.match(resultOf(t).failed[0], new RegExp(`^The footage of "${TITLE}" couldn't be made into one video: the video\\.words\\.json is in .* already, and a file there is never written over\\.$`));
     assert.equal(readFileSync(join(folder, "Take 1.words.json"), "utf8"), "hers");
     assert.deepEqual(listAll(folder).filter((rel) => !rel.startsWith("record/")), ["Take 1.words.json", "shot list.md", "teleprompter.txt", "video guide.md"]);
     assert.equal(readEpisode(folder).record.rev, plan.rev);
@@ -1131,6 +1137,100 @@ describe("the join run, what stops it (PR H5b)", () => {
     await joinRun(u, [two.record.id], { isWhole: () => false, readAll: async () => { throw new Error("Dropbox sent nothing of it for 2 minutes, so it was given up"); } });
     assert.deepEqual(resultOf(u).failed, [COULD_NOT(`${labelOf(1)} could not be read from Dropbox (Dropbox sent nothing of it for 2 minutes, so it was given up)`)]);
     u.done();
+  });
+});
+
+describe("a failed join says nothing of its parts' names (PR H5b: a part is gated, so no result holds a name of its video)", () => {
+  /** What a part's names are, as the gate takes them out: its video's file, that without its ending, and the folder of its episode. */
+  const namesOf = (one) => [one.record.video.file, basename(one.record.video.file, ".mov"), basename(one.folder)];
+  const light = (t) => depsOf(t, { settings: { ...t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 2 }, alive: (pid) => pid === process.pid });
+  /** Every place a failed run's words reach her: the result file as it is written, what `status` says of the plan, and the lines the run said. */
+  async function whatSheCanRead(t, run) {
+    const file = readFileSync(join(episodeWork(t.home, FOLDER_NAME(t)), "join.result.json"), "utf8");
+    const status = (await on(light(t), "status")).said.join("\n");
+    return { file, status, said: run.text };
+  }
+  const holdsNone = (readable, parts, what) => {
+    for (const [where, text] of Object.entries(readable)) for (const one of parts) for (const name of namesOf(one)) assert.ok(!text.includes(name), `${what}: ${JSON.stringify(name)} is in ${where}:\n${text}`);
+  };
+  it("takes out of the result, and of what status says of it, the name of a part's file that the filing names when it will not write over a file", async () => {
+    const t = world({ probes: longTalk("Take 1") });
+    const folder = await planned(t);
+    const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+    writeFileSync(join(folder, "Take 1.words.json"), "hers");
+    const r = await joinRun(t, [one.record.id]);
+    assert.equal(r.code, 1);
+    const readable = await whatSheCanRead(t, r);
+    holdsNone(readable, [one], "never over a file");
+    // It is still a reason she can act on: the file is named as the gate names a video's files, and what is wrong is said.
+    assert.match(readResult(t.home, FOLDER_NAME(t), "join").failed[0], /^The footage of "Too many SKUs" couldn't be made into one video: the video\.words\.json is in .* already, and a file there is never written over\.$/);
+    assert.match(readable.status, /Not done: The footage of "Too many SKUs" couldn't be made into one video: the video\.words\.json is in /);
+    t.done();
+  });
+  it("takes it out of ffmpeg's last line, which names the file it could not open", async () => {
+    const t = world({ concat: "names" });
+    await planned(t);
+    const a = part(t, 1, { words: SCRIPT[0].split(" ") });
+    const b = part(t, 2, { words: SCRIPT[1].split(" ") });
+    const r = await joinRun(t, [a.record.id, b.record.id]);
+    assert.equal(r.code, 1);
+    const readable = await whatSheCanRead(t, r);
+    holdsNone(readable, [a, b], "ffmpeg's last line");
+    assert.match(readResult(t.home, FOLDER_NAME(t), "join").failed[0], /^The footage of "Too many SKUs" couldn't be made into one video: \[concat @ 0x1\] Impossible to open /);
+    t.done();
+  });
+  it("takes it out of the last words of the program that reads a part through from Dropbox, and keeps the part's label, which names it for her", async () => {
+    const t = world({ probes: longTalk("Take 1") });
+    await planned(t);
+    const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+    const gone = join(one.folder, "Take 1.mov");
+    const r = await joinRun(t, [one.record.id], { isWhole: () => false, readAll: async () => { throw new Error(`cat: ${gone}: Resource deadlock avoided`); } });
+    assert.equal(r.code, 1);
+    const readable = await whatSheCanRead(t, r);
+    holdsNone(readable, [one], "readThrough");
+    const [failed] = readResult(t.home, FOLDER_NAME(t), "join").failed;
+    assert.ok(failed.startsWith(`The footage of "${TITLE}" couldn't be made into one video: ${labelOf(1)} could not be read from Dropbox (cat: `), failed);
+    assert.ok(failed.endsWith(": Resource deadlock avoided)."), failed);
+    assert.ok(readable.status.includes(labelOf(1)), "the part is named by its label in what status says");
+    t.done();
+  });
+  it("leaves a result that holds no name of a part just as it was: the words of a plan's own are not touched", async () => {
+    const t = world({ probes: { "Take 2.mov": WIDE({ picture: { width: 3840, height: 2160 } }) } });
+    await planned(t);
+    const a = part(t, 1, { words: SCRIPT[0].split(" ") });
+    const b = part(t, 2, { words: SCRIPT[1].split(" ") });
+    await joinRun(t, [a.record.id, b.record.id]);
+    assert.deepEqual(resultOf(t).failed, [COULD_NOT("talking part 2 is 3840 by 2160, and talking part 1 is 1920 by 1080")]);
+    t.done();
+  });
+});
+
+describe("workcopy's result, for a video made from a plan, holds no name of a part's file either (PR H5b)", () => {
+  it("says only its own fixed reasons when a footage copy cannot be made, whatever the programs and Dropbox said of the part's file", async () => {
+    const t = world({ probes: longTalk("Take 1"), copy: "120.000000" });
+    await planned(t);
+    const talk = part(t, 1, { words: SCRIPT[0].split(" ") });
+    const broll = part(t, 2, { as: "b-roll", shot: 2 });
+    const screen = part(t, 3, { as: "screen", shot: 4 });
+    assert.equal((await joinRun(t, [talk.record.id])).code, 0);
+    const { finishLate } = await import("../filing.js");
+    const [pending] = readPendings(t.home);
+    assert.deepEqual(finishLate(pending, { episode: { root: t.root, machine: "Mac Studio", home: t.home }, log: () => {}, notify: () => {}, clone: t.ctx.deps.clone, sameDisk: () => true }).problems, []);
+    // The b-roll's video is not here, and Dropbox's last words name it; ffmpeg fails on the screen recording and its last line names that.
+    const guarded = t.ctx.deps.runGuarded;
+    const failing = async (cmd, args, limits) => (args.some((a) => String(a).endsWith("Take 3.mov")) ? { code: 1, signal: null, stderr: `Error opening input ${args.find((a) => String(a).endsWith("Take 3.mov"))}: Invalid data\n`, overMemory: false, outOfTime: false, peak: 0, stopped: "" } : guarded(cmd, args, limits));
+    const here = (path) => !path.startsWith(broll.folder);
+    const read = async (path) => { throw new Error(`cat: ${path}: Resource deadlock avoided`); };
+    const r = await on(appDeps(t, { runGuarded: failing, isWhole: here, readAll: read }), "workcopy", "--now", FOLDER_NAME(t), "--footage");
+    assert.equal(r.code, 1, r.text);
+    const result = readResult(t.home, FOLDER_NAME(t), "workcopy");
+    assert.deepEqual(result.failed, [`The footage for shot 2 could not be made: Dropbox is still bringing ${TITLE}, b-roll for shot 2 over to this Mac.`, "The footage for shot 4 could not be made: it could not be converted."]);
+    const file = readFileSync(join(episodeWork(t.home, FOLDER_NAME(t)), "workcopy.result.json"), "utf8");
+    const status = (await on(depsOf(t, { settings: { ...t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 2 } }), "status")).said.join("\n");
+    for (const one of [broll, screen]) for (const name of [one.record.video.file, basename(one.record.video.file, ".mov"), basename(one.folder)]) {
+      assert.ok(!file.includes(name) && !status.includes(name), `${JSON.stringify(name)} is in what she can read`);
+    }
+    t.done();
   });
 });
 
