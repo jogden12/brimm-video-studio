@@ -100,11 +100,12 @@ const classify = (rows) => deepFreeze(Object.fromEntries(rows.map(([name, kind, 
 
 /** Every command of the pinned command line, and what it is (5.5). The help of 0.8.208 lists 43; A0's hand-made list of what to
     deny named 6 of them (F6). A command is one of three classes, each with the reason it is in it:
-    - `agent`: one a project's agent may run (20). It reads the project, draws frames, renders on this Mac or measures sound.
+    - `agent`: one a project's agent may run (21). It reads the project, draws frames, renders on this Mac, measures sound or writes
+      speech with a local model (`tts`: Jason allows a stock voice, 2026-11-04).
     - `edit`: one only edit.js runs (2). They are the handover's (5.6), and edit.js runs them with a fixed list of arguments and variables.
       A project's settings deny them to its own agent (denyRules): edit.js runs them by absolute path, outside those settings.
-    - `denied`: one nobody runs here (21). It uploads, publishes, signs in, fetches or installs from the network, generates a voice,
-      changes the pin, or redoes what Studio did. A project's settings deny each (denyRules), and its notes name each.
+    - `denied`: one nobody runs here (20). It uploads, publishes, signs in, fetches or installs from the network, changes the pin,
+      or redoes what Studio did. A project's settings deny each (denyRules), and its notes name each.
     It is a table, one row for each command, so that a command can be in only one class, and it is checked against the help
     (unclassified): a command that is in none fails a test, so a new pin cannot slip one in. */
 export const COMMANDS = classify([
@@ -128,6 +129,7 @@ export const COMMANDS = classify([
   ["normalize-audio", "agent", "matches the loudness of one clip to another's"],
   ["grade-compare", "agent", "draws candidate colour grades on one frame, to compare"],
   ["compare", "agent", "renders variants of a composition into one sheet, to compare"],
+  ["tts", "agent", "writes speech from text with a local model: a stock voice, which Jason allows (2026-11-04)"],
 
   ["open", "edit", "hands the project to the HyperFrames app, and her chat with it when the handover is allowed: only edit.js runs it (5.6)"],
   ["catch-up", "edit", "reads what was done in the app since the project was last looked at, the other half of the handover: only edit.js runs it"],
@@ -151,7 +153,6 @@ export const COMMANDS = classify([
   ["benchmark", "denied", "renders again and again to time it, which nobody asked for"],
   ["clean", "denied", "sweeps the history and the render leftovers of every project it knows, not of one: named paths are deleted instead (7.4)"],
   ["transcribe", "denied", "listens to audio again: the words are in transcript.json already, made on the Mac"],
-  ["tts", "denied", "writes speech from text with a local model: a generated voice"],
   ["remove-background", "denied", "may download a model when first used; it waits for A0 to say it is wanted"]
 ]);
 
