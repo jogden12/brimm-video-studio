@@ -174,9 +174,10 @@ const STAYS = {
 };
 const STAYS_OTHERWISE = "This video's chat stays here.";
 /** The last line, whenever the app opened (architecture 3.3 and 5.9): the app's own buttons, which Studio cannot turn off, and what
-    is allowed with them: Share for invited people only, exports on This Mac and never in the cloud, and no HeyGen avatars or voices
-    without Jason's yes. It holds no path, no flag and no name of a command. */
-const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
+    is allowed with them: Share for invited people only, and exports on This Mac, though the Export dialog may start on Cloud. It
+    ends with a warning and blocks nothing (Jason, 2026-11-04): The BRIMM doesn't use AI avatars or an AI Sallie, her face or her
+    voice, for now. It holds no path, no flag and no name of a command. */
+const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
 
 /** Whether a project of the record is the one in use for the main video: its key is "main", and it was not kept for an earlier kind.
     edit.js `kind` asks it too, of a record that changes kind. */

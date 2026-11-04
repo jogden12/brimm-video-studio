@@ -45,7 +45,7 @@ function runsOf(mac) {
 }
 
 const OPEN = "It's open in HyperFrames.";
-const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
+const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
 /** The moment of the first release as the words give it, in the zone the code is given: 15:00 on 2026-10-20 in UTC-5. */
 const WHEN = ZONE.text(Date.parse("2026-10-20T20:00:00Z"));
 const THERE = (on, of = "") => `The HyperFrames project for ${of}${NAME} is on ${on}, and ${on} has not handed it over yet. On ${on}, say "I'm done with it for now", then say it again here. If that can't be done, ask Jason.`;

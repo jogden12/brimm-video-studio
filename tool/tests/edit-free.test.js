@@ -51,7 +51,7 @@ const NOT_FOR_SESSION = "This is a client or group session: that is not done for
 const HERS = { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00" };
 const WORKING_COPY = "the working copy's bytes";
 const OPEN = "It's open in HyperFrames.";
-const BUTTONS = "In HyperFrames, share only with people you invite, export on This Mac and never in the cloud, and use no HeyGen avatars or voices without Jason's yes.";
+const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
 const NOTHING = `There is nothing to take away for ${NAME} on this Mac.`;
 const HELD_BACK = "Deleting an episode's Final Cut library by command comes in a later version. To free space now, use Final Cut's File > Delete Generated Library Files.";
 
