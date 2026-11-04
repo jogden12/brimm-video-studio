@@ -19,7 +19,7 @@ import { stillsArgs, cropsFor, verticalArgs } from "../reframe.js";
 import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
 import { progressFolder, noProgress } from "../progress.js";
 import { seenFile, writeSettings } from "../settings.js";
-import { RECORD_VERSION, readEpisode, acceptRev, writeEpisode, undone, recordFile } from "../episode.js";
+import { NEWEST_VERSION, readEpisode, acceptRev, writeEpisode, undone, recordFile } from "../episode.js";
 import { fileId, importIdOf, noteSeen, writePending } from "../filing.js";
 import { readStatuses, writeStatus } from "../importing.js";
 import { lockOf } from "../detached.js";
@@ -3377,7 +3377,7 @@ describe("the videos of an episode's video, made again from its cut plan (--from
   it("stops, and makes nothing, when a newer brimm-video wrote the episode's record (PR 19's review)", async () => {
     const { t, folder, video } = await imported();
     const { record } = readEpisode(folder);
-    writeFileSync(join(folder, "record", "0002.json"), JSON.stringify({ ...record, version: RECORD_VERSION + 1, rev: 2 }, null, 2) + "\n");
+    writeFileSync(join(folder, "record", "0002.json"), JSON.stringify({ ...record, version: NEWEST_VERSION + 1, rev: 2 }, null, 2) + "\n");
     const r = await stopped(t, folder, video);
     assert.deepEqual([r.stopped, r.calls, r.clones], [true, 0, 0]);
     assert.equal(r.message, "its episode was written by a newer brimm-video. Ask Jason to update this Mac");
@@ -5080,7 +5080,7 @@ describe("the light import", () => {
     const folder = t.episodeFolder();
     const video = join(folder, "Talk.mov");
     // The newer record is of a light episode, as this code would see it: no kind and an answer, so at layout 3.
-    writeFileSync(join(folder, "record", "0002.json"), JSON.stringify({ ...t.record(), version: RECORD_VERSION + 1, rev: 2 }, null, 2) + "\n");
+    writeFileSync(join(folder, "record", "0002.json"), JSON.stringify({ ...t.record(), version: NEWEST_VERSION + 1, rev: 2 }, null, 2) + "\n");
     const before = listAll(folder);
     t.calls.length = 0;
     t.logs.length = 0;

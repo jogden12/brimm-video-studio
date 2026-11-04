@@ -609,7 +609,7 @@ describe("ask, when something fails half-way (from the review)", () => {
 // part, which asks Claude nothing and changes nothing.
 import { writeStatus } from "../importing.js";
 import { writePending } from "../filing.js";
-import { RECORD_VERSION, acceptRev, readEpisode, filesProblems, writeEpisode } from "../episode.js";
+import { NEWEST_VERSION, acceptRev, readEpisode, filesProblems, writeEpisode } from "../episode.js";
 import { askBlocked } from "../unedited.js";
 
 /** Run ask both ways on a ready episode: the quick part, then the detached part. Resolves what each said and did. */
@@ -2063,7 +2063,7 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
   // person may start by the folder's name, names it by its short id alone, as every other command does, and goes no further.
   it("refuses, in its detached part, an episode a newer brimm-video wrote, by its short id alone, and asks nothing and writes nothing", async () => {
     const p = askable();
-    relayout(p.found, { version: RECORD_VERSION + 1 });
+    relayout(p.found, { version: NEWEST_VERSION + 1 });
     const { id } = JSON.parse(readFileSync(join(p.found.folder, "record", "0001.json"), "utf8"));
     /** Every file in the episode's folder, with its size. */
     const listing = () => readdirSync(p.found.folder, { recursive: true }).sort().map((n) => [n, statSync(join(p.found.folder, n)).size]);

@@ -8,7 +8,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { COMMAND_NAMES, contextFor, editMain, findEpisode } from "../edit.js";
 import { UNANSWERED, UNSCOPED } from "../gate.js";
-import { RECORD_VERSION, readEpisode, recordFile, recordText } from "../episode.js";
+import { NEWEST_VERSION, readEpisode, recordFile, recordText } from "../episode.js";
 import { episodeWork } from "../settings.js";
 import { lockOf, readResult } from "../detached.js";
 import { setup, episodeFor, reread, listAll, FOLDER, ID } from "./episodes.js";
@@ -426,7 +426,7 @@ describe("the gate, a record of a layout newer than this brimm-video's", () => {
   function newer() {
     const t = setup();
     const found = episodeFor(t);
-    writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: RECORD_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
+    writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
     return t;
   }
   it("is refused by every command that names an episode, in today's words, whatever its kind says", async () => {
@@ -663,7 +663,7 @@ describe("the gate, a record Dropbox is still bringing over", () => {
   it("is refused after the newer layout's words when the record read is a newer brimm-video's", async () => {
     const t = setup();
     const found = episodeFor(t);
-    writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: RECORD_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
+    writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
     PENDING_FILE(found, 3, "{");
     const r = await on(light(t), "open", FOLDER);
     assert.deepEqual(r.said, [`That is an episode a newer brimm-video wrote (${ID.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`]);

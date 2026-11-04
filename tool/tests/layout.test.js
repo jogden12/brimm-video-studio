@@ -1,20 +1,21 @@
 // The record's layouts 2 and 3. Layout 2 (phase 4) is written only once a record holds a layer of the session's commands, and
 // layout 3 (the switch) once it holds an unanswered or new kind, an answer, a session mark, a reading, a version of another
-// episode, or a rendered version; each layer is read whole or refused.
+// episode, or a rendered version; each layer is read whole or refused. Layout 5, the planned episode's, is tests/planned.test.js's.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { newEpisode, episodeFault, faultFor, kindOf, layoutOf, ofTheSwitch, writeEpisode, recordFile, RECORD_VERSION, SESSION_EDITS } from "../episode.js";
+import { newEpisode, episodeFault, faultFor, kindOf, layoutOf, ofTheSwitch, writeEpisode, recordFile, PLANNED_VERSION, RECORD_VERSION, SESSION_EDITS } from "../episode.js";
 import { EDITS } from "../sessions.js";
 
 const BASE = { ...newEpisode({ id: "e-20261014-3fa9c1", machine: "Mac Studio", at: "2026-10-14T09:12:00-05:00", video: { file: "a.mp4", bytes: 1, seconds: 20, created: null }, kind: "episode", writer: { commit: "c709b57", on: "Mac Studio" } }), rev: 1 };
 const REEL = { n: 2, status: "picked", from: 1, to: 9, title: "t", why: "", files: [], pushed: [] };
 
 describe("the record's layout", () => {
-  it("is 4 at most here, and 2 only once a record holds a layer of phase 4", () => {
+  it("is 4 at most for every record but a planned episode's, which is 5, and 2 only once a record holds a layer of phase 4", () => {
     assert.equal(RECORD_VERSION, 4);
+    assert.equal(PLANNED_VERSION, 5);
     assert.equal(layoutOf(BASE), 1);
     assert.equal(layoutOf({ ...BASE, reels: [{ ...REEL, captions: true }] }), 1);
     for (const more of [
@@ -49,7 +50,7 @@ describe("the record's layout", () => {
     assert.equal(episodeFault({ ...BASE, brand: { logo: "/Users/x/logo.png" } }), "its logo cannot be read");
     assert.equal(episodeFault({ ...BASE, main: { ...BASE.main, graphics: [{ id: "g1", picture: "media/..", at: 3, for: 2, place: "corner" }] } }), "its main video cannot be read");
     assert.equal(episodeFault({ ...BASE, brand: { logo: "media/." } }), "its logo cannot be read");
-    assert.equal(episodeFault({ ...BASE, version: 5 }), "it is version 5, and this brimm-video reads versions 1 to 4");
+    assert.equal(episodeFault({ ...BASE, version: 6 }), "it is version 6, and this brimm-video reads versions 1 to 5");
     assert.equal(faultFor(2)({ ...BASE, version: 3 }), "it is version 3, and this brimm-video reads versions 1 to 2");
     assert.equal(faultFor(2)({ ...BASE, version: 2 }), "");
   });

@@ -2,7 +2,7 @@
 // cleared. It is pure: the command's name, the record and the command's words are all it is given, and it reads nothing.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, gateFor, printWhy, gated } from "../gate.js";
+import { UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, PLANNED, gateFor, printWhy, gated } from "../gate.js";
 import { COMMAND_NAMES } from "../edit.js";
 
 const AT = "2026-10-22T10:00:00-05:00";
@@ -24,6 +24,11 @@ describe("the gate's lists", () => {
     assert.deepEqual(UNANSWERED, ["kind", "leave", "which", "show", "release", "resolve"]);
     assert.deepEqual(SESSION, [...UNANSWERED, "name"]);
     assert.deepEqual(SESSION_TAUGHT, [...SESSION, "teachings", "principles", "ideas", "finish", "reel", "render", "read"]);
+  });
+  it("have a list of a planned episode's own (PR H4), apart from the three that hold the one before: plan and name, and no command that needs footage", () => {
+    assert.deepEqual(PLANNED, ["plan", "name"]);
+    for (const list of [UNSCOPED, UNANSWERED, SESSION_TAUGHT]) assert.ok(!list.includes("plan"), "plan runs for a plan alone: it is in none of the lists of a video not yet answered or a session");
+    for (const name of PLANNED) assert.ok(!UNSCOPED.includes(name) && !UNANSWERED.includes(name), `${name} is no command of the lists before it`);
   });
   it("hold no command of the unscoped list, which name no episode", () => {
     for (const list of [UNANSWERED, SESSION, SESSION_TAUGHT]) for (const name of UNSCOPED) assert.ok(!list.includes(name), name);

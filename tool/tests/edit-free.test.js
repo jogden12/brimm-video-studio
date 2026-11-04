@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { COMMAND_NAMES, HELP, editMain } from "../edit.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { HELD } from "../gate.js";
-import { recordFile, recordText } from "../episode.js";
+import { NEWEST_VERSION, recordFile, recordText } from "../episode.js";
 import { episodeWork, writeSettings } from "../settings.js";
 import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 import { FOLDER, NAME, episodeAs, listAll, reread } from "./episodes.js";
@@ -193,7 +193,7 @@ describe("free: the gate asks first, in its own words", () => {
   });
   it("is refused for a record of a newer layout, in the words every command has for one, with 1", async () => {
     const { t, found } = world();
-    writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: 5, id: found.record.id, rev: 2, kind: "podcast" }));
+    writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: found.record.id, rev: 2, kind: "podcast" }));
     const r = await on(t.ctx.deps, "free", FOLDER);
     assert.deepEqual([r.code, r.said], [1, [`That is an episode a newer brimm-video wrote (${found.record.id.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`]]);
     t.done();

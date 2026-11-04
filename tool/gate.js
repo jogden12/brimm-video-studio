@@ -8,7 +8,7 @@
 // asks it wherever it finds the episode a command names (findEpisode), which reads records only. It also says how a gated record,
 // and one held as a session, is named (gatedName, gatedAsOf), for edit.js and for the installer's check of the old drop folder
 // (switch.js), which are given the versions of a video (finish.js linksOf) to ask it with.
-import { kindOf, shownName } from "./episode.js";
+import { isPlannedRecord, kindOf, shownName } from "./episode.js";
 
 /** The commands that name no episode: their output is built from labels alone, and is not gated here. */
 export const UNSCOPED = ["episodes", "status", "behind", "retry", "guide"];
@@ -17,6 +17,9 @@ export const UNSCOPED = ["episodes", "status", "behind", "retry", "guide"];
 export const UNANSWERED = ["kind", "leave", "which", "show", "release", "resolve"];
 /** The commands that run for a session not cleared, with this Mac's training gate on or off: those, and `name`. */
 export const SESSION = [...UNANSWERED, "name"];
+/** The commands that run for a planned episode (isPlannedRecord), beside those that name no episode: `plan`, which shows and sets its
+    package, and `name`. `leave` says how to drop a plan; every other command is refused, for there is no footage. */
+export const PLANNED = ["plan", "name"];
 /** The commands that run for a session not cleared once this Mac's training gate is on. `reel` and `render` are narrowed by
     their words (below), and `read` is the session reading's own detached run, which starts only through `teachings`. */
 export const SESSION_TAUGHT = [...SESSION, "teachings", "principles", "ideas", "finish", "reel", "render", "read"];
@@ -26,6 +29,10 @@ const WAITING = "This video is waiting for its answer: say what it is first.";
 /** What a video she left alone is refused in, by the gate and by askBlocked: it is not waiting for anything. */
 export const LEFT = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
+/** Why a command is refused for a planned episode (isPlannedRecord), which has no footage yet, naming the title she gave it. `leave` is
+    answered by how to drop a plan instead: a plan is not left alone as a video is, it is dropped. */
+const NO_FOOTAGE = (record) => `"${shownName(record)}" is a planned video, and there's no footage for it yet.`;
+const TO_DROP = (record) => `To drop a plan, say "drop the plan for ${shownName(record)}".`;
 export const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac yet: ask Jason.";
 /** What the training gate says once Jason's check of it is 90 days old or more (settings.js teachingsLapsed): he checks again. */
 export const TEACHINGS_LAPSED = "Teachings from sessions were turned on more than 90 days ago on this Mac: ask Jason to check the training setting again.";
@@ -55,8 +62,12 @@ export const leftAlone = (record) => isObject(record) && kindOf(record) === null
 
 /** Whether a record is gated at all: a video with no kind (not yet answered, or left alone as not for brimm-video), or a session
     whose mark is not cleared. Such a record is named by its label in everything edit.js prints (shownName, in episode.js), and
-    never by its folder or its file. Anything that is not a record is not one. */
-export const gated = (record) => isObject(record) && (kindOf(record) === null || sessionNotCleared(record));
+    never by its folder or its file. Anything that is not a record is not one.
+    Not gated: a planned episode (PR H4), and no other record with no kind. It was made in her chat from words she gave and never
+    from a file, so it cannot be a client's session, and it is named by its title. A record is treated so only when isPlannedRecord
+    says it is whole in every way: its answer says "planned", its `planned` is whole, it has no video and no kind, and it was written
+    at layout 5. One that only claims to be planned, failing any of those, is gated as a video not yet answered is. */
+export const gated = (record) => isObject(record) && !isPlannedRecord(record) && (kindOf(record) === null || sessionNotCleared(record));
 
 /** Whether a record has a label of the import's to be named by. */
 export const isLabelled = (r) => typeof r.label === "string" && r.label.trim() !== "";
@@ -115,6 +126,8 @@ const transcriptOnly = (words) => wordsOf(words).includes("--transcript-only");
 /** Why `command`, with `words`, may not run for the episode with this `record`: the plain words of why, or "" when it may.
     `said` is what the episode was asked for by (findEpisode's second argument), with which the words of a Reel are matched.
     - A command that names no episode (UNSCOPED) is not gated.
+    - A planned episode (isPlannedRecord), only the commands of PLANNED; `leave` is told how to drop a plan, and any other is refused
+      in words that say there is no footage for it yet. A record that only claims to be planned is none, and is gated as follows.
     - A record with no kind, whatever its answer says (a video left alone as not for brimm-video included), only the commands of
       UNANSWERED. Any other is refused in the words of a video waiting for its answer, or, for one she left alone, in words that
       say so: it is not waiting for an answer.
@@ -126,6 +139,7 @@ const transcriptOnly = (words) => wordsOf(words).includes("--transcript-only");
     A command named in none of the lists is refused for a record that is gated at all. */
 export function gateFor(command, record, { teachingsOn = false, lapsed = false, said } = {}, words = []) {
   if (UNSCOPED.includes(command)) return "";
+  if (isPlannedRecord(record)) return PLANNED.includes(command) ? "" : command === "leave" ? TO_DROP(record) : NO_FOOTAGE(record);
   if (kindOf(record) === null) return UNANSWERED.includes(command) ? "" : leftAlone(record) ? LEFT : WAITING;
   if (!sessionNotCleared(record)) return "";
   if (SESSION.includes(command)) return "";

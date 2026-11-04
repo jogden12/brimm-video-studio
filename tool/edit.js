@@ -48,7 +48,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, isPlannedRecord, shownName, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
 import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
@@ -685,9 +685,11 @@ export function findEpisode(ctx, said) {
   const nameOf = (r) => (r.name && typeof r.name.text === "string" ? r.name.text : "");
   const words = plainly(said).split(/\s+/).filter(Boolean);
   const exact = all.filter((e) => plainly(e.name) === plainly(said));
-  // A label, and a label with the short id after it as the lists name a gated video ("<label> (3fa9c1)").
+  // A label, and a label with the short id after it as the lists name a gated video ("<label> (3fa9c1)"). A planned episode's title is its
+  // label too, the whole of it, so that "Too many SKUs" fits it alone when the words of another episode's name fit as well; a plan she
+  // dropped is not found so, and a new plan of that title is.
   const labelled = (e, r) => {
-    const labels = [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : e.held ? heldName(r) : ""].filter(Boolean);
+    const labels = [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : e.held ? heldName(r) : isPlannedRecord(r) && !r.archived ? shownName(r) : ""].filter(Boolean);
     return typeof r.id === "string" ? [...labels, ...labels.map((label) => `${label} (${r.id.slice(-6)})`)] : labels;
   };
   const byLabel = all.filter((e) => known(e).some((r) => labelled(e, r).some((label) => spaced(label) === spaced(said))));
