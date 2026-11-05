@@ -106,13 +106,14 @@ export function gatedReadRules(facts) {
     No folder is added to the session. */
 export function openSettingsOf({ checkout, node, folder, facts }) {
   const { home } = facts;
+  const claudeHome = facts.claudeHome ?? home;
   const AS = join(home, "Library", "Application Support");
   const BV = realOf(facts.root);
   const W = realOf(workshopFolder(home));
   const places = gatedPlaces(facts);
   const both = (path) => bothSpellings(realOf(path));
   const edit = (path) => both(path).map((p) => `Edit(/${p}/**)`);
-  const onlyBrimmVideo = [folder, checkout, BV, join(dirname(BV), "BRIMM VIDEO Transfer"), join(home, "BRIMM Video Work"), join(AS, "BRIMM Video"), join(AS, "BRIMM Video Words"), join(AS, "Claude"), join(home, "Library", "LaunchAgents"), join(home, ".claude"), join(home, ".ssh")];
+  const onlyBrimmVideo = [folder, checkout, BV, join(dirname(BV), "BRIMM VIDEO Transfer"), join(home, "BRIMM Video Work"), join(AS, "BRIMM Video"), join(AS, "BRIMM Video Words"), join(claudeHome, "Library", "Application Support", "Claude"), join(home, "Library", "LaunchAgents"), join(claudeHome, ".claude"), join(home, ".ssh")];
   return {
     permissions: {
       defaultMode: "default",

@@ -33,6 +33,7 @@ import { claudeDirName, fold, realOf } from "./places.js";
 import { BUILT_IN_AGENTS } from "./never.js";
 import { SESSION_ID, scanTranscript } from "./scan.js";
 import { strictSeen } from "./held.js";
+import { programHome } from "./home.js";
 
 /** What `behind` says first when the lock on her folder for Claude has been loosened on this Mac (lockLoosened). Her skill listens
     for these words (tests/studio.test.js). */
@@ -125,6 +126,9 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   const settings = deps.settings || readSettings(home).settings || null;
   const open = lockFor(settings, deps) === "open";
   const env = deps.env || process.env;
+  // Claude Code's and the Claude app's own files (~/.claude, ~/.claude.json, Application Support/Claude) are in the real home, which
+  // under BRIMM_VIDEO_HOME is not Studio's (home.js programHome); Studio's own files are in `home`.
+  const claudeHome = programHome(home, env);
   // On an open-lock Mac, the processes above this check (chain.js), null when they could not be read, and the Claude Code among them.
   const table = open ? (deps.ps || readProcesses)() : null;
   const claude = table === null ? null : claudeAbove(chainUp(processTable(table), deps.pid !== undefined ? deps.pid : process.pid));
@@ -189,7 +193,7 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   let app = deps.appSettings !== undefined ? deps.appSettings : null;
   if (table === null) why.push("(Jason: this chat's processes could not be read, so the Claude app's flags on it are not known.)");
   else {
-    const found = appWhy({ claude, underClaude, folder, home, record: deps.appFlags || APP_FLAGS, minimum: minimumOf(deps) });
+    const found = appWhy({ claude, underClaude, folder, home: claudeHome, record: deps.appFlags || APP_FLAGS, minimum: minimumOf(deps) });
     why.push(...found.lines);
     if (deps.appSettings === undefined) app = found.settings;
   }
@@ -197,10 +201,10 @@ export function lockLoosened({ home, checkout, deps = {} }) {
     if (app.disableAllHooks === true) why.push(`(Jason: ${APP_LABEL} turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`);
     why.push(...sourceWhy(APP_LABEL, app));
   }
-  if (underClaude) why.push(...addedWhy({ home, sessionId, transcriptPath: transcript }));
-  why.push(...pluginsWhy({ home, settingsList: [user, ...managed.map(([, set]) => set), app] }));
-  if (folder) why.push(...skillsWhy({ home, folder, allow: [...ALLOW_DEFAULT, ...studioAllowOf(settings)] }));
-  why.push(...agentsWhy({ home, folder, env: deps.env || process.env }));
+  if (underClaude) why.push(...addedWhy({ home: claudeHome, sessionId, transcriptPath: transcript }));
+  why.push(...pluginsWhy({ home: claudeHome, settingsList: [user, ...managed.map(([, set]) => set), app] }));
+  if (folder) why.push(...skillsWhy({ home: claudeHome, folder, allow: [...ALLOW_DEFAULT, ...studioAllowOf(settings)] }));
+  why.push(...agentsWhy({ home, folder, env }));
   why.push(...environmentWhy(deps.env || process.env));
   const port = proxyPortOf(settings);
   if (port !== null) {
@@ -234,7 +238,7 @@ function homeClaude(config, home) {
 export function beyondWhy({ env, home }) {
   const why = [];
   const config = (env || {}).CLAUDE_CONFIG_DIR;
-  if (config && !homeClaude(config, home)) {
+  if (config && !homeClaude(config, programHome(home, env || {}))) {
     why.push("(Jason: Claude Code keeps this chat's settings and transcripts outside ~/.claude (CLAUDE_CONFIG_DIR), where the lock holds nothing. Its value is not shown here.)");
   }
   if (strictSeen(home)) why.push("(Jason: her folder kept the open lock's settings for a time while this Mac's lock was strict, when a session's words could go into command output that chats with the open lock can read. Run node tool/settings.js studio again.)");
@@ -257,7 +261,7 @@ function userDenyHeld(user, facts) {
     folder, or the id is not a chat's id, which is never put into a path. app.js asks it too, for the handover of her chat. */
 export function transcriptOf({ home, env, folder, sessionId }) {
   if (!folder || typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return null;
-  const projects = env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, "projects") : join(home, ".claude", "projects");
+  const projects = env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, "projects") : join(programHome(home, env), ".claude", "projects");
   const file = join(projects, claudeDirName(folder), `${sessionId}.jsonl`);
   return dirname(dirname(file)) === projects ? file : null;
 }
@@ -390,7 +394,7 @@ export const UNTRUSTED = "Claude Code has not trusted this folder yet: open it o
     having hasTrustDialogAccepted true. A file that cannot be read trusts nothing. No folder, nothing to say. */
 export function trustWhy({ home, folder, env = {} }) {
   if (!folder) return "";
-  const config = settingsObject(env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, ".claude.json") : join(home, ".claude.json"));
+  const config = settingsObject(env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, ".claude.json") : join(programHome(home, env), ".claude.json"));
   const projects = config && isObject(config.projects) ? config.projects : {};
   const above = (path) => {
     const all = [path];
@@ -476,7 +480,7 @@ export const lockFor = (settings, deps = {}) => effectiveLock(settings, minimumO
 
 /** What her folder's open settings are written for on this Mac (settings.js factsOf), for a check given `deps`: a test gives its own
     temp folder and uid, so that this Mac's own are never looked at. */
-export const factsFor = (home, settings, deps = {}) => factsOf(home, settings, { tmp: deps.tmp, uid: deps.uid });
+export const factsFor = (home, settings, deps = {}) => factsOf(home, settings, { tmp: deps.tmp, uid: deps.uid, env: deps.env });
 
 /** How the Claude app's --settings for a chat is named in the lines for Jason. */
 const APP_LABEL = "the Claude app's --settings for this chat";
@@ -734,10 +738,10 @@ function agentWhy(file, base, seen) {
 export function agentsWhy({ home, folder, env = {} }) {
   const config = env.CLAUDE_CONFIG_DIR;
   const roots = [
-    join(home, ".claude", "agents"),
+    join(programHome(home, env), ".claude", "agents"),
     ...(typeof config === "string" && config !== "" ? [join(config, "agents")] : []),
     ...(folder ? [join(folder, ".claude", "agents")] : []),
-    ...pluginFolders(home, foldersThrough).map((dir) => join(dir, "agents")),
+    ...pluginFolders(programHome(home, env), foldersThrough).map((dir) => join(dir, "agents")),
   ];
   const seen = { named: false, asks: false, unknown: false };
   for (const root of [...new Set(roots)]) agentsIn(root, seen);
@@ -768,7 +772,7 @@ export function sources({ home, deps = {} }) {
   const account = deps.user || userInfo().username;
   const of = (file) => `this Mac's managed settings, ${file}`;
   return [
-    [`this Mac's ${config ? "$CLAUDE_CONFIG_DIR" : "~/.claude"}/settings.json`, settingsObject(config ? join(config, "settings.json") : join(home, ".claude", "settings.json"))],
+    [`this Mac's ${config ? "$CLAUDE_CONFIG_DIR" : "~/.claude"}/settings.json`, settingsObject(config ? join(config, "settings.json") : join(programHome(home, deps.env || process.env), ".claude", "settings.json"))],
     ...["managed-settings.json", ...dropIns].map((file) => [of(file), settingsObject(join(managed, file))]),
     ...[join(account, PREFS_FILE), PREFS_FILE].map((file) => {
       const [set, unread] = prefsObject(join(prefs, file), deps.plutil);

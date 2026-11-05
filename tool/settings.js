@@ -31,7 +31,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { textWriter } from "./dropbox.js";
-import { homeRefusal, studioHome } from "./home.js";
+import { homeRefusal, programHome, studioHome } from "./home.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, gatedReadRules, studioFiles, studioFolder, writeStudio } from "./studio.js";
 import { isConnector, neverCaught } from "./never.js";
 import { claudeDirName, realOf } from "./places.js";
@@ -177,9 +177,10 @@ export const effectiveLock = (s, minimum = OPEN_LOCK_CLAUDE) => (lockOf(s) === "
 /** What her folder's open settings are written for on this Mac (studio.js openSettingsOf), from its settings `s`: the home, BRIMM
     Video, this Mac user's id, Claude Code's temp folder (CLAUDE_CODE_TMPDIR, else /tmp, by its real path), where Zoom keeps its
     recordings, the proxy port, the web tools, and what her folder allows (studio/allow.json, then this Mac's own entries). A test
-    gives a temp folder and a uid of its own, so that this Mac's own temp folder is never looked at. */
-export function factsOf(home, s, { tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp", uid = process.getuid() } = {}) {
-  return { home, root: s.root, uid, tmp: realOf(tmp), zoomFolder: zoomFolderOf(s, home), port: proxyPortOf(s), web: webOf(s), allow: [...ALLOW_DEFAULT, ...studioAllowOf(s)] };
+    gives a temp folder and a uid of its own, so that this Mac's own temp folder is never looked at. `claudeHome` is there only when
+    Claude Code's own files are in another home than Studio's (BRIMM_VIDEO_HOME, in `env`; home.js programHome). */
+export function factsOf(home, s, { tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp", uid = process.getuid(), env = process.env } = {}) {
+  return { home, ...(programHome(home, env) !== home ? { claudeHome: programHome(home, env) } : {}), root: s.root, uid, tmp: realOf(tmp), zoomFolder: zoomFolderOf(s, home), port: proxyPortOf(s), web: webOf(s), allow: [...ALLOW_DEFAULT, ...studioAllowOf(s)] };
 }
 
 /** Whether this Mac does the light import, which asks Claude nothing about a video until its person answers. Anything but
@@ -846,7 +847,7 @@ const USER_UNREAD = "Her user settings could not be read as JSON, so nothing was
     mode it had, and one that is made is 0600. First this Mac's settings note `userDeny: true`, so that the lock check looks for the rules
     from then on (loosened.js), then the file is written under another name beside it, then renamed: through a link to it, the file
     it leads to, the link left as it is. Gives the number it ends with. */
-function userDeny(home, rest, say, { tmp, uid, openMinimum }) {
+function userDeny(home, rest, say, { tmp, uid, openMinimum, env }) {
   if (rest.length) {
     say(HELP);
     return 2;
@@ -862,7 +863,8 @@ function userDeny(home, rest, say, { tmp, uid, openMinimum }) {
     say("Not changed: her user settings get these deny rules only under the open lock, which waits for the checks by hand.");
     return 1;
   }
-  const file = join(home, ".claude", "settings.json");
+  // Claude Code's own file: in the real home, which under BRIMM_VIDEO_HOME is not Studio's.
+  const file = join(programHome(home, env), ".claude", "settings.json");
   let held = {};
   try {
     held = JSON.parse(readFileSync(file, "utf8"));
@@ -879,7 +881,7 @@ function userDeny(home, rest, say, { tmp, uid, openMinimum }) {
     say(USER_UNREAD);
     return 1;
   }
-  const rules = gatedReadRules(factsOf(home, got.settings, { tmp, uid }));
+  const rules = gatedReadRules(factsOf(home, got.settings, { tmp, uid, env }));
   const written = { ...held, permissions: { ...permissions, deny: [...deny, ...rules.filter((rule, i) => !deny.includes(rule) && rules.indexOf(rule) === i)] } };
   try {
     writeSettings(home, { userDeny: true });
@@ -954,7 +956,7 @@ function mark(rest, say, clone) {
     `tmp` and `uid` Claude Code's temp folder and this Mac user's id, which a test gives as its own. The home folder is the one HOME names, as for the
     launch agent and in a shell, and the Mac's own word for it when HOME names none; or the one BRIMM_VIDEO_HOME names (home.js), and a
     BRIMM_VIDEO_HOME that is not a whole path ends it with 2. */
-export function settingsMain(argv, { home, say = (line) => process.stdout.write(`${line}\n`), clone, now = new Date(), openMinimum = OPEN_LOCK_CLAUDE, freePort = freeLocalPort, tmp, uid } = {}) {
+export function settingsMain(argv, { home, say = (line) => process.stdout.write(`${line}\n`), clone, now = new Date(), openMinimum = OPEN_LOCK_CLAUDE, freePort = freeLocalPort, tmp, uid, env = process.env } = {}) {
   const [command, ...rest] = argv;
   if (command === "--help" || command === "-h") {
     say(HELP);
@@ -975,7 +977,7 @@ export function settingsMain(argv, { home, say = (line) => process.stdout.write(
   if (command === "show" && !rest.length) return show(home, say, now);
   if (command === "marker") return mark(rest, say, clone);
   if (command === "studio") return studio(home, rest, say, { openMinimum, freePort, tmp, uid, now });
-  if (command === "user-deny") return userDeny(home, rest, say, { tmp, uid, openMinimum });
+  if (command === "user-deny") return userDeny(home, rest, say, { tmp, uid, openMinimum, env });
   say(HELP);
   return 2;
 }

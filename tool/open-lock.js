@@ -53,6 +53,7 @@ import { fetchWhy } from "./fetchable.js";
 import { claudeDirName, fold, gatedIndex, gatedPlaces, pathsIn, realOf, searchRoot } from "./places.js";
 import { SESSION_ID } from "./scan.js";
 import { HELD_NARROWED, HELD_REFUSED, chatHeld, noteStrictSeen, strictSeenFile, wordsFolder } from "./held.js";
+import { programHome } from "./home.js";
 import { LOCK_CHANGED, addedWhy, beyondWhy, environmentWhy, lockLoosened, skillFolders } from "./loosened.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, WORD, guardDecision, literally, openSettingsOf, workshopFolder } from "./studio.js";
 import { TOOLS_WITH_RULES, effectiveLock, factsOf, readSettings, settingsFile, studioAllowOf, studioNodeOf } from "./settings.js";
@@ -101,13 +102,14 @@ function under(place, path) {
 function carveOuts(input, ctx) {
   const id = input.session_id;
   if (typeof id !== "string" || !SESSION_ID.test(id)) return [];
-  const claude = join(ctx.home, ".claude");
+  const claudeHome = ctx.claudeHome || ctx.home;
+  const claude = join(claudeHome, ".claude");
   const carves = [join(realOf(wordsFolder(ctx.home)), id)];
   if (typeof input.transcript_path === "string" && isAbsolute(input.transcript_path)) {
     carves.push(under(claude, join(dirname(input.transcript_path), id, "tool-results")));
   }
   const skills = (Array.isArray(ctx.allow) ? ctx.allow : []).filter((entry) => isObject(entry) && entry.type === "skill");
-  for (const { name } of skills) for (const dir of skillFolders({ home: ctx.home, folder: ctx.folder, name })) carves.push(under(claude, dir));
+  for (const { name } of skills) for (const dir of skillFolders({ home: claudeHome, folder: ctx.folder, name })) carves.push(under(claude, dir));
   return carves.filter(Boolean);
 }
 
@@ -158,7 +160,7 @@ function bashDecision(command, background, cwd, ctx) {
   for (const text of [command, wordsOf(command).join(" ")]) {
     if (fold(text).includes("edit.js") || fold(text).includes(fold(`${ctx.checkout}/tool`))) return deny(RUN_ALONE);
   }
-  if (pathsIn(wordsOf(command), cwd, ctx.home).some((path) => ctx.index.at(path))) return deny(GATED_REFUSED);
+  if (tildeHomes(ctx).flatMap((home) => pathsIn(wordsOf(command), cwd, home)).some((path) => ctx.index.at(path))) return deny(GATED_REFUSED);
   return allow("a command in the sandbox");
 }
 
@@ -226,13 +228,14 @@ export async function openDecision(input, ctx) {
 
   const cwd = typeof input.cwd === "string" && isAbsolute(input.cwd) ? input.cwd : ctx.folder;
   const carves = name === "Read" ? carveOuts(input, ctx) : [];
-  const paths = pathsIn(input.tool_input, cwd, ctx.home);
-  const root = name === "Glob" || name === "Grep" ? searchRoot(name, given, cwd, ctx.home) : null;
+  const homes = tildeHomes(ctx);
+  const paths = homes.flatMap((home) => pathsIn(input.tool_input, cwd, home));
+  const roots = name === "Glob" || name === "Grep" ? homes.map((home) => searchRoot(name, given, cwd, home)) : [];
   // A gated place answers first, whatever else the input holds.
   if (paths.some((path) => ctx.index.at(path, carves))) return deny(GATED_REFUSED);
-  if (root !== null && (ctx.index.at(root) || ctx.index.holds(root))) return deny(GATED_REFUSED);
+  if (roots.some((root) => ctx.index.at(root) || ctx.index.holds(root))) return deny(GATED_REFUSED);
   if (paths.some((path) => ctx.workshop.at(path))) return deny(WORKSHOP_FILES_REFUSED);
-  if (root !== null && (ctx.workshop.at(root) || ctx.workshop.holds(root))) return deny(WORKSHOP_FILES_REFUSED);
+  if (roots.some((root) => ctx.workshop.at(root) || ctx.workshop.holds(root))) return deny(WORKSHOP_FILES_REFUSED);
   if (FILE_TOOLS.has(name)) return allow("outside the gated places and the workshop");
   if (name === "Bash") return bashDecision(given.command, Boolean(given.run_in_background), cwd, ctx);
   if (name === "Skill") return typeof given.skill === "string" && named("skill", given.skill) ? allow("a skill this folder allows") : deny(NOT_NAMED);
@@ -319,14 +322,16 @@ function foldersOf(dir) {
     hooks, the skills her folder allows, the app's --settings file and the folders it adds, the workshop, and this checkout's data the
     open shape is made from. */
 function watched({ home, folder, checkout, env, deps, settings, claude }) {
-  const config = env.CLAUDE_CONFIG_DIR || join(home, ".claude");
-  const agentFolders = [join(home, ".claude", "agents"), join(config, "agents"), join(folder, ".claude", "agents")];
+  // Claude Code's own files are in the real home (home.js programHome), Studio's in `home`.
+  const claudeHome = programHome(home, env);
+  const config = env.CLAUDE_CONFIG_DIR || join(claudeHome, ".claude");
+  const agentFolders = [join(claudeHome, ".claude", "agents"), join(config, "agents"), join(folder, ".claude", "agents")];
   const managed = deps.managedDir || MANAGED_DIR;
   const prefs = deps.managedPrefs || MANAGED_PREFS;
-  const plugins = join(home, ".claude", "plugins");
+  const plugins = join(claudeHome, ".claude", "plugins");
   // Each plugin's folder: cache/<marketplace>/<plugin>/<version>, and synced/<account>/<plugin>.
   const pluginDirs = [...foldersOf(join(plugins, "cache")).flatMap(foldersOf).flatMap(foldersOf), ...foldersOf(join(plugins, "synced")).flatMap(foldersOf)];
-  const skillRoots = [join(folder, ".claude", "skills"), join(home, ".claude", "skills"), ...pluginDirs.map((dir) => join(dir, "skills"))];
+  const skillRoots = [join(folder, ".claude", "skills"), join(claudeHome, ".claude", "skills"), ...pluginDirs.map((dir) => join(dir, "skills"))];
   const skills = [...ALLOW_DEFAULT, ...studioAllowOf(settings)].filter((e) => isObject(e) && e.type === "skill" && typeof e.name === "string");
   let dropIns = [];
   try {
@@ -341,7 +346,7 @@ function watched({ home, folder, checkout, env, deps, settings, claude }) {
     settingsFile(home),
     folder, join(folder, ".claude"), join(folder, ".claude", "settings.json"), join(folder, ".claude", "settings.local.json"),
     config, join(config, "settings.json"), join(config, "remote-settings.json"),
-    join(home, ".claude"), plugins, join(plugins, "cache"), ...foldersOf(join(plugins, "cache")), ...foldersOf(join(plugins, "cache")).flatMap(foldersOf),
+    join(claudeHome, ".claude"), plugins, join(plugins, "cache"), ...foldersOf(join(plugins, "cache")), ...foldersOf(join(plugins, "cache")).flatMap(foldersOf),
     join(plugins, "synced"), ...foldersOf(join(plugins, "synced")),
     ...pluginDirs.flatMap((dir) => [dir, join(dir, "hooks"), join(dir, "hooks", "hooks.json"), join(dir, ".claude-plugin", "plugin.json"), join(dir, "skills")]),
     // The agent definitions Claude Code would load (loosened.js agentsWhy), each folder and file inside the agents folders by itself.
@@ -392,6 +397,10 @@ function without(lines, less) {
   return rest;
 }
 
+/** The homes a `~` in a command or a path may mean: Studio's, and the real one a shell is given as HOME, which under BRIMM_VIDEO_HOME is
+    another. Both are looked at, so that neither is let through. */
+const tildeHomes = (ctx) => [...new Set([ctx.home, ctx.claudeHome || ctx.home])];
+
 /** The lock check's lines for this call (loosened.js lockLoosened), kept in the cache while its signature holds, for CACHE_LIFE at
     most. The folders added to the chat (addedWhy) are read from its transcript at every call, outside the cache, since the
     transcript grows at every call. */
@@ -412,7 +421,7 @@ function lockLines({ home, checkout, folder, node, input, deps, env, settings, f
     shape: studioNodeOf(settings) ? openSettingsOf({ checkout, node: studioNodeOf(settings), folder, facts }) : null,
     files: watched({ home, folder, checkout, env, deps, settings, claude }).map(stamp),
   });
-  const added = () => addedWhy({ home, sessionId, transcriptPath: deps.transcript });
+  const added = () => addedWhy({ home: programHome(home, env), sessionId, transcriptPath: deps.transcript });
   const kept = readCache(home);
   if (kept && kept.signature === signature && now - kept.at >= 0 && now - kept.at < CACHE_LIFE) return [...kept.lines, ...added()];
   const lines = lockLoosened({ home, checkout, deps });
@@ -458,9 +467,9 @@ export async function guardAnswer(input, { checkout, node, folder, deps = {} }) 
     if (openShaped(folder)) noteStrictSeen(home, deps.now ? Number(deps.now()) : Date.now());
     return today();
   }
-  const facts = factsOf(home, settings, { tmp: deps.tmp, uid: deps.uid });
+  const facts = factsOf(home, settings, { tmp: deps.tmp, uid: deps.uid, env: deps.env });
   const ctx = {
-    checkout, node, folder, home, uid: facts.uid, tmp: facts.tmp,
+    checkout, node, folder, home, claudeHome: facts.claudeHome, uid: facts.uid, tmp: facts.tmp,
     index: gatedIndex(gatedPlaces(facts), [join(realOf(facts.root), "Assets")]), workshop: workshopIndex(home),
     allow: facts.allow, web: facts.web, resolve: deps.resolve || lookUp, loosened: false, held: false,
   };
