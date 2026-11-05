@@ -774,10 +774,18 @@ These came from H6's build and review on 4 November:
 28. **The HeyGen voice is taken only from its project's own `assets/` folder.** A sound file reached through a link, or an `assets/` that is itself a link, is refused, so nothing from elsewhere is filed as the voice and read by Claude.
 29. **`app` refuses a plan in the gate's words of ruling 20,** where H6's section quoted the older ones.
 
+These came from the final review of the whole branch on 4 November:
+
+30. **A part held as a session is used for nothing.** If the video a part matched is later answered as a session, or the part comes to be held beside one, it is not joined, copied or put into a project. A file already moved into a project's `media/` before then stays there until Jason takes it out.
+31. **A conflicted plan can be sorted out** like any episode. One refusal of its own: a side whose plan is already made its video is kept over a side that is still a plan.
+32. **The join stops while a part's file isn't the one that came in,** and she says it again in a few minutes. It doesn't wait for each part's late check. This answers the open item on late checks.
+33. **A footage copy that keeps failing ends in "Ask Jason",** instead of "still being made" at every open.
+34. **An episode with no words file keeps its idea markers,** from the plan's own phrase words.
+35. **The merge into `main` waits for her laptop's move** (checks 41 to 48). Until then her laptop runs brimm-video, which can't see a plan, a part or a video made from a plan.
+
 ## Open items
 
 - **How `claude` reads under H7's scratch home.** It is settled on the page before the first check that needs a reading.
 - **Whether parts' own files could later be freed,** once a planned episode's main video is filed (ruling 12's cost). That is Jason's call, after H5.
 - **Whether taking footage back should void its client's agreement.** Today it does not. The agreement is for that video as footage for that plan, so if she makes it footage for the same plan again, the agreement still counts. Jason's call.
 - **Whether a video she left alone can be made footage.** Today it can. `episodes` shows no card for it, but `footage` asks her both cards, and the client question still holds back footage that shows a client. Jason's call.
-- **Whether the join should wait for each part's own late check.** Today it reads each part as Dropbox has it, and a video made from its footage can't be joined again. The whole-branch review weighs it; then it is Jason's call.
