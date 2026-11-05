@@ -59,7 +59,7 @@ import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
-import { runningCommand } from "./detached.js";
+import { readResult, runningCommand } from "./detached.js";
 import { isFromPlan, kindOf, localStamp } from "./episode.js";
 import { sessionNotCleared } from "./gate.js";
 import { copyIn as copyTakes } from "./guide.js";
@@ -714,6 +714,20 @@ export function keptFits(ctx, { found, kept, copy, was, made, starts = true }) {
 export const FOOTAGE_COMING = 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.';
 /** What she is told when a copy of footage that is made could not be moved into the project. */
 export const FOOTAGE_NOT_IN = "Some of its footage could not be put into the project. Ask Jason.";
+/** What she is told when a copy of footage is still missing and the last run that made copies failed for it for a reason that will not pass. */
+export const FOOTAGE_NOT_MADE = "Some of its footage could not be made for HyperFrames. Ask Jason.";
+
+/** Whether the last run of the working copy for this episode failed to make the copy of the footage of `shot` for a reason that will not pass: its
+    result holds a line "The footage for shot <n> could not be made: <why>" (workcopy.js makeFootageCopies), in `failed` for a run of the footage alone
+    and in `footageFailed` for the run that made the video's copy first, and the why is not that Dropbox is still bringing the video over. A run at
+    work now (`making`) has not left its result yet: what the last one left is not read. */
+function footageNotMade(ctx, found, shot) {
+  if (runningCommand(ctx.home, found.name, ctx.alive, workCopyLockOf(ctx.home, found.name))) return false;
+  const result = readResult(ctx.home, found.name, "workcopy");
+  if (result === null || typeof result !== "object") return false;
+  const lines = [...(Array.isArray(result.failed) ? result.failed : []), ...(Array.isArray(result.footageFailed) ? result.footageFailed : [])];
+  return lines.some((line) => typeof line === "string" && line.startsWith(`The footage for shot ${shot} could not be made:`) && !line.includes("Dropbox is still bringing"));
+}
 
 /** Put the footage of a video made from a plan into its main project at `dir`, at every open of it (PR H5b). `kit` is what the plan gives the
     project (join.js planProject, given as the `plan` dep: footage.js reaches this module through finish.js, so it is not imported here), read just
@@ -727,16 +741,21 @@ function placeFootage(ctx, { found, dir, kit }, { rename }) {
   if (!kit || !kit.footage) return;
   let waiting = false;
   let stuck = false;
+  let unmade = false;
   for (const item of kit.footage) {
     const to = join(dir, item.path);
     if (existsSync(to)) continue;
-    if (item.from === null) waiting = true;
-    else if (!moveIn(item.from, to, rename)) stuck = true;
+    if (item.from === null) {
+      // A copy that the last run failed to make for a reason that will not pass is not asked for again at every open (the final review, fix 4).
+      if (footageNotMade(ctx, found, item.shot)) unmade = true;
+      else waiting = true;
+    } else if (!moveIn(item.from, to, rename)) stuck = true;
   }
   if (waiting) {
     requestWorkCopy(ctx, { folder: found.name, footage: true });
     ctx.say(FOOTAGE_COMING);
   }
+  if (unmade) ctx.say(FOOTAGE_NOT_MADE);
   if (stuck) ctx.say(FOOTAGE_NOT_IN);
 }
 

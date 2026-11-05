@@ -2041,3 +2041,79 @@ describe("the join takes a part's files as they came in (the final review, fix 3
     t.done();
   });
 });
+
+describe("a footage copy that keeps failing is not asked for again at every open (the final review, fix 4)", () => {
+  const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
+  const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
+  const CUES = ["--cue", "b-roll | 4 | count what you actually sell | Sallie at her desk | shot: 2"];
+  const COMING = 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.';
+  const UNMADE = "Some of its footage could not be made for HyperFrames. Ask Jason.";
+  const asksFootage = (t) => t.started.filter(([, args]) => args.includes("--footage")).length;
+  /** A plan made its video, with a b-roll part for shot 2; the launch agent's late check passed. */
+  async function made(script) {
+    const t = world(Object.assign(script, { probes: longTalk("Take 1"), copy: "120.000000" }));
+    writeFileSync(join(t.home, "hyperframes-stand-in.json"), JSON.stringify({ open: "opened" }));
+    await planned(t, { shots: [...SHOT_ARGS, ...CUES] });
+    const talk = part(t, 1, { words: SCRIPT.join(" ").split(" ") });
+    part(t, 2, { as: "b-roll", shot: 2 });
+    assert.equal((await joinRun(t, [talk.record.id])).code, 0);
+    const { finishLate } = await import("../filing.js");
+    const [pending] = readPendings(t.home);
+    assert.deepEqual(finishLate(pending, { episode: { root: t.root, machine: "Mac Studio", home: t.home }, log: () => {}, notify: () => {}, clone: t.ctx.deps.clone, sameDisk: () => true }).problems, []);
+    const app = (more = {}) => appDeps(t, { app: { cli: STAND_IN, node: process.execPath, guidance: GUIDANCE }, ...more });
+    return { t, app, project: () => join(episodeWork(t.home, FOLDER_NAME(t)), planOf(t).app.projects[0].name) };
+  }
+  it("says it could not be made, and asks for no new run, when the last run failed for a reason that will not pass: a copy with a sound stream", async () => {
+    const script = { footage: WIDE() };
+    const { t, app, project } = await made(script);
+    // The run `kind` started makes the video's copy, and the footage's: the footage's fails and costs the video's nothing.
+    assert.equal((await on(app(), "workcopy", "--now", FOLDER_NAME(t))).code, 0);
+    const first = await on(app(), "app", TITLE);
+    assert.equal(first.code, 0, first.text);
+    assert.ok(first.said.includes(UNMADE), first.text);
+    assert.ok(!first.said.includes(COMING), first.text);
+    assert.equal(asksFootage(t), 0);
+    assert.ok(!existsSync(join(project(), "media", "b-roll-2.mp4")));
+    // The run for the footage alone fails the same way; the open says the same and asks for nothing.
+    assert.equal((await on(app(), "workcopy", "--now", FOLDER_NAME(t), "--footage")).code, 1);
+    const second = await on(app(), "app", TITLE);
+    assert.ok(second.said.includes(UNMADE) && !second.said.includes(COMING), second.text);
+    assert.equal(asksFootage(t), 0);
+    // Once a run makes it, the next open moves it in and says nothing of it.
+    script.footage = SILENT;
+    assert.equal((await on(app(), "workcopy", "--now", FOLDER_NAME(t), "--footage")).code, 0);
+    const last = await on(app(), "app", TITLE);
+    assert.equal(last.code, 0, last.text);
+    assert.ok(!last.said.includes(UNMADE) && !last.said.includes(COMING), last.text);
+    assert.deepEqual(readdirSync(join(project(), "media")).sort(), ["b-roll-2.mp4", "recording.mp4"]);
+    t.done();
+  });
+  it("asks again, as before, when the last run failed because Dropbox is still bringing the part's video over", async () => {
+    const { t, app, project } = await made({});
+    // (The video's own copy is made; the run's footage waits for Dropbox.)
+    const waiting = { isWhole: (path) => !path.endsWith("Take 2.mov"), readAll: async () => {} };
+    assert.equal((await on(app(waiting), "workcopy", "--now", FOLDER_NAME(t))).code, 0);
+    assert.ok(resultFootage(t).footageFailed[0].includes("Dropbox is still bringing"), JSON.stringify(resultFootage(t)));
+    const opened = await on(app(), "app", TITLE);
+    assert.equal(opened.code, 0, opened.text);
+    assert.equal(opened.said[0], COMING);
+    assert.ok(!opened.said.includes(UNMADE));
+    assert.equal(asksFootage(t), 1);
+    assert.ok(!existsSync(join(project(), "media", "b-roll-2.mp4")));
+    t.done();
+  });
+  it("asks as before when no run has been made for it yet", async () => {
+    const { t, app } = await made({});
+    assert.equal((await on(app(), "workcopy", "--now", FOLDER_NAME(t))).code, 0);
+    // The footage's copies and the run's result are gone, as if the run had not been made.
+    const dir = workCopyDir(t.home, FOLDER_NAME(t));
+    for (const name of readdirSync(dir).filter((n) => n.startsWith("footage-"))) rmSync(join(dir, name));
+    rmSync(join(episodeWork(t.home, FOLDER_NAME(t)), "workcopy.result.json"));
+    const opened = await on(app(), "app", TITLE);
+    assert.equal(opened.said[0], COMING);
+    assert.ok(!opened.said.includes(UNMADE));
+    assert.equal(asksFootage(t), 1);
+    t.done();
+  });
+  const resultFootage = (t) => readResult(t.home, FOLDER_NAME(t), "workcopy");
+});

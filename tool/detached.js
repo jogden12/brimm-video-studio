@@ -206,7 +206,9 @@ export async function runDetached({ home, folder, command, lock: own, keepAwake 
     done = { ok: false, made: [], failed: [`The work stopped (${e.code || e.message}).`], next: "" };
   }
   const result = resultOf(done);
-  if (done.takeOver) result.takeOver = { ...done.takeOver, ...(done.takeOver.next ? { next: clean(done.takeOver.next) } : {}) };
+  // The footage copies a working copy's run could not make (edit.js workcopy): the run's own result is the video's, and they cost it nothing, but the open of the project reads them (app.js placeFootage).
+  if (Array.isArray(done.footageFailed) && done.footageFailed.length) result.footageFailed = done.footageFailed.map(clean);
+  if (done.takeOver) result.takeOver ={ ...done.takeOver, ...(done.takeOver.next ? { next: clean(done.takeOver.next) } : {}) };
   let failure = null;
   try {
     writeWhole(resultFile(home, folder, command), JSON.stringify(result, null, 2) + "\n");

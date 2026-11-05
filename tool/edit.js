@@ -4261,7 +4261,7 @@ async function workcopy(ctx, rest) {
       if (!main.ok || !isFromPlan(held.record)) return main;
       // A video made from a plan has its footage copied after its own video, in the same run. A copy that fails is in the log and costs nothing.
       const footage = await planFootage(ctx, { found, record: held.record, deps });
-      return { ...main, made: [...main.made, ...footage.made] };
+      return { ...main, made: [...main.made, ...footage.made], ...(footage.failed?.length ? { footageFailed: footage.failed } : {}) };
     }
     // A Reel's video is the suggestion's stretch of the recording; the list is read once the video is whole and checked.
     const got = reelStretch(found.folder, reel);
