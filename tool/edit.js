@@ -130,7 +130,7 @@ import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, 
 import { lookAt, referencesAsked, sayReferences, useIn } from "./references.js";
 import { newPlan, planAsked, planFor, plannedLine, textArg } from "./plan.js";
 import { SHOT_SAID } from "./sentences.js";
-import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, mayGoIn, partRefused, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
+import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
 
@@ -7030,7 +7030,7 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
     return {
       name: hidden ? listedAs(ctx, e) : withShortId(shownName(r), r), id: r.id, aliases: [r.id, r.id.slice(-6), hidden ? gatedName(gatedRecord(e), e.held) : shownName(r), ...(hidden ? [] : [e.name])],
       at: Date.parse(r.imported.at), mac: "", drop: null, conflicted: e.read.code === "CONFLICTED", kind: null, waiting: false, heldAsSession: false, elsewhere: false, handoff: null, source: null,
-      planned: { route: r.planned.route, voice: r.planned.voice, footage: footageCounts(parts), waiting: parts.filter((part) => !mayGoIn(part, r.planned)).map((part) => part.record.label || shownName(part.record)), joining, joinFailed, set: r.planned.set !== null, project: Boolean(r.planned.project) }
+      planned: { route: r.planned.route, voice: r.planned.voice, footage: footageCounts(parts), waiting: parts.filter((part) => waitsForClient(part, r.planned)).map((part) => part.record.label || shownName(part.record)), joining, joinFailed, set: r.planned.set !== null, project: Boolean(r.planned.project) }
     };
   }
   const kind = recordKind(r);

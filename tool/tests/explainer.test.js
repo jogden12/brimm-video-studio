@@ -6,7 +6,7 @@
 // and each test has a folder of its own under the temp folder.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { editMain } from "../edit.js";
@@ -15,7 +15,7 @@ import { readResult } from "../detached.js";
 import { finishLate, readPendings } from "../filing.js";
 import { voiceCopyArgs, voiceCopyFacts, voiceCopyPaths, workCopyDir, workCopyKey } from "../workcopy.js";
 import { probed } from "./fixtures.js";
-import { footageAsked, footageCounts, mayGoIn, partLine, plannedOffers } from "../footage.js";
+import { footageAsked, footageCounts, mayGoIn, partLine, plannedOffers, waitsForClient } from "../footage.js";
 import { onMac, voiceIn, voiceSeconds } from "../explainer.js";
 import { PIN } from "../hyperframes.js";
 import { nextFor } from "../guide.js";
@@ -24,7 +24,7 @@ import { FONTS, explainerHtml, projectFiles } from "../project.js";
 
 import { NO_RECEIPT, PLANNED_Q, cardOf, footageOption, formOf, notSessionCardOf, plannedCardOf, receiptFrom, voiceoverOption, writeReceipt } from "../receipts.js";
 import { fileSafe } from "../names.js";
-import { episodeWork, writeSettings } from "../settings.js";
+import { downloadsFolder, episodeWork, writeSettings } from "../settings.js";
 import { localDay } from "../shared/text.js";
 import { setup, episodeAs, reread, listAll, toldOf } from "./episodes.js";
 import { MINIMUM } from "./open-world.js";
@@ -484,6 +484,7 @@ describe("a voiceover is a part like the rest (PR H6)", () => {
     assert.equal(footageCounts([part]), "1 voiceover");
     assert.equal(partLine(part, {}), `Footage: ${labelOf(1)}, the voiceover.`);
     assert.equal(mayGoIn(part, {}), false, "fails closed: only footage that shows no client goes into a project");
+    assert.equal(waitsForClient(part, {}), false, "yet it waits for no client's agreement (the guide's client line is made of this; see the fix-round test)");
   });
   it("is asked as a third word that takes the one flag --not-a-session, and no other", () => {
     assert.deepEqual(footageAsked(["v", "Why", "voiceover"], {}), { form: "set", video: "v", planned: "Why", as: "voiceover", client: null, shot: null, notASession: false });
@@ -1685,5 +1686,83 @@ describe("the hand-off of an explainer (PR H6)", () => {
     const r = await on(depsOf(u), "finish", TITLE, "--as-it-is");
     assert.ok(!r.said.some((line) => /Handed off as it is/.test(line)), r.text);
     u.done();
+  });
+});
+
+describe("H6 fix round 1", () => {
+  const lightOf = (t) => depsOf(t, { settings: { ...t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 2 } });
+  it("never has a voiceover waiting for a client's agreement: not by waitsForClient, and not in the guide while the run is at work or after it failed", async () => {
+    const { waitsForClient } = await import("../footage.js");
+    const t = world({ probes: { "Voice 1.m4a": VOICE_PROBE("182.000000", null) } });
+    await explainer(t);
+    const one = voicePart(t, 1);
+    const part = { name: one.name, folder: one.folder, record: one.record };
+    assert.equal(waitsForClient(part, planOf(t).planned), false);
+    // A talking part that shows a client and has no agreement still waits, as it did.
+    assert.equal(waitsForClient({ ...part, record: { ...part.record, partOf: { id: part.record.partOf.id, as: "talking", shot: null, client: true } } }, planOf(t).planned), true);
+    // The run fails (no sound): the guide of the plan says its step and no client line.
+    assert.equal((await on(depsOf(t), "join", "--now", nameOf(t), "--parts", one.record.id)).code, 1);
+    const after = await on(lightOf(t), "guide", TITLE);
+    assert.deepEqual(after.said, [`${TITLE} (400000): Its voice could not be taken in. Say "how far is it?" to see why.`]);
+    assert.ok(!after.text.includes("shows a client"), after.text);
+    t.done();
+  });
+  it("leaves a failed run's result and status without the part's file name (ruling 4)", async () => {
+    const t = world({ probes: { "Voice 1.m4a": VOICE_PROBE("182.000000", null) } });
+    await explainer(t);
+    const one = voicePart(t, 1);
+    await on(depsOf(t), "join", "--now", nameOf(t), "--parts", one.record.id);
+    const file = readFileSync(join(t.home, "BRIMM Video Work", nameOf(t), "join.result.json"), "utf8");
+    assert.ok(!file.includes("Voice 1"), file);
+    const said = (await on(depsOf(t), "status")).text;
+    assert.ok(!said.includes("Voice 1"), said);
+    t.done();
+  });
+  it("finds the export of a made HeyGen explainer, and ends with the YouTube line; and refuses --as-it-is in the exact words", async () => {
+    const t = world();
+    await explainer(t, { voice: "heygen" });
+    assert.equal((await on(depsOf(t), "app", TITLE)).code, 0);
+    voiceMade(t);
+    assert.equal((await on(depsOf(t), "join", "--now", nameOf(t), "--voice")).code, 0);
+    const dir = join(workOf(t), HEYGEN_PROJECT);
+    // The app's export: the file in Downloads, ending two minutes after it began, and the record it leaves in the project's renders/.
+    const downloads = downloadsFolder(t.home);
+    mkdirSync(downloads, { recursive: true });
+    mkdirSync(join(dir, "renders"), { recursive: true });
+    const day = dayOf(t);
+    const began = Date.parse(`${day}T13:56:40-05:00`);
+    const file = join(downloads, `${HEYGEN_PROJECT} ${day} 13.56.mp4`);
+    writeFileSync(file, "the export");
+    utimesSync(file, new Date(began + 120000), new Date(began + 120000));
+    const meta = JSON.parse(readFileSync(new URL("./fixtures/hyperframes-0.8.208/exports/main.meta.json", import.meta.url), "utf8").replace("<DOWNLOADS>", downloads));
+    meta.exportedTo = file;
+    writeFileSync(join(dir, "renders", `${HEYGEN_PROJECT}_${day}_13-56-40.meta.json`), JSON.stringify(meta));
+    const r = await on(depsOf(t), "finish", TITLE);
+    assert.ok(!r.said.some((l) => /no export yet|not an export/.test(l)), r.text);
+    assert.ok(r.said.some((l) => l.includes(`${HEYGEN_PROJECT} ${day} 13.56.mp4`)), r.text);
+    assert.equal(r.said.at(-1) === "It has a HeyGen voice: when you upload it to YouTube, mark it as altered or synthetic content." || r.said.includes("It has a HeyGen voice: when you upload it to YouTube, mark it as altered or synthetic content."), true, r.text);
+    t.done();
+    const u = world();
+    await madeExplainer(u);
+    const refused = await on(depsOf(u, { settings: { ...u.ctx.settings, handoffVersion: 2 } }), "finish", TITLE, "--as-it-is");
+    assert.deepEqual([refused.code, refused.said], [1, ['An explainer is made in HyperFrames: export it there, then say "hand it off".']]);
+    u.done();
+  });
+  it("takes the voice only from the project's own assets: a symlinked assets folder is refused, in words, and nothing is started", async () => {
+    const t = world();
+    const { dir } = await heygenOpened(t);
+    const elsewhere = join(t.dir, "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    writeFileSync(join(elsewhere, "HeyGen voice 1.wav"), "not from the project");
+    symlinkSync(elsewhere, join(dir, "assets-real"));
+    rmSync(join(dir, "assets"), { recursive: true, force: true });
+    symlinkSync(elsewhere, join(dir, "assets"));
+    writeFileSync(join(dir, "index.html"), readFileSync(join(dir, "index.html"), "utf8").replace("</body>", '<audio src="assets/HeyGen%20voice%201.wav"></audio></body>'));
+    const r = await on(depsOf(t), "plan", TITLE, "voice");
+    assert.deepEqual([r.code, r.said], [1, ["Its HyperFrames project plays a voice from outside its own assets: have one made there again."]]);
+    assert.deepEqual(t.started, []);
+    assert.equal((await on(depsOf(t), "join", "--now", nameOf(t), "--voice")).code, 1);
+    assert.ok(!existsSync(join(t.root, "Episodes", nameOf(t), "HeyGen voice 1.wav")));
+    t.done();
   });
 });

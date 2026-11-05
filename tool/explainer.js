@@ -7,8 +7,8 @@
 //
 // edit.js is only the wiring. What this says goes into her chat, so it holds no path and no flag. Nothing here posts, sends or publishes anything, and
 // no HeyGen tool is run by Studio: the app's agent makes the voice, in her words and her project, and Studio takes the file it saved.
-import { existsSync, lstatSync, readFileSync } from "node:fs";
-import { join, posix } from "node:path";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { join, posix, sep } from "node:path";
 import { countWords } from "./shared/text.js";
 import { logosIn, mediaOf, openOnly, projectGone } from "./app.js";
 import { isFromPlan, localStamp, shownName } from "./episode.js";
@@ -154,6 +154,15 @@ export function voiceCase(ctx, found, record) {
     plain = false;
   }
   if (!plain) return { why: "Its HyperFrames project plays a voice that isn't in its assets: have one made there again." };
+  // The file must really be in the project's own assets/: no link in the way, in assets/ or above it, may lead it out of the project.
+  let inside = false;
+  try {
+    const assets = join(realpathSync(dir), "assets");
+    inside = realpathSync(join(dir, "assets")) === assets && realpathSync(file).startsWith(`${assets}${sep}`);
+  } catch (e) {
+    inside = false;
+  }
+  if (!inside) return { why: "Its HyperFrames project plays a voice from outside its own assets: have one made there again." };
   return { project, dir, src: heard.src, file };
 }
 
