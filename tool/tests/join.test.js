@@ -12,6 +12,7 @@ import { HELP, editMain } from "../edit.js";
 import { episodeFault, isPart, isPlannedRecord, layoutOf, localStamp, newEpisode, newPlannedEpisode, readEpisode, recordFile, recordText, writeEpisode } from "../episode.js";
 import { concatList, isFromPlan, joinArgs, partOrder, partsFault } from "../join.js";
 import { footageOf, footageToUse, footageWithheld, withMaterial } from "../plan-project.js";
+import { partHeld, partsOf } from "../footage.js";
 import { lockOf, readResult, takeEpisodeLock } from "../detached.js";
 import { guardDecision } from "../studio.js";
 import { CHECKOUT, EDIT, NODE } from "./guard-cases.js";
@@ -1885,6 +1886,102 @@ describe("from the parts to the project: the join, the copies and the open, run 
     assert.equal(episodeFault(odd), "");
     writeEpisode(folder, odd, { expectRev: plan.rev, writeText: (to, text) => writeFileSync(to, text), writer: plan.writer, home: t.home });
     assert.deepEqual([readEpisode(folder).record.kind, readEpisode(folder).record.video.sound], ["raw", false]);
+    t.done();
+  });
+});
+
+describe("a part that comes to be held as a session is used for nothing (the final review, fix 1)", () => {
+  const SESSION_ID = "e-20261104-5e5510";
+  const HELD_AS_SESSION = "This video is a version of a client or group session: answer it as a session too, or ask Jason.";
+  const MATCHED_AS_SESSION = "This video holds most of the words of a client or group session: answer it as a session, or ask Jason.";
+  /** A client or group session, answered and not cleared, in Episodes. */
+  function session(t, versionOf = null) {
+    const folder = join(t.root, "Episodes", "2026-11-04 Group call (Mac Studio)");
+    mkdirSync(join(folder, "record"), { recursive: true });
+    const made = newEpisode({
+      id: SESSION_ID, machine: "Mac Studio", at: "2026-11-04T08:00:00-05:00", video: { file: "Group call.mov", bytes: 5, seconds: 600, created: null }, kind: "session", writer: { commit: "c709b57", on: "Mac Studio" },
+      label: "Video of 4 Nov, 08:00 (Mac Studio)", answer: { state: "answered", guess: null, seen: "wide, 10:00", came: "zoom", by: "Mac Studio", on: "Mac Studio", at: "2026-11-04T08:30:00-05:00", private: "no" }
+    });
+    writeFileSync(recordFile(folder, 1), recordText({ ...made, ...(versionOf ? { versionOf } : {}), rev: 1 }));
+    return folder;
+  }
+  /** The part's video is matched to a session after it was answered as a part (its import matched the session's words). */
+  const matched = (t, one) => {
+    session(t);
+    writeFileSync(recordFile(one.folder, 3), recordText({ ...one.record, rev: 3, answer: { ...one.record.answer, match: SESSION_ID } }));
+  };
+  /** A session is answered as a version of the part's video: the part is held beside it (a part has no kind, so its own walk stops at itself). */
+  const beside = (t, one) => session(t, one.record.id);
+
+  it("holds a part by the gate's words, the part's label first: it matched a session, or it is a version of one", async () => {
+    for (const [hold, words] of [[matched, MATCHED_AS_SESSION], [beside, HELD_AS_SESSION]]) {
+      const t = world();
+      await planned(t);
+      const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+      hold(t, one);
+      const held = partHeld(partsOf(t.root, planIdOf(t))[0]);
+      assert.equal(held.why, "session");
+      const r = await on(depsOf(t), "plan", TITLE, "join");
+      assert.deepEqual([r.code, r.said], [1, [`${labelOf(1)}: ${words}`]]);
+      t.done();
+    }
+  });
+  it("refuses `plan … join` and `join --now` for a talking part answered as a session after it became a part, and writes nothing", async () => {
+    for (const hold of [matched, beside]) {
+      const t = world();
+      const folder = await planned(t);
+      const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+      hold(t, one);
+      const before = snapshot(t);
+      const said = await on(depsOf(t), "plan", TITLE, "join");
+      assert.equal(said.code, 1, said.text);
+      assert.deepEqual([snapshot(t), t.started], [before, []]);
+      const run = await joinRun(t, [one.record.id]);
+      assert.equal(run.code, 1);
+      const [failed] = resultOf(t).failed;
+      assert.equal(failed, COULD_NOT(said.said[0].replace(/\.$/, "")));
+      assert.deepEqual(readPendings(t.home), []);
+      assert.equal(planOf(t).kind, null);
+      assert.ok(!existsSync(join(folder, "Take 1.mov")));
+      t.done();
+    }
+  });
+  it("says nothing in the guide that names the session", async () => {
+    const t = world();
+    await planned(t);
+    const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+    beside(t, one);
+    const text = (await on(depsOf(t), "guide")).text + (await on(depsOf(t), "plan", TITLE)).text;
+    assert.ok(!text.includes("Group call") && !text.includes("08:00") && !text.includes(SESSION_ID), text);
+    t.done();
+  });
+  it("gives no footage, makes no copy and puts nothing in media/ for a b-roll part held beside a session, once the plan is its video", async () => {
+    const t = world({ probes: longTalk("Take 1"), copy: "120.000000" });
+    writeFileSync(join(t.home, "hyperframes-stand-in.json"), JSON.stringify({ open: "opened" }));
+    const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
+    const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
+    await planned(t, { shots: [...SHOT_ARGS, "--cue", "b-roll | 4 | count what you actually sell | Sallie at her desk | shot: 2"] });
+    const talk = part(t, 1, { words: SCRIPT.join(" ").split(" ") });
+    const broll = part(t, 2, { as: "b-roll", shot: 2 });
+    part(t, 3, { as: "screen", shot: 4 });
+    const app = () => appDeps(t, { app: { cli: STAND_IN, node: process.execPath, guidance: GUIDANCE } });
+    assert.equal((await joinRun(t, [talk.record.id])).code, 0);
+    const { finishLate } = await import("../filing.js");
+    const [pending] = readPendings(t.home);
+    assert.deepEqual(finishLate(pending, { episode: { root: t.root, machine: "Mac Studio", home: t.home }, log: () => {}, notify: () => {}, clone: t.ctx.deps.clone, sameDisk: () => true }).problems, []);
+    // The b-roll's video is then found to be a version of a session. The screen recording is not.
+    beside(t, broll);
+    const parts = partsOf(t.root, planOf(t).id, { newer: true });
+    assert.deepEqual(footageOf(planOf(t), parts).map((f) => f.path), ["media/screen-4.mp4"]);
+    assert.deepEqual(footageWithheld(planOf(t), parts).map(({ part: p, why }) => [p.record.label, why]), [[labelOf(2), "it is held as a session"]]);
+    const made = await on(app(), "workcopy", "--now", FOLDER_NAME(t));
+    assert.equal(made.code, 0, made.text);
+    assert.deepEqual(readdirSync(workCopyDir(t.home, FOLDER_NAME(t))).filter((n) => n.startsWith("footage-") && n.endsWith(".mp4")).map((n) => n.split("-")[1]), ["4"]);
+    assert.ok(made.said.some((line) => line.includes(labelOf(2)) && line.includes("held as a session")), made.text);
+    const opened = await on(app(), "app", TITLE);
+    assert.equal(opened.code, 0, opened.text);
+    const project = join(episodeWork(t.home, FOLDER_NAME(t)), planOf(t).app.projects[0].name);
+    assert.deepEqual(readdirSync(join(project, "media")).sort(), ["recording.mp4", "screen-4.mp4"]);
     t.done();
   });
 });

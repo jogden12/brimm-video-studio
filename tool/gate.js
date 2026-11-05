@@ -52,6 +52,8 @@ export const TEACHINGS_LAPSED = "Teachings from sessions were turned on more tha
 const REEL_NOT_AGREED = "A Reel is cut from a session only once you have noted the client's agreement.";
 /** What a video one of whose other versions is a client or group session not cleared is refused in (heldGateFor). */
 export const HELD = "This video is a version of a client or group session: answer it as a session too, or ask Jason.";
+/** Why a video whose import matched a session's words (finish.js matchedSession) is answered only as one. */
+export const MATCHED_SESSION = "This video holds most of the words of a client or group session: answer it as a session, or ask Jason.";
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 /** A whole number from 1, as a person types it: no sign, no zero in front, no fraction. */

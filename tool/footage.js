@@ -22,11 +22,11 @@
 // plan.js imports this file, to say the footage of a plan and to note a client's agreement; this file reads a plan's title (textArg) and says
 // shots as plan.js does through sentences.js, a leaf that neither needs to have been read first (they were plan.js's own until PR H5b).
 import { appendFileSync, chmodSync, mkdirSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PART_KINDS, heldElsewhere, isFromPlan, isPart, isPlannedRecord, kindOf, localStamp, readEpisode, recordNumbers, shownName, undone, acceptRev } from "./episode.js";
 import { episodesFolder, episodeWork } from "./settings.js";
 import { runningCommand, startDetached } from "./detached.js";
-import { linksOf } from "./finish.js";
+import { linksOf, matchedSession } from "./finish.js";
 import { gatedName } from "./gate.js";
 import { isSeenLine, isZoomName, withoutNames } from "./kinds.js";
 import { lockFor } from "./loosened.js";
@@ -171,15 +171,31 @@ export const labelOf = (part) => (typeof part?.record?.label === "string" && par
     a part is held when its episode's folder holds a conflicted copy of any file (episode.js conflictedCopies, as every command that names
     an episode refuses it), when its newest record is one a newer brimm-video wrote, and when its record cannot be read whole at all.
     { why: "conflicted" | "newer" | "unreadable", read, record }: `read` is readEpisode's of the folder, `record` the newer record. A part is
-    one of partsOf's, { name, folder, record }, with `newer: true` when partsOf listed it as a newer brimm-video's. */
-export function partHeld(part) {
+    one of partsOf's, { name, folder, record }, with `newer: true` when partsOf listed it as a newer brimm-video's.
+    And a part is held as a session ({ why: "session", matched }) when it comes to be one after it was answered as a part (the final review, fix 1):
+    the video its import matched (`answer.match`) is a client or group session not cleared (finish.js matchedSession: `matched` true), or the video is
+    held beside one (linksOf sessionsBeside: it is a version of a session). The gate holds such a video as a session in everything else; here it is
+    held in everything made of a part, whenever it is asked, not only when she answered it. `links` (finish.js linksOf) is read once by a caller that
+    asks of many parts; without it Episodes is read for this part (its folder is in Episodes, so its root is two folders up). */
+export function partHeld(part, links = null) {
   if (!isObject(part) || typeof part.folder !== "string") return { why: "unreadable" };
   if (part.newer === true) return { why: "newer", record: part.record };
   const read = readEpisode(part.folder);
   if (read.code === "CONFLICTED") return { why: "conflicted", read };
   if (!read.record) return { why: "unreadable", read };
   if (read.newer) return { why: "newer", read, record: read.record };
+  const at = links ?? linksOf(dirname(dirname(part.folder)));
+  if (matchedSession(at, read.record, { folder: part.folder })) return { why: "session", matched: true, read };
+  if (at.sessionsBeside(read.record, part.folder).length > 0) return { why: "session", matched: false, read };
   return null;
+}
+
+/** Links to read Episodes with for the parts `parts`, once and only when first asked (partHeld's `links`), or null when none of them is listed. */
+export function linksForParts(parts) {
+  const one = (Array.isArray(parts) ? parts : []).find((part) => isObject(part) && typeof part.folder === "string");
+  if (!one) return () => null;
+  let links = null;
+  return () => (links ??= linksOf(dirname(dirname(one.folder))));
 }
 
 /** Whether a part may be used to make something: a joined video, a copy of its footage with no sound, a file in a project's media/. It may when

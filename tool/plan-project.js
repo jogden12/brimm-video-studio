@@ -9,7 +9,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { GRAPHIC_CUE_KINDS, SHOT_KINDS, graphicCuesOf } from "./graphic-cues.js";
 import { isFromPlan, isPart } from "./episode.js";
-import { mayGoIn, partHeld, partsOf } from "./footage.js";
+import { linksForParts, mayGoIn, partHeld, partsOf } from "./footage.js";
 import { footageCopyPaths, workCopyKey } from "./workcopy.js";
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -31,10 +31,11 @@ export const footagePath = (as, shot) => `media/${as}-${shot}.mp4`;
     file goes into a project only once it has. */
 export function footageOf(record, parts) {
   const shots = list(record?.planned?.shots);
+  const links = linksForParts(parts);
   return list(parts)
     .filter((part) => isObject(part) && isPart(part.record) && part.record.partOf.id === record?.id && FOOTAGE_KINDS.includes(part.record.partOf.as))
     .filter((part) => shots.some((shot) => shot.n === part.record.partOf.shot && shot.kind === part.record.partOf.as))
-    .filter((part) => partHeld(part) === null)
+    .filter((part) => partHeld(part, links()) === null)
     .map((part) => ({ part, as: part.record.partOf.as, shot: part.record.partOf.shot, path: footagePath(part.record.partOf.as, part.record.partOf.shot) }));
 }
 
@@ -43,7 +44,7 @@ export function footageOf(record, parts) {
 export const footageToUse = (record, parts) => footageOf(record, parts).filter(({ part }) => mayGoIn(part, record.planned));
 
 /** What a held part (footage.js partHeld) is called in the log. */
-const HELD_SAID = { conflicted: "its episode holds a conflicted copy", newer: "a newer brimm-video wrote its record", unreadable: "its record cannot be read" };
+const HELD_SAID = { conflicted: "its episode holds a conflicted copy", newer: "a newer brimm-video wrote its record", unreadable: "its record cannot be read", session: "it is held as a session" };
 
 /** The b-roll and screen parts of the plan `record` among `parts` that give no footage now, each as { part, why } in the order given, `why` being
     what the log says: that its episode is held (conflicted copies, a record a newer brimm-video wrote, a record that cannot be read: ruling 1),
@@ -52,10 +53,11 @@ const HELD_SAID = { conflicted: "its episode holds a conflicted copy", newer: "a
 export function footageWithheld(record, parts) {
   const going = new Set(footageToUse(record, parts).map(({ part }) => part));
   const shots = list(record?.planned?.shots);
+  const links = linksForParts(parts);
   return list(parts)
     .filter((part) => isObject(part) && !going.has(part) && (part.newer === true || (isPart(part.record) && part.record.partOf.id === record?.id && FOOTAGE_KINDS.includes(part.record.partOf.as))))
     .map((part) => {
-      const held = partHeld(part);
+      const held = partHeld(part, links());
       if (held) return { part, why: HELD_SAID[held.why] ?? HELD_SAID.unreadable };
       const { as, shot } = part.record.partOf;
       if (!shots.some((one) => one.n === shot && one.kind === as)) return { part, why: "its shot is not a shot of its kind in the plan any more" };

@@ -14,7 +14,8 @@ import { basename, extname, join } from "node:path";
 import { cueTokens } from "./graphic-cues.js";
 import { factsOf, framesASecond, probeArgs, streamsOf, soundStream } from "./cuts.js";
 import { isFromPlan, isPlannedRecord, localStamp, readEpisode, shownName, undone } from "./episode.js";
-import { keepTitle, labelOf, partHeld, partNamed, partsOf } from "./footage.js";
+import { keepTitle, labelOf, linksForParts, partHeld, partNamed, partsOf } from "./footage.js";
+import { HELD, MATCHED_SESSION } from "./gate.js";
 import { runningCommand, startDetached } from "./detached.js";
 import { LATE_CHECK_MS, readThrough } from "./dropbox.js";
 import { episodeKind, fileEpisode, pendingFor, writePending } from "./filing.js";
@@ -183,6 +184,8 @@ function wordsOfPart(part) {
     label first, so that she knows which video to sort out: Dropbox's conflicted copy, or a record a newer brimm-video wrote, or one that cannot
     be read. `kit` is edit.js's (notRead, newerWhy). */
 export function heldWords(part, held, kit) {
+  // A part held as a session (the final review, fix 1): the gate's words for a video held as one, with the part's label first. They name no session.
+  if (held.why === "session") return `${labelOf(part)}: ${held.matched ? MATCHED_SESSION : HELD}`;
   if (held.why === "newer") {
     const label = typeof part.record?.label === "string" && part.record.label !== "" ? `${part.record.label}: ` : "";
     return `${label}${kit.newerWhy(held.record)}`;
@@ -212,7 +215,8 @@ export function joinCase(ctx, record, kit, { videos = [], ids = null } = {}) {
   const taken = partsOf(ctx.root, record.id, { newer: true }).filter(takenOf(record));
   for (const part of taken) kit.hide(part.name);
   if (!taken.length) return { why: explainer ? `"${title}" has no voiceover yet: a video needs one.` : `"${title}" has no talking part yet: a video needs at least one.` };
-  const held = taken.map((part) => ({ part, held: partHeld(part) })).find((one) => one.held !== null);
+  const links = linksForParts(taken);
+  const held = taken.map((part) => ({ part, held: partHeld(part, links()) })).find((one) => one.held !== null);
   if (held) return { why: heldWords(held.part, held.held, kit) };
   const ordered = explainer
     ? taken.map((part) => ({ id: part.record.id, label: labelOf(part), place: null }))

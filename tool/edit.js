@@ -68,7 +68,7 @@ import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
-import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
+import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
@@ -80,7 +80,7 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
+import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, matchedSession, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
 import { BRINGING, REEL_KEY, START as REELS_START, exportAgainWords, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
 import { checkingNow, problemFlagged } from "./finish-check.js";
 import { endedSinceYes, endedWithoutHandoff } from "./finish-ended.js";
@@ -5408,24 +5408,6 @@ const logNotWritten = (holds) => `The log on this Mac could not be written: the 
 const noMarkToClear = (name) => `${name} has no session mark to clear.`;
 /** Why a session not cleared cannot be cleared: its record holds no mark that can be read (the gate holds it all the same). */
 const markUnreadable = (name) => `${name}'s session mark cannot be read: ask Jason.`;
-/** Why a video whose import matched a session's words (matchedSession) is answered only as one. */
-const MATCHED_SESSION = "This video holds most of the words of a client or group session: answer it as a session, or ask Jason.";
-/** Whether the episode the import matched in the video of `record` (answer.match, an id, never the record's own) is a client or group
-    session not cleared, or one of its other versions is, in its record or a conflicted copy (finish.js linksOf: holdsSession,
-    sessionsBeside), as Episodes holds it now. The video of `record` is never counted among them: once it is a version of the match
-    and marked a session itself, its own mark must not hold its clearing back (as sessionAmong leaves out the session being
-    cleared). And for a clearing of its mark (`clearing`, with the video's own `folder`), a match among the video's own versions (the
-    same first id) says nothing: each mark of a set is cleared by a click of its own, and the video cleared is then held as a session
-    while another of them is marked (STILL_HELD). A match outside its own versions still counts. A match this Mac cannot read says
-    nothing. */
-function matchedSession(links, record, { clearing = false, folder = null } = {}) {
-  const id = record.answer && typeof record.answer === "object" ? record.answer.match : null;
-  if (typeof id !== "string" || id === record.id) return false;
-  const match = links.find(id);
-  if (!match) return false;
-  if (clearing && links.firstOf(match.record, match.folder) === links.firstOf(record, folder)) return false;
-  return links.holdsSession(match) || links.sessionsBeside(match.record, match.folder).some((one) => one.record.id !== record.id);
-}
 /** Why a video one of whose other versions is a client or group session not cleared is answered only as a session: `name` is the
     video being answered. */
 const heldAnswer = (name) => `${name} is a version of a client or group session: answer it as a session too, or ask Jason. Nothing was written.`;
