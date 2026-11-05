@@ -153,6 +153,23 @@ describe("the timeline a push hands to Final Cut", () => {
       t.done();
     }
   });
+  it("keeps the markers of Claude's graphic ideas on an episode read before the words file, from the plan's own phrase words (the final review, fix 5)", async () => {
+    const cues = [{ n: 1, words: "know your costs", kind: "graphic", show: "A chart of what it costs", seconds: 4, style: null, phrase: "p7" }];
+    const ideas = (xml) => tags(xml, "marker").filter((m) => m.value.startsWith("Graphic idea")).map((m) => [m.start, m.value]);
+    // With its words file, the markers are where the words are said; without it, they are in the same place, from the words the plan holds.
+    const withWords = episode({}, {}, episodeFiles({ claude: { graphicCues: cues } }));
+    const asked = { ...withWords.found.record, version: 2, spellings: [["Sallie", "Sally"]] };
+    const wanted = ideas((await timelineFor({ ...withWords.found, record: asked }, "main", withWords.t.ctx)).xml);
+    assert.deepEqual(wanted, [["459459/30000s", "Graphic idea: A chart of what it costs"]]);
+    withWords.t.done();
+    const made = episodeFiles({ claude: { graphicCues: cues } });
+    delete made.files["Pricing talk.words.json"];
+    const { t, found } = episode({}, {}, made);
+    const built = await timelineFor({ ...found, record: { ...found.record, version: 2, spellings: [["Sallie", "Sally"]] } }, "main", t.ctx);
+    assert.deepEqual(ideas(built.xml), wanted);
+    assert.match(built.told.join(" "), /no Pricing talk\.words\.json, so no captions are drawn/);
+    t.done();
+  });
   it("reads a phone photo's size as it is shown, turned upright, from a JPEG whose frame comes after a large EXIF part", async () => {
     const { t, found } = episode();
     mkdirSync(join(found.folder, "media"), { recursive: true });
