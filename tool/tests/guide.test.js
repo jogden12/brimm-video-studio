@@ -1005,10 +1005,10 @@ describe("the step of a planned video whose footage is being made into one video
     assert.equal(nextFor(plan({ ...SCRIPT, joining: true, joinFailed: true }), NOTES, NOW).stage, "joining");
     assert.equal(FAILED, 'Its footage could not be made into one video. Say "how far is it?" to see why.');
   });
-  it("is the step it was for a plan with neither, and for an explainer, which has no footage to join", () => {
+  it("is the step it was for a plan with neither; an explainer's run takes its voice in (PR H6, guide: explainer.test.js)", () => {
     assert.equal(nextFor(plan(SCRIPT), NOTES, NOW).stage, "footage");
     assert.equal(nextFor(plan({ ...SCRIPT, joining: false, joinFailed: false }), NOTES, NOW).stage, "footage");
-    for (const flags of [{ joining: true }, { joinFailed: true }]) assert.equal(nextFor(plan({ route: "explainer", voice: null, ...flags }), NOTES, NOW).stage, "film");
+    for (const [flags, stage] of [[{ joining: true }, "joining"], [{ joinFailed: true }, "join-failed"]]) assert.equal(nextFor(plan({ route: "explainer", voice: null, ...flags }), NOTES, NOW).stage, stage);
   });
   it("comes before the BRIMM Ops page's steps and changes none of them", () => {
     for (const planned of [{ ...SCRIPT, joining: true }, { ...SCRIPT, joinFailed: true }]) {

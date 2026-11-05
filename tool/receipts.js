@@ -75,8 +75,11 @@ export function notSessionCardOf({ label, came = null }) {
 export const PLANNED_Q = (label) => `Is ${label} for a planned video?`;
 /** The planned card's answer for a plan, by its title: "Footage for "Too many SKUs"". Her answer on the planned card says which plan. */
 export const footageOption = (title) => `Footage for "${title}"`;
-/** A plan's title out of its answer on the planned card, or null for any other text. */
-const titleOfOption = (text) => /^Footage for "([\s\S]+)"$/.exec(text)?.[1] ?? null;
+/** The planned card's answer for an explainer, by its title (PR H6): "The voiceover for "Why SKUs sink you"". A video of sound alone is offered an
+    explainer, as a video with a picture is offered a script's footage; the card holds either kind of answer. */
+export const voiceoverOption = (title) => `The voiceover for "${title}"`;
+/** A plan's title out of its answer on the planned card, whether it is footage for a script or the voiceover of an explainer, or null for any other text. */
+const titleOfOption = (text) => /^(?:Footage for|The voiceover for) "([\s\S]+)"$/.exec(text)?.[1] ?? null;
 /** The planned card's last answer: the video is for no plan. */
 const NOT_PLANNED = "No";
 /** The most plans the planned card offers. */
@@ -163,7 +166,7 @@ export function formOf(questions) {
       const label = text.slice(0, -after.length);
       if (fits(questions, notSessionCardOf({ label, came: how }))) return { label, form: "not-a-session" };
     }
-    // The planned card: one to three plans offered as Footage for their titles, then No.
+    // The planned card: one to three plans offered as Footage for their titles, or The voiceover for their titles (PR H6), then No.
     const planned = /^Is ([\s\S]+) for a planned video\?$/.exec(asked[0][0]);
     if (planned) {
       const answers = asked[0][1];
@@ -317,10 +320,28 @@ export function receiptWhy({ home, expected, now }) {
     or one the card did not offer. */
 export function expectedFootage({ label, title, as, client, offeredNow }) {
   const option = footageOption(title);
-  const stillOffered = (offered) => Array.isArray(offered) && offered.length >= 2 && offered[offered.length - 1] === NOT_PLANNED
-    && offered.slice(0, -1).every((one) => typeof one === "string" && offeredNow.includes(one)) && offered.includes(option);
   return [
-    { form: "planned", answers: { [PLANNED_Q(label)]: option }, offered: stillOffered },
+    { form: "planned", answers: { [PLANNED_Q(label)]: option }, offered: stillOffered(option, offeredNow) },
     { form: "part", answers: { [SHOT_Q(label)]: SHOT_ANSWERS[as] ?? "", [CLIENT_Q(label)]: client === true ? "Yes" : "No" } }
   ];
+}
+
+/** The answers `footage … voiceover` needs a receipt of (PR H6), for the video called `label`, which came as `came` ("zoom", "sound" or null when the
+    record does not say: how the not-a-session card is worded), made the voiceover of the explainer called `title`: her answer on the planned card,
+    The voiceover for that title, from a card whose every plan is still offered now (`offeredNow`, as above, whichever kind of answer a plan is), and,
+    as `kind` asks of a video that is sound alone, her answer "It is not a session" on the not-a-session card. Sound alone has no part card. */
+export function expectedVoiceover({ label, title, came = null, offeredNow }) {
+  const option = voiceoverOption(title);
+  return [
+    { form: "planned", answers: { [PLANNED_Q(label)]: option }, offered: stillOffered(option, offeredNow) },
+    { form: "not-a-session", answers: { [notSessionCardOf({ label, came }).questions[0].question]: NOT_SESSION } }
+  ];
+}
+
+/** Whether the card a receipt kept (its `offered`, every answer the planned card offered, in order) is one whose every plan is still offered now
+    (`offeredNow`: the planned card's answers for each plan a video may be for now, as footageOption and voiceoverOption give them) and that offered
+    `option`, her answer, before the No it ends with. */
+function stillOffered(option, offeredNow) {
+  return (offered) => Array.isArray(offered) && offered.length >= 2 && offered[offered.length - 1] === NOT_PLANNED
+    && offered.slice(0, -1).every((one) => typeof one === "string" && offeredNow.includes(one)) && offered.includes(option);
 }

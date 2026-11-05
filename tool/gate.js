@@ -21,8 +21,9 @@ export const SESSION = [...UNANSWERED, "name"];
     package, `name`, and (PR H5b) `join`, the detached run that makes the plan its video once its footage is in, which `plan … join` starts.
     `join` is in no list of a record with no kind but this one: a video not yet answered, one left alone, a part and a session are refused
     it in the gate's words, as `workcopy` is. `leave` says how to drop a plan; every other command is refused, for it is not made from its
-    footage yet. */
-export const PLANNED = ["plan", "name", "join"];
+    footage yet. And (PR H6) `app`, which opens a HeyGen explainer's project before its voice is made: the command itself refuses every plan but
+    that one, in the gate's own words (noFootageWhy), so that a script and an explainer in her voice hear what every other command says. */
+export const PLANNED = ["plan", "name", "join", "app"];
 /** The commands that run for a record with no kind, beside those of UNANSWERED (PR H5a): `footage`, which answers a dropped video as
     footage for a planned video, or takes it back. It runs for a video waiting for its answer, one she left alone, and a part, and for no
     other record: a session not cleared is refused it in the gate's words (it is in none of the lists of a session), and so is a video held
@@ -42,6 +43,8 @@ const NOT_FOR_SESSION = "This is a client or group session: that is not done for
     whether it has footage or none (PR H5b). `leave` is answered by how to drop a plan instead: a plan is not left alone as a video is, it is
     dropped. */
 const NO_FOOTAGE = (record) => `"${shownName(record)}" is a planned video, and it isn't made from its footage yet.`;
+/** The same words, for a command that the gate lets run for a plan and that then refuses it (PR H6: `app` opens a HeyGen explainer's project alone). */
+export const noFootageWhy = NO_FOOTAGE;
 const TO_DROP = (record) => `To drop a plan, say "drop the plan for ${shownName(record)}".`;
 export const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac yet: ask Jason.";
 /** What the training gate says once Jason's check of it is 90 days old or more (settings.js teachingsLapsed): he checks again. */

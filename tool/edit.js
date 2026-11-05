@@ -50,6 +50,8 @@
 //                                         "that's all the footage": the plan's talking parts joined, in the order of its script,
 //                                         into its video (join.js). The detached half, `join --now`, and the working copy's
 //                                         `workcopy --now … --footage`, are runs of its own and in no help
+//   node edit.js plan "<planned>" voice   "the HeyGen voice is done": the voice the app's agent made in a HeyGen explainer's
+//                                         project taken in as the plan's video (explainer.js). `app` opens that project
 //
 // Everything it prints goes into Sallie's Claude chat. So a command that names an episode is checked first against the
 // episode's record (gate.js, asked by findEpisode): for a video not yet answered, and for a client or group session, only a few
@@ -66,7 +68,7 @@ import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
-import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
+import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
@@ -92,7 +94,7 @@ import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, le
 import { pictureNameFault, pictureSize } from "./pictures.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
 import { spelled } from "./final-transcript.js";
-import { GRAPHIC_CUE_KINDS, graphicCuesOf, keptIndexes, keptPhraseSpans, placeGraphicCues } from "./graphic-cues.js";
+import { GRAPHIC_CUE_KINDS, SHOT_KINDS, graphicCuesOf, keptIndexes, keptPhraseSpans, placeGraphicCues } from "./graphic-cues.js";
 import { handoffText, handoffFault } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, VERSION_2 } from "./handoff-v2.js";
 import { presetOf } from "./layers.js";
@@ -116,7 +118,9 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, isMain as inUse, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, guidanceOf, isMain as inUse, mediaOf, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
+import { VOICEOVER } from "./project.js";
+import { openVoiceProject, voiceProjectWhy } from "./explainer.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
 import { historyTail, mainProjectDir, toldTurns, turnTime, versionsOf, whatHappened } from "./app-history.js";
 import { recordingPlacementsIn, timelineTranscript } from "./on-timeline.js";
@@ -127,7 +131,8 @@ import { lookAt, referencesAsked, sayReferences, useIn } from "./references.js";
 import { newPlan, planAsked, planFor, plannedLine, textArg } from "./plan.js";
 import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, mayGoIn, partRefused, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
-import { afterJoin, footageToUse, footageWithheld, joinRun, planProject } from "./join.js";
+import { afterJoin, joinRun } from "./join.js";
+import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -388,7 +393,12 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         the plan written as a raw video or an iPhone clip) and a notice comes when it is
                                         ready; with two or more and no order given, it says the order the script puts them
                                         in and starts nothing. Once they are joined no more talking parts can be added,
-                                        but b-roll and screen recordings still can. An explainer has no footage to join
+                                        but b-roll and screen recordings still can. An explainer has no footage to join:
+                                        its voiceover, once answered, is taken in at once
+  node edit.js plan "<planned>" voice   for "the HeyGen voice is done": take in the voice the app's agent made in a HeyGen
+                                        explainer's project, once it plays one. A detached run copies it out, reads its
+                                        words and makes the plan its video, a short video whose project is that one; a notice
+                                        comes when it is ready
   node edit.js footage "<video>" "<planned>" talking|screen|b-roll --client yes|no [--shot <n>]
                                         answer a dropped video as footage for a planned video: talking to the camera, a
                                         screen recording or b-roll, and whether it shows a client, a client's name or their
@@ -399,6 +409,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         download, a video that holds a client or group session's words, or one held beside a
                                         session. A part is kept out of episodes and the guide; it goes into no project while
                                         it shows a client who has not agreed
+  node edit.js footage "<video>" "<planned>" voiceover [--not-a-session]
+                                        answer a dropped recording of sound alone as the voiceover of an explainer in her
+                                        voice, on the planned card and the not-a-session card: it is taken in at once as the
+                                        plan's video
   node edit.js footage "<video>" none  take a video back from a planned video, until the plan is filmed: it waits for
                                         its answer again, with its cards
   node edit.js plan "<planned>" agreed "<video>"
@@ -1510,8 +1524,22 @@ export async function app(ctx, rest) {
   if (!got.found) return got.code;
   const { found } = got;
   if (recordKind(got.record) === "finished") return refuse(ctx, finishedHasNoProject(got.record.name.text));
+  // A planned video (PR H6): only a HeyGen explainer has a project before it is a video, and no question or Reel is asked of a plan.
+  const isPlan = isPlannedRecord(got.record);
+  if (isPlan) {
+    const why = question ? noFootageWhy(got.record) : voiceProjectWhy(ctx, got.record);
+    if (why) return refuse(ctx, why);
+  }
   if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
   const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
+  if (isPlan) {
+    if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
+    const kit = { cues: graphicCuesOf(got.record.planned.cues, { kinds: SHOT_KINDS }).cues };
+    return openVoiceProject(ctx, { found, record: got.record }, {
+      env: ctx.deps.env, ...ctx.deps.app, cli, guidance: ctx.deps.app?.guidance ?? guidanceOf(ctx.home), cues: kit.cues,
+      save: (next) => save(ctx, { ...found, record: got.record }, next, "")
+    });
+  }
   if (question === "what-happened") return whatHappened(ctx, { found, record: got.record }, { ...ctx.deps.app });
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
   if (question === "versions") return versionsOf(ctx, { found, record: got.record }, { env: ctx.deps.env, ...ctx.deps.app, cli });
@@ -1558,6 +1586,7 @@ async function appReel(ctx, asked, flags) {
   const { found } = got;
   const name = got.record.name.text;
   const { n } = asked;
+  if (isPlannedRecord(got.record)) return refuse(ctx, noFootageWhy(got.record));
   if (recordKind(got.record) === "short video") return refuse(ctx, NO_REELS);
   if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
   const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
@@ -2630,6 +2659,8 @@ export async function finishEpisode(ctx, found, answers = {}) {
     looked.asks.push(reelTitleAsk({ n: part.reel, found: mine && part.project ? projectWordsIn(work, part.project).words : [], opening }));
   }
   for (const line of [...lines, ...looked.stops, ...stops, ...looked.asks]) ctx.say(line);
+  // An explainer in a HeyGen voice (PR H6) is told what YouTube asks of it, ending what the finish found.
+  if (isFromPlan(record) && record.planned.route === "explainer" && record.planned.voice === "heygen") ctx.say(HEYGEN_YOUTUBE);
   if (looked.stops.length || stops.length) {
     ctx.say(looked.looked);
     return 1;
@@ -4219,6 +4250,11 @@ async function workcopy(ctx, rest) {
     if (held.why) return { ok: false, made: [], failed: [held.why], next: "" };
     const video = join(found.folder, held.record.video.file);
     if (!reel) {
+      // An explainer in her voice (PR H6) is a sound alone: its copy is the voice made ready for the page, a copy of no 4K, and no footage is
+      // made for it. An explainer in a HeyGen voice has its voice in its project, so it has nothing to copy.
+      const media = mediaOf(held.record);
+      if (media === null) return { ok: false, made: [], failed: [canNotBeUsed("its voice is made in its HyperFrames project")], next: "" };
+      if (media === VOICEOVER) return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), voice: true }, deps);
       const main = await makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), fourK: Boolean(flags["4k"]) }, deps);
       if (!main.ok || !isFromPlan(held.record)) return main;
       // A video made from a plan has its footage copied after its own video, in the same run. A copy that fails is in the log and costs nothing.
@@ -4485,10 +4521,15 @@ function clipNext(ctx, found, record) {
     the spellings card did before, in its words. A hand-off made already from the import is kept, with the revision the page holds: an
     edited version needs HyperFrames first. Every offer of HyperFrames in these words is left out where this Mac's settings have the app off,
     and on a Mac that hands off version 1 the way that is handed off now (a clip opened in HyperFrames and exported) is named beside the wait. */
+/** What `finish` says at the end of what it found for an explainer in a HeyGen voice, and what it says of any explainer handed off as it is (PR H6). */
+const HEYGEN_YOUTUBE = "It has a HeyGen voice: when you upload it to YouTube, mark it as altered or synthetic content.";
+const EXPLAINER_EXPORT = 'An explainer is made in HyperFrames: export it there, then say "hand it off".';
 async function finishClip(ctx, found, answers) {
   const { record } = found;
   const name = shownName(record);
   const app = Boolean(appOf(ctx.settings));
+  // An explainer (PR H6) is made in HyperFrames, and is never handed off as it is, whether she asked for it or not.
+  if (isFromPlan(record) && record.planned.route === "explainer") return refuse(ctx, EXPLAINER_EXPORT);
   if (!writesV2For(ctx.settings, found.folder, record)) return refuse(ctx, `${handoffFromSpellingsWaits(name)}${app ? ' Or open it in HyperFrames, export it on this Mac and say "hand it off".' : ""}`);
   if (record.finished && Number.isInteger(record.finished.revision)) {
     const how = madeFromImport(record) ? `, from the clip as it was filmed.${app ? " To hand off an edited version, open it in HyperFrames first." : ""}` : ": a spelling changed writes its next revision.";
@@ -6989,7 +7030,7 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
     return {
       name: hidden ? listedAs(ctx, e) : withShortId(shownName(r), r), id: r.id, aliases: [r.id, r.id.slice(-6), hidden ? gatedName(gatedRecord(e), e.held) : shownName(r), ...(hidden ? [] : [e.name])],
       at: Date.parse(r.imported.at), mac: "", drop: null, conflicted: e.read.code === "CONFLICTED", kind: null, waiting: false, heldAsSession: false, elsewhere: false, handoff: null, source: null,
-      planned: { route: r.planned.route, voice: r.planned.voice, footage: footageCounts(parts), waiting: parts.filter((part) => !mayGoIn(part, r.planned)).map((part) => part.record.label || shownName(part.record)), joining, joinFailed }
+      planned: { route: r.planned.route, voice: r.planned.voice, footage: footageCounts(parts), waiting: parts.filter((part) => !mayGoIn(part, r.planned)).map((part) => part.record.label || shownName(part.record)), joining, joinFailed, set: r.planned.set !== null, project: Boolean(r.planned.project) }
     };
   }
   const kind = recordKind(r);
@@ -7041,6 +7082,7 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
     v2,
     app: Boolean(appOf(ctx.settings)),
     placeholder: r.name.placeholder === true,
+    explainer: isFromPlan(r) && r.planned.route === "explainer",
     shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
     finishRunning: running === "finish",
     checking,
@@ -7463,7 +7505,9 @@ function editKit(ctx) {
     newerWhy,
     pending: PENDING_WHY,
     hide: (name) => hideNames(ctx, episodeAt(ctx, name)),
-    calledAs: (found) => calledAs(ctx, found)
+    calledAs: (found) => calledAs(ctx, found),
+    // What `kind` says of a recording that may be a session, before she has answered the not-a-session card: its words and its card (PR H6: the voiceover).
+    askIfSession: (name, record) => refuseAnswer(ctx, name, record, ASK_IF_SESSION)
   };
 }
 
@@ -7501,7 +7545,9 @@ async function footage(ctx, rest) {
 async function joinCommand(ctx, rest) {
   const { flags } = flagsOf(rest.slice(2), ["parts"]);
   const ids = Array.isArray(flags.parts) && flags.parts.length === 1 ? flags.parts[0].split(",").map((id) => id.trim()) : [];
-  if (rest[0] !== "--now" || !rest[1] || !ids.length || ids.some((id) => id === "")) {
+  // `--voice` (PR H6) takes a HeyGen voice in from the plan's project, and is given with no part.
+  const voice = flags.voice === true && flags.parts === undefined;
+  if (rest[0] !== "--now" || !rest[1] || (flags.voice !== undefined && !voice) || (!voice && !ids.length) || ids.some((id) => id === "")) {
     ctx.say(HELP);
     return 2;
   }
@@ -7526,7 +7572,7 @@ async function joinCommand(ctx, rest) {
   // The result is cleaned late: the parts are hidden while the run reads them (joinRun, kit.hide), after this is made, and a reason that names a file of
   // one (the filing's, Dropbox's, ffmpeg's last words) must not reach the result, or `status`, which says it, with a name in it.
   const result = await runDetached({ home: ctx.home, folder: found.name, clean: lateClean(ctx), command: "join", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
-    const done = await joinRun(ctx, { found }, ids, deps, editKit(ctx));
+    const done = await joinRun(ctx, { found }, voice ? { voice: true } : ids, deps, editKit(ctx));
     started = done.started ?? null;
     return done;
   });

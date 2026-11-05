@@ -1209,7 +1209,7 @@ describe("a script she has, and the plan made from it: the skill's rows and scri
   });
   it("gives an explainer graphic and words cues and no shots, with a voice that is hers or a HeyGen voice she picks, never one made from her own", () => {
     const step = stepOf(7);
-    for (const words of ['run `plan new "<title>" --explainer`', 'give only "graphic" and "words" cues, and no shots', "The voice is hers, which she records from the teleprompter script, or a HeyGen voice she picks in HyperFrames: Jason's standing yes for explainers, never a voice made from her own.", "Add `--voice sallie` or `--voice heygen` once she says which."]) assert.ok(step.includes(words), words);
+    for (const words of ['run `plan new "<title>" --explainer`', 'give only "graphic" and "words" cues, and no shots', "The voice is hers, which she records from the teleprompter script, or a stock HeyGen voice she picks in HyperFrames, never a voice made from her own.", "Add `--voice sallie` or `--voice heygen` once she says which."]) assert.ok(step.includes(words), words);
   });
   it("shows her no command, no path and no flag, and posts, sends and publishes nothing", () => {
     for (const words of ["never show her a command, a path or a flag: say what was done, in plain words.", "Nothing here is posted, sent or published"]) assert.ok(script.includes(words), words);

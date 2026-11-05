@@ -4,24 +4,27 @@
 // filed as the plan's own video: the plan's record, written once more as the video it was waiting to be (episode.js isFromPlan). Its b-roll
 // and screen recordings are made into copies with no sound for the HyperFrames project (workcopy.js) and moved into its media/ (app.js).
 //
-// This first half is pure: the parts' words and what ffprobe printed of them go in, and the order they come in, whether they can be joined,
-// the list and the arguments ffmpeg is given, and the footage a plan's parts give its project come out. The only thing it looks at is whether
-// a part's episode is held (footage.js partHeld), which every consumer of a part asks (PR H5b, ruling 1).
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+// This first half is pure: the parts' words and what ffprobe printed of them go in, and the order they come in, whether they can be joined, and the
+// list and the arguments ffmpeg is given come out. The only thing it looks at is whether a part's episode is held (footage.js partHeld), which every
+// consumer of a part asks (PR H5b, ruling 1). The footage a plan's parts give its project is plan-project.js's (PR H6 moved it there).
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { PIN } from "./hyperframes.js";
+import { voiceCase } from "./explainer.js";
 import { basename, extname, join } from "node:path";
-import { GRAPHIC_CUE_KINDS, cueTokens, graphicCuesOf } from "./graphic-cues.js";
+import { cueTokens } from "./graphic-cues.js";
 import { factsOf, framesASecond, probeArgs, streamsOf, soundStream } from "./cuts.js";
-import { isFromPlan, isPart, isPlannedRecord, localStamp, readEpisode, shownName, undone } from "./episode.js";
-import { keepTitle, labelOf, mayGoIn, partHeld, partNamed, partsOf } from "./footage.js";
+import { isFromPlan, isPlannedRecord, localStamp, readEpisode, shownName, undone } from "./episode.js";
+import { keepTitle, labelOf, partHeld, partNamed, partsOf } from "./footage.js";
 import { runningCommand, startDetached } from "./detached.js";
 import { LATE_CHECK_MS, readThrough } from "./dropbox.js";
 import { episodeKind, fileEpisode, pendingFor, writePending } from "./filing.js";
 import { runGuarded } from "./guard.js";
 import { fileSafe } from "./names.js";
+import { FOOTAGE_KINDS } from "./plan-project.js";
 import { lastLine } from "./run.js";
 import { appOf, runsFolder } from "./settings.js";
 import { banner, importInto } from "./unedited.js";
-import { footageCopyPaths, requestWorkCopy, workCopyKey, workCopyLimits } from "./workcopy.js";
+import { requestWorkCopy, workCopyLimits } from "./workcopy.js";
 
 export { isFromPlan };
 
@@ -151,103 +154,18 @@ export const joinArgs = (listFile, output, { video, audio }) => [
   output
 ];
 
-// --- The footage a plan's parts give its project ---
-
-/** The kinds of part that are footage for a project: b-roll and a screen recording. A talking part is joined into the plan's video. */
-const FOOTAGE_KINDS = ["b-roll", "screen"];
-
-/** The file in a project's media/ that the footage of a shot is, whether or not it is there yet: `media/b-roll-2.mp4`, `media/screen-4.mp4`. */
-export const footagePath = (as, shot) => `media/${as}-${shot}.mp4`;
-
-/** The b-roll and screen parts among `parts` (as partsOf lists them) that are footage for the plan `record`, each as { part, as, shot, path }, in
-    the order given. A part gives footage only while it may be used to make something, as far as its episode goes (footage.js partHeld: no
-    conflicted copy, no record a newer brimm-video wrote), and only while its shot is still a shot of its kind in the plan's shot list: `plan …
-    set` may change the shot list after parts exist, and a b-roll part whose shot is a screen recording now, or is not there, gives nothing
-    (ruling 4). Whether her client agreed to it (footage.js mayGoIn) is not asked here: a cue names the file of such a part all the same, and the
-    file goes into a project only once it has. */
-export function footageOf(record, parts) {
-  const shots = list(record?.planned?.shots);
-  return list(parts)
-    .filter((part) => isObject(part) && isPart(part.record) && part.record.partOf.id === record?.id && FOOTAGE_KINDS.includes(part.record.partOf.as))
-    .filter((part) => shots.some((shot) => shot.n === part.record.partOf.shot && shot.kind === part.record.partOf.as))
-    .filter((part) => partHeld(part) === null)
-    .map((part) => ({ part, as: part.record.partOf.as, shot: part.record.partOf.shot, path: footagePath(part.record.partOf.as, part.record.partOf.shot) }));
-}
-
-/** The footage of the plan `record` that may go into its project now (PR H5b): footageOf's, of the parts her client has agreed to or that show no
-    client (footage.js mayGoIn). Every copy of footage that is made, and every file that is moved into a project's media/, is of these and of no other. */
-export const footageToUse = (record, parts) => footageOf(record, parts).filter(({ part }) => mayGoIn(part, record.planned));
-
-/** What a held part (footage.js partHeld) is called in the log. */
-const HELD_SAID = { conflicted: "its episode holds a conflicted copy", newer: "a newer brimm-video wrote its record", unreadable: "its record cannot be read" };
-
-/** The b-roll and screen parts of the plan `record` among `parts` that give no footage now, each as { part, why } in the order given, `why` being
-    what the log says: that its episode is held (conflicted copies, a record a newer brimm-video wrote, a record that cannot be read: ruling 1),
-    that its shot is no longer a shot of its kind in the plan (ruling 4), or that her client has not agreed to it. A part a newer brimm-video wrote
-    is among them whatever its kind, since its record cannot be read as a part's. Talking parts, parts of other plans and what is no part are not. */
-export function footageWithheld(record, parts) {
-  const going = new Set(footageToUse(record, parts).map(({ part }) => part));
-  const shots = list(record?.planned?.shots);
-  return list(parts)
-    .filter((part) => isObject(part) && !going.has(part) && (part.newer === true || (isPart(part.record) && part.record.partOf.id === record?.id && FOOTAGE_KINDS.includes(part.record.partOf.as))))
-    .map((part) => {
-      const held = partHeld(part);
-      if (held) return { part, why: HELD_SAID[held.why] ?? HELD_SAID.unreadable };
-      const { as, shot } = part.record.partOf;
-      if (!shots.some((one) => one.n === shot && one.kind === as)) return { part, why: "its shot is not a shot of its kind in the plan any more" };
-      return { part, why: "her client has not agreed to it" };
-    });
-}
-
-/** The cues of a plan's video with the file each cue that shows footage names, as `material`: a b-roll or a screen cue, which names the shot it
-    shows (`shot`), is given the file of that shot's footage (`media/b-roll-2.mp4`), whether or not the file is in the project yet. A cue of
-    any other kind is left as it is. A cue whose shot has a part that is withheld (footageOf gives nothing of it: its shot is of another kind
-    now, or its episode is held) is given none; and a cue whose shot has no part yet is given the file it will have, so that the project's
-    notes can tell her it has no footage yet. */
-export function withMaterial(cues, record, parts) {
-  const given = footageOf(record, parts);
-  const aPart = (cue) => list(parts).some((part) => isObject(part) && isPart(part.record) && part.record.partOf.id === record?.id && part.record.partOf.as === cue.kind && part.record.partOf.shot === cue.shot);
-  return list(cues).map((cue) => {
-    if (!isObject(cue) || !FOOTAGE_KINDS.includes(cue.kind) || !Number.isInteger(cue.shot)) return cue;
-    const footage = given.find((one) => one.as === cue.kind && one.shot === cue.shot);
-    if (footage) return { ...cue, material: footage.path };
-    return aPart(cue) ? cue : { ...cue, material: footagePath(cue.kind, cue.shot) };
-  });
-}
-
-/** Where the copy of a part's footage is made, as the path of its video, or null while it is not whole there (its video and its facts, workcopy.js
-    footageCopyPaths): the copy is named for its shot and the key of the part's own video, so a part whose video has changed has none. */
-function copyOfFootage(ctx, found, part, shot) {
-  try {
-    const raw = statSync(join(part.folder, part.record.video.file));
-    const paths = footageCopyPaths(ctx.home, found.name, shot, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
-    return existsSync(paths.video) && existsSync(paths.facts) ? paths.video : null;
-  } catch (e) {
-    return null;
-  }
-}
-
-/** What the plan a video was made from gives its main project (PR H5b), once its parts are read from Episodes (`ctx` is edit.js's: { home, root }):
-    { cues, footage }, or null for a record that is no video made from a plan (episode.js isFromPlan). It is read at the moment the project is made
-    and at every open, so that a part her client agrees to later, and a copy made since, are found the next time.
-    - `cues` are the plan's guide's, planned.cues read again as a package's are (graphicCuesOf with every kind of cue), each b-roll and screen cue
-      named after its footage's file (withMaterial), whether or not the file is in yet;
-    - `footage` are the files that may go into the project's media/ (footageToUse), each { path, as, shot, from }: `from` is the copy of the part's
-      footage, made for HyperFrames with no sound (workcopy.js), or null while it is not made.
-    app.js is given this as a function (its `plan` dep) rather than importing it: footage.js reaches app.js through finish.js. */
-export function planProject(ctx, { found, record }) {
-  if (!isFromPlan(record)) return null;
-  const parts = partsOf(ctx.root, record.id, { newer: true });
-  const cues = withMaterial(graphicCuesOf(record.planned.cues, { kinds: GRAPHIC_CUE_KINDS }).cues, record, parts);
-  const footage = footageToUse(record, parts).map(({ part, as, shot, path }) => ({ path, as, shot, from: copyOfFootage(ctx, found, part, shot) }));
-  return { cues, footage };
-}
-
 // --- plan "<planned>" join ["<video>"…]: "that's all the footage" ---
 
 /** Whether a part of the plan is a talking part. A part a newer brimm-video wrote (`newer: true`) is taken for one unless its record says it is
     b-roll or a screen recording: a talking part that cannot be read is refused, and never left out of the video without a word. */
 const isTalking = (part) => (part.newer === true ? !FOOTAGE_KINDS.includes(part.record?.partOf?.as) : part.record.partOf.as === "talking");
+
+/** Whether a part of an explainer is its voiceover (PR H6). A part a newer brimm-video wrote is taken for one unless its record says it is another
+    kind of part: a voiceover that cannot be read is refused, and never left out of the video without a word. */
+const isVoiceover = (part) => (part.newer === true ? !["talking", ...FOOTAGE_KINDS].includes(part.record?.partOf?.as) : part.record.partOf.as === "voiceover");
+
+/** The parts a join takes of the plan `record`: its talking parts (a script's), or its voiceover (an explainer's, PR H6). */
+const takenOf = (record) => (record.planned.route === "explainer" ? isVoiceover : isTalking);
 
 /** The words a talking part is read from, for the order it comes in: the words file its light import filed. [] when it is not there, is not whole
     or cannot be read, and the part then has no place in the script. */
@@ -273,53 +191,68 @@ export function heldWords(part, held, kit) {
   return `${labelOf(part)}: its record cannot be read now. Ask Jason.`;
 }
 
-/** The talking parts of the plan `record`, in the order they come in by its script, and what is wrong with them, from one look at Episodes: { talking,
-    ordered, held } or { why }. `talking` are partsOf's (answered order; a part a newer brimm-video wrote among them), `ordered` the same as
-    partOrder gives them ({ id, label, place }), and `held` the first of them that must not be joined, { part, held }, or null. Each part is hidden
-    from what is said first (kit.hide), and the plan's title is kept (footage.js keepTitle). */
-function talkingOf(ctx, record, kit) {
-  const talking = partsOf(ctx.root, record.id, { newer: true }).filter(isTalking);
-  for (const part of talking) kit.hide(part.name);
-  const first = talking.map((part) => ({ part, held: partHeld(part) })).find(({ held }) => held !== null) ?? null;
-  const ordered = partOrder(talking.map((part) => ({ id: part.record.id, label: labelOf(part), words: wordsOfPart(part) })), record.planned.lines);
-  return { talking, ordered, held: first };
+/** What a join of the plan `record` takes, and every reason it cannot be made, in the one place that knows them (the plan's ruling 1 of PR H6: H5b wrote
+    this sequence twice, in `plan … join` and in the run, which could then have refused differently). `plan … join` (joinFor) is given the words she
+    said for the parts (`videos`), and the run (joinRun) the ids it was started with (`ids`); both ask this, so that what one refuses the other refuses,
+    in the same words. From one look at Episodes, in this order, it refuses with `{ why }`:
+    - an explainer a HeyGen voice reads: its voice is made in its project and taken from there (`plan … voice`), and it has no footage to join;
+    - no part to join: no talking part (a script's), or no voiceover (an explainer's, PR H6);
+    - a part that must not be joined (footage.js partHeld): the words of its episode's conflict, or of its newer record, with its label first;
+    - an explainer with more than one voiceover: it has one voice;
+    - parts that are not each of the plan's, once, in the plan's words with the plan's parts named.
+    Otherwise it gives { parts, ordered, explainer }: `parts` are partsOf's, in the order they are joined, the ones named or the one there is; or null
+    when there are several and none was named, which is for the caller to say the order of (`ordered`: partOrder's { id, label, place } for the talking
+    parts of a script, in the order the script puts them in, and the voiceover alone for an explainer). Each part is hidden from what is said first
+    (kit.hide), and the plan's title is kept (footage.js keepTitle). */
+export function joinCase(ctx, record, kit, { videos = [], ids = null } = {}) {
+  const title = shownName(record);
+  keepTitle(ctx, title);
+  const explainer = record.planned.route === "explainer";
+  if (explainer && record.planned.voice === "heygen") return { why: `"${title}" is an explainer: its voice makes it, and it has no footage to join.` };
+  const taken = partsOf(ctx.root, record.id, { newer: true }).filter(takenOf(record));
+  for (const part of taken) kit.hide(part.name);
+  if (!taken.length) return { why: explainer ? `"${title}" has no voiceover yet: a video needs one.` : `"${title}" has no talking part yet: a video needs at least one.` };
+  const held = taken.map((part) => ({ part, held: partHeld(part) })).find((one) => one.held !== null);
+  if (held) return { why: heldWords(held.part, held.held, kit) };
+  const ordered = explainer
+    ? taken.map((part) => ({ id: part.record.id, label: labelOf(part), place: null }))
+    : partOrder(taken.map((part) => ({ id: part.record.id, label: labelOf(part), words: wordsOfPart(part) })), record.planned.lines);
+  const labels = ordered.map((part) => part.label).join(", ");
+  if (explainer && taken.length > 1) return { why: `"${title}" has more than one voiceover: ${labels}. Take the others back, each with "that's not footage for ${title}".` };
+  if (ids !== null || videos.length) {
+    const wanted = ids !== null ? ids.map((id) => taken.find((part) => part.record.id === id)) : videos.map((word) => partNamed(taken, word));
+    if (wanted.some((part) => !part) || wanted.length !== taken.length || new Set(wanted).size !== taken.length) {
+      return { why: explainer ? `Those aren't the voiceover of "${title}". It is: ${labels}.` : `Those aren't the talking parts of "${title}". They are: ${labels}.` };
+    }
+    return { parts: wanted, ordered, explainer };
+  }
+  return { parts: taken.length > 1 ? null : taken, ordered, explainer };
 }
 
 /** `plan "<planned>" join ["<video>"…]`, for "that's all the footage", once edit.js has found the plan through the gate (its record is `got.record`) and
     plan.js has shown it is no video made from its footage already. In this order it refuses, writing nothing and starting nothing, with 1:
-    - an explainer: its voice makes it, and it has no footage to join;
     - a run at work on the plan, as `kind` says it;
-    - a plan with no talking part yet;
-    - a talking part that must not be joined (partHeld): the words of its episode's conflict, or of its newer record, with its label first;
-    - videos that are not each of the plan's talking parts once, in the plan's words, with the talking parts named.
+    - anything joinCase refuses, in its words: no part to join, a part that must not be joined, videos that are not each of the plan's parts once.
     With two talking parts or more and none named, it says the order the script puts them in (partOrder) and which has no place in it, and that no
-    more can be added once they are joined; it writes nothing and starts nothing, and ends 0. With one talking part, or the parts named, it starts the
-    join run (`join --now <the plan's folder> --parts <ids, in her order>`, detached) and says a notice comes when it is ready. */
+    more can be added once they are joined; it writes nothing and starts nothing, and ends 0. With one part to join (a talking part, or the voiceover of
+    an explainer, PR H6), or the parts named, it starts the join run (`join --now <the plan's folder> --parts <ids, in her order>`, detached) and says
+    a notice comes when it is ready. */
 export function joinFor(ctx, got, asked, kit) {
   const { found, record } = got;
   const title = shownName(record);
   keepTitle(ctx, title);
-  if (record.planned.route === "explainer") return refuse(ctx, `"${title}" is an explainer: its voice makes it, and it has no footage to join.`);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   if (running) return refuse(ctx, `${running} is running for ${kit.calledAs(found)} already. Say it again when it has finished.`);
-  const { talking, ordered, held } = talkingOf(ctx, record, kit);
-  if (!talking.length) return refuse(ctx, `"${title}" has no talking part yet: a video needs at least one.`);
-  if (held) return refuse(ctx, heldWords(held.part, held.held, kit));
-  let ids = ordered.map((part) => part.id);
-  if (asked.videos.length) {
-    const named = asked.videos.map((word) => partNamed(talking, word));
-    if (named.some((part) => !part) || named.length !== talking.length || new Set(named).size !== talking.length) {
-      return refuse(ctx, `Those aren't the talking parts of "${title}". They are: ${ordered.map((part) => part.label).join(", ")}.`);
-    }
-    ids = named.map((part) => part.record.id);
-  } else if (talking.length > 1) {
+  const joined = joinCase(ctx, record, kit, { videos: asked.videos });
+  if (joined.why) return refuse(ctx, joined.why);
+  if (joined.parts === null) {
     ctx.say(`The talking parts of "${title}", in the order of its script:`);
-    ordered.forEach((part, i) => ctx.say(`${i + 1}. ${part.label}${part.place === null ? ", whose words weren't found in the script" : ""}`));
+    joined.ordered.forEach((part, i) => ctx.say(`${i + 1}. ${part.label}${part.place === null ? ", whose words weren't found in the script" : ""}`));
     ctx.say("Once they are joined, no more talking parts can be added.");
     return 0;
   }
-  startDetached(ctx, { command: "join", folder: found.name, args: ["--parts", ids.join(",")] });
-  ctx.say(`"${title}" is being made from its footage. A notice comes when it is ready.`);
+  startDetached(ctx, { command: "join", folder: found.name, args: ["--parts", joined.parts.map((part) => part.record.id).join(",")] });
+  ctx.say(joined.explainer ? `The voiceover of "${title}" is being taken in. A notice comes when it is ready.` : `"${title}" is being made from its footage. A notice comes when it is ready.`);
   return 0;
 }
 
@@ -329,25 +262,54 @@ export function joinFor(ctx, got, asked, kit) {
 export const JOIN_STEP = "Joining the parts";
 
 /** The result of a join run that did not make the plan its video: nothing of the plan was changed, and its result says why in the words the guide
-    sends her to ("how far is it?"). */
-const stopped = (title, why) => ({ ok: false, made: [], failed: [`The footage of "${title}" couldn't be made into one video: ${String(why).replace(/\.$/, "")}.`], next: "" });
+    sends her to ("how far is it?"). The run of an explainer (`voice`, PR H6) takes its voice in, and says so. */
+const stopped = (title, why, voice = false) => ({
+  ok: false, made: [],
+  failed: [`${voice ? `The voice of "${title}" couldn't be taken in` : `The footage of "${title}" couldn't be made into one video`}: ${String(why).replace(/\.$/, "")}.`],
+  next: ""
+});
 
 /** The record the join writes, from the plan's own (`plan`) and the record a new episode would have had (`made`, fileEpisode's `first`): the plan
-    written once more as the video it was waiting to be (episode.js isFromPlan). Its kind is the rule's ("raw", or "short video"), its video, files
-    and fingerprint those of the video that was filed, with the plan's own files kept; its answer says it is answered, by this Mac, now, as no card
-    asked her anything: what was seen of it and how it came are the first talking part's (`seen` is that of the video the light import read, for
-    several parts); and its plan is kept whole but for `filmed`, { at, parts }: when, and which parts, in the order they were joined. Nothing else
-    of the plan's record changes: its name stays its title, and it stays at layout 5. */
-function videoOf(plan, made, { at, machine, ids, came, seen }) {
+    written once more as the video it was waiting to be (episode.js isFromPlan). Its kind is the rule's ("raw", or "short video"; an explainer is
+    always a short video: `kind`), its video, files and fingerprint those of the video that was filed, with the plan's own files kept; its answer
+    says it is answered, by this Mac, now, as no card asked her anything: what was seen of it and how it came are the first talking part's (`seen` is
+    that of the video the light import read, for several parts); and its plan is kept whole but for `filmed`, { at, parts }: when, and which parts,
+    in the order they were joined. Nothing else of the plan's record changes: its name stays its title, and it stays at layout 5.
+    An explainer (PR H6) is given the voice it has, hers when it had none (`voice`); one read by a HeyGen voice (`project`, the entry of its project
+    for `app.projects`, which is the main project in use from now on) moves its project out of its plan, where it was kept until the voice was in. */
+function videoOf(plan, made, { at, machine, ids, came, seen, kind = made.kind, voice = null, project = null }) {
+  const { project: _kept, ...planned } = plan.planned;
   return {
     ...plan,
-    kind: made.kind,
+    kind,
     video: made.video,
     files: { ...plan.files, ...made.files },
     ...(made.fingerprint ? { fingerprint: made.fingerprint } : {}),
     answer: { state: "answered", guess: null, seen, came, by: machine, on: machine, at, private: "no" },
-    planned: { ...plan.planned, filmed: { at, parts: ids } }
+    planned: { ...planned, ...(voice ? { voice } : {}), filmed: { at, parts: ids } },
+    ...(project ? { app: { toolchain: PIN.version, projects: [project] } } : {})
   };
+}
+
+/** Why a recording cannot be the voiceover of an explainer (PR H6), from what ffprobe printed of it, in plain words with the part's label first, or "":
+    it could not be read as a sound; it has a picture (a voiceover is sound alone); it has no sound this Mac's ffmpeg can read. A video with no sound
+    takes no kind (the plan's ruling 22), so one is never filed as the plan's video: this is met before anything is filed. */
+function voiceoverFault(printed, part) {
+  const facts = factsOf(printed);
+  if (!facts) return `${labelOf(part)} could not be read as a sound`;
+  if (facts.height > 0) return `${labelOf(part)} has a picture: a voiceover is sound alone`;
+  if (streamsOf(printed).audio === null) return `${labelOf(part)} has no sound, so it can't be a voiceover`;
+  return "";
+}
+
+/** Why a HeyGen voice cannot be taken in (PR H6), from what ffprobe printed of its copy, or "": it could not be read as a sound; it has a picture (a voice is
+    sound alone, and BRIMM uses no AI avatar); it has no sound this Mac's ffmpeg can read. A video with no sound takes no kind, so this is met before anything is filed. */
+function voiceFault(printed) {
+  const facts = factsOf(printed);
+  if (!facts) return "the voice could not be read as a sound";
+  if (facts.height > 0) return "the voice has a picture: a voice is sound alone";
+  if (streamsOf(printed).audio === null) return "the voice has no sound";
+  return "";
 }
 
 /** The join run, `join --now "<the plan's folder>" --parts <id>[,<id>…]`, once edit.js has found the plan through the gate and holds the plan's episode
@@ -373,31 +335,36 @@ function videoOf(plan, made, { at, machine, ids, came, seen }) {
     The filing itself refuses a record with a kind and a video with no sound, whoever asks.
     `deps` is what edit.js gives the run: `run`, `runGuarded`, `tools`, `model`, `progress`, `log`, `now` (a Date), `clock` (ms), `wait`, `isWhole`,
     `readAll`, `commit` and the rule's `clone` and `sameDisk`. `kit` is edit.js's (notRead, newerWhy, hide). */
-export async function joinRun(ctx, { found }, ids, deps, kit) {
+export async function joinRun(ctx, { found }, asked, deps, kit) {
+  // `asked` is the ids of the parts to join, or { voice: true } (PR H6): the run `plan … voice` starts, which takes a HeyGen voice in from the plan's project.
+  const voice = asked !== null && typeof asked === "object" && !Array.isArray(asked) && asked.voice === true;
+  const ids = voice ? null : asked;
   const episode = { root: ctx.root, machine: ctx.machine, checkout: deps.checkout, home: ctx.home };
   const read = readEpisode(found.folder);
   const named = read.record ? shownName(read.record) : found.name;
+  // An explainer's run takes its voice in, and its failures say so (stopped).
+  let voiced = false;
   const stop = (why) => {
     ctx.say(`${named}: ${why}`);
-    return stopped(named, why);
+    return stopped(named, why, voiced);
   };
   if (!read.record) return stop(String(read.why).replace(/\.$/, ""));
   if (read.newer) return stop(kit.newerWhy(read.record));
   const plan = read.record;
+  if (voice) voiced = true;
   const title = shownName(plan);
   keepTitle(ctx, title);
   const gone = undone(plan, ctx.home);
   if (gone) return stop(gone);
-  if (isFromPlan(plan)) return stop(`"${title}" is made from its footage already.`);
+  if (isFromPlan(plan)) return stop(voice ? `"${title}" has its voice already.` : `"${title}" is made from its footage already.`);
   if (!isPlannedRecord(plan) || plan.archived) return stop(plan.archived ? `The plan for "${title}" was dropped.` : `"${title}" is not a planned video.`);
-  if (plan.planned.route === "explainer") return stop(`"${title}" is an explainer: its voice makes it, and it has no footage to join.`);
-  const { talking, ordered, held } = talkingOf(ctx, plan, kit);
-  if (!talking.length) return stop(`"${title}" has no talking part yet: a video needs at least one.`);
-  if (held) return stop(heldWords(held.part, held.held, kit));
-  const chosen = ids.map((id) => talking.find((part) => part.record.id === id));
-  if (chosen.some((part) => !part) || chosen.length !== talking.length || new Set(chosen).size !== talking.length) {
-    return stop(`Those aren't the talking parts of "${title}". They are: ${ordered.map((part) => part.label).join(", ")}.`);
-  }
+  voiced = plan.planned.route === "explainer";
+  // What it takes and why it cannot is joinCase's, the very function `plan … join` asks (voiceCase's, for a HeyGen voice, which `plan … voice` asks).
+  const heard = voice ? voiceCase(ctx, found, plan) : null;
+  if (heard && heard.why) return stop(heard.why);
+  const taken = voice ? { parts: [], explainer: true } : joinCase(ctx, plan, kit, { ids });
+  if (taken.why) return stop(taken.why);
+  const chosen = taken.parts;
   const tools = deps.tools;
   const work = join(runsFolder(ctx.home), `join-${process.pid}-${ctx.now()}`);
   // The run's own folder is kept once the video is filed, for the late check; until then it is taken away with whatever is in it.
@@ -416,6 +383,45 @@ export async function joinRun(ctx, { found }, ids, deps, kit) {
       }
       return ctx.isWhole(path) ? "" : `Dropbox is still bringing ${labelOf(part)} over to this Mac`;
     };
+    if (voice) {
+      // A HeyGen voice (PR H6): copied out of the project (never moved), read, taken in with the light import's steps, and filed as the plan's video,
+      // with the project as the main project in use, in one write.
+      const copy = join(work, basename(heard.file));
+      copyFileSync(heard.file, copy);
+      const out = join(work, "probe-voice.json");
+      const ran = await deps.run(tools.ffprobe, probeArgs(copy, out));
+      let printed = "";
+      try {
+        printed = ran.code === 0 ? readFileSync(out, "utf8") : "";
+      } catch (e) {
+        printed = "";
+      }
+      const fault = voiceFault(printed);
+      if (fault) return stop(fault);
+      const facts = factsOf(printed);
+      const modified = localStamp(statSync(copy).mtime);
+      const at = localStamp(new Date(ctx.now()));
+      const { project } = heard;
+      const imported = await importInto(copy, {
+        folder: found.folder,
+        record: plan,
+        change: (made) => videoOf(plan, made, {
+          at, machine: ctx.machine, ids: [], came: "sound", seen: made.answer && typeof made.answer.seen === "string" ? made.answer.seen : "", kind: "short video", voice: "heygen",
+          project: {
+            key: "main", name: project.name, madeAt: project.madeAt, on: project.on, from: { file: made.video.file, bytes: made.video.bytes, modified },
+            workingCopy: { bytes: made.video.bytes, seconds: facts.duration, fps: 30 }, opened: project.opened, handover: false, fromSuggestion: null, state: "opened"
+          }
+        })
+      }, { ...deps, episode, work, shown: title, light: true });
+      if (!imported.filed) return stop(String(imported.message || "the work stopped").replace(/^it could not be filed into Episodes: /, ""));
+      kept = true;
+      if (!imported.ok) ctx.say(`${title}: ${imported.message}.`);
+      ctx.say(`${title}: made from its voice, as ${imported.filed.record.id}.`);
+      return {
+        ok: true, made: ["the video from its voice"], failed: [], next: "",
+        started: { kind: imported.filed.record.kind, rev: imported.filed.record.rev, video: imported.filed.record.video.file, explainer: true, project: true }
+      };
+    }
     // What ffprobe prints of each part's video, as a JSON text, "" for one it cannot read.
     const printeds = [];
     for (const [i, part] of chosen.entries()) {
@@ -432,7 +438,8 @@ export async function joinRun(ctx, { found }, ids, deps, kit) {
       }
       printeds.push(printed);
     }
-    const fault = partsFault(printeds);
+    // The talking parts must be joinable by copying; the one voiceover of an explainer is a sound alone, with nothing to compare (PR H6).
+    const fault = taken.explainer ? voiceoverFault(printeds[0], chosen[0]) : partsFault(printeds);
     if (fault) return stop(fault);
     const machine = ctx.machine;
     const at = localStamp(new Date(ctx.now()));
@@ -440,19 +447,24 @@ export async function joinRun(ctx, { found }, ids, deps, kit) {
     const came = chosen[0].record.answer.came ?? null;
     /** Right before the record is written: the talking parts are the ones this run joined, as they were. It throws, and the files are taken out again. */
     const unchanged = () => {
-      const now = partsOf(ctx.root, plan.id, { newer: true }).filter(isTalking);
+      const now = partsOf(ctx.root, plan.id, { newer: true }).filter(takenOf(plan));
       const same = now.length === chosen.length && chosen.every((part) => {
         const again = now.find((one) => one.record.id === part.record.id);
         return again !== undefined && again.record.rev === part.record.rev && partHeld(again) === null;
       });
-      if (!same) throw new Error("a talking part changed while the footage was joined");
+      if (!same) throw new Error(taken.explainer ? "the voiceover changed while it was taken in" : "a talking part changed while the footage was joined");
     };
     const into = (seen) => ({
       folder: found.folder,
       record: plan,
       change: (made) => {
         unchanged();
-        return videoOf(plan, made, { at, machine, ids: joinedIds, came, seen: seen ?? (made.answer && typeof made.answer.seen === "string" ? made.answer.seen : "") });
+        // An explainer is a short video whatever its voice is (a recording of sound alone is an episode by the import's rule), and its voice is hers when
+        // it had none chosen: the voiceover is hers.
+        return videoOf(plan, made, {
+          at, machine, ids: joinedIds, came, seen: seen ?? (made.answer && typeof made.answer.seen === "string" ? made.answer.seen : ""),
+          ...(taken.explainer ? { kind: "short video", voice: plan.planned.voice ?? "sallie" } : {})
+        });
       }
     });
     const fdeps = { ...deps, episode };
@@ -472,7 +484,7 @@ export async function joinRun(ctx, { found }, ids, deps, kit) {
       }
       try {
         filed = fileEpisode({
-          file: video, made: rels.map((rel) => join(part.folder, rel)), at: (to) => to, fcpxml: "", facts, printed: printeds[0], kind: episodeKind(facts) === "short video" ? "short video" : "raw",
+          file: video, made: rels.map((rel) => join(part.folder, rel)), at: (to) => to, fcpxml: "", facts, printed: printeds[0], kind: taken.explainer || episodeKind(facts) === "short video" ? "short video" : "raw",
           read: null, reels: [], work, fingerprint: typeof part.record.fingerprint === "string" ? part.record.fingerprint : "", into: into(part.record.answer.seen)
         }, fdeps);
       } catch (e) {
@@ -515,8 +527,11 @@ export async function joinRun(ctx, { found }, ids, deps, kit) {
       kept = true;
       if (!imported.ok) ctx.say(`${title}: ${imported.message}.`);
     }
-    ctx.say(`${title}: made from its footage, as ${filed.record.id}.`);
-    return { ok: true, made: ["the video from its footage"], failed: [], next: "", started: { kind: filed.record.kind, rev: filed.record.rev, video: filed.record.video.file } };
+    ctx.say(`${title}: made from its ${taken.explainer ? "voice" : "footage"}, as ${filed.record.id}.`);
+    return {
+      ok: true, made: [taken.explainer ? "the video from its voice" : "the video from its footage"], failed: [], next: "",
+      started: { kind: filed.record.kind, rev: filed.record.rev, video: filed.record.video.file, explainer: taken.explainer }
+    };
   } catch (e) {
     return stop(`the work stopped (${e.code || e.message})`);
   } finally {
@@ -534,9 +549,10 @@ export function afterJoin(ctx, found, started, notify = banner) {
   const wrote = readEpisode(found.folder);
   if (!wrote.record || wrote.newer || wrote.record.rev !== started.rev || wrote.record.kind !== started.kind) return;
   const title = shownName(wrote.record);
+  // A HeyGen voice's video (PR H6) is read, for its spellings, but has no working copy made: its project holds the voice already.
   if (ctx.settings.readings !== false) {
     startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", started.kind, "--rev", String(started.rev)] });
-    if (appOf(ctx.settings) !== "" && ctx.isWhole(join(found.folder, started.video))) requestWorkCopy(ctx, { folder: found.name });
+    if (started.project !== true && appOf(ctx.settings) !== "" && ctx.isWhole(join(found.folder, started.video))) requestWorkCopy(ctx, { folder: found.name });
   }
   if (!ctx.agentRunning()) {
     try {
@@ -545,5 +561,5 @@ export function afterJoin(ctx, found, started, notify = banner) {
       ctx.say(`${title}: the launch agent could not be asked to make its late check (${String(e.message).replace(/\.$/, "")}). It is made when the Mac's import next runs.`);
     }
   }
-  notify(`Ready: "${title}" is made from its footage. In Claude, say "what's next?"`);
+  notify(started.explainer === true ? `Ready: "${title}" has its voice. In Claude, say "what's next?"` : `Ready: "${title}" is made from its footage. In Claude, say "what's next?"`);
 }

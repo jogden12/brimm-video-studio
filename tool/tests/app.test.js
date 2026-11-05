@@ -13,7 +13,7 @@ import { openInApp, projectOnAnotherMac, NOT_SET_UP } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { processTable } from "../chain.js";
 import { episodeFault, layoutOf, localStamp, newEpisode, newPlannedEpisode, recordFile, recordText } from "../episode.js";
-import { planProject } from "../join.js";
+import { planProject } from "../plan-project.js";
 import { markChat } from "../held.js";
 import { claudeDirName } from "../places.js";
 import { episodeWork } from "../settings.js";

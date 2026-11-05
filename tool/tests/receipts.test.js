@@ -643,7 +643,11 @@ describe("the planned card and the part card, in code (PR H5a)", () => {
       ["an answer that is Footage for with no title", [options(planned, ['Footage for ""', "No"])]],
       ["an answer that is Footage for with no quotes", [options(planned, ["Footage for Too many SKUs", "No"])]],
       ["an answer that is Footage for in other case", [options(planned, ['footage for "Too many SKUs"', "No"])]],
-      ["an answer that is a voiceover", [options(planned, ['The voiceover for "Too many SKUs"', "No"])]],
+      // The voiceover of an explainer is an answer of the planned card since PR H6 (receipts.js voiceoverOption; tests/explainer.test.js): only a wording that is not its own is no card.
+      ["an answer that is a voiceover worded otherwise", [options(planned, ['The voiceover of "Too many SKUs"', "No"])]],
+      ["an answer that is The voiceover for with no title", [options(planned, ['The voiceover for ""', "No"])]],
+      ["an answer that is The voiceover for with no quotes", [options(planned, ["The voiceover for Too many SKUs", "No"])]],
+      ["an answer that is The voiceover for in other case", [options(planned, ['the voiceover for "Too many SKUs"', "No"])]],
       ["an answer that is Yes", [options(planned, [footageOption(TITLES[0]), "Yes"])]],
       ["the question with no label", [{ ...planned, question: "Is  for a planned video?" }]],
       ["the question worded otherwise", [{ ...planned, question: "Is Talk 3 a planned video?" }]],

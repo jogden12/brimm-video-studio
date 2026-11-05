@@ -28,8 +28,8 @@ describe("the gate's lists", () => {
     assert.deepEqual(SESSION, [...UNANSWERED, "name"]);
     assert.deepEqual(SESSION_TAUGHT, [...SESSION, "teachings", "principles", "ideas", "finish", "reel", "render", "read"]);
   });
-  it("have a list of a planned episode's own (PR H4), apart from the three that hold the one before: plan, name and (PR H5b) join, and no command that needs footage", () => {
-    assert.deepEqual(PLANNED, ["plan", "name", "join"]);
+  it("have a list of a planned episode's own (PR H4), apart from the three that hold the one before: plan, name, (PR H5b) join and (PR H6) app, and no command that needs footage", () => {
+    assert.deepEqual(PLANNED, ["plan", "name", "join", "app"]);
     for (const list of [UNSCOPED, UNANSWERED, SESSION_TAUGHT]) assert.ok(!list.includes("plan"), "plan runs for a plan alone: it is in none of the lists of a video not yet answered or a session");
     for (const name of PLANNED) assert.ok(!UNSCOPED.includes(name) && !UNANSWERED.includes(name), `${name} is no command of the lists before it`);
   });
@@ -62,8 +62,8 @@ describe("the gate and plan (PR H4)", () => {
     assert.equal(gateFor("plan", session(), ON), NOT_FOR_SESSION);
     assert.equal(gateFor("plan", finished, OFF), "", "an answered video is let through, and plan says it is no plan");
   });
-  it("has the planned episode's own list: plan, name and join run, leave says how to drop a plan, and every other command is refused as the plan is not made from its footage yet", () => {
-    assert.deepEqual(PLANNED, ["plan", "name", "join"]);
+  it("has the planned episode's own list: plan, name, join and (PR H6) app run, leave says how to drop a plan, and every other command is refused as the plan is not made from its footage yet", () => {
+    assert.deepEqual(PLANNED, ["plan", "name", "join", "app"]);
     for (const name of COMMAND_NAMES) assert.equal(gateFor(name, PLAN, OFF) === "", UNSCOPED.includes(name) || PLANNED.includes(name), name);
     assert.equal(gateFor("leave", PLAN, OFF), 'To drop a plan, say "drop the plan for Too many SKUs".');
     assert.equal(gateFor("open", PLAN, OFF), '"Too many SKUs" is a planned video, and it isn\'t made from its footage yet.');

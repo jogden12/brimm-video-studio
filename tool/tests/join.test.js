@@ -10,7 +10,8 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HELP, editMain } from "../edit.js";
 import { episodeFault, isPart, isPlannedRecord, layoutOf, localStamp, newEpisode, newPlannedEpisode, readEpisode, recordFile, recordText, writeEpisode } from "../episode.js";
-import { concatList, footageOf, footageToUse, footageWithheld, isFromPlan, joinArgs, partOrder, partsFault, withMaterial } from "../join.js";
+import { concatList, isFromPlan, joinArgs, partOrder, partsFault } from "../join.js";
+import { footageOf, footageToUse, footageWithheld, withMaterial } from "../plan-project.js";
 import { lockOf, readResult, takeEpisodeLock } from "../detached.js";
 import { guardDecision } from "../studio.js";
 import { CHECKOUT, EDIT, NODE } from "./guard-cases.js";
@@ -464,12 +465,21 @@ const JOINING = `"${TITLE}" is being made from its footage. A notice comes when 
 const NO_MORE = "Once they are joined, no more talking parts can be added.";
 
 describe("plan … join, for \"that's all the footage\" (PR H5b)", () => {
-  it("refuses a plan that is an explainer, in words, and writes nothing", async () => {
+  it("refuses a plan that is an explainer read by a HeyGen voice, in words, and writes nothing", async () => {
+    const t = world();
+    assert.equal((await on(depsOf(t), "plan", "new", "Why SKUs", "--explainer", "--voice", "heygen")).code, 0);
+    const before = snapshot(t);
+    const r = await on(depsOf(t), "plan", "Why SKUs", "join");
+    assert.deepEqual([r.code, r.said], [1, [`"Why SKUs" is an explainer: its voice makes it, and it has no footage to join.`]]);
+    assert.deepEqual([snapshot(t), t.started], [before, []]);
+    t.done();
+  });
+  it("takes an explainer in her voice for a plan with a voiceover to join (PR H6): with none yet it says so, in words, and writes nothing", async () => {
     const t = world();
     assert.equal((await on(depsOf(t), "plan", "new", "Why SKUs", "--explainer")).code, 0);
     const before = snapshot(t);
     const r = await on(depsOf(t), "plan", "Why SKUs", "join");
-    assert.deepEqual([r.code, r.said], [1, [`"Why SKUs" is an explainer: its voice makes it, and it has no footage to join.`]]);
+    assert.deepEqual([r.code, r.said], [1, [`"Why SKUs" has no voiceover yet: a video needs one.`]]);
     assert.deepEqual([snapshot(t), t.started], [before, []]);
     t.done();
   });
@@ -646,6 +656,54 @@ const READY = `Ready: "${TITLE}" is made from its footage. In Claude, say "what'
 /** The files of a part's light import, by their names. */
 const LIGHT_NAMES = (stem) => ["srt", "transcript.txt", "words.json", "cut-plan.json", "cut-plan.txt", "rough-cut.srt", "rough-cut.transcript.txt"].map((e) => `${stem}.${e}`);
 const longTalk = (stem) => ({ [`${stem}.mov`]: WIDE({ duration: "120.000000" }) });
+
+describe("plan … join and join --now refuse in the same words (the plan's ruling 1 of PR H6: the refusals are one function)", () => {
+  /** What the plan's command says, and what the run leaves as its reason, for the same plan, parts and words. */
+  async function both(t, { words = [], ids }) {
+    const said = await on(depsOf(t), "plan", TITLE, "join", ...words);
+    const run = await joinRun(t, ids);
+    const reason = resultOf(t).failed[0];
+    const why = reason.startsWith(`The footage of "${TITLE}" couldn't be made into one video: `) ? reason.slice(`The footage of "${TITLE}" couldn't be made into one video: `.length).replace(/\.$/, "") : reason;
+    return { said, run, why };
+  }
+  it("says no talking part, a talking part held by a conflict, and a talking part a newer brimm-video wrote, in one set of words", async () => {
+    const t = world();
+    await planned(t);
+    const none = await both(t, { ids: [idOf(1)] });
+    assert.deepEqual([none.said.code, none.run.code], [1, 1]);
+    assert.equal(`${none.why}.`, none.said.said[0]);
+    t.done();
+    for (const hold of [
+      (one) => writeFileSync(join(one.folder, "record", "0002 (Sallie's conflicted copy 2026-11-04).json"), recordText(one.record)),
+      (one) => writeFileSync(recordFile(one.folder, 3), recordText({ ...one.record, rev: 3, version: 9 }))
+    ]) {
+      const u = world();
+      await planned(u);
+      const one = part(u, 1, { words: SCRIPT[0].split(" ") });
+      hold(one);
+      const held = await both(u, { ids: [one.record.id] });
+      assert.deepEqual([held.said.code, held.run.code], [1, 1]);
+      assert.equal(held.why.replace(/^.*?: /, ""), held.said.said[0].replace(/^.*?: /, "").replace(/\.$/, ""), "the same reason");
+      assert.equal(`${held.why}.`, held.said.said[0].replace(/\.$/, "") + ".");
+      u.done();
+    }
+  });
+  it("says parts that are not each of the plan's talking parts once in one set of words, whether she named them or the run was given their ids", async () => {
+    const t = world();
+    await planned(t);
+    const a = part(t, 1, { words: SCRIPT[0].split(" ") });
+    const b = part(t, 2, { words: SCRIPT[1].split(" ") });
+    part(t, 3, { as: "b-roll", shot: 2 });
+    for (const [words, ids] of [[[labelOf(1)], [a.record.id]], [[labelOf(1), labelOf(1)], [a.record.id, a.record.id]], [[labelOf(1), "Nothing like it"], [a.record.id, "e-20261104-ffffff"]], [[labelOf(1), labelOf(3)], [a.record.id, idOf(3)]]]) {
+      const r = await both(t, { words, ids });
+      assert.deepEqual([r.said.code, r.run.code], [1, 1], words.join(" | "));
+      assert.equal(`${r.why}.`, r.said.said[0], words.join(" | "));
+      assert.equal(r.why, `Those aren't the talking parts of "${TITLE}". They are: ${labelOf(1)}, ${labelOf(2)}`);
+    }
+    assert.ok(b);
+    t.done();
+  });
+});
 
 describe("the join run, with one talking part (PR H5b)", () => {
   it("makes the plan its video: the part's video and its light import's files are cloned in under their own names, and the record is written last as the video", async () => {

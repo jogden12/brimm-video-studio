@@ -377,6 +377,11 @@ function reelsStep(reels, checking) {
 /** What is said of a plan whose footage is being made into one video (PR H5b), and of one whose run to do it ended in a failure. */
 const JOINING = "Its footage is being made into one video. A notice comes when it is ready.";
 const JOIN_FAILED = 'Its footage could not be made into one video. Say "how far is it?" to see why.';
+/** The same, for an explainer, whose voice is taken in (PR H6), and what a HeyGen explainer is told before and after its project is made. */
+const VOICE_JOINING = "Its voice is being taken in. A notice comes when it is ready.";
+const VOICE_JOIN_FAILED = 'Its voice could not be taken in. Say "how far is it?" to see why.';
+const HEYGEN_OPEN = 'Say "open it in HyperFrames" to make it there. Then ask there for a HeyGen voice to read the teleprompter script.';
+const HEYGEN_VOICE = 'In HyperFrames, have a HeyGen voice read the teleprompter script. Then say "the HeyGen voice is done".';
 
 /** The step of a planned episode (PR H4), whose footage is still to come: `film`; and, once a script has some (PR H5a), `footage`, which says
     what it has and that she says when it is all in; and (PR H5b), once she has said so, `joining` while the run that makes its video is at
@@ -385,15 +390,19 @@ const JOIN_FAILED = 'Its footage could not be made into one video. Say "how far 
     A script is filmed to its shot list, and its files dropped in the drop folder. An explainer's voice is hers, recorded from the teleprompter
     script and dropped as sound alone, unless it is a HeyGen voice, which she chooses in HyperFrames (a voice chosen is dropped as sound too,
     PR H6 builds the rest of that route). With no voice chosen yet it is hers: a voice made from hers is never the default. */
-function filmStep({ route, voice, footage = "", joining = false, joinFailed = false }) {
+function filmStep({ route, voice, footage = "", joining = false, joinFailed = false, set = false, project = false }) {
   // Her "that's all the footage" has started the run that makes the video (PR H5b): it is at work, or its last end was a failure and the plan
   // is a plan still. The run at work comes first: a failure before it is the run's before, not this one's.
-  if (route === "script" && joining) return toDo("joining", JOINING);
-  if (route === "script" && joinFailed) return toDo("join-failed", JOIN_FAILED);
+  // An explainer's run (PR H6) takes its voice in, and says so.
+  if (joining) return toDo("joining", route === "script" ? JOINING : VOICE_JOINING);
+  if (joinFailed) return toDo("join-failed", route === "script" ? JOIN_FAILED : VOICE_JOIN_FAILED);
   // A script with footage in (PR H5a) is told what it has: `footage` is the parts counted in words ("2 talking parts, 1 screen recording and 2
   // b-roll clips"), and "" while no part has come, when the step is the one before.
   if (route === "script" && footage) return toDo("footage", `Its footage so far: ${footage}. When it is all in, say "that's all the footage".`);
   if (route === "script") return toDo("film", "Film it to its shot list, then drop the files in your drop folder. The teleprompter script is in its folder in Episodes.");
+  // A HeyGen explainer (PR H6): its project is made in HyperFrames first, and the voice there; she says when the voice is done.
+  if (voice === "heygen" && project) return toDo("heygen-voice", HEYGEN_VOICE);
+  if (voice === "heygen" && set) return toDo("heygen-open", HEYGEN_OPEN);
   if (voice === "heygen") return toDo("film", "When the HyperFrames part is ready, you'll choose the HeyGen voice there.");
   return toDo("film", "Record the voiceover from the teleprompter script, then drop the sound file in your drop folder.");
 }
@@ -429,6 +438,8 @@ function videoNext(facts, notes, now) {
     return toDo("reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".');
   }
   if (!facts.offersAnswered) return toDo("spellings", 'Claude has read it. Say "what did Claude find?", then answer the spellings card.');
+  // An explainer (PR H6) is made in HyperFrames and never handed off as it is: after its spellings its step is the app's.
+  if (clip && facts.explainer) return appStep(facts);
   if (raw) {
     if (facts.placeholder) return toDo("name", 'It needs its name before it is finished. Say "call it", then the name.');
     if (viaApp(facts)) return appStep(facts);

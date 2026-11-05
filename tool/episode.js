@@ -57,9 +57,10 @@ const NO_KIND_STATES = ["needs your answer", "not for brimm-video", "part"];
 const ANSWER_STATES = ["needs your answer", "answered", "not for brimm-video", "part"];
 /** The answer of a part. */
 const PART_STATE = "part";
-/** The kinds of part, which are the kinds of shot in a shot list (SHOT_LIST_KINDS): footage she films talking to the camera, a screen
-    recording of work on the computer, and b-roll. PR H6 adds the voiceover. */
-export const PART_KINDS = Object.freeze(["talking", "screen", "b-roll"]);
+/** The kinds of part: the kinds of shot in a shot list (SHOT_LIST_KINDS), footage she films talking to the camera, a screen recording of work
+    on the computer, and b-roll; and (PR H6) the voiceover, a recording of sound alone that is the voice of an explainer, which is not a shot
+    of any list. */
+export const PART_KINDS = Object.freeze(["talking", "screen", "b-roll", "voiceover"]);
 /** Where a planned episode stands: planned, with no video to answer. It is no state of the card (ANSWER_STATES). */
 const PLANNED_STATE = "planned";
 /** The routes of a planned episode: a video she films from a script, and a video of graphics and words alone (an explainer). The
@@ -146,9 +147,11 @@ const isAnswer = (a) => isObject(a) && (a.state === PLANNED_STATE ? isPlannedAns
 /** What a part is footage for (PR H5a): `{ id, as, shot, client }`, and nothing else. `id` is the planned episode's; `as` the kind of part
     (PART_KINDS); `shot` the number of the shot in the plan's shot list that a screen recording or b-roll shows, a whole number from 1,
     and null for a talking part, which has none (Studio puts the talking parts in order by their words); `client` whether it shows a
-    client, a client's name or their work, which a talking part never does (it is her talking to the camera). */
-const isPartOf = (p) => isObject(p) && Object.keys(p).length === 4 && isId(p.id) && PART_KINDS.includes(p.as) && typeof p.client === "boolean"
-  && (p.as === "talking" ? p.shot === null && p.client === false : Number.isInteger(p.shot) && p.shot >= 1);
+    client, a client's name or their work, which a talking part never does (it is her talking to the camera). A voiceover (PR H6) is sound
+    alone: it has no shot, and no client to ask about, so its `client` is null (not false: nothing was asked). */
+const isPartOf = (p) => isObject(p) && Object.keys(p).length === 4 && isId(p.id) && PART_KINDS.includes(p.as)
+  && (p.as === "voiceover" ? p.shot === null && p.client === null
+    : typeof p.client === "boolean" && (p.as === "talking" ? p.shot === null && p.client === false : Number.isInteger(p.shot) && p.shot >= 1));
 /** Whether a record is a part: no kind, the answer "part" and a whole `partOf`. A part is gated like any video with no kind (gate.js
     gated), and named by its label. The record read whole (faultFor) holds more: layout 5 and a video. */
 export const isPart = (r) => isObject(r) && r.kind === null && isObject(r.answer) && r.answer.state === PART_STATE && isPartOf(r.partOf);
@@ -216,18 +219,27 @@ const isPlannedShot = (s) => isObject(s) && Number.isInteger(s.n) && s.n >= 1 &&
     by its file (whose name may be a client's, and a plan's record is not gated), its label, and the day her click noted the agreement
     (isDay). Nothing else: who agreed, and what she typed, stay on the Mac that noted them (agreements.txt). */
 const isConsent = (c) => isObject(c) && Object.keys(c).length === 3 && isId(c.id) && isText(c.label) && isDay(c.at);
+/** The HyperFrames project of a HeyGen explainer before its voice is taken in (PR H6), as the plan keeps it: `{ name, madeAt, on, opened }`, and nothing
+    else. `name` is the project's folder in the plan's work folder on the Mac `on` that made it, at the moment `madeAt`, and `opened` the moments it was
+    opened in the app since, which `app` adds to. The name is one folder's name: a name that leads anywhere else is none. */
+const isPlannedProject = (p) => isObject(p) && Object.keys(p).length === 4 && isText(p.name) && p.name !== "." && p.name !== ".." && !/[/\\\0]/.test(p.name)
+  && isTime(p.madeAt) && isText(p.on) && Array.isArray(p.opened) && p.opened.every(isTime);
+
 /** A planned episode's `planned` (layout 5), read whole: its route and title; its voice, which an explainer may have and a script
     never does; when and on which Mac it was planned and when its package was last set (`set`, or null before the first); the
     cues, which graphic-cues.js reads and so are only looked at as objects here; the shots; the teleprompter's lines; `filmed`
-    (PR H5): null while there is no footage; and `consent` (PR H5a), once a client's agreement is noted for any part: a list of
-    { id, label, at } (isConsent). A plan with none has none: the key is there only once an agreement is noted. */
+    (PR H5): null while there is no footage; `consent` (PR H5a), once a client's agreement is noted for any part: a list of
+    { id, label, at } (isConsent); and `project` (PR H6), once a HeyGen explainer's project is made: { name, madeAt, on, opened }
+    (isPlannedProject), which only an explainer read by a HeyGen voice has. A plan with none of these has none: each key is there only
+    once there is something to keep in it. */
 const isPlanned = (p) => isObject(p) && PLANNED_ROUTES.includes(p.route) && isText(p.title)
   && (p.voice === null || (p.route === "explainer" && PLANNED_VOICES.includes(p.voice)))
   && isTime(p.at) && isText(p.on) && (p.set === null || isTime(p.set))
   && Array.isArray(p.cues) && p.cues.every(isObject) && Array.isArray(p.shots) && p.shots.every(isPlannedShot)
   && Array.isArray(p.lines) && p.lines.every((line) => typeof line === "string")
   && (p.filmed === null || isTime(p.filmed) || isObject(p.filmed))
-  && (p.consent === undefined || (Array.isArray(p.consent) && p.consent.every(isConsent)));
+  && (p.consent === undefined || (Array.isArray(p.consent) && p.consent.every(isConsent)))
+  && (p.project === undefined || (p.route === "explainer" && p.voice === "heygen" && isPlannedProject(p.project)));
 /** Whether a record is a planned episode, whole: the one record with no kind that is not gated (gate.js gated). It is none unless all
     of these hold, and a record that only claims to be planned, failing any, is a video not yet answered to every command:
     - its answer says "planned" and is a planned answer's (isPlannedAnswer);

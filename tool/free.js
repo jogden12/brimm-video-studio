@@ -7,7 +7,8 @@
 // It deletes files, so it takes nothing it has not named, and names nothing it has not looked at:
 //   - The paths are named: the episode's folder of copies (workcopy.js workCopyDir), and for each project of the record's
 //     `app.projects` but a session clip's, its renders/; and the media/recording.mp4 of the main project in use alone, because that
-//     is the one project `app` puts the video back into. A Reel's video, and a kept project's, cannot be made again yet
+//     is the one project `app` puts the video back into (an explainer's, PR H6, holds media/voiceover.m4a instead, and one in a HeyGen
+//     voice no video at all: app.js mediaOf). A Reel's video, and a kept project's, cannot be made again yet
 //     (app-reel.js makes a Reel once and opens it as it is), so they stay, and it says so. Nothing is found by listing a folder or by
 //     a pattern, so a file that only looks like one of them stays. A session clip's project is not named at all (`clips … done` is
 //     its way out), and neither is a folder the record does not list. The record comes from Dropbox, where the other Mac writes it,
@@ -35,7 +36,7 @@
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
-import { changedSince, isMain, plainName } from "./app.js";
+import { changedSince, isMain, mediaOf, plainName } from "./app.js";
 import { runningCommand } from "./detached.js";
 import { heldText, shownName } from "./episode.js";
 import { sizeText } from "./kinds.js";
@@ -73,7 +74,8 @@ const folded = (name) => name.normalize("NFC").toLowerCase();
 
 /** The paths `free` names for the episode in `folder` on this Mac, from the record: { work, copies, projects, clips }, where `work`
     is the episode's own folder in BRIMM Video Work, `copies` its folder of copies, each of `projects` is { key, name, dir, video,
-    stays, renders }: a project's folder, its renders, and its media/recording.mp4, which is `video` (to be taken) for the main
+    stays, renders }: a project's folder, its renders, and its video (media/recording.mp4, or the explainer's media: mediaOf; none, null, when the
+    project holds no media), which is `video` (to be taken) for the main
     project in use, the first `isMain` of the record as `app` opens it, and `stays` (to be left) for any other; and each of `clips`
     is { name, dir }, a session clip's folder, which `free` looks at but never names. Pure: nothing is looked at. A project is named
     once, however its name is spelled, and not when its name is not one plain folder name or is a session clip's. Throws for a folder
@@ -91,7 +93,10 @@ export function freePaths(home, folder, record) {
     if (!freeable(project) || !plainName(project.name) || clipNames.has(project.name) || seen.has(folded(project.name))) continue;
     seen.add(folded(project.name));
     const dir = join(work, project.name);
-    const video = join(dir, "media", "recording.mp4");
+    // The video a project holds is the record's media (app.js mediaOf: an explainer's is its voiceover, a sound alone, and in a HeyGen voice none at all, since
+    // the voice was made in its project: PR H6) for the main project, and the recording's for a Reel's.
+    const media = project.key === "main" ? mediaOf(record) : "media/recording.mp4";
+    const video = media === null ? null : join(dir, media);
     projects.push({ key: project.key, name: project.name, dir, video: project === inUse ? video : null, stays: project === inUse ? null : video, renders: join(dir, "renders") });
   }
   const clips = clipped.filter((project) => plainName(project.name)).map((project) => ({ name: project.name, dir: join(work, project.name) }));

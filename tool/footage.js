@@ -25,11 +25,12 @@ import { appendFileSync, chmodSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { PART_KINDS, heldElsewhere, isFromPlan, isPart, isPlannedRecord, kindOf, localStamp, readEpisode, recordNumbers, shownName, undone, acceptRev } from "./episode.js";
 import { episodesFolder, episodeWork } from "./settings.js";
+import { runningCommand, startDetached } from "./detached.js";
 import { linksOf } from "./finish.js";
 import { gatedName } from "./gate.js";
 import { isSeenLine, isZoomName, withoutNames } from "./kinds.js";
 import { lockFor } from "./loosened.js";
-import { NO_RECEIPT, expectedFootage, footageOption, partCardOf, plannedCardOf, receiptWhy } from "./receipts.js";
+import { NO_RECEIPT, expectedFootage, expectedVoiceover, footageOption, notSessionCardOf, partCardOf, plannedCardOf, receiptWhy, voiceoverOption } from "./receipts.js";
 import { localDay } from "./shared/text.js";
 import { SHOT_SAID, counted, dayText, joined, plainly, sentence, textArg } from "./sentences.js";
 
@@ -58,6 +59,10 @@ const joinedPlan = (record) => isFromPlan(record) && record.planned.route === "s
 /** Whether a plan takes more footage: it waits for its footage, or it is made from it and not handed off yet. */
 const takesFootage = (record) => waitsForFootage(record) || joinedPlan(record);
 
+/** Whether a record is an explainer that waits for its voice (PR H6): a plan whose route is an explainer, whose voice is hers or not chosen yet (a
+    HeyGen voice is made in the plan's HyperFrames project, and no recording is its voiceover), not filmed and not dropped. */
+const waitsForVoiceover = (record) => isPlannedRecord(record) && record.planned.route === "explainer" && record.planned.voice !== "heygen" && !record.archived && record.planned.filmed === null;
+
 /** The moment a plan was planned, in milliseconds, for ordering: 0 for one that cannot be read. */
 const plannedAt = (record) => {
   const at = Date.parse(record.planned.at);
@@ -65,20 +70,25 @@ const plannedAt = (record) => {
 };
 
 /** The plans a video may be for, from the records `records` (the plans among them are looked at, every other record passed over): each as
-    { record, option }, the plan's record and its answer on the planned card, as Footage for its title (receipts.js footageOption), newest
-    first by the moment it was planned, and at most three. A plan is offered for a video with a picture (`picture`): a script whose package is
-    set (a plan with no shot list yet has nothing to show), not filmed and not dropped; and (PR H5b) a video made from a plan with no hand-off
-    yet (joinedPlan), which takes b-roll and a screen recording still (`footage` refuses it a talking part). `sound` is whether the video has any;
-    a picture with none is footage all the same (b-roll and a screen recording go in mute), and PR H6 offers the voiceover of an explainer
-    to sound alone. A plan is named as every line names it (shownName), the name she gave it or its title. */
+    { record, option }, the plan's record and its answer on the planned card, newest first by the moment it was planned, and at most three. A plan
+    is named as every line names it (shownName), the name she gave it or its title. Which plans, and which answer, is by the video:
+    - a video with a picture (`picture` true) is offered a script whose package is set (a plan with no shot list yet has nothing to show), not
+      filmed and not dropped, and (PR H5b) a video made from a plan with no hand-off yet (joinedPlan), which takes b-roll and a screen recording
+      still (`footage` refuses it a talking part), as Footage for its title (receipts.js footageOption). `sound` is whether the video has any;
+      a picture with none is footage all the same (b-roll and a screen recording go in mute);
+    - a video of sound alone (`picture` false, and sound) is offered each explainer whose voice is hers or not chosen yet (waitsForVoiceover),
+      whose package is set, as The voiceover for its title (receipts.js voiceoverOption) (PR H6). A HeyGen explainer is offered to nothing;
+    - a video the import could not read (`picture` null), and a file with no picture and no sound, are offered none. */
 export function plannedOffers(records, { picture = false, sound = true } = {}) {
-  if (!Array.isArray(records) || picture !== true) return [];
+  if (!Array.isArray(records)) return [];
+  const aVoice = picture === false && sound !== false;
+  if (picture !== true && !aVoice) return [];
   return records
-    .filter((record) => takesFootage(record) && record.planned.set !== null)
+    .filter((record) => (aVoice ? waitsForVoiceover(record) : takesFootage(record)) && record.planned.set !== null)
     .map((record, order) => ({ record, order }))
     .sort((a, b) => plannedAt(b.record) - plannedAt(a.record) || a.order - b.order)
     .slice(0, MOST_OFFERS)
-    .map(({ record }) => ({ record, option: footageOption(shownName(record)) }));
+    .map(({ record }) => ({ record, option: (aVoice ? voiceoverOption : footageOption)(shownName(record)) }));
 }
 
 /** The episodes in Episodes, each as { name, folder, record }, by the record in force of each: the newest whole record, read past any
@@ -180,7 +190,7 @@ export const mayBeUsed = (part, planned) => mayGoIn(part, planned) && partHeld(p
 // --- What is said of the footage ---
 
 /** A kind of part, counted: "2 talking parts", "1 screen recording", "3 b-roll clips". */
-const COUNTED = { talking: ["talking part"], screen: ["screen recording"], "b-roll": ["b-roll clip"] };
+const COUNTED = { talking: ["talking part"], screen: ["screen recording"], "b-roll": ["b-roll clip"], voiceover: ["voiceover"] };
 
 /** The parts of a plan counted by their kind, in a sentence's words: "2 talking parts, 1 screen recording and 2 b-roll clips". A kind with
     none is left out; "" for no part. */
@@ -189,12 +199,13 @@ export function footageCounts(parts) {
 }
 
 /** A part in the lines of `plan "<planned>"`: "Footage: <label>, talking to the camera.", "Footage: <label>, b-roll for shot 2." or
-    "Footage: <label>, a screen recording for shot 4."; and for a part that shows a client " It shows a client, and waits for their
-    agreement." or " It shows a client, who agreed on 4 November.", as the plan's `planned` holds. A part is named by its label. */
+    "Footage: <label>, a screen recording for shot 4."; "Footage: <label>, the voiceover." for the voiceover of an explainer (PR H6); and for a
+    part that shows a client " It shows a client, and waits for their agreement." or " It shows a client, who agreed on 4 November.", as the
+    plan's `planned` holds. A part is named by its label. */
 export function partLine(part, planned) {
   const { record } = part;
   const { as, shot, client } = record.partOf;
-  const what = as === "talking" ? SHOT_SAID.talking : `${SHOT_SAID[as]} for shot ${shot}`;
+  const what = as === "voiceover" ? "the voiceover" : as === "talking" ? SHOT_SAID.talking : `${SHOT_SAID[as]} for shot ${shot}`;
   const agreed = client ? (Array.isArray(planned?.consent) ? planned.consent.find((one) => isObject(one) && one.id === record.id) : undefined) : undefined;
   const asked = !client ? "" : agreed ? ` It shows a client, who agreed on ${dayText(agreed.at)}.` : " It shows a client, and waits for their agreement.";
   return `Footage: ${record.label || shownName(record)}, ${what}.${asked}`;
@@ -204,8 +215,10 @@ export function partLine(part, planned) {
 
 /** What `footage` is told, from the words after the command and its flags (edit.js flagsOf gives them, with --client and --shot taking a value
     each): { form: "set", video, planned, as, client, shot } for `footage "<video>" "<planned>" talking|screen|b-roll --client yes|no [--shot
-    <n>]`, `client` true or false and `shot` a whole number from 1 or null, and { form: "none", video } for `footage "<video>" none`; or null for
-    anything else, which is the help. The video and the plan are one word each, as every command has them. */
+    <n>]`, `client` true or false and `shot` a whole number from 1 or null; { form: "set", video, planned, as: "voiceover", client: null, shot:
+    null, notASession } for `footage "<video>" "<planned>" voiceover [--not-a-session]` (PR H6), which takes no --client and no --shot, and
+    `notASession` her answer on the not-a-session card; and { form: "none", video } for `footage "<video>" none`; or null for anything else,
+    which is the help. The video and the plan are one word each, as every command has them. */
 export function footageAsked(words, flags) {
   const [video, second, third, ...more] = words;
   const said = (word) => typeof word === "string" && word.trim() !== "";
@@ -213,7 +226,9 @@ export function footageAsked(words, flags) {
   if (!said(video) || !said(second)) return null;
   if (second === "none" && third === undefined) return only() ? { form: "none", video } : null;
   const as = typeof third === "string" ? third.toLowerCase() : "";
-  if (more.length || !PART_KINDS.includes(as) || !only("client", "shot")) return null;
+  if (more.length || !PART_KINDS.includes(as)) return null;
+  if (as === "voiceover") return only("not-a-session") ? { form: "set", video, planned: second, as, client: null, shot: null, notASession: flags["not-a-session"] === true } : null;
+  if (!only("client", "shot")) return null;
   const client = Array.isArray(flags.client) && flags.client.length === 1 ? String(flags.client[0]).trim().toLowerCase() : "";
   if (!["yes", "no"].includes(client)) return null;
   let shot = null;
@@ -237,17 +252,31 @@ export function pictureOf(record) {
 /** Whether a video came from Zoom, by how the import saw it come or by its file's name: a Zoom download is never footage. */
 const fromZoom = (record) => (isObject(record.answer) && record.answer.came === "zoom") || (isObject(record.video) && isZoomName(record.video.file));
 
+/** The line of the planned card for the video called `label` (receipts.js plannedCardOf), as `episodes` prints it, given the plans offered
+    (plannedOffers): the card as JSON, which her skill asks as it is. */
+const plannedLine = (label, offers) => `    Planned card: ${JSON.stringify(plannedCardOf({ label, offers }))}`;
+
 /** The lines of the planned card and the part card for the video called `label` (receipts.js plannedCardOf, partCardOf), each as `episodes`
     prints it, given the plans offered (plannedOffers): one line each, as JSON, which her skill asks as it is. */
-export const cardLines = (label, offers) => [`    Planned card: ${JSON.stringify(plannedCardOf({ label, offers }))}`, `    Part card: ${JSON.stringify(partCardOf({ label }))}`];
+export const cardLines = (label, offers) => [plannedLine(label, offers), `    Part card: ${JSON.stringify(partCardOf({ label }))}`];
 
-/** The two cards `episodes` prints under the video waiting for her answer whose record is `record`, called `label`, as lines, or [] when a plan
-    is not offered to it: it came from Zoom, it has no picture or the import could not say, it is `blocked` (its Maybe line is a session's, or it
-    is held beside a session: edit.js says), or no plan waits for footage among `records` (plannedOffers). */
+/** The cards `episodes` prints under the video waiting for her answer whose record is `record`, called `label`, as lines, or [] when a plan is not
+    offered to it: it came from Zoom, it is `blocked` (its Maybe line is a session's, or it is held beside a session: edit.js says), the import
+    could not say whether it has a picture, or no plan is offered to it among `records` (plannedOffers). A video with a picture is offered the
+    scripts that wait for footage, and given the planned card and the part card; a video of sound alone (PR H6) is offered the explainers that wait
+    for a voice, and given the planned card alone: a voiceover is asked no kind of shot and no client. */
 export function footageCards({ record, label, records, blocked = false }) {
-  if (blocked || !isObject(record) || !isObject(record.video) || fromZoom(record) || pictureOf(record) !== true) return [];
-  const offers = plannedOffers(records, { picture: true, sound: record.video.sound !== false });
-  return offers.length ? cardLines(label, offers) : [];
+  if (blocked || !isObject(record) || !isObject(record.video) || fromZoom(record)) return [];
+  const picture = pictureOf(record);
+  if (picture === true) {
+    const offers = plannedOffers(records, { picture: true, sound: record.video.sound !== false });
+    return offers.length ? cardLines(label, offers) : [];
+  }
+  if (picture === false && record.video.sound !== false) {
+    const offers = plannedOffers(records, { picture: false, sound: true });
+    return offers.length ? [plannedLine(label, offers)] : [];
+  }
+  return [];
 }
 
 /** What `kind` and `leave` say of a part: it is footage for the plan called `title` (or for a planned video that is not on this Mac, when
@@ -282,8 +311,10 @@ export function keepTitle(ctx, title) {
 
 /** Why the video `record`, called `name`, cannot be footage, in plain words, or "": in this order, it came from Zoom; it holds most of the words
     of a client or group session (its match, or one of its versions is a session not cleared: edit.js's matchedSession and linksOf); it is
-    answered already; it is footage for a plan already; it is sound alone, or the import could not read it. */
-function videoWhy(ctx, found, record, name, plans, kit) {
+    answered already; it is footage for a plan already; it is sound alone, or the import could not read it. For the voiceover of an explainer
+    (`voiceover`, PR H6) it is the other way about at the end: it is sound alone, or it has a picture (a voiceover is sound alone), or the import
+    could not read it. */
+function videoWhy(ctx, found, record, name, plans, kit, { voiceover = false } = {}) {
   if (fromZoom(record)) return `${name} came from Zoom, and a Zoom download is never footage.`;
   const links = linksOf(ctx.root);
   if (kit.matchedSession(links, record) || links.sessionsBeside(record, found.folder).length > 0) return `${name} holds most of the words of a client or group session, so it is never footage. Ask Jason.`;
@@ -294,6 +325,10 @@ function videoWhy(ctx, found, record, name, plans, kit) {
     return other ? `${name} is footage for "${shownName(other.record)}" already. To change that, say "that's not footage for ${shownName(other.record)}" first.` : `${name} is footage for a planned video already. To change that, say "that's not footage" first.`;
   }
   const picture = pictureOf(record);
+  if (voiceover) {
+    if (picture === true) return `${name} has a picture: a voiceover is sound alone.`;
+    return picture === null ? `${name} could not be read when it was imported, so it can't be a voiceover.` : "";
+  }
   if (picture === false) return `${name} is sound alone, so it can't be footage.`;
   if (picture === null) return `${name} could not be read when it was imported, so it can't be footage.`;
   return "";
@@ -330,11 +365,12 @@ function madeLine({ name, title, as, shot, client }) {
 const receiptsAsked = (ctx) => (ctx.deps.env || process.env).CLAUDECODE === "1" && lockFor(ctx.settings, ctx.deps) === "open";
 
 /** The plans the cards offer when `plan` was named: the three newest (plannedOffers), and the plan named as well when it is older than those,
-    in place of the third, last, as the newest first order has it. */
-function offersNaming(records, plan) {
-  const offers = plannedOffers(records, { picture: true });
+    in place of the third, last, as the newest first order has it. For the voiceover of an explainer (`voiceover`, PR H6) they are the explainers
+    a video of sound alone is offered, and the plan is named by The voiceover for its title. */
+function offersNaming(records, plan, { voiceover = false } = {}) {
+  const offers = plannedOffers(records, voiceover ? { picture: false, sound: true } : { picture: true });
   if (offers.some((offer) => offer.record.id === plan.id)) return offers;
-  return [...offers.slice(0, MOST_OFFERS - 1), { record: plan, option: footageOption(shownName(plan)) }];
+  return [...offers.slice(0, MOST_OFFERS - 1), { record: plan, option: (voiceover ? voiceoverOption : footageOption)(shownName(plan)) }];
 }
 
 /** `footage "<video>" "<planned>" talking|screen|b-roll --client yes|no [--shot <n>]`, once edit.js has found the video through the gate, holds its
@@ -394,6 +430,72 @@ async function makePart(ctx, found, record, name, asked, kit) {
   return 0;
 }
 
+/** `footage "<video>" "<planned>" voiceover [--not-a-session]` (PR H6), once edit.js has found the video through the gate, holds its answer lock and
+    read its record: a recording of sound alone is answered as the voiceover of an explainer, which becomes its video. In this order it refuses, with 1
+    and nothing written:
+    - the plan: none called so waits (it is not filmed or dropped); a script, which takes footage and no voiceover; one a HeyGen voice reads; one
+      whose package is not made yet;
+    - the video: Zoom, a session's words, answered already, footage already, a picture (a voiceover is sound alone), unreadable at the import, and no
+      sound at all (a video with no sound takes no kind, and a voiceover is a voice);
+    - the answer on the not-a-session card: sound alone is often a client or group session, so, as `kind` does, it asks for her answer first;
+    - a plan that has its voiceover already, the other Mac's claim, and a run at work on the plan;
+    - and, under Claude Code on a Mac whose lock is open, a video she has not answered on the planned card and the not-a-session card (NO_RECEIPT and
+      both cards). Sound alone has no part card, and no client to ask about.
+    Then, in this order, the plan is given its voice when it had none (`planned.voice` "sallie", in a record write of its own: an explainer whose
+    voice is not chosen yet is hers once a voiceover is dropped for it), the video's own record is written by the rule as a part (answer "part",
+    `partOf` { id, as: "voiceover", shot: null, client: null }), and the join run is started on the plan with that one part, which takes the voice
+    in as the plan's video. The plan is written for its voice and for nothing else here: the run writes it as a video. */
+async function makeVoiceover(ctx, found, record, name, asked, kit) {
+  const plans = plansIn(ctx.root);
+  const waiting = plans.filter(({ record: one }) => isPlannedRecord(one) && !one.archived && one.planned.filmed === null);
+  const fits = plansCalled(waiting, asked.planned);
+  if (!fits.length) return refuse(ctx, `There's no planned video called "${asked.planned}" waiting for its voiceover.`);
+  if (fits.length > 1) return refuse(ctx, `More than one planned video is called "${asked.planned}": ask Jason.`);
+  const [planFound] = fits;
+  const plan = planFound.record;
+  const title = shownName(plan);
+  keepTitle(ctx, title);
+  if (plan.planned.route === "script") return refuse(ctx, `"${title}" is a script: it takes footage, and no voiceover.`);
+  if (plan.planned.voice === "heygen") return refuse(ctx, `"${title}" is read by a HeyGen voice, so it takes no voiceover.`);
+  if (plan.planned.set === null) return refuse(ctx, `The plan for "${title}" isn't made yet: its guide and its teleprompter script come first.`);
+  const why = videoWhy(ctx, found, record, name, plans, kit, { voiceover: true });
+  if (why) return refuse(ctx, why);
+  // A video with no sound takes no kind (PR H5b, ruling 5), and the voiceover is filed as the plan's video: it must have a voice.
+  if (isObject(record.video) && record.video.sound === false) return refuse(ctx, `${name} has no sound, so it can't be a voiceover.`);
+  if (!asked.notASession) return kit.askIfSession(name, record);
+  const have = partsOf(ctx.root, plan.id, { newer: true }).find((part) => part.record?.partOf?.as === "voiceover");
+  if (have) return refuse(ctx, `"${title}" has its voiceover already: ${labelOf(have)}. To change it, say "that's not footage for ${title}" first.`);
+  const held = heldElsewhere(record, ctx.machine);
+  if (held) return refuse(ctx, kit.beingAnswered(name, held.by));
+  const running = runningCommand(ctx.home, planFound.name, ctx.alive);
+  if (running) return refuse(ctx, `${running} is running for ${kit.calledAs(planFound)} already. Say it again when it has finished.`);
+  const answer = record.answer;
+  const came = answer.came === "zoom" || answer.came === "sound" ? answer.came : null;
+  if (receiptsAsked(ctx)) {
+    // Her receipts are of the cards this video's line prints, and of the plan's title among plans that are each still offered now.
+    const said = (text) => (ctx.hidden && ctx.hidden.names.length ? withoutNames(text, ctx.hidden.names, ctx.hidden.keep, { paths: false }) : text);
+    const offeredNow = plans.filter(({ record: one }) => one.planned.set !== null && (takesFootage(one) || waitsForVoiceover(one))).map(({ record: one }) => (waitsForVoiceover(one) ? voiceoverOption : footageOption)(shownName(one)));
+    const now = ctx.now();
+    const answered = [...new Set([name, said(name)])].some((label) => receiptWhy({ home: ctx.home, expected: expectedVoiceover({ label, title, came, offeredNow }), now }) === "");
+    if (!answered) {
+      ctx.say(NO_RECEIPT);
+      ctx.say(plannedLine(name, offersNaming(plans.map(({ record: one }) => one), plan, { voiceover: true })));
+      ctx.say(`    Card if not a session: ${JSON.stringify(notSessionCardOf({ label: name, came }))}`);
+      return 1;
+    }
+  }
+  if (plan.planned.voice === null) {
+    const code = await kit.save({ name: planFound.name, folder: planFound.folder, record: plan }, { ...plan, planned: { ...plan.planned, voice: "sallie" } }, "");
+    if (code !== 0) return code;
+  }
+  const next = { ...record, answer: { guess: null, seen: "", came: null, ...answer, state: "part", by: ctx.machine, on: ctx.machine, at: localStamp(new Date(ctx.now())), private: "no" }, partOf: { id: plan.id, as: "voiceover", shot: null, client: null } };
+  const code = await kit.save({ ...found, record }, next, "");
+  if (code !== 0) return code;
+  startDetached(ctx, { command: "join", folder: planFound.name, args: ["--parts", record.id] });
+  ctx.say(`${name} is the voiceover for "${title}". It is being taken in now. A notice comes when it is ready.`);
+  return 0;
+}
+
 /** `footage "<video>" none`: a part waits for its answer again, with its cards, until its plan is filmed (PR H5b); after that it is Jason's to fix.
     A video that is no part is told so. The plan's record is not written; an agreement noted for the part stays in it. */
 async function takeBack(ctx, found, record, name, kit) {
@@ -427,8 +529,14 @@ export async function footageFor(ctx, got, asked, kit) {
     return 1;
   }
   const name = gatedName(read.record, Boolean(found.held));
-  return asked.form === "none" ? takeBack(ctx, found, read.record, name, kit) : makePart(ctx, found, read.record, name, asked, kit);
+  if (asked.form === "none") return takeBack(ctx, found, read.record, name, kit);
+  return asked.as === "voiceover" ? makeVoiceover(ctx, found, read.record, name, asked, kit) : makePart(ctx, found, read.record, name, asked, kit);
 }
+
+/** Whether a part is waiting for a client's agreement (PR H6): it shows a client, and the plan holds none for it yet. The voiceover of an explainer
+    shows no client (nothing was asked of it: its `client` is null) and waits for none; mayGoIn alone, which fails closed for anything that is not
+    footage that plainly shows no client, would take it for one. `part` is one of partsOf's. */
+export const waitsForClient = (part, planned) => isObject(part?.record?.partOf) && part.record.partOf.client === true && !mayGoIn(part, planned);
 
 // --- plan "<planned>" agreed "<video>": a client's agreement to being shown in a part ---
 

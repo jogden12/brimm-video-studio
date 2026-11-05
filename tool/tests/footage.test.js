@@ -336,7 +336,8 @@ describe("footageAsked, the words of footage", () => {
     assert.deepEqual(footageAsked(words("Video", "Too many SKUs", "b-roll"), flags("yes", "2")), { form: "set", video: "Video", planned: "Too many SKUs", as: "b-roll", client: true, shot: 2 });
     assert.deepEqual(footageAsked(words("Video", "Too many SKUs", "screen"), flags("No", "12")), { form: "set", video: "Video", planned: "Too many SKUs", as: "screen", client: false, shot: 12 });
     assert.deepEqual(footageAsked(words("Video", "Too many SKUs", "B-ROLL"), flags("YES")), { form: "set", video: "Video", planned: "Too many SKUs", as: "b-roll", client: true, shot: null });
-    for (const as of PART_KINDS) assert.equal(footageAsked(words("V", "P", as), flags("no")).as, as);
+    // Every kind of part but the voiceover (PR H6), which takes no --client and has a form of its own (tests/explainer.test.js).
+    for (const as of PART_KINDS.filter((kind) => kind !== "voiceover")) assert.equal(footageAsked(words("V", "P", as), flags("no")).as, as);
   });
   it("takes a video and none, to take it back", () => {
     assert.deepEqual(footageAsked(words("Video", "none"), {}), { form: "none", video: "Video" });

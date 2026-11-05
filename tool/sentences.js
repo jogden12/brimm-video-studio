@@ -19,6 +19,10 @@ export const counted = (n, one, many = `${one}s`) => `${number(n)} ${n === 1 ? o
 /** A text as a sentence: it ends with a stop, a question or an exclamation mark, or a full stop is put there. */
 export const sentence = (text) => (/[.!?…]["”']?$/.test(text) ? text : `${text}.`);
 
+/** The teleprompter script as a file holds it, from the plan's `lines` (a paragraph each): the lines with a blank line between them and a newline at the
+    end. The plan's own file, teleprompter.txt, is this (plan.js packageFiles), and so is the file an explainer's project holds (PR H6). */
+export const teleprompterText = (lines) => `${lines.join("\n\n")}\n`;
+
 /** How a shot is said where a cue names it, and what a cue of each kind that shows footage shows. */
 export const SHOT_SAID = { talking: "talking to the camera", screen: "a screen recording", "b-roll": "b-roll" };
 

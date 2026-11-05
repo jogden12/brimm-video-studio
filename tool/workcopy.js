@@ -285,10 +285,12 @@ const hdrChain = ({ rate, width, height, stored }) => {
 /** Why a video cannot be made into a working copy by what ffprobe said of it, in plain words, or "": it could not be read or has no
     length (factsOf has nothing), it has no picture (a cover picture is none), or its only sound is in a form this Mac's ffmpeg
     cannot read. A video with no sound at all can be, and is made with none. A copy made `mute` (a footage copy, PR H5b) takes no sound
-    from the video, so what its sound is does not matter. */
-function unusable({ facts, streams, mute = false }) {
-  if (!facts) return "it could not be read as a video";
+    from the video, so what its sound is does not matter. The copy of a voice (`voice`, PR H6: an explainer's voiceover, which is sound alone) is
+    the other way about: it has no picture to need, and a sound it must have, one this Mac's ffmpeg can read. */
+function unusable({ facts, streams, mute = false, voice = false }) {
+  if (!facts) return voice ? "it could not be read as a sound" : "it could not be read as a video";
   const taken = streams || { video: null, audio: null, unreadable: [] };
+  if (voice) return taken.audio !== null ? "" : list(taken.unreadable).length ? "its sound is in a form this Mac can't read" : "there is no sound in it";
   if (!facts.height || taken.video === null) return "there is no picture in it";
   if (!mute && taken.audio === null && list(taken.unreadable).length) return "its sound is in a form this Mac can't read";
   return "";
@@ -326,8 +328,8 @@ export function hasHwaccel(listing, name) {
     - `freeBytes` is the room on the disk the copy is made on, and `rawBytes` the raw video's size: less than twice its size is not
       enough. When the room cannot be measured (it is not a number) nothing is said: a full disk is found out when the copy is
       written, and the job leaves nothing behind then either. */
-export function workCopyFault({ facts, streams, colour, filters, hwaccels, freeBytes, rawBytes, mute = false }) {
-  const cannot = unusable({ facts, streams, mute });
+export function workCopyFault({ facts, streams, colour, filters, hwaccels, freeBytes, rawBytes, mute = false, voice = false }) {
+  const cannot = unusable({ facts, streams, mute, voice });
   if (cannot) return cannot;
   if (isHdr(colour) && !(hasFilters(filters, HDR_FILTERS) && hasHwaccel(hwaccels, HDR_HWACCEL))) return "it is an HDR video, and this Mac can't turn HDR into standard colours: ask Jason";
   if (Number.isFinite(rawBytes) && rawBytes > 0 && Number.isFinite(freeBytes) && freeBytes < 2 * rawBytes) {
@@ -397,6 +399,22 @@ export function workCopyArgs(input, output, { facts, streams = null, colour = nu
   ];
 }
 
+/** The arguments that have ffmpeg make the copy of a voice for HyperFrames (PR H6): the working copy of an explainer's voiceover, which is sound
+    alone, or null when the file has no sound this Mac's ffmpeg can read (`streams`, streamsOf's: the number of the sound to take, which is mapped by
+    its number, as the video's copy maps it). The picture is left out (`-vn`: a sound file may hold a cover picture), the sound is AAC at 48 kHz as
+    every video the tool makes has it, and it is put on the file's own clock first (aresample, the video copy's own: silence where the file has
+    none), so that a time in the voice's words is a time in the copy. Nothing is cut, and no start or length is given. The file is told it is an mp4,
+    so it can be written under another name and given its own when it is whole. */
+export function voiceCopyArgs(input, output, { streams = null } = {}) {
+  if (!streams || !Number.isInteger(streams.audio)) return null;
+  return [
+    "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", input,
+    "-map", `0:${streams.audio}`, "-vn", "-af", "aresample=async=1:first_pts=0",
+    "-sn", "-dn", "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart",
+    "-f", "mp4", output
+  ];
+}
+
 /** A time in seconds as ffmpeg is given it: to the thousandth of a second, which leaves 0.1 + 0.2 as 0.3 and not as
     0.30000000000000004, and never in the exponent form JavaScript writes a very small number in, which ffmpeg cannot read. */
 const secondsText = (seconds) => String(Math.round(Number(seconds) * 1000) / 1000);
@@ -448,6 +466,26 @@ export function footageCopyPaths(home, folder, shot, key) {
   const dir = workCopyDir(home, folder);
   const stem = join(dir, `footage-${shot}-${key}`);
   return { dir, video: `${stem}.mp4`, facts: `${stem}.json` };
+}
+
+/** Where the copy of a voice goes (PR H6), for the episode in `folder` on this Mac: { dir, video, facts }. An explainer in her own voice has a working
+    copy of its voiceover, a sound alone, in the folder of the working copies named by its key as a video's is, and ending .m4a: `<key>.m4a`, its facts
+    beside it as `<key>.json`. Throws for a key workCopyKey could not have made (a copy of 4K is not one: a voice has no picture), and for a folder that
+    workCopyDir refuses. */
+export function voiceCopyPaths(home, folder, key) {
+  if (typeof key !== "string" || !/^\d+-\d+$/.test(key)) throw new Error(`A voice's copy has a key, its file's size and its time, and ${JSON.stringify(key)} is not one.`);
+  const dir = workCopyDir(home, folder);
+  return { dir, video: join(dir, `${key}.m4a`), facts: join(dir, `${key}.json`) };
+}
+
+/** The facts of a finished copy of a voice, read from what ffprobe printed of it, and its size on disk: { seconds, bytes, width: 1080, height: 1920, fps:
+    30, sound: true }, or null when it has no length, no sound or a picture (what ffmpeg wrote is a sound alone). The size and the rate are the page's own
+    (project.js explainerHtml is upright, 1080 by 1920), so that the checks every working copy put into a project passes (app.js copyFits) hold for it
+    as they do for a video's. */
+export function voiceCopyFacts(printed, bytes) {
+  const facts = factsOf(printed);
+  if (!facts || !facts.sound || facts.height > 0) return null;
+  return { seconds: facts.duration, bytes, width: 1080, height: 1920, fps: 30, sound: true };
 }
 
 /** What a Reel's key looks like: the raw file's size, its time, and the two ends of the stretch, each in milliseconds. */
@@ -534,7 +572,7 @@ export function requestWorkCopy(ctx, { folder, fourK = false, reel = 0, footage 
 
 /** What a working copy's own files are called in the folder of the copies, so that the copies for another key are known from
     everything else there by the whole of their names, and nothing else is ever taken away. */
-const COPY_FILE = /^(\d+-\d+(?:-4k)?)\.(?:mp4|json)$/;
+const COPY_FILE = /^(\d+-\d+(?:-4k)?)\.(?:mp4|m4a|json)$/;
 
 /** A file's facts as stat gives them, or nothing when there is no such file or it cannot be looked at. */
 const statOf = (path) => {
@@ -657,11 +695,15 @@ async function keepCues({ cues, stretch, paths, work, shown, write, rename, log 
     - its key is its own video's size and time (never 4K), and its files are `footage-<shot>-<key>.mp4` and `.json`, in the folder of the
       working copies (footageCopyPaths), so that it replaces the same shot's copies of other keys alone;
     - its step in the progress panel is its own (FOOTAGE_STEP), and the log says it is the footage that is made.
+    The copy of a voice (`voice` true, PR H6: an explainer in her own voice, whose video is its voiceover, a sound alone) is made by this very job
+    too, and differs in what is of a sound and not of a picture: it needs a sound this Mac's ffmpeg can read and no picture; ffmpeg is given
+    voiceCopyArgs (the sound alone, AAC at 48 kHz, on the file's clock); the copy is `<key>.m4a` (voiceCopyPaths), never of 4K; it is checked to be a
+    sound of the voice's length; and its facts are voiceCopyFacts' ({ seconds, bytes, width: 1080, height: 1920, fps: 30, sound: true }), the page's own.
     The `deps` are all what it touches: `run` (runProgram) for ffprobe and for ffmpeg's lists of filters and of hardware decoders
     (an HDR video's alone), `runGuarded`, `tools` ({ ffmpeg, ffprobe }), `probe` (a function from a file to what ffprobe printed
     of it, or "": read through `run` when none is given), `freeBytes`, `stat`, `mkdir`, `rename`, `rm`, `readDir`, `write`,
     `progress`, `log`, `now`, `pid`, which names the run's own folder, `faces` and `cues`. */
-export async function makeWorkCopy({ home, folder, video, name, fourK = false, reel = null, footage = null }, deps = {}) {
+export async function makeWorkCopy({ home, folder, video, name, fourK = false, reel = null, footage = null, voice = false }, deps = {}) {
   const {
     run = runProgram, runGuarded: guarded = runGuarded, tools = {}, probe: given, freeBytes = freeOn, stat = statOf, mkdir = mkdirSync,
     rename = renameSync, rm = rmSync, readDir = readdirSync, write = writeFileSync, progress = noProgress, log = () => {}, now = Date.now, pid = process.pid,
@@ -670,7 +712,7 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
   const shown = name || (typeof video === "string" && video ? basename(video) : "a video");
   // What the video is called in what is logged: the Reel's, or HyperFrames'. A footage copy (PR H5b: `footage` is { shot }) is the footage's.
   const for_ = reel !== null && reel !== undefined && Number.isInteger(reel.n) ? `Reel ${reel.n}` : "HyperFrames";
-  const what = footage ? "the footage for HyperFrames" : `the video for ${for_}`;
+  const what = footage ? "the footage for HyperFrames" : voice ? "the voice for HyperFrames" : `the video for ${for_}`;
   /** The job ends here when it cannot make the copy: `reason` is said to the person, and `why` is what the log says. */
   const refuse = (reason, why = reason) => {
     log(`${shown}: ${what} could not be made: ${why}.`);
@@ -685,9 +727,9 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
     if (!tools.ffmpeg || !tools.ffprobe) return refuse("this Mac has no program to make it with: ask Jason", "ffmpeg or ffprobe is not installed");
     const raw = stat(video);
     if (!raw) return refuse("it isn't on this Mac", "the video is not there");
-    const key = reel ? reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, reel) : workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs, fourK: footage ? false : fourK });
-    if (!key) return refuse("it could not be read as a video", "the video's size and time cannot be read");
-    const paths = reel ? reelCopyPaths(home, folder, reel.n, key) : footage ? footageCopyPaths(home, folder, footage.shot, key) : workCopyPaths(home, folder, key);
+    const key = reel ? reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, reel) : workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs, fourK: footage || voice ? false : fourK });
+    if (!key) return refuse(voice ? "it could not be read as a sound" : "it could not be read as a video", "the video's size and time cannot be read");
+    const paths = reel ? reelCopyPaths(home, folder, reel.n, key) : footage ? footageCopyPaths(home, folder, footage.shot, key) : voice ? voiceCopyPaths(home, folder, key) : workCopyPaths(home, folder, key);
     if (stat(paths.video) && stat(paths.facts)) {
       log(`${shown}: ${what} is made already.`);
       return { ok: true, made: [], failed: [], next: "", words: WORK_COPY_DONE, key, paths };
@@ -752,14 +794,16 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
       log(`${shown}: the room left on the disk could not be read (${e.code || e.message}).`);
     }
     // The room a copy needs is twice the raw video's size, or twice the stretch's share of it.
-    const fault = workCopyFault({ facts, streams, colour, filters, hwaccels, freeBytes: free, rawBytes: stretch ? raw.size * (seconds / facts.duration) : raw.size, mute: Boolean(footage) });
+    const fault = workCopyFault({ facts, streams, colour, filters, hwaccels, freeBytes: free, rawBytes: stretch ? raw.size * (seconds / facts.duration) : raw.size, mute: Boolean(footage), voice });
     if (fault) return refuse(fault);
 
     const writing = join(work, basename(paths.video));
     // How the picture is stored (`stored`) is the Reel's as much as the video's: an HDR picture is turned by hand, from the note the
     // recording is stored with, whichever stretch of it is cut.
-    const args = workCopyArgs(video, writing, { facts, streams, colour, rate, fourK: reel || footage ? false : fourK, stored, ...(stretch ? { stretch } : {}), ...(footage ? { mute: true } : {}) });
-    if (!args) return refuse("it could not be read as a video");
+    const args = voice
+      ? voiceCopyArgs(video, writing, { streams })
+      : workCopyArgs(video, writing, { facts, streams, colour, rate, fourK: reel || footage ? false : fourK, stored, ...(stretch ? { stretch } : {}), ...(footage ? { mute: true } : {}) });
+    if (!args) return refuse(voice ? "it could not be read as a sound" : "it could not be read as a video");
     // ffmpeg says how far it has got, for the progress panel. Without a panel it is given nothing more.
     const watch = progress.encoding(seconds);
     let ended;
@@ -776,7 +820,7 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
 
     // Whole is what was written, with a picture, and a sound if there was one, and as long as the raw video.
     const printedCopy = await probe(writing);
-    const shape = workCopyFacts(printedCopy, copy.size);
+    const shape = voice ? voiceCopyFacts(printedCopy, copy.size) : workCopyFacts(printedCopy, copy.size);
     if (!shape) return refuse("what was made could not be read back", "ffprobe could not read what ffmpeg wrote");
     if (Math.abs(shape.seconds - seconds) > 1) return refuse("what was made came out the wrong length", `what ffmpeg wrote is ${shape.seconds} seconds long, and the ${stretch ? "stretch" : "video"} is ${seconds}`);
     // A footage copy has no sound, and one in which ffprobe finds a sound stream is never put in place (PR H5b); any other has the sound the video has.

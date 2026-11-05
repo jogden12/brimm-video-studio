@@ -26,7 +26,8 @@ import { textWriter } from "./dropbox.js";
 import { commitOf, thisCheckout } from "./filing.js";
 import { agreedFor, labelOf, partLine, partsOf as footageParts } from "./footage.js";
 import { joinFor } from "./join.js";
-import { SHOT_SAID, counted, dayText, joined, number, plainly, sentence, textArg } from "./sentences.js";
+import { voiceFor } from "./explainer.js";
+import { SHOT_SAID, counted, dayText, joined, number, plainly, sentence, teleprompterText, textArg } from "./sentences.js";
 
 // The helpers that say things in her chat stand in sentences.js, where footage.js reads them too; they are said from here as they always were.
 export { SHOT_LIST_KINDS, SHOT_SAID, counted, dayText, joined, plainly, sentence, textArg };
@@ -227,7 +228,7 @@ export function packageFiles(title, plan, { explainer = false } = {}) {
   return {
     [GUIDE_FILE]: listed(`${title}: the video guide`, plan.cues.map((cue) => `${cue.n}. ${capital(cueSaid(cue))}`)),
     ...(explainer ? {} : { [SHOT_LIST_FILE]: listed(`${title}: the shot list`, plan.shots.map((shot) => `${shot.n}. ${capital(SHOT_SAID[shot.kind])}: ${sentence(shot.what)}${usedBy(shot.n, plan.cues)}`)) }),
-    [TELEPROMPTER_FILE]: `${plan.lines.join("\n\n")}\n`
+    [TELEPROMPTER_FILE]: teleprompterText(plan.lines)
   };
 }
 
@@ -272,7 +273,7 @@ export function plannedLine(record) {
 
 /** What `plan` is told, from the words after the command and its flags (edit.js flagsOf gives them, with --cue, --shot, --line and --voice
     taking a value each time they are given): { form: "new", title, explainer, voice }, { form: "show", episode }, { form: "set", episode, cues,
-    shots, lines }, { form: "drop", episode }, (PR H5a) { form: "agreed", episode, video } or (PR H5b) { form: "join", episode, videos }; or null for
+    shots, lines }, { form: "drop", episode }, (PR H6) { form: "voice", episode } (a HeyGen voice is done; no more words, no flag), (PR H5a) { form: "agreed", episode, video } or (PR H5b) { form: "join", episode, videos }; or null for
     anything else, which is the help. `new` is followed by the title, one word in quotes. A flag no form has is none. The episode is one word, as every
     command has it. A `set` gives at least one cue, shot or line. `agreed` is followed by the video, one word, and takes no flag. `join` is followed by
     the talking parts in the order she wants them, each one word, and by none when she has not said an order; it takes no flag. */
@@ -286,6 +287,7 @@ export function planAsked(words, flags) {
   }
   if (said(first) && second === "agreed") return more.length === 1 && said(more[0]) && only() ? { form: "agreed", episode: first, video: more[0] } : null;
   if (said(first) && second === "join") return more.every(said) && only() ? { form: "join", episode: first, videos: more } : null;
+  if (said(first) && second === "voice") return more.length === 0 && only() ? { form: "voice", episode: first } : null;
   if (!said(first) || more.length) return null;
   if (second === undefined) return only() ? { form: "show", episode: first } : null;
   if (second === "drop") return only() ? { form: "drop", episode: first } : null;
@@ -466,6 +468,7 @@ export function planFor(ctx, got, asked, kit) {
   const made = isFromPlan(record);
   if (!isPlannedRecord(record) && !made) return refuse(ctx, `"${shownName(record)}" is not a planned video.`);
   if (record.archived) return refuse(ctx, `The plan for "${shownName(record)}" was dropped.`);
+  if (asked.form === "voice") return voiceFor(ctx, got, kit);
   if (made && asked.form === "join") return refuse(ctx, `"${shownName(record)}" is made from its footage already.`);
   if (made && (asked.form === "set" || asked.form === "drop")) return refuse(ctx, `"${shownName(record)}" is made from its footage already: its plan can't be changed.`);
   if (asked.form === "set") return setPlan(ctx, got, asked);

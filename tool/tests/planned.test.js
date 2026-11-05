@@ -210,8 +210,8 @@ const PART_OF = { id: ID, as: "b-roll", shot: 2, client: false };
 const part = (partOf = PART_OF, over = {}) => waiting({ version: 5, answer: PART_ANSWER, partOf, ...over });
 
 describe("a part's record (PR H5a)", () => {
-  it("has the three kinds of part, the shots' own, in the order the design lists them", () => {
-    assert.deepEqual([...PART_KINDS], ["talking", "screen", "b-roll"]);
+  it("has the four kinds of part: the shots' own, in the order the design lists them, and the voiceover of an explainer (PR H6)", () => {
+    assert.deepEqual([...PART_KINDS], ["talking", "screen", "b-roll", "voiceover"]);
   });
   it("is the dropped video's own record: no kind, the answer \"part\" and `partOf`, at layout 5, and a whole record", () => {
     const record = part();

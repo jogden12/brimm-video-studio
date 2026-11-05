@@ -68,14 +68,15 @@ import { PIN, childEnv, cliPath, handoverAllowed, readOpen, toolchainDir } from 
 import { transcriptOf } from "./loosened.js";
 import { aboutLeft, progressFolder, readRates } from "./progress.js";
 import { graphicCuesOfPlan, graphicCuesOfRecord } from "./graphic-cues.js";
-import { projectCues, projectFiles, projectName, writeProject } from "./project.js";
+import { VOICEOVER, projectCues, projectFiles, projectName, writeProject } from "./project.js";
 import { refNamesOf, withReferences } from "./references.js";
 import { REELS_FILE } from "./reels.js";
 import { appHandoverOn, episodeWork } from "./settings.js";
+import { teleprompterText } from "./sentences.js";
 import { ASIDE_DIR, asidePlace, makerOf, markedOlder, momentText, olderThan, rebuildProject, snapshotOf, snapshotsOf } from "./snapshot.js";
 import { studioFolder } from "./studio.js";
 import { clockAt } from "./unedited.js";
-import { requestWorkCopy, workCopyKey, workCopyLockOf, workCopyPaths } from "./workcopy.js";
+import { requestWorkCopy, voiceCopyPaths, workCopyKey, workCopyLockOf, workCopyPaths } from "./workcopy.js";
 
 /** What is said of a Mac that is not set up for the app (settings.js appOf). edit.js says it before it goes any further, so
     openInApp is only ever given a Mac that is set up, and does not say it. */
@@ -100,6 +101,9 @@ function readyAt(ctx, record) {
 }
 const stillReading = (name) => `Claude is still reading it. Say "open ${name} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
 export const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
+/** What is said of an explainer's HyperFrames project in a HeyGen voice when its folder is not on this Mac and there is no snapshot to rebuild it from (PR H6):
+    it holds no media to make it again from, since the voice was made in it. */
+export const projectGone = (name) => `The HyperFrames project for ${name} is not on this Mac, and its HeyGen voice is made in it, so it can't be made again here. Ask Jason.`;
 export const recordingChanged = (name) => `The recording of ${name} has changed since its HyperFrames project was made: the project is opened as it was, with the recording it was made from.`;
 /** What is said of a project's video made again and put back, whether `free` took it away or the project was rebuilt from a snapshot (plan
     PR 11) without one. The six that follow are said of a Reel's project in the same words (app-reel.js), with the Reel named in `name`. */
@@ -353,8 +357,27 @@ export function copyOf(facts) {
   return Number.isInteger(bytes) && bytes >= 0 && typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 && rate ? { bytes, seconds, fps } : null;
 }
 
-/** The video of a project: where project.js moves the working copy to, last, and where `free` (free.js) takes it from. */
-export const videoIn = (dir) => join(dir, "media", "recording.mp4");
+/** The media a project of this episode holds as its video, as a path from the project, or null when it holds none (PR H6): the recording, `media/recording.mp4`,
+    for any episode; `media/voiceover.m4a` for an explainer in her own voice (episode.js isFromPlan of a plan whose route is an explainer), whose video is its
+    voiceover, a sound alone; and none for an explainer in a HeyGen voice, whose project holds no media at all, the voice being made in it by the app's agent,
+    into its assets/. `free`, the video put back (putVideoBack) and the rebuild of a project ask it: with none there is nothing to take away or put back. */
+export function mediaOf(record) {
+  if (!isFromPlan(record) || record.planned.route !== "explainer") return "media/recording.mp4";
+  return record.planned.voice === "heygen" ? null : VOICEOVER;
+}
+
+/** The video of a project of the episode whose record is `record`: where project.js moves the working copy to, last, and where `free` (free.js) takes it from
+    (mediaOf), or null when the project holds none. Without a record it is the recording's, as a Reel's project's is (app-reel.js). */
+export const videoIn = (dir, record = null) => {
+  const media = mediaOf(record);
+  return media === null ? null : join(dir, media);
+};
+
+/** Where the working copy of the episode's video is made and kept (workcopy.js): a video's, or an explainer's voice's (PR H6), by the media its project holds. */
+function copyPathsOf(home, folder, record, raw) {
+  const key = workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs });
+  return mediaOf(record) === VOICEOVER ? voiceCopyPaths(home, folder, key) : workCopyPaths(home, folder, key);
+}
 
 /** Whether there is nothing at a path, not even a link. Anything else that stops it being looked at is something there. */
 export function nothingAt(path) {
@@ -368,8 +391,9 @@ export function nothingAt(path) {
 
 /** What the record keeps of the working copy a project holds, from the project's own brimm/facts.json (project.js), which has the
     length and the rate but not the size, and from the size of the video in the project. null when either cannot be had. */
-export function copyIn(dir) {
-  const video = statOf(videoIn(dir));
+export function copyIn(dir, record = null) {
+  const at = videoIn(dir, record);
+  const video = at === null ? undefined : statOf(at);
   return video?.isFile() ? copyOf({ ...factsIn(join(dir, "brimm", "facts.json")), bytes: video.size }) : null;
 }
 
@@ -423,8 +447,8 @@ function adoptProject(ctx, { found, record, at, projects }) {
   const dir = join(episodeWork(home, found.name), name);
   if (!existsSync(dir)) return null;
   const raw = statSync(join(found.folder, record.video.file));
-  const copy = workCopyPaths(home, found.name, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
-  const workingCopy = copyOf(factsIn(copy.facts)) ?? copyIn(dir);
+  const copy = copyPathsOf(home, found.name, record, raw);
+  const workingCopy = copyOf(factsIn(copy.facts)) ?? copyIn(dir, record);
   if (!workingCopy) {
     ctx.say(notWhole(record.name.text));
     return { code: 1 };
@@ -459,7 +483,7 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
     return { code: 1 };
   }
   const raw = statSync(join(found.folder, record.video.file));
-  const copy = workCopyPaths(home, found.name, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+  const copy = copyPathsOf(home, found.name, record, raw);
   const reading = runningCommand(home, found.name, ctx.alive) === "read";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     requestWorkCopy(ctx, { folder: found.name });
@@ -481,10 +505,14 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   // A video made from a plan (PR H5b) takes the plan's guide's cues in place of the reading's, each b-roll and screen cue naming its footage's file,
   // and the footage whose copies are made already is moved in with the recording; the rest comes at an open (placeFootage).
   const kit = isFromPlan(record) && typeof planned === "function" ? planned({ found, record }) : null;
+  // An explainer in her own voice (PR H6): its project is the explainer's page over its voiceover, the plan's cues placed on the voiceover's words, and
+  // the plan's teleprompter script beside them. (Its voice is the working copy `copy` made of the voiceover: media/voiceover.m4a.)
+  const explainer = mediaOf(record) === VOICEOVER ? { voice: "sallie", teleprompter: teleprompterText(record.planned.lines) } : null;
   const input = {
     kind: "main", number, short, id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words,
     plan, graphicCues: kit ? kit.cues : short ? graphicCuesOfRecord(record) : graphicCuesOfPlan(plan), reels: reels?.candidates, video: copy.video, cli, guidance: readFileSync(guidance, "utf8"), createdAt: at,
-    ...(kit ? { footage: kit.footage.filter((item) => item.from !== null).map(({ path, from }) => ({ path, from })) } : {})
+    ...(kit && kit.footage ? { footage: kit.footage.filter((item) => item.from !== null).map(({ path, from }) => ({ path, from })) } : {}),
+    ...(explainer ? { explainer } : {})
   };
   // The pictures its cues name by a ref come from the reference folder into the project (references.js; PR H3): those that are not there are said, and
   // their cues keep their styles. A project whose cues name none looks at no folder and says nothing of it.
@@ -623,12 +651,12 @@ function putVideoBack(ctx, { found, record, project, dir, kept = null }, { renam
     ctx.say(videoGoneAndChanged(name));
     return { code: 1 };
   }
-  const copy = workCopyPaths(home, found.name, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+  const copy = copyPathsOf(home, found.name, record, raw);
   const was = factsIn(join(dir, "brimm", "facts.json"));
   const made = factsIn(copy.facts);
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     const keeps = keptFits(ctx, { found, kept, copy, was, made });
-    if (keeps.workingCopy && moveIn(kept, videoIn(dir), rename)) {
+    if (keeps.workingCopy && moveIn(kept, videoIn(dir, record), rename)) {
       ctx.say(videoKept(name));
       return { workingCopy: keeps.workingCopy };
     }
@@ -642,7 +670,7 @@ function putVideoBack(ctx, { found, record, project, dir, kept = null }, { renam
     ctx.say({ project: notWhole, copy: notPutBack, other: notTheSame }[fits.no](name));
     return { code: 1 };
   }
-  if (!moveIn(copy.video, videoIn(dir), rename)) {
+  if (!moveIn(copy.video, videoIn(dir, record), rename)) {
     ctx.say(notPutBack(name));
     return { code: 1 };
   }
@@ -693,9 +721,10 @@ export const FOOTAGE_NOT_IN = "Some of its footage could not be put into the pro
     { path, from } with `from` the copy made of it, or null while there is none. Each that is not in the project already is moved in from its
     copy (moveIn: a rename on the same disk, nothing copied); one with no copy is asked for, once for all (workcopy.js requestWorkCopy with
     `footage`, which starts nothing while a run is at work), and she is told the footage is being made (FOOTAGE_COMING); a copy that cannot be
-    moved is left where it is and she is told (FOOTAGE_NOT_IN). Nothing here stops the project opening, and a null `kit` does nothing. */
+    moved is left where it is and she is told (FOOTAGE_NOT_IN). Nothing here stops the project opening, and a null `kit` does nothing, nor does one with
+    no footage (`footage: null`, an explainer's: it has none, PR H6). */
 function placeFootage(ctx, { found, dir, kit }, { rename }) {
-  if (!kit) return;
+  if (!kit || !kit.footage) return;
   let waiting = false;
   let stuck = false;
   for (const item of kit.footage) {
@@ -804,7 +833,7 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
     const built = rebuildHere(ctx, { found, record, snapshot: snapshotOf(record.files, project.name), dir: join(work, project.name), name: record.name.text, older: true }, { cli, fs: deps.fs });
     if (built.code !== undefined) return built.code;
     rebuilt = true;
-    kept = videoIn(built.aside);
+    kept = videoIn(built.aside, record);
   }
   if (project) {
     // A project here that is older than the newest snapshot, and has no marker to say so, is not opened: the other Mac worked on it
@@ -813,16 +842,24 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
       ctx.say(olderThanSnapshot(record.name.text));
       return 1;
     }
-    if (nothingAt(videoIn(join(work, project.name)))) {
-      // Its video has been taken away (free.js): it is put back before the app is asked, or the project is not opened.
+    const media = videoIn(join(work, project.name), record);
+    if (media !== null && nothingAt(media)) {
+      // Its video has been taken away (free.js): it is put back before the app is asked, or the project is not opened. (A project that holds no media, as
+      // an explainer's in a HeyGen voice, has none to put back: PR H6.)
       const back = putVideoBack(ctx, { found, record, project, dir: join(work, project.name), kept }, { rename });
       if (back.code !== undefined) return back.code;
       restored = back.workingCopy;
-    } else if (changedSince(project, { found, record })) {
+    } else if (media !== null && changedSince(project, { found, record })) {
       // The project is opened as it was whatever the recording is now: a project that may be open in the app is never changed (4.8).
       ctx.say(recordingChanged(record.name.text));
     }
   } else {
+    // An explainer in a HeyGen voice whose project is not on this Mac has no media to make it again from (PR H6): its voice was made in the project, by the
+    // app's agent, and what is in the plan's folder is a sound with no page to play it. Nothing is made.
+    if (mediaOf(record) === null) {
+      ctx.say(projectGone(record.name.text));
+      return 1;
+    }
     const taken = adoptProject(ctx, { found, record, at, projects }) ?? await makeProject(ctx, { found, record, at, projects }, { cli, guidance: deps.guidance ?? guidanceOf(home), planned: deps.plan });
     if (taken.code !== undefined) return taken.code;
     ({ project } = taken);
@@ -831,6 +868,36 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   // that are not made are asked for. The project opens whatever comes of that: footage is added to it, never needed for it.
   if (typeof deps.plan === "function" && isFromPlan(record)) placeFootage(ctx, { found, dir: join(work, project.name), kit: deps.plan({ found, record }) }, { rename });
   return openProjectInApp(ctx, { record, project, dir: join(work, project.name), projects, keeps: (p) => !isMain(p), at, restored }, { save, cli, spawn, env, node, chat: deps.chat });
+}
+
+/** Ask the app to open the project in `dir`, and say what came of it in her words, without writing any record (PR H6: the open half of
+    openProjectInApp, which a HeyGen explainer's project is opened by too, before its voice is taken in, when its record is a plan's: explainer.js
+    openVoiceProject). Resolves what the command line printed, as hyperframes.js readOpen reads it: { opened, handedOver, words }. What it says is the
+    command line's own words in hers (readOpen), one line more about her chat when a handover was wanted and not made, and last, whenever the app
+    opened, the line about the buttons Studio cannot control (BUTTONS). `record` is the episode's record, which says whether her chat may be handed over
+    (hyperframes.js handoverAllowed). `deps` are `cli`, `spawn`, `env`, `node` and `chat` as openInApp has them; the chat is asked only when this Mac's
+    setting wants the handover. */
+export function openOnly(ctx, { record, dir }, { cli, spawn = spawnSync, env = process.env, node = process.execPath, chat: given }) {
+  const { home } = ctx;
+  // A handover is looked into only where it is wanted: it is all the chat decides, and finding out can take a while.
+  const wanted = appHandoverOn(ctx.settings);
+  const askChat = given ?? (() => chatOf(home, env));
+  const chat = wanted ? askChat() : { sessionId: "", held: true };
+  const handover = handoverAllowed({
+    setting: wanted, sessionId: chat.sessionId, held: chat.held,
+    episode: { session: sessionNotCleared(record), unanswered: kindOf(record) === null }, project: { clip: false }
+  });
+  const ran = spawn(node, [cli, "open", dir, "--json"], {
+    env: childEnv({ base: { HOME: home, LANG: env.LANG }, node, handover: handover.allowed, sessionId: chat.sessionId }),
+    encoding: "utf8", timeout: OPEN_MS
+  });
+  const read = readOpen(ran.stdout, ran.status, { handoverWanted: wanted });
+  ctx.say(read.words);
+  if (wanted && read.opened && !read.handedOver) ctx.say(Object.hasOwn(STAYS, handover.why) ? STAYS[handover.why] : STAYS_OTHERWISE);
+  // The buttons Studio cannot control are named whenever the app opened, after the opening and whatever is said of her chat. The app
+  // is open whether or not the record can be written, so the reminder does not wait for it.
+  if (read.opened) ctx.say(BUTTONS);
+  return read;
 }
 
 /** Ask the app to open a project of the episode, say what came of it in her words, and write the record: the part of opening that the
@@ -849,25 +916,7 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
     `deps` are the `save` that writes the record (resolves 0 when it has), the pinned command line's program `cli`, and `spawn`,
     `env`, `node` and `chat` as openInApp has them. The chat is asked only when this Mac's setting wants the handover. */
 export async function openProjectInApp(ctx, { record, project, dir, projects, keeps, at = localStamp(new Date(ctx.now())), also = (next) => next, restored = null }, { save, cli, spawn = spawnSync, env = process.env, node = process.execPath, chat: given }) {
-  const { home } = ctx;
-  // A handover is looked into only where it is wanted: it is all the chat decides, and finding out can take a while.
-  const wanted = appHandoverOn(ctx.settings);
-  const askChat = given ?? (() => chatOf(home, env));
-  const chat = wanted ? askChat() : { sessionId: "", held: true };
-  const handover = handoverAllowed({
-    setting: wanted, sessionId: chat.sessionId, held: chat.held,
-    episode: { session: sessionNotCleared(record), unanswered: kindOf(record) === null }, project: { clip: false }
-  });
-  const ran = spawn(node, [cli, "open", dir, "--json"], {
-    env: childEnv({ base: { HOME: home, LANG: env.LANG }, node, handover: handover.allowed, sessionId: chat.sessionId }),
-    encoding: "utf8", timeout: OPEN_MS
-  });
-  const read = readOpen(ran.stdout, ran.status, { handoverWanted: wanted });
-  ctx.say(read.words);
-  if (wanted && read.opened && !read.handedOver) ctx.say(Object.hasOwn(STAYS, handover.why) ? STAYS[handover.why] : STAYS_OTHERWISE);
-  // The buttons Studio cannot control are named whenever the app opened, after the opening and whatever is said of her chat. The app
-  // is open whether or not the record can be written below, so the reminder does not wait for it.
-  if (read.opened) ctx.say(BUTTONS);
+  const read = openOnly(ctx, { record, dir }, { cli, spawn, env, node, chat: given });
 
   // A time is added only if the app opened; a chat once handed over stays recorded as handed over; a later state is not moved back.
   const updated = {

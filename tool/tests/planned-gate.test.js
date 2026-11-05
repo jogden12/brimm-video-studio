@@ -101,8 +101,8 @@ describe("shownName, a planned record and a record that only claims to be one", 
 });
 
 describe("gateFor, a planned episode", () => {
-  it("lets through the commands that name no episode, plan, name and (PR H5b) join, which makes a plan its video, and nothing else", () => {
-    assert.deepEqual(PLANNED, ["plan", "name", "join"]);
+  it("lets through the commands that name no episode, plan, name, (PR H5b) join, which makes a plan its video, and (PR H6) app, which opens a HeyGen explainer's project, and nothing else", () => {
+    assert.deepEqual(PLANNED, ["plan", "name", "join", "app"]);
     for (const name of [...UNSCOPED, ...PLANNED]) for (const on of [ON, OFF]) assert.equal(gateFor(name, planned(), on), "", name);
   });
   it("says how to drop a plan to leave, and writes nothing", () => {
