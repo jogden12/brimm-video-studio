@@ -267,6 +267,19 @@ export const JOIN_STEP = "Joining the parts";
 
 /** The result of a join run that did not make the plan its video: nothing of the plan was changed, and its result says why in the words the guide
     sends her to ("how far is it?"). The run of an explainer (`voice`, PR H6) takes its voice in, and says so. */
+/** Whether the file at `path` is not the size its record holds (`bytes`), or cannot be looked at: a file Dropbox is still bringing over or another Mac
+    changed. A record that holds no size for it says nothing (the file is as it is). */
+const differs = (path, bytes) => {
+  if (!Number.isInteger(bytes)) return false;
+  try {
+    return statSync(path).size !== bytes;
+  } catch (e) {
+    return true;
+  }
+};
+/** What the run says of a part whose file is not the one that came in. */
+const changedWords = (part) => `${labelOf(part)} has changed since it came in, so it can't be joined yet. Say it again in a few minutes.`;
+
 const stopped = (title, why, voice = false) => ({
   ok: false, made: [],
   failed: [`${voice ? `The voice of "${title}" couldn't be taken in` : `The footage of "${title}" couldn't be made into one video`}: ${String(why).replace(/\.$/, "")}.`],
@@ -432,6 +445,8 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       const video = join(part.folder, part.record.video.file);
       const why = await hereWhy(part, video);
       if (why) return stop(why);
+      // The video is the one that came in: a plan made its video can never be joined again, so a file Dropbox is still changing makes no video (the final review, fix 3).
+      if (differs(video, part.record.video?.bytes)) return stop(changedWords(part));
       const out = join(work, `probe-${i + 1}.json`);
       const ran = await deps.run(tools.ffprobe, probeArgs(video, out));
       let printed = "";
@@ -485,6 +500,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       for (const rel of rels) {
         const why = await hereWhy(part, join(part.folder, rel));
         if (why) return stop(why);
+        if (differs(join(part.folder, rel), part.record.files[rel])) return stop(changedWords(part));
       }
       try {
         filed = fileEpisode({

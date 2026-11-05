@@ -1985,3 +1985,59 @@ describe("a part that comes to be held as a session is used for nothing (the fin
     t.done();
   });
 });
+
+describe("the join takes a part's files as they came in (the final review, fix 3)", () => {
+  const CHANGED = (label) => COULD_NOT(`${label} has changed since it came in, so it can't be joined yet. Say it again in a few minutes`);
+  /** Everything in Episodes, whole: a join that stops leaves it as it was. */
+  const episodesOf = (t) => Object.fromEntries(listAll(join(t.root, "Episodes")).map((rel) => [rel, readFileSync(join(t.root, "Episodes", rel), "utf8")]));
+  it("stops while one of several parts has a video that is not the size its record says, and files nothing", async () => {
+    const t = world();
+    const folder = await planned(t);
+    const a = part(t, 1, { words: SCRIPT[0].split(" ") });
+    const b = part(t, 2, { words: SCRIPT[1].split(" ") });
+    // Dropbox is still bringing the second part's video over, or another Mac changed it: it is not the size the record says.
+    writeFileSync(join(b.folder, "Take 2.mov"), "video 2, longer than it came in");
+    const before = episodesOf(t);
+    const r = await joinRun(t, [a.record.id, b.record.id]);
+    assert.equal(r.code, 1);
+    assert.deepEqual(resultOf(t).failed, [CHANGED(labelOf(2))]);
+    assert.deepEqual(episodesOf(t), before);
+    assert.deepEqual([planOf(t).kind, readPendings(t.home), t.notices, t.started], [null, [], [], []]);
+    assert.ok(!existsSync(join(folder, "Take 1.mov")));
+    t.done();
+  });
+  it("stops while the video of the one part is not the size its record says, and while a file its light import filed is not the one it holds", async () => {
+    for (const [file, text] of [["Take 1.mov", "video 1, longer than it came in"], ["Take 1.srt", "1\n00:00:00,000 --> 00:00:04,000\n a different caption\n"], ["Take 1.words.json", "{}"]]) {
+      const t = world({ probes: longTalk("Take 1") });
+      const folder = await planned(t);
+      const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+      writeFileSync(join(one.folder, file), text);
+      const before = episodesOf(t);
+      const r = await joinRun(t, [one.record.id]);
+      assert.equal(r.code, 1, file);
+      assert.deepEqual(resultOf(t).failed, [CHANGED(labelOf(1))], file);
+      assert.deepEqual(episodesOf(t), before, file);
+      assert.deepEqual([planOf(t).kind, readPendings(t.home), t.notices, t.started], [null, [], [], []], file);
+      assert.ok(!existsSync(join(folder, "Take 1.mov")), file);
+      t.done();
+    }
+  });
+  it("does not look at a file of the light import when several parts are joined: those are not filed", async () => {
+    const t = world({ probes: longTalk("Take 1") });
+    await planned(t);
+    const a = part(t, 1, { words: SCRIPT[0].split(" ") });
+    const b = part(t, 2, { words: SCRIPT[1].split(" ") });
+    writeFileSync(join(b.folder, "Take 2.srt"), "a caption that Dropbox has not finished bringing over");
+    assert.equal((await joinRun(t, [a.record.id, b.record.id])).code, 0);
+    assert.equal(isFromPlan(planOf(t)), true);
+    t.done();
+  });
+  it("joins a part whose files are the sizes its record says, as before", async () => {
+    const t = world({ probes: longTalk("Take 1") });
+    await planned(t);
+    const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+    assert.equal((await joinRun(t, [one.record.id])).code, 0);
+    assert.equal(isFromPlan(planOf(t)), true);
+    t.done();
+  });
+});
