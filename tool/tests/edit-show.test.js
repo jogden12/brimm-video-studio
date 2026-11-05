@@ -516,6 +516,22 @@ describe("behind", () => {
         t.done();
       }
     });
+    it("goes on for a folder written before it turned off /feedback and the survey, with no env: out of date, not changed, until the one command writes it again", async () => {
+      const stale = "Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
+      const { t, folder } = mac();
+      // The settings as the brimm-video before wrote them: the same text, to the last newline, with no env.
+      const file = join(folder, ".claude", "settings.json");
+      const { env, ...before } = JSON.parse(readFileSync(file, "utf8"));
+      assert.ok(env, "the folder is written with an env");
+      writeFileSync(file, JSON.stringify(before, null, 2) + "\n");
+      const old = await behindOn(t);
+      assert.deepEqual([old.code, old.text], [0, `This Mac has the newest brimm-video.\n${stale}`]);
+      // The command it names writes her folder again: then nothing is said of it.
+      writeStudio(t.home, { checkout: "/checkout", node: NODE });
+      const again = await behindOn(t);
+      assert.deepEqual([again.code, again.text], [0, "This Mac has the newest brimm-video."]);
+      t.done();
+    });
     it("leaves every other difference in her folder's settings, and in its CLAUDE.md and skill, to the line that says it is out of date", async () => {
       const stale = "Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
       const cases = [
