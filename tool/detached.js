@@ -6,7 +6,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { studioHome } from "./home.js";
 import { join } from "node:path";
 import { episodeWork } from "./settings.js";
 import { caffeinate, thisCheckout } from "./filing.js";
@@ -225,11 +225,11 @@ export async function runDetached({ home, folder, command, lock: own, keepAwake 
 }
 
 /** Start a program detached from this one, and do not wait for it: it goes on when this process ends, and what it prints goes
-    into the tool's log, ~/Library/Logs/brimm-video.log. It is started with this process's environment (`env`) but CLAUDECODE: a
+    into the tool's log, ~/Library/Logs/brimm-video.log (in Studio's own home, which BRIMM_VIDEO_HOME may name: home.js). It is started with this process's environment (`env`) but CLAUDECODE: a
     detached run prints to no chat, so it is not under Claude Code, and never marks a chat as holding a session's words (design
     2026-10-26, R8). Which run is detached is told by this, never by the word `--now`, which Claude can type. `spawn` is a test's
     stand-in. */
-export function spawnDetached(cmd, args, { log = join(process.env.HOME || homedir(), "Library", "Logs", "brimm-video.log"), spawn: start = spawn, env = process.env } = {}) {
+export function spawnDetached(cmd, args, { spawn: start = spawn, env = process.env, log = join(studioHome(env), "Library", "Logs", "brimm-video.log") } = {}) {
   let out = "ignore";
   try {
     mkdirSync(join(log, ".."), { recursive: true });

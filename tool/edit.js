@@ -62,7 +62,7 @@
 import { spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
 import { appendFileSync, chmodSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
@@ -419,8 +419,8 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         for footage that shows a client: notes, on a dialog on this Mac that only her click
                                         answers, that the client agreed to being shown in it. Who agreed stays on this Mac`;
 
-/** The home folder commands work from: the one a test gives, else the one HOME names, else the Mac's own word for it. */
-const homeOf = (deps) => deps.home || process.env.HOME || homedir();
+/** The home folder commands work from: the one a test gives, else Studio's own (home.js: BRIMM_VIDEO_HOME, else HOME, else the Mac's own word for it). */
+const homeOf = (deps) => deps.home || studioHome();
 
 /** The context every command is given: this Mac's settings and what it finds from them, and the ways of doing things,
     each the Mac's own unless a test gives another. {why} when this Mac has no settings for episodes. */
@@ -7583,6 +7583,12 @@ export async function editMain(argv, deps = {}) {
     say(HELP);
     return 0;
   }
+  // A BRIMM_VIDEO_HOME that is not a whole path is refused, never taken for the real home (home.js). A test's own home is not asked.
+  const refusedHome = deps.home ? "" : homeRefusal();
+  if (refusedHome) {
+    say(refusedHome);
+    return 2;
+  }
   const made = contextFor({ ...deps, say });
   if (made.why) {
     // A Mac with no settings for episodes can still have her folder, and the lock on it is looked at all the same, for the checkout
@@ -7622,9 +7628,13 @@ export async function editMain(argv, deps = {}) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   // Inside Claude Code's sandbox nothing runs: it would fail partway through a command (sandboxed.js). The check is the open lock's:
   // a Mac whose lock in effect is strict runs edit.js as it did before the open lock was built, and never asks ps.
-  const open = effectiveLock(readSettings(homeOf({})).settings ?? null) === "open";
+  const refusedHome = homeRefusal();
+  const open = !refusedHome && effectiveLock(readSettings(homeOf({})).settings ?? null) === "open";
   const sandboxed = open ? sandboxedWhy({ env: process.env, pid: process.pid, spawn: spawnSync }) : "";
-  if (sandboxed) {
+  if (refusedHome) {
+    process.stdout.write(`${refusedHome}\n`);
+    process.exitCode = 2;
+  } else if (sandboxed) {
     process.stdout.write(`${sandboxed}\n`);
     process.exitCode = 1;
   } else {

@@ -27,10 +27,11 @@
 //   node settings.js user-deny
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { textWriter } from "./dropbox.js";
+import { homeRefusal, studioHome } from "./home.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, gatedReadRules, studioFiles, studioFolder, writeStudio } from "./studio.js";
 import { isConnector, neverCaught } from "./never.js";
 import { claudeDirName, realOf } from "./places.js";
@@ -951,12 +952,21 @@ function mark(rest, say, clone) {
     change the drop folder, which makes them look at the old folder (switch.js), and for `studio` while it picks a proxy port.
     `openMinimum` is the Claude Code version the open lock was checked on (OPEN_LOCK_CLAUDE), `freePort` what picks that port, and
     `tmp` and `uid` Claude Code's temp folder and this Mac user's id, which a test gives as its own. The home folder is the one HOME names, as for the
-    launch agent and in a shell, and the Mac's own word for it when HOME names none. */
-export function settingsMain(argv, { home = process.env.HOME || homedir(), say = (line) => process.stdout.write(`${line}\n`), clone, now = new Date(), openMinimum = OPEN_LOCK_CLAUDE, freePort = freeLocalPort, tmp, uid } = {}) {
+    launch agent and in a shell, and the Mac's own word for it when HOME names none; or the one BRIMM_VIDEO_HOME names (home.js), and a
+    BRIMM_VIDEO_HOME that is not a whole path ends it with 2. */
+export function settingsMain(argv, { home, say = (line) => process.stdout.write(`${line}\n`), clone, now = new Date(), openMinimum = OPEN_LOCK_CLAUDE, freePort = freeLocalPort, tmp, uid } = {}) {
   const [command, ...rest] = argv;
   if (command === "--help" || command === "-h") {
     say(HELP);
     return 0;
+  }
+  if (home === undefined) {
+    const why = homeRefusal();
+    if (why) {
+      say(why);
+      return 2;
+    }
+    home = studioHome();
   }
   if (command === "write") return write(home, rest, say, now);
   if (command === "plan") return plan(home, rest, say, now);

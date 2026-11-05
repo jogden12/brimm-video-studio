@@ -28,7 +28,7 @@
 import { spawnSync } from "node:child_process";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
-import { isMain, plainName, projectOnAnotherMac } from "./app.js";
+import { isMain, plainName, programHome, projectOnAnotherMac } from "./app.js";
 import { VERSIONS_LIMIT, childEnv, clockIn, historyArgs, plainTurns, plainVersions, readHistory, turnsOf } from "./hyperframes.js";
 import { episodeWork } from "./settings.js";
 
@@ -228,7 +228,7 @@ export function versionsOf(ctx, { found, record }, deps = {}) {
   const { file, args } = historyArgs({ home: ctx.home, node, project: dir });
   let ran = null;
   try {
-    ran = spawn(file, [deps.cli ?? args[0], ...args.slice(1)], { env: childEnv({ base: { HOME: ctx.home, LANG: env.LANG }, node }), encoding: "utf8", timeout: HISTORY_MS, maxBuffer: HISTORY_ROOM });
+    ran = spawn(file, [deps.cli ?? args[0], ...args.slice(1)], { env: childEnv({ base: { HOME: programHome(ctx.home, env), LANG: env.LANG }, node }), encoding: "utf8", timeout: HISTORY_MS, maxBuffer: HISTORY_ROOM });
   } catch {
     // A program that cannot be run is a command line that cannot list them.
   }

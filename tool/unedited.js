@@ -47,6 +47,7 @@ import { mainProject } from "./projects.js";
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { localDay, stamp } from "./shared/text.js";
@@ -1340,7 +1341,7 @@ function sameBytes(a, b) {
     back is kept in BRIMM Video Work, in the episode's folder there, under "put back", and the problem says where. */
 export async function intoEpisode(file, madeAt, work, deps, { change = (record) => record, expectRev, onPut } = {}) {
   const { files, log = () => {} } = deps;
-  const home = deps.home || homedir();
+  const home = deps.home || studioHome();
   const folder = dirname(file);
   const opts = { ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log };
   const wait = deps.wait || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -1820,13 +1821,13 @@ export function askBlocked({ folder, record, root, home, machine, now = Date.now
 export async function askAgain({ folder, record }, deps) {
   const { log = () => {} } = deps;
   const as = "The Reel candidates are as they were.";
-  const blocked = askBlocked({ folder, record, root: deps.settings.root, home: deps.home || homedir(), machine: deps.settings.machine, now: deps.now ? deps.now() : Date.now(), whole: deps.isWhole || isWhole });
+  const blocked = askBlocked({ folder, record, root: deps.settings.root, home: deps.home || studioHome(), machine: deps.settings.machine, now: deps.now ? deps.now() : Date.now(), whole: deps.isWhole || isWhole });
   if (blocked.why) return { ok: false, made: [], failed: [blocked.why], next: as };
   const name = record.video.file;
   const video = join(folder, name);
   const stem = basename(name, extname(name));
   const plan = JSON.parse(readFileSync(join(folder, `${stem}.cut-plan.json`), "utf8"));
-  const work = join(runsFolder(deps.home || homedir()), `ask-${process.pid}-${Date.now()}`);
+  const work = join(runsFolder(deps.home || studioHome()), `ask-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
   try {
     // ffprobe is asked which streams the video has, so that each preview takes the picture and the sound a run takes.
@@ -1854,7 +1855,7 @@ export async function askAgain({ folder, record }, deps) {
     const read = listed === null ? null : readReels(listed);
     if (read && read.why) return { ok: false, made: [], failed: [...said, `The list of Reel candidates cannot be read: ${read.why.replace(/\.$/, "")}.`], next: as };
     // The record is read again for it: the other Mac's ask may have landed meanwhile, which the rev check then says.
-    const lost = listGone({ folder, record: readEpisode(folder).record || record, home: deps.home || homedir() });
+    const lost = listGone({ folder, record: readEpisode(folder).record || record, home: deps.home || studioHome() });
     if (lost) return { ok: false, made: [], failed: [...said, lost], next: "" };
     const merged = mergeCandidates({ old: read ? read.reels : null, fresh, record });
     if (!merged.added.length) return { ok: true, made: [], failed: [...said, ...merged.ignored], next: `Every clip Claude picked has words of a Reel or a candidate already there. ${as}` };
@@ -1992,7 +1993,7 @@ export async function videosFromPlan(file, deps) {
   if (!read.record) return stop(`its episode's record cannot be read: ${read.why}`);
   if (read.newer) return stop(NEWER_STOP);
   if (!deps.settings) return stop("this Mac has no settings for episodes, so nothing can be put into its episode");
-  const home = deps.home || homedir();
+  const home = deps.home || studioHome();
   const held = undone(read.record, home) || heldText(read.record, deps.settings.machine) || importHolds({ root: deps.settings.root, home, machine: deps.settings.machine, record: read.record, now: deps.clock ? deps.clock() : Date.now() });
   // Its own closing is the run's: "Nothing was made."
   if (held) return stop(held.replace(/ Nothing was changed\.$/, "").replace(/\.$/, ""));
@@ -2010,7 +2011,7 @@ export async function videosFromPlan(file, deps) {
 async function remakeVideos(file, { out, plan, episode, stop, expectRev }, deps) {
   const { run, tools, log = () => {}, progress = noProgress } = deps;
   const name = basename(file);
-  const work = episode ? join(runsFolder(deps.home || homedir()), `${process.pid}-${Date.now()}`) : join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
+  const work = episode ? join(runsFolder(deps.home || studioHome()), `${process.pid}-${Date.now()}`) : join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
   // Each video goes through `files`, and is put in place as soon as it is whole, or, for an episode, held until all are made.
   const files = filesOf(work, { name, hold: episode, log, move: deps.move, copy: deps.copy });
@@ -2143,7 +2144,7 @@ export async function uneditedFolder(dir, deps) {
   }
   // The lock of this Mac's drop folder is kept in BRIMM Video Work, so that a run started by hand and the launch agent's,
   // whose temp folders differ, share it.
-  const home = deps.home || homedir();
+  const home = deps.home || studioHome();
   const lockDir = deps.lockDir || (episodic ? runsFolder(home) : undefined);
   if (lockDir) mkdirSync(lockDir, { recursive: true });
   const lock = lockFile(dir, lockDir);
@@ -2277,7 +2278,7 @@ export const banner = (text) => {
     `import: "light"`, the run is told so (`light`), and the episodes of its drop folder are imported lightly: nothing else
     is, neither the one file nor a folder that is not its drop folder. With no such setting the run is given what it was. */
 export function depsFor(found, log, env = process.env, args = {}) {
-  const home = env.HOME || homedir();
+  const home = studioHome(env);
   // This Mac's settings for episodes, when it has them: with them, the import of its own drop folder makes episodes.
   const settings = readSettings(home).settings || null;
   return { run: runProgram, tools: found, model: found.model, home, settings, ...(lightImport(settings) ? { light: true } : {}), rulesOnly: Boolean(args.rulesOnly), log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)), progress: reporter({ folder: progressFolder(home), swift: found.swift, log }) };
@@ -2370,6 +2371,11 @@ export async function main(argv) {
   }
   if (args.checkClaude) return checkClaude({ run: runProgram, tools: findPrograms(), say: (line) => process.stdout.write(`${line}\n`), until: args.until, job: process.env.XPC_SERVICE_NAME });
   const log = (line) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
+  const refused = homeRefusal();
+  if (refused) {
+    log(refused);
+    return 2;
+  }
   const found = findPrograms();
   if (found.missing.length) {
     for (const m of found.missing) log(m);

@@ -53,6 +53,10 @@ node --test
 
 GitHub Actions runs them on every push and every pull request.
 
+## A home of its own, for by-hand checks
+
+`BRIMM_VIDEO_HOME` is for by-hand checks only: it gives Studio a home of its own, a scratch folder, so that a check runs as a Mac of its own. Studio keeps its own folders there (its settings, its work folder, the Downloads it looks in, its runs, pendings, progress and log), and `HOME` stays real, so `claude`, the transcription model, ffmpeg and the HyperFrames app run as they always do. Changing `HOME` itself breaks the login keychain and the model's place. It must be a whole path, or the command ends with 2 and says so. It is never set on a Mac in use, and Claude in Sallie's folder cannot set it: the guard allows only the one spelling of each command.
+
 ## Copies kept in step by hand
 
 The tool borrows from two places in brimm-operations, and keeps its own copies. Each copy's first line names the file it was copied from and the commit, 84a2f61.

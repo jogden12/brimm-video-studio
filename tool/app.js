@@ -59,6 +59,7 @@ import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
+import { programHome } from "./home.js";
 import { readResult, runningCommand } from "./detached.js";
 import { isFromPlan, kindOf, localStamp } from "./episode.js";
 import { sessionNotCleared } from "./gate.js";
@@ -907,7 +908,7 @@ export function openOnly(ctx, { record, dir }, { cli, spawn = spawnSync, env = p
     episode: { session: sessionNotCleared(record), unanswered: kindOf(record) === null }, project: { clip: false }
   });
   const ran = spawn(node, [cli, "open", dir, "--json"], {
-    env: childEnv({ base: { HOME: home, LANG: env.LANG }, node, handover: handover.allowed, sessionId: chat.sessionId }),
+    env: childEnv({ base: { HOME: programHome(home, env), LANG: env.LANG }, node, handover: handover.allowed, sessionId: chat.sessionId }),
     encoding: "utf8", timeout: OPEN_MS
   });
   const read = readOpen(ran.stdout, ran.status, { handoverWanted: wanted });
@@ -951,3 +952,6 @@ export async function openProjectInApp(ctx, { record, project, dir, projects, ke
   if (written !== 0) return 1;
   return read.opened ? 0 : 1;
 }
+
+/** The home folder the command line and the app are given as HOME (home.js): the real one, even in a check that gives Studio a home of its own. */
+export { programHome };
