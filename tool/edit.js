@@ -3484,6 +3484,8 @@ const NEEDS_JASON = "A conflict needs Jason: tell him the episode's name.";
     which would take the answer back. Each names the video as edit.js names it (shownName). */
 function keptOverWhy(kept, other) {
   if (sessionNotCleared(other) && !sessionNotCleared(kept)) return `One side marks ${shownName(other)} a client or group session: keep that side; the mark is cleared only by her click (say "clear the session mark").`;
+  // A plan (the final review, fix 2) that one side has made into its video by the join: the other side is the plan as it was, and keeping it would unmake the video.
+  if (recordKind(other) !== null && recordKind(kept) === null && isPlannedRecord(kept)) return `One side has "${shownName(kept)}" made from its footage: keep that side; a plan is made from its footage once.`;
   if (recordKind(other) !== null && recordKind(kept) === null) return `One side has ${shownName(kept)} answered: keep that side; an answer is changed only by saying what it is again.`;
   return "";
 }

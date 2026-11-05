@@ -28,10 +28,11 @@ describe("the gate's lists", () => {
     assert.deepEqual(SESSION, [...UNANSWERED, "name"]);
     assert.deepEqual(SESSION_TAUGHT, [...SESSION, "teachings", "principles", "ideas", "finish", "reel", "render", "read"]);
   });
-  it("have a list of a planned episode's own (PR H4), apart from the three that hold the one before: plan, name, (PR H5b) join and (PR H6) app, and no command that needs footage", () => {
-    assert.deepEqual(PLANNED, ["plan", "name", "join", "app"]);
+  it("have a list of a planned episode's own (PR H4), apart from the three that hold the one before: plan, name, (PR H5b) join, (PR H6) app and (the final review) resolve, and no command that needs footage", () => {
+    assert.deepEqual(PLANNED, ["plan", "name", "join", "app", "resolve"]);
     for (const list of [UNSCOPED, UNANSWERED, SESSION_TAUGHT]) assert.ok(!list.includes("plan"), "plan runs for a plan alone: it is in none of the lists of a video not yet answered or a session");
-    for (const name of PLANNED) assert.ok(!UNSCOPED.includes(name) && !UNANSWERED.includes(name), `${name} is no command of the lists before it`);
+    // `resolve` runs for a video not yet answered too (it sorts out a conflict of any episode): it is the one command both lists share.
+    for (const name of PLANNED) assert.ok(!UNSCOPED.includes(name) && (name === "resolve" || !UNANSWERED.includes(name)), `${name} is no command of the lists before it`);
   });
   it("hold no command of the unscoped list, which name no episode", () => {
     for (const list of [UNANSWERED, SESSION, SESSION_TAUGHT]) for (const name of UNSCOPED) assert.ok(!list.includes(name), name);
@@ -62,8 +63,8 @@ describe("the gate and plan (PR H4)", () => {
     assert.equal(gateFor("plan", session(), ON), NOT_FOR_SESSION);
     assert.equal(gateFor("plan", finished, OFF), "", "an answered video is let through, and plan says it is no plan");
   });
-  it("has the planned episode's own list: plan, name, join and (PR H6) app run, leave says how to drop a plan, and every other command is refused as the plan is not made from its footage yet", () => {
-    assert.deepEqual(PLANNED, ["plan", "name", "join", "app"]);
+  it("has the planned episode's own list: plan, name, join, (PR H6) app and (the final review) resolve run, leave says how to drop a plan, and every other command is refused as the plan is not made from its footage yet", () => {
+    assert.deepEqual(PLANNED, ["plan", "name", "join", "app", "resolve"]);
     for (const name of COMMAND_NAMES) assert.equal(gateFor(name, PLAN, OFF) === "", UNSCOPED.includes(name) || PLANNED.includes(name), name);
     assert.equal(gateFor("leave", PLAN, OFF), 'To drop a plan, say "drop the plan for Too many SKUs".');
     assert.equal(gateFor("open", PLAN, OFF), '"Too many SKUs" is a planned video, and it isn\'t made from its footage yet.');

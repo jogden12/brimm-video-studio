@@ -616,7 +616,7 @@ describe("planned.project, the HyperFrames project of a HeyGen explainer before 
 describe("the gate lets app run for a plan (PR H6)", () => {
   it("has app in the planned list beside plan, name and join, and in no other list", async () => {
     const { PLANNED, UNANSWERED, SESSION_TAUGHT, FOOTAGE, gateFor, noFootageWhy } = await import("../gate.js");
-    assert.deepEqual(PLANNED, ["plan", "name", "join", "app"]);
+    assert.deepEqual(PLANNED, ["plan", "name", "join", "app", "resolve"]);
     for (const list of [UNANSWERED, SESSION_TAUGHT, FOOTAGE]) assert.ok(!list.includes("app"), "app is on no list of a video not yet answered, a session or footage");
     assert.equal(gateFor("app", plan(), {}), "");
     // The words it refuses every other plan in are the gate's own, which app says too for a plan it will not open.

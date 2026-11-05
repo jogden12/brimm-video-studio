@@ -22,8 +22,10 @@ export const SESSION = [...UNANSWERED, "name"];
     `join` is in no list of a record with no kind but this one: a video not yet answered, one left alone, a part and a session are refused
     it in the gate's words, as `workcopy` is. `leave` says how to drop a plan; every other command is refused, for it is not made from its
     footage yet. And (PR H6) `app`, which opens a HeyGen explainer's project before its voice is made: the command itself refuses every plan but
-    that one, in the gate's own words (noFootageWhy), so that a script and an explainer in her voice hear what every other command says. */
-export const PLANNED = ["plan", "name", "join", "app"];
+    that one, in the gate's own words (noFootageWhy), so that a script and an explainer in her voice hear what every other command says. And (the final
+    review, fix 2) `resolve`, which sorts out Dropbox's conflicted copies of a plan's record, as it does a video's: both Macs write a plan's record
+    (`set`, `agreed`, the open of a HeyGen project, the join), and the guide's step for a conflicted plan is "sort out the conflict". */
+export const PLANNED = ["plan", "name", "join", "app", "resolve"];
 /** The commands that run for a record with no kind, beside those of UNANSWERED (PR H5a): `footage`, which answers a dropped video as
     footage for a planned video, or takes it back. It runs for a video waiting for its answer, one she left alone, and a part, and for no
     other record: a session not cleared is refused it in the gate's words (it is in none of the lists of a session), and so is a video held

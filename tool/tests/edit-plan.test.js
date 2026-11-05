@@ -675,7 +675,7 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     footage: [TITLE, "Another plan", "talking", "--client", "no"]
   };
   it("refuses every other command in the same words, ends with 1, and starts and writes nothing", async () => {
-    const names = COMMAND_NAMES.filter((name) => !UNSCOPED.includes(name) && !["plan", "name", "join"].includes(name));
+    const names = COMMAND_NAMES.filter((name) => !UNSCOPED.includes(name) && !["plan", "name", "join", "resolve"].includes(name));
     for (const name of names) assert.ok(name in ASKED, `${name} names an episode: give it its words here, or the plan is not tried on it`);
     const t = setup();
     const folder = await planned(t);
