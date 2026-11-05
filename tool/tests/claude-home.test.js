@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain } from "../edit.js";
 import { factsOf, readSettings, settingsMain } from "../settings.js";
-import { gatedReadRules, writeStudio } from "../studio.js";
+import { gatedReadRules, openSettingsOf, writeStudio } from "../studio.js";
 import { claudeDirName, gatedIndex, gatedPlaces, readAllowed, realOf } from "../places.js";
 import { guardAnswer, openDecision } from "../open-lock.js";
 import { addedWhy, agentsWhy, beyondWhy, skillFolders, transcriptOf, trustWhy } from "../loosened.js";
@@ -179,6 +179,63 @@ describe("settings.js user-deny, under BRIMM_VIDEO_HOME", () => {
     assert.ok(written.permissions.deny.length > 0);
     assert.equal(readSettings(s.home).settings.userDeny, true);
     assert.throws(() => readFileSync(join(s.home, ".claude", "settings.json")));
+    s.done();
+  });
+});
+
+describe("fix round 1: both homes' gated places, under BRIMM_VIDEO_HOME", () => {
+  const ask = (s, tool_name, tool_input) => openDecision({ session_id: SESSION, transcript_path: join(s.real, ".claude", "projects", "x", `${SESSION}.jsonl`), cwd: s.folder, hook_event_name: "PreToolUse", tool_name, tool_input },
+    { checkout: s.checkout, node: s.node, folder: s.folder, home: s.home, claudeHome: s.real, uid: s.uid, tmp: s.tmp, index: gatedIndex(gatedPlaces(s.facts), []), allow: s.facts.allow, web: "held", resolve: async () => [], loosened: false, held: false });
+  const sensitive = (s) => [join(s.real, ".ssh", "id_x"), join(s.real, ".aws", "credentials"), join(s.real, "BRIMM Video Work", "p", "a.txt"), join(s.real, "Library", "Application Support", "Dropbox", "info.json"), join(s.real, "Library", "Application Support", "BRIMM Video", "settings.json"), join(s.real, ".netrc")];
+  it("refuses the real home's sensitive places by an absolute path, by a tilde, and in a command", async () => {
+    const s = split();
+    for (const path of sensitive(s)) {
+      assert.equal((await ask(s, "Read", { file_path: path })).decision, "deny", path);
+      assert.equal((await ask(s, "Bash", { command: `cat "${path}"` })).decision, "deny", path);
+      const tilde = `~${path.slice(s.real.length)}`;
+      assert.equal((await ask(s, "Read", { file_path: tilde })).decision, "deny", tilde);
+      assert.equal((await ask(s, "Bash", { command: `cat ${tilde.replaceAll(" ", "\\ ")}` })).decision, "deny", tilde);
+    }
+    s.done();
+  });
+  it("still guards the scratch home's copies", async () => {
+    const s = split();
+    for (const path of [join(s.home, ".ssh", "id_x"), join(s.home, "BRIMM Video Work", "p"), join(s.home, "Library", "Application Support", "BRIMM Video", "settings.json")]) assert.equal((await ask(s, "Read", { file_path: path })).decision, "deny", path);
+    s.done();
+  });
+  it("names both homes' places in the Read deny rules, denyRead and the Edit() deny list, and the real Claude folder in denyWrite", () => {
+    const s = split();
+    const settings = openSettingsOf({ checkout: s.checkout, node: s.node, folder: s.folder, facts: s.facts });
+    const reads = gatedReadRules(s.facts);
+    const denyRead = settings.sandbox.filesystem.denyRead;
+    const edits = settings.permissions.deny.filter((rule) => rule.startsWith("Edit("));
+    for (const home of [s.real, s.home]) {
+      for (const path of [join(home, ".ssh"), join(home, "BRIMM Video Work"), join(home, "Library", "Application Support", "Dropbox")]) {
+        assert.ok(denyRead.includes(realOf(path)), `denyRead ${path}`);
+        assert.ok(reads.some((rule) => rule.includes(realOf(path))), `Read rule ${path}`);
+      }
+      for (const path of [join(home, ".ssh"), join(home, "Library", "LaunchAgents"), join(home, "BRIMM Video Work")]) assert.ok(edits.includes(`Edit(/${realOf(path)}/**)`), `Edit ${path}`);
+    }
+    const claudeApp = join(s.real, "Library", "Application Support", "Claude");
+    assert.ok(settings.sandbox.filesystem.denyWrite.includes(realOf(claudeApp)));
+    assert.ok(!settings.sandbox.filesystem.denyWrite.includes(realOf(join(s.home, "Library", "Application Support", "Claude"))));
+    s.done();
+  });
+  it("leaves the lists exactly as they were when BRIMM_VIDEO_HOME is not set", () => {
+    const w = openWorld();
+    const settings = readSettings(w.home).settings;
+    const plain = factsOf(w.home, settings, { tmp: w.tmp, uid: w.uid, env: { HOME: w.home } });
+    assert.equal(plain.claudeHome, undefined);
+    assert.equal(JSON.stringify(gatedPlaces(plain)), JSON.stringify(gatedPlaces({ ...w.facts })));
+    assert.equal(gatedPlaces(plain).length, 29);
+    w.done();
+  });
+  it("reads the server-managed settings (remote-settings.json) from the real home's .claude", async () => {
+    const s = split();
+    writeFileSync(join(s.real, ".claude", "remote-settings.json"), JSON.stringify({ sandbox: { enabled: SECRET } }));
+    const r = await behindOn(s);
+    assert.equal(r.code, 1);
+    assert.ok(r.text.includes("remote-settings.json: sandbox.enabled"), r.text);
     s.done();
   });
 });

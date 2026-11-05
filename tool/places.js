@@ -98,6 +98,38 @@ export function gatedPlaces({ home, claudeHome = home, root, uid, tmp = "/privat
     itself(join(home, ".netrc"), "file"),
     itself(join(home, ".git-credentials"), "file"),
     itself(join(home, ".npmrc"), "file"),
+    ...(claudeHome === home ? [] : realHomeOnly(claudeHome, itself, carved)),
+  ];
+}
+
+/** The gated places of the real home when BRIMM_VIDEO_HOME gives Studio another: a program started as Jason, with his real HOME,
+    reaches these, so they are guarded as well as the scratch home's copies. (Claude Code's own are named by claudeHome above.) */
+function realHomeOnly(h, itself, carved) {
+  const AS = join(h, "Library", "Application Support");
+  const containers = join(h, "Library", "Containers");
+  return [
+    itself(join(h, "Documents", "Zoom")),
+    itself(join(h, "Movies", "Final Cut Backups")),
+    itself(join(h, "BRIMM Video Work")),
+    itself(join(AS, "BRIMM Video")),
+    carved(join(AS, "BRIMM Video Words"), "words"),
+    itself(join(AS, "com.apple.sharedfilelist")),
+    itself(join(h, "Library", "Preferences", "com.apple.finder.plist"), "file"),
+    itself(join(h, ".dropbox")),
+    itself(join(AS, "Dropbox")),
+    itself(join(h, "Library", "Group Containers", "G7HH3F8CAK.com.getdropbox.dropbox.sync")),
+    itself(join(containers, "com.getdropbox.dropbox.fileprovider")),
+    itself(join(containers, "com.getdropbox.dropbox.TransferExtension")),
+    itself(join(containers, "com.getdropbox.dropbox.garcon")),
+    itself(join(h, "Library", "Logs", "brimm-video.log"), "file"),
+    itself(join(h, "Library", "Logs", "brimm-video-claude-check.log"), "file"),
+    itself(join(h, ".ssh")),
+    itself(join(h, "Library", "Keychains")),
+    itself(join(h, ".aws")),
+    itself(join(h, ".config")),
+    itself(join(h, ".netrc"), "file"),
+    itself(join(h, ".git-credentials"), "file"),
+    itself(join(h, ".npmrc"), "file"),
   ];
 }
 

@@ -778,6 +778,6 @@ export function sources({ home, deps = {} }) {
       const [set, unread] = prefsObject(join(prefs, file), deps.plutil);
       return [of(`Managed Preferences/${file}`), set, unread];
     }),
-    [of(`the server-managed ones Claude Code keeps in ${config ? "$CLAUDE_CONFIG_DIR" : "~/.claude"}/remote-settings.json`), settingsObject(config ? join(config, "remote-settings.json") : join(home, ".claude", "remote-settings.json"))]
+    [of(`the server-managed ones Claude Code keeps in ${config ? "$CLAUDE_CONFIG_DIR" : "~/.claude"}/remote-settings.json`), settingsObject(config ? join(config, "remote-settings.json") : join(programHome(home, deps.env || process.env), ".claude", "remote-settings.json"))]
   ];
 }

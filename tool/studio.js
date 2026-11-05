@@ -113,7 +113,9 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
   const places = gatedPlaces(facts);
   const both = (path) => bothSpellings(realOf(path));
   const edit = (path) => both(path).map((p) => `Edit(/${p}/**)`);
-  const onlyBrimmVideo = [folder, checkout, BV, join(dirname(BV), "BRIMM VIDEO Transfer"), join(home, "BRIMM Video Work"), join(AS, "BRIMM Video"), join(AS, "BRIMM Video Words"), join(claudeHome, "Library", "Application Support", "Claude"), join(home, "Library", "LaunchAgents"), join(claudeHome, ".claude"), join(home, ".ssh")];
+  const onlyBrimmVideo = [folder, checkout, BV, join(dirname(BV), "BRIMM VIDEO Transfer"), join(home, "BRIMM Video Work"), join(AS, "BRIMM Video"), join(AS, "BRIMM Video Words"), join(claudeHome, "Library", "Application Support", "Claude"), join(home, "Library", "LaunchAgents"), join(claudeHome, ".claude"), join(home, ".ssh"),
+    // Under BRIMM_VIDEO_HOME the real home's too (places.js realHomeOnly).
+    ...(claudeHome === home ? [] : [join(claudeHome, "BRIMM Video Work"), join(claudeHome, "Library", "Application Support", "BRIMM Video"), join(claudeHome, "Library", "Application Support", "BRIMM Video Words"), join(claudeHome, "Library", "LaunchAgents"), join(claudeHome, ".ssh")])];
   return {
     permissions: {
       defaultMode: "default",
@@ -135,7 +137,7 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
       network: { deniedDomains: ["*"], httpProxyPort: facts.port, socksProxyPort: facts.port },
       filesystem: {
         allowWrite: [W],
-        denyWrite: [...both(folder), ...both(join(AS, "Claude"))],
+        denyWrite: [...both(folder), ...both(join(claudeHome, "Library", "Application Support", "Claude"))],
         denyRead: places.flatMap((place) => bothSpellings(place.path)),
         allowRead: readAllowed({ ...facts, folder })
       },
