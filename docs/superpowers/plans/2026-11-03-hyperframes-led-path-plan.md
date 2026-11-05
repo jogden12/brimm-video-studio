@@ -767,6 +767,13 @@ These came from H5b's build and review on 4 November:
 24. **`guide wait` and `guide tell` wait while a join runs,** as they do for a reading or a copy. No step on the BRIMM Ops page changes.
 25. **A client's agreement can still be noted once the video is made** (`plan … agreed` runs for a video made from its footage), and `workcopy --footage` makes the footage copies alone.
 
+These came from H6's build and review on 4 November:
+
+26. **The join's refusals are one function,** which `plan … join` and the run both call, so a `join --now` typed directly refuses exactly what she would hear.
+27. **Her voiceover is never a client's.** A voiceover part has no client answer, and nothing says it waits for a client's agreement.
+28. **The HeyGen voice is taken only from its project's own `assets/` folder.** A sound file reached through a link, or an `assets/` that is itself a link, is refused, so nothing from elsewhere is filed as the voice and read by Claude.
+29. **`app` refuses a plan in the gate's words of ruling 20,** where H6's section quoted the older ones.
+
 ## Open items
 
 - **How `claude` reads under H7's scratch home.** It is settled on the page before the first check that needs a reading.
