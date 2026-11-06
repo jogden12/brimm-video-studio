@@ -8,7 +8,7 @@ import { editMain, HELP } from "../edit.js";
 import { readGuideNotes, writeGuideNotes, guideFile } from "../guide-note.js";
 import { NOT_SET_UP, OPS_PAGE } from "../guide.js";
 import { localStamp, readEpisode, recordFile, recordText } from "../episode.js";
-import { writeStatus } from "../importing.js";
+import { removeStatus, writeStatus } from "../importing.js";
 import { progressFolder, RATES } from "../progress.js";
 import { clockAt } from "../unedited.js";
 import { writePending, noteSeen } from "../filing.js";
@@ -189,6 +189,8 @@ describe("guide, from the records", () => {
     const t = setup();
     const found = episodeAs(t, { id: "e-20261020-c2c2c2", name: "2026-10-20 Long talk (Mac Studio)", record: { kind: "raw", answer: ANSWERED, name: { text: "Long talk", placeholder: false }, video: { file: "Long talk.mov", bytes: 5, seconds: 2400, recorded: "2026-10-20", recordedFrom: "import" }, main: MAIN([]), ...imported("10:30") } });
     writePending(t.home, { version: 1, id: found.record.id, name: found.name, folder: found.folder, video: "Long talk.mov", bytes: 5, seconds: 2400, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt" });
+    // The other Mac's import of the video is at work: its check is not this Mac's to keep in step, so the reading waits for it.
+    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Long talk.mov", bytes: 5, seconds: 2400, step: "Importing", at: new Date(t.now()).toISOString() }, (to, text) => writeFileSync(to, text));
     const due = t.now() + 10 * 60 * 1000;
     const STARTS = `Long talk (c2c2c2): Claude starts reading it about ${clockAt(due)}, once the import has checked its copies.`;
     const ROUGH = `Its rough cut is ready about ${clockAt(due + 1032 * 1000)}.`;
@@ -203,15 +205,20 @@ describe("guide, from the records", () => {
     writeFileSync(lockOf(t.home, found.name), JSON.stringify({ pid: 777, command: "read" }));
     const reading = light(t, { alive: (pid) => pid === 777 });
     assert.deepEqual((await on(reading, "guide", "Long talk")).said, [`${STARTS} ${ROUGH} ${NOTICE}`]);
+    // Only this Mac's own check is left to come (R1c): the reading started at once and keeps it in step, so it is "reading", with no time.
+    const READING = 'Long talk (c2c2c2): Claude is reading it. A notice comes when it is done; then say "what did Claude find?".';
+    removeStatus(t.root, "Long talk.mov", "Sallie's laptop", "k3j9x");
+    assert.deepEqual((await on(reading, "guide", "Long talk")).said, [READING]);
     // The check made, Claude is at work: when it began is not kept, so no time.
     rmSync(join(pendingFolder(t.home), `${found.record.id}.json`));
-    assert.deepEqual((await on(reading, "guide", "Long talk")).said, ['Long talk (c2c2c2): Claude is reading it. A notice comes when it is done; then say "what did Claude find?".']);
+    assert.deepEqual((await on(reading, "guide", "Long talk")).said, [READING]);
     t.done();
   });
   it("says Claude starts reading a raw video now when its late check is overdue, never at a time gone by, and its rough cut to the nearest minute", async () => {
     const t = setup();
     const found = episodeAs(t, { id: "e-20261020-c2c2c2", name: "2026-10-20 Long talk (Mac Studio)", record: { kind: "raw", answer: ANSWERED, name: { text: "Long talk", placeholder: false }, video: { file: "Long talk.mov", bytes: 5, seconds: 2400, recorded: "2026-10-20", recordedFrom: "import" }, main: MAIN([]), ...imported("10:30") } });
     writePending(t.home, { version: 1, id: found.record.id, name: found.name, folder: found.folder, video: "Long talk.mov", bytes: 5, seconds: 2400, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 60 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt" });
+    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Long talk.mov", bytes: 5, seconds: 2400, step: "Importing", at: new Date(t.now()).toISOString() }, (to, text) => writeFileSync(to, text));
     mkdirSync(progressFolder(t.home), { recursive: true });
     writeFileSync(join(progressFolder(t.home), RATES), JSON.stringify({ "Asking Claude": 0.31, "Making the rough cut": 0.12 }));
     const STARTS = `Long talk (c2c2c2): Claude starts reading it about ${clockAt(t.now())}, once the import has checked its copies.`;

@@ -3,11 +3,12 @@
 // stand-ins for every program, is in unedited.test.js. Each test has a temp folder of its own; nothing touches Dropbox.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { episodeMode, episodeKind, findFolder, commitOf, thisCheckout, importEpisodes, clearRuns, clearCrashes, heldBy, dueAt } from "../filing.js";
+import { episodeMode, episodeKind, findFolder, commitOf, thisCheckout, importEpisodes, clearRuns, clearCrashes, heldBy, dueAt, lateCheckLockOf, takeLateCheckLock, releaseLateCheckLock, LOCK_AGAIN_MS } from "../filing.js";
+import { episodeWork } from "../settings.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { readStatuses, writeStatus } from "../importing.js";
@@ -170,8 +171,7 @@ describe("the wait for late checks", () => {
   /** A late check this Mac holds of `video`, imported into its own episode, `lastCopy` milliseconds from the epoch: the pending
       check, kept on this Mac's disk, and the episode with its record. The one file the check looks at is whole in the episode,
       unless `whole` is false, and then it is not there, and nor is its work copy. Gives back the pending, as it was written. */
-  function holdCheck(w, video, lastCopy, { whole = true } = {}) {
-    const id = `e-20261027-${video.slice(0, 1).toLowerCase()}00001`;
+  function holdCheck(w, video, lastCopy, { whole = true, id = `e-20261027-${video.slice(0, 1).toLowerCase()}00001` } = {}) {
     const folder = join(w.root, "Episodes", `2026-10-27 ${video} (Mac Studio)`);
     mkdirSync(join(folder, "record"), { recursive: true });
     const bytes = Buffer.byteLength(`the bytes of ${video}`);
@@ -285,6 +285,120 @@ describe("the wait for late checks", () => {
       chmodSync(locked, 0o700);
       w.done();
     }
+  });
+
+  // --- plan R1c: a reading that puts its files in takes them out of the late check, under a lock the check also takes ---
+  const mine = (pid) => pid === process.pid;
+  /** X's late check with two files the reading may have replaced: A, in the episode at the reading's size (a longer text), and B,
+      which is not there, each with its work copy as the import made it. The record in force lists A at `listedA` bytes. */
+  function readingWorld(w, L, { listedA, mark = null }) {
+    // An id a record can have (hex), as the record in force must read for the check to be settled by it.
+    const X = holdCheck(w, "X.mov", L, { id: "e-20261027-ab0001" });
+    const work = join(w.dir, "work", X.id);
+    mkdirSync(work, { recursive: true });
+    const A =join(X.folder, "X.mov.cut-plan.json");
+    const B = join(X.folder, "X.mov.srt");
+    writeFileSync(join(work, "A"), "import A!");
+    writeFileSync(join(work, "B"), "import B!");
+    writeFileSync(A, "the reading's A, longer");
+    const files = listedA === undefined ? {} : { "X.mov.cut-plan.json": listedA };
+    const record = { ...newEpisode({ id: X.id, machine: "Mac Studio", at: "2026-10-27T09:00:00-05:00", video: { file: "X.mov", bytes: X.bytes, seconds: 120, created: null }, kind: "episode", writer: { commit: "abc1234", on: "Mac Studio" }, files }), rev: 1 };
+    writeFileSync(recordFile(X.folder, 1), recordText(record));
+    const entries = [{ from: join(work, "A"), to: A, bytes: 9 }, { from: join(work, "B"), to: B, bytes: 9 }];
+    const pending = { ...X, entries, ...(mark ? { reading: { pid: 999999, at: L, to: [A] } } : {}) };
+    delete pending.pendingFile;
+    writeFileSync(X.pendingFile, JSON.stringify(pending));
+    return { X, A, B, pending };
+  }
+  const deadLock = (w, X) => {
+    mkdirSync(episodeWork(w.home, X.name), { recursive: true });
+    writeFileSync(lateCheckLockOf(w.home, X.name), JSON.stringify({ pid: 999999, command: "read", nonce: "dead" }));
+  };
+  const runs = (w, now, over = {}) => ({ episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait: async () => {}, clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, keepAwake: () => {}, log: () => {}, alive: mine, ...over });
+
+  it("10. puts off a check due while a reading holds its lock: no file is put back, it waits LOCK_AGAIN_MS between tries, and it is made once the lock is let go", async () => {
+    const w = world([]);
+    const L = Date.parse("2026-10-27T10:00:00");
+    const { X, A, pending } = readingWorld(w, L, { listedA: 23 });
+    writeStatus(w.root, { version: 1, machine: "Mac Studio", pid: process.pid, import: "k3j9x", video: "X.mov", bytes: X.bytes, seconds: 120, step: "Waiting for its late check", at: new Date(dueAt(X)).toISOString(), due: dueAt(X) }, (to, text) => writeFileSync(to, text));
+    const held = takeLateCheckLock(w.home, X.name, "read", mine);
+    assert.ok(held);
+    const waits = [];
+    const logs = [];
+    const wait = async (ms) => {
+      waits.push(ms);
+      if (waits.length === 2) {
+        // The reading's put is done: what end({ put: true }) does.
+        writeFileSync(X.pendingFile, JSON.stringify({ ...pending, entries: pending.entries.slice(1) }));
+        releaseLateCheckLock(held);
+      }
+    };
+    await importEpisodes(w.folder, runs(w, dueAt(X) + 1, { wait, log: (line) => logs.push(line) }), async () => assert.fail("nothing is waiting"));
+    assert.equal(readFileSync(A, "utf8"), "the reading's A, longer");
+    assert.deepEqual(waits, [LOCK_AGAIN_MS, LOCK_AGAIN_MS]);
+    assert.equal(existsSync(join(X.folder, "X.mov.srt")), true, "the import's other file is checked, and put in again");
+    assert.deepEqual([w.statuses(), existsSync(X.pendingFile)], [[], false]);
+    assert.equal(logs.filter((line) => line.includes("its late check waits a moment")).length, 1);
+    w.done();
+  });
+  it("11. settles a mark left by a reading that stopped after its record was written by the record: the reading's file is left, and the rest is checked", async () => {
+    const w = world([]);
+    const L = Date.parse("2026-10-27T10:00:00");
+    const { X, A, B } = readingWorld(w, L, { listedA: 23, mark: true });
+    deadLock(w, X);
+    const logs = [];
+    await importEpisodes(w.folder, runs(w, dueAt(X) + 1, { log: (line) => logs.push(line) }), async () => assert.fail("nothing is waiting"));
+    assert.equal(readFileSync(A, "utf8"), "the reading's A, longer");
+    assert.equal(readFileSync(B, "utf8"), "import B!");
+    assert.equal(existsSync(X.pendingFile), false);
+    assert.equal(existsSync(lateCheckLockOf(w.home, X.name)), false);
+    assert.deepEqual(logs.filter((line) => line.includes("a reading stopped")), ["X.mov: a reading stopped while it put its files in. Its late check leaves out 1 file the record says is the reading's."]);
+    w.done();
+  });
+  it("12. keeps every entry of a mark left by a reading that stopped before its record, and the import's file is put back", async () => {
+    const w = world([]);
+    const L = Date.parse("2026-10-27T10:00:00");
+    const { X, A } = readingWorld(w, L, { listedA: 9, mark: true });
+    deadLock(w, X);
+    await importEpisodes(w.folder, runs(w, dueAt(X) + 1), async () => assert.fail("nothing is waiting"));
+    assert.equal(readFileSync(A, "utf8"), "import A!");
+    assert.equal(existsSync(X.pendingFile), false);
+    w.done();
+  });
+  it("13. leaves a mark whose record cannot be read (a conflicted copy) for the next run: the run ends, the pending keeps its mark, and the log says so once", async () => {
+    const w = world([]);
+    const L = Date.parse("2026-10-27T10:00:00");
+    const { X, A } = readingWorld(w, L, { listedA: 23, mark: true });
+    deadLock(w, X);
+    writeFileSync(join(X.folder, "record", "0001 (Sallie's laptop's conflicted copy 2026-10-27).json"), "{}");
+    const logs = [];
+    await importEpisodes(w.folder, runs(w, dueAt(X) + 1, { log: (line) => logs.push(line) }), async () => assert.fail("nothing is waiting"));
+    assert.equal(existsSync(X.pendingFile), true);
+    assert.ok(JSON.parse(readFileSync(X.pendingFile, "utf8")).reading, "the mark stays");
+    assert.equal(readFileSync(A, "utf8"), "the reading's A, longer");
+    assert.equal(existsSync(lateCheckLockOf(w.home, X.name)), false);
+    assert.deepEqual(logs.filter((line) => line.includes("cannot be read now")), ["X.mov: its late check waits for the next run: a reading stopped while it put its files in, and the episode's record cannot be read now."]);
+    w.done();
+  });
+  it("14. puts off, at the per-minute timer, a check whose lock a reading holds, and throws nothing", async () => {
+    const w = world(["B.mov"]);
+    const L = Date.parse("2026-10-27T10:00:00");
+    const { X, A } = readingWorld(w, L, { listedA: 23 });
+    assert.ok(takeLateCheckLock(w.home, X.name, "read", mine));
+    let now = L + 60 * 1000;
+    let tick = null;
+    const importOne = async (name) => {
+      now = dueAt(X) + 1000;
+      assert.doesNotThrow(() => tick());
+      assert.equal(existsSync(X.pendingFile), true);
+      assert.equal(readFileSync(A, "utf8"), "the reading's A, longer");
+      return { ok: true, name };
+    };
+    // The lock is let go when the run first waits, and the check is made then.
+    const deps = runs(w, 0, { clock: () => now, every: (fn) => { tick = fn; return 1; }, cancel: () => {}, wait: async () => rmSync(lateCheckLockOf(w.home, X.name)) });
+    await importEpisodes(w.folder, deps, importOne);
+    assert.equal(existsSync(X.pendingFile), false);
+    w.done();
   });
 });
 

@@ -7,7 +7,9 @@
 // - A raw video: the plan changed by Claude's decisions, with the pauses the import kept, its cut log, the rough cut's captions
 //   and transcript, Claude's notes, the Reel suggestions and the spellings as offers; and the rough cut rendered on this Mac, by
 //   today's ffmpeg, as version 0 of the main video, from the timeline kept as edit/main.v0.fcpxml, and opened in QuickTime
-//   Player. It replaces files the import's late check looks at, so it waits first while that check still holds the video.
+//   Player. It replaces files the import's late check looks at. On the Mac that owns that check (this Mac's own pending, with no other
+//   import of the video at work) it starts at once and takes those files out of the check, under a lock the check also takes
+//   (late-wait.js keepCheckInStep); otherwise it waits first while that check still holds the video.
 // - An iPhone clip: the spellings as offers, one line on what the clip is, and its graphic cues (three at most, PR H2). It changes the
 //   record alone, in the one write it makes: the cues are kept in the record's `reading.graphicCues`, beside `reading.about`, and the
 //   clip's cut plan is left exactly as the import wrote it. It replaces no file that the import's late check looks at, so it does not
@@ -21,7 +23,7 @@
 // the video, so that no number is given twice under one id. The record keeps what the call did (`reading`). Before anything is
 // asked, and again just before the call, the record must still be the answer the run was started for. The log and the result
 // name the episode by its name and id, and never quote Claude's reply or the transcript.
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { requestFor, readReading, reelCuesRequest, reelPhraseLines, readReelCues } from "./readings.js";
 import { applyDecisions, clipRanges, notesText, pausesOfPlan } from "./notes.js";
@@ -31,6 +33,7 @@ import { stretchesOf, fitReel } from "./reframe.js";
 import { reelsFile, reelEntries, REELS_FILE } from "./reels.js";
 import { readEpisode, writeEpisode, localStamp, kindOf, shownName, heldElsewhere, undone, recordNumbers } from "./episode.js";
 import { commitOf, thisCheckout } from "./filing.js";
+import { keepCheckInStep, ownCheckOnly } from "./late-wait.js";
 import { gated } from "./gate.js";
 import { highestNumberOf } from "./finish.js";
 import { timelineFor } from "./timeline.js";
@@ -238,6 +241,16 @@ export function rulesPlanKept(folder, stem) {
     numbers, which are Claude's own, are not taken for the numbers the reading gives the suggestions it keeps. */
 const claudesClip = (line) => String(line).replace(/^Clip (\d+) was left out: /, "Claude's clip $1 was left out: ").replace(/overlaps clip (\d+)\./, "overlaps Claude's clip $1.");
 
+/** Whether every file the record lists, the video among them, is in the episode's `folder` at its listed size, as the import filed
+    them (plan R1c): a reading that starts before the import's late check is made may do so only when nothing the check would put
+    back is missing or short. False when the record lists none. */
+export function asFiled(folder, record) {
+  const listed = Object.entries(record.files || {});
+  if (!listed.length) return false;
+  const size = (rel) => statSync(join(folder, rel), { throwIfNoEntry: false })?.size;
+  return size(record.video.file) === record.video.bytes && listed.every(([rel, bytes]) => size(rel) === bytes);
+}
+
 /** Read the episode `found` ({ folder, name, record }, as findEpisode found it) as `deps.kind` (finished, raw, short video), the
     answer of rev `deps.rev`: the detached run's work. Resolves { ok, made, failed, next }, the run's result, in plain words that
     name the episode by its name (shownName) and never quote Claude's reply or the transcript. `ctx` is edit.js's (this Mac's
@@ -254,7 +267,9 @@ const claudesClip = (line) => String(line).replace(/^Clip (\d+) was left out: /,
       `teachings` checked them before; this is the backstop);
     - Claude Code is not on this Mac; the import still holds the video (importHold), for a raw reading, and for a finished one
       that would replace a file the import put in (reels.json, its suggestions), and that does not clear within READ_HOLD_MS,
-      or clears only by a person's hand; or a file it reads is not on this Mac and cannot be brought over.
+      or clears only by a person's hand, unless this Mac's own late check is all that holds it and every file is as the import filed
+      it (ownCheckOnly, asFiled): then the reading starts at once and keeps that check in step (late-wait.js keepCheckInStep); or a
+      file it reads is not on this Mac and cannot be brought over.
     When Claude cannot be asked, nothing is written either. Otherwise what it read goes in by the rule, with the record; then the
     rough cut opens, the notice is posted and the result is written early, before the late check is waited for. */
 export async function readEpisodeNow(ctx, found, deps) {
@@ -291,14 +306,22 @@ export async function readEpisodeNow(ctx, found, deps) {
 
   // A reading that replaces a file the import's late check looks at waits while that check is still to come, and asks nothing
   // and writes nothing meanwhile: a raw reading always (the plan, the cut log, the rough cut's captions), and a finished one when
-  // the import put in a reels.json or suggestions (as the full import does). An iPhone clip's replaces no file: it changes the record
-  // alone (its graphic cues are kept in the record's reading, and its cut plan is left as the import wrote it), so it never waits.
+  // the import put in a reels.json or suggestions (as the full import does). It does not wait when the check is this Mac's own alone
+  // and every file is as the import filed it (plan R1c): it takes the files it replaces out of the check as it puts them in. An iPhone
+  // clip's replaces no file: it changes the record alone (its graphic cues are kept in the record's reading, and its cut plan is left as
+  // the import wrote it), so it never waits.
   const replaces = kind === "raw" || (kind === "finished" && [REELS_FILE, `${stem}.reel-suggestions.txt`].some((rel) => existsSync(join(found.folder, rel))));
   if (replaces) {
     let waited = 0;
     for (;;) {
       const hold = importHold({ root: ctx.root, home, machine: ctx.machine, record, now: now() });
       if (!hold.why) break;
+      // This Mac's own check is all that holds it, and every file is as the import filed it: no wait. The reading takes its files out of
+      // the check when it puts them in (keepCheckInStep), and the check is still made of every other file.
+      if (ownCheckOnly(ctx, record) && asFiled(found.folder, record)) {
+        log(`${named}: Claude reads it now, while the import's late check of its copies is still to come.`);
+        break;
+      }
       if (!hold.waits || waited >= READ_HOLD_MS) return stop(hold.why);
       if (!waited) log(`${named}: Claude reads it once the import has checked its copies.`);
       await wait(READ_LOOK_MS);
@@ -585,13 +608,25 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   }
   // The rule's own lines name the video's file first: the reading names the episode by its name and id.
   const intoLog = (line) => log(line.startsWith(`${file}: `) ? `${named}: ${line.slice(file.length + 2)}` : `${named}: ${line}`);
-  const into = await intoEpisode(join(folder, file), madeAt, work, { ...deps, home, settings: ctx.settings, files, log: intoLog }, { change, expectRev: record.rev, onPut });
-  const problems = [...into.problems, ...into.notes].map(sentence);
-  if (!into.put) {
-    // Nothing of it is in the episode, nor opened: the rough cut stays on this Mac, named as the episode is named.
-    const kept = render ? [`The rough cut of ${name} is kept on this Mac, in BRIMM Video Work, as "${basename(render.to)}".`] : [];
-    return { ok: false, made: [], failed: [...failed, ...problems, ...kept], next: AGAIN };
+  // Nothing of it is in the episode, nor opened: the rough cut stays on this Mac, named as the episode is named.
+  const kept = render ? [`The rough cut of ${name} is kept on this Mac, in BRIMM Video Work, as "${basename(render.to)}".`] : [];
+  // This Mac's own late check of the import takes the files it is about to put in out of its list as they go in, under a lock it also
+  // takes (plan R1c), so that it never puts the import's older file back over one the reading wrote.
+  const step = await keepCheckInStep(ctx, { name: found.name, record, paths: madeAt }, { wait: deps.wait || ((ms_) => new Promise((done) => setTimeout(done, ms_))), log: (line) => log(`${named}: ${line}`) });
+  if (step.why) return { ok: false, made: [], failed: [...failed, step.why, ...kept], next: AGAIN };
+  let into;
+  try {
+    // The files are in once `onPut` is called: their entries leave the check then, and the lock goes.
+    into = await intoEpisode(join(folder, file), madeAt, work, { ...deps, home, settings: ctx.settings, files, log: intoLog }, { change, expectRev: record.rev, onPut: () => {
+      if (step.end) step.end({ put: true });
+      return onPut();
+    } });
+  } finally {
+    // Whatever happened, the check is left as it was when nothing went in (a put that failed, or one that threw), and the lock goes.
+    if (step.end) step.end({ put: false });
   }
+  const problems = [...into.problems, ...into.notes].map(sentence);
+  if (!into.put) return { ok: false, made: [], failed: [...failed, ...problems, ...kept], next: AGAIN };
   log(`${named}: read.`);
   return { ok: !into.problems.length && okNow(), made, failed: [...failed, ...problems], next: saidNext };
 }

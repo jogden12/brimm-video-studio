@@ -77,7 +77,7 @@ import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
-import { lateCheckAt, localSource, waitFacts } from "./late-wait.js";
+import { localSource, readingWaitsUntil, waitFacts } from "./late-wait.js";
 import { heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
@@ -6035,7 +6035,7 @@ async function answerKind(ctx, found, plan, began) {
     return 1;
   }
   const previous = readResult(ctx.home, found.name, "read");
-  const holdsUntil = stored === "raw" ? lateCheckAt(ctx, wrote.record) : null;
+  const holdsUntil = stored === "raw" ? readingWaitsUntil(ctx, wrote.record) : null;
   startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", stored, "--rev", String(wrote.record.rev)] });
   // The video HyperFrames is given to edit is made beside the reading, once, for a raw video and an iPhone clip whose video is whole
   // on this Mac (architecture 2026-10-27, 5.7), when it will be used (copyWanted). It takes a lock of its own, so it does not wait
@@ -6958,7 +6958,7 @@ const clockNear = (ms) => clockAt(Math.round(ms / 60000) * 60000);
     `started` is in milliseconds and the record's times are text: each is read as a time before they are compared. */
 function guideReading(ctx, e, r, kind, running, rates) {
   if (kind === "session" ? sessionReading(r) : currentReading(r)) return { reading: "done" };
-  const due = kind === "raw" ? lateCheckAt(ctx, r) : null;
+  const due = kind === "raw" ? readingWaitsUntil(ctx, r) : null;
   /** A raw reading that waits for the import's late check: when Claude starts, and when its rough cut should be ready. */
   const later = () => {
     const rough = roughIn(rates, r.video && r.video.seconds);

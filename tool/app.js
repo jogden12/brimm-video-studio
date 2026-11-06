@@ -64,7 +64,7 @@ import { readResult, runningCommand } from "./detached.js";
 import { isFromPlan, kindOf, localStamp } from "./episode.js";
 import { sessionNotCleared } from "./gate.js";
 import { copyIn as copyTakes, waitWords } from "./guide.js";
-import { lateCheckAt, waitFacts } from "./late-wait.js";
+import { readingWaitsUntil, waitFacts } from "./late-wait.js";
 import { chatHeld } from "./held.js";
 import { PIN, childEnv, cliPath, handoverAllowed, readOpen, toolchainDir } from "./hyperframes.js";
 import { transcriptOf } from "./loosened.js";
@@ -107,7 +107,7 @@ function readyAt(ctx, record) {
 /** Claude's reading of a raw video waits for the import's late check as well (reading.js): while that is still to come, when the reading
     starts is said with it (plan R1a). */
 function stillReading(ctx, record) {
-  const due = kindOf(record) === "raw" ? lateCheckAt(ctx, record) : null;
+  const due = kindOf(record) === "raw" ? readingWaitsUntil(ctx, record) : null;
   const starts = due === null ? "" : ` It starts at ${clockAt(due)}, when Dropbox has checked its copies.`;
   return `Claude is still reading it.${starts} Say "open ${record.name.text} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
 }
