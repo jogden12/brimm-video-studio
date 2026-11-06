@@ -11,7 +11,7 @@ import { cutPlan, wordsOf, pausesOf, phrasesOf } from "../cuts.js";
 import { COMMANDS, PIN } from "../hyperframes.js";
 import { wordsOnScreen } from "../on-screen.js";
 import { recordingPlacements } from "../on-timeline.js";
-import { assertSafe, cutSuggestions, faceTrack, hyperframesGuidance, indexHtml, projectCues, projectFiles, projectName, reelCrop, reelSuggestions, reelWords, saidWords, settingsText, transcriptJson, writeProject } from "../project.js";
+import { assertSafe, cutSuggestions, faceTrack, hyperframesGuidance, indexHtml, projectCues, projectFiles, projectName, reelCrop, reelSuggestions, reelWords, saidWords, transcriptJson, writeProject } from "../project.js";
 
 const fixture = (name) => fs.readFileSync(new URL(`./fixtures/hyperframes-0.8.208/init/${name}`, import.meta.url), "utf8");
 const GOLDEN = {
@@ -1428,15 +1428,6 @@ describe("writeProject (5.7)", () => {
   });
 });
 
-describe("settingsText (5.5; plan PR 11)", () => {
-  it("is the text that .claude/settings.json holds in a project of that kind, so that a rebuilt project's is the same", () => {
-    assert.equal(settingsText("main"), projectFiles(main()).get(".claude/settings.json"));
-    assert.equal(settingsText("main"), projectFiles(reel()).get(".claude/settings.json"));
-    assert.equal(settingsText("clip"), projectFiles(clip()).get(".claude/settings.json"));
-    assert.notEqual(settingsText("main"), settingsText("clip"));
-  });
-});
-
 describe("what the documents say of a Reel's page (Jason, 2 November): Studio makes it upright, 1080 by 1920, and crops it on the speaker", () => {
   const read = (path) => fs.readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
   const readme = read("README.md");
@@ -1445,7 +1436,7 @@ describe("what the documents say of a Reel's page (Jason, 2 November): Studio ma
   const rowOf = (start) => readme.split("\n").filter((line) => line.startsWith(start));
 
   it("has the README's row of `app … reel` say how the Reel opens: upright, where the speaker is, the formula, who can move the crop, and that an older Reel project stays as it was", () => {
-    const [row] = rowOf("| `app \"<episode>\" reel <n> [--take-over]`");
+    const [row] = rowOf("| `app \"<episode>\" reel <n>`");
     for (const words of [
       "**It opens upright, 1080 by 1920, cropped on the speaker**", "`data-resolution=\"portrait\"`", "`object-fit: cover`", "`object-position: <p>% 50%`", "the largest face in each still the finder looked in",
       "the lower of two", "p = (540 - place x `Wi`) / (1080 - `Wi`)", "`speakerPlace` and `uprightPosition`", "has nothing to crop across and is 50", "the app's agent can move the crop",

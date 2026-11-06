@@ -191,7 +191,7 @@ const STAGE_ROWS = [
   [{ kind: null, waiting: true }, "waiting", 'It is waiting for your answer. Say "what\'s waiting?" to see its card.'],
   [{ kind: null, waiting: true, elsewhere: true, mac: "Mac Studio" }, "answering-elsewhere", "It is being answered on the Mac Studio. Carry on there."],
   [{ heldAsSession: true }, "held-session", 'One of its other versions is a client or group session. Say "it was a session after all" for this one too.'],
-  [{ elsewhere: true, mac: "Mac Studio", reading: "running" }, "open-elsewhere", "It is open on the Mac Studio. Carry on there, or open it here and take it over."],
+  [{ elsewhere: true, mac: "Mac Studio", reading: "running" }, "open-elsewhere", "It is open on the Mac Studio. Carry on there."],
   [{ readingsOff: true, reading: "none" }, "readings-off", "Readings are off on this Mac: ask Jason."],
   [{ reading: "running" }, "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
   [{ reading: "none" }, "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
@@ -241,7 +241,7 @@ const STAGE_ROWS = [
   [CLIP({ copy: { left: 120, usual: null } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames" when it is done.'],
   // On a Mac whose settings have the app off nothing opens a project, so a clip is not told to open one.
   [CLIP({ copy: { left: null, usual: null }, app: false, v2: false }), "waits-v2", V1],
-  [APP({ way: "hyperframes", project: PROJECT(), elsewhere: true, mac: "Mac Studio" }), "open-elsewhere", "It is open on the Mac Studio. Carry on there, or open it here and take it over."],
+  [APP({ way: "hyperframes", project: PROJECT(), elsewhere: true, mac: "Mac Studio" }), "open-elsewhere", "It is open on the Mac Studio. Carry on there."],
   // Open it: no project and no copy at work, or a project the app never opened.
   [APP(), "open-app", 'Say "open it in HyperFrames" to edit it there.'],
   [APP({ way: "hyperframes" }), "open-app", 'Say "open it in HyperFrames" to edit it there.'],
@@ -258,7 +258,7 @@ const STAGE_ROWS = [
   [APP({ app: false, reading: "running" }), "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
   [APP({ app: false, offersAnswered: false }), "spellings", 'Claude has read it. Say "what did Claude find?", then answer the spellings card.'],
   [APP({ app: false, placeholder: true }), "name", 'It needs its name before it is finished. Say "call it", then the name.'],
-  [APP({ way: "hyperframes", app: false, elsewhere: true, mac: "Mac Studio" }), "open-elsewhere", "It is open on the Mac Studio. Carry on there, or open it here and take it over."],
+  [APP({ way: "hyperframes", app: false, elsewhere: true, mac: "Mac Studio" }), "open-elsewhere", "It is open on the Mac Studio. Carry on there."],
   [APP({ way: "hyperframes", app: false, finishRunning: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
   [APP({ way: "hyperframes", app: false, project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
   [APP({ way: "hyperframes", app: false, project: PROJECT({ exported: true }) }), "exported", 'You have exported it. Say "hand it off" and I will check what you exported.'],

@@ -1806,7 +1806,7 @@ describe("ask, reels and an episode the other Mac has open (phase 1b's claim)", 
     const record = JSON.parse(readFileSync(at, "utf8"));
     writeFile(at, JSON.stringify({ ...record, editing: { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00" } }, null, 2) + "\n");
   };
-  const held = `Sallie's laptop has ${NAME} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.`;
+  const held = `Sallie's laptop has ${NAME} open. Carry on there. Nothing was changed.`;
   it("ask refuses, both parts, and asks nothing", async () => {
     const p = askable();
     openOnLaptop(p.found);

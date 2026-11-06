@@ -51,7 +51,7 @@ describe("the session's commands, while the other Mac has the episode", () => {
       picture(t, "logo.png", 600, 300);
       picture(t, "chart.png", 1600, 900);
       const r = await on(t.ctx.deps, ...ask);
-      assert.deepEqual([r.code, r.text], [1, 'Sallie\'s laptop has Pricing: what to charge? open. Open it here first (say "take it over" if they are done with it). Nothing was changed.'], ask[0]);
+      assert.deepEqual([r.code, r.text], [1, 'Sallie\'s laptop has Pricing: what to charge? open. Carry on there. Nothing was changed.'], ask[0]);
       assert.equal(reread(found).rev, 1, ask[0]);
       assert.equal(existsSync(join(found.folder, "media")), false, ask[0]);
       t.done();

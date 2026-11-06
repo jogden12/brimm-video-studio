@@ -850,17 +850,6 @@ describe("edit.js on the one version model: a render is a version, and only a pu
     assert.ok(record.version < 3, String(record.version));
     t.done();
   });
-  it("hands an episode over asking nothing about Final Cut for a part whose newest version was rendered", async () => {
-    const { t } = answeredRaw([pushOn(1), renderOn(2)]);
-    const r = await on(t.ctx.deps, "release", FOLDER);
-    assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, "Pricing: what to charge? is handed over. Copied for the other Mac: nothing. Keep this Mac open and online until Dropbox shows the folder is up to date.");
-    t.done();
-    const pushed = answeredRaw([renderOn(1), pushOn(2)]);
-    const asked = await on(pushed.t.ctx.deps, "release", FOLDER);
-    assert.deepEqual([asked.code, asked.text], [1, 'Did you change anything in Final Cut since it was last shown (main v2)? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.']);
-    pushed.t.done();
-  });
   it("says in the episodes lines whether the newest version was rendered or shown in Final Cut, and says nothing of it in open", async () => {
     for (const [pushed, line] of [[[renderOn(0)], "Shown: v0 (rendered), on Mac Studio"], [[renderOn(0), pushOn(1)], "Shown: v1 (in Final Cut), on Mac Studio"], [[pushOn(2), renderOn(1, LAPTOP)], "Shown: v2 (in Final Cut), on Mac Studio"]]) {
       const { t } = answeredRaw(pushed);

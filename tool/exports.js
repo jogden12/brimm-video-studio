@@ -9,7 +9,7 @@
 //
 // Only projectChange and (below) exportsFound read the disk, and only the folders they are given. Nothing here writes anywhere.
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tokens } from "./shared/text.js";
 import { KEPT, isMain } from "./app.js";
 import { historyTail } from "./app-history.js";
@@ -185,15 +185,11 @@ const endingOf = (name) => ((/\.([A-Za-z0-9]+)$/.exec(String(name)) || [])[1] ||
 const taking = (file) => TAKEN_ENDINGS.includes(file.ending);
 
 /** Where a file is, as a person is told it: the places an export can be found in. */
-const FROM = { Downloads: "from Downloads", "another folder": "from another folder", "the other Mac": "from what the other Mac released", renders: "HyperFrames' own render" };
-/** Whether a file is on the other Mac's side, as a person is told: on this Mac, or from the other Mac. */
-const placeOf = (file) => (file.where === "the other Mac" ? "from the other Mac" : "on this Mac");
+const FROM = { Downloads: "from Downloads", "another folder": "from another folder", renders: "HyperFrames' own render" };
 
-/** Files as a person is told them: by name, and by where each is when two have one name. */
+/** Files as a person is told them: by name. */
 function shown(files) {
-  const twice = (f) => files.filter((g) => nfc(g.name) === nfc(f.name)).length > 1;
-  const order = (f) => `${nfc(f.name)}\u0000${f.where === "the other Mac" ? 1 : 0}`;
-  return [...files].sort((a, b) => (order(a) < order(b) ? -1 : 1)).map((f) => (twice(f) ? `${f.name} ${placeOf(f)}` : f.name)).join(", ");
+  return [...files].sort((a, b) => (nfc(a.name) < nfc(b.name) ? -1 : 1)).map((f) => f.name).join(", ");
 }
 /** The files, but for one with the name and the size of an earlier one: the same export, in both places, is taken once. */
 const once = (files) => files.filter((f, i) => !files.some((g, k) => k < i && nfc(g.name) === nfc(f.name) && g.bytes === f.bytes));
@@ -201,8 +197,8 @@ const once = (files) => files.filter((f, i) => !files.some((g, k) => k < i && nf
 /** The video a part is given, as the detached part is told it. */
 const videoOf = (file) => ({ name: file.name, dir: file.dir, where: file.where, bytes: file.bytes, mtimeMs: file.mtimeMs, began: file.began ?? null });
 
-/** The files that can be a part's export: those its own records name (`part.recorded`), and those in Downloads and in what the other Mac
-    released whose name is an export's name for the part's project. A file found both ways is one, the record's; one with nothing in it
+/** The files that can be a part's export: those its own records name (`part.recorded`), and those in Downloads whose name is an
+    export's name for the part's project. A file found both ways is one, the record's; one with nothing in it
     is none. Each is { name, dir, where, bytes, mtimeMs, began, ending }. */
 function candidatesOf(part, input, zone) {
   const out = [];
@@ -215,22 +211,20 @@ function candidatesOf(part, input, zone) {
     } else if (candidate.via === "record") out[at.get(key)] = candidate;
   };
   for (const recorded of part.recorded || []) add({ ...recorded, via: "record", ending: endingOf(recorded.name) });
-  for (const [place, where] of [[input.downloads, "Downloads"], [input.released, "the other Mac"]]) {
-    for (const file of place.files) {
-      const read = exportNameOf(file.name);
-      if (read && nfc(read.project) === nfc(part.project)) add({ ...file, dir: place.dir, where, via: "name", ending: read.ending, began: beganAt(read, zone) });
-    }
+  for (const file of input.downloads.files) {
+    const read = exportNameOf(file.name);
+    if (read && nfc(read.project) === nfc(part.project)) add({ ...file, dir: input.downloads.dir, where: "Downloads", via: "name", ending: read.ending, began: beganAt(read, zone) });
   }
   return out.filter((candidate) => candidate.bytes > 0);
 }
 
 /** What `finish` looks for among HyperFrames' exports, and what it asks (architecture 8.1, plan PR 7), in plain data.
-    `input`: { parts, downloads, released, finished, zone }. A part is { key, label, reel?, project, fromSuggestion, here, mac, changed,
+    `input`: { parts, downloads, finished, zone }. A part is { key, label, reel?, project, fromSuggestion, here, mac, changed,
     recorded, renders }: its key ("main" or "reel 2") and label ("the main video", "Reel 2"), the project's name, the suggestion a Reel
     was made from, whether the project is on this Mac and the Mac it was made on, when it last changed (projectChange, null when not known),
-    the files its records name (each with `where` and `began`), and the renders in its renders/ that no record names. `downloads` and
-    `released` are { dir, files }, their video files as { name, bytes, mtimeMs }. `finished` is the record's last finish, for a part kept.
-    `answers`: { take: { <key>: <a file's name, "this Mac" or "the other Mac"> }, final: [<key>], without: [<key>] }. `rest` is false when
+    the files its records name (each with `where` and `began`), and the renders in its renders/ that no record names. `downloads` is
+    { dir, files }, its video files as { name, bytes, mtimeMs }. `finished` is the record's last finish, for a part kept.
+    `answers`: { take: { <key>: <a file's name> }, final: [<key>], without: [<key>] }. `rest` is false when
     the main video is finished another way, in which case a Reel the last finish finished that has no project here is left to that way.
     Gives { parts, asks, stops, mentions, looked, tied }: each part taken as { key, label, reel?, project, projects, fromSuggestion, video,
     export: null, kept, noHandEdits: false, line }, with `video` null when the part is kept as the last finish made it; the questions she is
@@ -280,28 +274,11 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
     // A file she names: wherever it is, whatever it is called, and with no check against the project's last change.
     if (take[key] !== undefined) {
       const said = nfc(take[key]);
-      const lower = said.toLowerCase();
-      const place = lower === "this mac" ? "this" : lower === "the other mac" ? "other" : "";
       const notAnExport = () => asks.push(`"${take[key]}" is not an export of ${label}. ${exports.length ? `The ones there are: ${shown(once(exports))}.` : "There is none there."} Which is the final one?`);
-      let chosen;
-      if (place) {
-        const inPlace = exports.filter((file) => (file.where === "the other Mac") === (place === "other"));
-        const newest = inPlace.length ? Math.max(...inPlace.map((file) => minuteOf(file.began.ms))) : null;
-        const group = inPlace.filter((file) => minuteOf(file.began.ms) === newest);
-        if (!group.length) notAnExport();
-        else if (group.length > 1) asks.push(`For ${label} there are ${count(group.length)} exports ${placeOf(group[0])}: ${shown(group)}. Which is the final one?`);
-        else [chosen] = group;
-      } else {
-        const listed = [[input.downloads, "Downloads"], [input.released, "the other Mac"]]
-          .flatMap(([folder, where]) => folder.files.map((file) => ({ ...file, dir: folder.dir, where, ending: endingOf(file.name) })))
-          .filter((file) => taking(file) && file.bytes > 0);
-        const named = once([...exports, ...listed, ...renders.filter(taking)]).filter((file) => nfc(file.name) === said);
-        const here = named.filter((file) => file.where !== "the other Mac");
-        const there = named.filter((file) => file.where === "the other Mac");
-        if (!named.length) notAnExport();
-        else if (here.length && there.length) asks.push(`${named[0].name} is both on this Mac and from the other Mac, and they differ. Say which: this Mac, or the other Mac.`);
-        else [chosen] = here.length ? here : there;
-      }
+      const listed = input.downloads.files.map((file) => ({ ...file, dir: input.downloads.dir, where: "Downloads", ending: endingOf(file.name) })).filter((file) => taking(file) && file.bytes > 0);
+      const named = once([...exports, ...listed, ...renders.filter(taking)]).filter((file) => nfc(file.name) === said);
+      if (!named.length) notAnExport();
+      const [chosen] = named;
       if (chosen) made(videoOf(chosen), `${Cap}: ${chosen.name}, ${FROM[chosen.where]}, the file you named.`);
       else passedOver();
       continue;
@@ -363,7 +340,7 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
     }
   }
   const names = input.parts.map((part) => part.project);
-  return { parts: out, asks, stops, mentions, looked: `Looked in Downloads and in what the other Mac released for exports of: ${names.join(", ")}.`, tied };
+  return { parts: out, asks, stops, mentions, looked: `Looked in Downloads for exports of: ${names.join(", ")}.`, tied };
 }
 
 // --- What is read from the disk ---
@@ -372,10 +349,6 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
 export const NEVER_OPENED = 'The main video was never opened in HyperFrames. Say "open it in HyperFrames" first, edit it there, export it on This Mac, then say "hand it off".';
 /** What finish says when this Mac will not let it look in Downloads: macOS asks once, and keeps the answer. */
 export const DOWNLOADS_UNREADABLE = 'This Mac does not let BRIMM Video Studio look in the Downloads folder, where HyperFrames puts its exports. Allow it in System Settings, under Privacy & Security, Files and Folders, then say "hand it off" again.';
-/** Where `release` puts the exports it copies into the episode for the other Mac (hand-over.js writes it, plan PR 11, with exportsToCarry; this reads it): the way
-    `edit/from-final-cut/` holds Final Cut's Shares. */
-export const RELEASED_FOLDER = join("edit", "from-hyperframes");
-
 /** Whether a name leads nowhere but a folder of its own: a project's name comes from the record, which Dropbox and the other Mac write. */
 const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name);
 const isFolder = (path) => {
@@ -469,12 +442,11 @@ export function downloadsOnce({ home, readdir = readdirSync }) {
 
 /** What `finish` reads of the disk to look for HyperFrames' exports (plan PR 7): for the main project in use and each Reel project of
     the record (not a project kept for an earlier kind, and not one of a Reel the record says is dropped), whether its folder is on this Mac, when it last changed (projectChange), the
-    files its records name and the renders in its renders/ that none does; and the videos in Downloads and in what the other Mac
-    released into the episode (`edit/from-hyperframes/`). `home` is this Mac's home, `name` the episode's folder name and `folder` its
-    folder in Episodes. Gives { input, unreadable }: `input` is what lookForExports is given, and `unreadable` is true when this Mac will
+    files its records name and the renders in its renders/ that none does; and the videos in Downloads. `home` is this Mac's home,
+    `name` the episode's folder name. Gives { input, unreadable }: `input` is what lookForExports is given, and `unreadable` is true when this Mac will
     not let Downloads be read. `readdir` lists a folder as readdirSync does, for a test to give another. `listDownloads`, when it is given
     (downloadsOnce), lists Downloads in its place: so that a caller that asks for many videos reads the folder once. Nothing is written. */
-export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, readdir = readdirSync, listDownloads = null }) {
+export function exportsFound({ home, name, record, zone = LOCAL_ZONE, readdir = readdirSync, listDownloads = null }) {
   const downloads = downloadsFolder(home);
   const work = episodeWork(home, name);
   const projects = Array.isArray(record.app && record.app.projects) ? record.app.projects : [];
@@ -493,42 +465,10 @@ export function exportsFound({ home, name, folder, record, zone = LOCAL_ZONE, re
     };
   });
   const seen = listDownloads ? listDownloads() : videosIn(downloads, readdir);
-  const releasedDir = join(folder, RELEASED_FOLDER);
   return {
     unreadable: seen.unreadable,
-    input: { parts, downloads: { dir: downloads, files: seen.files }, released: { dir: releasedDir, files: videosIn(releasedDir, readdir).files }, finished: record.finished || null, zone }
+    input: { parts, downloads: { dir: downloads, files: seen.files }, finished: record.finished || null, zone }
   };
-}
-
-/** Whether the file at `path` is inside the folder `root` once links are followed: a link in a project that leads out of it is not. */
-function insideReal(path, root) {
-  try {
-    const real = realpathSync(path);
-    const base = realpathSync(root);
-    return real === base || real.startsWith(base.endsWith(sep) ? base : `${base}${sep}`);
-  } catch (e) {
-    return false;
-  }
-}
-
-/** The exports `release` carries to the other Mac (architecture 4.7 and 7.3; plan PR 11): of each part whose project is on this Mac, the
-    newest export of this Mac's own, in Downloads and wherever the project's records say it went, and not what the other Mac released: those
-    that began in the newest minute (an MP4 and a MOV of one minute are both carried, as `finish` asks which is final). A WebM is none, nor is
-    an empty file. Only an export in Downloads, inside the project (links followed), or named as an export of that project (isExportOf) is
-    carried: a record in the project's renders/ can be written by the app's agent, and must never make another video on this Mac go into
-    Dropbox (the review of PR 11, M3). `input` is what `exportsFound` gives. Each is { key, name, dir, bytes, mtimeMs }, the main video's first. */
-export function exportsToCarry(input) {
-  const zone = input.zone || LOCAL_ZONE;
-  const out = [];
-  for (const part of input.parts) {
-    if (!part.here) continue;
-    const carries = (file) => file.where === "Downloads" || isExportOf(file.name, part.project) || (typeof part.dir === "string" && insideReal(join(file.dir, file.name), part.dir));
-    const exports = once(candidatesOf(part, { ...input, released: { dir: "", files: [] } }, zone).filter(taking).filter(carries));
-    if (!exports.length) continue;
-    const newest = Math.max(...exports.map((file) => minuteOf(file.began.ms)));
-    for (const file of exports.filter((f) => minuteOf(f.began.ms) === newest)) out.push({ key: part.key, name: file.name, dir: file.dir, bytes: file.bytes, mtimeMs: file.mtimeMs });
-  }
-  return out;
 }
 
 // --- The checks of an export (architecture 8.2), and the rule for what may be removed from Downloads (8.1) ---

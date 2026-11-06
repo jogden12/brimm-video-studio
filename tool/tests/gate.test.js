@@ -24,7 +24,7 @@ const OFF = { teachingsOn: false };
 describe("the gate's lists", () => {
   it("are the commands the design names, each list holding the one before it", () => {
     assert.deepEqual(UNSCOPED, ["episodes", "status", "behind", "retry", "guide"]);
-    assert.deepEqual(UNANSWERED, ["kind", "leave", "which", "show", "release", "resolve"]);
+    assert.deepEqual(UNANSWERED, ["kind", "leave", "which", "show", "resolve"]);
     assert.deepEqual(SESSION, [...UNANSWERED, "name"]);
     assert.deepEqual(SESSION_TAUGHT, [...SESSION, "teachings", "principles", "ideas", "finish", "reel", "render", "read"]);
   });
@@ -79,7 +79,7 @@ describe("the gate and footage (PR H5a)", () => {
   it("has a list of its own, footage alone, apart from the lists of a video not yet answered: it is in none of them", () => {
     assert.deepEqual(FOOTAGE, ["footage"]);
     for (const list of [UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, PLANNED]) assert.ok(!list.includes("footage"), "footage runs for a record with no kind alone, and for no session or plan");
-    assert.deepEqual(UNANSWERED, ["kind", "leave", "which", "show", "release", "resolve"], "the list of a video not yet answered is as it was");
+    assert.deepEqual(UNANSWERED, ["kind", "leave", "which", "show", "resolve"], "the list of a video not yet answered is as it was");
     assert.ok(COMMAND_NAMES.includes("footage"));
   });
   it("lets footage run for a record with no kind: a video waiting for its answer, one left alone, and a part, which it takes back", () => {
@@ -134,8 +134,8 @@ describe("the gate and the join (PR H5b)", () => {
 });
 
 describe("gateFor, a video waiting for its answer", () => {
-  it("lets through only the commands that answer it, leave it, show where it is, hand it over or sort out its files", () => {
-    for (const name of ["kind", "leave", "which", "show", "release", "resolve"]) assert.equal(gateFor(name, unanswered, ON), "", name);
+  it("lets through only the commands that answer it, leave it, show where it is or sort out its files", () => {
+    for (const name of ["kind", "leave", "which", "show", "resolve"]) assert.equal(gateFor(name, unanswered, ON), "", name);
   });
   it("refuses every other command, with teachings on or off, in the same words, which name no episode", () => {
     for (const name of ["open", "push", "bring", "name", "title", "reel", "reels", "ask", "finish", "spell", "logo", "captions", "text", "graphic", "preset", "cut", "teachings", "principles", "ideas", "render", "read", "free"]) {

@@ -685,7 +685,7 @@ export function letGoClaim(ctx, found) {
     // A record written since (one not whole yet, say: the other Mac's take-over on its way) is not this Mac's claim to keep
     // (round 3, t1-5).
     if (e.code === "CHANGED") return "The episode changed on the other Mac while finish ran, so nothing was let go here: say open to see who has it now.";
-    return `This Mac still has the episode open: it could not be let go (${String(e.message).replace(/\.$/, "")}). Say "hand it to Jason", or open it on the other Mac with "take it over".`;
+    return `This Mac still has the episode open: it could not be let go (${String(e.message).replace(/\.$/, "")}). Ask Jason.`;
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -969,7 +969,7 @@ export async function finishNow(ctx, found, deps = {}) {
     // this ran: the copies would land under its claim, and the record could not be written (the review of PR 21, finding 2).
     const now = readEpisode(found.folder);
     const held = now.record ? heldElsewhere(now.record, ctx.machine) : null;
-    if (held) failed.push(`${held.by} has ${record.name.text} open now, so nothing was copied into final/. Finish it there, or take it over and say ${finishAgain} again.`);
+    if (held) failed.push(`${held.by} has ${record.name.text} open now, so nothing was copied into final/. Finish it there.`);
     else if (!now.record || now.record.rev !== asked.rev) failed.push(`The episode changed while finish was working, so nothing was copied into final/. ${sayAgain}`);
     if (failed.length) return result();
 
@@ -1087,7 +1087,7 @@ export async function finishNow(ctx, found, deps = {}) {
     const before_ = readEpisode(found.folder);
     const heldNow = before_.record ? heldElsewhere(before_.record, ctx.machine) : null;
     if (heldNow) {
-      failed.push(`${heldNow.by} took ${record.name.text} over while finish was copying into final/, so the finish is not in the record.${listWhatFinalHolds()} Take it over and say ${finishAgain} again, or finish it there.`);
+      failed.push(`${heldNow.by} took ${record.name.text} over while finish was copying into final/, so the finish is not in the record.${listWhatFinalHolds()} Finish it there.`);
       return result();
     }
     const recordWriter = textWriter({ work: join(work, "record"), keep: true, ...opts });
