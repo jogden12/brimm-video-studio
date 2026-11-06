@@ -196,20 +196,20 @@ describe("kind … --again: the earlier reading set aside", () => {
     assert.equal(readFileSync(join(found.folder, "Pricing talk.cut-plan.txt"), "utf8"), LOG_TEXT);
     assert.equal(record.files["Pricing talk.cut-plan.json"], Buffer.byteLength(PLAN_TEXT));
     assert.equal(record.files["Pricing talk.cut-plan.txt"], Buffer.byteLength(LOG_TEXT));
-    // Set aside: what Claude made of the plan, its cut log, its notes, the rough cut's captions and transcript as it made them, the
-    // timeline version 0 was rendered from, and its suggestions. The rules' plan and log the first reading kept stay there, once.
+    // Set aside: what Claude made of the plan, its cut log, its notes, the rough cut's captions and transcript as it made them, and
+    // its suggestions (no Final Cut file is made now). The rules' plan and log the first reading kept stay there, once.
     assert.deepEqual(historyNames(found), [
       "Pricing talk.cut-plan.json", "Pricing talk.cut-plan.json", "Pricing talk.cut-plan.txt", "Pricing talk.cut-plan.txt", "Pricing talk.edit-notes.txt",
-      "Pricing talk.reel-suggestions.txt", "Pricing talk.rough-cut.srt", "Pricing talk.rough-cut.transcript.txt", "main.v0.fcpxml", "reels.json"
+      "Pricing talk.reel-suggestions.txt", "Pricing talk.rough-cut.srt", "Pricing talk.rough-cut.transcript.txt", "reels.json"
     ]);
     const kept = Object.fromEntries(historyOf(found).filter(([name]) => !name.startsWith("Pricing talk.cut-plan")));
-    for (const [name, text] of Object.entries(kept)) assert.equal(text, before[name === "main.v0.fcpxml" ? "edit/main.v0.fcpxml" : name], name);
+    for (const [name, text] of Object.entries(kept)) assert.equal(text, before[name], name);
     assert.deepEqual(historyOf(found).filter(([name]) => name === "Pricing talk.cut-plan.json").map(([, text]) => text).sort(), [before["Pricing talk.cut-plan.json"], PLAN_TEXT].sort());
-    for (const rel of ["edit/main.v0.fcpxml", "Pricing talk.edit-notes.txt", "Pricing talk.rough-cut.srt", "Pricing talk.rough-cut.transcript.txt", "reels.json"]) {
+    for (const rel of ["Pricing talk.edit-notes.txt", "Pricing talk.rough-cut.srt", "Pricing talk.rough-cut.transcript.txt", "reels.json"]) {
       assert.ok(!existsSync(join(found.folder, rel)), rel);
       assert.ok(!(rel in record.files), rel);
     }
-    // Version 0's entry goes with its timeline; the rough cut itself, on this Mac's own disk, stays where it is.
+    // The record never held an entry for the rough cut; the rough cut itself, on this Mac's own disk, stays where it is.
     assert.deepEqual(record.main.pushed, []);
     assert.ok(existsSync(render));
     assert.deepEqual([record.kind, record.reading], ["finished", null]);

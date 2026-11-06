@@ -6,7 +6,7 @@
 //   video keeps the whole of itself, so each suggestion's stretch is its phrases' own times, on the video's own clock.
 // - A raw video: the plan changed by Claude's decisions, with the pauses the import kept, its cut log, the rough cut's captions
 //   and transcript, Claude's notes, the Reel suggestions and the spellings as offers; and the rough cut rendered on this Mac, by
-//   today's ffmpeg, as version 0 of the main video, from the timeline kept as edit/main.v0.fcpxml, and opened in QuickTime
+//   today's ffmpeg, as version 0 of the main video, and opened in QuickTime
 //   Player. It replaces files the import's late check looks at. On the Mac that owns that check (this Mac's own pending, with no other
 //   import of the video at work) it starts at once and takes those files out of the check, under a lock the check also takes
 //   (late-wait.js keepCheckInStep); otherwise it waits first while that check still holds the video.
@@ -36,9 +36,8 @@ import { commitOf, thisCheckout } from "./filing.js";
 import { keepCheckInStep, ownCheckOnly } from "./late-wait.js";
 import { gated } from "./gate.js";
 import { highestNumberOf } from "./finish.js";
-import { timelineFor } from "./timeline.js";
 import { episodeWork, runsFolder, readSettings } from "./settings.js";
-import { fileSafe, shortId, timelineFile } from "./names.js";
+import { fileSafe, shortId } from "./names.js";
 import { askOnce, roughCut, intoEpisode, filesOf, importHold, sameVideo, CLAUDE_MODEL, CLAUDE_TRIES, AGAIN_MS } from "./unedited.js";
 import { noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, LATE_CHECK_MS } from "./dropbox.js";
@@ -254,7 +253,7 @@ export function asFiled(folder, record) {
 /** Read the episode `found` ({ folder, name, record }, as findEpisode found it) as `deps.kind` (finished, raw, short video), the
     answer of rev `deps.rev`: the detached run's work. Resolves { ok, made, failed, next }, the run's result, in plain words that
     name the episode by its name (shownName) and never quote Claude's reply or the transcript. `ctx` is edit.js's (this Mac's
-    settings, home, root, isWhole, openApp, and its deps for timelineFor), and `deps` are the run's: `run` and `tools` (the
+    settings, home, root, isWhole, openApp, and its deps for the render), and `deps` are the run's: `run` and `tools` (the
     programs, Claude Code among them), `wait`, `now`, `log`, `notify` (the import's notice), `readAll` (how a file is brought over),
     `early` (runDetached's, for the result once what it read is in), and the rule's options, as askAgain is given them. Nothing
     is asked of Claude, and nothing written, when:
@@ -528,15 +527,11 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     text(`${stem}.rough-cut.srt`, roughSrt);
     text(`${stem}.rough-cut.transcript.txt`, stampedText(roughSrt));
     text(`${stem}.cut-plan.txt`, planText(next, readPlanNote(changes, notesFile)));
-    // The rough cut, rendered as version 0, and the timeline it is made from, as the main video's timeline is built (timelineFor).
-    const v0 = timelineFile({ part: "main", v: 0 });
-    const timeline = await timelineFor({ folder, name: found.name, record }, "main", ctx, { build: true, plan: readPlan }).catch((e) => ({ why: `the work stopped (${(e && e.code) || "an error"})` }));
-    if (timeline.xml) {
-      text(v0, timeline.xml);
-      const rendered = await renderRough(ctx, found, deps, { record, plan: next, facts, work, named, name, log, now });
-      if (rendered.why) failed.push(`The rough cut could not be made: ${sentence(rendered.why)}`);
-      else render = { ...rendered, file: v0 };
-    } else failed.push(`The rough cut could not be made: its timeline could not be built (${String(timeline.why || `Dropbox is still bringing ${timeline.coming} over`).replace(/\.$/, "")}).`);
+    // The rough cut, rendered as version 0 into BRIMM Video Work from the plan as Claude read it. No Final Cut file is written, and
+    // the record holds no entry for it: it is kept on this Mac, and said.
+    const rendered = await renderRough(ctx, found, deps, { record, plan: next, facts, work, named, name, log, now });
+    if (rendered.why) failed.push(`The rough cut could not be made: ${sentence(rendered.why)}`);
+    else render = rendered;
     // The plan is put in last of the files, as the import writes it last.
     planLast = JSON.stringify(readPlan, null, 2) + "\n";
     made.push("the cut plan as Claude read it", "Claude's notes", ...(render ? ["the rough cut, version 0"] : []));
@@ -560,14 +555,13 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   if (spellingCount) made.push(`${counted(spellingCount, "spelling")} to check`);
   if (unused.length) failed.push(`${counted(unused.length, "part")} of Claude's reply could not be used${reeled ? `: ${stem}.reel-suggestions.txt says which` : ""}.`);
 
-  // Version 0 of the main video is the rough cut, rendered, made from edit/main.v0.fcpxml; it counts as shown once it has opened
-  // in QuickTime Player, which it does as soon as the record holding it is in (onPut), at the moment `opened` says.
+  // The rough cut is rendered into BRIMM Video Work and opens in QuickTime Player as soon as the record holding what was read is
+  // in (onPut). The record holds no entry for it.
   const change = (r) => ({
     ...r,
     ...(reeled ? { reels: [...(Array.isArray(r.reels) ? r.reels : []).filter((reel) => reel.status !== "candidate"), ...reelEntries(candidates)] } : {}),
     offers: { ...(isObject(r.offers) ? r.offers : {}), spellings: offered(r) },
     reading: { kind, model: CLAUDE_MODEL, at, on: ctx.machine, account, outcome: "read", ...(kind === "short video" ? { about: read.about, graphicCues: read.graphicCues } : {}) },
-    ...(render ? { main: { ...r.main, pushed: [{ v: 0, how: "render", at: render.at, on: ctx.machine, file: render.file, opened: localStamp(new Date(now())) }, ...(Array.isArray(r.main.pushed) ? r.main.pushed : []).filter((p) => p.v !== 0)] } } : {})
   });
   const okNow = () => !failed.some((f) => f.startsWith("The rough cut"));
   // Once what it read is in: the rough cut opens, the notice goes out, and the result is written early, before the late check.

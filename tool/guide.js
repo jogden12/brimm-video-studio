@@ -235,7 +235,7 @@ const LATE_PROBLEM = 'The check of its copies in Dropbox found a problem. Say "h
 const TEACHINGS_OFF = "Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.";
 
 /** The steps of the import whose speeds (progress.js RATES) a raw reading's time is made of: its Claude call and its rough cut. The
-    rough cut stays among them until the retirement's wave 2 stops the reading making one (spec section 10). */
+    rough cut stays among them: the reading still makes it, though not a Final Cut file (Jason, 6 November 2026). */
 export const READING_STEPS = ["Asking Claude", "Making the rough cut"];
 
 /** Seconds until an import on this Mac is Ready, from its run in the panel (progress.js): the time left in all, or on its last
