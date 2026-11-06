@@ -51,7 +51,7 @@ function handedOff(t, { id = "e-20261020-a1a1a1", name = "2026-10-20 Launch talk
   return found;
 }
 const DROP_LINE = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
-const TAKE = '  Launch talk (a1a1a1): On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
+const TAKE = '  Launch talk (a1a1a1): On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off".';
 const NO_FIT = 'No video under way fits that. Say "what\'s next?" to see the ones that are.';
 
 describe("guide on a Mac not on the light import", () => {
@@ -138,7 +138,7 @@ describe("guide, from the records", () => {
       writeGuideNotes(t.home, noted("live", 1));
       const live = await on(light(t), "guide", "Launch talk again");
       assert.equal(live.said[0], `Launch talk again (a2a2a2): On the BRIMM Ops page: ${kind === "raw" ? `${TAKE_AGAIN} ${ONLINE}` : TAKE_AGAIN}`, kind);
-      assert.match(live.said[1], /^Then: Press "Write what’s next"\. .* If the "Reels" card lists "Reels from brimm-video", press "Write its post text" beside each\.$/, kind);
+      assert.match(live.said[1], /^Then: Press "Write what’s next"\. .* If the "Reels" card lists "Reels from BRIMM Video Studio", press "Write its post text" beside each\.$/, kind);
       t.done();
     }
   });
@@ -569,7 +569,7 @@ describe("guide tell", () => {
   });
 });
 
-const TAKE_TEXT = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
+const TAKE_TEXT = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off".';
 describe("guide notes her word", () => {
   it("notes only the step that comes next, then says the next one", async () => {
     const t = setup();

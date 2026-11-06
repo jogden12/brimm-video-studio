@@ -98,7 +98,7 @@ const ONLINE_ONLY = ' Once Dropbox shows the episode\'s folder is up to date, Co
 
 /** What follows taking a newer revision of an episode whose note is already at the cascade, the last step. The Reels of a video her
     editor finished usually come later, through "Hand off the Reels", which writes a newer revision of the hand-off. The page's "Reels"
-    card lists them ("Reels from brimm-video"), each with a "Write its post text" button, or "Open its short video" once its post text
+    card lists them ("Reels from BRIMM Video Studio"), each with a "Write its post text" button, or "Open its short video" once its post text
     exists. The cascade step says so, but she has done it, and no step comes after "taken" to say it again. With the note before the
     cascade that step is still to come, and it says it. A short video's page has no "Reels" card, and a session's words are the
     session form's. */
@@ -109,25 +109,25 @@ const LATE_REELS = ' Then, on the "Reels" card, press "Write its post text" besi
     note on it: the revision the note holds is the one the page holds, which the page's button for a newer revision names beside the
     hand-off's, and the step it holds is how far she has got (an episode's, at the cascade, is sent on to the "Reels" card:
     LATE_REELS). A first take reads no note. A hand-off dropped on Episodes opens the episode that holds its video; when none does,
-    the page offers "Add it as a new episode", which opens a form whose button is "Add the episode", and the file goes into that
-    episode's transcript. A session's form has one button, "Take the session", for a new revision and a newer one. */
+    the page says it is a new episode and has one button, "Add the episode and take the hand-off" (a hand-off with no name keeps
+    "Add it as a new episode"); the file goes into that episode's transcript. A session's form has one button, "Take the session", for a new revision and a newer one. */
 const SAYS = {
   taken: (family, again, revision, note) =>
     family === "session"
       ? `Choose "Principles", drop the ${again ? "new " : ""}hand-off, then press "Take the session".`
       : again
         ? `Drag the new hand-off onto Episodes, then press "Take revision ${revision} in place of revision ${note.revision}".${family === "episode" && note.step === "cascade" ? LATE_REELS : ""}`
-        : 'Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".',
+        : 'Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off".',
   kit: () => 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.',
   posted: (family) =>
     family === "short video"
       ? "Post it on Instagram, and as a YouTube Short."
       : 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".',
   live: () => 'Correct the form to what is live, then press "This is what is live".',
-  // The page's "Reels" card lists the Reels brimm-video handed off ("Reels from brimm-video"), each with "Write its post text".
+  // The page's "Reels" card lists the Reels BRIMM Video Studio handed off ("Reels from BRIMM Video Studio"), each with "Write its post text".
   // The step names no "Clip to cut": the page (version 10) stops writing them. OpusClip is no longer used (Jason, 2 November 2026).
   cascade: () =>
-    'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. If the "Reels" card lists "Reels from brimm-video", press "Write its post text" beside each.',
+    'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. If the "Reels" card lists "Reels from BRIMM Video Studio", press "Write its post text" beside each.',
   posttext: () => 'Press "Write what’s next", and pick the hook and the YouTube Short title. Approve and copy the caption, the Short\'s title and description, and the LinkedIn post.',
   checked: () => 'Check each principle marked "Check it", then press "Use in drafts".',
   // "the hand-off", not "the empty session revision": once the session's own hand-off is written, final/ holds that one in its place.
