@@ -1,5 +1,5 @@
-// The move script of the "Move to Studio" app (tool/move-app/move.zsh): it moves Sallie's laptop from brimm-video to Studio, one
-// asked step at a time. Every test runs it in a home folder made for the test, with stand-ins for ssh-keygen, ssh, claude, launchctl,
+// The move script of the "Move to Studio" app (tool/move-app/move.zsh): it moves Sallie's laptop or Jason's MacBook from brimm-video
+// to Studio, or sets up fresh, as Jason's MacBook, a Mac with no brimm-video, one asked step at a time. Every test runs it in a home folder made for the test, with stand-ins for ssh-keygen, ssh, claude, launchctl,
 // brew, open, pbcopy, caffeinate, sw_vers, df and xcode-select first on its PATH, each writing `name args` into a `ran` file, so that
 // no test runs the program of the Mac it runs on. The "GitHub" it clones from is a local repository made with real git.
 // The environment is built from scratch (never process.env spread in), so that nothing of this test run, such as the variables
@@ -8,7 +8,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -82,8 +82,12 @@ if (command === "show") {
 `;
 
 /** Runs the move script on a Mac made for the test. `options`, all optional:
-    settings   her settings.json (default: as the switch of 26 October left it), or null for none
+    settings   her settings.json (default: as the switch of 26 October left it), or null for none (a Mac with no brimm-video)
     settingsChange  values to change in the default settings
+    brimmVideo with no settings, Dropbox's The BRIMM DB/BRIMM Video is still made in ~/Dropbox, unless this is null (none),
+               "two" (a second one in ~/Library/CloudStorage/Dropbox too), "linked" (only in ~/Library/CloudStorage/Dropbox, with
+               ~/Dropbox a link to that Dropbox folder) or "team" (a level deeper, in a team member's folder, as on the Mac Studio:
+               ~/Library/CloudStorage/Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB/BRIMM Video)
     launchctl  what `launchctl list` prints; launchctlLater: what it prints from its second call on (default: the same)
     dropFiles  names put in her drop folder (it always holds .DS_Store and .brimm-watched-by too)
     claude     { status, version }: what the stand-in prints for `auth status --json` (default signed in, Max), and for --version;
@@ -103,7 +107,9 @@ if (command === "show") {
                `open -a Safari` has been run (the stand-in puts it there)
     install    what the stand-in tool/install.sh in the "GitHub" repo does: { print, printExit, ran, ranExit, moves, checkLeft }.
                `print` is the text of --print (a list: one text a call, the last repeating), `ran` the text of --yes; `printDrops` (a file name put in her drop folder by every --print), `moves`
-               rewrites settings.json's checkout to Studio and writes the agent's plist; `checkLeft` leaves the one-shot plist
+               rewrites settings.json's checkout to Studio and writes the agent's plist; `checkLeft` leaves the one-shot plist;
+               `writesSettings` makes, as the real one does on a Mac with none, a settings.json for the --machine and the folder it is
+               given, and the drop folder Drop/<machine>
     laterCommit  the "GitHub" repo gets a commit after the pin
     testFail   BRIMM_TEST_FAIL=1 for the tests in the checkout
     gitStandIn a stand-in git that notes its arguments and GIT_SSH_COMMAND, and fails; noRepo leaves BRIMM_STUDIO_REPO unset;
@@ -150,6 +156,9 @@ case "$1" in
     ${inst.moves ? `node -e 'const fs=require("fs");const f=process.argv[1];const s=JSON.parse(fs.readFileSync(f,"utf8"));s.checkout=process.argv[2];fs.writeFileSync(f,JSON.stringify(s))' "$HOME/Library/Application Support/BRIMM Video/settings.json" "$HOME/Claude Code/brimm-video-studio"
     mkdir -p "$HOME/Library/LaunchAgents"; echo "$HOME/Claude Code/brimm-video-studio/tool/unedited.js" > "$HOME/Library/LaunchAgents/com.thebrimm.unedited.plist"` : ""}
     ${inst.checkLeft ? 'mkdir -p "$HOME/Library/LaunchAgents"; echo left > "$HOME/Library/LaunchAgents/com.thebrimm.claude-check.plist"' : ""}
+    ${inst.writesSettings ? `machine="$3"; for a in "$@"; do root="$a"; done
+    mkdir -p "$HOME/Library/Application Support/BRIMM Video" "$root/Drop/$machine"
+    node -e 'const [f, root, machine, checkout] = process.argv.slice(1); require("fs").writeFileSync(f, JSON.stringify({ version: 1, machine, root, checkout, import: "light", handoffVersion: 2, drop: "Drop" }))' "$HOME/Library/Application Support/BRIMM Video/settings.json" "$root" "$machine" "$HOME/Claude Code/brimm-video-studio"` : ""}
     exit ${inst.ranExit ?? 0} ;;
 esac
 `, 0o755);
@@ -176,6 +185,20 @@ esac
       put(join(drop, ".DS_Store"), "");
       put(join(drop, ".brimm-watched-by"), `${settings.machine}\n`);
       for (const name of options.dropFiles ?? []) put(join(drop, name), "made for the test");
+    }
+    // A Mac with no settings still has The BRIMM DB in Dropbox, unless the test says it has none (null), two ("two"), or one in
+    // CloudStorage with ~/Dropbox a link to it ("linked"), as Dropbox makes it on a newer Mac.
+    if (settings === null && options.brimmVideo !== null) {
+      const cloud = join(home, "Library", "CloudStorage", "Dropbox");
+      if (options.brimmVideo === "linked") {
+        mkdirSync(join(cloud, "The BRIMM DB", "BRIMM Video"), { recursive: true });
+        symlinkSync(cloud, join(home, "Dropbox"));
+      } else if (options.brimmVideo === "team") {
+        mkdirSync(join(home, "Library", "CloudStorage", "Dropbox-Ogden28.5", "Jason Ogden", "The BRIMM DB", "BRIMM Video"), { recursive: true });
+      } else {
+        mkdirSync(join(home, "Dropbox", "The BRIMM DB", "BRIMM Video"), { recursive: true });
+        if (options.brimmVideo === "two") mkdirSync(join(cloud, "The BRIMM DB", "BRIMM Video"), { recursive: true });
+      }
     }
 
     // Studio's checkout, as an earlier run left it.
@@ -334,11 +357,7 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
   it("refuses another Mac, and an option it doesn't know, and a missing commit, changing nothing", () => {
     const other = moveOn({ settingsChange: { machine: "Mac Studio" } });
     assert.equal(other.status, 2);
-    assert.match(other.out, /This app is for Sallie's laptop, and this Mac's settings say it is "Mac Studio"\. Nothing was changed\./);
-
-    const none = moveOn({ settings: null });
-    assert.equal(none.status, 2);
-    assert.match(none.out, /This Mac has no brimm-video settings \(~\/Library\/Application Support\/BRIMM Video\/settings\.json\), so it isn't a laptop this app moves\. Nothing was changed\./);
+    assert.match(other.out, /This app is for Sallie's laptop and Jason's MacBook, and this Mac's settings say it is "Mac Studio"\. Nothing was changed\./);
 
     const unknown = moveOn({}, "--frobnicate");
     assert.equal(unknown.status, 2);
@@ -350,7 +369,7 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
     const malformed = moveOn({ commit: "abc123" });
     assert.equal(malformed.status, 2);
 
-    for (const r of [other, none, unknown, missing, malformed]) {
+    for (const r of [other, unknown, missing, malformed]) {
       assert.deepEqual(r.tree, r.before, "nothing is written");
       assert.equal(r.ran, "", "nothing is run");
     }
@@ -377,18 +396,18 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
   it("counts the files in her drop folder, never names one, and stops when there are any", () => {
     const r = moveOn({ dropFiles: ["Client Name Session.mov"] });
     assert.equal(r.status, 1);
-    assert.match(r.out, /Her drop folder holds 1 file still to be imported\./);
+    assert.match(r.out, /The drop folder holds 1 file still to be imported\./);
     assert.ok(!r.out.includes("Client Name") && !r.log.includes("Client Name") && !r.err.includes("Client Name"));
     const two = moveOn({ dropFiles: ["a.mov", "b.mov"] });
-    assert.match(two.out, /Her drop folder holds 2 files still to be imported\./);
+    assert.match(two.out, /The drop folder holds 2 files still to be imported\./);
   });
 
   it("stops, saying to allow Terminal, when her drop folder cannot be read, and does not take it for empty", () => {
     const r = moveOn({ dropMode: 0o000 });
     assert.equal(r.status, 1, r.out);
-    assert.match(r.out, /Her drop folder could not be read\. macOS may have asked whether Terminal may read Dropbox/);
+    assert.match(r.out, /The drop folder could not be read\. macOS may have asked whether Terminal may read Dropbox/);
     assert.match(r.out, /Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again\./);
-    assert.ok(!r.out.includes("Her drop folder is empty."), r.out);
+    assert.ok(!r.out.includes("The drop folder is empty."), r.out);
     assert.ok(r.out.endsWith(STOPPED_NOTHING), r.out);
   });
 
@@ -556,8 +575,8 @@ describe("the move script, one run at a time", { skip: notAMac }, () => {
   });
 
   it("(the test's own set-up) says so plainly when the first run never reaches its question, rather than going on", () => {
-    // Refused at once (this Mac has no settings), the first run never asks, so it never holds the lock the second should meet.
-    assert.throws(() => moveOn({ ...SIGNED_OUT_OPEN, settings: null }), /The first run never reached its first question: it ended first\./);
+    // Refused at once (its settings name the Mac Studio), the first run never asks, so it never holds the lock the second should meet.
+    assert.throws(() => moveOn({ ...SIGNED_OUT_OPEN, settingsChange: { machine: "Mac Studio" } }), /The first run never reached its first question: it ended first\./);
   });
 
   it("takes no lock under --print, so a print runs beside an open run", () => {
@@ -1031,8 +1050,8 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     const dropped = moveOn({ marks: NOT_INSTALLED, install: { printDrops: "Client Name Session.mov" }, answers: "y\ny\n" });
     assert.equal(dropped.status, 1, dropped.out);
     assert.ok(!dropped.ran.includes("install.sh --yes"), dropped.ran);
-    assert.match(dropped.out, /Her drop folder holds 1 file still to be imported\./);
-    assert.equal((dropped.out.match(/Her drop folder is empty\./g) ?? []).length, 1, "step 1 found it empty; the second look found a file");
+    assert.match(dropped.out, /The drop folder holds 1 file still to be imported\./);
+    assert.equal((dropped.out.match(/The drop folder is empty\./g) ?? []).length, 1, "step 1 found it empty; the second look found a file");
     for (const text of [dropped.out, dropped.log, dropped.report, dropped.err]) assert.ok(!text.includes("Client Name"), "no file's name anywhere");
     assert.ok(dropped.out.endsWith(STOPPED_NOTHING), dropped.out);
 
@@ -1045,7 +1064,7 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     // Nothing new in her drop folder and no import: it goes on, and says so a second time.
     const clear = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n" });
     assert.equal(clear.status, 0, clear.out);
-    assert.equal((clear.out.match(/Her drop folder is empty\./g) ?? []).length, 2);
+    assert.equal((clear.out.match(/The drop folder is empty\./g) ?? []).length, 2);
     assert.equal((clear.out.match(/No import is running\./g) ?? []).length, 2);
   });
 
@@ -1209,5 +1228,119 @@ describe("the move script, the report and brimm-video's old key (check 48)", { s
     assert.equal(gone.status, 0, gone.out);
     assert.ok(!gone.out.includes("Has brimm-video's key been deleted"), "no old key: no question");
     assert.match(gone.report, /^brimm-video's old key: not on this Mac$/m);
+  });
+});
+
+describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook moved or set up fresh", { skip: notAMac }, () => {
+  const JASON = "Jason's MacBook";
+  const JASON_KEY = "brimm-video-studio read-only, Jason's MacBook";
+  const OPTIONS = "--machine Jason's MacBook --drop Drop --import light --handoff 2";
+  const rootOf = (home) => `${home}/Dropbox/The BRIMM DB/BRIMM Video`;
+  const installCalls = (r) => r.ran.split("\n").filter((l) => l.startsWith("install.sh "));
+  const NOT_INSTALLED = "tests=SHA\n";
+  // A Mac with no brimm-video settings, where Studio's code is already at the pin with its tests passed and Studio's key is made for
+  // Jason's MacBook, so a run goes from step 1's question straight to the installer. A brimm-video checkout with no settings (as the
+  // transcript tool's standby may have) is there too: the harness always makes one.
+  const FRESH = { settings: null, key: JASON_KEY, marks: NOT_INSTALLED };
+  // Its answers: set up fresh, the installer, HyperFrames on (a fresh Mac's settings name no editing app), and Return at Finder.
+  const FRESH_YES = "y\ny\ny\n\n";
+
+  it("refuses a Mac whose settings name another Mac, changing nothing", () => {
+    for (const machine of ["Mac Studio", "Sallie's MacBook Air"]) {
+      const r = moveOn({ settingsChange: { machine } });
+      assert.equal(r.status, 2, r.out);
+      assert.match(r.out, new RegExp(`This app is for Sallie's laptop and Jason's MacBook, and this Mac's settings say it is "${machine}"\\. Nothing was changed\\.`));
+      assert.deepEqual(r.tree, r.before);
+    }
+  });
+
+  it("moves Jason's MacBook from brimm-video under its own name", () => {
+    const r = moveOn({ settingsChange: { machine: JASON }, key: JASON_KEY, marks: NOT_INSTALLED, answers: "y\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`, `install.sh --yes ${OPTIONS} ${rootOf(r.home)}`]);
+    assert.ok(r.ran.split("\n").includes(`open -R ${rootOf(r.home)}/Drop/${JASON}`), r.ran);
+    assert.ok(!/set up fresh/.test(r.out), "a Mac with brimm-video is moved, not set up fresh");
+    assert.ok(r.out.trimEnd().endsWith("Done. Next on the By-Hand page: the rest of the check for Jason's MacBook."), r.out.slice(-300));
+    assert.match(r.report, /^Studio move report: Jason's MacBook, /);
+  });
+
+  it("names Studio's key, and its title on GitHub, for the Mac it is on", () => {
+    const r = moveOn({ settingsChange: { machine: JASON }, key: null, answers: "y\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.ok(r.ran.split("\n").includes(`ssh-keygen -t ed25519 -f ${r.home}/.ssh/brimm_video_studio_deploy -N  -C ${JASON_KEY}`), r.ran);
+    assert.equal(r.copied, `ssh-ed25519 AAAAstandin ${JASON_KEY}\n`);
+    assert.match(r.out, /Title: Jason's MacBook\./);
+    assert.ok(!r.out.includes("Sallie's laptop"), r.out);
+  });
+
+  it("on a Mac with no brimm-video, a print says it would set it up fresh as Jason's MacBook, and changes nothing", () => {
+    const r = moveOn(FRESH, "--print");
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /Would ask to set this Mac up fresh as Jason's MacBook/);
+    assert.ok(r.out.includes(rootOf(r.home)), "it says where BRIMM Video is");
+    assert.match(r.out, /Would leave brimm-video's old key as it is, if there is one: this Mac is set up fresh/);
+    assert.ok(!r.out.includes("only once Studio's installer has finished"), "a fresh Mac's step 7 is never asked");
+    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`]);
+    assert.deepEqual(r.tree, r.before);
+  });
+
+  it("sets a Mac with no brimm-video up fresh as Jason's MacBook on y, and says nothing of Sallie there", () => {
+    const r = moveOn({ ...FRESH, install: { writesSettings: true }, answers: FRESH_YES });
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /set up fresh, as Jason's MacBook/);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`, `install.sh --yes ${OPTIONS} ${rootOf(r.home)}`]);
+    assert.equal((r.out.match(/No import is running\./g) ?? []).length, 2, "it looked again right before the install");
+    assert.ok(!/drop folder (is empty|holds)/i.test(r.out), "a Mac set up fresh has no drop folder to count before the install");
+    assert.ok(r.ran.split("\n").includes(`open -R ${rootOf(r.home)}/Drop/${JASON}`), r.ran);
+    assert.match(r.report, /^Studio move report: Jason's MacBook, /);
+    assert.match(r.report, /1\.4\.0 on Jason's MacBook/);
+    assert.match(r.report, /^Anything unexpected in her settings: .*set up fresh/m);
+    assert.ok(r.out.trimEnd().endsWith("Done. Next on the By-Hand page: the rest of the check for Jason's MacBook."), r.out.slice(-300));
+    assert.ok(!/Sallie|[Hh]er (drop folder|settings|Desktop|own Claude|HeyGen|checkout)/.test(r.out), r.out);
+    assert.ok(r.tree.includes(join("Claude Code", "BRIMM video", "tool", "settings.js")), "a brimm-video checkout is left as it is");
+  });
+
+  it("stops, changing nothing, on n to setting this Mac up fresh", () => {
+    const r = moveOn({ ...FRESH, answers: "n\n" });
+    assert.equal(r.status, 1, r.out);
+    assert.ok(r.out.endsWith(STOPPED_NOTHING), r.out);
+    assert.deepEqual(installCalls(r), []);
+  });
+
+  it("stops before asking when Dropbox's BRIMM Video folder is not on this Mac, or is there twice", () => {
+    const none = moveOn({ ...FRESH, brimmVideo: null });
+    assert.equal(none.status, 1, none.out);
+    assert.match(none.out, /This Mac has no BRIMM Video folder in Dropbox \(The BRIMM DB › BRIMM Video\)\. Sign in to Dropbox, let The BRIMM DB sync, then run the app again\./);
+    assert.ok(none.out.endsWith(STOPPED_NOTHING), none.out);
+    assert.ok(!none.out.includes("Go ahead?"), "nothing was asked");
+
+    const two = moveOn({ ...FRESH, brimmVideo: "two" });
+    assert.equal(two.status, 1, two.out);
+    assert.match(two.out, /This Mac has 2 BRIMM Video folders in Dropbox: /);
+    assert.ok(two.out.includes(rootOf(two.home)) && two.out.includes(`${two.home}/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video`), two.out);
+    assert.ok(two.out.endsWith(STOPPED_NOTHING), two.out);
+    assert.ok(!two.out.includes("Go ahead?"), "nothing was asked");
+  });
+
+  it("counts BRIMM Video once when ~/Dropbox is a link to Dropbox's folder in CloudStorage, and names it there", () => {
+    const r = moveOn({ ...FRESH, brimmVideo: "linked" }, "--print");
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${r.home}/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video`]);
+  });
+
+  it("finds BRIMM Video a level deeper, in a team Dropbox's member folder, as the Mac Studio has it", () => {
+    const r = moveOn({ ...FRESH, brimmVideo: "team" }, "--print");
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${r.home}/Library/CloudStorage/Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB/BRIMM Video`]);
+  });
+
+  it("leaves brimm-video's old key alone on a Mac set up fresh", () => {
+    const r = moveOn({ ...FRESH, oldKey: true, install: { writesSettings: true }, answers: FRESH_YES });
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(r.oldKeyFiles, [true, true]);
+    assert.ok(r.ownKeyKept);
+    assert.ok(!r.out.includes("Has brimm-video's key been deleted"), "no question about it");
+    assert.match(r.out, /Not asked: this Mac was set up fresh/);
+    assert.match(r.report, /^brimm-video's old key: not asked: this Mac was set up fresh/m);
   });
 });
