@@ -34,10 +34,13 @@
 //   - otherwise the episode's words must be on this Mac, and so must the working copy of its video (5.7). The copy is a detached
 //     job (workcopy.js) that can take minutes, so when it is not there it is asked for, and she is told to say it again when it
 //     is made;
-//   - and Claude's reading must be over: the project is written from it (the cut plan and the Reel suggestions), and nothing writes
-//     it again afterwards, so a project made while `read` is still at work would keep an unfinished reading for good. While it is at
-//     work nothing is made, and she is told to say it again when it has finished. Only a new project waits for it: one made before
-//     is opened as it was, and so is a folder the record does not know;
+//   - and Claude's reading must be in the episode's record: the project is written from it (the cut plan and the Reel suggestions), and
+//     nothing writes it again afterwards, so a project made while `read` is still at work on it would keep an unfinished reading for
+//     good. Until the record holds the current reading nothing is made, and she is told to say it again when it has finished. Once it
+//     does, the project is made even while the reading's own late check is still to come (plan R1d), if the words, the Reel
+//     suggestions and the cut plan are each at the size the record lists (readListed; else she is told some files are not whole yet,
+//     and claimAndBring says so before it claims anything). Only a new project waits for the reading: one made before is opened as it
+//     was, and so is a folder the record does not know;
 //   - the project is written from them (project.js), whole or not at all, with the working copy moved into it (5.1, 5.2);
 //   - the app is opened on the project by the pinned command line (hyperframes.js), by absolute path and in a short list of
 //     variables of its own, with her chat handed to the app only when handoverAllowed says it may be (5.6);
@@ -63,7 +66,8 @@ import { programHome } from "./home.js";
 import { readResult, runningCommand } from "./detached.js";
 import { isFromPlan, kindOf, localStamp } from "./episode.js";
 import { sessionNotCleared } from "./gate.js";
-import { copyIn as copyTakes } from "./guide.js";
+import { copyIn as copyTakes, waitWords } from "./guide.js";
+import { projectWaits, readingWaitsUntil, waitFacts } from "./late-wait.js";
 import { chatHeld } from "./held.js";
 import { PIN, childEnv, cliPath, handoverAllowed, readOpen, toolchainDir } from "./hyperframes.js";
 import { transcriptOf } from "./loosened.js";
@@ -91,16 +95,28 @@ export const KEPT = "kept for an earlier kind";
 
 /** What she is told, in words that hold no path, no flag and no command name. The three exported ones are said of a Reel's project in
     the same words (app-reel.js, plan PR 5); the other two, which tell her what to say again, have a Reel's own there. */
-export const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason.`;
+export const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Dropbox may still be bringing them: say it again in a few minutes. If it says this again, tell Jason.`;
 const beingMade = (name, ready = "") => `The video for HyperFrames is being made.${ready} Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
 /** When the video for HyperFrames will be ready, as a clock time and in minutes, for the line that says it is being made: from the speed
     this Mac measured of making one (guide.js copyIn, which the guide's "It usually takes" is made of) and the recording's length, as
     the clock shows it now. Nothing while it has measured none, so that no time is named that cannot be backed. */
 function readyAt(ctx, record) {
   const seconds = copyTakes(readRates(progressFolder(ctx.home)), record.video && record.video.seconds);
+  // While the copy has to wait for Dropbox's late check (plan R1a), the time is the check's, and the copy's after it.
+  const wait = waitFacts(ctx, record, seconds);
+  if (wait) return ` ${waitWords(wait)}`;
   return seconds === null ? "" : ` It is ready about ${clockAt(ctx.now() + seconds * 1000)}, in ${aboutLeft(seconds)}.`;
 }
-const stillReading = (name) => `Claude is still reading it. Say "open ${name} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
+/** Claude's reading of a raw video waits for the import's late check as well (reading.js): while that is still to come, when the reading
+    starts is said with it (plan R1a). */
+function stillReading(ctx, record) {
+  const due = kindOf(record) === "raw" ? readingWaitsUntil(ctx, record) : null;
+  const starts = due === null ? "" : ` It starts at ${clockAt(due)}, when Dropbox has checked its copies.`;
+  return `Claude is still reading it.${starts} Say "open ${record.name.text} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
+}
+/** What is said when the project is not made because a file it reads is not at the size the record lists, while the reading's own
+    late check is still to come (plan R1d). On a take-over she is told to take it over again, as claimAndBring's other waits tell her. */
+export const notWholeYet = (name, takeOver = false) => `Some files of ${name} are not whole in Dropbox yet, so its HyperFrames project wasn't made. Say "${takeOver ? "take it over" : `open ${name} in HyperFrames`}" again in a few minutes. If it says this again, tell Jason.`;
 export const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
 /** What is said of an explainer's HyperFrames project in a HeyGen voice when its folder is not on this Mac and there is no snapshot to rebuild it from (PR H6):
     it holds no media to make it again from, since the voice was made in it. */
@@ -114,7 +130,7 @@ export const noRecording = (name) => `The recording of ${name} is not in its fol
 export const notTheSame = (name) => `The video made again for ${name} isn't the size or length of the one its HyperFrames project was made with, so it wasn't put back. Ask Jason.`;
 export const notPutBack = (name) => `The video for ${name} was made again, but it could not be put back in its HyperFrames project. Ask Jason.`;
 /** What is said of a project rebuilt from the other Mac's snapshot (plan PR 11), `name` being "Pricing talk" or "Reel 2 of Pricing talk". */
-export const snapshotNotWhole = (name) => `The snapshot of the HyperFrames project for ${name} is not whole on this Mac, so it wasn't rebuilt. Ask Jason.`;
+export const snapshotNotWhole = (name) => `The snapshot of the HyperFrames project for ${name} is not whole on this Mac, so it wasn't rebuilt. Dropbox may still be bringing it: say it again in a few minutes. If it says this again, tell Jason.`;
 export const couldNotRebuild = (name) => `The HyperFrames project for ${name} could not be rebuilt on this Mac. Ask Jason.`;
 export const olderThanSnapshot = (name) => `The HyperFrames project for ${name} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`;
 export const ASSETS_NOT_IN = "Its assets (pictures, music and video) were too big to hand over, so they are not in it.";
@@ -123,7 +139,7 @@ export const ASSETS_NOT_IN = "Its assets (pictures, music and video) were too bi
     handed over from this Mac is in it (the review of PR 18, F2); the next three are why it was not done, each saying the older project is
     where it was (the last, that it is in its set-aside place and nothing was deleted); the video's is said where a rebuilt project's video is. */
 export const setAsideWords = (name) => `The older HyperFrames project for ${name} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`;
-export const notWholeAside = (name) => `The snapshot of the HyperFrames project for ${name} is not whole on this Mac, so the older project was left where it was. Ask Jason.`;
+export const notWholeAside = (name) => `The snapshot of the HyperFrames project for ${name} is not whole on this Mac, so the older project was left where it was. Dropbox may still be bringing it: say it again in a few minutes. If it says this again, tell Jason.`;
 export const couldNotAside = (name) => `The HyperFrames project for ${name} could not be rebuilt on this Mac, so the older project was left where it was. Ask Jason.`;
 export const stuckAside = (name) => `The older HyperFrames project for ${name} was set aside on this Mac and nothing was deleted, but the rebuilt one could not be put in its place. Ask Jason.`;
 export const videoKept = (name) => `The video for ${name} was kept from the older project, and it is in the project.`;
@@ -268,13 +284,50 @@ export function jsonIn(path) {
   }
 }
 
+/** What the file `rel` in the episode's `folder` holds, read whole and judged by the bytes read (plan R1d): { text } when the record
+    lists the file and the bytes read are the size it lists, or it lists none and the file is there; { notWhole: rel } when it lists
+    the file and it is missing or of another size; { absent: true } when it lists none and the file is not there. The size is that
+    of what was read, not of a look before it. */
+export function readListed(folder, record, rel) {
+  const listed = record.files && Object.prototype.hasOwnProperty.call(record.files, rel);
+  let bytes;
+  try {
+    bytes = readFileSync(join(folder, rel));
+  } catch (e) {
+    if (e.code === "ENOENT") return listed ? { notWhole: rel } : { absent: true };
+    if (listed) return { notWhole: rel };
+    throw e;
+  }
+  return listed && bytes.length !== record.files[rel] ? { notWhole: rel } : { text: bytes.toString("utf8") };
+}
+
+/** `readListed` for the episode's words file: a read that fails for a reason other than the file's not being there is not there either
+    ({ absent: true }), as `wordsIn` takes it, so that the words are said not to be on this Mac yet and nothing throws. */
+export function readWords(folder, record, rel) {
+  try {
+    return readListed(folder, record, rel);
+  } catch {
+    return { absent: true };
+  }
+}
+
+/** The words, [{ w, start, end }], that `text` holds: the import writes { video, duration, words }, and a bare list is taken too.
+    null when it is no JSON or holds no list. */
+export const wordsOfText = (text) => {
+  try {
+    const held = JSON.parse(text);
+    const words = Array.isArray(held) ? held : held?.words;
+    return Array.isArray(words) ? words : null;
+  } catch {
+    return null;
+  }
+};
+
 /** The episode's words, [{ w, start, end }], from its .words.json: the import writes { video, duration, words }, and a bare list is
     taken too. null when the file is not there, cannot be read, or holds no list: then the words are not on this Mac yet. */
 export function wordsIn(path) {
   try {
-    const held = JSON.parse(readFileSync(path, "utf8"));
-    const words = Array.isArray(held) ? held : held?.words;
-    return Array.isArray(words) ? words : null;
+    return wordsOfText(readFileSync(path, "utf8"));
   } catch {
     return null;
   }
@@ -463,8 +516,11 @@ function adoptProject(ctx, { found, record, at, projects }) {
     - Without the working copy, it is asked for, unless it is being made already (workcopy.js requestWorkCopy), and she is told
       to say it again when it is done (0). A project made before has taken the copy into itself and left only its facts, which
       is why openInApp looks for that project first.
-    - While Claude's reading of the episode is at work (`read` holds the episode's lock), nothing is made: the project is written
-      from the reading, and nothing writes it again later. She is told to say it again when it has finished (0). The working copy
+    - While Claude's reading of the episode is at work and not yet in the record (`projectWaits` "reading"), nothing is made: the project
+      is written from the reading, and nothing writes it again later. She is told to say it again when it has finished (0). With the
+      reading in the record ("verify": the read run is at its own late check, or this Mac still owes the import's) the words, the Reel
+      suggestions and the cut plan are read through `readListed`, and a file not at the size the record lists makes nothing (0, in
+      `notWholeYet`'s words). The working copy
       is still asked for when it is not there, as above, and the one line she gets is the reading's: it is the one she waits for
       (the copy is made meanwhile), and what she says again is the same.
     - The pictures its cues name by a `ref` in their style are copied from the reference folder into its brimm/references/ (references.js
@@ -478,27 +534,35 @@ function adoptProject(ctx, { found, record, at, projects }) {
 async function makeProject(ctx, { found, record, at, projects }, { cli, guidance, planned }) {
   const { home } = ctx;
   const stem = basename(record.video.file, extname(record.video.file));
-  const words = wordsIn(join(found.folder, `${stem}.words.json`));
+  const wait = projectWaits(ctx, { name: found.name, record });
+  // While the reading's own late check is still to come (plan R1d), the three files read from the episode's folder are held to the
+  // sizes the record lists, judged by the bytes read; one that is not whole makes nothing.
+  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel, i) => (i === 0 ? readWords : readListed)(found.folder, record, rel)) : null;
+  if (checked && checked.some((got) => got.notWhole)) {
+    ctx.say(notWholeYet(record.name.text));
+    return { code: 0 };
+  }
+  const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(join(found.folder, `${stem}.words.json`));
   if (!words) {
     ctx.say(noWords(record.name.text));
     return { code: 1 };
   }
   const raw = statSync(join(found.folder, record.video.file));
   const copy = copyPathsOf(home, found.name, record, raw);
-  const reading = runningCommand(home, found.name, ctx.alive) === "read";
+  const reading = wait === "reading";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     requestWorkCopy(ctx, { folder: found.name });
-    ctx.say(reading ? stillReading(record.name.text) : beingMade(record.name.text, readyAt(ctx, record)));
+    ctx.say(reading ? stillReading(ctx, record) : beingMade(record.name.text, readyAt(ctx, record)));
     return { code: 0 };
   }
   if (reading) {
-    ctx.say(stillReading(record.name.text));
+    ctx.say(stillReading(ctx, record));
     return { code: 0 };
   }
   const facts = JSON.parse(readFileSync(copy.facts, "utf8"));
   const { name, number } = nextMain(record, projects);
-  const reels = jsonIn(join(found.folder, REELS_FILE));
-  const plan = jsonIn(join(found.folder, `${stem}.cut-plan.json`));
+  const reels = checked ? (checked[1].text === undefined ? undefined : JSON.parse(checked[1].text)) : jsonIn(join(found.folder, REELS_FILE));
+  const plan = checked ? (checked[2].text === undefined ? undefined : JSON.parse(checked[2].text)) : jsonIn(join(found.folder, `${stem}.cut-plan.json`));
   // The graphic cues go in beside the suggested cuts, placed on the project's words (project.js). A raw video's are the cut plan's own,
   // or for a plan made before them its ideas for graphics as cues (graphic-cues.js graphicCuesOfPlan). An iPhone clip's are the ones its
   // reading kept in its record (graphicCuesOfRecord, PR H2): its cut plan is the import's, and holds none.
@@ -714,21 +778,32 @@ export function keptFits(ctx, { found, kept, copy, was, made, starts = true }) {
     footage comes into it the next time she opens it. */
 export const FOOTAGE_COMING = 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.';
 /** What she is told when a copy of footage that is made could not be moved into the project. */
-export const FOOTAGE_NOT_IN = "Some of its footage could not be put into the project. Ask Jason.";
+export const footageNotInWords = (name) => `Some of its footage could not be put into the project. Say "open ${name} in HyperFrames" again. If it says this again, tell Jason.`;
 /** What she is told when a copy of footage is still missing and the last run that made copies failed for it for a reason that will not pass. */
-export const FOOTAGE_NOT_MADE = "Some of its footage could not be made for HyperFrames. Ask Jason.";
+export const footageNotMadeWords = (name) => "Some of its footage could not be made for HyperFrames, and opening it again won't change that. Ask Jason."; // `name` is kept for callers: no retry is promised
 
 /** Whether the last run of the working copy for this episode failed to make the copy of the footage of `shot` for a reason that will not pass: its
     result holds a line "The footage for shot <n> could not be made: <why>" (workcopy.js makeFootageCopies), in `failed` for a run of the footage alone
     and in `footageFailed` for the run that made the video's copy first, and the why is not that Dropbox is still bringing the video over. A run at
     work now (`making`) has not left its result yet: what the last one left is not read. */
 function footageNotMade(ctx, found, shot) {
-  if (runningCommand(ctx.home, found.name, ctx.alive, workCopyLockOf(ctx.home, found.name))) return false;
-  const result = readResult(ctx.home, found.name, "workcopy");
-  if (result === null || typeof result !== "object") return false;
-  const lines = [...(Array.isArray(result.failed) ? result.failed : []), ...(Array.isArray(result.footageFailed) ? result.footageFailed : [])];
-  return lines.some((line) => typeof line === "string" && line.startsWith(`The footage for shot ${shot} could not be made:`) && !line.includes("Dropbox is still bringing"));
+  return footageFailedLines(ctx, found.name).some((line) => line.startsWith(`The footage for shot ${shot} could not be made:`));
 }
+
+/** The lines of the last working-copy result of the episode in `folder` that say a copy of footage could not be made for a reason that will not pass
+    ("The footage for shot <n> could not be made: <why>"): none while a run of the copy is at work, and none for a why that is Dropbox still bringing
+    the video over. */
+function footageFailedLines(ctx, folder) {
+  if (runningCommand(ctx.home, folder, ctx.alive, workCopyLockOf(ctx.home, folder))) return [];
+  const result = readResult(ctx.home, folder, "workcopy");
+  if (result === null || typeof result !== "object") return [];
+  const lines = [...(Array.isArray(result.failed) ? result.failed : []), ...(Array.isArray(result.footageFailed) ? result.footageFailed : [])];
+  return lines.filter((line) => typeof line === "string" && /^The footage for shot \d+ could not be made:/.test(line) && !line.includes("Dropbox is still bringing"));
+}
+
+/** Whether the last run of the working copy for the episode in `folder` left a copy of footage it could not make for a reason that will not pass
+    (`status` says so). */
+export const footageFailed = (ctx, folder) => footageFailedLines(ctx, folder).length > 0;
 
 /** Put the footage of a video made from a plan into its main project at `dir`, at every open of it (PR H5b). `kit` is what the plan gives the
     project (join.js planProject, given as the `plan` dep: footage.js reaches this module through finish.js, so it is not imported here), read just
@@ -736,10 +811,11 @@ function footageNotMade(ctx, found, shot) {
     { path, from } with `from` the copy made of it, or null while there is none. Each that is not in the project already is moved in from its
     copy (moveIn: a rename on the same disk, nothing copied); one with no copy is asked for, once for all (workcopy.js requestWorkCopy with
     `footage`, which starts nothing while a run is at work), and she is told the footage is being made (FOOTAGE_COMING); a copy that cannot be
-    moved is left where it is and she is told (FOOTAGE_NOT_IN). Nothing here stops the project opening, and a null `kit` does nothing, nor does one with
+    moved is left where it is and she is told (footageNotInWords). Nothing here stops the project opening, and a null `kit` does nothing, nor does one with
     no footage (`footage: null`, an explainer's: it has none, PR H6). */
-function placeFootage(ctx, { found, dir, kit }, { rename }) {
-  if (!kit || !kit.footage) return;
+function placeFootage(ctx, { found, dir, kit, record }, { rename }) {
+  const after = [];
+  if (!kit || !kit.footage) return after;
   let waiting = false;
   let stuck = false;
   let unmade = false;
@@ -754,10 +830,11 @@ function placeFootage(ctx, { found, dir, kit }, { rename }) {
   }
   if (waiting) {
     requestWorkCopy(ctx, { folder: found.name, footage: true });
-    ctx.say(FOOTAGE_COMING);
+    after.push(FOOTAGE_COMING);
   }
-  if (unmade) ctx.say(FOOTAGE_NOT_MADE);
-  if (stuck) ctx.say(FOOTAGE_NOT_IN);
+  if (unmade) after.push(footageNotMadeWords(record.name.text));
+  if (stuck) after.push(footageNotInWords(record.name.text));
+  return after;
 }
 
 /** Open the episode's main video in the HyperFrames app, making its project first when it has none, and resolve the exit code: 0
@@ -785,8 +862,9 @@ function placeFootage(ctx, { found, dir, kit }, { rename }) {
     are moved into the new project, and its video is kept for the new project when it passes the check every working copy does
     (putVideoBack's `kept`). A project here that is
     older by the times of its files and has no marker is not opened (olderHere; it says so and ends with 1). A new project is not made
-    while Claude's reading of the episode is at work (`read` holds its
-    lock): she is told to say it again when it has finished, and it ends with 0. Only a new project waits: one made before is
+    while Claude's reading of the episode is at work and not yet in the record (`read` holds its
+    lock): she is told to say it again when it has finished, and it ends with 0; once the reading is in, the files are held to the sizes
+    the record lists (makeProject). Only a new project waits: one made before is
     opened, and a folder the record does not know is taken, whether or not the reading is at work. A project kept for an earlier
     kind (KEPT) is none in use: the next is made as any first one is, under the first name no project the record keeps has
     (nextMain), "main 2" after the first, and the kept one keeps its folder, its name and its entry in the record.
@@ -886,8 +964,11 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   }
   // The footage of a video made from a plan, at every open (PR H5b): what may go in and is not in media/ is moved in from its copy, and the copies
   // that are not made are asked for. The project opens whatever comes of that: footage is added to it, never needed for it.
-  if (typeof deps.plan === "function" && isFromPlan(record)) placeFootage(ctx, { found, dir: join(work, project.name), kit: deps.plan({ found, record }) }, { rename });
-  return openProjectInApp(ctx, { record, project, dir: join(work, project.name), projects, keeps: (p) => !isMain(p), at, restored }, { save, cli, spawn, env, node, chat: deps.chat });
+  // What it says of the footage comes after "It's open in HyperFrames." (review changes R4c), not before it.
+  const footage = typeof deps.plan === "function" && isFromPlan(record) ? placeFootage(ctx, { found, dir: join(work, project.name), kit: deps.plan({ found, record }), record }, { rename }) : [];
+  const opened = await openProjectInApp(ctx, { record, project, dir: join(work, project.name), projects, keeps: (p) => !isMain(p), at, restored }, { save, cli, spawn, env, node, chat: deps.chat });
+  for (const line of footage) ctx.say(line);
+  return opened;
 }
 
 /** Ask the app to open the project in `dir`, and say what came of it in her words, without writing any record (PR H6: the open half of

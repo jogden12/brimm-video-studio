@@ -828,6 +828,42 @@ describe("making the working copy", () => {
     assert.deepEqual(t.inWork(), [t.shown(t.paths.facts), t.shown(t.paths.video)].sort());
     assert.deepEqual(entries(runsFolder(t.home)), []);
   });
+  it("reads `from` when it is given, and keeps `video` as the identity: the key, the copy's places and the room needed are the video's", async (c) => {
+    let from = "";
+    const t = setup({ deps: { probe: async (file) => (file === from ? SOURCE : copyOf()) } });
+    c.after(t.done);
+    from = join(t.dir, "local.mov");
+    writeFileSync(from, Buffer.alloc(4096, 2));
+    utimesSync(from, new Date(NOW + 777000), new Date(NOW + 777000));
+    const result = await t.job({ from });
+    assert.deepEqual([result.ok, result.failed], [true, []]);
+    // ffprobe and ffmpeg read the local file, and the Dropbox file is not touched.
+    assert.equal(t.guarded[0].args[t.guarded[0].args.indexOf("-i") + 1], from);
+    // The key is the video's, not the local file's time.
+    assert.equal(result.key, t.key);
+    assert.deepEqual([existsSync(t.paths.video), existsSync(t.paths.facts)], [true, true]);
+  });
+  it("with no `from` reads the video, as it always did", async (c) => {
+    const t = setup();
+    c.after(t.done);
+    await t.job({ from: undefined });
+    assert.equal(t.guarded[0].args[t.guarded[0].args.indexOf("-i") + 1], t.video);
+  });
+  it("reads a `from` that is taken away while ffmpeg runs to its end: the open file stays readable", async (c) => {
+    let from = "";
+    const t = setup({ deps: { probe: async (file) => (file === from ? SOURCE : copyOf()) } });
+    c.after(t.done);
+    from = join(t.dir, "local.mov");
+    writeFileSync(from, Buffer.alloc(4096, 2));
+    const ran = t.deps.runGuarded;
+    t.deps.runGuarded = async (cmd, args, limits) => {
+      const ended = await ran(cmd, args, limits);
+      rmSync(from);
+      return ended;
+    };
+    const result = await t.job({ from });
+    assert.deepEqual([result.ok, existsSync(t.paths.video)], [true, true]);
+  });
   it("gives ffmpeg what workCopyArgs says, read from what ffprobe printed of the raw video", async (c) => {
     const t = setup({ source: printedOf({ picture: { ...UPRIGHT, r_frame_rate: "24/1", avg_frame_rate: "24/1" }, sounds: [{ codec_name: "apple_apac" }, { codec_name: "aac" }] }), fourK: true });
     c.after(t.done);

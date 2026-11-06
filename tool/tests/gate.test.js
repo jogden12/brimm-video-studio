@@ -8,7 +8,7 @@ import { newPlannedEpisode } from "../episode.js";
 
 const AT = "2026-10-22T10:00:00-05:00";
 const WAITING = "This video is waiting for its answer: say what it is first.";
-const LEFT = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+const LEFT = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac yet: ask Jason.";
 const REEL_NOT_AGREED = "A Reel is cut from a session only once you have noted the client's agreement.";
@@ -143,7 +143,7 @@ describe("gateFor, a video waiting for its answer", () => {
       assert.equal(gateFor(name, unanswered, OFF), WAITING, name);
     }
   });
-  it("is gated whatever its answer says, a video left alone ('not for brimm-video') included, which is refused in words of its own", () => {
+  it("is gated whatever its answer says, a video left alone (the stored state \"not for brimm-video\") included, which is refused in words of its own", () => {
     const left = { kind: null, answer: { state: "not for brimm-video" } };
     for (const name of ["open", "ask", "push", "finish", "reel", "teachings", "somethingNew"]) {
       assert.equal(gateFor(name, left, ON), LEFT, name);
@@ -160,7 +160,7 @@ describe("gateFor, a video waiting for its answer", () => {
     assert.equal(gateFor("ask", {}, ON), WAITING);
     assert.equal(gateFor("ask", null, ON), WAITING);
   });
-  it("is gated by a kind this brimm-video does not know, which it cannot say is not an unanswered video", () => {
+  it("is gated by a kind this BRIMM Video Studio does not know, which it cannot say is not an unanswered video", () => {
     assert.equal(gateFor("ask", { kind: "podcast" }, ON), WAITING);
   });
 });

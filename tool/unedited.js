@@ -70,7 +70,8 @@ import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutName
 import { fingerprintOf, matchVersion } from "./versions.js";
 import { runDetached } from "./detached.js";
 import { LEFT, leftAlone, sessionNotCleared } from "./gate.js";
-import { readStatuses, importState } from "./importing.js";
+import { STUDIO_NAME } from "./name.js";
+import { readStatuses, importState, shownStep } from "./importing.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
     transcript tool's own numbers. */
@@ -1350,7 +1351,7 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
   // Why the episode cannot be gone on with as it is now, or "".
   const notAsWas = (found, rev) => {
     if (!found.record) return `the episode's record cannot be read: ${String(found.why || "it is not there").replace(/\.$/, "")}`;
-    if (found.newer) return "the episode was written by a newer brimm-video. Ask Jason to update this Mac";
+    if (found.newer) return "the episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac";
     const gone = undone(found.record, home);
     if (gone) return gone.replace(/\.$/, "");
     if (rev !== undefined && found.record.rev > rev) return "this episode changed on the other Mac meanwhile. Say it again";
@@ -1478,11 +1479,11 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
         // The file that was there before this run is Dropbox's revert, whatever a claim made from the record before lists.
         const was = wasOf(e.to);
         if (there && Number.isInteger(hers) && hers !== e.bytes && there.size === hers && !(was && sameBytes(e.to, was))) {
-          theirs(e.to, "its late check left it as it is");
+          theirs(e.to, "the check of its copies left it as it is");
           continue;
         }
         const kept = keep(e.to, e.from);
-        problems.push(`${rel(e.to)} is not as this Mac put it at the late check, and ${judge.held.by} has ${judge.name} open now, so it was not copied in again${kept ? `. This Mac's copy is kept at ${kept}` : ""}`);
+        problems.push(`${rel(e.to)} is not as this Mac put it when its copies were checked, and ${judge.held.by} has ${judge.name} open now, so it was not copied in again${kept ? `. This Mac's copy is kept at ${kept}` : ""}`);
       }
       return { problems, checked, held: true };
     };
@@ -1503,11 +1504,11 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
         continue;
       }
       if (now === "theirs") {
-        theirs(e.to, "its late check left it as it is");
+        theirs(e.to, "the check of its copies left it as it is");
         continue;
       }
       if (now === "unlisted") {
-        notes.push(`${rel(e.to)} is gone, and the record no longer lists it, so its late check left it out`);
+        notes.push(`${rel(e.to)} is gone, and the record no longer lists it, so the check of its copies left it out`);
         continue;
       }
       const left = leftWhy(now, e.to, judge);
@@ -1593,7 +1594,7 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
     }
     if (back.length || gone.length) {
       log(`${basename(file)}: what was put back has its late check in ${LATE_CHECK_MS / 60000} minutes.`);
-      if (deps.progress) deps.progress.step("Waiting for the late check");
+      if (deps.progress) deps.progress.step("Waiting for the late check", "Waiting for Dropbox's check of its copies");
       await wait(LATE_CHECK_MS);
       const late = ownLateCheck(back);
       problems.push(...late.problems);
@@ -1603,7 +1604,7 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
         if (sameBytes(e.to, e.from)) continue;
         whole = false;
         const kept = keep(e.to, e.from);
-        problems.push(`${rel(e.to)} could not be put back as it was at its late check${kept ? `. The one that was there is kept at ${kept}` : ""}`);
+        problems.push(`${rel(e.to)} could not be put back as it was when its copies were checked${kept ? `. The one that was there is kept at ${kept}` : ""}`);
       }
       // A file this run took away that Dropbox brought back, still this run's and listed by no record, is taken away again.
       const now = judgeNow();
@@ -1669,7 +1670,7 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
   }
   log(`${basename(file)}: put into its episode. Its late check is in ${LATE_CHECK_MS / 60000} minutes.`);
   if (onPut) await onPut();
-  if (deps.progress) deps.progress.step("Waiting for the late check");
+  if (deps.progress) deps.progress.step("Waiting for the late check", "Waiting for Dropbox's check of its copies");
   await wait(LATE_CHECK_MS);
   problems.push(...ownLateCheck(entries).problems);
   return { put: true, problems, notes, kept: keptNow };
@@ -1712,19 +1713,19 @@ export function importHold({ root, home, machine, record, now = Date.now(), impo
   const state = (want) => statuses.find((s) => importState(s, now) === want);
   const held = (why, waits = false, kind = "") => ({ why, waits, state: kind });
   const running = state("running");
-  if (running) return held(`The import of this episode has not finished on ${running.machine} yet: it is at "${running.step}". Say it again when it has.`, true, "running");
+  if (running) return held(`The import of this episode has not finished on ${running.machine} yet: it is at "${shownStep(running.step)}". Say it again when it has.`, true, "running");
   const failed = state("failed");
   if (failed) return held(`The import of this episode failed on ${failed.machine}: ${said(failed.failed)}. Say "try it again" to import it again.`, false, "failed");
   const problem = state("problem");
-  if (problem) return held(`The late check of this episode's import found a problem: ${said(problem.problem)}. Once it is put right, ${again(problem.machine)}.`, false, "problem");
+  if (problem) return held(`Dropbox found a problem with a copy of this episode: ${said(problem.problem)}. Once it is put right, ${again(problem.machine)}.`, false, "problem");
   const owed = readPendings(home).find((p) => p.id === record.id && (!machine || p.machine === machine) && resolve(String(p.root)) === resolve(root));
-  if (owed && owed.problem) return held(`The late check of this episode's import found a problem: ${said(owed.problem)}. Once it is put right, ${again(owed.machine)}.`, false, "problem");
+  if (owed && owed.problem) return held(`Dropbox found a problem with a copy of this episode: ${said(owed.problem)}. Once it is put right, ${again(owed.machine)}.`, false, "problem");
   // No import of the video is at work here (a running status would have said so), so none makes the check unless told to. The
   // hold is "due" when this Mac's launch agent run is at work, as it will make the check itself, and "owed" when it is not.
-  if (owed && dueAt(owed) > now) return held(`This Mac has still to make the late check of this episode's import, due at ${clockAt(dueAt(owed))}. Say "try it again" for ${video} to have it made then, then say this again.`, true, importing ? "due" : "owed");
-  if (owed) return held(`This Mac has still to make the late check of this episode's import. Say "try it again" for ${video} to have it made now, then say this again.`, false, importing ? "due" : "owed");
+  if (owed && dueAt(owed) > now) return held(`This Mac has still to make the check of this episode's copies, due at ${clockAt(dueAt(owed))}. Say "try it again" for ${video} to have it made then, then say this again.`, true, importing ? "due" : "owed");
+  if (owed) return held(`This Mac has still to make the check of this episode's copies. Say "try it again" for ${video} to have it made now, then say this again.`, false, importing ? "due" : "owed");
   const stopped = state("stopped");
-  if (stopped) return held(`The import of this episode stopped on ${stopped.machine} before its late check was made. On ${stopped.machine}, say "try it again" for ${video}, then say this again.`, false, "stopped");
+  if (stopped) return held(`The import of this episode stopped on ${stopped.machine} before the check of its copies was made. On ${stopped.machine}, say "try it again" for ${video}, then say this again.`, false, "stopped");
   return held("");
 }
 
@@ -1891,7 +1892,7 @@ export async function askAgain({ folder, record }, deps) {
 /** What --from-plan says when it is asked for a light episode, whose videos are made when it is read. */
 const LIGHT_REFUSAL = "This episode was imported lightly: its videos are made when it is read, not from the plan.";
 /** What --from-plan says when a newer brimm-video wrote the episode's record. */
-const NEWER_STOP = "its episode was written by a newer brimm-video. Ask Jason to update this Mac";
+const NEWER_STOP = "its episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac";
 
 /** Make the videos of one video again from the cut plan an earlier run wrote for it (--from-plan): its rough cut, its upright
     version when it is wider than it is tall, and each of Claude's clips and each part of a clip's Story that the plan names
@@ -2229,7 +2230,7 @@ export function parseArgs(argv) {
   return a;
 }
 
-const HELP = `For an unedited video: a transcript with a time for every word, a cut plan that Claude is asked to read, a rough cut and
+const HELP = `For a video that is not edited yet: a transcript with a time for every word, a cut plan that Claude is asked to read, a rough cut and
 its captions, an upright version for Instagram, a Final Cut Pro project file, Claude's notes for the editor and the short
 clips it picked.
 
@@ -2266,8 +2267,9 @@ and how long is left. Closing it changes nothing about the work.
 
 /** A banner on the Mac's screen. It is a courtesy: when it cannot be shown, nothing else changes. The import posts its notices
     through it, and so does a reading (reading.js). */
+export const bannerArgs = (text) => ["-e", `display notification ${JSON.stringify(text)} with title ${JSON.stringify(STUDIO_NAME)}`];
 export const banner = (text) => {
-  const child = spawn("/usr/bin/osascript", ["-e", `display notification ${JSON.stringify(text)} with title "BRIMM unedited video"`], { stdio: "ignore" });
+  const child = spawn("/usr/bin/osascript", bannerArgs(text), { stdio: "ignore" });
   child.on("error", () => {});
 };
 

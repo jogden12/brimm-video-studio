@@ -407,6 +407,19 @@ describe("plan … set", () => {
     assert.deepEqual(readdirSync(join(folder, "record")), ["0001.json", "0002.json"], "the record it would have written is not there");
     t.done();
   });
+  it("says a conflicted copy kept meanwhile as she sees it: one full stop, and what she can say", async () => {
+    const t = setup();
+    const folder = await planned(t);
+    const clone = t.ctx.deps.clone;
+    let seen = 0;
+    const racing = (from, to) => {
+      clone(from, to);
+      if (basename(to) === "teleprompter.txt" && !seen++) writeFileSync(join(folder, "record", "0001 (Sallie's conflicted copy 2026-10-20).json"), "{}");
+    };
+    const r = await on(depsOf(t, { clone: racing }), "plan", TITLE, "set", "--line", "One.");
+    assert.deepEqual([r.code, r.said], [1, ['Nothing was saved: Dropbox has kept a conflicted copy of it: say "sort out the conflict".']]);
+    t.done();
+  });
   it("writes no record, and no file, when any entry fails: each problem is said on its own line, then that nothing was saved, with 1", async () => {
     const t = setup();
     const folder = await planned(t);
@@ -709,7 +722,7 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     assert.equal(lines[0], "Episodes, newest first:");
     assert.equal(lines[1], `  "Too many SKUs": planned on ${dayText(t)}, waiting for its footage (2 shots), id ${SHORT}`);
     assert.match(lines[2], new RegExp(`^  ${NAME.replace(/[?]/g, "\\?")}: an episode of`));
-    assert.ok(lines.every((line) => !/Not right/.test(line)), r.text);
+    assert.ok(lines.every((line) => !/A file of this video/.test(line)), r.text);
     t.done();
   });
   it("lists a plan with no shot yet, and an explainer, in the words of its footage or its voice", async () => {
@@ -731,13 +744,13 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     await set(t, "--line", "One.");
     rmSync(join(folder, "teleprompter.txt"));
     const { said } = await on(depsOf(t), "episodes");
-    assert.deepEqual(said.slice(1, 3), [`  "Too many SKUs": planned on ${dayText(t)}, waiting for its footage (no shots yet), id ${SHORT}`, "    Not right: teleprompter.txt is missing"]);
+    assert.deepEqual(said.slice(1, 3), [`  "Too many SKUs": planned on ${dayText(t)}, waiting for its footage (no shots yet), id ${SHORT}`, "    A file of this video is missing: teleprompter.txt. Dropbox may still be bringing it. Wait a few minutes and ask again. If it is still missing, tell Jason."]);
     t.done();
   });
   it("gives the guide a step of its own for it: film it, before the BRIMM Ops page's steps and changing none of them", async () => {
     const t = setup();
     await planned(t);
-    const FILM = "Film it to its shot list, then drop the files in your drop folder. The teleprompter script is in its folder in Episodes.";
+    const FILM = "Film it to its shot list, then drop the files in your drop folder. To read the teleprompter script, say 'show me the script': it opens as a copy to read, and changes come through the chat.";
     assert.deepEqual((await on(light(t), "guide")).said, ["Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio", "Under way:", `  Too many SKUs (${SHORT}): ${FILM}`]);
     assert.deepEqual((await on(light(t), "guide", TITLE)).said, [`Too many SKUs (${SHORT}): ${FILM}`]);
     assert.deepEqual((await on(light(t), "guide", SHORT)).said, [`Too many SKUs (${SHORT}): ${FILM}`]);

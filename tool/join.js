@@ -24,7 +24,10 @@ import { fileSafe } from "./names.js";
 import { FOOTAGE_KINDS } from "./plan-project.js";
 import { lastLine } from "./run.js";
 import { appOf, runsFolder } from "./settings.js";
-import { banner, importInto } from "./unedited.js";
+import { banner, clockAt, importInto } from "./unedited.js";
+import { copyIn } from "./guide.js";
+import { waitFacts } from "./late-wait.js";
+import { progressFolder, readRates } from "./progress.js";
 import { requestWorkCopy, workCopyLimits } from "./workcopy.js";
 
 export { isFromPlan };
@@ -191,7 +194,7 @@ export function heldWords(part, held, kit) {
     return `${label}${kit.newerWhy(held.record)}`;
   }
   if (held.read) return kit.notRead({ name: part.name, folder: part.folder }, held.read);
-  return `${labelOf(part)}: its record cannot be read now. Ask Jason.`;
+  return `${labelOf(part)}: its record cannot be read now. Dropbox may still be bringing it: ask again in a few minutes. If it says this again, tell Jason.`;
 }
 
 /** What a join of the plan `record` takes, and every reason it cannot be made, in the one place that knows them (the plan's ruling 1 of PR H6: H5b wrote
@@ -488,6 +491,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
     });
     const fdeps = { ...deps, episode };
     let filed;
+    let late = "";
     if (chosen.length === 1) {
       const [part] = chosen;
       // A talking part has sound, and a video with no sound takes no kind (ruling 5): one alone with no sound this Mac can read is never taken in
@@ -514,9 +518,11 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       const pending = pendingFor(filed, { video: part.record.video.file, drop: join(work, "not in a drop folder"), work, planTxt: `${basename(part.record.video.file, extname(part.record.video.file))}.cut-plan.txt`, label: title }, { episode, clock: deps.clock || Date.now });
       try {
         writePending(ctx.home, pending);
-        ctx.say(`${title}: copied into Dropbox. Its late check is made in ${LATE_CHECK_MS / 60000} minutes.`);
+        ctx.say(`${title}: copied into Dropbox. Dropbox's check of its copies is made in ${LATE_CHECK_MS / 60000} minutes.`);
+        // The result keeps it too (plan R1a), with no title: "how far is it?" and the guide's tell read the result, not the log.
+        late = `copied into Dropbox, and Dropbox's check of its copies is made in ${LATE_CHECK_MS / 60000} minutes`;
       } catch (e) {
-        ctx.say(`${title}: copied into Dropbox, but its late check could not be kept (${e.code || e.message}), so it is not made.`);
+        ctx.say(`${title}: copied into Dropbox, but the check of its copies could not be kept (${e.code || e.message}), so it is not made.`);
       }
     } else {
       const output = join(work, `${fileSafe(title)}.mov`);
@@ -549,7 +555,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
     }
     ctx.say(`${title}: made from its ${taken.explainer ? "voice" : "footage"}, as ${filed.record.id}.`);
     return {
-      ok: true, made: [taken.explainer ? "the video from its voice" : "the video from its footage"], failed: [], next: "",
+      ok: true, made: [taken.explainer ? "the video from its voice" : "the video from its footage", ...(late ? [late] : [])], failed: [], next: "",
       started: { kind: filed.record.kind, rev: filed.record.rev, video: filed.record.video.file, explainer: taken.explainer }
     };
   } catch (e) {
@@ -557,6 +563,17 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
   } finally {
     if (!kept) rmSync(work, { recursive: true, force: true });
   }
+}
+
+/** When the video for HyperFrames that was asked for will be ready, as the notice says it (plan R1a): " It opens in HyperFrames about 17:26.", by the
+    speed this Mac measured of making one and the length of the video, from when the copy can begin: now, or, while it must wait for the import's late
+    check (late-wait.js waitFacts), when that is made. Nothing while this Mac has measured no speed, so that no time is named that cannot be backed. */
+function opensAt(ctx, record) {
+  const seconds = copyIn(readRates(progressFolder(ctx.home)), record.video && record.video.seconds);
+  if (seconds === null) return "";
+  const wait = waitFacts(ctx, record, seconds);
+  const at = wait ? wait.readyAt : clockAt(Math.round((ctx.now() + seconds * 1000) / 60000) * 60000);
+  return ` It opens in HyperFrames about ${at}.`;
 }
 
 /** What follows a join run that made the plan its video (`started`: its kind, its rev and its video's file), once the run has let go of the plan's lock,
@@ -570,16 +587,20 @@ export function afterJoin(ctx, found, started, notify = banner) {
   if (!wrote.record || wrote.newer || wrote.record.rev !== started.rev || wrote.record.kind !== started.kind) return;
   const title = shownName(wrote.record);
   // A HeyGen voice's video (PR H6) is read, for its spellings, but has no working copy made: its project holds the voice already.
+  let copyAsked = false;
   if (ctx.settings.readings !== false) {
     startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", started.kind, "--rev", String(started.rev)] });
-    if (started.project !== true && appOf(ctx.settings) !== "" && ctx.isWhole(join(found.folder, started.video))) requestWorkCopy(ctx, { folder: found.name });
+    if (started.project !== true && appOf(ctx.settings) !== "" && ctx.isWhole(join(found.folder, started.video))) {
+      requestWorkCopy(ctx, { folder: found.name });
+      copyAsked = true;
+    }
   }
   if (!ctx.agentRunning()) {
     try {
       ctx.kickstart();
     } catch (e) {
-      ctx.say(`${title}: the launch agent could not be asked to make its late check (${String(e.message).replace(/\.$/, "")}). It is made when the Mac's import next runs.`);
+      ctx.say(`${title}: the launch agent could not be asked to make the check of its copies (${String(e.message).replace(/\.$/, "")}). It is made when the Mac's import next runs.`);
     }
   }
-  notify(started.explainer === true ? `Ready: "${title}" has its voice. In Claude, say "what's next?"` : `Ready: "${title}" is made from its footage. In Claude, say "what's next?"`);
+  notify(started.explainer === true ? `Ready: "${title}" has its voice. In Claude, say "what's next?"` : `Ready: "${title}" is made from its footage.${copyAsked ? opensAt(ctx, wrote.record) : ""} In Claude, say "what's next?"`);
 }

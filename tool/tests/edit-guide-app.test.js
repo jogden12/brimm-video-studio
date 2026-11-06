@@ -14,6 +14,8 @@ import { KEPT, NOT_SET_UP } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { HELP } from "../edit.js";
 import { COPY_STEP } from "../guide.js";
+import { fileId, writePending } from "../filing.js";
+import { clockAt } from "../unedited.js";
 import { PIN } from "../hyperframes.js";
 import { RATES, aboutLeft, progressFolder, readRates, reporter } from "../progress.js";
 import { WORK_COPY_WAIT_STEP, workCopyLockOf } from "../workcopy.js";
@@ -21,18 +23,19 @@ import { FOLDER, ID, episodeAs, listAll, reread } from "./episodes.js";
 import { ANSWERED, entry, exportOf } from "./exports-world.js";
 import { OFFERS, READ, depsOf, guideWorld } from "./guide-world.js";
 import { PLAIN, RAW as RAW_RECORD, atWork, on, world as copyWorld } from "./workcopy-world.js";
+const HAND_OFF_LINE = "Hand-off question: I found your export. Hand it off?";
 
 const NAMED = "Pricing: what to charge? (3fa9c1)";
 const DROP_LINE = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
 const says = (text) => `${NAMED}: ${text}`;
 const OPEN = 'Say "open it in HyperFrames" to edit it there.';
 const AFTER = 'Say "open it in HyperFrames" when it is done.';
-const EXPORTED = 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.';
+const EXPORTED = 'You have exported it. Say "hand it off" and I will check what you exported.';
 const edit = (last = "") => `Edit it in HyperFrames.${last ? ` Your last request there was ${last}.` : ""} When you are done, export it on This Mac, as MP4, then say "hand it off".`;
 const SHOW = 'Ask for any changes in your own words, then say "show it in Final Cut".';
 const FINISH = 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".';
 const AGAIN = 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".';
-const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
+const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
 const CLIP_NEXT = 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
 const REEL_2 = 'You have exported Reel 2 from HyperFrames. Say "hand off the Reels" to add it to the hand-off.';
@@ -212,6 +215,30 @@ describe("the guide while the video for HyperFrames is made", () => {
     assert.equal(await line(w), says(`The video for HyperFrames is being made, less than a minute left. ${AFTER}`));
     rmSync(join(progressFolder(w.t.home), `${process.pid}.json`));
     assert.equal(await line(w), says(`The video for HyperFrames is being made. It usually takes about 4 minutes. ${AFTER}`));
+    w.t.done();
+  });
+  it("says when it will be ready, after Dropbox has checked its copies, while the run waits for the late check this Mac still owes (plan R1a)", async () => {
+    const w = guideWorld({ kind: "short video", projects: null });
+    atWork(w.t, "workcopy");
+    const record = reread(w.found);
+    const lastCopy = w.t.now() - 4 * 60 * 1000;
+    const pending = { version: 1, id: record.id, name: FOLDER, folder: w.found.folder, video: record.video.file, bytes: record.video.bytes, seconds: record.video.seconds, drop: join(w.t.dir, "no drop file"), dropFile: null, importId: "x", work: join(w.t.dir, "work"), entries: [], lastCopy, root: w.t.root, machine: "Mac Studio", planTxt: "x.cut-plan.txt" };
+    writePending(w.t.home, pending);
+    const due = lastCopy + 15 * 60 * 1000;
+    // No speed is known: only when Dropbox checks.
+    assert.equal(await line(w), says(`The video for HyperFrames is being made. Dropbox checks its copies at ${clockAt(due)} first. ${AFTER}`));
+    // 10 seconds of work for each second of the recording's 23.423: 234 seconds after the check, which is 15 minutes from now.
+    speeds(w, 10);
+    panel(w, { step: WORK_COPY_WAIT_STEP, n: null, of: null, percent: null, left: null, total: null });
+    const rounded = clockAt(Math.round((due + 234 * 1000) / 60000) * 60000);
+    assert.equal(await line(w), says(`The video for HyperFrames is being made. It is ready about ${rounded}, in 15 minutes, after Dropbox has checked its copies at ${clockAt(due)}. ${AFTER}`));
+    // A copy made from the file this Mac holds waits for nothing: the panel's time, as before.
+    const drop = join(w.t.dir, "drop.mov");
+    writeFileSync(drop, "x".repeat(record.video.bytes));
+    writeFileSync(join(w.found.folder, record.video.file), "x".repeat(record.video.bytes));
+    writePending(w.t.home, { ...pending, drop, dropFile: fileId(drop) });
+    panel(w, { left: 180 });
+    assert.equal(await line(w), says(`The video for HyperFrames is being made, about 3 minutes left. ${AFTER}`));
     w.t.done();
   });
   it("says no usual time while the run waits for the import to check its copies: it has not begun (review I3a)", async () => {
@@ -665,14 +692,14 @@ describe("a file the app keeps that is a named pipe, where a reader that waits f
     assert.equal(got.hung, false, `${got.stage}`);
     assert.equal(got.code, 0, JSON.stringify(got));
     assert.match(got.said[0], MAIN_EXPORT);
-    assert.equal(got.said.at(-1), 'Say "yes, hand it off" to start.');
+    assert.equal(got.said.at(-1), HAND_OFF_LINE);
   });
   it("answers `finish` when an export's record in renders/ is a pipe", async () => {
     const got = await inChild("record", "finish");
     assert.equal(got.hung, false, `${got.stage}`);
     assert.equal(got.code, 0, JSON.stringify(got));
     assert.match(got.said[0], MAIN_EXPORT);
-    assert.equal(got.said.at(-1), 'Say "yes, hand it off" to start.');
+    assert.equal(got.said.at(-1), HAND_OFF_LINE);
   });
   // A finished video's Reels (plan PR 16): the Reel project's history and record, and the hand-off in final/, which the guide read with a plain read.
   it("answers `guide` for a finished video when a Reel project's history, or its export's record, is a pipe: the Reel is still said", async () => {

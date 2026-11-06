@@ -22,7 +22,7 @@ import { OFFERS, READ } from "./guide-world.js";
 import { finishedWorld } from "./reels-world.js";
 import { HANDOFF, NAMED, atWait, check, exported, on, seeing, whileChecking } from "./checking-world.js";
 
-const TAKEN = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
+const TAKEN = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
 const ONLINE = ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".';
 const KIT = 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.';
 const POSTED = 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".';
@@ -324,7 +324,7 @@ describe("`guide … tell` for a video whose finish is running", () => {
     const w = await exported();
     let waits = 0;
     const said = await on(seeing(w, { wait: async () => { waits += 1; } }), "guide", "3fa9c1", "tell");
-    assert.deepEqual([said.said, waits], [[`${NAMED}: You have exported it from HyperFrames. Say "hand it off" to write its hand-off.`], 0]);
+    assert.deepEqual([said.said, waits], [[`${NAMED}: You have exported it. Say "hand it off" and I will check what you exported.`], 0]);
     w.t.done();
   });
   it("waits for the finish that hands off the Reels of a finished video too, and says the new revision is ready", async () => {

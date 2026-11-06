@@ -16,7 +16,7 @@ import { openWorld, openDeps, psText, chatChain, appCopy, APP_ARGS, RECORD, MINI
 
 /** Words that must never be said: what a settings file holds. */
 const SECRET = "SECRET-WORDS-OF-A-FILE";
-const NEWEST = "This Mac has the newest brimm-video.";
+const NEWEST = "This Mac has the newest BRIMM Video Studio.";
 const STALE = "Her folder for Claude is out of date";
 
 /** `behind` on the world `w`, its deps openDeps's with `more` over them, git finding the checkout up to date: { code, text, g }. */
@@ -74,7 +74,7 @@ const chatTranscript = (w, lines, id = SESSION) => transcript(join(w.home, ".cla
 /** What `behind` says while Claude Code keeps its settings and chats outside ~/.claude (CLAUDE_CONFIG_DIR). */
 const CONFIG_LINE = "(Jason: Claude Code keeps this chat's settings and transcripts outside ~/.claude (CLAUDE_CONFIG_DIR), where the lock holds nothing. Its value is not shown here.)";
 
-const ownLine = (parts) => `(Jason: her folder's .claude/settings.json no longer holds the open lock as this brimm-video writes it: ${parts}. Its contents are not shown here.)`;
+const ownLine = (parts) => `(Jason: her folder's .claude/settings.json no longer holds the open lock as this BRIMM Video Studio writes it: ${parts}. Its contents are not shown here.)`;
 
 describe("behind, with the open lock", () => {
   it("goes on when her folder holds the open lock as written and nothing else loosens it, and says nothing of it being out of date", async () => {
@@ -89,7 +89,7 @@ describe("behind, with the open lock", () => {
     const skill = join(w.folder, ".claude", "skills", "brimm-edit", "SKILL.md");
     writeFileSync(skill, readFileSync(skill, "utf8").replace(/\| "Show me the Reels".*\n/, ""));
     const r = await behindOn(w);
-    assert.deepEqual([r.code, r.text], [0, `${NEWEST}\nHer folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${NODE}, then start a new session in her Claude folder)`]);
+    assert.deepEqual([r.code, r.text], [0, `${NEWEST}\nHer folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${NODE}, then start a new session in her Claude folder)`]);
     w.done();
   });
   it("refuses, naming the key and none of its values, for every sandbox key but the few that narrow, in the user, managed and --settings settings", async () => {
@@ -147,8 +147,8 @@ describe("behind, with the open lock", () => {
       [(s) => delete s.disableSkillShellExecution, "skills' shell lines off"],
       [(s) => delete s.hooks.PostToolUse, "the card's receipt hook"],
       [(s) => (s.hooks.SessionStart = [{ hooks: [{ type: "command", command: SECRET }] }]), "a hook beside the guard and the receipt"],
-      [(s) => (s.env = { A: SECRET }), "settings brimm-video does not write there"],
-      [(s) => { s.env = { A: SECRET }; s.autoDreamEnabled = true; s.sandbox.enabled = false; }, "the sandbox's settings, memory off, settings brimm-video does not write there"],
+      [(s) => (s.env = { A: SECRET }), "settings BRIMM Video Studio does not write there"],
+      [(s) => { s.env = { A: SECRET }; s.autoDreamEnabled = true; s.sandbox.enabled = false; }, "the sandbox's settings, memory off, settings BRIMM Video Studio does not write there"],
     ];
     for (const [change, parts] of cases) {
       const w = openWorld();
@@ -171,7 +171,7 @@ describe("behind, with the open lock", () => {
       s.env = { A: SECRET };
     });
     const r = await behindOn(w);
-    assert.deepEqual(r.text.split("\n"), [LOCK_CHANGED, "(Jason: her folder's .claude/settings.json does not disable Auto mode (disableAutoMode). Its contents are not shown here.)", ownLine("the allow and deny rules, settings brimm-video does not write there")]);
+    assert.deepEqual(r.text.split("\n"), [LOCK_CHANGED, "(Jason: her folder's .claude/settings.json does not disable Auto mode (disableAutoMode). Its contents are not shown here.)", ownLine("the allow and deny rules, settings BRIMM Video Studio does not write there")]);
     w.done();
   });
   it("is PR #40's check on a strict Mac, whatever the user settings' sandbox keys say", async () => {
@@ -228,8 +228,8 @@ describe("behind, with the open lock", () => {
       w.done();
     }
   });
-  it("refuses when her user settings lose a Read deny rule brimm-video added, and says nothing of them on a Mac where none were added", async () => {
-    const LINE = "(Jason: her user settings, ~/.claude/settings.json, no longer hold every Read deny rule brimm-video added for the places only it reads. Its contents are not shown here.)";
+  it("refuses when her user settings lose a Read deny rule BRIMM Video Studio added, and says nothing of them on a Mac where none were added", async () => {
+    const LINE = "(Jason: her user settings, ~/.claude/settings.json, no longer hold every Read deny rule BRIMM Video Studio added for the places only it reads. Its contents are not shown here.)";
     const w = openWorld();
     const user = join(w.home, ".claude", "settings.json");
     const addRules = async () => assert.equal(await settingsMain(["user-deny"], { home: w.home, say: () => {}, openMinimum: MINIMUM, tmp: w.tmp, uid: w.uid }), 0);
@@ -265,7 +265,7 @@ describe("behind, with the open lock", () => {
 });
 
 describe("behind, with the open lock: the chat's environment, the proxy port and the workshop", () => {
-  const secretLine = (name) => `(Jason: this chat's environment has ${name}, which looks like a secret and is not on brimm-video's list. Its value is not shown here.)`;
+  const secretLine = (name) => `(Jason: this chat's environment has ${name}, which looks like a secret and is not on BRIMM Video Studio's list. Its value is not shown here.)`;
   it("refuses for a secret-shaped name not on the list, naming it and never its value", async () => {
     for (const name of ["GITHUB_TOKEN", "MY_API_KEY", "DB_PASSWORD", "OPENROUTER_KEY", "npm_config__auth", "Apple_PubSub_Socket_Render", "GIT_ASKPASS_PASSWD", "SESSION_COOKIE", "AWS_CREDENTIALS_FILE", "BILLING_EMAIL", "ACCOUNT_ID", "ORGANIZATION_ID", "A_SECRET"]) {
       const w = openWorld();
@@ -574,7 +574,7 @@ describe("behind, with the open lock: plugins, named skills and SessionStart hoo
     for (const where of ["user", "managed", "app"]) {
       const w = openWorld();
       const r = await behindOn(w, put(w, where, { hooks: { SessionStart: [{ hooks: [{ type: "command", command: SECRET }] }] } }));
-      refusedFor(r, `(Jason: ${LABEL[where]}: a SessionStart hook, which can change the id brimm-video marks chats by. Its contents are not shown here.)`, where);
+      refusedFor(r, `(Jason: ${LABEL[where]}: a SessionStart hook, which can change the id BRIMM Video Studio marks chats by. Its contents are not shown here.)`, where);
       w.done();
     }
     const w = openWorld();
@@ -802,7 +802,7 @@ describe("behind, with the open lock: the app's flags, folders added mid-chat, t
       `(Jason: ${LABEL.app} turns hooks off (disableAllHooks), which the lock rests on. Its contents are not shown here.)`,
       `(Jason: ${LABEL.app}: sandbox.allowUnsandboxedCommands, which can open her folder's lock. Its contents are not shown here.)`,
       `(Jason: ${LABEL.app}: an Edit( allow rule, which lets sandboxed commands write there. Its contents are not shown here.)`,
-      `(Jason: ${LABEL.app}: a SessionStart hook, which can change the id brimm-video marks chats by. Its contents are not shown here.)`,
+      `(Jason: ${LABEL.app}: a SessionStart hook, which can change the id BRIMM Video Studio marks chats by. Its contents are not shown here.)`,
     ];
     const file = join(w.dir, "app settings.json");
     writeFileSync(file, JSON.stringify(loose));

@@ -44,7 +44,7 @@ export function footageOf(record, parts) {
 export const footageToUse = (record, parts) => footageOf(record, parts).filter(({ part }) => mayGoIn(part, record.planned));
 
 /** What a held part (footage.js partHeld) is called in the log. */
-const HELD_SAID = { conflicted: "its episode holds a conflicted copy", newer: "a newer brimm-video wrote its record", unreadable: "its record cannot be read", session: "it is held as a session" };
+const HELD_SAID = { conflicted: "its episode holds a conflicted copy", newer: "a newer BRIMM Video Studio wrote its record", unreadable: "its record cannot be read", session: "it is held as a session" };
 
 /** The b-roll and screen parts of the plan `record` among `parts` that give no footage now, each as { part, why } in the order given, `why` being
     what the log says: that its episode is held (conflicted copies, a record a newer brimm-video wrote, a record that cannot be read: ruling 1),

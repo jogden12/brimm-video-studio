@@ -133,6 +133,11 @@ async function whole(file, work, my, { app = false, again = "hand it off" } = {}
   return { why: app ? `${basename(file)} is still being written. Say "${again}" again when HyperFrames has finished exporting it.` : `${basename(file)} is still being written by Final Cut. Say finish again when its Share is done.` };
 }
 
+/** The one question the chat asks her when her exports are found and nothing is left to ask (after "Hand-off question:" in what
+    `finish` prints): her yes starts the hand-off (review changes R3). The Reels' version is for a finished video's Reels. */
+export const HAND_OFF_ASK = "I found your export. Hand it off?";
+export const REELS_ASK = "I found your Reels' exports. Hand off the Reels?";
+
 /** The words a part is expected to start with: the first phrase kept, as the cut plan and the part's own cuts leave it (phase
     4), for a Reel the first from where it starts. */
 export function expectedWords(part, record, plan) {
@@ -431,7 +436,7 @@ export function chainGapWords(record, gap) {
 export function cannotFinish(record) {
   const who = shownName(record);
   const kind = kindOf(record);
-  if (kind === "session" || (kind !== null && gated(record))) return `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`;
+  if (kind === "session" || (kind !== null && gated(record))) return `${who} is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written.`;
   if (kind === null) return `${who} is not answered yet: say what it is first. Nothing was written.`;
   return "";
 }
@@ -1147,7 +1152,7 @@ export async function finishNow(ctx, found, deps = {}) {
     const problems = movedOn
       ? []
       : theirs
-        ? entries.filter((e) => { const s = statSync(e.to, { throwIfNoEntry: false }); return !s || s.size !== e.bytes; }).map((e) => `${basename(e.to)} is not whole in final/ at the late check, and ${theirs.by} has ${record.name.text} open now, so it was not copied in again: say ${finishAgain} again there.`)
+        ? entries.filter((e) => { const s = statSync(e.to, { throwIfNoEntry: false }); return !s || s.size !== e.bytes; }).map((e) => `${basename(e.to)} is not whole in final/ when its copies were checked, and ${theirs.by} has ${record.name.text} open now, so it was not copied in again: say ${finishAgain} again there.`)
         : check(entries, opts);
     // Its record is put back only when it is gone and no later record is there: never over a record the other Mac wrote
     // under its number, or over one written since. Then the episode is read again, and From Final Cut is emptied only
@@ -1170,8 +1175,8 @@ export async function finishNow(ctx, found, deps = {}) {
     }
     if (problems.length) {
       failed.push(...problems);
-      if (parts.some((p) => !p.app && !p.reused)) next.push("The files it took from From Final Cut are kept there, because a copy in final/ was not whole at the late check.");
-      if (taken.some((file) => file.place === "Downloads")) next.push("The exports it took from Downloads are kept there, because a copy in final/ was not whole at the late check.");
+      if (parts.some((p) => !p.app && !p.reused)) next.push("The files it took from From Final Cut are kept there, because a copy in final/ was not whole when its copies were checked.");
+      if (taken.some((file) => file.place === "Downloads")) next.push("The exports it took from Downloads are kept there, because a copy in final/ was not whole when its copies were checked.");
     } else if (written && holds) {
       for (const file of taken) {
         if (unchanged(file.path, file.snap)) rmSync(file.path, { recursive: true, force: true });
@@ -1559,7 +1564,7 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
 const SESSION_NAME_FILES = "This session's name is the name of its video's file: give it another name first. Nothing was written.";
 const SESSION_NAME_NO_FILE = "This session's name cannot name its files: give it another name first. Nothing was written.";
 const SESSION_NAME_LONG = `This session's name is longer than ${SESSION_NAME_MOST} characters: give it a shorter one first. Nothing was written.`;
-const sessionNameHolds = (word) => `This session's name holds "${word}", a name brimm-video can see in it: give it another name first. Nothing was written.`;
+const sessionNameHolds = (word) => `This session's name holds "${word}", a name BRIMM Video Studio can see in it: give it another name first. Nothing was written.`;
 
 /** Write the hand-off of a client or group session, of what she approved of its teachings (edit.js finish, for a session): the
     principles she kept (without their source_context), the recurring principles she kept, and the Reel ideas she kept that are
@@ -1619,7 +1624,7 @@ export async function finishSession(ctx, found, { host } = {}) {
   const edits = (record.session && record.session.edits) || {};
   const writtenItems = { principles: approved.session.principles, recurringPrinciples: approved.session.recurringPrinciples, reelIdeas: approved.session.reelsToFilm };
   const hers = [["principles", "Principle"], ["recurringPrinciples", "Recurring principle"], ["reelIdeas", "Reel idea"]].flatMap(([key, label]) =>
-    writtenItems[key].flatMap((item) => Object.keys(((edits[key] || {})[String(item.n)]) || {}).map((field) => [field, herWordsName(item[field], seen.hers)]).filter(([, word]) => word).map(([field, word]) => `${label} ${item.n}'s ${field}, as you changed it, holds "${word}", a name brimm-video can see: say it another way, or drop it.`)));
+    writtenItems[key].flatMap((item) => Object.keys(((edits[key] || {})[String(item.n)]) || {}).map((field) => [field, herWordsName(item[field], seen.hers)]).filter(([, word]) => word).map(([field, word]) => `${label} ${item.n}'s ${field}, as you changed it, holds "${word}", a name BRIMM Video Studio can see: say it another way, or drop it.`)));
   if (hers.length) return { why: hers.join("\n") };
   const target = handoffTarget(ctx, { folder, record });
   if (target.refusal) return { why: target.refusal };

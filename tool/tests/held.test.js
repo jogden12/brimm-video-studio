@@ -51,7 +51,7 @@ const table = (args) => processTable(chatChain({ args }));
 
 describe("chats that hold a session's words", () => {
   it("says what a held chat is told, in the design's words", () => {
-    assert.equal(HELD_REFUSED, "This chat holds a session's words, so it can only run brimm-video now. Start a new chat for anything else.");
+    assert.equal(HELD_REFUSED, "This chat holds a session's words, so it can only run BRIMM Video Studio now. Start a new chat for anything else.");
     assert.equal(HELD_NARROWED, "This chat holds a session's words, so it can't do that here. Start a new chat for it.");
     assert.equal(wordsFolder("/Users/s"), "/Users/s/Library/Application Support/BRIMM Video Words");
   });

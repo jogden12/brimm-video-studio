@@ -18,7 +18,9 @@ import { guardDecision } from "../studio.js";
 import { CHECKOUT, EDIT, NODE } from "./guard-cases.js";
 import { fileSafe } from "../names.js";
 import { fileEpisode, readPendings } from "../filing.js";
-import { importInto } from "../unedited.js";
+import { clockAt, importInto } from "../unedited.js";
+import { COPY_STEP } from "../guide.js";
+import { addRates, progressFolder } from "../progress.js";
 import { holds } from "../snapshot.js";
 import { episodeWork } from "../settings.js";
 import { localDay } from "../shared/text.js";
@@ -255,7 +257,7 @@ describe("the footage a plan's parts give its project (footageOf, withMaterial)"
     assert.deepEqual(footageOf(plan(), [broll, screen]).map((f) => f.path), ["media/screen-4.mp4"]);
     t.done();
   });
-  it("gives no footage of a part a newer brimm-video wrote, listed with newer: true", () => {
+  it("gives no footage of a part a newer BRIMM Video Studio wrote, listed with newer: true", () => {
     const t = setup();
     const broll = listed(t, 1, "b-roll", 2);
     assert.deepEqual(footageOf(plan(), [{ ...broll, newer: true }]), []);
@@ -327,7 +329,7 @@ describe("the footage a plan's parts give its project (footageOf, withMaterial)"
     const why = footageWithheld(plan(), [going, conflicted, { ...newer, newer: true }, stale, waits, talking, other, lost]).map(({ part, why: said }) => [part.record.label, said]);
     assert.deepEqual(why, [
       ["Video 2", "its episode holds a conflicted copy"],
-      ["Video 3", "a newer brimm-video wrote its record"],
+      ["Video 3", "a newer BRIMM Video Studio wrote its record"],
       ["Video 4", "its shot is not a shot of its kind in the plan any more"],
       ["Video 5", "her client has not agreed to it"],
       ["Video 8", "its record cannot be read"]
@@ -622,14 +624,14 @@ describe("plan … join, a talking part that must not be joined (ruling 1)", () 
     assert.deepEqual([snapshot(t), t.started], [before, []]);
     t.done();
   });
-  it("refuses a talking part a newer brimm-video wrote, which partsOf does not list, in the newer record's words, with its label first", async () => {
+  it("refuses a talking part a newer BRIMM Video Studio wrote, which partsOf does not list, in the newer record's words, with its label first", async () => {
     const t = world();
     await planned(t);
     const one = part(t, 1, { words: SCRIPT[0].split(" ") });
     writeFileSync(recordFile(one.folder, 3), recordText({ ...one.record, rev: 3, version: 9 }));
     const before = snapshot(t);
     const r = await on(depsOf(t), "plan", TITLE, "join");
-    assert.deepEqual([r.code, r.said], [1, [`${labelOf(1)}: That is an episode a newer brimm-video wrote (a11111). Jason has a newer brimm-video. Ask him to update this Mac.`]]);
+    assert.deepEqual([r.code, r.said], [1, [`${labelOf(1)}: That is an episode a newer BRIMM Video Studio wrote (a11111). Jason has a newer BRIMM Video Studio. Ask him to update this Mac.`]]);
     assert.deepEqual([snapshot(t), t.started], [before, []]);
     t.done();
   });
@@ -667,7 +669,7 @@ describe("plan … join and join --now refuse in the same words (the plan's ruli
     const why = reason.startsWith(`The footage of "${TITLE}" couldn't be made into one video: `) ? reason.slice(`The footage of "${TITLE}" couldn't be made into one video: `.length).replace(/\.$/, "") : reason;
     return { said, run, why };
   }
-  it("says no talking part, a talking part held by a conflict, and a talking part a newer brimm-video wrote, in one set of words", async () => {
+  it("says no talking part, a talking part held by a conflict, and a talking part a newer BRIMM Video Studio wrote, in one set of words", async () => {
     const t = world();
     await planned(t);
     const none = await both(t, { ids: [idOf(1)] });
@@ -767,6 +769,62 @@ describe("the join run, with one talking part (PR H5b)", () => {
     assert.deepEqual(t.notices, [READY]);
     assert.deepEqual(t.kicks, ["kickstart"]);
     t.done();
+  });
+  describe("says when the video opens in HyperFrames (plan R1a)", () => {
+    const near = (ms) => clockAt(Math.round(ms / 60000) * 60000);
+    const READY_AT = (at) => `Ready: "${TITLE}" is made from its footage. It opens in HyperFrames about ${at}. In Claude, say "what's next?"`;
+    it("names the clock time the copy will be ready when this Mac has measured a speed, and the copy starts from the file the join put in from: with no wait for the check", async () => {
+      const t = world({ probes: longTalk("Take 1") });
+      await planned(t);
+      const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+      // 0.1 seconds of work for each second of the video's 120: 12 seconds.
+      addRates(progressFolder(t.home), { [COPY_STEP]: 0.1 });
+      await joinRun(t, [one.record.id]);
+      assert.deepEqual(t.notices, [READY_AT(near(t.now() + 12 * 1000))]);
+      t.done();
+    });
+    it("counts the wait for the late check in that time when the copy cannot start from a local file", async () => {
+      const t = world({ probes: longTalk("Take 1") });
+      await planned(t);
+      const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+      addRates(progressFolder(t.home), { [COPY_STEP]: 0.1 });
+      // The part's file is not whole on this Mac once the join has been made, so the copy has to wait for the check, which is due 15 minutes after the join's copy.
+      let after = false;
+      const start = (...args) => {
+        after = true;
+        return t.ctx.deps.start(...args);
+      };
+      const isWhole = (path) => !(after && path.startsWith(one.folder));
+      await joinRun(t, [one.record.id], { start, isWhole });
+      const [pending] = readPendings(t.home);
+      assert.deepEqual(t.notices, [READY_AT(near(pending.lastCopy + 15 * 60 * 1000 + 12 * 1000))]);
+      t.done();
+    });
+    it("says what it always said when no speed is known, when the copy is not asked for, and of a plan made from its voice", async () => {
+      const t = world({ probes: longTalk("Take 1") });
+      await planned(t);
+      const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+      await joinRun(t, [one.record.id]);
+      assert.deepEqual(t.notices, [READY]);
+      t.done();
+      const u = world({ probes: longTalk("Take 1") });
+      await planned(u);
+      const two = part(u, 1, { words: SCRIPT[0].split(" ") });
+      addRates(progressFolder(u.home), { [COPY_STEP]: 0.1 });
+      await on(depsOf(u), "join", "--now", FOLDER_NAME(u), "--parts", two.record.id);
+      assert.deepEqual(u.notices, [READY], "a Mac not set up for HyperFrames makes no copy, so it opens nowhere");
+      u.done();
+    });
+    it("keeps the line about the check of the copies in the result's made text, with no title in it", async () => {
+      const t = world({ probes: longTalk("Take 1") });
+      await planned(t);
+      const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+      const r = await joinRun(t, [one.record.id]);
+      assert.ok(r.text.includes(`${TITLE}: copied into Dropbox. Dropbox's check of its copies is made in 15 minutes.`), r.text);
+      assert.deepEqual(resultOf(t).made, ["the video from its footage", "copied into Dropbox, and Dropbox's check of its copies is made in 15 minutes"]);
+      assert.ok(!resultOf(t).made.join(" ").includes(TITLE));
+      t.done();
+    });
   });
   it("asks for no working copy on a Mac not set up for HyperFrames, and no reading while this Mac's readings are off", async () => {
     const t = world({ probes: longTalk("Take 1") });
@@ -1124,7 +1182,7 @@ describe("the join run, what stops it (PR H5b)", () => {
     assert.equal(readEpisode(folder).record.rev, plan.rev);
     t.done();
   });
-  it("refuses at the run what the command refused: a talking part in conflict or written by a newer brimm-video, in the words of the conflict, with its label first", async () => {
+  it("refuses at the run what the command refused: a talking part in conflict or written by a newer BRIMM Video Studio, in the words of the conflict, with its label first", async () => {
     const t = world();
     const folder = await planned(t);
     const one = part(t, 1, { words: SCRIPT[0].split(" ") });
@@ -1139,7 +1197,7 @@ describe("the join run, what stops it (PR H5b)", () => {
     rmSync(join(one.folder, "record", "0002 (Sallie's conflicted copy 2026-11-04).json"));
     writeFileSync(recordFile(one.folder, 3), recordText({ ...one.record, rev: 3, version: 9 }));
     await joinRun(t, [one.record.id]);
-    assert.deepEqual(resultOf(t).failed, [COULD_NOT(`${labelOf(1)}: That is an episode a newer brimm-video wrote (a11111). Jason has a newer brimm-video. Ask him to update this Mac`)]);
+    assert.deepEqual(resultOf(t).failed, [COULD_NOT(`${labelOf(1)}: That is an episode a newer BRIMM Video Studio wrote (a11111). Jason has a newer BRIMM Video Studio. Ask him to update this Mac`)]);
     assert.equal(planOf(t).kind, null);
     assert.ok(existsSync(folder) && !existsSync(join(folder, "Take 1.mov")) && Object.keys(before).length > 0);
     t.done();
@@ -1389,6 +1447,28 @@ describe("the join's late check (PR H5b)", () => {
   });
 });
 
+describe("the joined video's copy starts from the local file (plan R1b)", () => {
+  it("is made with no wait while the join's late check is still owed: the file the join put in from is read, and the check goes on behind", async () => {
+    const t = world({ probes: longTalk("Take 1"), copy: "120.000000" });
+    const folder = await planned(t);
+    const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+    await joinRun(t, [one.record.id]);
+    const [pending] = readPendings(t.home);
+    const waits = [];
+    const wait = async (ms) => waits.push(ms);
+    const r = await on(appDeps(t, { wait }), "workcopy", "--now", FOLDER_NAME(t));
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(waits, []);
+    assert.ok(!r.text.includes("once the import has checked"), r.text);
+    const raw = statSync(join(folder, "Take 1.mov"));
+    const copy = workCopyPaths(t.home, FOLDER_NAME(t), workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+    assert.deepEqual([existsSync(copy.video), existsSync(copy.facts)], [true, true]);
+    // The late check is still owed, and the file it checks is as it was.
+    assert.deepEqual(readPendings(t.home).map((p) => p.id), [pending.id]);
+    t.done();
+  });
+});
+
 describe("plan … agreed, for a video made from its footage (PR H5b)", () => {
   const TYPED = "Quayle Widgets, 21 October";
   /** `edit.js` with a stand-in for osascript that answers her click on "They agreed". */
@@ -1559,7 +1639,7 @@ describe("the footage copies, which `workcopy` makes for a video made from a pla
     assert.equal(ffmpegRuns(t).length, 3, "the main copy and the screen recording were made already: only the b-roll was made");
     t.done();
   });
-  it("makes no copy of a part whose episode holds a conflicted copy or whose record a newer brimm-video wrote, though its record in force shows no client, and says so (ruling 1)", async () => {
+  it("makes no copy of a part whose episode holds a conflicted copy or whose record a newer BRIMM Video Studio wrote, though its record in force shows no client, and says so (ruling 1)", async () => {
     const t = world({ joined: "60.000000" });
     const { parts } = await made(t, { parts: [[2, "b-roll", 2, false], [3, "screen", 4, false], [4, "b-roll", 5, false]] });
     // Dropbox kept a conflicted copy of the b-roll's record that says it shows a client; a newer brimm-video wrote the third.
@@ -1569,7 +1649,7 @@ describe("the footage copies, which `workcopy` makes for a video made from a pla
     assert.equal(r.code, 0, r.text);
     assert.deepEqual(copies(t).filter((n) => n.startsWith("footage-")).map((n) => n.split("-")[1]), ["4", "4"]);
     assert.ok(r.said.some((line) => line.includes(labelOf(2)) && line.includes("its episode holds a conflicted copy")), r.text);
-    assert.ok(r.said.some((line) => line.includes(labelOf(4)) && line.includes("a newer brimm-video wrote its record")), r.text);
+    assert.ok(r.said.some((line) => line.includes(labelOf(4)) && line.includes("a newer BRIMM Video Studio wrote its record")), r.text);
     t.done();
   });
   it("makes no copy of a part whose shot is no longer a shot of its kind in the plan (ruling 4)", async () => {
@@ -1743,7 +1823,7 @@ describe("the README on the join (PR H5b)", () => {
   it("has a row for `plan … join`, with the order it says, the refusals, the run, the copies and what the project is given", () => {
     const row = rows.find((line) => line.startsWith('| `plan "<planned>" join ["<video>"…]` |')) || "";
     for (const words of ['`The talking parts of "Too many SKUs", in the order of its script:`', "Once they are joined, no more talking parts can be added.", '`"Too many SKUs" is being made from its footage. A notice comes when it is ready.`',
-      "`join --now <the plan's folder> --parts <id>[,<id>…]`", "Those aren't the talking parts of", "a talking part held by a conflict in its episode or a record a newer brimm-video wrote", "talking part 2 is 3840 by 2160, and talking part 1 is 1920 by 1080", "has no sound, so it can't be a talking part", "a video with no sound takes no kind",
+      "`join --now <the plan's folder> --parts <id>[,<id>…]`", "Those aren't the talking parts of", "a talking part held by a conflict in its episode or a record a newer BRIMM Video Studio wrote", "talking part 2 is 3840 by 2160, and talking part 1 is 1920 by 1080", "has no sound, so it can't be a talking part", "a video with no sound takes no kind",
       "`Making the footage for HyperFrames`", "`--footage` makes these alone", "a copy in which ffprobe finds a sound stream is never put in place", "`media/b-roll-<n>.mp4`", "her client has not agreed to", "Its footage is still being made for HyperFrames: say \"open it in HyperFrames\" again when it is done."]) assert.ok(row.includes(words), words);
   });
   it("lists the two modules, and says the gate's words for a plan as they are now", () => {
@@ -1805,7 +1885,7 @@ describe("from the parts to the project: the join, the copies and the open, run 
     // The next open asks for the copy, says it is being made, and opens all the same.
     const again = await on(app(), "app", TITLE);
     assert.equal(again.code, 0, again.text);
-    assert.equal(again.said[0], COMING);
+    assert.ok(again.said.includes(COMING));
     assert.deepEqual(t.started.filter(([, args]) => args.includes("--footage")).map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER_NAME(t), "--footage"]]);
     assert.deepEqual(readdirSync(join(project, "media")).sort(), ["b-roll-2.mp4", "recording.mp4", "screen-4.mp4"]);
     // The run makes it, and the open after that moves it in.
@@ -2047,7 +2127,7 @@ describe("a footage copy that keeps failing is not asked for again at every open
   const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
   const CUES = ["--cue", "b-roll | 4 | count what you actually sell | Sallie at her desk | shot: 2"];
   const COMING = 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.';
-  const UNMADE = "Some of its footage could not be made for HyperFrames. Ask Jason.";
+  const UNMADE = "Some of its footage could not be made for HyperFrames, and opening it again won't change that. Ask Jason.";
   const asksFootage = (t) => t.started.filter(([, args]) => args.includes("--footage")).length;
   /** A plan made its video, with a b-roll part for shot 2; the launch agent's late check passed. */
   async function made(script) {
@@ -2071,6 +2151,7 @@ describe("a footage copy that keeps failing is not asked for again at every open
     const first = await on(app(), "app", TITLE);
     assert.equal(first.code, 0, first.text);
     assert.ok(first.said.includes(UNMADE), first.text);
+    assert.ok(first.said.indexOf("It's open in HyperFrames.") < first.said.indexOf(UNMADE), "it says it is open first: " + first.text);
     assert.ok(!first.said.includes(COMING), first.text);
     assert.equal(asksFootage(t), 0);
     assert.ok(!existsSync(join(project(), "media", "b-roll-2.mp4")));
@@ -2096,7 +2177,7 @@ describe("a footage copy that keeps failing is not asked for again at every open
     assert.ok(resultFootage(t).footageFailed[0].includes("Dropbox is still bringing"), JSON.stringify(resultFootage(t)));
     const opened = await on(app(), "app", TITLE);
     assert.equal(opened.code, 0, opened.text);
-    assert.equal(opened.said[0], COMING);
+    assert.ok(opened.said.includes(COMING));
     assert.ok(!opened.said.includes(UNMADE));
     assert.equal(asksFootage(t), 1);
     assert.ok(!existsSync(join(project(), "media", "b-roll-2.mp4")));
@@ -2110,7 +2191,7 @@ describe("a footage copy that keeps failing is not asked for again at every open
     for (const name of readdirSync(dir).filter((n) => n.startsWith("footage-"))) rmSync(join(dir, name));
     rmSync(join(episodeWork(t.home, FOLDER_NAME(t)), "workcopy.result.json"));
     const opened = await on(app(), "app", TITLE);
-    assert.equal(opened.said[0], COMING);
+    assert.ok(opened.said.includes(COMING));
     assert.ok(!opened.said.includes(UNMADE));
     assert.equal(asksFootage(t), 1);
     t.done();

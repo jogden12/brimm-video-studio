@@ -39,7 +39,7 @@ export const SESSION_TAUGHT = [...SESSION, "teachings", "principles", "ideas", "
 /** Why a command is refused, in plain words. None of them names an episode, so that nothing of a file's name reaches the chat. */
 const WAITING = "This video is waiting for its answer: say what it is first.";
 /** What a video she left alone is refused in, by the gate and by askBlocked: it is not waiting for anything. */
-export const LEFT = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+export const LEFT = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 /** Why a command is refused for a planned episode (isPlannedRecord), which is not made from its footage yet, naming the title she gave it: true
     whether it has footage or none (PR H5b). `leave` is answered by how to drop a plan instead: a plan is not left alone as a video is, it is

@@ -88,7 +88,7 @@ const ASSETS_NOT_IN = "Its assets (pictures, music and video) were too big to ha
 const ASSETS_REST_NOT_IN = "The rest of its assets (pictures, music and video) were too big to hand over, so they are not in it.";
 const OLDER = (of = "") => `The HyperFrames project for ${of}${NAME} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`;
 const COULD_NOT = (of = "") => `The HyperFrames project for ${of}${NAME} could not be rebuilt on this Mac, so the older project was left where it was. Ask Jason.`;
-const NOT_WHOLE = (of = "") => `The snapshot of the HyperFrames project for ${of}${NAME} is not whole on this Mac, so the older project was left where it was. Ask Jason.`;
+const NOT_WHOLE = (of = "") => `The snapshot of the HyperFrames project for ${of}${NAME} is not whole on this Mac, so the older project was left where it was. Dropbox may still be bringing it: say it again in a few minutes. If it says this again, tell Jason.`;
 
 /** What the older Mac's video is: the text fillProject puts in a project's `media/recording.mp4`, and the size of it. */
 const OLD_VIDEO = "the working copy";

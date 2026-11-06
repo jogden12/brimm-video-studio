@@ -349,7 +349,7 @@ describe("what the open command printed, in her words", () => {
   const PICKS_UP = "It's open in HyperFrames, and it picks up this conversation.";
   const NEW_CHAT = "It's open in HyperFrames. It starts a new conversation.";
   const NOT_INSTALLED = "HyperFrames isn't installed on this Mac: ask Jason.";
-  const WOULD_NOT = "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason.";
+  const WOULD_NOT = "HyperFrames wouldn't open. Try once more. If it still won't, tell Jason.";
   const CANNOT = "HyperFrames can't be opened from here: ask Jason.";
   const notOpened = (reason) => JSON.stringify({ ...JSON.parse(fixture("open-not-installed.json")), reason });
 

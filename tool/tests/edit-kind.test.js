@@ -54,7 +54,7 @@ const BOTH = "Say both answers: what it is, and whether it is a private session 
 const DISAGREE = "Those two answers disagree: say again whether it is a private session.";
 const ZOOM = "Ask first whether it is a client or group session: it came from Zoom, or is sound alone. Then answer again with --not-a-session.";
 const MARKED = 'This was marked a client or group session. Clearing the mark needs your click on this Mac: say "clear the session mark".';
-const LEFT_WORDS = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+const LEFT_WORDS = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
 const NOT_YET = "The video is not on this Mac yet: Dropbox is still bringing it over. Say it again in a minute.";
 const SESSION_NEXT = "Ask her whether she wants its teachings (principles and Reel ideas) or the transcript only.";
@@ -777,8 +777,10 @@ describe("kind: the working copy (plan PR 4)", () => {
   it("asks for it at once beside a reading that waits for the import's late check: kind does not wait for the check, its run does (workcopy's tests)", async () => {
     const t = setup();
     appOn(t);
-    waiting(t);
+    const found = waiting(t);
     writePending(t.home, { version: 1, id: ID, name: FOLDER, folder: join(t.root, "Episodes", FOLDER), video: "Pricing talk.mp4", bytes: 1, seconds: 120, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt" });
+    // The other Mac's import of the video is at work, so the reading still waits for the check (plan R1c).
+    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Pricing talk.mp4", bytes: found.record.video.bytes, seconds: 120, step: "Waiting for its late check", at: AT, label: LABEL }, (to, text) => writeFileSync(to, text));
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     assert.match(r.said[0], /^Answered\. Claude reads it at /);
     assert.deepEqual(startedBy(t), [readArgs("raw", 3), COPY_ARGS]);
@@ -879,35 +881,39 @@ describe("kind: a raw reading waits for the import's late check", () => {
   function owe(t, ago, over = {}) {
     writePending(t.home, { version: 1, id: ID, name: FOLDER, folder: join(t.root, "Episodes", FOLDER), video: "Pricing talk.mp4", bytes: 1, seconds: 120, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - ago, root: t.root, machine: "Mac Studio", planTxt: "x.txt", ...over });
   }
-  it("says when Claude reads it, starts the detached run, and does not wait for it, while this Mac's pending late check is due later", async () => {
+  /** The other Mac's import of the made-up video, at work: its late check is not this Mac's to keep in step (plan R1c), so a reading
+      waits for it, and says when. */
+  const elsewhere = (t, found) => writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Pricing talk.mp4", bytes: found.record.video.bytes, seconds: 120, step: "Waiting for its late check", at: AT, label: LABEL }, (to, text) => writeFileSync(to, text));
+  it("23. is waited for as a raw answer with no check while this Mac's own late check is still to come: the reading and the copy are started, and the words are the reading's", async () => {
     const t = setup();
     appOn(t);
     waiting(t);
     owe(t, 5 * 60 * 1000);
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
-    const due = clockAt(Date.parse(AT) - 5 * 60 * 1000 + LATE_CHECK_MS);
-    assert.deepEqual([r.code, r.said], [0, [`Answered. Claude reads it at ${due}, when the import has checked its copies.`]]);
+    assert.deepEqual([r.code, r.said], [0, [STILL(LABEL)]]);
     assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs("raw", 3), COPY_ARGS]);
-    assert.deepEqual(t.waits, [CLAIM_WAIT_MS]);
     t.done();
   });
-  it("says when its rough cut is ready too, as the guide does, once this Mac has measured the speeds of Claude's call and of the rough cut", async () => {
+  it("24. says when its rough cut is ready too, as the guide does, once this Mac has measured the speeds of Claude's call and of the rough cut, while the other Mac's import is at work", async () => {
     const t = setup();
     appOn(t);
-    waiting(t);
+    const found = waiting(t);
     owe(t, 5 * 60 * 1000);
+    elsewhere(t, found);
     // 10 seconds for each second of video, twice, for a video of 23.423 seconds: 468 seconds from the time Claude starts.
     addRates(progressFolder(t.home), { "Asking Claude": 10, "Making the rough cut": 10 });
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     const due = Date.parse(AT) - 5 * 60 * 1000 + LATE_CHECK_MS;
     const rough = clockAt(Math.round((due + 468000) / 60000) * 60000);
     assert.deepEqual([r.code, r.said], [0, [`Answered. Claude reads it at ${clockAt(due)}, when the import has checked its copies. Its rough cut is ready about ${rough}.`]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs("raw", 3), COPY_ARGS]);
     t.done();
   });
-  it("says the time of a check that is already due as the time now, since the import makes it within a minute", async () => {
+  it("24. says the time of a check that is already due as the time now, since the import makes it within a minute, while the other Mac's import is at work", async () => {
     const t = setup();
-    waiting(t);
+    const found = waiting(t);
     owe(t, 40 * 60 * 1000);
+    elsewhere(t, found);
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     assert.deepEqual(r.said, [`Answered. Claude reads it at ${clockAt(t.now())}, when the import has checked its copies.`]);
     t.done();
@@ -1260,7 +1266,7 @@ describe("kind --version-of", () => {
 });
 
 describe("leave", () => {
-  it("marks a video not for brimm-video, with who, where and when, says so, and asks nothing more", async () => {
+  it("marks a video left alone (the stored state \"not for brimm-video\"), with who, where and when, says so, and asks nothing more", async () => {
     const t = setup();
     const found = waiting(t);
     const r = await on(t.ctx.deps, "leave", LABEL);
@@ -1278,7 +1284,7 @@ describe("leave", () => {
     assert.ok(before.some((line) => line.includes("a video waiting for your answer")), before.join("\n"));
     await on(t.ctx.deps, "leave", LABEL);
     const after = (await on(t.ctx.deps, "episodes")).said;
-    const heading = after.findIndex((line) => line.startsWith("Left alone, not for brimm-video"));
+    const heading = after.findIndex((line) => line.startsWith("Left alone, not for BRIMM Video Studio"));
     assert.ok(heading > 0, after.join("\n"));
     assert.equal(after[heading + 1], `  ${LABEL}: a video of 0:23, id ${SHORT}`);
     assert.equal(after.filter((line) => line.includes(`${LABEL}:`) && line.includes("waiting for your answer")).length, 0, after.join("\n"));

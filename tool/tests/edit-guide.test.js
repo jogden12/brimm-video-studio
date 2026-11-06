@@ -8,7 +8,7 @@ import { editMain, HELP } from "../edit.js";
 import { readGuideNotes, writeGuideNotes, guideFile } from "../guide-note.js";
 import { NOT_SET_UP, OPS_PAGE } from "../guide.js";
 import { localStamp, readEpisode, recordFile, recordText } from "../episode.js";
-import { writeStatus } from "../importing.js";
+import { removeStatus, writeStatus } from "../importing.js";
 import { progressFolder, RATES } from "../progress.js";
 import { clockAt } from "../unedited.js";
 import { writePending, noteSeen } from "../filing.js";
@@ -51,7 +51,7 @@ function handedOff(t, { id = "e-20261020-a1a1a1", name = "2026-10-20 Launch talk
   return found;
 }
 const DROP_LINE = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
-const TAKE = '  Launch talk (a1a1a1): On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
+const TAKE = '  Launch talk (a1a1a1): On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
 const NO_FIT = 'No video under way fits that. Say "what\'s next?" to see the ones that are.';
 
 describe("guide on a Mac not on the light import", () => {
@@ -138,7 +138,7 @@ describe("guide, from the records", () => {
       writeGuideNotes(t.home, noted("live", 1));
       const live = await on(light(t), "guide", "Launch talk again");
       assert.equal(live.said[0], `Launch talk again (a2a2a2): On the BRIMM Ops page: ${kind === "raw" ? `${TAKE_AGAIN} ${ONLINE}` : TAKE_AGAIN}`, kind);
-      assert.match(live.said[1], /^Then: Press "Write what’s next"\. .* If the "Reels" card lists "Reels from brimm-video", press "Write its post text" beside each\.$/, kind);
+      assert.match(live.said[1], /^Then: Press "Write what’s next"\. .* If the "Reels" card lists "Reels from BRIMM Video Studio", press "Write its post text" beside each\.$/, kind);
       t.done();
     }
   });
@@ -162,7 +162,7 @@ describe("guide, from the records", () => {
     for (const said of ["Launch talk", older.name]) assert.deepEqual(await on(light(t), "guide", said), { code: 1, said: [NO_FIT] }, said);
     t.done();
   });
-  it("reads a hand-off of a kind brimm-video never writes from the record, and does not stop at it", async () => {
+  it("reads a hand-off of a kind BRIMM Video Studio never writes from the record, and does not stop at it", async () => {
     const t = setup();
     const h = handedOff(t);
     writeFileSync(join(h.folder, "final/Launch talk.brimm-ops.json"), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: h.record.id, kind: "film", name: "Launch talk" } }));
@@ -189,6 +189,8 @@ describe("guide, from the records", () => {
     const t = setup();
     const found = episodeAs(t, { id: "e-20261020-c2c2c2", name: "2026-10-20 Long talk (Mac Studio)", record: { kind: "raw", answer: ANSWERED, name: { text: "Long talk", placeholder: false }, video: { file: "Long talk.mov", bytes: 5, seconds: 2400, recorded: "2026-10-20", recordedFrom: "import" }, main: MAIN([]), ...imported("10:30") } });
     writePending(t.home, { version: 1, id: found.record.id, name: found.name, folder: found.folder, video: "Long talk.mov", bytes: 5, seconds: 2400, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt" });
+    // The other Mac's import of the video is at work: its check is not this Mac's to keep in step, so the reading waits for it.
+    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Long talk.mov", bytes: 5, seconds: 2400, step: "Importing", at: new Date(t.now()).toISOString() }, (to, text) => writeFileSync(to, text));
     const due = t.now() + 10 * 60 * 1000;
     const STARTS = `Long talk (c2c2c2): Claude starts reading it about ${clockAt(due)}, once the import has checked its copies.`;
     const ROUGH = `Its rough cut is ready about ${clockAt(due + 1032 * 1000)}.`;
@@ -203,15 +205,20 @@ describe("guide, from the records", () => {
     writeFileSync(lockOf(t.home, found.name), JSON.stringify({ pid: 777, command: "read" }));
     const reading = light(t, { alive: (pid) => pid === 777 });
     assert.deepEqual((await on(reading, "guide", "Long talk")).said, [`${STARTS} ${ROUGH} ${NOTICE}`]);
+    // Only this Mac's own check is left to come (R1c): the reading started at once and keeps it in step, so it is "reading", with no time.
+    const READING = 'Long talk (c2c2c2): Claude is reading it. A notice comes when it is done; then say "what did Claude find?".';
+    removeStatus(t.root, "Long talk.mov", "Sallie's laptop", "k3j9x");
+    assert.deepEqual((await on(reading, "guide", "Long talk")).said, [READING]);
     // The check made, Claude is at work: when it began is not kept, so no time.
     rmSync(join(pendingFolder(t.home), `${found.record.id}.json`));
-    assert.deepEqual((await on(reading, "guide", "Long talk")).said, ['Long talk (c2c2c2): Claude is reading it. A notice comes when it is done; then say "what did Claude find?".']);
+    assert.deepEqual((await on(reading, "guide", "Long talk")).said, [READING]);
     t.done();
   });
   it("says Claude starts reading a raw video now when its late check is overdue, never at a time gone by, and its rough cut to the nearest minute", async () => {
     const t = setup();
     const found = episodeAs(t, { id: "e-20261020-c2c2c2", name: "2026-10-20 Long talk (Mac Studio)", record: { kind: "raw", answer: ANSWERED, name: { text: "Long talk", placeholder: false }, video: { file: "Long talk.mov", bytes: 5, seconds: 2400, recorded: "2026-10-20", recordedFrom: "import" }, main: MAIN([]), ...imported("10:30") } });
     writePending(t.home, { version: 1, id: found.record.id, name: found.name, folder: found.folder, video: "Long talk.mov", bytes: 5, seconds: 2400, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 60 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt" });
+    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Long talk.mov", bytes: 5, seconds: 2400, step: "Importing", at: new Date(t.now()).toISOString() }, (to, text) => writeFileSync(to, text));
     mkdirSync(progressFolder(t.home), { recursive: true });
     writeFileSync(join(progressFolder(t.home), RATES), JSON.stringify({ "Asking Claude": 0.31, "Making the rough cut": 0.12 }));
     const STARTS = `Long talk (c2c2c2): Claude starts reading it about ${clockAt(t.now())}, once the import has checked its copies.`;
@@ -377,7 +384,7 @@ describe("guide opens a folder, the page, or a file's place in Finder", () => {
     assert.deepEqual(await on(light(t), "guide", "drop"), { code: 0, said: ["Opened your drop folder in Finder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio."] });
     assert.deepEqual(t.opened, [["Finder", join(t.root, "Drop", "Mac Studio")]]);
     const broken = light(t, { openApp: () => { throw new Error("Finder could not be opened (/x/y)"); } });
-    assert.deepEqual(await on(broken, "guide", "drop"), { code: 1, said: ["Finder could not open your drop folder: ask Jason."] });
+    assert.deepEqual(await on(broken, "guide", "drop"), { code: 1, said: ["Finder could not open your drop folder. Say it again. If it says this again, tell Jason."] });
     t.done();
   });
   it("opens Zoom Video Transfer, beside BRIMM Video, or says to ask Jason", async () => {
@@ -393,10 +400,10 @@ describe("guide opens a folder, the page, or a file's place in Finder", () => {
     const t = setup();
     assert.deepEqual(await on(light(t), "guide", "page"), { code: 0, said: ["Opened the BRIMM Ops page in your browser."] });
     assert.deepEqual(t.calls, [{ cmd: "/usr/bin/open", args: [OPS_PAGE] }]);
-    assert.deepEqual(await on(light(t, { run: async () => ({ code: 1, stderr: "no" }) }), "guide", "page"), { code: 1, said: ["The BRIMM Ops page could not be opened: ask Jason."] });
+    assert.deepEqual(await on(light(t, { run: async () => ({ code: 1, stderr: "no" }) }), "guide", "page"), { code: 1, said: ["The BRIMM Ops page could not be opened. Say it again. If it says this again, tell Jason."] });
     t.done();
   });
-  it("shows in Finder what the step needs: the hand-off, then the video to post; and nothing for a step of brimm-video's", async () => {
+  it("shows in Finder what the step needs: the hand-off, then the video to post; and nothing for a step of BRIMM Video Studio's", async () => {
     const t = setup();
     const h = handedOff(t);
     assert.deepEqual(await on(light(t), "guide", "Launch talk", "show"), { code: 0, said: ["Shown in Finder: the hand-off of Launch talk (a1a1a1)."] });
@@ -541,7 +548,7 @@ describe("guide tell", () => {
     const raw = episodeAs(t, { ...VIDEOS.raw, record: { ...VIDEOS.raw.record, reading: null } });
     const stopped = onWait(t, 1, () => {
       mkdirSync(dirname(resultFile(t.home, raw.name, "read")), { recursive: true });
-      writeFileSync(resultFile(t.home, raw.name, "read"), JSON.stringify({ version: 1, command: "read", started: t.now(), ended: t.now(), ok: false, made: [], failed: ["The late check of this episode's import found a problem: a copy did not match."], next: "" }));
+      writeFileSync(resultFile(t.home, raw.name, "read"), JSON.stringify({ version: 1, command: "read", started: t.now(), ended: t.now(), ok: false, made: [], failed: ["Dropbox found a problem with a copy of this episode: a copy did not match."], next: "" }));
     });
     const r = await on(light(t, { wait: stopped }), "guide", "Morning talk", "tell");
     assert.deepEqual(r, { code: 0, said: ['Morning talk (cccccc): Claude\'s reading of it did not finish. Say "how far is it?" to see why.'] });
@@ -569,7 +576,7 @@ describe("guide tell", () => {
   });
 });
 
-const TAKE_TEXT = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
+const TAKE_TEXT = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
 describe("guide notes her word", () => {
   it("notes only the step that comes next, then says the next one", async () => {
     const t = setup();
@@ -593,7 +600,7 @@ describe("guide notes her word", () => {
     assert.equal((await on(light(t), "guide")).said[1], "Nothing is under way. To start, put the video in your drop folder.");
     t.done();
   });
-  it("refuses a step for a video whose next step is brimm-video's, and a note that cannot be written", async () => {
+  it("refuses a step for a video whose next step is BRIMM Video Studio's, and a note that cannot be written", async () => {
     const t = setup();
     episodeAs(t, VIDEOS.read);
     assert.deepEqual(await on(light(t), "guide", "Pricing talk", "done", "taken"), { code: 1, said: ['Not noted: Pricing talk (bbbbbb) has no step on the BRIMM Ops page now. Claude has read it. Say "what did Claude find?", then answer the spellings card.'] });
@@ -602,7 +609,7 @@ describe("guide notes her word", () => {
     writeFileSync(join(guideFile(t.home), "x"), "");
     const r = await on(light(t), "guide", "Launch talk", "done", "taken");
     assert.equal(r.code, 1);
-    assert.match(r.said.join("\n"), /^Not noted: this Mac's note could not be written \([A-Z]+\)\. Ask Jason\.$/);
+    assert.match(r.said.join("\n"), /^Not noted: this Mac's note could not be written \([A-Z]+\)\. Say it again\. If it says this again, tell Jason\.$/);
     t.done();
   });
   it("takes her word that she is done with a video: it is no longer under way", async () => {

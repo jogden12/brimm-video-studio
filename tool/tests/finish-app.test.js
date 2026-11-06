@@ -17,6 +17,7 @@ import { tidyTranscript } from "../shared/transcript.js";
 import { EDITED, ID, PROJECT, SRT, partOf, reread } from "./episodes.js";
 import { EPISODE } from "./phase4.js";
 import { MAIN, MAIN_WORDS, REEL1, REEL2, entry, exportOf, fw, named, probeFor, whisper } from "./exports-world.js";
+const HAND_OFF_LINE = "Hand-off question: I found your export. Hand it off?";
 
 const HANDOFF = "Pricing- what to charge-.brimm-ops.json";
 const stem = (file) => file.replace(/\.[^.]+$/, "");
@@ -618,7 +619,7 @@ describe("E6. the late check, and what is removed from Downloads", () => {
     const result = await finishNow(w.t.ctx, found, { lateCheck: () => [`${MAIN_FILE} is not whole in final (it is missing).`] });
     assert.equal(result.ok, false);
     assert.match(result.failed.join(" "), /is not whole in final/);
-    assert.ok(result.next.includes("The exports it took from Downloads are kept there, because a copy in final/ was not whole at the late check."), result.next);
+    assert.ok(result.next.includes("The exports it took from Downloads are kept there, because a copy in final/ was not whole when its copies were checked."), result.next);
     assert.deepEqual([existsSync(main.path), existsSync(reel.path)], [true, true]);
     w.t.done();
   });
@@ -652,7 +653,7 @@ describe("E7. again, and the run", () => {
     w.t.clones.length = 0;
     const again = { ...found, record: reread(found) };
     assert.equal(await finishEpisode(w.t.ctx, again, {}), 0);
-    assert.deepEqual(w.t.said().split("\n").slice(-3), ["The main video: kept as the last finish made it.", "Reel 2: kept as the last finish made it.", 'Say "yes, hand it off" to start.']);
+    assert.deepEqual(w.t.said().split("\n").slice(-3), ["The main video: kept as the last finish made it.", "Reel 2: kept as the last finish made it.", HAND_OFF_LINE]);
     assert.equal(await finishEpisode(w.t.ctx, again, { yes: true }), 0);
     const result = await finishNow(w.t.ctx, { ...found, record: reread(found) });
     assert.equal(result.ok, true, result.failed.join(" "));
@@ -676,7 +677,7 @@ describe("E7. again, and the run", () => {
     const had = w.t.said().split("\n").length;
     const again = { ...found, record: reread(found) };
     assert.equal(await finishEpisode(w.t.ctx, again, {}), 0);
-    assert.deepEqual(w.t.said().split("\n").slice(had), ["The main video: kept as the last finish made it.", "Reel 2: kept as the last finish made it.", 'Say "yes, hand it off" to start.']);
+    assert.deepEqual(w.t.said().split("\n").slice(had), ["The main video: kept as the last finish made it.", "Reel 2: kept as the last finish made it.", HAND_OFF_LINE]);
     assert.equal(await finishEpisode(w.t.ctx, again, { final: ["main"], yes: true }), 0);
     const result = await finishNow(w.t.ctx, { ...found, record: reread(found) });
     assert.equal(result.ok, true, result.failed.join(" "));

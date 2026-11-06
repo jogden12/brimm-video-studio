@@ -892,7 +892,7 @@ describe("plan … agreed: asking on a dialog Claude cannot press", () => {
     assert.deepEqual([r.code, r.said, again.asked.length], [0, [`${labelOf(1)}'s client agreed already, on ${dayText(dayOf(t))}.`], 0]);
     t.done();
   });
-  it("refuses before any dialog a part whose episode Dropbox has kept a conflicted copy in, and one a newer brimm-video wrote, and writes nothing", async () => {
+  it("refuses before any dialog a part whose episode Dropbox has kept a conflicted copy in, and one a newer BRIMM Video Studio wrote, and writes nothing", async () => {
     const { t } = await clientWorld();
     const folder = join(t.root, "Episodes", "2026-11-04 Drop 1 (Mac Studio)");
     const record = readEpisode(folder, { pastCopies: true }).record;
@@ -1336,7 +1336,7 @@ describe("plan, the footage a plan has, and the guide (PR H5a)", () => {
   it("tells her what footage is in, and what it is waiting for, in the guide; with none, as it did", async () => {
     const t = setup();
     await planned(t);
-    const FILM = "Film it to its shot list, then drop the files in your drop folder. The teleprompter script is in its folder in Episodes.";
+    const FILM = "Film it to its shot list, then drop the files in your drop folder. To read the teleprompter script, say 'show me the script': it opens as a copy to read, and changes come through the chat.";
     assert.deepEqual((await on(light(t), "guide", TITLE)).said, [`${TITLE} (${SHORT}): ${FILM}`]);
     for (const n of [1, 2, 3, 4, 5]) video(t, n, { silent: n > 2 });
     await on(depsOf(t), "footage", labelOf(1), TITLE, "talking", "--client", "no");

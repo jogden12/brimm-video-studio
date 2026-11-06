@@ -63,10 +63,10 @@ import { argsOf, chainUp, claudeAbove, processTable, readProcesses } from "./cha
 export const NEVER_REFUSED = "That is never done from this folder: nothing here posts, sends, publishes or shares, or works the screen, the browser or another session. Ask Jason.";
 export const NOT_NAMED = "That is not among the tools and skills this folder allows. Ask Jason.";
 export const WEB_HELD = "The web is not turned on for this folder yet: ask Jason.";
-export const GATED_REFUSED = "That is one of the places only brimm-video reads or writes. Ask for it through brimm-video, or ask Jason.";
+export const GATED_REFUSED = "That is one of the places only BRIMM Video Studio reads or writes. Ask for it through BRIMM Video Studio, or ask Jason.";
 export const WRITE_REFUSED = "Claude's own file tools do not write files here. Make a file in the workshop, ~/BRIMM Video Workshop, with a command, which runs in the sandbox.";
 export const WORKSHOP_FILES_REFUSED = "Claude's own file tools do not read the workshop. Read a file there with a command, which runs in the sandbox.";
-export const RUN_ALONE = "Run brimm-video's commands on their own, exactly as her skill says, and not in the background.";
+export const RUN_ALONE = "Run BRIMM Video Studio's commands on their own, exactly as her skill says, and not in the background.";
 
 /** The tools left to Claude Code's own rules (step 9): its card, its list of what it is doing and ToolSearch, which only loads a
     tool that then meets this guard. The card must stay so: an answer of the guard's would answer it without her. */
@@ -153,7 +153,7 @@ function bashDecision(command, background, cwd, ctx) {
   if (typeof command !== "string") return deny(NOT_NAMED);
   const edit = `^${literally(ctx.node)} "${literally(ctx.checkout)}/tool/edit\\.js"`;
   if (new RegExp(`${edit}(?: ${WORD})+$`).test(command)) {
-    if (!background || new RegExp(`${edit} guide ${WORD} tell$`).test(command)) return allow("brimm-video's own command");
+    if (!background || new RegExp(`${edit} guide ${WORD} tell$`).test(command)) return allow("BRIMM Video Studio's own command");
     return deny(RUN_ALONE);
   }
   // The command as written, and its words with quotes and backslashes taken off, as the shell would run them.

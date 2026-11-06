@@ -186,15 +186,15 @@ describe("the limits a preview is made under", () => {
   });
 });
 
-describe("what brimm-video says of a Reel it cannot make on a Mac that is not set up for HyperFrames", () => {
+describe("what BRIMM Video Studio says of a Reel it cannot make on a Mac that is not set up for HyperFrames", () => {
   // Reels are made in HyperFrames, so a Mac that is not set up for it cannot make one. OpusClip is no longer used (Jason, 2 November 2026).
   it("is said of no number, of one, of several joined with the last after \"and\", with the words written out", () => {
-    assert.equal(notMadeWords(), "brimm-video cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
-    assert.equal(notMadeWords([]), "brimm-video cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
-    assert.equal(notMadeWords(2), "brimm-video cannot make Reel 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
-    assert.equal(notMadeWords([2]), "brimm-video cannot make Reel 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
-    assert.equal(notMadeWords([1, 2]), "brimm-video cannot make Reels 1 and 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
-    assert.equal(notMadeWords([1, 2, 3]), "brimm-video cannot make Reels 1, 2 and 3 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords(), "BRIMM Video Studio cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords([]), "BRIMM Video Studio cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords(2), "BRIMM Video Studio cannot make Reel 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords([2]), "BRIMM Video Studio cannot make Reel 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords([1, 2]), "BRIMM Video Studio cannot make Reels 1 and 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords([1, 2, 3]), "BRIMM Video Studio cannot make Reels 1, 2 and 3 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
   });
   it("sends her to OpusClip nowhere, and says nothing of cutting a Reel for now or of BRIMM Ops writing its post text", () => {
     for (const n of [undefined, 3, [1, 2], [1, 2, 3]]) assert.doesNotMatch(notMadeWords(n), /OpusClip|for now|cut |post text|New short video/i, String(n));
@@ -258,7 +258,7 @@ describe("reels.json", () => {
     assert.deepEqual(readReels("not json"), { why: "it is not JSON" });
     assert.deepEqual(readReels(JSON.stringify({ format: "something else", version: 1 })), { why: "it is not a list of Reel candidates this tool wrote" });
     // Version 2 is the reading's (a candidate with no crops yet): the next one up is a newer brimm-video's.
-    assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 3, video: "a.mov", candidates: [] })), { why: "it was written by a newer brimm-video. Ask Jason to update this Mac." });
+    assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 3, video: "a.mov", candidates: [] })), { why: "it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac." });
     assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 1, video: "a.mov", candidates: [{ n: 1, ranges: [{ start: 1 }] }] })), { why: "candidate 1 in it cannot be read" });
     assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 1, video: "a.mov", highest: "three", candidates: [] })), { why: "it is not a list of Reel candidates this tool wrote" });
   });
@@ -325,19 +325,31 @@ describe("the list of the Reel candidates", () => {
   const reels = reelsFile({ video: "talk.mov", by: "import", made, candidates: [{ ...one, preview: "previews/reel-1.mp4" }, { ...one, n: 3, title: "Thank you", seconds: 32, fits: { fits: true, why: "" }, preview: null, failed: "ffmpeg stopped (Cannot allocate memory)", check: "It ends with no pause after it: check the last word." }] });
   const record = { reels: [{ n: 1, status: "picked" }, { n: 3, status: "candidate" }] };
 
+  it("prints the why of a candidate as why it holds attention, and nothing for a candidate with no why", () => {
+    const bare = { ...one, n: 2, reason: "" };
+    const text = reelsText(reelsFile({ video: "talk.mov", by: "import", made, candidates: [one, bare] }), { reels: [] });
+    assert.equal(text.match(/Why it holds attention: .*/g).length, 1);
+    assert.match(text, /\n1\. [^\n]*\n(   [^\n]*\n)*?   Why it holds attention: It makes one point and stands alone\./);
+    assert.doesNotMatch(text, /\n   Why: /);
+    assert.equal(text.split("\n\n")[2].includes("Why it holds attention"), false);
+  });
+  it("prints the why of a Reel read before it was asked for in this sense (any old reason) under the same heading", () => {
+    const old = { ...one, reason: "It stands alone." };
+    assert.match(reelsText(reelsFile({ video: "talk.mov", by: "import", made, candidates: [old] }), { reels: [] }), /\n   Why it holds attention: It stands alone\.\n/);
+  });
   it("gives each candidate's number, times, length, title, why, what it is now and its preview", () => {
     assert.equal(reelsText(reels, record), [
       "Reel candidates of talk.mov: 2.",
       "",
       "1. 0:13 to 0:21, 5 seconds. Picked.",
       "   On screen: Know your costs",
-      "   Why: It makes one point and stands alone.",
+      "   Why it holds attention: It makes one point and stands alone.",
       "   It does not fit a Reel. It is 5.204 seconds long, and a Reel clip is at least 15 seconds.",
       "   Preview: previews/reel-1.mp4",
       "",
       "3. 0:13 to 0:21, 32 seconds. A candidate.",
       "   On screen: Thank you",
-      "   Why: It makes one point and stands alone.",
+      "   Why it holds attention: It makes one point and stands alone.",
       "   No preview: ffmpeg stopped (Cannot allocate memory).",
       "   It ends with no pause after it: check the last word.",
       ""
@@ -410,24 +422,24 @@ describe("the list of the Reel suggestions of a video of the switch (layout 3)",
       "1. 0:05 to 0:15, 10 seconds. A candidate.",
       "   Opens with: w20 w21 w22 w23",
       "   Closes with: w36 w37 w38 w39",
-      "   Why: Reason 1.",
+      "   Why it holds attention: Reason 1.",
       "   It does not fit a Reel. It is 10 seconds long, and a Reel clip is at least 15 seconds.",
       "   It starts with no pause before it: check the first word.",
       "",
       "2. Cut now: its words were cut from main v1. A candidate.",
       "   Opens with: w64 w65 w66 w67",
       "   Closes with: w72 w73 w74 w75",
-      "   Why: Reason 2.",
+      "   Why it holds attention: Reason 2.",
       "",
       "3. Cut now: its words were cut from main v1. A candidate.",
       "   Opens with: w50 w51 w52 w53",
       "   Closes with: w66 w67 w68 w69",
-      "   Why: Reason 3.",
+      "   Why it holds attention: Reason 3.",
       "",
       "4. 0:17 to 0:25, 8 seconds. Picked.",
       "   Opens with: w44 w45 w46 w47",
       "   Closes with: w56 w57 w58 w59",
-      "   Why: Reason 4.",
+      "   Why it holds attention: Reason 4.",
       "   It does not fit a Reel. It is 9 seconds long, and a Reel clip is at least 15 seconds.",
       "   Preview: previews/reel-4.mp4",
       ""
@@ -505,24 +517,24 @@ describe("the list of the Reel suggestions of a video of the switch (layout 3)",
       "1. 0:05 to 0:15, 10 seconds. A candidate.",
       "   Opens with: w20 w21 w22 w23",
       "   Closes with: w36 w37 w38 w39",
-      "   Why: Reason 1.",
+      "   Why it holds attention: Reason 1.",
       "   It does not fit a Reel. It is 10 seconds long, and a Reel clip is at least 15 seconds.",
       "   It starts with no pause before it: check the first word.",
       "",
       "2. Cut now: its words were cut from main v1. A candidate.",
       "   Opens with: w64 w65 w66 w67",
       "   Closes with: w72 w73 w74 w75",
-      "   Why: Reason 2.",
+      "   Why it holds attention: Reason 2.",
       "",
       "3. Cut now: its words were cut from main v1. A candidate.",
       "   Opens with: w50 w51 w52 w53",
       "   Closes with: w66 w67 w68 w69",
-      "   Why: Reason 3.",
+      "   Why it holds attention: Reason 3.",
       "",
       "5. 0:23 to 0:37, 4 seconds. A candidate.",
       "   Opens with: w56 w57 w58 w59",
       "   Closes with: w100 w101 w102 w103",
-      "   Why: Reason 5.",
+      "   Why it holds attention: Reason 5.",
       "   It does not fit a Reel. It is 5 seconds long, and a Reel clip is at least 15 seconds.",
       ""
     ].join("\n"));
@@ -534,26 +546,26 @@ describe("the list of the Reel suggestions of a video of the switch (layout 3)",
       "1. 0:10 to 0:20, 10 seconds. A candidate.",
       "   Opens with: w20 w21 w22 w23",
       "   Closes with: w36 w37 w38 w39",
-      "   Why: Reason 1.",
+      "   Why it holds attention: Reason 1.",
       "   It does not fit a Reel. It is 10 seconds long, and a Reel clip is at least 15 seconds.",
       "   It starts with no pause before it: check the first word.",
       "",
       "2. 0:32 to 0:38, 6 seconds. A candidate.",
       "   Opens with: w64 w65 w66 w67",
       "   Closes with: w72 w73 w74 w75",
-      "   Why: Reason 2.",
+      "   Why it holds attention: Reason 2.",
       "   It does not fit a Reel. It is 6 seconds long, and a Reel clip is at least 15 seconds.",
       "",
       "3. 0:25 to 0:35, 10 seconds. A candidate.",
       "   Opens with: w50 w51 w52 w53",
       "   Closes with: w66 w67 w68 w69",
-      "   Why: Reason 3.",
+      "   Why it holds attention: Reason 3.",
       "   It does not fit a Reel. It is 10 seconds long, and a Reel clip is at least 15 seconds.",
       "",
       "4. 0:22 to 0:31, 9 seconds. Picked.",
       "   Opens with: w44 w45 w46 w47",
       "   Closes with: w58 w59 w60 w61",
-      "   Why: Reason 4.",
+      "   Why it holds attention: Reason 4.",
       "   It does not fit a Reel. It is 9 seconds long, and a Reel clip is at least 15 seconds.",
       "   Preview: previews/reel-4.mp4",
       ""

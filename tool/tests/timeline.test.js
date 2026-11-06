@@ -667,21 +667,21 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
       "1. 0:00 to 0:03, 4 seconds. A candidate.",
       "   Opens with: Welcome to the show.",
       "   Closes with: talk about pricing.",
-      "   Why: It says what the talk is about.",
+      "   Why it holds attention: It says what the talk is about.",
       "   It does not fit a Reel. It is 3.971 seconds long, and a Reel clip is at least 15 seconds.",
       "",
       "2. 0:04 to 0:08, 5 seconds. Picked.",
       "   Opens with: So the first thing",
       "   Closes with: so much, Sallie.",
-      "   Why: It makes one point and stands alone.",
+      "   Why it holds attention: It makes one point and stands alone.",
       "   It does not fit a Reel. It is 5.204 seconds long, and a Reel clip is at least 15 seconds.",
       "",
       // Reels are made in HyperFrames, and this Mac is not set up for it: brimm-video cannot make them here. OpusClip is no longer used (Jason, 2 November 2026).
-      "brimm-video cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason."
+      "BRIMM Video Studio cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason."
     ].join("\n"));
     t.done();
   });
-  it("says that brimm-video cannot make them last, after the line on the other Mac's newer version, which belongs with the list's times", async () => {
+  it("says that BRIMM Video Studio cannot make them last, after the line on the other Mac's newer version, which belongs with the list's times", async () => {
     const later = { v: 1, how: "render", at: AT, on: "Sallie's laptop", file: "edit/main.v1.fcpxml", opened: AT };
     const { t, found } = episode({ ...raw([rough, later]), editing: { by: "Mac Studio", since: AT } }, {}, suggested());
     writeFileSync(join(found.folder, later.file), EPISODE.files["edit/main.v0.fcpxml"]);
@@ -689,7 +689,7 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
     assert.equal(r.code, 0, r.text);
     assert.deepEqual(r.text.split("\n").slice(-2), [
       'The other Mac has a newer version (v1, on Sallie\'s laptop): say "render it here" to see it.',
-      "brimm-video cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason."
+      "BRIMM Video Studio cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason."
     ]);
     t.done();
   });

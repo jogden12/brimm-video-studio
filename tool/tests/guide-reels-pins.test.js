@@ -56,15 +56,15 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
     assert.ok(paragraph, "the README has the paragraph");
     assert.ok(paragraph.includes('The guide tells her too: once a Reel of the video is exported from HyperFrames and is not in its hand-off, "what\'s next?" says so, ahead of the BRIMM Ops page\'s steps (plan PR 16).'));
   });
-  it("has both skills offer to hand off the Reels at that stage, in the very line of their section on the guide, and stay under 180 lines", () => {
-    const offer = '"Shall I hand off the Reels?" once she has exported a Reel of a finished video';
+  it("has both skills run finish at once, not offer, for the Reels at that stage, in the very line of their section on the guide, and stay under 270 lines", () => {
+    const run = 'Once it says she has exported it, or a Reel of a finished video, do not offer: run `finish` at once, as the "Hand it off" and "Hand off the Reels" rules say.';
     for (const [which, skill] of Object.entries(skills)) {
       const guide = guideSection(skill);
       assert.ok(guide.trimEnd().split("\n").length <= 30, `${which}: ${guide.split("\n").length} lines`);
       const next = guide.split("\n").find((line) => line.startsWith("- Any other next step:"));
-      assert.ok(next && next.includes(offer), `${which}: ${next}`);
-      assert.ok(next.indexOf('"Shall I hand it off?" once she has exported it') < next.indexOf(offer) && next.indexOf(offer) < next.indexOf('"Shall I show it in Final Cut?"'), `${which}: the offers are in the order of the stages`);
-      assert.ok(skill.split("\n").length < 180, `${which}: ${skill.split("\n").length} lines`);
+      assert.ok(next && next.includes(run) && !next.includes("Shall I hand"), `${which}: ${next}`);
+      assert.ok(next.indexOf('"Shall I open it in HyperFrames?"') < next.indexOf('"Shall I show it in Final Cut?"') && next.indexOf("as the table below says.") < next.indexOf(run), `${which}: the offers stay, and the run follows them`);
+      assert.ok(skill.split("\n").length < 270, `${which}: ${skill.split("\n").length} lines`);
     }
     // The two skills' sections on the guide, and their rows and section on handing off, are the same words.
     assert.equal(guideSection(skills.open), guideSection(skills.strict));

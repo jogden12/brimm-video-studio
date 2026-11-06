@@ -229,7 +229,7 @@ describe("behind", () => {
     }
     writeFileSync(join(workFolder(t.home), FOLDER, "kept.txt"), "stays");
     const r = await on({ ...t.ctx.deps, run: async () => ({ code: 0, stderr: "", stdout: "0\n" }) }, "behind");
-    assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."]);
+    assert.deepEqual([r.code, r.text], [0, "This Mac has the newest BRIMM Video Studio."]);
     for (const dir of made) assert.ok(!existsSync(dir), dir);
     assert.ok(existsSync(join(workFolder(t.home), FOLDER, "kept.txt")));
     t.done();
@@ -248,7 +248,7 @@ describe("behind", () => {
     const t = setup();
     const g = git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "3\n" });
     const r = await on({ ...t.ctx.deps, run: g.run }, "behind");
-    assert.deepEqual([r.code, r.text], [0, "Jason has a newer brimm-video (3 changes). Ask him to update this Mac when it suits."]);
+    assert.deepEqual([r.code, r.text], [0, "Jason has a newer BRIMM Video Studio (3 changes). Ask him to update this Mac when it suits."]);
     assert.deepEqual(g.calls.map((c) => c.args), [["-C", "/checkout", "fetch", "-q", "origin", "main"], ["-C", "/checkout", "rev-list", "--count", "HEAD..origin/main"]]);
     for (const c of g.calls) {
       assert.equal(c.asked.limit, 20000);
@@ -258,8 +258,8 @@ describe("behind", () => {
   });
   it("says one change, and the newest when there are none", async () => {
     const t = setup();
-    assert.equal((await on({ ...t.ctx.deps, run: git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "1\n" }).run }, "behind")).text, "Jason has a newer brimm-video (1 change). Ask him to update this Mac when it suits.");
-    assert.equal((await on({ ...t.ctx.deps, run: git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" }).run }, "behind")).text, "This Mac has the newest brimm-video.");
+    assert.equal((await on({ ...t.ctx.deps, run: git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "1\n" }).run }, "behind")).text, "Jason has a newer BRIMM Video Studio (1 change). Ask him to update this Mac when it suits.");
+    assert.equal((await on({ ...t.ctx.deps, run: git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" }).run }, "behind")).text, "This Mac has the newest BRIMM Video Studio.");
     t.done();
   });
   it("says her folder for Claude is out of date when this checkout would write it otherwise, and the one command that rewrites it (PR 19, the architect's 1.1)", async () => {
@@ -267,18 +267,18 @@ describe("behind", () => {
     const newest = () => git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" }).run;
     // On a Mac with no folder for Claude, nothing is said of it. (install.sh --machine writes one on each Mac, the Mac Studio's
     // too, when its Claude Code is new enough.)
-    assert.equal((await on({ ...t.ctx.deps, run: newest() }, "behind")).text, "This Mac has the newest brimm-video.");
+    assert.equal((await on({ ...t.ctx.deps, run: newest() }, "behind")).text, "This Mac has the newest BRIMM Video Studio.");
     const folder = writeStudio(t.home, { checkout: "/checkout", node: "/opt/homebrew/bin/node" });
-    assert.equal((await on({ ...t.ctx.deps, run: newest() }, "behind")).text, "This Mac has the newest brimm-video.");
+    assert.equal((await on({ ...t.ctx.deps, run: newest() }, "behind")).text, "This Mac has the newest BRIMM Video Studio.");
     // A git pull brought a newer skill, and the folder still has the one written before.
     const skill = join(folder, ".claude", "skills", "brimm-edit", "SKILL.md");
     writeFileSync(skill, readFileSync(skill, "utf8").replace(/\| "Show me the Reels".*\n/, ""));
     const r = await on({ ...t.ctx.deps, run: newest() }, "behind");
-    const stale = "Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
-    assert.deepEqual([r.code, r.text], [0, `This Mac has the newest brimm-video.\n${stale}`]);
+    const stale = "Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
+    assert.deepEqual([r.code, r.text], [0, `This Mac has the newest BRIMM Video Studio.\n${stale}`]);
     // It needs no network: when git cannot fetch, the folder is still looked at (behind-studio-1).
     const offline = await on({ ...t.ctx.deps, run: git({ code: 128, stderr: "fatal: Could not read from remote repository." }).run }, "behind");
-    assert.deepEqual([offline.code, offline.text], [0, `Could not check for a newer brimm-video. Is this Mac offline?\n${stale}`]);
+    assert.deepEqual([offline.code, offline.text], [0, `Could not check for a newer BRIMM Video Studio. Is this Mac offline?\n${stale}`]);
     t.done();
   });
   describe("her folder's lock (spec 2026-10-22, section 7)", () => {
@@ -326,7 +326,7 @@ describe("behind", () => {
         const { t } = mac();
         if (settings) userSettings(t, settings);
         const r = await behindOn(t);
-        assert.deepEqual([r.code, r.text, r.g.calls.length], [0, "This Mac has the newest brimm-video.", 2], JSON.stringify(settings));
+        assert.deepEqual([r.code, r.text, r.g.calls.length], [0, "This Mac has the newest BRIMM Video Studio.", 2], JSON.stringify(settings));
         t.done();
       }
     });
@@ -338,7 +338,7 @@ describe("behind", () => {
         writeFileSync(join(dir, "settings.local.json"), `{"x":"${SECRET}"}`);
       }
       const r = await behindOn(t);
-      assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."]);
+      assert.deepEqual([r.code, r.text], [0, "This Mac has the newest BRIMM Video Studio."]);
       t.done();
     });
     it("refuses, saying her folder has a settings.local.json and nothing of what it holds, when it has one; git is not asked", async () => {
@@ -393,14 +393,14 @@ describe("behind", () => {
         const { t } = mac();
         userSettings(t, text);
         const r = await behindOn(t);
-        assert.deepEqual([r.code, r.text, r.g.calls.length], [0, "This Mac has the newest brimm-video.", 2], JSON.stringify(text));
+        assert.deepEqual([r.code, r.text, r.g.calls.length], [0, "This Mac has the newest BRIMM Video Studio.", 2], JSON.stringify(text));
         t.done();
       }
       // A settings file that is not a file is no file.
       const { t } = mac();
       mkdirSync(join(t.home, ".claude", "settings.json"), { recursive: true });
       const r = await behindOn(t);
-      assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."]);
+      assert.deepEqual([r.code, r.text], [0, "This Mac has the newest BRIMM Video Studio."]);
       t.done();
     });
     it("cannot tell, and so refuses, when it is not allowed to look for a settings.local.json in her folder", async (c) => {
@@ -423,13 +423,13 @@ describe("behind", () => {
       assert.deepEqual([off.code, off.text], [1, `${LOCK}\n${HOOKS_WHY}`]);
       userSettings(t, { disableAllHooks: false });
       const on_ = await behindOn(t);
-      assert.deepEqual([on_.code, on_.text], [0, "This Mac has the newest brimm-video."]);
+      assert.deepEqual([on_.code, on_.text], [0, "This Mac has the newest BRIMM Video Studio."]);
       t.done();
     });
     // --- Her folder's own .claude/settings.json: the lock is what it says (fix round 1, item 1) ---
     const FOLDER_UNREAD_WHY = "(Jason: her folder's .claude/settings.json is not there, or could not be read as a JSON object, so it is not known that the guard is on. Its contents are not shown here.)";
     const FOLDER_HOOKS_WHY = "(Jason: her folder's .claude/settings.json turns hooks off (disableAllHooks), and the lock rests on them. Its contents are not shown here.)";
-    const FOLDER_GUARD_WHY = "(Jason: her folder's .claude/settings.json no longer has the guard hook this brimm-video writes for it. Its contents are not shown here.)";
+    const FOLDER_GUARD_WHY = "(Jason: her folder's .claude/settings.json no longer has the guard hook this BRIMM Video Studio writes for it. Its contents are not shown here.)";
     const BYPASS = "does not disable Bypass mode (disableBypassPermissionsMode)";
     const AUTO = "does not disable Auto mode (disableAutoMode)";
     const modesWhy = (...parts) => `(Jason: her folder's .claude/settings.json ${parts.join(" and ")}. Its contents are not shown here.)`;
@@ -445,7 +445,7 @@ describe("behind", () => {
       const { t, folder } = mac();
       assert.equal(guardOf(JSON.parse(readFileSync(join(folder, ".claude", "settings.json"), "utf8"))).onFailure, "block");
       const r = await behindOn(t);
-      assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."]);
+      assert.deepEqual([r.code, r.text], [0, "This Mac has the newest BRIMM Video Studio."]);
       t.done();
     });
     it("refuses when her folder's own settings.json no longer holds the lock, saying which part and nothing of what it holds", async () => {
@@ -506,18 +506,18 @@ describe("behind", () => {
       }
     });
     it("goes on for a folder as main's studio.js writes it, with no disableAllHooks: only disableAllHooks true turns hooks off (final fix 18)", async () => {
-      const stale = "Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
+      const stale = "Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
       // main's settingsOf writes the permissions and the guard hook, and no disableAllHooks.
       for (const [what, change] of [["as main writes it", (s) => { delete s.disableAllHooks; }], ["disableAllHooks a word", (s) => { s.disableAllHooks = "false"; }], ["disableAllHooks null", (s) => { s.disableAllHooks = null; }]]) {
         const { t, folder } = mac();
         editSettings(folder, change);
         const r = await behindOn(t);
-        assert.deepEqual([r.code, r.text], [0, `This Mac has the newest brimm-video.\n${stale}`], what);
+        assert.deepEqual([r.code, r.text], [0, `This Mac has the newest BRIMM Video Studio.\n${stale}`], what);
         t.done();
       }
     });
     it("goes on for a folder written before it turned off /feedback and the survey, with no env: out of date, not changed, until the one command writes it again", async () => {
-      const stale = "Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
+      const stale = "Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
       const { t, folder } = mac();
       // The settings as the brimm-video before wrote them: the same text, to the last newline, with no env.
       const file = join(folder, ".claude", "settings.json");
@@ -525,15 +525,15 @@ describe("behind", () => {
       assert.ok(env, "the folder is written with an env");
       writeFileSync(file, JSON.stringify(before, null, 2) + "\n");
       const old = await behindOn(t);
-      assert.deepEqual([old.code, old.text], [0, `This Mac has the newest brimm-video.\n${stale}`]);
+      assert.deepEqual([old.code, old.text], [0, `This Mac has the newest BRIMM Video Studio.\n${stale}`]);
       // The command it names writes her folder again: then nothing is said of it.
       writeStudio(t.home, { checkout: "/checkout", node: NODE });
       const again = await behindOn(t);
-      assert.deepEqual([again.code, again.text], [0, "This Mac has the newest brimm-video."]);
+      assert.deepEqual([again.code, again.text], [0, "This Mac has the newest BRIMM Video Studio."]);
       t.done();
     });
     it("leaves every other difference in her folder's settings, and in its CLAUDE.md and skill, to the line that says it is out of date", async () => {
-      const stale = "Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
+      const stale = "Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
       const cases = [
         ["a permission added", (folder) => editSettings(folder, (s) => { s.permissions.allow.push("Bash(ls)"); })],
         ["the denies emptied", (folder) => editSettings(folder, (s) => { s.permissions.deny = []; })],
@@ -547,7 +547,7 @@ describe("behind", () => {
         const { t, folder } = mac();
         make(folder);
         const r = await behindOn(t);
-        assert.deepEqual([r.code, r.text], [0, `This Mac has the newest brimm-video.\n${stale}`], what);
+        assert.deepEqual([r.code, r.text], [0, `This Mac has the newest BRIMM Video Studio.\n${stale}`], what);
         t.done();
       }
     });
@@ -578,7 +578,7 @@ describe("behind", () => {
       // The hook is off in ~/.claude only: with the configuration home elsewhere, that file is not the user settings.
       userSettings(t, { disableAllHooks: true });
       const elsewhere = await behindOn(t, { env: { CLAUDE_CONFIG_DIR: config } });
-      assert.deepEqual([elsewhere.code, elsewhere.text], [0, "This Mac has the newest brimm-video."]);
+      assert.deepEqual([elsewhere.code, elsewhere.text], [0, "This Mac has the newest BRIMM Video Studio."]);
       // ...and off in the configuration home is.
       writeFileSync(join(config, "settings.json"), JSON.stringify({ disableAllHooks: true, env: { TOKEN: SECRET } }));
       const named = await behindOn(t, { env: { CLAUDE_CONFIG_DIR: config } });
@@ -645,7 +645,7 @@ describe("behind", () => {
         mkdirSync(dirname(join(t.dir, "managed", name)), { recursive: true });
         writeFileSync(join(t.dir, "managed", name), typeof text === "string" ? text : JSON.stringify(text));
         const r = await behindOn(t);
-        assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."], `${name}: ${JSON.stringify(text)}`);
+        assert.deepEqual([r.code, r.text], [0, "This Mac has the newest BRIMM Video Studio."], `${name}: ${JSON.stringify(text)}`);
         t.done();
       }
       // A managed settings folder that is not there is the usual case on a Mac nobody manages.
@@ -727,7 +727,7 @@ describe("behind", () => {
       assert.equal((await behindOn(t)).code, 1);
       rmSync(local);
       const put = await behindOn(t);
-      assert.deepEqual([put.code, put.text], [0, "This Mac has the newest brimm-video."]);
+      assert.deepEqual([put.code, put.text], [0, "This Mac has the newest BRIMM Video Studio."]);
       t.done();
     });
 
@@ -761,7 +761,7 @@ describe("behind", () => {
       if (existsSync(join(t.home, "brimm video studio"))) paths.push(join(t.home, "brimm video studio"));
       for (const cwd of paths) {
         const r = await behindOn(t, { cwd });
-        assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."], cwd);
+        assert.deepEqual([r.code, r.text], [0, "This Mac has the newest BRIMM Video Studio."], cwd);
       }
       t.done();
     });
@@ -825,7 +825,7 @@ describe("behind", () => {
         const { t } = mac();
         putPrefs(t, name, entries);
         const r = await behindOn(t);
-        assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."], `${name}: ${JSON.stringify(entries)}`);
+        assert.deepEqual([r.code, r.text], [0, "This Mac has the newest BRIMM Video Studio."], `${name}: ${JSON.stringify(entries)}`);
         t.done();
       }
       // A Mac nobody manages has no managed preferences folder.
@@ -877,7 +877,7 @@ describe("behind", () => {
   it("names the node that rewrites her folder only when her folder's settings give a real one: an absolute path ending in /node that is there; otherwise Homebrew's", async () => {
     // The folder's settings are a file she can change, and Jason is told to run what this line prints.
     const HOMEBREW = "/opt/homebrew/bin/node";
-    const said = (node) => `Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${node}, then start a new session in her Claude folder)`;
+    const said = (node) => `Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${node}, then start a new session in her Claude folder)`;
     const t = setup();
     const bin = join(t.home, "bin");
     mkdirSync(join(bin, "newline\n--evil"), { recursive: true });
@@ -903,7 +903,7 @@ describe("behind", () => {
       writeFileSync(file, JSON.stringify(settings, null, 2));
       const g = git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" });
       const r = await on({ ...t.ctx.deps, run: g.run }, "behind");
-      assert.deepEqual([r.code, r.text], [0, `This Mac has the newest brimm-video.\n${said(printed)}`], JSON.stringify(node));
+      assert.deepEqual([r.code, r.text], [0, `This Mac has the newest BRIMM Video Studio.\n${said(printed)}`], JSON.stringify(node));
     }
     t.done();
   });
@@ -912,7 +912,7 @@ describe("behind", () => {
     for (const answers of [[{ code: 128, stderr: "fatal: Could not read from remote repository." }], [{ code: 1, stderr: "", outOfTime: true }], [{ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "not a number\n" }]]) {
       const g = git(...answers);
       const r = await on({ ...t.ctx.deps, run: g.run }, "behind");
-      assert.deepEqual([r.code, r.text], [0, "Could not check for a newer brimm-video. Is this Mac offline?"]);
+      assert.deepEqual([r.code, r.text], [0, "Could not check for a newer BRIMM Video Studio. Is this Mac offline?"]);
     }
     t.done();
   });

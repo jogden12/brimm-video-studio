@@ -178,8 +178,8 @@ describe("node edit.js episodes", () => {
     const other = t.episode("2026-10-14 Pricing talk (Mac Studio)");
     writeFileSync(join(other.path, "Talk (Jason Ogden's conflicted copy 2026-10-14).mov"), "x");
     const r = await t.run("episodes");
-    assert.ok(r.text.includes("  Talk (a placeholder name): an episode of 2:00, in 2026-10-13 Talk (Mac Studio), id 000001\n    Not right: Talk.cut-plan.txt is missing"), r.text);
-    assert.ok(r.text.includes("  2026-10-14 Pricing talk (Mac Studio)\n    Not right: Dropbox has kept a conflicted copy in this episode: Talk (Jason Ogden's conflicted copy 2026-10-14).mov."), r.text);
+    assert.ok(r.text.includes("  Talk (a placeholder name): an episode of 2:00, in 2026-10-13 Talk (Mac Studio), id 000001\n    A file of this video is missing: Talk.cut-plan.txt. Dropbox may still be bringing it. Wait a few minutes and ask again. If it is still missing, tell Jason."), r.text);
+    assert.ok(r.text.includes("  2026-10-14 Pricing talk (Mac Studio)\n    Dropbox has kept a conflicted copy in this episode: Talk (Jason Ogden's conflicted copy 2026-10-14).mov."), r.text);
     t.done();
   });
   it("lists the videos waiting in each drop folder, for how long, and one already imported", async () => {
@@ -195,7 +195,7 @@ describe("node edit.js episodes", () => {
     const r = await t.run("episodes");
     assert.ok(r.text.includes([
       "Waiting in the drop folders:",
-      "  Talk.mov, in Mac Studio's, for 2 hours: already imported as 2026-10-13 Talk (Mac Studio). It stays in the drop folder until its late check passes, or for a person to delete.",
+      "  Talk.mov, in Mac Studio's, for 2 hours: already imported as 2026-10-13 Talk (Mac Studio). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.",
       "  Budget.mov, in Sallie's laptop's, for 2 hours"
     ].join("\n")), r.text);
     t.done();
@@ -215,7 +215,7 @@ describe("node edit.js episodes", () => {
       "  A.mov: being imported on Mac Studio, at Making the rough cut",
       "  B.mov: stopped on Sallie's laptop at Making the rough cut, 30 minutes ago",
       "  C.mov: its import failed on Mac Studio: the transcriber stopped",
-      "  D.mov: copied in on Mac Studio, but the late check found a problem: Talk.rough-cut.mp4 is short"
+      "  D.mov: copied in on Mac Studio. Dropbox found a problem with a copy of it: Talk.rough-cut.mp4 is short"
     ].join("\n")), r.text);
     t.done();
   });
@@ -312,7 +312,7 @@ describe("node edit.js open", () => {
     writeFileSync(recordFile(path, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
     const r = await t.run("open", "talk");
     assert.equal(r.code, 1);
-    assert.deepEqual(r.said, ["That is an episode a newer brimm-video wrote (000001). Jason has a newer brimm-video. Ask him to update this Mac."]);
+    assert.deepEqual(r.said, ["That is an episode a newer BRIMM Video Studio wrote (000001). Jason has a newer BRIMM Video Studio. Ask him to update this Mac."]);
     t.done();
   });
   it("names the episodes when it cannot tell which is meant, and how it is used when none is named", async () => {
@@ -387,13 +387,13 @@ describe("node edit.js push", () => {
     assert.deepEqual([r.code, r.said, t.opened, record(t).rev], [1, ['Did you change v1 of Talk in Final Cut since it was shown? Say "no changes" to show it again. If you did change it, say so.'], [], 2]);
     t.done();
   });
-  it("stops at a yes, and says how to work until brimm-video can build on hand edits; nothing is written and Final Cut is not asked", async () => {
+  it("stops at a yes, and says how to work until BRIMM Video Studio can build on hand edits; nothing is written and Final Cut is not asked", async () => {
     const t = setup();
     const { path } = imported(t);
     await t.run("push", "talk");
     t.opened.length = 0;
     const r = await t.run("push", "talk", "--hand-edits");
-    assert.deepEqual([r.code, r.said], [1, ["Your changes stay in v1 in Final Cut. This version of brimm-video cannot build on them yet. Until it can: ask for brimm-video's changes first and make trims by hand last, or finish that timeline by hand in v1."]]);
+    assert.deepEqual([r.code, r.said], [1, ["Your changes stay in v1 in Final Cut. This version of BRIMM Video Studio cannot build on them yet. Until it can: ask for BRIMM Video Studio's changes first and make trims by hand last, or finish that timeline by hand in v1."]]);
     assert.deepEqual([t.opened, record(t).rev, readdirSync(join(path, "edit")).sort()], [[], 2, ["main.v0.fcpxml", "main.v1.mac-studio.fcpxml"]]);
     t.done();
   });
@@ -680,7 +680,7 @@ describe("what the final review found in edit.js", () => {
     let kicked = 0;
     t.deps.kickstart = () => (kicked += 1);
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said], [0, [`Talk.mov is imported, as ${folder}, and its late check is still to be made on this Mac: the Mac's import of its drop folder is asked to make it now. The panel shows how far it is.`]]);
+    assert.deepEqual([r.code, r.said], [0, [`Talk.mov is imported, as ${folder}. Dropbox's check of its copies is still to be made on this Mac: the Mac's import of its drop folder is asked to make it now. The panel shows how far it is.`]]);
     assert.equal(kicked, 1);
     t.done();
   });
@@ -701,33 +701,33 @@ describe("what the final review found in edit.js", () => {
     const t = owing({ problem: "reel-2.mp4 could not be put into the episode." });
     t.deps.agentRunning = () => true;
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, t.kicked], [1, ['Talk.mov is imported, as 2026-10-13 Talk (Mac Studio), and its late check found a problem: reel-2.mp4 could not be put into the episode. The import at work now does not make it again: once the problem is put right and the panel shows that import has ended, say "try it again" again.'], 0]);
+    assert.deepEqual([r.code, r.said, t.kicked], [1, ['Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Dropbox found a problem with a copy of it: reel-2.mp4 could not be put into the episode. The import at work now does not check it again: once the problem is put right and the panel shows that import has ended, say "try it again" again.'], 0]);
     t.done();
   });
   it("retry has a late check that found a problem made again when no import is at work", async () => {
     const t = owing({ problem: "reel-2.mp4 could not be put into the episode." });
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, t.kicked], [0, ["Talk.mov is imported, as 2026-10-13 Talk (Mac Studio), and its late check found a problem before (reel-2.mp4 could not be put into the episode): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is."], 1]);
+    assert.deepEqual([r.code, r.said, t.kicked], [0, ["Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Dropbox found a problem with a copy of it before (reel-2.mp4 could not be put into the episode): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is."], 1]);
     t.done();
   });
   it("retry says the import at work makes a due late check once it has finished any video it is importing (PR 19's check of 2d4c8af, F7)", async () => {
     const t = owing();
     t.deps.agentRunning = () => true;
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, t.kicked], [0, ["Talk.mov is imported, as 2026-10-13 Talk (Mac Studio), and its late check is still to be made on this Mac: the import at work now makes it once it has finished any video it is importing. The panel shows how far it is."], 0]);
+    assert.deepEqual([r.code, r.said, t.kicked], [0, ["Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Dropbox's check of its copies is still to be made on this Mac: the import at work now makes it once it has finished any video it is importing. The panel shows how far it is."], 0]);
     t.done();
   });
   it("retry says when the import at work makes a late check that is not due yet (D8, D12)", async () => {
     const t = owing({ lastCopy: NOW - 5 * 60000 });
     t.deps.agentRunning = () => true;
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, t.kicked], [0, [`Talk.mov is imported, as 2026-10-13 Talk (Mac Studio), and its late check is still to be made on this Mac: the import at work now makes it when it is due, at ${clock(NOW + 10 * 60000)}, once it has finished any video it is importing. The panel shows how far it is.`], 0]);
+    assert.deepEqual([r.code, r.said, t.kicked], [0, [`Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Dropbox's check of its copies is still to be made on this Mac: the import at work now makes it when it is due, at ${clock(NOW + 10 * 60000)}, once it has finished any video it is importing. The panel shows how far it is.`], 0]);
     t.done();
   });
   it("retry says the import it starts makes a late check that is not due yet when it is due (E15)", async () => {
     const t = owing({ lastCopy: NOW - 5 * 60000 });
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, t.kicked], [0, [`Talk.mov is imported, as 2026-10-13 Talk (Mac Studio), and its late check is still to be made on this Mac: the Mac's import of its drop folder is asked to make it when it is due, at ${clock(NOW + 10 * 60000)}. The panel shows how far it is.`], 1]);
+    assert.deepEqual([r.code, r.said, t.kicked], [0, [`Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Dropbox's check of its copies is still to be made on this Mac: the Mac's import of its drop folder is asked to make it when it is due, at ${clock(NOW + 10 * 60000)}. The panel shows how far it is.`], 1]);
     t.done();
   });
   it("retry takes away a stopped status of this Mac's own for an imported video when it owes no late check of it", async () => {
@@ -739,7 +739,7 @@ describe("what the final review found in edit.js", () => {
     let kicked = 0;
     t.deps.kickstart = () => (kicked += 1);
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Its import stopped on this Mac, and has no late check left to make here, so the status that held the episode is taken away."]]);
+    assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Its import stopped on this Mac, and has no check of its copies left to make here, so the status that held the episode is taken away."]]);
     assert.deepEqual([readdirSync(join(t.episodes, ".importing")), kicked], [[], 0]);
     t.done();
   });
@@ -780,7 +780,7 @@ describe("what the final review found in edit.js", () => {
     writeFileSync(join(t.root, "Unedited Video", "Mac Studio", "Talk.mov"), "video");
     t.deps.kickstart = () => assert.fail("nothing is asked");
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said], [1, ["Talk.mov is already imported as 2026-10-13 Talk (Mac Studio). It stays in the drop folder until its late check passes, or for a person to delete."]]);
+    assert.deepEqual([r.code, r.said], [1, ["Talk.mov is already imported as 2026-10-13 Talk (Mac Studio). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete."]]);
     t.done();
   });
 });
@@ -807,13 +807,13 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
     assert.ok(r.text.includes(`  ${FOLDER}.fcpbundle: 2.0 MB`), r.text);
     t.done();
   });
-  it("5. lists an episode written by a newer brimm-video by its short id alone, without reading its fields", async () => {
+  it("5. lists an episode written by a newer BRIMM Video Studio by its short id alone, without reading its fields", async () => {
     const t = setup();
     const { path } = imported(t);
     writeFileSync(recordFile(path, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
     const r = await t.run("episodes");
     assert.equal(r.code, 0, r.text);
-    assert.ok(r.text.includes("Episodes, newest first:\n  An episode a newer brimm-video wrote (000001): Jason updates this Mac before it is changed here.\n"), r.text);
+    assert.ok(r.text.includes("Episodes, newest first:\n  An episode a newer BRIMM Video Studio wrote (000001): Jason updates this Mac before it is changed here.\n"), r.text);
     t.done();
   });
   it("6. says the offline step at the first open that completes, even when a bring came first, and only once", async () => {
@@ -875,7 +875,7 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
     assert.equal(findEpisode(ctx, "talk").name, FOLDER);
     t.done();
   });
-  it("21. ends a push of an episode written by a newer brimm-video with 1", async () => {
+  it("21. ends a push of an episode written by a newer BRIMM Video Studio with 1", async () => {
     const t = setup();
     const { path } = imported(t);
     writeFileSync(recordFile(path, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
@@ -909,7 +909,7 @@ describe("retry, with the launch agent idle or at work", () => {
     t.deps.agentRunning = () => true;
     t.deps.kickstart = () => assert.fail("a run is at work, and none is started");
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported again by the import at work now, when it next looks in the drop folder: within a minute while it waits for a late check, or once it has finished the video it is on. The panel shows how far it is."]]);
+    assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported again by the import at work now, when it next looks in the drop folder: within a minute while it waits to check the copies, or once it has finished the video it is on. The panel shows how far it is."]]);
     assert.deepEqual(readdirSync(join(t.episodes, ".importing")), []);
     t.done();
   });
@@ -1063,11 +1063,11 @@ describe("reading a library's Settings.plist", () => {
   });
 });
 
-describe("an episode a newer brimm-video wrote, named by its short id alone (Part L's review)", () => {
+describe("an episode a newer BRIMM Video Studio wrote, named by its short id alone (Part L's review)", () => {
   // A newer brimm-video may have written a session or a video not yet answered, whose folder's name is a client's: this one
   // cannot read its label, so it names the episode by its short id, and never by its folder.
   const JANE = "2026-10-20 Coaching call Jane Doe (Mac Studio)";
-  const NEWER = "an episode a newer brimm-video wrote (000002)";
+  const NEWER = "an episode a newer BRIMM Video Studio wrote (000002)";
   /** An episode of today's, and one whose newest record a newer brimm-video wrote, in a folder named for a client. */
   const both = () => {
     const t = setup();
@@ -1080,7 +1080,7 @@ describe("an episode a newer brimm-video wrote, named by its short id alone (Par
     const t = both();
     const r = await t.run("episodes");
     assert.equal(r.code, 0, r.text);
-    assert.ok(r.text.startsWith(`Episodes, newest first:\n  An episode a newer brimm-video wrote (000002): Jason updates this Mac before it is changed here.\n  Talk (a placeholder name): an episode of 2:00, in 2026-10-14 Sales call (Mac Studio), id 000001\n`), r.text);
+    assert.ok(r.text.startsWith(`Episodes, newest first:\n  An episode a newer BRIMM Video Studio wrote (000002): Jason updates this Mac before it is changed here.\n  Talk (a placeholder name): an episode of 2:00, in 2026-10-14 Sales call (Mac Studio), id 000001\n`), r.text);
     assert.ok(!r.text.includes("Jane"), r.text);
     t.done();
   });
@@ -1088,7 +1088,7 @@ describe("an episode a newer brimm-video wrote, named by its short id alone (Par
     const t = both();
     for (const said of ["000002", "coaching"]) {
       const r = await t.run("open", said);
-      assert.deepEqual([r.code, r.said], [1, ["That is an episode a newer brimm-video wrote (000002). Jason has a newer brimm-video. Ask him to update this Mac."]], said);
+      assert.deepEqual([r.code, r.said], [1, ["That is an episode a newer BRIMM Video Studio wrote (000002). Jason has a newer BRIMM Video Studio. Ask him to update this Mac."]], said);
     }
     t.done();
   });

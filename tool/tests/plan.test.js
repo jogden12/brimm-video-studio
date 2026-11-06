@@ -3,7 +3,7 @@
 // is given go in, and the package, the problems with it and the three files' texts come out. Nothing is read or written.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { SHOT_LIST_KINDS, packageFiles, packageOf, planLines, plannedLine, savedLine, textArg } from "../plan.js";
+import { SHOT_LIST_KINDS, packageFiles, packageOf, planFilesFrom, planLines, plannedLine, savedLine, textArg } from "../plan.js";
 
 /** A cue's words as the command is given them, for a script that has a talking shot, a screen recording and some b-roll. */
 const SHOTS = ["talking | Open on the problem, to the camera.", "screen | The inventory sheet, scrolling.", "b-roll | Sallie at her desk sorting invoices."];
@@ -406,5 +406,19 @@ describe("plannedLine, what `episodes` says of a planned episode", () => {
   });
   it("is named by the name she gave it", () => {
     assert.match(plannedLine({ ...record(), name: { text: "Why SKUs sink you", placeholder: false } }), /^"Why SKUs sink you": planned on/);
+  });
+});
+
+describe("planFilesFrom", () => {
+  it("makes the plan's files from a record, as packageFiles does from its plan, named by the record's name", () => {
+    const planned = { route: "script", title: "Old title", voice: null, set: "2026-11-05T10:00:00-05:00", cues: [], shots: [{ n: 1, kind: "talking", what: "Open on it." }], lines: ["One.", "Two."] };
+    const r = { name: { text: "New name", placeholder: false }, planned };
+    assert.deepEqual(planFilesFrom(r), packageFiles("New name", planned, { explainer: false }));
+    assert.deepEqual(Object.keys(planFilesFrom(r)).sort(), ["shot list.md", "teleprompter.txt", "video guide.md"]);
+  });
+  it("makes the explainer's files without a shot list, and nothing for a plan whose package was never set", () => {
+    const planned = { route: "explainer", title: "T", voice: "heygen", set: "2026-11-05T10:00:00-05:00", cues: [], shots: [], lines: ["One."] };
+    assert.ok(!("shot list.md" in planFilesFrom({ name: { text: "T", placeholder: false }, planned })));
+    assert.deepEqual(planFilesFrom({ name: { text: "T", placeholder: false }, planned: { ...planned, set: null } }), {});
   });
 });

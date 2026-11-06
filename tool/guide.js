@@ -98,7 +98,7 @@ const ONLINE_ONLY = ' Once Dropbox shows the episode\'s folder is up to date, Co
 
 /** What follows taking a newer revision of an episode whose note is already at the cascade, the last step. The Reels of a video her
     editor finished usually come later, through "Hand off the Reels", which writes a newer revision of the hand-off. The page's "Reels"
-    card lists them ("Reels from brimm-video"), each with a "Write its post text" button, or "Open its short video" once its post text
+    card lists them ("Reels from BRIMM Video Studio"), each with a "Write its post text" button, or "Open its short video" once its post text
     exists. The cascade step says so, but she has done it, and no step comes after "taken" to say it again. With the note before the
     cascade that step is still to come, and it says it. A short video's page has no "Reels" card, and a session's words are the
     session form's. */
@@ -109,25 +109,25 @@ const LATE_REELS = ' Then, on the "Reels" card, press "Write its post text" besi
     note on it: the revision the note holds is the one the page holds, which the page's button for a newer revision names beside the
     hand-off's, and the step it holds is how far she has got (an episode's, at the cascade, is sent on to the "Reels" card:
     LATE_REELS). A first take reads no note. A hand-off dropped on Episodes opens the episode that holds its video; when none does,
-    the page offers "Add it as a new episode", which opens a form whose button is "Add the episode", and the file goes into that
-    episode's transcript. A session's form has one button, "Take the session", for a new revision and a newer one. */
+    the page says it is a new episode and has one button, "Add the episode and take the hand-off" (a hand-off with no name keeps
+    "Add it as a new episode"); the file goes into that episode's transcript. A session's form has one button, "Take the session", for a new revision and a newer one. */
 const SAYS = {
   taken: (family, again, revision, note) =>
     family === "session"
       ? `Choose "Principles", drop the ${again ? "new " : ""}hand-off, then press "Take the session".`
       : again
         ? `Drag the new hand-off onto Episodes, then press "Take revision ${revision} in place of revision ${note.revision}".${family === "episode" && note.step === "cascade" ? LATE_REELS : ""}`
-        : 'Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".',
+        : 'Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.',
   kit: () => 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.',
   posted: (family) =>
     family === "short video"
       ? "Post it on Instagram, and as a YouTube Short."
       : 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".',
   live: () => 'Correct the form to what is live, then press "This is what is live".',
-  // The page's "Reels" card lists the Reels brimm-video handed off ("Reels from brimm-video"), each with "Write its post text".
+  // The page's "Reels" card lists the Reels BRIMM Video Studio handed off ("Reels from BRIMM Video Studio"), each with "Write its post text".
   // The step names no "Clip to cut": the page (version 10) stops writing them. OpusClip is no longer used (Jason, 2 November 2026).
   cascade: () =>
-    'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. If the "Reels" card lists "Reels from brimm-video", press "Write its post text" beside each.',
+    'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. If the "Reels" card lists "Reels from BRIMM Video Studio", press "Write its post text" beside each.',
   posttext: () => 'Press "Write what’s next", and pick the hook and the YouTube Short title. Approve and copy the caption, the Short\'s title and description, and the LinkedIn post.',
   checked: () => 'Check each principle marked "Check it", then press "Use in drafts".',
   // "the hand-off", not "the empty session revision": once the session's own hand-off is written, final/ holds that one in its place.
@@ -273,7 +273,7 @@ const toDo = (stage, text) => ({ done: false, stage, text, step: "", after: "" }
 
 /** A step as the panel says it ("Writing the transcript"), put in the middle of a sentence: its first letter in lower case, unless
     it opens with Claude's name or a quoted word, as unedited.js clause() keeps them. */
-const midSentence = (step) => (/^(Claude|")/.test(step) ? step : step[0].toLowerCase() + step.slice(1));
+export const midSentence = (step) => (/^(Claude|Dropbox|")/.test(step) ? step : step[0].toLowerCase() + step.slice(1));
 
 /** The step for a file in a drop folder. One in the other Mac's waits on that Mac: its "Ready" notice, or its "try it again". */
 function dropNext(drop, mac) {
@@ -337,9 +337,19 @@ function sessionNext(facts, notes, now) {
     the retirement's wave 4 (the ruling of PR 10). */
 const viaApp = (facts) => facts.way === "hyperframes" || facts.way === "unopened";
 
+/** What is said of a video for HyperFrames that must wait for Dropbox's late check (plan R1a; late-wait.js waitFacts), by its `checkAt`, `readyAt`
+    and `inSeconds`, the same in the guide's step and in `app`: when it will be ready, after the check, or only when the check is made while no
+    speed of making it is known. */
+export function waitWords({ checkAt, readyAt, inSeconds }) {
+  if (!readyAt || inSeconds == null) return `Dropbox checks its copies at ${checkAt} first.`;
+  return `It is ready about ${readyAt}, in ${aboutLeft(inSeconds).replace(/^about /, "")}, after Dropbox has checked its copies at ${checkAt}.`;
+}
+
 /** The video for HyperFrames being made, and what to say when it is done: how long is left when the panel's run says, else how long it
     usually takes, by the speed this Mac measured, else no time. */
-function copyStep({ left, usual }) {
+function copyStep({ left, usual, wait }) {
+  // Waiting for Dropbox's late check (plan R1a): when it will be ready with the wait in it, else when the check is made.
+  if (left == null && wait) return toDo("making-copy", `The video for HyperFrames is being made. ${waitWords(wait)} Say "open it in HyperFrames" when it is done.`);
   const time = left != null ? `, ${aboutLeft(left)} left` : "";
   const often = left == null && usual != null ? ` It usually takes ${aboutLeft(usual)}.` : "";
   return toDo("making-copy", `The video for HyperFrames is being made${time}.${often} Say "open it in HyperFrames" when it is done.`);
@@ -354,7 +364,7 @@ function copyStep({ left, usual }) {
     have it open by hand, and `finish` needs no setting. */
 function appStep(facts) {
   const project = facts.project;
-  if (project && project.exported) return toDo("exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.');
+  if (project && project.exported) return toDo("exported", 'You have exported it. Say "hand it off" and I will check what you exported.');
   if (project && project.opened) return toDo("in-app", `Edit it in HyperFrames.${project.last ? ` Your last request there was ${project.last}.` : ""} When you are done, export it on This Mac, as MP4, then say "hand it off".`);
   if (!facts.app) return toDo("app-off", APP_NOT_SET_UP);
   if (!project && facts.copy) return copyStep(facts.copy);
@@ -399,7 +409,7 @@ function filmStep({ route, voice, footage = "", joining = false, joinFailed = fa
   // A script with footage in (PR H5a) is told what it has: `footage` is the parts counted in words ("2 talking parts, 1 screen recording and 2
   // b-roll clips"), and "" while no part has come, when the step is the one before.
   if (route === "script" && footage) return toDo("footage", `Its footage so far: ${footage}. When it is all in, say "that's all the footage".`);
-  if (route === "script") return toDo("film", "Film it to its shot list, then drop the files in your drop folder. The teleprompter script is in its folder in Episodes.");
+  if (route === "script") return toDo("film", "Film it to its shot list, then drop the files in your drop folder. To read the teleprompter script, say 'show me the script': it opens as a copy to read, and changes come through the chat.");
   // A HeyGen explainer (PR H6): its project is made in HyperFrames first, and the voice there; she says when the voice is done.
   if (voice === "heygen" && project) return toDo("heygen-voice", HEYGEN_VOICE);
   if (voice === "heygen" && set) return toDo("heygen-open", HEYGEN_OPEN);

@@ -18,7 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import { chainUp, claudeAbove } from "./chain.js";
 import { SESSION_ID, heldFolder, scanTranscript, uuidsFile, uuidsOf } from "./scan.js";
 
-export const HELD_REFUSED = "This chat holds a session's words, so it can only run brimm-video now. Start a new chat for anything else.";
+export const HELD_REFUSED = "This chat holds a session's words, so it can only run BRIMM Video Studio now. Start a new chat for anything else.";
 export const HELD_NARROWED = "This chat holds a session's words, so it can't do that here. Start a new chat for it.";
 
 /** Where a session's words are handed over to the chat that asked for them, a folder for each chat's id, in Application Support. */

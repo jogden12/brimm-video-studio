@@ -19,5 +19,5 @@ try {
   if (decision !== "pass") answer(decision, reason);
   else end("");
 } catch {
-  answer("deny", "brimm-video's guard could not check this. Ask Jason.");
+  answer("deny", "BRIMM Video Studio's guard could not check this. Ask Jason.");
 }

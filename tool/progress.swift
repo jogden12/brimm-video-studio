@@ -103,7 +103,7 @@ final class Panel: NSObject, NSWindowDelegate {
   override init() {
     window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: 80), styleMask: [.titled, .closable, .utilityWindow, .nonactivatingPanel], backing: .buffered, defer: false)
     super.init()
-    window.title = "BRIMM video"
+    window.title = "BRIMM Video Studio"
     window.level = .floating
     window.isFloatingPanel = true
     window.hidesOnDeactivate = false
