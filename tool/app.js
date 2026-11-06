@@ -34,10 +34,13 @@
 //   - otherwise the episode's words must be on this Mac, and so must the working copy of its video (5.7). The copy is a detached
 //     job (workcopy.js) that can take minutes, so when it is not there it is asked for, and she is told to say it again when it
 //     is made;
-//   - and Claude's reading must be over: the project is written from it (the cut plan and the Reel suggestions), and nothing writes
-//     it again afterwards, so a project made while `read` is still at work would keep an unfinished reading for good. While it is at
-//     work nothing is made, and she is told to say it again when it has finished. Only a new project waits for it: one made before
-//     is opened as it was, and so is a folder the record does not know;
+//   - and Claude's reading must be in the episode's record: the project is written from it (the cut plan and the Reel suggestions), and
+//     nothing writes it again afterwards, so a project made while `read` is still at work on it would keep an unfinished reading for
+//     good. Until the record holds the current reading nothing is made, and she is told to say it again when it has finished. Once it
+//     does, the project is made even while the reading's own late check is still to come (plan R1d), if the words, the Reel
+//     suggestions and the cut plan are each at the size the record lists (readListed; else she is told some files are not whole yet,
+//     and claimAndBring says so before it claims anything). Only a new project waits for the reading: one made before is opened as it
+//     was, and so is a folder the record does not know;
 //   - the project is written from them (project.js), whole or not at all, with the working copy moved into it (5.1, 5.2);
 //   - the app is opened on the project by the pinned command line (hyperframes.js), by absolute path and in a short list of
 //     variables of its own, with her chat handed to the app only when handoverAllowed says it may be (5.6);
@@ -298,6 +301,16 @@ export function readListed(folder, record, rel) {
   return listed && bytes.length !== record.files[rel] ? { notWhole: rel } : { text: bytes.toString("utf8") };
 }
 
+/** `readListed` for the episode's words file: a read that fails for a reason other than the file's not being there is not there either
+    ({ absent: true }), as `wordsIn` takes it, so that the words are said not to be on this Mac yet and nothing throws. */
+export function readWords(folder, record, rel) {
+  try {
+    return readListed(folder, record, rel);
+  } catch {
+    return { absent: true };
+  }
+}
+
 /** The words, [{ w, start, end }], that `text` holds: the import writes { video, duration, words }, and a bare list is taken too.
     null when it is no JSON or holds no list. */
 export const wordsOfText = (text) => {
@@ -503,8 +516,11 @@ function adoptProject(ctx, { found, record, at, projects }) {
     - Without the working copy, it is asked for, unless it is being made already (workcopy.js requestWorkCopy), and she is told
       to say it again when it is done (0). A project made before has taken the copy into itself and left only its facts, which
       is why openInApp looks for that project first.
-    - While Claude's reading of the episode is at work (`read` holds the episode's lock), nothing is made: the project is written
-      from the reading, and nothing writes it again later. She is told to say it again when it has finished (0). The working copy
+    - While Claude's reading of the episode is at work and not yet in the record (`projectWaits` "reading"), nothing is made: the project
+      is written from the reading, and nothing writes it again later. She is told to say it again when it has finished (0). With the
+      reading in the record ("verify": the read run is at its own late check, or this Mac still owes the import's) the words, the Reel
+      suggestions and the cut plan are read through `readListed`, and a file not at the size the record lists makes nothing (0, in
+      `notWholeYet`'s words). The working copy
       is still asked for when it is not there, as above, and the one line she gets is the reading's: it is the one she waits for
       (the copy is made meanwhile), and what she says again is the same.
     - The pictures its cues name by a `ref` in their style are copied from the reference folder into its brimm/references/ (references.js
@@ -521,7 +537,7 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   const wait = projectWaits(ctx, { name: found.name, record });
   // While the reading's own late check is still to come (plan R1d), the three files read from the episode's folder are held to the
   // sizes the record lists, judged by the bytes read; one that is not whole makes nothing.
-  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel) => readListed(found.folder, record, rel)) : null;
+  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel, i) => (i === 0 ? readWords : readListed)(found.folder, record, rel)) : null;
   if (checked && checked.some((got) => got.notWhole)) {
     ctx.say(notWholeYet(record.name.text));
     return { code: 0 };
@@ -844,8 +860,9 @@ function placeFootage(ctx, { found, dir, kit }, { rename }) {
     are moved into the new project, and its video is kept for the new project when it passes the check every working copy does
     (putVideoBack's `kept`). A project here that is
     older by the times of its files and has no marker is not opened (olderHere; it says so and ends with 1). A new project is not made
-    while Claude's reading of the episode is at work (`read` holds its
-    lock): she is told to say it again when it has finished, and it ends with 0. Only a new project waits: one made before is
+    while Claude's reading of the episode is at work and not yet in the record (`read` holds its
+    lock): she is told to say it again when it has finished, and it ends with 0; once the reading is in, the files are held to the sizes
+    the record lists (makeProject). Only a new project waits: one made before is
     opened, and a folder the record does not know is taken, whether or not the reading is at work. A project kept for an earlier
     kind (KEPT) is none in use: the next is made as any first one is, under the first name no project the record keeps has
     (nextMain), "main 2" after the first, and the kept one keeps its folder, its name and its entry in the record.

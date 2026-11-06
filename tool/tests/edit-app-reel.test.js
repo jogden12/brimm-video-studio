@@ -489,16 +489,17 @@ describe("app … reel: the Reel's video", () => {
       assert.ok(existsSync(join(work, PROJECT, "index.html")));
       t.done();
     });
-    it("makes and asks for nothing while reels.json is shorter than the record lists (the claim's own look at the files stops it first; the Reel's line is app-reel.test.js's)", async () => {
+    it("says the Reel's line, ends with 0 and writes nothing, asking for nothing, while reels.json is shorter than the record lists (R1d fix 1)", async () => {
       for (const copy of [true, false]) {
         const { t, found, work } = world({ copy, record: reading() });
         hold(t);
         const at = join(found.folder, "reels.json");
         writeFileSync(at, readFileSync(at, "utf8").slice(0, -4));
-        const r = await on(t.ctx.deps, "app", FOLDER, "reel", "2");
-        assert.deepEqual([t.started.filter(([, args]) => args[1] === "workcopy"), runsOf(t)], [[], []]);
+        const rev = reread(found).rev;
+        const r = await app(t.ctx.deps, FOLDER, "reel", "2");
+        assert.deepEqual([r.code, r.said, t.started, runsOf(t)], [0, [`Some files of ${NAME} are not whole in Dropbox yet, so the project of Reel 2 wasn't made. Say "open Reel 2 of ${NAME} in HyperFrames" again in a few minutes; if it says this again, ask Jason.`], [], []]);
+        assert.equal(reread(found).rev, rev);
         assert.ok(!existsSync(join(work, PROJECT)));
-        assert.doesNotMatch(r.text, /It's open in HyperFrames/);
         t.done();
       }
     });

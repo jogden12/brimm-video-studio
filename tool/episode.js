@@ -662,7 +662,7 @@ export function writeEpisode(folder, record, { expectRev, writeText, writer, hom
 
 /** Other names Dropbox may have kept a file under, beside it: with ".writing" after its name, or with "(1)", or a conflicted
     copy's words, before its ending. Each as a path from the episode's folder. */
-function otherNames(folder, path) {
+export function otherNames(folder, path) {
   const where = dirname(path);
   const name = basename(path);
   const ending = extname(name);

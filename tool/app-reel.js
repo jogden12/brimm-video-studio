@@ -19,9 +19,11 @@
 //     main video's, from a copy of the Reel made again by the detached run, which it asks for and she is told to say it again;
 //   - a folder at the Reel project's name that the record does not list, as a run whose record was not written leaves, is taken as the
 //     project it is and recorded: nothing is made or started for it, and neither the words nor the Reel's video are needed;
-//   - otherwise the episode's words must be on this Mac, and Claude's reading must be over, since the Reel is one of its suggestions
-//     (reels.json): while it is at work nothing is made, and nothing is asked for either, for which stretch it is depends on the
-//     reading. The suggestion must still be in the list;
+//   - otherwise the episode's words must be on this Mac, and Claude's reading must be in the record, since the Reel is one of its
+//     suggestions (reels.json): until then nothing is made, and nothing is asked for either, for which stretch it is depends on the
+//     reading. With it in the record, while its own late check is still to come, the words, reels.json and the cut plan must be at
+//     the sizes the record lists (plan R1d; else nothing is made or asked for, and she is told some files are not whole yet). The
+//     suggestion must still be in the list;
 //   - the Reel's video is a stretch of the recording as filed, from the suggestion's first moment to its last, made as the working
 //     copy is, with its chain and its checks (workcopy.js reelCopyKey, makeWorkCopy), by the detached run `workcopy --reel <n>` that
 //     has the working copy's lock. When it is not there it is asked for and she is told to say it again when it is done; this does
@@ -60,7 +62,7 @@ import { episodeWork } from "./settings.js";
 import { snapshotOf } from "./snapshot.js";
 import {
   asideWords, changedSince, copyFits, copyIn, factsIn, fromOf, guidanceOf, jsonIn, keptFits, logosIn, moveIn, noRecording, noWords, notPutBack, notTheSame, notWhole, nothingAt, olderHere, olderMarked, olderThanSnapshot,
-  openProjectInApp, plainName, readListed, rebuildHere, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, videoKept, wordsIn, wordsOfText
+  openProjectInApp, plainName, readListed, readWords, rebuildHere, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, videoKept, wordsIn, wordsOfText
 } from "./app.js";
 import { reelCopyKey, reelCopyPaths, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
@@ -195,7 +197,9 @@ function cuesFor(kind, { plan, file, record }) {
     opened), the stretch it was cut from and the suggestion it is, or { code }, when nothing was made and a line said why: the exit
     code to end with.
     - Without the episode's words there is nothing to start from (1).
-    - While Claude's reading is at work (`read` holds the episode's lock) nothing is made or asked for (0): she is told to say it again.
+    - While Claude's reading is at work and not yet in the record (`projectWaits` "reading") nothing is made or asked for (0): she is told
+      to say it again. With it in the record ("verify") the words, reels.json and the cut plan go through `readListed`: a file not at its
+      listed size makes and asks for nothing (0, in `reelNotWholeYet`'s words).
     - The Reel must still be in the list of suggestions, with a stretch to show (1, in words).
     - Without the Reel's video, it is asked for, and she is told to say it again when it is done (0). When a run is at work on the
       episode already, whichever video it makes (workcopy.js requestWorkCopy: one at a time, one lock), nothing is asked for, and
@@ -213,7 +217,7 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   const wait = projectWaits(ctx, { name: found.name, record });
   // While the reading's own late check is still to come (plan R1d), the words, the suggestions and the cut plan are held to the sizes the
   // record lists, judged by the bytes read.
-  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel) => readListed(found.folder, record, rel)) : null;
+  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel, i) => (i === 0 ? readWords : readListed)(found.folder, record, rel)) : null;
   if (checked && checked.some((got) => got.notWhole)) {
     ctx.say(reelNotWholeYet(n, name));
     return { code: 0 };
@@ -273,8 +277,9 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
     Reel's own copy (workcopy.js reelCopyPaths): { workingCopy }, what the record keeps of the copy put in, or { code }, when nothing was put
     back and a line said why.
     - A recording that is not in the episode, or that has changed since the project was made, cannot be made into that video again (1).
-    - While Claude's reading is at work nothing is asked for, since the Reel's stretch is the reading's (0); the suggestion must still be in
-      the list, with a stretch to show (1).
+    - While Claude's reading is at work and not yet in the record nothing is asked for, since the Reel's stretch is the reading's (0); with
+      it in the record, reels.json must be at its listed size (`reelNotWholeYet`, 0). The suggestion must still be in the list, with a
+      stretch to show (1).
     - Without the Reel's video, it is asked for, and she is told to say it again when it is done (0); when a run is at work on the episode,
       whichever video it makes, she is told a video is being made already (0). With the video in place and the run still looking for the
       faces in it, the same: moving it would take it from under the finder.

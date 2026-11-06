@@ -66,7 +66,7 @@ import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
@@ -77,7 +77,7 @@ import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
-import { localSource, readingCheckAt, readingWaitsUntil, waitFacts } from "./late-wait.js";
+import { localSource, projectWaits, readingCheckAt, readingWaitsUntil, waitFacts } from "./late-wait.js";
 import { heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
@@ -119,10 +119,10 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, footageFailed, guidanceOf, isMain as inUse, mediaOf, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, footageFailed, guidanceOf, isMain as inUse, mediaOf, notWholeYet, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
 import { VOICEOVER } from "./project.js";
 import { openVoiceProject, voiceProjectWhy } from "./explainer.js";
-import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
+import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelNotWholeYet, reelStretch, reelWhy } from "./app-reel.js";
 import { historyTail, mainProjectDir, toldTurns, turnTime, versionsOf, whatHappened } from "./app-history.js";
 import { recordingPlacementsIn, timelineTranscript } from "./on-timeline.js";
 import { freeEpisode, hyperFramesRunning } from "./free.js";
@@ -1288,6 +1288,23 @@ function withoutOwnAnswers(record, machine) {
   return { ...record, released: { ...record.released, answers: Object.fromEntries(Object.entries(answers).filter(([key]) => !mine.has(key))) } };
 }
 
+/** The files the record lists (the record's own folder apart) that are missing or not at their listed size, and that Dropbox has kept under no
+    other name: what claimAndBring takes for a plain wait in the window of plan R1d. */
+function plainShort(folder, record) {
+  const out = [];
+  for (const [rel, bytes] of Object.entries(record.files)) {
+    if (rel.split("/")[0] === RECORD_DIR) continue;
+    let size = null;
+    try {
+      size = statSync(join(folder, rel)).size;
+    } catch (e) {
+      // Not there.
+    }
+    if (size !== bytes && !otherNames(folder, rel).length) out.push(rel);
+  }
+  return out;
+}
+
 /** The claim and the bring that `open` and `app` both begin with: check the episode's files against its record, and that each is
     whole on this Mac, and claim it for this Mac. `record` is the one `found` was read as (episodeFor). Resolves { record }, the
     episode's record with this Mac editing it (read again, when the claim was just written), once every file is here and the
@@ -1310,7 +1327,7 @@ function withoutOwnAnswers(record, machine) {
       the claim away, this Mac says so and stops; when the other Mac claimed it meanwhile, or both Macs wrote the same record
       and Dropbox kept a conflicted copy, this Mac stops, and it is theirs or for a person to sort out;
     - a warning when this Mac seems offline, since the other Mac then cannot see the claim. */
-async function claimAndBring(ctx, found, record, { takeOver = false, again, by = "" }) {
+async function claimAndBring(ctx, found, record, { takeOver = false, again, by = "", notYet = "" }) {
   const { say } = ctx;
   // The bring it starts is told which command asked (`--asked-by`), when it is not `open`, so that what it says to say next, when
   // it is done, is that command's: a bring started by `app` ends by sending her back to app, and not to open.
@@ -1340,6 +1357,13 @@ async function claimAndBring(ctx, found, record, { takeOver = false, again, by =
     return { code: 0 };
   }
   const problems = filesProblems(found.folder, record);
+  // `app` and `app … reel` while the reading's own late check is still to come (plan R1d): when every problem is a listed file that is
+  // missing or not at its listed size, with no other name Dropbox may have kept it under, it is a wait, not a refusal; nothing is
+  // claimed or written. Judged by the record's list and the sizes, not by the words of the problems.
+  if (problems.length && notYet && projectWaits(ctx, { name: found.name, record }) === "verify" && plainShort(found.folder, record).length === problems.length) {
+    say(notYet);
+    return { code: 0 };
+  }
   if (problems.length) {
     say(`${found.name} is not whole in Dropbox:`);
     for (const problem of problems) say(`  ${problem}`);
@@ -1556,7 +1580,7 @@ export async function app(ctx, rest) {
   if (clip) return refuse(ctx, clip);
   const older = await olderWords(ctx, { found, record: got.record }, "main", got.record.name.text);
   if (older) return refuse(ctx, older);
-  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED });
+  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED, notYet: notWholeYet(got.record.name.text) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
   return openInApp(ctx, { found, record }, { env: ctx.deps.env, running: hyperFramesAsked(ctx), ...ctx.deps.app, cli, plan: (given) => planProject(ctx, given), save: (next) => save(ctx, { ...found, record }, next) });
@@ -1572,8 +1596,8 @@ export async function app(ctx, rest) {
       them, though no main project: its Reels are the Reels of a video her editor finished (4.3);
     - this Mac must be set up for the app and have the pinned command line, or it says so and ends with 1, having claimed nothing;
     - a Reel neither the record's list nor its projects have, and a Reel finished already that has no project, are refused in words
-      (app-reel.js reelWhy), before anything is claimed. While Claude's reading is at work the list is not asked, since the reading
-      is making it;
+      (app-reel.js reelWhy), before anything is claimed. While Claude's reading is at work and not yet in the record the list is not
+      asked, since the reading is making it; once it is in, the record judges;
     - a Reel project made on another Mac and not on this one is refused when the record lists no snapshot of it (projectOnAnotherMac
       and projectSnapshot, with the Reel's key), with or without `--take-over`, before anything is claimed, brought or made; with
       one, openReelInApp rebuilds it from the snapshot;
@@ -1606,7 +1630,7 @@ async function appReel(ctx, asked, flags) {
   if (clip) return refuse(ctx, clip);
   const older = await olderWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
   if (older) return refuse(ctx, older);
-  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openReelWords(n, name), by: appReelAsked(n) });
+  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openReelWords(n, name), by: appReelAsked(n), notYet: reelNotWholeYet(n, name) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
   return openReelInApp(ctx, { found, record, n }, { env: ctx.deps.env, running: hyperFramesAsked(ctx), ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
@@ -2226,7 +2250,10 @@ const refuse = (ctx, why) => {
     whose hand-off is written and which only waits for its late check (finish-check.js checkingNow). She was told she need not wait for that
     check, so the stop says that the hand-off is written and when Studio checks Dropbox's copies, and `again`, what she does then, in the
     command's own words; `of` is " of <the video>" where the command names it. A stop that comes while the finish still copies is the
-    generic one: nothing is written yet, and the finish is what she waits for. `record` is the episode's record in force. */
+    generic one: nothing is written yet, and the finish is what she waits for. The same for a read run whose reading is in the record and
+    which only waits for its own late check (late-wait.js readingCheckAt, from the run's early result): "Claude's reading<of> is written,
+    and Studio checks Dropbox's copies at <time>. <again>"; with no early result of that run it is the generic one. `record` is the
+    episode's record in force. */
 function stoppedWords(ctx, found, record, { generic, again, of = "" }) {
   const checking = checkingNow(ctx.home, found.name, record, ctx.alive);
   if (checking) return `The hand-off${of} is written, and Studio checks Dropbox's copies at ${clockAt(checking.due)}. ${again}`;

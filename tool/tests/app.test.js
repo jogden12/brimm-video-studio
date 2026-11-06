@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { childEnv, PIN, readHistory, readOpen } from "../hyperframes.js";
-import { openInApp, projectOnAnotherMac, readListed, NOT_SET_UP } from "../app.js";
+import { openInApp, projectOnAnotherMac, readListed, readWords, NOT_SET_UP } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { processTable } from "../chain.js";
 import { episodeFault, layoutOf, localStamp, newEpisode, newPlannedEpisode, recordFile, recordText } from "../episode.js";
@@ -444,6 +444,30 @@ describe("app: opening an episode in HyperFrames", () => {
       assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
       assert.ok(existsSync(join(e.project, "index.html")));
       assert.equal(readFileSync(lockOf(e.home, FOLDER), "utf8"), lock);
+    });
+    it("makes the project from the reading's plan and reels.json as they are: a cue of the plan and a candidate of the list are in it", async (c) => {
+      const cue = { n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null, phrase: "p2" };
+      const e = read(c, {}, { plan: { ...PLAN, claude: { graphicCues: [cue] } } });
+      const candidate = { n: 1, title: "A title", reason: "Why", ranges: [{ start: 1.2, end: 2.5 }] };
+      writeFileSync(join(e.folder, "reels.json"), JSON.stringify({ format: "brimm-video reels", version: 1, candidates: [candidate] }));
+      e.record.files["reels.json"] = statSync(join(e.folder, "reels.json")).size;
+      hold(e);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(JSON.parse(readFileSync(join(e.project, "brimm", "graphic-cues.json"), "utf8")).cues.map((c2) => c2.words), ["says Sally"]);
+      assert.deepEqual(JSON.parse(readFileSync(join(e.project, "brimm", "reel-suggestions.json"), "utf8")).reels.map((r) => [r.n, r.title]), [[1, "A title"]]);
+    });
+    it("reads a words file that cannot be read as not there: the words are not on this Mac yet, not an error", (c) => {
+      const e = read(c);
+      mkdirSync(join(e.folder, "odd.words.json"));
+      assert.deepEqual(readWords(e.folder, { files: {} }, "odd.words.json"), { absent: true });
+      assert.deepEqual(readWords(e.folder, e.record, "Talk.words.json"), readListed(e.folder, e.record, "Talk.words.json"));
+    });
+    it("checks no sizes outside the window: with no read run and no check owed, a short listed file is read as it is", async (c) => {
+      const e = read(c);
+      const whole = readFileSync(join(e.folder, "Talk.cut-plan.json"), "utf8");
+      e.record.files["Talk.cut-plan.json"] = whole.length + 5;
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
     });
     it("makes nothing while a file it reads is not the size the record lists, and makes the project when it is put right", async (c) => {
       const e = read(c);

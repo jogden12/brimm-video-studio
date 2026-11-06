@@ -6,6 +6,9 @@
 // A reading that replaces files the import's check looks at (plan R1c) need not wait either, on the Mac that owns that check: it
 // takes its files out of the check under a lock the check also takes (keepCheckInStep), so the check never puts an older file back
 // over one the reading wrote, and still looks at every other file.
+// And the making of an episode's HyperFrames project need not wait for the reading's own late check (plan R1d): once the reading is in the
+// record, `projectWaits` says to verify the files the project reads against the sizes the record lists (app.js readListed), and
+// `readingCheckAt` says when the read run's own check is made, for the words of the commands it stops.
 import { statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { LATE_CHECK_MS } from "./dropbox.js";
@@ -15,7 +18,8 @@ import { currentReading, shownName } from "./episode.js";
 import { readResult, runningCommand, runningRun } from "./detached.js";
 import { clockAt, importHold } from "./unedited.js";
 
-/** This Mac's pending late check of the episode with `record`, with no problem found: the check it still owes, or undefined. */
+/** This Mac's pending late check of the episode with `record`: the check it still owes, or undefined. It leaves out one that has found a
+    problem, unless `problem` is true (projectWaits holds while the check is owed, with or without a problem). */
 const owedFor = (ctx, record, { problem = false } = {}) => readPendings(ctx.home).find((p) => p.id === record.id && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root) && (problem || !p.problem));
 
 /** The size of the file at `path`, or -1 when it is not there. */
