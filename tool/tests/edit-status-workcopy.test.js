@@ -14,7 +14,7 @@ import { progressFolder } from "../progress.js";
 import { READ_LOOK_MS } from "../reading.js";
 import { episodeWork, pendingFolder } from "../settings.js";
 import { FOLDER, ID, NAME } from "./episodes.js";
-import { PLAIN, UNANSWERED, atWork, on, world } from "./workcopy-world.js";
+import { AT, PLAIN, RAW, UNANSWERED, atWork, on, world } from "./workcopy-world.js";
 
 /** What `status` says while the working copy is made, and what it calls the run once it has ended. */
 const BEING_MADE = "the video for HyperFrames is being made.";
@@ -154,5 +154,56 @@ describe("status: the working copy", () => {
     assert.deepEqual((await howFar(t, "Pricing")).said, [`${FOLDER}: ${BEING_MADE}`]);
     assert.deepEqual((await howFar(t, "Budget")).said, ["Nothing is running, and nothing is waiting."]);
     t.done();
+  });
+
+  // R6b: a footage copy that failed for a reason that will not pass is said, in plain words and with what she can do first.
+  const NOT_MADE = (name) => `Some of the footage for "${name}" could not be made. Say "open ${name} in HyperFrames" again; if it says so again, ask Jason.`;
+  const SHOT_2 = "The footage for shot 2 could not be made: ffmpeg stopped.";
+  it("says that some of the footage could not be made, and what to do first, when the last run's result holds a footage copy that failed", async () => {
+    const { t } = world();
+    left(t, "workcopy", 3 * 60000, { made: ["the video for HyperFrames"], footageFailed: [SHOT_2] });
+    assert.deepEqual((await howFar(t)).said, [`${FOLDER}: ${MAKING} ended 3 minutes ago. Made: the video for HyperFrames.`, NOT_MADE(FOLDER)]);
+    t.done();
+    const u = world();
+    left(u.t, "workcopy", 3 * 60000, { ok: false, failed: [SHOT_2] });
+    assert.ok((await howFar(u.t)).said.includes(NOT_MADE(FOLDER)));
+    u.t.done();
+  });
+  it("does not say a footage copy failed because Dropbox is still bringing the video over: that passes by itself", async () => {
+    const { t } = world();
+    left(t, "workcopy", 3 * 60000, { made: ["the video for HyperFrames"], footageFailed: ["The footage for shot 2 could not be made: Dropbox is still bringing the video over."] });
+    const r = await howFar(t);
+    assert.ok(!r.text.includes("could not be made. Say"), r.text);
+    t.done();
+  });
+  it("does not say a failed footage copy while the copy is at work again: it has not left its result", async () => {
+    const { t } = world();
+    left(t, "workcopy", 3 * 60000, { footageFailed: [SHOT_2] });
+    atWork(t, "workcopy");
+    assert.deepEqual((await howFar(t)).said, [`${FOLDER}: ${BEING_MADE}`]);
+    t.done();
+  });
+  it("names a gated video by its label and short id alone when it says its footage could not be made", async () => {
+    const { t } = world({ record: UNANSWERED });
+    left(t, "workcopy", 3 * 60000, { footageFailed: [SHOT_2] });
+    const r = await howFar(t);
+    // The gate refuses "open" for it: the line names it by its label alone and sends her to Jason.
+    assert.ok(r.said.includes(`Some of the footage for "${UNANSWERED.label}" could not be made. Ask Jason.`), r.text);
+    assert.ok(!r.text.includes("open"), r.text);
+    for (const given of [FOLDER, "Pricing", "mp4"]) assert.ok(!r.text.includes(given), `${given} in ${r.text}`);
+    t.done();
+  });
+  // A plan of an explainer, kept in the video its voice made (episode.js: layout 5 holds `planned` whole).
+  const EXPLAINER = { ...RAW, version: 5, planned: { route: "explainer", title: "T", voice: "sallie", at: AT, on: "Mac Studio", set: null, cues: [], shots: [], lines: [], filmed: null } };
+  it("gives an explainer's voice its own line, and never calls it the footage", async () => {
+    const { t } = world({ record: EXPLAINER });
+    atWork(t, "join");
+    assert.deepEqual((await howFar(t)).said, [`${FOLDER}: its voice is being taken in.`]);
+    t.done();
+    const u = world({ record: EXPLAINER });
+    left(u.t, "join", 2 * 60000, { made: ["its voice"] });
+    const r = await howFar(u.t);
+    assert.deepEqual(r.said, [`${FOLDER}: taking in its voice ended 2 minutes ago. Made: its voice.`]);
+    u.t.done();
   });
 });

@@ -733,12 +733,23 @@ export const FOOTAGE_NOT_MADE = "Some of its footage could not be made for Hyper
     and in `footageFailed` for the run that made the video's copy first, and the why is not that Dropbox is still bringing the video over. A run at
     work now (`making`) has not left its result yet: what the last one left is not read. */
 function footageNotMade(ctx, found, shot) {
-  if (runningCommand(ctx.home, found.name, ctx.alive, workCopyLockOf(ctx.home, found.name))) return false;
-  const result = readResult(ctx.home, found.name, "workcopy");
-  if (result === null || typeof result !== "object") return false;
-  const lines = [...(Array.isArray(result.failed) ? result.failed : []), ...(Array.isArray(result.footageFailed) ? result.footageFailed : [])];
-  return lines.some((line) => typeof line === "string" && line.startsWith(`The footage for shot ${shot} could not be made:`) && !line.includes("Dropbox is still bringing"));
+  return footageFailedLines(ctx, found.name).some((line) => line.startsWith(`The footage for shot ${shot} could not be made:`));
 }
+
+/** The lines of the last working-copy result of the episode in `folder` that say a copy of footage could not be made for a reason that will not pass
+    ("The footage for shot <n> could not be made: <why>"): none while a run of the copy is at work, and none for a why that is Dropbox still bringing
+    the video over. */
+function footageFailedLines(ctx, folder) {
+  if (runningCommand(ctx.home, folder, ctx.alive, workCopyLockOf(ctx.home, folder))) return [];
+  const result = readResult(ctx.home, folder, "workcopy");
+  if (result === null || typeof result !== "object") return [];
+  const lines = [...(Array.isArray(result.failed) ? result.failed : []), ...(Array.isArray(result.footageFailed) ? result.footageFailed : [])];
+  return lines.filter((line) => typeof line === "string" && /^The footage for shot \d+ could not be made:/.test(line) && !line.includes("Dropbox is still bringing"));
+}
+
+/** Whether the last run of the working copy for the episode in `folder` left a copy of footage it could not make for a reason that will not pass
+    (`status` says so). */
+export const footageFailed = (ctx, folder) => footageFailedLines(ctx, folder).length > 0;
 
 /** Put the footage of a video made from a plan into its main project at `dir`, at every open of it (PR H5b). `kit` is what the plan gives the
     project (join.js planProject, given as the `plan` dep: footage.js reaches this module through finish.js, so it is not imported here), read just
