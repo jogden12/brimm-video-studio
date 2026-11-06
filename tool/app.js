@@ -63,7 +63,8 @@ import { programHome } from "./home.js";
 import { readResult, runningCommand } from "./detached.js";
 import { isFromPlan, kindOf, localStamp } from "./episode.js";
 import { sessionNotCleared } from "./gate.js";
-import { copyIn as copyTakes } from "./guide.js";
+import { copyIn as copyTakes, waitWords } from "./guide.js";
+import { lateCheckAt, waitFacts } from "./late-wait.js";
 import { chatHeld } from "./held.js";
 import { PIN, childEnv, cliPath, handoverAllowed, readOpen, toolchainDir } from "./hyperframes.js";
 import { transcriptOf } from "./loosened.js";
@@ -98,9 +99,18 @@ const beingMade = (name, ready = "") => `The video for HyperFrames is being made
     the clock shows it now. Nothing while it has measured none, so that no time is named that cannot be backed. */
 function readyAt(ctx, record) {
   const seconds = copyTakes(readRates(progressFolder(ctx.home)), record.video && record.video.seconds);
+  // While the copy has to wait for Dropbox's late check (plan R1a), the time is the check's, and the copy's after it.
+  const wait = waitFacts(ctx, record, seconds);
+  if (wait) return ` ${waitWords(wait)}`;
   return seconds === null ? "" : ` It is ready about ${clockAt(ctx.now() + seconds * 1000)}, in ${aboutLeft(seconds)}.`;
 }
-const stillReading = (name) => `Claude is still reading it. Say "open ${name} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
+/** Claude's reading of a raw video waits for the import's late check as well (reading.js): while that is still to come, when the reading
+    starts is said with it (plan R1a). */
+function stillReading(ctx, record) {
+  const due = kindOf(record) === "raw" ? lateCheckAt(ctx, record) : null;
+  const starts = due === null ? "" : ` It starts at ${clockAt(due)}, when Dropbox has checked its copies.`;
+  return `Claude is still reading it.${starts} Say "open ${record.name.text} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
+}
 export const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
 /** What is said of an explainer's HyperFrames project in a HeyGen voice when its folder is not on this Mac and there is no snapshot to rebuild it from (PR H6):
     it holds no media to make it again from, since the voice was made in it. */
@@ -488,11 +498,11 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   const reading = runningCommand(home, found.name, ctx.alive) === "read";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     requestWorkCopy(ctx, { folder: found.name });
-    ctx.say(reading ? stillReading(record.name.text) : beingMade(record.name.text, readyAt(ctx, record)));
+    ctx.say(reading ? stillReading(ctx, record) : beingMade(record.name.text, readyAt(ctx, record)));
     return { code: 0 };
   }
   if (reading) {
-    ctx.say(stillReading(record.name.text));
+    ctx.say(stillReading(ctx, record));
     return { code: 0 };
   }
   const facts = JSON.parse(readFileSync(copy.facts, "utf8"));

@@ -18,7 +18,9 @@ import { guardDecision } from "../studio.js";
 import { CHECKOUT, EDIT, NODE } from "./guard-cases.js";
 import { fileSafe } from "../names.js";
 import { fileEpisode, readPendings } from "../filing.js";
-import { importInto } from "../unedited.js";
+import { clockAt, importInto } from "../unedited.js";
+import { COPY_STEP } from "../guide.js";
+import { addRates, progressFolder } from "../progress.js";
 import { holds } from "../snapshot.js";
 import { episodeWork } from "../settings.js";
 import { localDay } from "../shared/text.js";
@@ -767,6 +769,62 @@ describe("the join run, with one talking part (PR H5b)", () => {
     assert.deepEqual(t.notices, [READY]);
     assert.deepEqual(t.kicks, ["kickstart"]);
     t.done();
+  });
+  describe("says when the video opens in HyperFrames (plan R1a)", () => {
+    const near = (ms) => clockAt(Math.round(ms / 60000) * 60000);
+    const READY_AT = (at) => `Ready: "${TITLE}" is made from its footage. It opens in HyperFrames about ${at}. In Claude, say "what's next?"`;
+    it("names the clock time the copy will be ready when this Mac has measured a speed, and the copy starts from the file the join put in from: with no wait for the check", async () => {
+      const t = world({ probes: longTalk("Take 1") });
+      await planned(t);
+      const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+      // 0.1 seconds of work for each second of the video's 120: 12 seconds.
+      addRates(progressFolder(t.home), { [COPY_STEP]: 0.1 });
+      await joinRun(t, [one.record.id]);
+      assert.deepEqual(t.notices, [READY_AT(near(t.now() + 12 * 1000))]);
+      t.done();
+    });
+    it("counts the wait for the late check in that time when the copy cannot start from a local file", async () => {
+      const t = world({ probes: longTalk("Take 1") });
+      await planned(t);
+      const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+      addRates(progressFolder(t.home), { [COPY_STEP]: 0.1 });
+      // The part's file is not whole on this Mac once the join has been made, so the copy has to wait for the check, which is due 15 minutes after the join's copy.
+      let after = false;
+      const start = (...args) => {
+        after = true;
+        return t.ctx.deps.start(...args);
+      };
+      const isWhole = (path) => !(after && path.startsWith(one.folder));
+      await joinRun(t, [one.record.id], { start, isWhole });
+      const [pending] = readPendings(t.home);
+      assert.deepEqual(t.notices, [READY_AT(near(pending.lastCopy + 15 * 60 * 1000 + 12 * 1000))]);
+      t.done();
+    });
+    it("says what it always said when no speed is known, when the copy is not asked for, and of a plan made from its voice", async () => {
+      const t = world({ probes: longTalk("Take 1") });
+      await planned(t);
+      const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+      await joinRun(t, [one.record.id]);
+      assert.deepEqual(t.notices, [READY]);
+      t.done();
+      const u = world({ probes: longTalk("Take 1") });
+      await planned(u);
+      const two = part(u, 1, { words: SCRIPT[0].split(" ") });
+      addRates(progressFolder(u.home), { [COPY_STEP]: 0.1 });
+      await on(depsOf(u), "join", "--now", FOLDER_NAME(u), "--parts", two.record.id);
+      assert.deepEqual(u.notices, [READY], "a Mac not set up for HyperFrames makes no copy, so it opens nowhere");
+      u.done();
+    });
+    it("keeps the line about the late check in the result's made text, with no title in it", async () => {
+      const t = world({ probes: longTalk("Take 1") });
+      await planned(t);
+      const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+      const r = await joinRun(t, [one.record.id]);
+      assert.ok(r.text.includes(`${TITLE}: copied into Dropbox. Its late check is made in 15 minutes.`), r.text);
+      assert.deepEqual(resultOf(t).made, ["the video from its footage", "copied into Dropbox, and its late check is made in 15 minutes"]);
+      assert.ok(!resultOf(t).made.join(" ").includes(TITLE));
+      t.done();
+    });
   });
   it("asks for no working copy on a Mac not set up for HyperFrames, and no reading while this Mac's readings are off", async () => {
     const t = world({ probes: longTalk("Take 1") });

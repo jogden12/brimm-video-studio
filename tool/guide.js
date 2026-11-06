@@ -337,9 +337,19 @@ function sessionNext(facts, notes, now) {
     the retirement's wave 4 (the ruling of PR 10). */
 const viaApp = (facts) => facts.way === "hyperframes" || facts.way === "unopened";
 
+/** What is said of a video for HyperFrames that must wait for Dropbox's late check (plan R1a; late-wait.js waitFacts), by its `checkAt`, `readyAt`
+    and `inSeconds`, the same in the guide's step and in `app`: when it will be ready, after the check, or only when the check is made while no
+    speed of making it is known. */
+export function waitWords({ checkAt, readyAt, inSeconds }) {
+  if (!readyAt || inSeconds == null) return `Dropbox checks its copies at ${checkAt} first.`;
+  return `It is ready about ${readyAt}, in ${aboutLeft(inSeconds).replace(/^about /, "")}, after Dropbox has checked its copies at ${checkAt}.`;
+}
+
 /** The video for HyperFrames being made, and what to say when it is done: how long is left when the panel's run says, else how long it
     usually takes, by the speed this Mac measured, else no time. */
-function copyStep({ left, usual }) {
+function copyStep({ left, usual, wait }) {
+  // Waiting for Dropbox's late check (plan R1a): when it will be ready with the wait in it, else when the check is made.
+  if (left == null && wait) return toDo("making-copy", `The video for HyperFrames is being made. ${waitWords(wait)} Say "open it in HyperFrames" when it is done.`);
   const time = left != null ? `, ${aboutLeft(left)} left` : "";
   const often = left == null && usual != null ? ` It usually takes ${aboutLeft(usual)}.` : "";
   return toDo("making-copy", `The video for HyperFrames is being made${time}.${often} Say "open it in HyperFrames" when it is done.`);

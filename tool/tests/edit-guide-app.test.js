@@ -14,6 +14,8 @@ import { KEPT, NOT_SET_UP } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { HELP } from "../edit.js";
 import { COPY_STEP } from "../guide.js";
+import { fileId, writePending } from "../filing.js";
+import { clockAt } from "../unedited.js";
 import { PIN } from "../hyperframes.js";
 import { RATES, aboutLeft, progressFolder, readRates, reporter } from "../progress.js";
 import { WORK_COPY_WAIT_STEP, workCopyLockOf } from "../workcopy.js";
@@ -213,6 +215,30 @@ describe("the guide while the video for HyperFrames is made", () => {
     assert.equal(await line(w), says(`The video for HyperFrames is being made, less than a minute left. ${AFTER}`));
     rmSync(join(progressFolder(w.t.home), `${process.pid}.json`));
     assert.equal(await line(w), says(`The video for HyperFrames is being made. It usually takes about 4 minutes. ${AFTER}`));
+    w.t.done();
+  });
+  it("says when it will be ready, after Dropbox has checked its copies, while the run waits for the late check this Mac still owes (plan R1a)", async () => {
+    const w = guideWorld({ kind: "short video", projects: null });
+    atWork(w.t, "workcopy");
+    const record = reread(w.found);
+    const lastCopy = w.t.now() - 4 * 60 * 1000;
+    const pending = { version: 1, id: record.id, name: FOLDER, folder: w.found.folder, video: record.video.file, bytes: record.video.bytes, seconds: record.video.seconds, drop: join(w.t.dir, "no drop file"), dropFile: null, importId: "x", work: join(w.t.dir, "work"), entries: [], lastCopy, root: w.t.root, machine: "Mac Studio", planTxt: "x.cut-plan.txt" };
+    writePending(w.t.home, pending);
+    const due = lastCopy + 15 * 60 * 1000;
+    // No speed is known: only when Dropbox checks.
+    assert.equal(await line(w), says(`The video for HyperFrames is being made. Dropbox checks its copies at ${clockAt(due)} first. ${AFTER}`));
+    // 10 seconds of work for each second of the recording's 23.423: 234 seconds after the check, which is 15 minutes from now.
+    speeds(w, 10);
+    panel(w, { step: WORK_COPY_WAIT_STEP, n: null, of: null, percent: null, left: null, total: null });
+    const rounded = clockAt(Math.round((due + 234 * 1000) / 60000) * 60000);
+    assert.equal(await line(w), says(`The video for HyperFrames is being made. It is ready about ${rounded}, in 15 minutes, after Dropbox has checked its copies at ${clockAt(due)}. ${AFTER}`));
+    // A copy made from the file this Mac holds waits for nothing: the panel's time, as before.
+    const drop = join(w.t.dir, "drop.mov");
+    writeFileSync(drop, "x".repeat(record.video.bytes));
+    writeFileSync(join(w.found.folder, record.video.file), "x".repeat(record.video.bytes));
+    writePending(w.t.home, { ...pending, drop, dropFile: fileId(drop) });
+    panel(w, { left: 180 });
+    assert.equal(await line(w), says(`The video for HyperFrames is being made, about 3 minutes left. ${AFTER}`));
     w.t.done();
   });
   it("says no usual time while the run waits for the import to check its copies: it has not begun (review I3a)", async () => {
