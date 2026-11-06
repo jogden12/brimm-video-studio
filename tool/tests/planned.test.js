@@ -118,7 +118,7 @@ describe("layout 5 on a Mac on older code", () => {
       writeFileSync(recordFile((mkdirSync(join(t.folder, "record")), t.folder), 1), recordText({ ...made(), rev: 1 }));
       const older = readEpisode(t.folder, { known: RECORD_VERSION });
       assert.deepEqual(older, { record: made(), file: recordFile(t.folder, 1), newer: true });
-      assert.equal(faultFor(RECORD_VERSION)(made()), "it is version 5, and this brimm-video reads versions 1 to 4");
+      assert.equal(faultFor(RECORD_VERSION)(made()), "it is version 5, and this BRIMM Video Studio reads versions 1 to 4");
       // This brimm-video reads it whole.
       assert.deepEqual(readEpisode(t.folder), { record: made(), file: recordFile(t.folder, 1) });
     } finally {
@@ -140,7 +140,7 @@ describe("layout 5 on a Mac on older code", () => {
     }
   });
   it("is refused, for want of a layout, by a Mac that stands in for layout 4 alone: a record of layout 6 is newer here too", () => {
-    assert.equal(faultFor(NEWEST_VERSION)({ ...made(), version: 6 }), "it is version 6, and this brimm-video reads versions 1 to 5");
+    assert.equal(faultFor(NEWEST_VERSION)({ ...made(), version: 6 }), "it is version 6, and this BRIMM Video Studio reads versions 1 to 5");
     assert.equal(faultFor(NEWEST_VERSION)(made()), "");
   });
 });

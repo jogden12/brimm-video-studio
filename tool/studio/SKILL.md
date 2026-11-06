@@ -5,13 +5,13 @@ description: Use for anything about The BRIMM's videos and episodes: what is wai
 
 # brimm-edit
 
-Run brimm-video's commands, and only these, exactly so: {{NODE}} "{{CHECKOUT}}/tool/edit.js" <command> …
+Run BRIMM Video Studio's commands, and only these, exactly so: {{NODE}} "{{CHECKOUT}}/tool/edit.js" <command> …
 Put the episode in quotes. Never show Sallie the command, a path or a flag: say what it did, in plain words, except a session's principles and Reel ideas, which are shown as printed ("A client or group session"). Ideas for graphics are shown as printed too, with their numbers and times.
 Words with a `$`, a backtick, a backslash or a straight double quote go in single quotes instead of double. Words with an apostrophe stay in double quotes. Words with both cannot be passed: ask her to say them another way (for example "99 dollars").
 
 ## At the start of each session
 
-Run `behind`. If it says "This folder's lock is changed on this Mac", tell her: "Something in this Claude folder's setup has changed; ask Jason before going on." Then stop: run nothing else, not even `episodes`, and show her nothing of what it says after that line. If this Mac is behind, tell her: "Jason has a newer brimm-video; ask him to update this Mac when it suits." If it says her folder for Claude is out of date, tell her: "Your Claude folder needs an update from Jason; ask him when it suits." Then run `episodes`, and show the card below for each video waiting for her answer.
+Run `behind`. If it says "This folder's lock is changed on this Mac", tell her: "Something in this Claude folder's setup has changed; ask Jason before going on." Then stop: run nothing else, not even `episodes`, and show her nothing of what it says after that line. If this Mac is behind, tell her: "Jason has a newer BRIMM Video Studio; ask him to update this Mac when it suits." If it says her folder for Claude is out of date, tell her: "Your Claude folder needs an update from Jason; ask him when it suits." Then run `episodes`, and show the card below for each video waiting for her answer.
 
 ## The card: what a video is
 
@@ -47,7 +47,7 @@ Run `kind` only with both answers, and only when they agree: "Client or group se
 | "A finished version of <name>", and No | `kind "<label>" finished --private no --version-of <id>` |
 | "Raw with retakes", and No, when the Maybe line's video is raw | `kind "<label>" raw --private no --version-of <id>`: tell her it starts as a new raw video, and its edits begin again |
 | "Client or group session", and Yes | `kind "<label>" session --private yes`, then "A client or group session", below |
-| Other: "leave it" / "it's not for brimm-video" | `leave "<label>"`: it is not asked about again |
+| Other: "leave it" / "it's not for BRIMM Video Studio" | `leave "<label>"`: it is not asked about again |
 | "Read it here", when `kind` says a raw video is not on this Mac yet | the same `kind` again with `--here` added: `kind "<label>" raw --private no --here`, or, for an answer given again, `kind "<video>" raw --private no --again --here`. Tell her it comes over first, which may take a while |
 | "Leave it for the Mac Studio" (or the Mac `kind` names) | Nothing: that Mac answers it |
 | Other: anything else ("not now", "it's a podcast") | Nothing |
@@ -73,7 +73,7 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 - Then, without asking her, run `guide "<video>" tell` in the background (the Bash tool's run_in_background), once per video, never Monitor, and say "I'll tell you here when it is done." When it ends, tell her its one line in plain words, and its next step. For a finish that is that the hand-off is ready, which is shown in Finder, and then the BRIMM Ops page's step; the finish goes on checking Dropbox's copies for a quarter of an hour, which she need not wait for.
 - If it says the finish wrote no hand-off, or that Claude's reading did not finish, tell her so, and offer to run `status` to see why. Making a Reel ("Make Reel 2") is the exception: the guide does not see a Reel's video being made, so tell her what it says, and that "how far is it?" says when it is done.
 - A video waiting for her answer: the card, as above. If she said "Yes" to the first question in this chat, tell her to choose "Client or group session" and "Yes".
-- Any other next step: say it in one or two sentences, offer to do the brimm-video part ("Shall I open it in HyperFrames?" when it says to open it there, "Shall I show it in Final Cut?" for a raw video edited there), and run it only on her yes, as the table below says. Once it says she has exported it, or a Reel of a finished video, do not offer: run `finish` at once, as the "Hand it off" and "Hand off the Reels" rules say.
+- Any other next step: say it in one or two sentences, offer to do the BRIMM Video Studio part ("Shall I open it in HyperFrames?" when it says to open it there, "Shall I show it in Final Cut?" for a raw video edited there), and run it only on her yes, as the table below says. Once it says she has exported it, or a Reel of a finished video, do not offer: run `finish` at once, as the "Hand it off" and "Hand off the Reels" rules say.
 - While it says the video for HyperFrames is being made, offer to tell her here when it is done (`guide "<video>" tell`, as above), and say only "I'll tell you here": no notice is posted for it. When it gives the time of her last request in HyperFrames, say it.
 - A step on the BRIMM Ops page: `guide page` the first time in this chat, then `guide "<video>"`, and say its step. Offer to show what it needs in Finder: `guide "<video>" show`. Then ask on one `AskUserQuestion`: "Done?": "Done", "Not yet", "Something's different". Done: `guide "<video>" done <step>`, with the word its Step line gives, and say the next step it prints. Something's different: ask what she sees; if it is not in the walkthrough, tell her to ask Jason.
 - "I posted it" / "I've done that": `guide "<video>"` for the video she means (`guide` first, and ask which, if that is unclear); say what is left of its step (such as ticking "Posted"), then ask "Done?" as above.
@@ -99,7 +99,7 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 | "Call it …" | `name "<episode>" "<name>"` |
 | "Use that title" / "Make the title …" | `title "<episode>" --approve` / `title "<episode>" --words "<words>" --approve` (an approved title changes only with `--change`; say BRIMM Ops may have it already) |
 | "Reel 2's title is …" | `title "<episode>" reel 2 --words "<words>"` |
-| "Show me the Reels" | `reels "<episode>"`: tell her each candidate in plain words; its preview, when it has one, opens in QuickTime Player. When it ends by saying how to make one, tell her so, in plain words: she says "Open Reel 2 in HyperFrames". When it says brimm-video cannot make a Reel on this Mac, say so, and that Jason sets the Mac up for HyperFrames. |
+| "Show me the Reels" | `reels "<episode>"`: tell her each candidate in plain words; its preview, when it has one, opens in QuickTime Player. When it ends by saying how to make one, tell her so, in plain words: she says "Open Reel 2 in HyperFrames". When it says BRIMM Video Studio cannot make a Reel on this Mac, say so, and that Jason sets the Mac up for HyperFrames. |
 | "Ask Claude again for Reels" | `ask "<episode>"`: it runs in the background, so say so, and that "how far is it?" shows how far it has got; go on as "Guide her" says for work in the background |
 | "Make Reel 2" / "Open Reel 2 in HyperFrames" | `app "<episode>" reel 2`: Reel 2, one of Claude's suggestions, becomes a project of its own in HyperFrames, opened on her Mac. Its video is made first, in the background: tell her so, and when "how far is it?" says it is done, run it again. |
 | "Drop 2" | `reel drop "<episode>" 2`: the Reel is left out. A Reel is picked by opening it, so nothing else picks one |
@@ -140,7 +140,7 @@ Each rule starts with the row it belongs to.
 - "What did Claude find?": After the reading, a video finished by your editor: `reels "<video>"` (the Reel suggestions), then the spellings card.
 - "What did Claude find?": After the reading, a video raw with retakes: `show "<video>" notes` (Claude's notes, without its line that says to ask for the ideas for graphics: they follow), `graphic "<video>" ideas` (its ideas for graphics, each shown exactly as printed, with its number and times) and `reels "<video>"`, then the spellings card (its rough cut, version 0, is open in QuickTime Player already).
 - "What did Claude find?": After the reading, an iPhone clip: the spellings card.
-- "What did Claude find?": After the reading, a session: `principles "<label>"` and `ideas "<label>"`, each item exactly as brimm-video printed it, never summarised (see "A client or group session").
+- "What did Claude find?": After the reading, a session: `principles "<label>"` and `ideas "<label>"`, each item exactly as BRIMM Video Studio printed it, never summarised (see "A client or group session").
 - The spellings card: For a finished video, when it says it showed a hand-off in Finder, tell her to drop it on the BRIMM Ops page. An iPhone clip's answer writes no hand-off: tell her the ways it names to go on.
 - The spellings card: When it names HyperFrames, ask her whether to edit it there (the "Open it in HyperFrames" row) or hand it off as it is (`finish "<video>" --as-it-is`); when it does not, offer only the latter.
 - "It's actually raw": For a video `episodes` lists as a client or group session, go straight to "Clear the session mark", below, without asking again.
@@ -162,7 +162,7 @@ Each rule starts with the row it belongs to.
 - "Open it in HyperFrames": If it says the recording has changed and the older project was left where it was, tell her so, and to ask Jason.
 - "Open it in HyperFrames": If it says the project here is older than the one the other Mac handed over, tell her so, and that nothing was changed, and to ask Jason.
 - "What did I do in HyperFrames?": If it says nothing has been done yet, tell her so; if it says the project is on another Mac, tell her so and to ask Jason. It claims nothing, so run it whoever has the episode open.
-- "What versions are there?": To go back to one she asks the assistant in HyperFrames ("go back to before the music"), which keeps the history: brimm-video never changes it, so never offer to go back here.
+- "What versions are there?": To go back to one she asks the assistant in HyperFrames ("go back to before the music"), which keeps the history: BRIMM Video Studio never changes it, so never offer to go back here.
 - "What versions are there?": If it says it can't list them right now, tell her HyperFrames shows its history.
 - "Make Reel 2": If it says another Mac has it, or files are being brought over first, go on as for "Open the Pricing episode in HyperFrames", with `app "<episode>" reel 2 --take-over` for the take-over.
 - "Make Reel 2": If it says the older project was set aside, or to quit HyperFrames first, go on as for "Open the Pricing episode in HyperFrames", with `app "<episode>" reel 2`; when it says the video was kept from the older project, there is nothing to wait for.
@@ -198,13 +198,13 @@ Once a session is marked, tell her: "Never rate, report or share a chat about a 
 
 Once a video is a session (by the card, a correction or "after all"), call it only by its label, or the name she gave it, and never repeat anything the chat holds of it (its file's name, its suggestions, its spellings). Never say a dialog is open once a command has returned, and never say the mark is cleared or the agreement noted unless edit.js says so after the dialog has closed.
 
-Wherever `principles` or `ideas` prints, show her each item exactly as brimm-video printed it, field by field, example and key phrases first, never summarised or shortened, with its line about the names it took out.
+Wherever `principles` or `ideas` prints, show her each item exactly as BRIMM Video Studio printed it, field by field, example and key phrases first, never summarised or shortened, with its line about the names it took out.
 
 | She says | Run |
 |---|---|
 | "Its teachings" / "Get the teachings of <label>" | `teachings "<label>"`. If it refuses (not turned on for this Mac yet, turned on more than 90 days ago, or another account signed in), tell her plainly that its teachings cannot be read on this Mac now, and to ask Jason: never say which account |
 | "The transcript only" | `teachings "<label>" --transcript-only` |
-| "Show me the principles" / "Show me the Reel ideas" | `principles "<label>"` / `ideas "<label>"`: show her each item exactly as brimm-video printed it, never summarised, as above; then ask her what to keep, change or drop |
+| "Show me the principles" / "Show me the Reel ideas" | `principles "<label>"` / `ideas "<label>"`: show her each item exactly as BRIMM Video Studio printed it, never summarised, as above; then ask her what to keep, change or drop |
 | "Keep 1 and 3" / "Drop 2" / "Change 3" | `principles "<label>" keep 1 3` / `principles "<label>" drop 2` / `principles "<label>" edit 3 --name "<words>"`, or `--category`, `--description` or `--example_application` in place of `--name`, in her words. |
 | "Done" | `finish "<label>"`. If it says something is not decided yet, ask her about it. When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page |
 | "The client agreed to Reel 2" | Before running it, tell her a dialog will open on her Mac, where she types who agreed and when, then clicks "They agreed"; Claude cannot press it, and Return presses Cancel. Then `reel "<label>" 2 --client-agreed`. |
@@ -223,7 +223,7 @@ More on these rows. Each rule starts with the row it belongs to:
 
 When a push answers that the timeline was shown before, ask her, in these words: "Did you change v<N> in Final Cut since it was shown?"
 - If not: run the push again with `--no-hand-edits`.
-- If yes: run it with `--hand-edits` and read her what it says: her changes stay in v<N>; brimm-video cannot build on them yet. Until it can, ask brimm-video for its changes first and make trims by hand last, or finish that timeline by hand.
+- If yes: run it with `--hand-edits` and read her what it says: her changes stay in v<N>; BRIMM Video Studio cannot build on them yet. Until it can, ask BRIMM Video Studio for its changes first and make trims by hand last, or finish that timeline by hand.
 - If the push says the changes are, or may be, on the other Mac: tell her so in plain words, and that whoever used it there can say. Run the push again with `--without-other-macs-changes` only if she says to go ahead without them. Never use `--no-hand-edits` for this: that is her answer about her own Final Cut.
 
 `text`, `graphic` and `cut` ask it too, before they read a time or her words on a timeline shown before: ask her the same question, and answer in the same way.
@@ -239,8 +239,8 @@ When `release "<episode>"` asks, ask her: "Did you change anything in Final Cut 
 ## Not ready yet: say so, and what to do by hand
 
 - A logo or a look on a Reel: "That comes with the brand templates, later. For now, do it by hand in Final Cut."
-- A Reel from Claude's suggestions, when it says this Mac isn't set up for HyperFrames: say brimm-video can't make it on this Mac, and that Jason sets the Mac up for HyperFrames, as "Show me the Reels" says. Never offer to make one here. A Reel of a private video with a client or a group, even once the client agreed: "That isn't ready yet; ask Jason."
-- Bringing in her hand edits: "That part of brimm-video isn't ready yet. Make your changes by hand last, after brimm-video's, or finish that timeline by hand in Final Cut."
+- A Reel from Claude's suggestions, when it says this Mac isn't set up for HyperFrames: say BRIMM Video Studio can't make it on this Mac, and that Jason sets the Mac up for HyperFrames, as "Show me the Reels" says. Never offer to make one here. A Reel of a private video with a client or a group, even once the client agreed: "That isn't ready yet; ask Jason."
+- Bringing in her hand edits: "That part of BRIMM Video Studio isn't ready yet. Make your changes by hand last, after BRIMM Video Studio's, or finish that timeline by hand in Final Cut."
 - Archiving, checking the setup, freeing space: "That isn't ready yet; ask Jason." (For space: Final Cut's File > Delete Generated Library Files.)
 
 ## By hand in Final Cut, in this order (tell her at the right moment)

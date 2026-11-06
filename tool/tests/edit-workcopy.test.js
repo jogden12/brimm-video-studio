@@ -24,7 +24,7 @@ import { FOLDER, ID, NAME, episodeAs, reread } from "./episodes.js";
 import { ANSWERED, AT, CLEARED, CLIP, COPY, FINISHED, LEFT, PLAIN, RAW, SESSION, SESSION_MARK, UNANSWERED, WAS_SESSION, atWork, dropbox, on, owedWithLocal, world } from "./workcopy-world.js";
 
 const WAITING_WORDS = "This video is waiting for its answer: say what it is first.";
-const LEFT_WORDS = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+const LEFT_WORDS = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const NOT_RAW_OR_CLIP = "It can't be used: it is not a raw video or an iPhone clip.";
 
@@ -248,11 +248,11 @@ describe("workcopy: an episode that cannot be gone on with", () => {
     assert.deepEqual([readResult(t.home, FOLDER, "workcopy"), t.calls], [null, []]);
     t.done();
   });
-  it("names a record a newer brimm-video wrote by its short id alone, as the gate does, and makes nothing", async () => {
+  it("names a record a newer BRIMM Video Studio wrote by its short id alone, as the gate does, and makes nothing", async () => {
     const { t, found, guarded } = world();
     writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
     const r = await on(t.ctx.deps, "workcopy", "--now", FOLDER);
-    assert.deepEqual([r.code, r.said, guarded], [1, [`That is an episode a newer brimm-video wrote (${ID.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`], []]);
+    assert.deepEqual([r.code, r.said, guarded], [1, [`That is an episode a newer BRIMM Video Studio wrote (${ID.slice(-6)}). Jason has a newer BRIMM Video Studio. Ask him to update this Mac.`], []]);
     t.done();
   });
 });

@@ -76,7 +76,7 @@ function namesIn(root) {
     unreadable, and `dueOf` reads it only when it is a finite number. */
 export function statusFault(s) {
   if (s === null || typeof s !== "object" || Array.isArray(s)) return "it is not an import's status";
-  if (s.version !== 1) return `it is version ${JSON.stringify(s.version)}, and this brimm-video reads version 1`;
+  if (s.version !== 1) return `it is version ${JSON.stringify(s.version)}, and this BRIMM Video Studio reads version 1`;
   const faults = [
     [typeof s.machine === "string" && s.machine !== "", "it names no Mac"],
     [Number.isInteger(s.pid) && s.pid > 0, "the run that wrote it cannot be read"],

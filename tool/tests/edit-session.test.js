@@ -411,7 +411,7 @@ describe("a Reel cut as a clip, before Reels had projects of their own", () => {
       ["preset", FOLDER, "reel", "1", "--look", "warm"]
     ];
     for (const argv of asks) {
-      assert.equal((await on(t.ctx.deps, ...argv)).text, "Reel 1 was cut as a clip before Reels had projects of their own, so brimm-video cannot change it: make this change by hand in Final Cut.", argv.join(" "));
+      assert.equal((await on(t.ctx.deps, ...argv)).text, "Reel 1 was cut as a clip before Reels had projects of their own, so BRIMM Video Studio cannot change it: make this change by hand in Final Cut.", argv.join(" "));
     }
     t.done();
   });

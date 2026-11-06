@@ -190,7 +190,7 @@ describe("spell … offers, with no answer: the card", () => {
     const CLEARED = { marked: AT, on: "Mac Studio", teachings: null, cleared: { at: AT, on: "Mac Studio", to: "finished", confirmed: "dialog" } };
     episodeFor(t, { record: answered("session", { name: { text: "Session, 2026-10-14", placeholder: false }, session: CLEARED, offers: { spellings: SPELLINGS }, reading: { kind: "session", model: "m", at: AT, on: "Mac Studio", account: "", outcome: "read" } }), files: LIGHT_FILES });
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers");
-    assert.deepEqual([r.code, r.text], [1, "Session, 2026-10-14 is a client or group session: brimm-video cannot finish a session yet. Nothing was written."]);
+    assert.deepEqual([r.code, r.text], [1, "Session, 2026-10-14 is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written."]);
     t.done();
   });
 });
@@ -682,7 +682,7 @@ describe("a later spell, when the video was answered as a session whose mark she
       const before = tree(t);
       for (const ask of [["add", "Ogdin", "Ogden"], ["add", "Ogdin", "Ogden", "pricing", "Pricing"]]) {
         const r = await on(t.ctx.deps, "spell", FOLDER, ...ask);
-        assert.deepEqual([r.code, r.text], [1, `${SESSION_NAME} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`], `setting ${version}: ${ask.join(" ")}`);
+        assert.deepEqual([r.code, r.text], [1, `${SESSION_NAME} is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written.`], `setting ${version}: ${ask.join(" ")}`);
       }
       assert.deepEqual(tree(t), before, `setting ${version}: the record as it was, and no spelling kept`);
       assert.deepEqual(reread(found).spellings, []);
@@ -697,7 +697,7 @@ describe("a later spell, when the video was answered as a session whose mark she
     writeFileSync(recordFile(found.folder, now.rev + 1), JSON.stringify({ ...now, rev: now.rev + 1, kind: "session", name: { text: SESSION_NAME, placeholder: false }, session: CLEARED, answer: { ...now.answer, at: NEWER } }));
     const before = tree(t);
     const r = await on(t.ctx.deps, "spell", FOLDER, "drop", "Ogdin");
-    assert.deepEqual([r.code, r.text], [1, `${SESSION_NAME} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`]);
+    assert.deepEqual([r.code, r.text], [1, `${SESSION_NAME} is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written.`]);
     assert.deepEqual(tree(t), before);
     assert.deepEqual(reread(found).spellings, [["Ogdin", "Ogden"]]);
     t.done();

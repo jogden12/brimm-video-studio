@@ -117,7 +117,7 @@ describe("the folder in Episodes a video goes into", () => {
   });
 });
 
-describe("which brimm-video wrote a record", () => {
+describe("which BRIMM Video Studio wrote a record", () => {
   it("is the short commit the checkout is at", () => {
     assert.match(commitOf(REPO), /^[0-9a-f]{7,}$/);
   });

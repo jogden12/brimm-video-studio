@@ -23,7 +23,7 @@ async function on(deps, ...argv) {
 
 const AT = "2026-10-20T15:00:00-05:00";
 const WAITING = "This video is waiting for its answer: say what it is first.";
-const LEFT_ALONE = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+const LEFT_ALONE = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac yet: ask Jason.";
 const REEL_NOT_AGREED = "A Reel is cut from a session only once you have noted the client's agreement.";
@@ -106,7 +106,7 @@ describe("the gate walks every command that names an episode", () => {
       t.done();
     }
   });
-  it("refuses a video left alone ('not for brimm-video') as it does one waiting, in words that do not say it waits for its answer", async () => {
+  it("refuses a video left alone ('not for BRIMM Video Studio') as it does one waiting, in words that do not say it waits for its answer", async () => {
     // `footage` (PR H5a) is let through for a video left alone, as for one waiting: it may be footage for a planned video all the same.
     for (const name of SCOPED.filter((n) => !UNANSWERED.includes(n) && !FOOTAGE.includes(n))) {
       const t = setup();
@@ -432,8 +432,8 @@ describe("the gate, an episode with a conflicted copy", () => {
   });
 });
 
-describe("the gate, a record of a layout newer than this brimm-video's", () => {
-  const NEWER = `That is an episode a newer brimm-video wrote (${ID.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`;
+describe("the gate, a record of a layout newer than this BRIMM Video Studio's", () => {
+  const NEWER = `That is an episode a newer BRIMM Video Studio wrote (${ID.slice(-6)}). Jason has a newer BRIMM Video Studio. Ask him to update this Mac.`;
   /** A newer brimm-video's record 2, of what kind this one cannot say. */
   function newer() {
     const t = setup();
@@ -672,13 +672,13 @@ describe("the gate, a record Dropbox is still bringing over", () => {
       }
     }
   });
-  it("is refused after the newer layout's words when the record read is a newer brimm-video's", async () => {
+  it("is refused after the newer layout's words when the record read is a newer BRIMM Video Studio's", async () => {
     const t = setup();
     const found = episodeFor(t);
     writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
     PENDING_FILE(found, 3, "{");
     const r = await on(light(t), "open", FOLDER);
-    assert.deepEqual(r.said, [`That is an episode a newer brimm-video wrote (${ID.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`]);
+    assert.deepEqual(r.said, [`That is an episode a newer BRIMM Video Studio wrote (${ID.slice(-6)}). Jason has a newer BRIMM Video Studio. Ask him to update this Mac.`]);
     t.done();
   });
   it("counts a conflicted copy of a record as the record, not as one above it", async () => {

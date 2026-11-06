@@ -1288,7 +1288,7 @@ describe("app: a video made from a plan, and its footage (PR H5b)", () => {
     assert.deepEqual(e.started, []);
     assert.deepEqual(e.said, [COMING, "It's open in HyperFrames.", BUTTONS]);
   });
-  it("leaves the footage of a part out when its episode holds a conflicted copy, or a newer brimm-video wrote its record, though its record in force shows no client (ruling 1)", async (c) => {
+  it("leaves the footage of a part out when its episode holds a conflicted copy, or a newer BRIMM Video Studio wrote its record, though its record in force shows no client (ruling 1)", async (c) => {
     const e = made(c);
     const conflicted = part(e, 2, "b-roll", 2, { made: true });
     const newer = part(e, 3, "screen", 4, { made: true });

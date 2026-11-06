@@ -312,7 +312,7 @@ describe("node edit.js open", () => {
     writeFileSync(recordFile(path, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
     const r = await t.run("open", "talk");
     assert.equal(r.code, 1);
-    assert.deepEqual(r.said, ["That is an episode a newer brimm-video wrote (000001). Jason has a newer brimm-video. Ask him to update this Mac."]);
+    assert.deepEqual(r.said, ["That is an episode a newer BRIMM Video Studio wrote (000001). Jason has a newer BRIMM Video Studio. Ask him to update this Mac."]);
     t.done();
   });
   it("names the episodes when it cannot tell which is meant, and how it is used when none is named", async () => {
@@ -387,13 +387,13 @@ describe("node edit.js push", () => {
     assert.deepEqual([r.code, r.said, t.opened, record(t).rev], [1, ['Did you change v1 of Talk in Final Cut since it was shown? Say "no changes" to show it again. If you did change it, say so.'], [], 2]);
     t.done();
   });
-  it("stops at a yes, and says how to work until brimm-video can build on hand edits; nothing is written and Final Cut is not asked", async () => {
+  it("stops at a yes, and says how to work until BRIMM Video Studio can build on hand edits; nothing is written and Final Cut is not asked", async () => {
     const t = setup();
     const { path } = imported(t);
     await t.run("push", "talk");
     t.opened.length = 0;
     const r = await t.run("push", "talk", "--hand-edits");
-    assert.deepEqual([r.code, r.said], [1, ["Your changes stay in v1 in Final Cut. This version of brimm-video cannot build on them yet. Until it can: ask for brimm-video's changes first and make trims by hand last, or finish that timeline by hand in v1."]]);
+    assert.deepEqual([r.code, r.said], [1, ["Your changes stay in v1 in Final Cut. This version of BRIMM Video Studio cannot build on them yet. Until it can: ask for BRIMM Video Studio's changes first and make trims by hand last, or finish that timeline by hand in v1."]]);
     assert.deepEqual([t.opened, record(t).rev, readdirSync(join(path, "edit")).sort()], [[], 2, ["main.v0.fcpxml", "main.v1.mac-studio.fcpxml"]]);
     t.done();
   });
@@ -807,13 +807,13 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
     assert.ok(r.text.includes(`  ${FOLDER}.fcpbundle: 2.0 MB`), r.text);
     t.done();
   });
-  it("5. lists an episode written by a newer brimm-video by its short id alone, without reading its fields", async () => {
+  it("5. lists an episode written by a newer BRIMM Video Studio by its short id alone, without reading its fields", async () => {
     const t = setup();
     const { path } = imported(t);
     writeFileSync(recordFile(path, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
     const r = await t.run("episodes");
     assert.equal(r.code, 0, r.text);
-    assert.ok(r.text.includes("Episodes, newest first:\n  An episode a newer brimm-video wrote (000001): Jason updates this Mac before it is changed here.\n"), r.text);
+    assert.ok(r.text.includes("Episodes, newest first:\n  An episode a newer BRIMM Video Studio wrote (000001): Jason updates this Mac before it is changed here.\n"), r.text);
     t.done();
   });
   it("6. says the offline step at the first open that completes, even when a bring came first, and only once", async () => {
@@ -875,7 +875,7 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
     assert.equal(findEpisode(ctx, "talk").name, FOLDER);
     t.done();
   });
-  it("21. ends a push of an episode written by a newer brimm-video with 1", async () => {
+  it("21. ends a push of an episode written by a newer BRIMM Video Studio with 1", async () => {
     const t = setup();
     const { path } = imported(t);
     writeFileSync(recordFile(path, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
@@ -1063,11 +1063,11 @@ describe("reading a library's Settings.plist", () => {
   });
 });
 
-describe("an episode a newer brimm-video wrote, named by its short id alone (Part L's review)", () => {
+describe("an episode a newer BRIMM Video Studio wrote, named by its short id alone (Part L's review)", () => {
   // A newer brimm-video may have written a session or a video not yet answered, whose folder's name is a client's: this one
   // cannot read its label, so it names the episode by its short id, and never by its folder.
   const JANE = "2026-10-20 Coaching call Jane Doe (Mac Studio)";
-  const NEWER = "an episode a newer brimm-video wrote (000002)";
+  const NEWER = "an episode a newer BRIMM Video Studio wrote (000002)";
   /** An episode of today's, and one whose newest record a newer brimm-video wrote, in a folder named for a client. */
   const both = () => {
     const t = setup();
@@ -1080,7 +1080,7 @@ describe("an episode a newer brimm-video wrote, named by its short id alone (Par
     const t = both();
     const r = await t.run("episodes");
     assert.equal(r.code, 0, r.text);
-    assert.ok(r.text.startsWith(`Episodes, newest first:\n  An episode a newer brimm-video wrote (000002): Jason updates this Mac before it is changed here.\n  Talk (a placeholder name): an episode of 2:00, in 2026-10-14 Sales call (Mac Studio), id 000001\n`), r.text);
+    assert.ok(r.text.startsWith(`Episodes, newest first:\n  An episode a newer BRIMM Video Studio wrote (000002): Jason updates this Mac before it is changed here.\n  Talk (a placeholder name): an episode of 2:00, in 2026-10-14 Sales call (Mac Studio), id 000001\n`), r.text);
     assert.ok(!r.text.includes("Jane"), r.text);
     t.done();
   });
@@ -1088,7 +1088,7 @@ describe("an episode a newer brimm-video wrote, named by its short id alone (Par
     const t = both();
     for (const said of ["000002", "coaching"]) {
       const r = await t.run("open", said);
-      assert.deepEqual([r.code, r.said], [1, ["That is an episode a newer brimm-video wrote (000002). Jason has a newer brimm-video. Ask him to update this Mac."]], said);
+      assert.deepEqual([r.code, r.said], [1, ["That is an episode a newer BRIMM Video Studio wrote (000002). Jason has a newer BRIMM Video Studio. Ask him to update this Mac."]], said);
     }
     t.done();
   });

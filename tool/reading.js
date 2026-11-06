@@ -295,7 +295,7 @@ export async function readEpisodeNow(ctx, found, deps) {
   const again = () => {
     const read = readEpisode(found.folder);
     if (!read.record) return { why: `The record of ${name} cannot be read now (${String(read.why).replace(/\.$/, "")}), so Claude did not read it.` };
-    if (read.newer) return { why: `${name} was written by a newer brimm-video meanwhile, so Claude did not read it. Ask Jason to update this Mac.` };
+    if (read.newer) return { why: `${name} was written by a newer BRIMM Video Studio meanwhile, so Claude did not read it. Ask Jason to update this Mac.` };
     // A record file above the one read, which Dropbox is still bringing over, may be another Mac's answer, or its session mark.
     if ((recordNumbers(found.folder)[0] || 0) > read.record.rev) return { why: `Dropbox is still bringing a newer record of ${name} over, so Claude did not read it.` };
     const why = notAsAnswered(read.record, asWas);

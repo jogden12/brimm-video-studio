@@ -54,7 +54,7 @@ const BOTH = "Say both answers: what it is, and whether it is a private session 
 const DISAGREE = "Those two answers disagree: say again whether it is a private session.";
 const ZOOM = "Ask first whether it is a client or group session: it came from Zoom, or is sound alone. Then answer again with --not-a-session.";
 const MARKED = 'This was marked a client or group session. Clearing the mark needs your click on this Mac: say "clear the session mark".';
-const LEFT_WORDS = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+const LEFT_WORDS = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
 const NOT_YET = "The video is not on this Mac yet: Dropbox is still bringing it over. Say it again in a minute.";
 const SESSION_NEXT = "Ask her whether she wants its teachings (principles and Reel ideas) or the transcript only.";
@@ -1266,7 +1266,7 @@ describe("kind --version-of", () => {
 });
 
 describe("leave", () => {
-  it("marks a video not for brimm-video, with who, where and when, says so, and asks nothing more", async () => {
+  it("marks a video not for BRIMM Video Studio, with who, where and when, says so, and asks nothing more", async () => {
     const t = setup();
     const found = waiting(t);
     const r = await on(t.ctx.deps, "leave", LABEL);
@@ -1284,7 +1284,7 @@ describe("leave", () => {
     assert.ok(before.some((line) => line.includes("a video waiting for your answer")), before.join("\n"));
     await on(t.ctx.deps, "leave", LABEL);
     const after = (await on(t.ctx.deps, "episodes")).said;
-    const heading = after.findIndex((line) => line.startsWith("Left alone, not for brimm-video"));
+    const heading = after.findIndex((line) => line.startsWith("Left alone, not for BRIMM Video Studio"));
     assert.ok(heading > 0, after.join("\n"));
     assert.equal(after[heading + 1], `  ${LABEL}: a video of 0:23, id ${SHORT}`);
     assert.equal(after.filter((line) => line.includes(`${LABEL}:`) && line.includes("waiting for your answer")).length, 0, after.join("\n"));

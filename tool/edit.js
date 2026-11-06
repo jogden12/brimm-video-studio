@@ -185,7 +185,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         none; --clear-session, with --again and what the video really is, clears a session
                                         mark: it asks on a dialog on this Mac, and only her click clears it. A raw video not
                                         on this Mac yet is read here only with --here, which brings it all over first
-  node edit.js leave "<video>"          leave a video that is not for brimm-video: it is not asked about again
+  node edit.js leave "<video>"          leave a video that is not for BRIMM Video Studio: it is not asked about again
   node edit.js which "<video>"          open the video in QuickTime Player on this Mac, to see which one it is
   node edit.js teachings "<session>" [--transcript-only]
                                         her answer for a client or group session: its teachings, which Claude reads once,
@@ -237,7 +237,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         Final Cut, it asks first whether it was changed there: --no-hand-edits says it
                                         was not, --hand-edits that it was (a version rendered last asks nothing). Shown
                                         last on the other Mac, it goes by what that Mac said when it handed the episode
-                                        over; --without-other-macs-changes goes ahead from that version as brimm-video
+                                        over; --without-other-macs-changes goes ahead from that version as BRIMM Video Studio
                                         made it
   node edit.js status ["<words>"]       what is running on this Mac, the imports, and what detached runs left
   node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped
@@ -299,7 +299,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         HyperFrames project in use, the recording's own), Claude's notes or its cut plan,
                                         whole. Of a video not yet answered, or a session, nothing is printed: a read-only
                                         copy of it opens in TextEdit on this Mac
-  node edit.js behind                   whether Jason has a newer brimm-video than this Mac's; and the copies show
+  node edit.js behind                   whether Jason has a newer BRIMM Video Studio than this Mac's; and the copies show
                                         opened are cleared. It refuses, and says to ask Jason, when her folder's lock is
                                         changed on this Mac: a settings.local.json in it, or hooks turned off
   node edit.js resolve "<episode>" [--keep A|B]
@@ -487,10 +487,10 @@ const listed = (things) => (things.length < 2 ? things.join("") : `${things.slic
 /** An episode whose record a newer brimm-video wrote, as it is named: by its short id alone, "an episode a newer brimm-video
     wrote (3fa9c1)". Never by its folder, whose name may be a client's: that record may be a session or a video not yet
     answered, and this brimm-video cannot read the label a newer one names it by. */
-const newerName = (record) => `an episode a newer brimm-video wrote (${record.id.slice(-6)})`;
+const newerName = (record) => `an episode a newer BRIMM Video Studio wrote (${record.id.slice(-6)})`;
 
 /** Why a command ends at an episode written by a newer brimm-video, in the words it has always used: by its short id alone. */
-const newerWhy = (record) => `That is ${newerName(record)}. Jason has a newer brimm-video. Ask him to update this Mac.`;
+const newerWhy = (record) => `That is ${newerName(record)}. Jason has a newer BRIMM Video Studio. Ask him to update this Mac.`;
 
 /** What the gate says when the record in force is not the newest file in the episode's record folder, for a record that may be a
     session: Dropbox is still bringing the newer one, or it is one this code rejects. */
@@ -1088,7 +1088,7 @@ export async function episodes(ctx) {
     for (const e of shown) for (const line of episodeLines(ctx, e, false, all, links)) say(line);
   }
   if (left.length) {
-    say("Left alone, not for brimm-video:");
+    say("Left alone, not for BRIMM Video Studio:");
     for (const e of left) for (const line of episodeLines(ctx, e, true, all, links)) say(line);
   }
   // The videos in each Mac's drop folder.
@@ -1800,7 +1800,7 @@ function guardOf(ctx, found, part, { noHandEdits = false, handEdits = false, wit
   const top = pushed.reduce((best, p) => (!best || p.v > best.v ? p : best), null);
   const other = top && top.v === last && top.on !== ctx.machine ? top.on : "";
   // A yes to the guard always stops it, whatever else is said with it.
-  if (last && handEdits) return { why: `Your changes stay in v${last} in Final Cut. This version of brimm-video cannot build on them yet. Until it can: ask for brimm-video's changes first and make trims by hand last, or finish that timeline by hand in v${last}.` };
+  if (last && handEdits) return { why: `Your changes stay in v${last} in Final Cut. This version of BRIMM Video Studio cannot build on them yet. Until it can: ask for BRIMM Video Studio's changes first and make trims by hand last, or finish that timeline by hand in v${last}.` };
   if (other) {
     const key = part === "main" ? "main" : `reel ${part.reel}`;
     const named = part === "main" ? "the main video" : `reel ${part.reel}`;
@@ -3353,11 +3353,11 @@ async function behind(ctx) {
   const added = open ? studioAllowOf(ctx.settings) : [];
   const run = ctx.deps.run || runProgram;
   const git = (...args) => run("/usr/bin/git", ["-C", ctx.settings.checkout, ...args], { limit: BEHIND_MS, out: 100 });
-  const could = "Could not check for a newer brimm-video. Is this Mac offline?";
+  const could = "Could not check for a newer BRIMM Video Studio. Is this Mac offline?";
   // Her folder is looked at whatever git answers: that needs no network.
   const stale = studioStale(ctx);
   const folderLine = () => {
-    if (stale) ctx.say(`Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${stale.node}, then start a new session in her Claude folder)`);
+    if (stale) ctx.say(`Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${stale.node}, then start a new session in her Claude folder)`);
     // On a Mac that opens episodes in the app, the pinned command line must be in its toolchain folder (architecture 6.1: `behind` also
     // checks the toolchain). This needs no network either, so it is said whatever git answered. It is not said when the lock refused first.
     const differs = appOf(ctx.settings) ? toolchainDiffers(toolchainHolds(ctx.home)) : "";
@@ -3373,8 +3373,8 @@ async function behind(ctx) {
   const counted = await git("rev-list", "--count", "HEAD..origin/main");
   const n = Number(String(counted.stdout || "").trim());
   if (counted.code !== 0 || counted.outOfTime || !/^\d+$/.test(String(counted.stdout || "").trim())) ctx.say(could);
-  else if (n === 0) ctx.say("This Mac has the newest brimm-video.");
-  else ctx.say(`Jason has a newer brimm-video (${n} change${n === 1 ? "" : "s"}). Ask him to update this Mac when it suits.`);
+  else if (n === 0) ctx.say("This Mac has the newest BRIMM Video Studio.");
+  else ctx.say(`Jason has a newer BRIMM Video Studio (${n} change${n === 1 ? "" : "s"}). Ask him to update this Mac when it suits.`);
   return folderLine();
 }
 
@@ -4479,8 +4479,8 @@ function layerStart(ctx, words, { writes = true } = {}) {
   if (claimHeld(ctx, got.record)) return { code: refuse(ctx, claimHeld(ctx, got.record)) };
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   if (running && running !== "bring") return { code: refuse(ctx, stoppedWords(ctx, found, got.record, { generic: `${running} is running for this episode. Say "how far is it?", and try again when it is done.`, again: "Try again then." })) };
-  if (target.base) return { code: refuse(ctx, "This timeline was changed by hand in Final Cut and taken in. brimm-video does not change a hand-edited timeline yet: make this change by hand in Final Cut.") };
-  if (part !== "main" && piecesOf(found, part, ctx).old) return { code: refuse(ctx, `Reel ${part.reel} was cut as a clip before Reels had projects of their own, so brimm-video cannot change it: make this change by hand in Final Cut.`) };
+  if (target.base) return { code: refuse(ctx, "This timeline was changed by hand in Final Cut and taken in. BRIMM Video Studio does not change a hand-edited timeline yet: make this change by hand in Final Cut.") };
+  if (part !== "main" && piecesOf(found, part, ctx).old) return { code: refuse(ctx, `Reel ${part.reel} was cut as a clip before Reels had projects of their own, so BRIMM Video Studio cannot change it: make this change by hand in Final Cut.`) };
   return { found, part, target, words: left };
 }
 
@@ -6651,11 +6651,11 @@ export async function whichCommand(ctx, rest) {
 const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
 /** What `name` says of a name for a session that holds a name brimm-video can see in it (spec 8, "A session's name"), or that is
     its video file's name, and what an edit of hers says of words that hold one. */
-const nameHolds = (word) => `That name holds "${word}", a name brimm-video can see in this session: give it another.`;
+const nameHolds = (word) => `That name holds "${word}", a name BRIMM Video Studio can see in this session: give it another.`;
 const FILES_NAME = "That is the name of the video's file: give the session another name.";
 const NO_FILE_NAME = "That name cannot name the session's files: give it another.";
 const NAME_TOO_LONG = `That name is longer than ${SESSION_NAME_MOST} characters: give a shorter one.`;
-const editHolds = (word) => `Those words hold "${word}", a name brimm-video can see in this session: say it another way.`;
+const editHolds = (word) => `Those words hold "${word}", a name BRIMM Video Studio can see in this session: say it another way.`;
 /** What is said while what a session's names are seen from is not whole on this Mac, after it was read through. */
 const WORDS_COMING = "Dropbox is still bringing its words over to this Mac: say it again in a minute.";
 /** What `finish` says of a session on a Mac that hands off version 1, which has no session kind. */

@@ -257,7 +257,7 @@ describe("the footage a plan's parts give its project (footageOf, withMaterial)"
     assert.deepEqual(footageOf(plan(), [broll, screen]).map((f) => f.path), ["media/screen-4.mp4"]);
     t.done();
   });
-  it("gives no footage of a part a newer brimm-video wrote, listed with newer: true", () => {
+  it("gives no footage of a part a newer BRIMM Video Studio wrote, listed with newer: true", () => {
     const t = setup();
     const broll = listed(t, 1, "b-roll", 2);
     assert.deepEqual(footageOf(plan(), [{ ...broll, newer: true }]), []);
@@ -329,7 +329,7 @@ describe("the footage a plan's parts give its project (footageOf, withMaterial)"
     const why = footageWithheld(plan(), [going, conflicted, { ...newer, newer: true }, stale, waits, talking, other, lost]).map(({ part, why: said }) => [part.record.label, said]);
     assert.deepEqual(why, [
       ["Video 2", "its episode holds a conflicted copy"],
-      ["Video 3", "a newer brimm-video wrote its record"],
+      ["Video 3", "a newer BRIMM Video Studio wrote its record"],
       ["Video 4", "its shot is not a shot of its kind in the plan any more"],
       ["Video 5", "her client has not agreed to it"],
       ["Video 8", "its record cannot be read"]
@@ -624,14 +624,14 @@ describe("plan … join, a talking part that must not be joined (ruling 1)", () 
     assert.deepEqual([snapshot(t), t.started], [before, []]);
     t.done();
   });
-  it("refuses a talking part a newer brimm-video wrote, which partsOf does not list, in the newer record's words, with its label first", async () => {
+  it("refuses a talking part a newer BRIMM Video Studio wrote, which partsOf does not list, in the newer record's words, with its label first", async () => {
     const t = world();
     await planned(t);
     const one = part(t, 1, { words: SCRIPT[0].split(" ") });
     writeFileSync(recordFile(one.folder, 3), recordText({ ...one.record, rev: 3, version: 9 }));
     const before = snapshot(t);
     const r = await on(depsOf(t), "plan", TITLE, "join");
-    assert.deepEqual([r.code, r.said], [1, [`${labelOf(1)}: That is an episode a newer brimm-video wrote (a11111). Jason has a newer brimm-video. Ask him to update this Mac.`]]);
+    assert.deepEqual([r.code, r.said], [1, [`${labelOf(1)}: That is an episode a newer BRIMM Video Studio wrote (a11111). Jason has a newer BRIMM Video Studio. Ask him to update this Mac.`]]);
     assert.deepEqual([snapshot(t), t.started], [before, []]);
     t.done();
   });
@@ -669,7 +669,7 @@ describe("plan … join and join --now refuse in the same words (the plan's ruli
     const why = reason.startsWith(`The footage of "${TITLE}" couldn't be made into one video: `) ? reason.slice(`The footage of "${TITLE}" couldn't be made into one video: `.length).replace(/\.$/, "") : reason;
     return { said, run, why };
   }
-  it("says no talking part, a talking part held by a conflict, and a talking part a newer brimm-video wrote, in one set of words", async () => {
+  it("says no talking part, a talking part held by a conflict, and a talking part a newer BRIMM Video Studio wrote, in one set of words", async () => {
     const t = world();
     await planned(t);
     const none = await both(t, { ids: [idOf(1)] });
@@ -1182,7 +1182,7 @@ describe("the join run, what stops it (PR H5b)", () => {
     assert.equal(readEpisode(folder).record.rev, plan.rev);
     t.done();
   });
-  it("refuses at the run what the command refused: a talking part in conflict or written by a newer brimm-video, in the words of the conflict, with its label first", async () => {
+  it("refuses at the run what the command refused: a talking part in conflict or written by a newer BRIMM Video Studio, in the words of the conflict, with its label first", async () => {
     const t = world();
     const folder = await planned(t);
     const one = part(t, 1, { words: SCRIPT[0].split(" ") });
@@ -1197,7 +1197,7 @@ describe("the join run, what stops it (PR H5b)", () => {
     rmSync(join(one.folder, "record", "0002 (Sallie's conflicted copy 2026-11-04).json"));
     writeFileSync(recordFile(one.folder, 3), recordText({ ...one.record, rev: 3, version: 9 }));
     await joinRun(t, [one.record.id]);
-    assert.deepEqual(resultOf(t).failed, [COULD_NOT(`${labelOf(1)}: That is an episode a newer brimm-video wrote (a11111). Jason has a newer brimm-video. Ask him to update this Mac`)]);
+    assert.deepEqual(resultOf(t).failed, [COULD_NOT(`${labelOf(1)}: That is an episode a newer BRIMM Video Studio wrote (a11111). Jason has a newer BRIMM Video Studio. Ask him to update this Mac`)]);
     assert.equal(planOf(t).kind, null);
     assert.ok(existsSync(folder) && !existsSync(join(folder, "Take 1.mov")) && Object.keys(before).length > 0);
     t.done();
@@ -1639,7 +1639,7 @@ describe("the footage copies, which `workcopy` makes for a video made from a pla
     assert.equal(ffmpegRuns(t).length, 3, "the main copy and the screen recording were made already: only the b-roll was made");
     t.done();
   });
-  it("makes no copy of a part whose episode holds a conflicted copy or whose record a newer brimm-video wrote, though its record in force shows no client, and says so (ruling 1)", async () => {
+  it("makes no copy of a part whose episode holds a conflicted copy or whose record a newer BRIMM Video Studio wrote, though its record in force shows no client, and says so (ruling 1)", async () => {
     const t = world({ joined: "60.000000" });
     const { parts } = await made(t, { parts: [[2, "b-roll", 2, false], [3, "screen", 4, false], [4, "b-roll", 5, false]] });
     // Dropbox kept a conflicted copy of the b-roll's record that says it shows a client; a newer brimm-video wrote the third.
@@ -1649,7 +1649,7 @@ describe("the footage copies, which `workcopy` makes for a video made from a pla
     assert.equal(r.code, 0, r.text);
     assert.deepEqual(copies(t).filter((n) => n.startsWith("footage-")).map((n) => n.split("-")[1]), ["4", "4"]);
     assert.ok(r.said.some((line) => line.includes(labelOf(2)) && line.includes("its episode holds a conflicted copy")), r.text);
-    assert.ok(r.said.some((line) => line.includes(labelOf(4)) && line.includes("a newer brimm-video wrote its record")), r.text);
+    assert.ok(r.said.some((line) => line.includes(labelOf(4)) && line.includes("a newer BRIMM Video Studio wrote its record")), r.text);
     t.done();
   });
   it("makes no copy of a part whose shot is no longer a shot of its kind in the plan (ruling 4)", async () => {
@@ -1823,7 +1823,7 @@ describe("the README on the join (PR H5b)", () => {
   it("has a row for `plan … join`, with the order it says, the refusals, the run, the copies and what the project is given", () => {
     const row = rows.find((line) => line.startsWith('| `plan "<planned>" join ["<video>"…]` |')) || "";
     for (const words of ['`The talking parts of "Too many SKUs", in the order of its script:`', "Once they are joined, no more talking parts can be added.", '`"Too many SKUs" is being made from its footage. A notice comes when it is ready.`',
-      "`join --now <the plan's folder> --parts <id>[,<id>…]`", "Those aren't the talking parts of", "a talking part held by a conflict in its episode or a record a newer brimm-video wrote", "talking part 2 is 3840 by 2160, and talking part 1 is 1920 by 1080", "has no sound, so it can't be a talking part", "a video with no sound takes no kind",
+      "`join --now <the plan's folder> --parts <id>[,<id>…]`", "Those aren't the talking parts of", "a talking part held by a conflict in its episode or a record a newer BRIMM Video Studio wrote", "talking part 2 is 3840 by 2160, and talking part 1 is 1920 by 1080", "has no sound, so it can't be a talking part", "a video with no sound takes no kind",
       "`Making the footage for HyperFrames`", "`--footage` makes these alone", "a copy in which ffprobe finds a sound stream is never put in place", "`media/b-roll-<n>.mp4`", "her client has not agreed to", "Its footage is still being made for HyperFrames: say \"open it in HyperFrames\" again when it is done."]) assert.ok(row.includes(words), words);
   });
   it("lists the two modules, and says the gate's words for a plan as they are now", () => {

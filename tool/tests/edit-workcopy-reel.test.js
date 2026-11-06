@@ -28,7 +28,7 @@ import { FOLDER, ID, NAME, episodeAs, reread } from "./episodes.js";
 import { ANSWERED, CLEARED, CLIP, COPY, FINISHED, LEFT, PLAIN, RAW, SESSION, SESSION_MARK, UNANSWERED, WAS_SESSION, atWork, dropbox, on, owedWithLocal, world } from "./workcopy-world.js";
 
 const WAITING_WORDS = "This video is waiting for its answer: say what it is first.";
-const LEFT_WORDS = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+const LEFT_WORDS = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const NOT_A_REEL_KIND = "It can't be used: it is not a raw or a finished video.";
 const BOX = { x: 0.41, y: 0.22, w: 0.18, h: 0.3 };

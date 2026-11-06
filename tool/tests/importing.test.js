@@ -73,7 +73,7 @@ describe("an import's status file", () => {
     const t = setup();
     const broken = [
       [null, "it is not an import's status"],
-      [{ ...STATUS, version: 2 }, "it is version 2, and this brimm-video reads version 1"],
+      [{ ...STATUS, version: 2 }, "it is version 2, and this BRIMM Video Studio reads version 1"],
       [{ ...STATUS, machine: "" }, "it names no Mac"],
       [{ ...STATUS, pid: "4242" }, "the run that wrote it cannot be read"],
       [{ ...STATUS, video: "Unedited Video/Mac Studio/Pricing talk.mp4" }, "it names no video"],
@@ -138,7 +138,7 @@ describe("the status files, read back", () => {
     writeFileSync(join(t.folder, "notes.txt"), "not a status");
     assert.deepEqual(readStatuses(t.root, NOW), [
       { file: join(t.folder, "Cut short.mp4 (Mac Studio) 1.json"), status: null, stale: false, n: 1, why: "it could not be read (it is not whole)" },
-      { file: join(t.folder, "Old.mp4 (Mac Studio) 1.json"), status: null, stale: false, n: 1, why: "it could not be read (it is version 2, and this brimm-video reads version 1)" },
+      { file: join(t.folder, "Old.mp4 (Mac Studio) 1.json"), status: null, stale: false, n: 1, why: "it could not be read (it is version 2, and this BRIMM Video Studio reads version 1)" },
       { file: join(t.folder, "Pricing talk.mp4 (Mac Studio) 1.json"), status: ago(1), stale: false, n: 1 }
     ]);
     t.done();

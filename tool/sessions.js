@@ -213,7 +213,7 @@ function throughout(mid) {
   return lettered.length >= 20 && lettered.filter(capital).length * 2 > lettered.length;
 }
 
-const SKIPPED = "The transcriber wrote this recording with capitals throughout, so brimm-video did not check its capitalised words for names: only the speakers' names and the file's name were checked.";
+const SKIPPED = "The transcriber wrote this recording with capitals throughout, so BRIMM Video Studio did not check its capitalised words for names: only the speakers' names and the file's name were checked.";
 
 /** The line that says the capitalised words of a recording were not checked for names, because the transcriber capitalised it
     throughout, and nothing for any other recording. */
@@ -321,7 +321,7 @@ const SESSION_LISTS = [["principles", "Principle"], ["recurringPrinciples", "Rec
 const LISTS = [...SESSION_LISTS, ["reelsToFilm", "Reel idea"]];
 /** The keys of an item that hold no words. */
 const NO_WORDS = new Set(["n", "approved", "refilm", "principle"]);
-const NAME_SEEN = "it held a name brimm-video can see";
+const NAME_SEEN = "it held a name BRIMM Video Studio can see";
 
 /** A word as a name and a field's word are compared: in lowercase, and with its accents taken off (the word written apart, NFD,
     and its marks left out), so that "José" is "jose". */
@@ -475,9 +475,9 @@ export function approvedSession(session, names) {
   };
   const { kept, dropped } = checkNames(chosen, names);
   const refusals = [
-    ...kept.principles.filter((p) => !filled(p.name)).map((p) => `Principle ${p.n}'s name held a name brimm-video took out: give it another name, or drop it.`),
-    ...kept.recurringPrinciples.filter((r) => !filled(r.text)).map((r) => `Recurring principle ${r.n}'s text held a name brimm-video took out: say it another way, or drop it.`),
-    ...kept.reelIdeas.flatMap((r) => ["idea", "words"].filter((field) => !filled(r[field])).map((field) => `Reel idea ${r.n}'s ${field} held a name brimm-video took out: say it another way, or drop it.`))
+    ...kept.principles.filter((p) => !filled(p.name)).map((p) => `Principle ${p.n}'s name held a name BRIMM Video Studio took out: give it another name, or drop it.`),
+    ...kept.recurringPrinciples.filter((r) => !filled(r.text)).map((r) => `Recurring principle ${r.n}'s text held a name BRIMM Video Studio took out: say it another way, or drop it.`),
+    ...kept.reelIdeas.flatMap((r) => ["idea", "words"].filter((field) => !filled(r[field])).map((field) => `Reel idea ${r.n}'s ${field} held a name BRIMM Video Studio took out: say it another way, or drop it.`))
   ];
   if (refusals.length) return { why: refusals.join("\n") };
   const principles = kept.principles.map((p) => ({

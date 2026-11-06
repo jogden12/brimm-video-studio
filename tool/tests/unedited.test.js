@@ -3374,13 +3374,13 @@ describe("the videos of an episode's video, made again from its cut plan (--from
     assert.equal(existsSync(lock), false);
     t.done();
   });
-  it("stops, and makes nothing, when a newer brimm-video wrote the episode's record (PR 19's review)", async () => {
+  it("stops, and makes nothing, when a newer BRIMM Video Studio wrote the episode's record (PR 19's review)", async () => {
     const { t, folder, video } = await imported();
     const { record } = readEpisode(folder);
     writeFileSync(join(folder, "record", "0002.json"), JSON.stringify({ ...record, version: NEWEST_VERSION + 1, rev: 2 }, null, 2) + "\n");
     const r = await stopped(t, folder, video);
     assert.deepEqual([r.stopped, r.calls, r.clones], [true, 0, 0]);
-    assert.equal(r.message, "its episode was written by a newer brimm-video. Ask Jason to update this Mac");
+    assert.equal(r.message, "its episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac");
     t.done();
   });
   it("stops, and makes nothing, while this Mac has the late check of the episode's import still to make", async () => {
@@ -5144,8 +5144,8 @@ describe("the light import", () => {
     assert.equal(r.message, "This episode was imported lightly: its videos are made when it is read, not from the plan.");
     t.done();
   });
-  it("says a newer brimm-video wrote the record, and not that it was imported lightly, when it did, with or without --out", async () => {
-    const NEWER = "its episode was written by a newer brimm-video. Ask Jason to update this Mac";
+  it("says a newer BRIMM Video Studio wrote the record, and not that it was imported lightly, when it did, with or without --out", async () => {
+    const NEWER = "its episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac";
     const t = episodeImport();
     await uneditedFolder(t.drop, t.deps);
     const folder = t.episodeFolder();
@@ -5162,13 +5162,13 @@ describe("the light import", () => {
     assert.deepEqual([t.calls, t.guarded, listAll(folder), existsSync(out)], [[], [], before, false]);
     t.done();
   });
-  it("is said in the README: --from-plan refuses, with or without --out, an episode a newer brimm-video wrote and one imported lightly", () => {
+  it("is said in the README: --from-plan refuses, with or without --out, an episode a newer BRIMM Video Studio wrote and one imported lightly", () => {
     const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
     const part = /\n\*\*`--from-plan` of an episode's video\*\*([^\n]*)\n/.exec(readme);
     assert.ok(part, "the README's paragraph on --from-plan of an episode's video");
     // One sentence says both refusals, and that --out changes neither.
     const said = part[1].split(/(?<=\.) /).find((sentence) => sentence.includes("with or without `--out`")) || "";
-    assert.ok(said.includes("a newer brimm-video wrote") && said.includes("imported lightly"), part[1]);
+    assert.ok(said.includes("a newer BRIMM Video Studio wrote") && said.includes("imported lightly"), part[1]);
   });
   it("still makes the videos again of an episode the heavy import made, whatever the setting says now", async () => {
     const t = episodeImport({ light: false });
