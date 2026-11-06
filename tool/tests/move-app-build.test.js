@@ -1,6 +1,6 @@
 // The "Move to Studio" app's launcher and its build. The build is run from a copy of tool/move-app/ committed into a temporary
 // git repo, so its checks of the commit see a repo made for the test, with stand-ins first on its PATH for swiftc, security,
-// codesign, osascript and open: each records "name args" into a `ran` file. No test runs the real security, codesign,
+// codesign, xcrun, osascript and open: each records "name args" into a `ran` file. No test runs the real security, codesign,
 // osascript, open or xcrun, and nothing is sent to Apple. The one real compiler call is the typecheck of the launcher, and only
 // where swiftc is. The tests need a Mac (plutil, ditto, xattr); anywhere else they skip themselves and say why.
 import { describe, it } from "node:test";
@@ -63,6 +63,7 @@ function world({ identities = [IDENTITY], behind = false } = {}) {
   standIn(bin, "swiftc", 'while [ $# -gt 0 ]; do if [ "$1" = -o ]; then shift; printf x > "$1"; fi; shift; done\n');
   standIn(bin, "security", `printf '%s\\n' '${identities.join("' '")}' '     ${identities.length} valid identities found'\n`);
   standIn(bin, "codesign", "");
+  standIn(bin, "xcrun", "");
   standIn(bin, "osascript", "");
   standIn(bin, "open", "");
   const env = { PATH: `${bin}:/usr/bin:/bin:/usr/sbin:/sbin`, HOME: join(dir, "home"), TMPDIR: tmp, RAN: join(dir, "ran") };
@@ -106,7 +107,9 @@ describe("open-in-terminal.zsh", { skip: notAMac }, () => {
       const command = join(folder, "Move to Studio.command");
       assert.ok(statSync(command).mode & 0o100, "the .command can be run");
       assert.equal(run("xattr", [command]).stdout.includes("com.apple.quarantine"), false);
-      assert.equal(run("xattr", [join(folder, "move.zsh")]).stdout.includes("com.apple.quarantine"), false);
+      // The copied script may carry what marks it likes: zsh runs it anyway. What keeps Terminal quiet is the fresh .command above, and
+      // nothing here clears marks (the step that did was not needed).
+      assert.equal(readFileSync(join(MOVE_APP, "open-in-terminal.zsh"), "utf8").includes("xattr"), false);
       assert.ok(readFileSync(command, "utf8").includes(`/bin/zsh '${folder}/move.zsh' --commit ${commit}\n`), readFileSync(command, "utf8"));
       assert.deepEqual(readFileSync(join(folder, "move.zsh")), readFileSync(join(res, "move.zsh")));
       assert.equal(w.ran().includes("osascript"), false);
@@ -187,7 +190,13 @@ describe("build-app.sh", { skip: notAMac }, () => {
       assert.deepEqual(added, []);
       assert.deepEqual(readdirSync(w.tmp), [], "its temporary folder is taken away");
       assert.deepEqual(readdirSync(w.out).sort(), ["Move to Studio.app", "Move to Studio.zip"]);
-      assert.equal(/^codesign /m.test(w.ran()), false, "no signing without --sign");
+      // Without --sign the bundle is still sealed, with an ad-hoc signature, so that another Mac sees a plain "rejected" and not "damaged".
+      const calls = w.ran().split("\n");
+      const adhoc = calls.indexOf(`codesign --force --sign - --timestamp=none ${w.app}`);
+      assert.ok(adhoc >= 0, w.ran());
+      assert.equal(calls[adhoc + 1], `codesign --verify --strict --verbose=2 ${w.app}`);
+      assert.equal(/^codesign .*--options runtime|^codesign .*--timestamp /m.test(w.ran()), false, "no Developer ID signing, and nothing sent to Apple's timestamp server");
+      assert.equal(/^security /m.test(w.ran()), false, "the keychain is not asked without --sign");
     } finally {
       w.cleanup();
     }
@@ -213,6 +222,7 @@ describe("build-app.sh", { skip: notAMac }, () => {
       const r = behind.build("--out", behind.out);
       assert.equal(r.status, 1);
       assert.match(r.stdout + r.stderr, /not on origin\/main/);
+      assert.match(r.stdout + r.stderr, /git fetch/);
       assert.equal(existsSync(behind.app), false);
       assert.equal(behind.build("--out", behind.out, "--any-commit").status, 0);
       assert.equal(existsSync(behind.app), true);
@@ -283,18 +293,29 @@ describe("build-app.sh", { skip: notAMac }, () => {
       assert.ok(r.stdout.includes(`xcrun notarytool submit "${w.zip}" --keychain-profile "BRIMM notary" --wait`), r.stdout);
       assert.ok(r.stdout.includes(`xcrun stapler staple "${w.app}"`));
       assert.ok(r.stdout.includes(`ditto -c -k --keepParent "${w.app}" "${w.zip}"`));
+      // The stand-in xcrun would note any call: there is none.
       for (const word of ["xcrun", "notarytool", "stapler"]) assert.equal(w.ran().includes(word), false);
-      assert.equal(w.ran().includes("ditto"), false);
+      // And the script's own text: those two commands are only ever inside a print line.
+      const source = readFileSync(join(MOVE_APP, "build-app.sh"), "utf8").split("\n");
+      for (const word of ["notarytool submit", "stapler staple"]) {
+        const lines = source.filter((l) => l.includes(word) && !l.trimStart().startsWith("#"));
+        assert.ok(lines.length > 0, word);
+        for (const l of lines) assert.ok(l.trimStart().startsWith("print "), `only printed: ${l}`);
+      }
     } finally {
       w.cleanup();
     }
   });
 
-  it("says it is not signed when --sign is not given", () => {
+  it("says it is not signed with the Developer ID when --sign is not given, and what to expect from AirDrop and a USB stick", () => {
     const w = world();
     try {
       const r = w.build("--out", w.out);
-      assert.match(r.stdout, /not signed/i);
+      assert.match(r.stdout, /not signed with the Developer ID/i);
+      assert.match(r.stdout, /AirDrop/);
+      assert.match(r.stdout, /System Settings › Privacy & Security › Open Anyway/);
+      assert.match(r.stdout, /USB stick it asks nothing/);
+      assert.match(r.stdout, /--sign for the copy that goes to Sallie/);
       assert.equal(r.stdout.includes("notarytool"), false);
     } finally {
       w.cleanup();
@@ -302,7 +323,9 @@ describe("build-app.sh", { skip: notAMac }, () => {
   });
 });
 
-describe("launcher.swift", { skip: notAMac || run("/usr/bin/which", ["swiftc"]).status !== 0 ? notAMac || "there is no swiftc here" : false }, () => {
+// The one real program the tests probe: whether a compiler is there. xcrun --find says, on a Mac with the command line tools.
+const swiftc = notAMac ? { status: 1, stdout: "" } : run("xcrun", ["--find", "swiftc"]);
+describe("launcher.swift", { skip: notAMac || (swiftc.status !== 0 ? "there is no swiftc here" : false) }, () => {
   it("the launcher compiles", () => {
     const cache = mkdtempSync(join(tmpdir(), "brimm-swift-cache-"));
     try {

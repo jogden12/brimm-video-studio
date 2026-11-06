@@ -1,7 +1,8 @@
 #!/bin/zsh
 # Move to Studio.app's helper: it opens Terminal on the move script, with this app's commit.
-# The script is copied, with the .command that runs it, into a fresh temporary folder, and Terminal opens that: a copy made with
-# cp -X carries no quarantine mark, so macOS runs it with no question, even when the app itself is running from a temporary place.
+# The script is copied, with the .command that runs it, into a fresh temporary folder, and Terminal opens that. Terminal asks
+# nothing because the .command is written fresh by printf here, so it carries no quarantine mark (cp -X also leaves the marks
+# behind). zsh runs the copied script whatever marks it carries.
 # If anything fails it says so in an alert and ends with 1.
 
 here=${0:A:h}
@@ -19,7 +20,6 @@ read -r commit < $here/commit.txt
 folder=$(mktemp -d "${TMPDIR:-/tmp}/move-to-studio.XXXXXX") || alert "A temporary folder could not be made."
 folder=${folder%/}
 cp -X $here/move.zsh $folder/move.zsh || alert "A temporary copy could not be made."
-xattr -c $folder/move.zsh 2>/dev/null   # cp -X is meant to leave marks behind, but a quarantine mark can still come across on some Macs
 command_file=$folder/"Move to Studio.command"
 move_file=$folder/move.zsh
 printf '#!/bin/zsh\n/bin/zsh %s --commit %s\n' "${(qq)move_file}" $commit > $command_file || alert "A temporary file could not be written."

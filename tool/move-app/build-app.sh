@@ -2,7 +2,8 @@
 # Builds "Move to Studio.app" and its zip, for Sallie's laptop. Run on a Mac with the Xcode command line tools:
 #   zsh tool/move-app/build-app.sh --out <folder> [--sign] [--any-commit]
 # It makes <folder>/Move to Studio.app and <folder>/Move to Studio.zip, replacing only those two from an earlier build. Beyond
-# <folder> it writes only a temporary folder (swiftc's module cache), which it takes away.
+# <folder> it writes only a temporary folder (swiftc's module cache), which it takes away. Without --sign the bundle gets an
+# ad-hoc seal (codesign --sign -), which is local and sends nothing.
 #   --sign        signs the app with the one "Developer ID Application" identity in the keychain, found by name (nothing secret
 #                 is in any file), with the hardened runtime and a secure timestamp. codesign --timestamp asks Apple's timestamp
 #                 server for the time, which signing for notarization needs; that is all it sends.
@@ -34,7 +35,7 @@ if [[ -n $(git -C $repo status --porcelain -- tool/move-app) ]]; then
 fi
 commit=$(git -C $repo rev-parse HEAD) || { print "This is not a git checkout."; exit 1 }
 if (( ! any_commit )) && ! git -C $repo merge-base --is-ancestor HEAD refs/remotes/origin/main 2>/dev/null; then
-  print "This commit (${commit[1,7]}) is not on origin/main. Merge it first, or use --any-commit."
+  print "This commit (${commit[1,7]}) is not on origin/main. Run git fetch first, to see what GitHub has. If it still is not there, merge it first, or use --any-commit."
   exit 1
 fi
 
@@ -90,6 +91,12 @@ print -r -- $commit > $app/Contents/Resources/commit.txt
 if (( sign )); then
   codesign --force --options runtime --timestamp --sign $identity $app || { print "Signing failed."; exit 1 }
   codesign --verify --strict --verbose=2 $app || { print "The signature did not check."; exit 1 }
+else
+  # The linker leaves only an ad-hoc signature on the program, and nothing seals the bundle's resources, so another Mac would call
+  # the copy "damaged". A whole-bundle ad-hoc signature verifies, and gets the plain "rejected" (macOS's Open Anyway). It is local:
+  # no identity, and no timestamp server, so nothing is sent.
+  codesign --force --sign - --timestamp=none $app || { print "The app could not be sealed."; exit 1 }
+  codesign --verify --strict --verbose=2 $app || { print "The seal did not check."; exit 1 }
 fi
 
 ditto -c -k --keepParent $app $zip || { print "The zip could not be made."; exit 1 }
@@ -105,5 +112,5 @@ if (( sign )); then
   print "  xcrun stapler staple \"$app\""
   print "  ditto -c -k --keepParent \"$app\" \"$zip\""
 else
-  print "Not signed: this copy opens on this Mac only. Use --sign for the copy that goes to Sallie."
+  print "Not signed with the Developer ID. From AirDrop, macOS asks once: System Settings › Privacy & Security › Open Anyway. From a USB stick it asks nothing. Use --sign for the copy that goes to Sallie."
 fi
