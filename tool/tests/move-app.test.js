@@ -445,6 +445,19 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
       assert.equal(term.status, 143);
       assert.ok(!existsSync(partial));
 
+      // Closing the Terminal window (HUP) stops it the same way, and takes the partial away before it says anything: the terminal may be gone.
+      mkdirSync(partial);
+      const hup = run("on_hup");
+      assert.equal(hup.status, 129, hup.stdout + hup.stderr);
+      assert.match(hup.stdout, /Stopped\. This run changed:\n {2}- put a thing in place\nDouble-click Move to Studio again to go on from here\./);
+      assert.ok(!existsSync(partial));
+      const order = spawnSync("/bin/zsh", ["-c", 'source "$1"; changed=(); PARTIAL="$2"; mkdir -p "$PARTIAL"; made_partial=1; say() { [[ -d "$PARTIAL" ]] && echo STILL-THERE; return 0; }; on_hup', "move", MOVE, partial], { encoding: "utf8", env: { HOME: home, PATH: "/usr/bin:/bin" } });
+      assert.ok(!order.stdout.includes("STILL-THERE"), "the partial is gone before the first thing said");
+      // The same for Ctrl-C.
+      mkdirSync(partial);
+      const intOrder = spawnSync("/bin/zsh", ["-c", 'source "$1"; changed=(); PARTIAL="$2"; mkdir -p "$PARTIAL"; made_partial=1; say() { [[ -d "$PARTIAL" ]] && echo STILL-THERE; return 0; }; on_int', "move", MOVE, partial], { encoding: "utf8", env: { HOME: home, PATH: "/usr/bin:/bin" } });
+      assert.ok(!intOrder.stdout.includes("STILL-THERE"));
+
       // A partial this run did not make is left alone.
       mkdirSync(partial);
       const other = spawnSync("/bin/zsh", ["-c", 'source "$1"; PARTIAL="$2"; on_int', "move", MOVE, partial], { encoding: "utf8", env: { HOME: home, PATH: "/usr/bin:/bin" } });

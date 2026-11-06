@@ -63,7 +63,7 @@ R43_VERSION=""       # the report's line for check 43: the HyperFrames app's ver
 R44_PRINT="" R44_RAN="" R44_AGENT="" R44_APP=""   # the report's lines for check 44: the print's lines that matter, the install's last lines, the one-shot check, and turning HyperFrames on
 
 say() {
-  print -r -- "$@"
+  print -r -- "$@" 2>/dev/null || true
   [[ -z "$LOGGING" ]] || print -r -- "$@" >> "$LOG"
   return 0
 }
@@ -87,15 +87,17 @@ stop_here() {
   summary
   exit 1
 }
-# Ctrl-C and a kill: a clone this run was part way through is taken away, so the next run starts clean.
+# Ctrl-C, a kill, and closing the Terminal window (HUP): a clone this run was part way through is taken away, so the next run
+# starts clean. That comes before the first word said, since after a closed window there may be nobody to say it to.
 interrupted() {
-  say ""
   [[ -z "$made_partial" || -z "$PARTIAL" ]] || rm -rf "$PARTIAL"
+  say ""
   summary
   exit $1
 }
 on_int() { interrupted 130; }
 on_term() { interrupted 143; }
+on_hup() { interrupted 129; }
 
 # Asks to go ahead with what $1 says will change. One line is read from the terminal: y or yes, in any case, with spaces round
 # it, goes ahead; anything else, an empty line, or the end of input stops. Under --print nothing is asked.
@@ -868,6 +870,7 @@ main() {
   refuse_unless_her_laptop
   trap on_int INT
   trap on_term TERM
+  trap on_hup HUP
   if [[ -z "$PRINT_ONLY" ]]; then
     mkdir -p "${LOG:h}"
     print -r -- "--- $(date '+%Y-%m-%d %H:%M:%S') ---" >> "$LOG"
