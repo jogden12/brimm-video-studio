@@ -352,7 +352,7 @@ const picked = (n, candidate) => (next) => {
     that is made stays, whether or not the app opened.
     `ctx` is what edit.js gives a command, { home, machine, now, alive, say, start, settings }. `found` is { name, folder }, and
     `record` the episode's record. `deps` are as openInApp's: `save(next)`, which writes the next record and resolves 0 when it has
-    (checked first, so that nothing is made without one), `cli`, `node`, `guidance`, `spawn`, `env`, `chat` and `running`.
+    (checked first, so that nothing is made without one), `cli`, `node`, `guidance`, `spawn`, `env` and `chat`.
     The Reel's project in the record's `app` whose folder is on this Mac is opened again, with one more time it was opened, and
     nothing is made or started. A Reel project the record has whose folder is not here is replaced, when this Mac made it: by the
     folder at the project's name when one is there that the record does not know (adoptReel), and otherwise by a new project

@@ -146,7 +146,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         then to open it there; once it is open, when she last asked the app for something;
                                         and once it is exported, to hand it off. Once its finish has written the hand-off
                                         it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's
-                                        copies (a spelling, handing it off again and handing it over wait until then),
+                                        copies (a spelling and handing it off again wait until then),
                                         though the finish goes on checking them for a quarter of an hour. On a Mac
                                         that Jason has not set up for HyperFrames it says that this Mac is not set up,
                                         where it would say to open the video there or that its video is being made. A
@@ -1382,7 +1382,7 @@ const finishedHasNoProject = (name) => `${name} was finished by your editor, so 
 /** What `app` says of an episode whose main project in use was made on another Mac and is not on this one (app.js
     projectOnAnotherMac): everything done in it is on that Mac, so a new project here would drop it from the record. One Mac edits a
     video from start to finish. Named as app's other lines name the video; `of` is "Reel 2 of " for a Reel's project. */
-const projectIsElsewhere = (name, on, of = "") => `The HyperFrames project of ${of}${name} is on ${on}. Carry on there.`;
+const projectIsElsewhere = (name, on, of = "") => `The HyperFrames project of ${of}${name} is on ${spokenMac(on)}. Carry on there.`;
 
 /** The refusal for a project of the record that is a session clip's folder on this Mac, however the record spells its name (PR 15's rule, as
     free.js has it; the review of PR 11, I4), or that cannot be told from one, or "": decided before anything is claimed or opened. `key` says
@@ -6718,7 +6718,7 @@ function guideProject(ctx, e, r, downloads) {
   const [newest] = toldTurns(turnsOf(historyTail(dir)), { tz: ctx.deps.app?.tz }, 1);
   let exported = false;
   try {
-    const seen = exportsFound({ home: ctx.home, name: e.name, folder: e.folder, record: { ...r, app: { ...r.app, projects: [main] } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads });
+    const seen = exportsFound({ home: ctx.home, name: e.name, record: { ...r, app: { ...r.app, projects: [main] } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads });
     if (!seen.unreadable) {
       // An export she is asked to choose between (two began in one minute) is an export waiting to be handed off: `finish` asks which.
       const looked = lookForExports(seen.input, {}, { rest: false });
@@ -6755,7 +6755,7 @@ function guideReels(ctx, e, r, downloads) {
   const based = reelsBase(e.folder, r, { isWhole: ctx.isWhole, read: regularJson });
   if (!based.onFile && !based.coming) return [];
   try {
-    const seen = exportsFound({ home: ctx.home, name: e.name, folder: e.folder, record: { ...r, app: { ...r.app, projects: here } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads });
+    const seen = exportsFound({ home: ctx.home, name: e.name, record: { ...r, app: { ...r.app, projects: here } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads });
     if (seen.unreadable) return [];
     const looked = lookForExports(seen.input, {}, { rest: false });
     const numberOf = (key) => Number(key.slice(5));
@@ -6956,7 +6956,7 @@ function checkSentence({ due, took }) {
 
 /** What is said after it, in the guide's answers: the check needs nothing of hers, but the commands that would write into the episode are
     stopped until it is made (stoppedWords): a spelling and handing the video off again. */
-const ON_THE_CHECK = "You do not need to wait for it. A spelling, handing it off again and handing it over wait until then.";
+const ON_THE_CHECK = "You do not need to wait for it. A spelling and handing it off again wait until then.";
 
 /** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old }. Each item (guide.js Item) is a
     video in a drop folder, or an answered video, with what was read of it and its one next step, from her notes on this Mac

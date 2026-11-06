@@ -1,6 +1,6 @@
 ---
 name: brimm-edit
-description: Use for anything about The BRIMM's videos and episodes: what is waiting, what to do with a new video and what comes next, step by step, what a new video is, what Claude found in it, client or group sessions and their teachings, opening an episode, what was done in HyperFrames and its versions, its name and title, Reels, showing it in Final Cut, finishing it, handing it over, the reference folder of post styles, a script she has and the plan made from it, the footage dropped for it, conflicts, and how far something has got.
+description: Use for anything about The BRIMM's videos and episodes: what is waiting, what to do with a new video and what comes next, step by step, what a new video is, what Claude found in it, client or group sessions and their teachings, opening an episode, what was done in HyperFrames and its versions, its name and title, Reels, showing it in Final Cut, finishing it, the reference folder of post styles, a script she has and the plan made from it, the footage dropped for it, conflicts, and how far something has got.
 ---
 
 # brimm-edit

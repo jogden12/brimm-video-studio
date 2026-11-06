@@ -20,7 +20,7 @@ export const THIS_PROCESS = (pid) => pid === process.pid;
 export const studio = (due, where = "the export out of Downloads") => `Studio checks Dropbox's copies at ${clockAt(due)}${where ? `, and then takes ${where}` : ""}.`;
 /** What the guide says of what waits for the check: she need not wait for it, but a spelling, handing the video off again and handing it
     over do (each is stopped until it is made: edit-checking-refusals.test.js). */
-export const WAITS = "You do not need to wait for it. A spelling, handing it off again and handing it over wait until then.";
+export const WAITS = "You do not need to wait for it. A spelling and handing it off again wait until then.";
 /** The line the guide adds after its own lines. */
 export const check = (due, where) => `${studio(due, where)} ${WAITS}`;
 

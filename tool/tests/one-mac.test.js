@@ -12,7 +12,7 @@ import { lookForExports, fixedZone } from "../exports.js";
 import { PIN } from "../hyperframes.js";
 import { episodeWork, writeSettings } from "../settings.js";
 import { workCopyKey, workCopyPaths } from "../workcopy.js";
-import { setup, episodeFor, reread, listAll, EDITED, FOLDER, NAME } from "./episodes.js";
+import { setup, episodeFor, reread, listAll, EDITED, FOLDER, NAME, PROJECT } from "./episodes.js";
 import { episode } from "./phase4.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
@@ -187,6 +187,20 @@ describe("a new record keeps released: null", () => {
     assert.equal(claimed.editing.by, "Mac Studio");
     assert.equal(episodeFault(claimed, 4), "");
     t.done();
+    // The finish's claim (edit-two-macs.test.js's world): the record it writes keeps released: null and has this Mac editing.
+    const u = setup();
+    const done = episodeFor(u, { record: EDITED });
+    u.shared(`${PROJECT.main}.mp4`, 2000);
+    u.shared(`${PROJECT.main}.fcpxmld`, 3000);
+    u.shared(`${PROJECT["reel 1"]}.mov`, 2000);
+    u.shared(`${PROJECT["reel 1"]}.fcpxmld`, 3000);
+    u.shared(`${PROJECT["reel 2"]}.mov`, 2000);
+    const finished = await on(u.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2");
+    assert.equal(finished.code, 0, finished.text);
+    assert.equal(reread(done).released, null);
+    assert.equal(reread(done).editing.by, "Mac Studio");
+    assert.equal(episodeFault(reread(done), 4), "");
+    u.done();
     const w = appWorld({ record: { ...RAW, kind: null, answer: { ...ANSWERED, state: "needs your answer", guess: "raw" } } });
     const kind = await on(w.t.ctx.deps, "kind", FOLDER, "raw", "--private", "no");
     assert.equal(kind.code, 0, kind.text);

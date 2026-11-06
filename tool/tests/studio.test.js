@@ -292,7 +292,7 @@ describe("her folder's settings", () => {
     assert.match(row, /If it is bringing files over first, wait until "how far is it\?" says the bring has ended, then run `open "<episode>"` again;/);
     // A bring that failed says why, and to open it: she is told, and nothing is run again until she says so (review #24-2).
     assert.match(row, /; if it says some files are not here, tell her why, in plain words, and try again only when she says to\.$/);
-    assert.doesNotMatch(skill, /--take-over|take it over|take an episode over|`release|The release question|I'm done with it for now|hand-edits-stay/);
+    assert.doesNotMatch(skill, /--take-over|take it over|take an episode over|`release|The release question|I'm done with it for now|hand-edits-stay|handing it over/);
     assert.ok(!commandsIn(skill).some((span) => span.split(" ")[0] === "release"), "the skill runs release");
   });
   it("have the skill open an episode in HyperFrames with app, and tell her of another Mac's project in the words app says it in", () => {
@@ -1328,7 +1328,7 @@ describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-2
   });
   it("has neither skill say anything of release or of taking an episode over (Phase 2, F5)", () => {
     for (const skill of [strictSkill, openSkill()]) {
-      assert.doesNotMatch(skill, /`release|The release question|--take-over|take it over/);
+      assert.doesNotMatch(skill, /`release|The release question|--take-over|take it over|handing it over/);
       assert.ok(!skill.includes('When `release "<episode>"` asks'), "the release question is gone");
     }
   });

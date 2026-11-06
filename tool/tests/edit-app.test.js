@@ -538,7 +538,7 @@ describe("app: what the bring it starts says when it is done", () => {
   });
 });
 
-describe("app: a project that is on another Mac, and that Mac has not handed over, is not made again here (plan PR 11: a snapshot makes it possible, edit-take-over-app.test.js)", () => {
+describe("app: a project that is on another Mac, is not made again here (one Mac edits a video from start to finish)", () => {
   const KEPT = "kept for an earlier kind";
   const PROJECT_NAME = "Pricing- what to charge- main 3fa9c1";
   const THERE = (on) => `The HyperFrames project of ${NAME} is on ${on}. Carry on there.`;
@@ -576,7 +576,7 @@ describe("app: a project that is on another Mac, and that Mac has not handed ove
   it("names the Mac the project was made on, and the video as app's other lines name it", async () => {
     const { t } = world({ record: { ...madeOn("Mac mini"), name: { text: "Budget talk", placeholder: false } } });
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual(r.said, ["The HyperFrames project of Budget talk is on Mac mini. Carry on there."]);
+    assert.deepEqual(r.said, ["The HyperFrames project of Budget talk is on the Mac mini. Carry on there."]);
     t.done();
   });
   it("comes after the settings and the command line: a Mac not set up, or without the command line, says so first", async () => {
