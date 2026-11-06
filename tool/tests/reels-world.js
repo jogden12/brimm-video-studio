@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { wordsOf } from "../cuts.js";
 import { finishFinished } from "../finish.js";
-import { reelEntries, reelsFile } from "../reels.js";
+import { reelEntries, reelsFile } from "../reel-candidates.js";
 import { SRT, toldOf } from "./episodes.js";
 import { EPISODE, episodeFiles } from "./phase4.js";
 import { VIDEO, world } from "./exports-world.js";

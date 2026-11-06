@@ -2,7 +2,7 @@
 // recorded at each push, and what finish must ask before it starts. Plain data: no disk.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { partsOf, kindOf, lookFor, firstWordsMatch, unkeptParts } from "../parts.js";
+import { partsOf, kindOf, lookFor, unkeptParts } from "../parts.js";
 
 const push = (v, project, at = "2026-10-20T10:00:00-05:00") => ({ v, at, on: "Mac Studio", file: `edit/x.v${v}.mac-studio.fcpxml`, project });
 const RECORD = {
@@ -191,17 +191,5 @@ describe("unkeptParts: the hand work only this Mac's Final Cut library holds", (
   });
   it("names no part pushed only on the other Mac", () => {
     assert.deepEqual(unkeptParts({ main: { pushed: [{ ...pushedHere(5, MAIN5), on: "Sallie's laptop" }] }, reels: [], finished: null }, "Mac Studio"), []);
-  });
-});
-
-describe("firstWordsMatch", () => {
-  it("is true when at least four of the six first words expected are heard, in order, near the start", () => {
-    assert.equal(firstWordsMatch("Welcome to the show. Today we are going", "Welcome to the show today we are going to talk"), true);
-    assert.equal(firstWordsMatch("Welcome to the show. Today we are going", "Okay. Welcome to the show, today we"), true);
-    assert.equal(firstWordsMatch("Welcome to the show. Today we are going", "So the first thing you need to do"), false);
-  });
-  it("needs every expected word when fewer than six are expected", () => {
-    assert.equal(firstWordsMatch("Know your costs", "Know your costs."), true);
-    assert.equal(firstWordsMatch("Know your costs", "Know your price"), false);
   });
 });

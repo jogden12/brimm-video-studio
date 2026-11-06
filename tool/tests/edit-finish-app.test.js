@@ -10,7 +10,7 @@ import { editMain, finishEpisode } from "../edit.js";
 import { localStamp, recordFile, recordText } from "../episode.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED } from "../exports.js";
 import { finishNow } from "../finish.js";
-import { reelsFile } from "../reels.js";
+import { reelsFile } from "../reel-candidates.js";
 import { episodeWork, writeSettings } from "../settings.js";
 import { EDITED, FOLDER, PROJECT, episodeFor, reread, setup } from "./episodes.js";
 import { EPISODE } from "./phase4.js";

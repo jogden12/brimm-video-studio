@@ -30,7 +30,7 @@ import { applyDecisions, clipRanges, notesText, pausesOfPlan } from "./notes.js"
 import { keptSpans, roughRate, roughCaptions, planText, probeArgs, factsOf, streamsOf } from "./cuts.js";
 import { stampedText } from "./lib.js";
 import { stretchesOf, fitReel } from "./reframe.js";
-import { reelsFile, reelEntries, REELS_FILE } from "./reels.js";
+import { reelsFile, reelEntries, REELS_FILE } from "./reel-candidates.js";
 import { readEpisode, writeEpisode, localStamp, kindOf, shownName, heldElsewhere, undone, recordNumbers } from "./episode.js";
 import { commitOf, thisCheckout } from "./filing.js";
 import { keepCheckInStep, ownCheckOnly } from "./late-wait.js";

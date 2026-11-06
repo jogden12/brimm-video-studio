@@ -10,6 +10,7 @@
 // Only projectChange and (below) exportsFound read the disk, and only the folders they are given. Nothing here writes anywhere.
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
+import { tokens } from "./shared/text.js";
 import { KEPT, isMain } from "./app.js";
 import { historyTail } from "./app-history.js";
 import { isDay } from "./episode.js";
@@ -563,4 +564,22 @@ export function colourNote(colour, name) {
   if (!colour) return `${name} has no colour tags: check by eye that its colours look right.`;
   if (isHdr(colour)) return `${name} is tagged as HDR colour, which most players show washed out: check it by eye, and export it again in standard colour if it looks wrong.`;
   return "";
+}
+
+/** Does a finished video start with the words its part is expected to start with? At least four of the six first words
+    expected (or every one, when fewer are expected) must be among its first twenty words, in the same order. A hand trim at
+    the start changes them, so a "no" is for a person to check by eye, and stops nothing. */
+export function firstWordsMatch(expected, heard) {
+  const want = tokens(expected).slice(0, 6);
+  const got = tokens(heard).slice(0, 20);
+  let at = 0;
+  let found = 0;
+  for (const w of want) {
+    const k = got.indexOf(w, at);
+    if (k !== -1) {
+      found += 1;
+      at = k + 1;
+    }
+  }
+  return want.length > 0 && found >= Math.min(4, want.length);
 }

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { downloadsFolder, episodeWork } from "../settings.js";
 import { turnsOf } from "../hyperframes.js";
-import { exportNameOf, metaNameOf, metaOf, beganAt, fixedZone, lastChangeOf, projectChange, lookForExports, exportsFound, isExportOf, shapeFault, soundFault, colourNote } from "../exports.js";
+import { exportNameOf, metaNameOf, metaOf, beganAt, fixedZone, lastChangeOf, projectChange, lookForExports, exportsFound, isExportOf, shapeFault, soundFault, colourNote, firstWordsMatch } from "../exports.js";
 
 const MAIN = "Pricing- what to charge- main 3fa9c1";
 const fixture = (name) => readFileSync(new URL(`./fixtures/hyperframes-0.8.208/exports/${name}`, import.meta.url), "utf8");
@@ -809,5 +809,17 @@ describe("E6. isExportOf: a name the app makes for the project", () => {
     assert.equal(isExportOf(`${MAIN} 2 2026-10-20 13.56.mp4`, MAIN), false);
     assert.equal(isExportOf(`${MAIN} 2026-10-20 13.56.mp4`, ""), false);
     assert.equal(isExportOf(null, MAIN), false);
+  });
+});
+
+describe("firstWordsMatch", () => {
+  it("is true when at least four of the six first words expected are heard, in order, near the start", () => {
+    assert.equal(firstWordsMatch("Welcome to the show. Today we are going", "Welcome to the show today we are going to talk"), true);
+    assert.equal(firstWordsMatch("Welcome to the show. Today we are going", "Okay. Welcome to the show, today we"), true);
+    assert.equal(firstWordsMatch("Welcome to the show. Today we are going", "So the first thing you need to do"), false);
+  });
+  it("needs every expected word when fewer than six are expected", () => {
+    assert.equal(firstWordsMatch("Know your costs", "Know your costs."), true);
+    assert.equal(firstWordsMatch("Know your costs", "Know your price"), false);
   });
 });

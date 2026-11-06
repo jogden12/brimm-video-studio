@@ -4,7 +4,6 @@
 // pushes (spec section 2), never by the episode's current name, which may have changed since. And what finish must ask
 // before it can start (spec section 5, steps 1 and 2). Plain data: nothing here touches a disk.
 import { extname } from "node:path";
-import { tokens } from "./shared/text.js";
 
 const VIDEOS = [".mov", ".mp4", ".m4v"];
 const EXPORTS = [".fcpxmld", ".fcpxml"];
@@ -155,22 +154,4 @@ export function unkeptParts(record, machine) {
     const finishedV = Number.isInteger(kept.v) ? kept.v : (pushed.find((p) => nfc(p.project) === nfc(stem(String(kept.file).split("/").pop()))) || {}).v;
     return !(finishedV >= newest);
   }).map((part) => part.label);
-}
-
-/** Does a finished video start with the words its part is expected to start with? At least four of the six first words
-    expected (or every one, when fewer are expected) must be among its first twenty words, in the same order. A hand trim at
-    the start changes them, so a "no" is for a person to check by eye, and stops nothing. */
-export function firstWordsMatch(expected, heard) {
-  const want = tokens(expected).slice(0, 6);
-  const got = tokens(heard).slice(0, 20);
-  let at = 0;
-  let found = 0;
-  for (const w of want) {
-    const k = got.indexOf(w, at);
-    if (k !== -1) {
-      found += 1;
-      at = k + 1;
-    }
-  }
-  return want.length > 0 && found >= Math.min(4, want.length);
 }

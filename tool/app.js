@@ -75,7 +75,7 @@ import { aboutLeft, progressFolder, readRates } from "./progress.js";
 import { graphicCuesOfPlan, graphicCuesOfRecord } from "./graphic-cues.js";
 import { VOICEOVER, projectCues, projectFiles, projectName, writeProject } from "./project.js";
 import { refNamesOf, withReferences } from "./references.js";
-import { REELS_FILE } from "./reels.js";
+import { REELS_FILE } from "./reel-candidates.js";
 import { appHandoverOn, episodeWork } from "./settings.js";
 import { teleprompterText } from "./sentences.js";
 import { ASIDE_DIR, asidePlace, makerOf, markedOlder, momentText, olderThan, rebuildProject, snapshotOf, snapshotsOf } from "./snapshot.js";

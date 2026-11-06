@@ -75,7 +75,7 @@ import { startDetached, runDetached, runningCommand, runningRun, readResult, tak
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
-import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
+import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reel-candidates.js";
 import { readStatuses, importState, removeStatus, shownStep } from "./importing.js";
 import { localSource, projectWaits, readingCheckAt, readingWaitsUntil, waitFacts } from "./late-wait.js";
 import { fileId, heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";

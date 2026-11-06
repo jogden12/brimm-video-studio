@@ -112,7 +112,8 @@ describe("push reel", () => {
 // crops, and a preview of each; its Reels' timelines are made from them (reels.js reelProject), not from a clip.
 import { wordsOf, pausesOf, phrasesOf, cutPlan } from "../cuts.js";
 import { readNotes, applyDecisions, clipRanges } from "../notes.js";
-import { reelCandidates, reelsFile, reelEntries, previewPath, REEL_FRAME } from "../reels.js";
+import { previewPath, REEL_FRAME } from "../reels.js";
+import { reelCandidates, reelsFile, reelEntries } from "../reel-candidates.js";
 import { pickReels } from "../edit.js";
 import { TOLD, PAUSES, probed } from "./fixtures.js";
 import { NAME } from "./episodes.js";

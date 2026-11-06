@@ -23,7 +23,8 @@ import { NEWEST_VERSION, readEpisode, acceptRev, writeEpisode, undone, recordFil
 import { fileId, importIdOf, noteSeen, writePending } from "../filing.js";
 import { readStatuses, writeStatus } from "../importing.js";
 import { lockOf } from "../detached.js";
-import { previewLimits, previewSteps, reelCandidates, reelEntries } from "../reels.js";
+import { previewLimits, previewSteps } from "../reels.js";
+import { reelCandidates, reelEntries } from "../reel-candidates.js";
 import { fingerprintOf } from "../versions.js";
 import { zoomTimeOf } from "../kinds.js";
 

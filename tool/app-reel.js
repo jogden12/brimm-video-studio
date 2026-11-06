@@ -57,7 +57,7 @@ import { graphicCuesOf, graphicCuesOfPlan, REEL_CUES_MOST, SHOT_KINDS } from "./
 import { cliPath } from "./hyperframes.js";
 import { projectCues, projectFiles, projectName, writeProject } from "./project.js";
 import { refNamesOf, withReferences } from "./references.js";
-import { REELS_FILE, readReels, reelEntries } from "./reels.js";
+import { REELS_FILE, readReels, reelEntries } from "./reel-candidates.js";
 import { episodeWork } from "./settings.js";
 import { snapshotOf } from "./snapshot.js";
 import {
