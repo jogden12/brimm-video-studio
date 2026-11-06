@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { videoClock } from "../video-clock.js";
 import { timelineAt, lengthOf } from "../clock.js";
 import { EPISODE, episode } from "./phase4.js";
+import { saidWords } from "../project.js";
 
 const AT = "2026-10-20T15:00:00-05:00";
 const ANSWERED = { state: "answered", guess: null, seen: "", came: "camera", by: "Mac Studio", on: "Mac Studio", at: AT, private: "no" };
@@ -67,5 +68,19 @@ describe("videoClock", () => {
     assert.deepEqual(videoClock(gone.found, gone.t.ctx, "main"), { why: "Pricing talk.words.json is not in the episode's folder." });
     t.done();
     gone.t.done();
+  });
+  it("places an iPhone clip's words with no phrases, whatever plan file is in the folder", () => {
+    const { t, found } = episode({ version: 3, kind: "short video" });
+    const words = JSON.parse(EPISODE.files["Pricing talk.words.json"]).words;
+    const got = videoClock(found, t.ctx, "main");
+    assert.deepEqual(got.words, saidWords(words, []));
+    assert.notDeepEqual(got.words, saidWords(words, JSON.parse(EPISODE.files["Pricing talk.cut-plan.json"]).phrases));
+    t.done();
+  });
+  it("says why when the cut plan is listed but cannot be read", () => {
+    const { t, found } = episode(raw());
+    writeFileSync(join(found.folder, "Pricing talk.cut-plan.json"), "{");
+    assert.deepEqual(videoClock(found, t.ctx, "main"), { why: "Pricing talk.cut-plan.json or Pricing talk.words.json cannot be read." });
+    t.done();
   });
 });

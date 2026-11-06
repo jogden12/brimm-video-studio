@@ -8,7 +8,7 @@ import { spellWords } from "./spelling.js";
 import { saidWords } from "./project.js";
 
 /** The video's clock for a part of an episode: `part` is "main" or { reel: n }; `found` holds `folder` and `record`.
-    - { clock, on, words, plan, span? }: `clock` is one piece over the whole video ({ at, from, to } as clock.js clockOfRanges gives
+    - { clock, on, words, raw, plan, span? }: `clock` is one piece over the whole video ({ at, from, to } as clock.js clockOfRanges gives
       them, so clockText and timelineAt read it), or over a Reel's suggestion, whose clock starts at its start and runs to its
       end; `on` is "the video" or "Reel <n>"; `words` are the video's own words from its words file, placed as they are said
       (project.js saidWords, as the HyperFrames project's transcript has them) and spelled as the record spells them; `plan` is
@@ -38,7 +38,7 @@ export function videoClock(found, ctx, part = "main") {
   try {
     if (existsSync(join(folder, planFile))) plan = JSON.parse(readFileSync(join(folder, planFile), "utf8")) || {};
   } catch (e) {
-    plan = {};
+    return { why: `${planFile} or ${wordsFile} cannot be read.` };
   }
   let file;
   try {
@@ -47,8 +47,10 @@ export function videoClock(found, ctx, part = "main") {
     return { why: `${wordsFile} cannot be read.` };
   }
   if (!file || !Array.isArray(file.words)) return { why: `${wordsFile} cannot be read.` };
-  const words = spellWords(saidWords(file.words, Array.isArray(plan.phrases) ? plan.phrases : []), record.spellings);
+  // An iPhone clip has no cut plan of its own: its words are placed with no phrases, as the project places them, so a stray plan file moves none.
+  const phrases = record.kind !== "short video" && Array.isArray(plan.phrases) ? plan.phrases : [];
+  const words = spellWords(saidWords(file.words, phrases), record.spellings);
   const length = Number.isFinite(file.duration) && file.duration > 0 ? file.duration : words.reduce((end, w) => Math.max(end, w.end), 0);
   const [from, to] = stretch ? [stretch.from, stretch.to] : [0, length];
-  return { clock: [{ at: 0, from, to }], on: stretch ? `Reel ${part.reel}` : "the video", words, plan, ...(stretch ? { span: stretch } : {}) };
+  return { clock: [{ at: 0, from, to }], on: stretch ? `Reel ${part.reel}` : "the video", words, raw: file.words, plan, ...(stretch ? { span: stretch } : {}) };
 }

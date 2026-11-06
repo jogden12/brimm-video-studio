@@ -96,7 +96,7 @@ import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, le
 import { pictureNameFault, pictureSize } from "./pictures.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
 import { spelled } from "./final-transcript.js";
-import { GRAPHIC_CUE_KINDS, SHOT_KINDS, graphicCuesOf, keptIndexes, keptPhraseSpans, placeGraphicCues } from "./graphic-cues.js";
+import { GRAPHIC_CUE_KINDS, SHOT_KINDS, graphicCuesOf, graphicCuesOfPlan, graphicCuesOfRecord, keptIndexes, keptPhraseSpans, placeGraphicCues } from "./graphic-cues.js";
 import { handoffText, handoffFault } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, VERSION_2 } from "./handoff-v2.js";
 import { presetOf } from "./layers.js";
@@ -121,7 +121,7 @@ import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, footageFailed, guidanceOf, isMain as inUse, mediaOf, notWholeYet, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
-import { VOICEOVER } from "./project.js";
+import { VOICEOVER, projectCues } from "./project.js";
 import { openVoiceProject, voiceProjectWhy } from "./explainer.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelNotWholeYet, reelStretch, reelWhy } from "./app-reel.js";
 import { historyTail, mainProjectDir, toldTurns, turnTime, versionsOf, whatHappened } from "./app-history.js";
@@ -5301,6 +5301,8 @@ function graphicIdeas(read, spellings = []) {
     of its video guide, planned.cues read again as a package's are, every kind of cue among them, since its project is made from those and from the
     reading's none; any other video lists the reading's (graphicIdeas). Each is placed on the words of the recording as the reading's are. */
 function ideasFor(read, record) {
+  // An iPhone clip's are the ones its reading kept in its record, placed with no phrases, as its project places them (app.js).
+  if (record.kind === "short video") return graphicIdeas({ ...read, plan: { ...read.plan, phrases: [], claude: { graphicCues: graphicCuesOfRecord(record) } } }, record.spellings);
   if (!isFromPlan(record)) return graphicIdeas(read, record.spellings);
   const cues = graphicCuesOf(record.planned.cues, { kinds: GRAPHIC_CUE_KINDS }).cues;
   return graphicIdeas({ ...read, plan: { ...read.plan, claude: { ...(read.plan.claude || {}), graphicCues: cues } } }, record.spellings);
@@ -5328,7 +5330,17 @@ const ideasAsk = (n) => `To put one up, say its number and a picture from your P
 /** What is said of a Reel that `graphic … ideas` is asked about, when it cannot be: one the record does not have. "" for any other. A
     Reel is not refused for being a suggestion, or for being made in HyperFrames: its cues are listed on the video's clock, which needs
     only the suggestion's place in reels.json (video-clock.js). */
+// reels.json is not consulted for the refusal: videoClock says if the suggestion is not there.
 const reelPartWhy = (record, n) => ((record.reels || []).some((r) => r.n === n) ? "" : `There is no Reel ${n}.`);
+
+/** The ideas of a Reel: exactly the cues its own project holds, in the project's numbering and on the Reel's clock (project.js projectCues, which
+    takes graphic-cues.js reelGraphicCues: wholly inside the Reel, at most REEL_CUES_MOST), from the cues app-reel.js gives that project.
+    Each is as graphicIdeas gives one, with `at` the second of the recording its words start. */
+function reelIdeas(record, { raw, plan, part, span }) {
+  const graphicCues = isFromPlan(record) ? graphicCuesOf(record.planned.cues, { kinds: SHOT_KINDS }).cues : graphicCuesOfPlan(plan);
+  const cues = projectCues({ kind: "reel", part, stretch: { start: span.from, end: span.to }, words: raw, plan, spellings: record.spellings, graphicCues });
+  return cues.map((c) => (c.at ? { n: c.n, idea: c.show, said: c.words, at: c.at.start + span.from, for: c.seconds, start: c.at.start, end: c.at.end } : { n: c.n, idea: c.show, said: c.words, missing: true, at: null }));
+}
 
 /** `graphic "<episode>" ideas [main | reel <n>]`: Claude's ideas for graphics, each with its times on the video's own clock, the one HyperFrames
     shows (video-clock.js), so that they are the seconds the project's own cues give. Nothing of Final Cut, a rough cut or a version is read,
@@ -5347,9 +5359,9 @@ function ideasList(ctx, words) {
   }
   const reading = clockRead(ctx, found, part, (f, p, c) => videoClock(f, c, p));
   if (reading.code !== undefined) return reading.code;
-  const { clock, on, words: said2, plan, span } = reading.read;
+  const { clock, on, words: said2, raw, plan, span } = reading.read;
   const read = { clock, on, words: said2, plan, pieces: clock.map((p) => ({ start: p.from, end: p.to })), ...(span ? { span } : {}) };
-  const ideas = ideasFor(read, found.record).filter((i) => !i.outside);
+  const ideas = span ? reelIdeas(found.record, { raw, plan, part, span }) : ideasFor(read, found.record).filter((i) => !i.outside);
   // A video made from a plan lists its video guide's cues (PR H5b), under a head of their own.
   const guide = isFromPlan(found.record);
   if (!ideas.length) {
