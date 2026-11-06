@@ -12,6 +12,7 @@ import { studioFiles } from "../studio.js";
 import { EPISODE, episode } from "./phase4.js";
 import { newPlannedEpisode } from "../episode.js";
 import { setup, episodeFor, reread, FOLDER } from "./episodes.js";
+import { withRules } from "./skill-rows.js";
 
 async function on(deps, ...argv) {
   const said = [];
@@ -473,10 +474,11 @@ describe("Claude's notes of a raw video she has answered", () => {
 
 describe("her skill, on ideas for graphics", () => {
   const skill = studioFiles({ checkout: "/c", node: "/n" })[".claude/skills/brimm-edit/SKILL.md"];
-  const rowOf = (start) => skill.split("\n").find((line) => line.startsWith(`| ${start} |`)) || "";
+  // The row and the rules under it ("More on these rows"), as the row said them before R2 split it (review changes).
+  const rowOf = (start) => withRules(skill, skill.split("\n").find((line) => line.startsWith(`| ${start} |`)) || "");
   it("lists a raw video's ideas at what Claude found, shows them as printed, and puts one up by its number, in its lines as they are", () => {
     const found = rowOf('"What did Claude find?"');
-    const raw = found.slice(0, found.indexOf("a session,"));
+    const raw = found.slice(0, found.indexOf("a session:"));
     for (const words of ['`show "<video>" notes` (Claude\'s notes, without its line that says to ask for the ideas for graphics: they follow)', '`graphic "<video>" ideas` (its ideas for graphics, each shown exactly as printed, with its number and times)']) assert.ok(raw.includes(words), words);
     const graphics = rowOf('"Show the pricing chart when I say three numbers"');
     for (const words of ['"Any ideas for graphics?": `graphic "<episode>" ideas`: show each idea exactly as printed, with its number and times, never restated without them.', '"Put idea 2 up with pricing.png": `graphic "<episode>" add "<picture>" --idea 2` (on a Reel, `graphic "<episode>" add "<picture>" reel 2 --idea 2`)']) assert.ok(graphics.includes(words), words);

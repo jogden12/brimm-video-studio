@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { HELP } from "../edit.js";
+import { rowWithRules } from "./skill-rows.js";
 
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 const readme = read("README.md");
@@ -119,20 +120,20 @@ describe("what pins the words about an older project being set aside (plan PR 18
     const OPEN_HER = '| "Open the Pricing episode in HyperFrames" / "Open it in HyperFrames" |';
     const REEL = '| "Make Reel 2" / "Open Reel 2 in HyperFrames" |';
     for (const [which, skill] of Object.entries(skills)) {
-      const app = row(skill, OPEN_HER);
+      const app = rowWithRules(skill, OPEN_HER);
       for (const words of [
         "if it then says its video is being made, tell her so, and when \"how far is it?\" says it is done, run it again.",
         "If it says the older project was set aside, tell her so, and that nothing was deleted: the project is now the newest one that was handed over, and any changes made on this Mac that were not handed over are in the older project (she asks Jason if she needs them).",
         "If it says assets of the older project were kept, tell her so; if it says some could not be moved, tell her they are in the older project and to ask Jason.",
         "If it says to quit HyperFrames first, tell her so, and run `app \"<episode>\"` again when she has.",
         "If it says the recording has changed and the older project was left where it was, tell her so, and to ask Jason.",
-        "If it says the project here is older than the one the other Mac handed over, tell her so, and that nothing was changed, and to ask Jason. |"
+        "If it says the project here is older than the one the other Mac handed over, tell her so, and that nothing was changed, and to ask Jason."
       ]) assert.ok(app.includes(words), `${which}: ${words}`);
       assert.ok(!app.includes("its video is then made again in the background"), `${which}: the video is made again only when it says so`);
-      const reel = row(skill, REEL);
+      const reel = rowWithRules(skill, REEL);
       assert.ok(reel.includes('If it says the older project was set aside, or to quit HyperFrames first, go on as for "Open the Pricing episode in HyperFrames", with `app "<episode>" reel 2`; when it says the video was kept from the older project, there is nothing to wait for.'), `${which}: the Reel's row`);
-      assert.ok(reel.endsWith("never offer to make one here |"), `${which}: the Reel's row ends as it did`);
-      assert.ok(skill.split("\n").length < 180, `${which}: ${skill.split("\n").length} lines`);
+      assert.ok(reel.endsWith("never offer to make one here."), `${which}: the Reel's row ends as it did`);
+      assert.ok(skill.split("\n").length < 270, `${which}: ${skill.split("\n").length} lines`);
     }
     assert.equal(row(skills.open, OPEN_HER), row(skills.strict, OPEN_HER), "the two skills have one row for opening in HyperFrames");
     assert.equal(row(skills.open, REEL), row(skills.strict, REEL), "and one row for a Reel");
