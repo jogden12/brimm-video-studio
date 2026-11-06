@@ -133,6 +133,13 @@ describe("graphic ideas", () => {
     assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing talk", "ideas"), { code: 0, text: "Pricing talk has no ideas for graphics: Claude gives none for a finished video's main video." });
     t.done();
   });
+  it("says a finished video's Reel gets its ideas when it is made in HyperFrames, not the main video's line", async () => {
+    const t = setup();
+    const reel = { n: 1, status: "candidate", from: 2, to: 30, title: "", why: "It stands alone.", files: [], pushed: [] };
+    episodeFor(t, { record: { version: 3, kind: "finished", answer: ANSWERED, label: "Video of 14 Oct, 09:12 (Mac Studio)", reels: [reel] }, files: LIGHT });
+    assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing talk", "ideas", "reel", "1"), { code: 0, text: "Pricing talk: Claude gives Reel 1 its ideas for graphics when it is made in HyperFrames, in its project there." });
+    t.done();
+  });
   it("says nothing of a newer version the other Mac rendered: their first line names the version", async () => {
     const { t } = renderedThere();
     const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");

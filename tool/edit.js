@@ -4187,6 +4187,9 @@ const ideaLine = (idea, on) => (idea.missing
 /** What is said of a finished video's ideas for graphics: Claude gives none for its main video (Jason, 22 Oct: "Reel suggestions
     and spellings, nothing more"). An iPhone clip's, and a plan's short video's, are listed as their projects are given them. */
 const noIdeas = (record) => `${shownName(record)} has no ideas for graphics: Claude gives none for a finished video's main video.`;
+/** What is said of a finished video's Reel: Claude reads it when it is made in HyperFrames, and its ideas for graphics go into its project
+    there (app-reel.js), so nothing is listed here. */
+const reelIdeasLater = (record, n) => `${shownName(record)}: Claude gives Reel ${n} its ideas for graphics when it is made in HyperFrames, in its project there.`;
 
 /** What is said of a Reel that `graphic … ideas` is asked about, when it cannot be: one the record does not have. "" for any other. A
     Reel is not refused for being a suggestion, or for being made in HyperFrames: its cues are listed on the video's clock, which needs
@@ -4215,7 +4218,7 @@ function ideasList(ctx, words) {
   if (left.length) return refuse(ctx, `"${left.join(" ")}" is not understood there: name the timeline last, as main or reel 2.`);
   if (part !== "main" && reelPartWhy(found.record, part.reel)) return refuse(ctx, reelPartWhy(found.record, part.reel));
   if (recordKind(found.record) === "finished") {
-    ctx.say(noIdeas(found.record));
+    ctx.say(part === "main" ? noIdeas(found.record) : reelIdeasLater(found.record, part.reel));
     return 0;
   }
   const reading = clockRead(ctx, found, part, (f, p, c) => videoClock(f, c, p));
