@@ -59,7 +59,10 @@ const filled = (name, { checkout, node }) => readFileSync(new URL(`./studio/${na
 
 /** The folder's settings for Claude Code. The hook runs in exec form, with no shell, so each path is one argument as it is,
     and a hook that cannot run blocks the call (onFailure, Claude Code 2.1.295 or later) rather than letting it through. It
-    is given her folder, which reads must stay in. Hooks are said to be on (disableAllHooks false): the mode rests on it. */
+    is given her folder, which reads must stay in. Hooks are said to be on (disableAllHooks false): the mode rests on it. Claude
+    Code's /feedback command and its transcript-share survey are off (the two variables in `env`, as in each HyperFrames project's
+    settings, hyperframes.js settingsFor): a session's words are a client's, and neither may offer them for sharing. Only this
+    shape, the strict lock, writes them: the open lock (openSettingsOf) takes any `env` as a change (openBroken, "other"). */
 function settingsOf({ checkout, node, folder }) {
   return {
     permissions: {
@@ -69,6 +72,7 @@ function settingsOf({ checkout, node, folder }) {
       disableBypassPermissionsMode: "disable",
       disableAutoMode: "disable"
     },
+    env: { DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1" },
     disableAllHooks: false,
     hooks: {
       PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/guard.sh`, node, folder], onFailure: "block" }] }]

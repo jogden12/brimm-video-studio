@@ -130,10 +130,16 @@ describe("her folder's settings", () => {
       disableAutoMode: "disable"
     });
   });
-  it("turn no hook off: disableAllHooks false beside the permissions and the hook, since the mode rests on the hook (spec 7)", () => {
+  it("turn no hook off: disableAllHooks false beside the permissions, the env and the hook, since the mode rests on the hook (spec 7)", () => {
     const s = JSON.parse(studioFiles({ checkout: CHECKOUT, node: NODE, folder: FOLDER })[".claude/settings.json"]);
-    assert.deepEqual(Object.keys(s), ["permissions", "disableAllHooks", "hooks"]);
+    assert.deepEqual(Object.keys(s), ["permissions", "env", "disableAllHooks", "hooks"]);
     assert.equal(s.disableAllHooks, false);
+  });
+  it("hold DISABLE_FEEDBACK_COMMAND=1 and CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1, and no other variable, so that her sessions have no /feedback and no transcript-share survey (build plan PR 12, architecture 'Her folder turns off')", () => {
+    // The survey ("How is Claude doing this session?") is where a transcript is offered for sharing, and a session's words are a
+    // client's. The same two variables are in each HyperFrames project's settings (hyperframes.js settingsFor).
+    const s = JSON.parse(studioFiles({ checkout: CHECKOUT, node: NODE, folder: FOLDER })[".claude/settings.json"]);
+    assert.deepEqual(s.env, { DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1" });
   });
   it("guard every tool with the hook, run without a shell so the paths' spaces and apostrophes stay whole, and block a call when the hook cannot run", () => {
     const s = JSON.parse(studioFiles({ checkout: "/Users/o'hara/Claude Code/BRIMM video", node: NODE, folder: "/Users/o'hara/BRIMM Video Studio" })[".claude/settings.json"]);
