@@ -481,19 +481,37 @@ describe("a pause", () => {
       [4.4, 5.65, true, "", "Okay. Three four."]
     ]);
   });
-  it("before the first words is cut only where it was heard: a sound before it is kept, with the silence before that sound cut", () => {
+  it("before the first words is all cut, a sound with no words in it too, but for the usual lead", () => {
     const { words } = spoken("One two.", 6);
-    // A door closes from 2 to 2.5, before anybody speaks.
+    // A door closes from 2 to 2.5, before anybody speaks: that is not speech, and it goes with the silence around it.
     const plan = planned(words, [[0, 2], [2.5, 6], [6.4, 9]], 9);
     assert.deepEqual(plan.ranges.map((r) => [r.start, r.end, r.keep, r.why]), [
-      [0, 1.8, false, "silence before the first words"],
-      [1.8, 2.7, true, ""],
-      [2.7, 5.8, false, "3.5 seconds of silence, shortened to 0.4"],
+      [0, 5.8, false, "silence before the first words"],
       [5.8, 6.6, true, ""],
       [6.6, 9, false, "silence after the last words"]
     ]);
-    // The recording opens with the sound: there is no silence before it to cut.
-    assert.deepEqual(planned(words, [[1, 6]], 6.4).ranges.map((r) => [r.start, r.end, r.keep]), [[0, 1.2, true], [1.2, 5.8, false], [5.8, 6.4, true]]);
+    // The recording opens with the sound (a hand over the lens): it is cut with the silence after it.
+    assert.deepEqual(planned(words, [[1, 6]], 6.4).ranges.map((r) => [r.start, r.end, r.keep]), [[0, 5.8, false], [5.8, 6.4, true]]);
+  });
+  it("a short sound in the opening, with the silence either side of it, is cut whole, as a hand on the phone before a first word at 5 s", () => {
+    const { words } = spoken("Here's the plan.", 5.157);
+    const plan = planned(words, [[0, 2.531], [2.587, 5.157]], 9);
+    assert.equal(plan.ranges[0].start, 0);
+    assert.equal(plan.ranges[0].keep, false);
+    assert.ok(Math.abs(plan.ranges[0].end - 4.957) < 1e-9, `the usual lead before the first phrase, not ${plan.ranges[0].end}`);
+    assert.equal(plan.ranges[1].keep, true);
+  });
+  it("keeps a longer sound before the first words, 2 seconds of it between two pauses, as it was before: it may be words the transcriber missed", () => {
+    const { words } = spoken("One two.", 6);
+    const plan = planned(words, [[0, 1], [3, 6], [6.4, 9]], 9);
+    assert.deepEqual(plan.ranges.map((r) => [r.start, r.end, r.keep]), [[0, 0.8, false], [0.8, 3.2, true], [3.2, 5.8, false], [5.8, 6.6, true], [6.6, 9, false]]);
+  });
+  it("after the last words is cut whole when a sound with no words in it there is short (a reach for the phone), and kept when it is long", () => {
+    const { words } = spoken("One two.", 2);
+    const short = planned(words, [[0, 2], [2.4, 3], [3.1, 6]], 6);
+    assert.deepEqual(short.ranges.map((r) => [r.start, r.end, r.keep, r.why]), [[0, 1.8, false, "silence before the first words"], [1.8, 2.6, true, ""], [2.6, 6, false, "silence after the last words"]]);
+    const long = planned(words, [[0, 2], [2.4, 3], [5, 6]], 6);
+    assert.deepEqual(long.ranges.map((r) => [r.start, r.end, r.keep]), [[0, 1.8, false], [1.8, 5.2, true], [5.2, 6, false]]);
   });
   it("is not cut at the start or the end of the recording where none was heard there: the time of a word is no place to cut", () => {
     // Music plays from the start to the end, and the words are timed from 3.2 to 6.2.

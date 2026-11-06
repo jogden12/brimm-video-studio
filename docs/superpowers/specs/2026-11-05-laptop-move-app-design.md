@@ -2,6 +2,8 @@
 
 5 November 2026. A draft for Jason's approval: nothing is built until he approves it. Branch `claude/studio-laptop-move-app`, from main fd5cd77.
 
+**Changed on 6 November: both MacBooks.** The app now also sets up Jason's MacBook, moved from brimm-video or set up fresh. See "Both MacBooks", below. Where this document says "her laptop", it means either MacBook, unless that section says otherwise.
+
 ## Why
 
 Moving her laptop from brimm-video to Studio is checks 41 to 48 on the Studio By-Hand Checks page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT, group "laptop"). On her laptop Jason pastes about thirty Terminal commands, one at a time, and copies what each prints into the page. The app takes the pasting away: Jason double-clicks it on her laptop, reads what it says, and answers y or n.
@@ -62,14 +64,46 @@ Not a `.pkg`. Installer runs its scripts as root, and Homebrew, her user's launc
 
 **Once, by hand, on the Mac Studio** (on the page; Jason types his own passwords, never into chat or a file):
 
-1. The certificate. Today the Mac Studio has none (`security find-identity -v -p codesigning` finds 0). In Keychain Access, Certificate Assistant › Request a Certificate From a Certificate Authority, saved to disk; on developer.apple.com, Certificates › + › Developer ID Application, with that request; download it and double-click it. Claude then checks that `security find-identity` shows it.
+1. The certificate. Today the Mac Studio has none (`security find-identity -v -p codesigning` finds 0). In Keychain Access, Certificate Assistant › Request a Certificate From a Certificate Authority, saved to disk; on developer.apple.com, Certificates › + › Developer ID Application, with that request; download it and double-click it. Claude then checks that `security find-identity` shows it. Done on 6 November, with three things learned on the way:
+   - Open Apps, type keychain, and choose Keychain Access, not Passwords. On this macOS it isn't in Applications › Utilities, and opening it by its path opens Passwords.
+   - Click login in Keychain Access before importing. With iCloud selected, the import fails with "Error: -25294", and Keychain Access hung.
+   - A Mac with only the Command Line Tools, and no Xcode, lacks Apple's Developer ID G2 intermediate certificate, so `find-identity` shows the identity but 0 valid. Download DeveloperIDG2CA.cer from apple.com/certificateauthority and import it into login too.
 2. The notary login. An app-specific password made at account.apple.com, then `xcrun notarytool store-credentials "BRIMM notary"` in Terminal, answering its own questions. The keychain keeps it under that name, and the notarizing step names only that.
 
 **Unsigned**, for the tests and the trial, and as a fallback, the build script makes one when told to. From AirDrop, macOS blocks an unsigned app the first time ("Apple could not verify…"). Since macOS 15, Control-click › Open no longer gets past it: Done, then System Settings › Privacy & Security, Open Anyway (shown for about an hour after the blocked try), her password, Open. A copy from a USB stick has no quarantine mark and opens with no question. The trial on the Mac Studio (macOS 27.0.1) reads Gatekeeper's verdict on a marked copy with `spctl`, which opens nothing.
 
+## Both MacBooks (6 November)
+
+Jason, 6 November: "the app should be able to be installed on any computer; in reality, it will just be her Macbook and my Macbook. I just want to be sure that it's not specific to her laptop in a way that prevents installation on my laptop". His answers the same day:
+- His MacBook is a standby, set up like hers, named Jason's MacBook. That was already the plan of 21 and 22 October: its own drop folder, with the import.
+- He isn't sure brimm-video is on it, so the app handles both cases.
+
+**Which Mac it is, from its settings, before anything changes:**
+- Settings naming Sallie's laptop or Jason's MacBook: moved from brimm-video under that name, as described above.
+- No settings: set up fresh, as Jason's MacBook, after a y. A brimm-video checkout with no settings (the transcript tool's standby may have one) is left as it is.
+- Settings naming any other Mac, the Mac Studio included: refused, and nothing is changed.
+
+**Set up fresh:**
+- The app finds Dropbox's The BRIMM DB › BRIMM Video: first in `~/Library/CloudStorage/Dropbox*`, then in `~/Dropbox*`, at the top of each Dropbox or a level deeper, in a team member's folder (as on the Mac Studio: `Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB`). A link to the same folder counts once. With none, or more than one, it stops before asking anything.
+- It skips what only brimm-video has: the check that the settings are as the switch of 26 October left them, the drop-folder count (there is no drop folder until the installer makes it), and step 7 (brimm-video's old key, if there is one, is left as it is).
+- Studio's installer makes the rest, with the same options as hers: the settings, Drop › Jason's MacBook, the light import, hand-off version 2, and the BRIMM Video Studio folder for Claude.
+
+**On both MacBooks:**
+- Each Mac's key and its title on GitHub carry the Mac's name.
+- Nothing the app says names Sallie, or says "her" of the person or the Mac. The report keeps the page's own box labels, which are her laptop's.
+- On the By-Hand page, the move group gets a check for his MacBook. Check 74 stays hers.
+
+Calls made here (Claude's):
+- A fresh Mac is always Jason's MacBook, so nothing is typed but y or n. A third Mac needs one line in the app.
+- The app keeps its name, Move to Studio.
+
 ## The next round
 
-The working folder and the drop folders become local in the next round. So the app writes no Dropbox path of its own. It reads her BRIMM Video folder from her settings and her drop folder from `settings.js show`, and keeps the installer's options in one place, so the next round changes one line.
+The working folder and the drop folders become local in the next round. So the app writes no Dropbox path of its own. It reads her BRIMM Video folder from her settings and her drop folder from `settings.js show`, and keeps the installer's options in one place, so the next round changes one line. On a Mac set up fresh, it finds BRIMM Video in Dropbox and hands that to the installer, which needs it.
+
+Jason, 6 November: "the app installer should allow the user to pick or create the Drop folder in a location of their choosing with a warning that creating it in Dropbox or other 'cloud' folders could cause issues. they should also be able to choose which folder exports of edited videos go into. Cloud based folders are fine for this step, especially if they want to share with other users or computers"
+
+Studio can't do that yet: it puts the drop folder at BRIMM Video › Drop › the Mac's name, and looks for exports only in Downloads. Jason decided the same day that Studio's side belongs to Phase 3 of the review plan (the local working folder, `docs/superpowers/plans/2026-11-05-review-changes-plan.md`), and that the app follows once Studio has it. The app will then pick each folder with macOS's own folder chooser (with New Folder), warn when the drop folder is in Dropbox, iCloud Drive or another cloud folder, and hand both to the installer.
 
 ## Testing
 

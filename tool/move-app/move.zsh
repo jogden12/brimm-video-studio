@@ -1,6 +1,7 @@
 #!/bin/zsh
-# Moves Sallie's laptop from brimm-video to Studio, one asked step at a time, in a Terminal window. It is the heart of the
-# small Mac app "Move to Studio", which hands this script to Terminal.
+# Moves Sallie's laptop or Jason's MacBook from brimm-video to Studio (or sets a Mac that has no brimm-video up fresh, as Jason's
+# MacBook), one asked step at a time, in a Terminal window. It is the heart of the small Mac app "Move to Studio", which hands
+# this script to Terminal.
 #
 #   zsh move.zsh --commit <40 characters>
 #                                    do the move. --commit is the commit of Studio that this app was made at: the code that is
@@ -13,16 +14,20 @@
 # Anything else, an empty line, or the end of input is no: the run stops, says what it changed (nothing, before the first
 # change), and runs again from where it stopped when it is started again. Control-C stops it the same way.
 # Nothing here prints, logs or writes the private half of Studio's key, the Claude account's email or organisation, or the name
-# of a file in her drop folder. What it says is also kept in ~/Library/Logs/brimm-video-studio-move.log.
-# Exit: 0 finished (or --print done); 1 stopped; 2 refused before anything (an option, not a Mac, not her laptop).
+# of a file in the drop folder. What it says is also kept in ~/Library/Logs/brimm-video-studio-move.log.
+# Exit: 0 finished (or --print done); 1 stopped; 2 refused before anything (an option, not a Mac, not one of the two MacBooks).
 set -euo pipefail
 
 # The values this app works from, each set once, here.
-MACHINE="Sallie's laptop"
+# The two Macs this app is for, named once. A Mac with no brimm-video settings is set up fresh as FRESH_MACHINE.
+MACHINES=("Sallie's laptop" "Jason's MacBook")
+FRESH_MACHINE="Jason's MacBook"
+# Set once the Mac is known (which_mac): its name, Studio's key comment, and the installer's options.
+MACHINE="" KEY_COMMENT="" INSTALL_OPTIONS=()
+FRESH=""             # set by which_mac on a Mac with no brimm-video settings
 STUDIO_URL="${BRIMM_STUDIO_REPO:-git@github-brimm-video-studio:jogden12/brimm-video-studio.git}"
 HOST_ALIAS="github-brimm-video-studio"
 KEY="$HOME/.ssh/brimm_video_studio_deploy"
-KEY_COMMENT="brimm-video-studio read-only, Sallie's laptop"
 OLD_KEY="$HOME/.ssh/brimm_video_deploy"
 GITHUB_HOST_KEY="github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
 GITHUB_FINGERPRINT="SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU"
@@ -34,8 +39,7 @@ LOG="$HOME/Library/Logs/brimm-video-studio-move.log"
 REPORT="$HOME/Desktop/Studio move report.txt"
 PUBLIC_COPY="$HOME/Desktop/Studio key (public half).txt"
 MARKS="$STUDIO/.git/move-to-studio"
-# The installer's options, written here and nowhere else, so that a later round changes one line.
-INSTALL_OPTIONS=(--machine "Sallie's laptop" --drop Drop --import light --handoff 2)
+# The installer's options are written in which_mac and nowhere else, so that a later round changes one line.
 HF_APP="${BRIMM_HYPERFRAMES_APP:-/Applications/HyperFrames.app}"
 HF_PAGE="https://hyperframes.dev/studio"
 CHECK_FILE="$HOME/Library/LaunchAgents/com.thebrimm.claude-check.plist"
@@ -116,7 +120,7 @@ ask_yes() {
   [[ "${(L)line}" =~ '^[[:space:]]*(y|yes)[[:space:]]*$' ]]
 }
 ask() { ask_yes "$1" || stop_here; }
-# Waits for something she does by hand: an empty line goes on, anything else stops.
+# Waits for something done by hand: an empty line goes on, anything else stops.
 wait_for() {
   local line=""
   say "$1"
@@ -128,9 +132,9 @@ wait_for() {
   [[ -z "${line//[[:space:]]/}" ]] || stop_here
 }
 
-# The words for a write to her Desktop that macOS refused.
+# The words for a write to the Desktop that macOS refused.
 desktop_stop() {
-  stop_here "Her Desktop could not be written to. macOS may have asked whether Terminal may write there, and the answer may have been no. Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again."
+  stop_here "The Desktop could not be written to. macOS may have asked whether Terminal may write there, and the answer may have been no. Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again."
 }
 
 # Programs, as install.sh finds them: along PATH, then Homebrew's folders.
@@ -153,7 +157,7 @@ find_claude() {
   done
   return 1
 }
-# One value from her brimm-video settings, or nothing.
+# One value from brimm-video's settings, or nothing.
 setting() { plutil -extract "$1" raw -o - "$SETTINGS" 2>/dev/null || true; }
 
 # The options. Anything wrong is refused before anything is looked at or changed.
@@ -174,23 +178,28 @@ read_options() {
   fi
 }
 
-# Whether this is her laptop, from its settings: refused (exit 2, nothing changed) if it is another Mac or has none.
-refuse_unless_her_laptop() {
+# Which Mac this is, from its settings: Sallie's laptop or Jason's MacBook. A Mac with no brimm-video settings is set up fresh as
+# Jason's MacBook (FRESH; the question comes in step 1). Refused (exit 2, nothing changed) if the settings name another Mac.
+which_mac() {
   if [[ "$(uname -s)" != "Darwin" ]]; then say "This is for a Mac."; exit 2; fi
-  if [[ ! -f "$SETTINGS" ]]; then
-    say "This Mac has no brimm-video settings (~/Library/Application Support/BRIMM Video/settings.json), so it isn't a laptop this app moves. Nothing was changed."
-    exit 2
+  if [[ -f "$SETTINGS" ]]; then
+    local machine="$(setting machine)"
+    if (( ! ${MACHINES[(Ie)$machine]} )); then
+      say "This app is for ${MACHINES[1]} and ${MACHINES[2]}, and this Mac's settings say it is \"$machine\". Nothing was changed."
+      exit 2
+    fi
+    MACHINE="$machine"
+  else
+    FRESH="yes"
+    MACHINE="$FRESH_MACHINE"
   fi
-  local machine="$(setting machine)"
-  if [[ "$machine" != "$MACHINE" ]]; then
-    say "This app is for $MACHINE, and this Mac's settings say it is \"$machine\". Nothing was changed."
-    exit 2
-  fi
+  KEY_COMMENT="brimm-video-studio read-only, $MACHINE"
+  INSTALL_OPTIONS=(--machine "$MACHINE" --drop Drop --import light --handoff 2)
 }
 
-# The two looks that must hold when anything is changed: no import is running, and her drop folder holds nothing to import. Step 1
+# The two looks that must hold when anything is changed: no import is running, and the drop folder holds nothing to import. Step 1
 # looks, and step 5 looks again right before the real install, because the installer checks the drop folder only when it switches
-# the folder, and her laptop stays on Drop, so it would not look again itself. Same words, same stops each time.
+# the folder, and a Mac already on Drop would not look again itself. Same words, same stops each time.
 look_at_import_and_drop() {
   # No import is running when every com.thebrimm job has no process id ("-") in the first column.
   local job
@@ -202,30 +211,65 @@ look_at_import_and_drop() {
   done
   say "  No import is running."
 
-  # Her drop folder is the one her own brimm-video names. It is counted and never listed: a file's name can be a client's.
+  # A Mac set up fresh has no drop folder until the installer makes it. Otherwise it is the one this Mac's brimm-video names. It
+  # is counted and never listed: a file's name can be a client's.
+  if [[ -n "$FRESH" ]]; then
+    R_COUNT="none: this Mac had no drop folder before the install"
+    return 0
+  fi
   if [[ ! -f "$CHECKOUT_NOW/tool/settings.js" ]]; then
-    stop_here "Her checkout ($CHECKOUT_NOW) has no tool/settings.js to say where her drop folder is."
+    stop_here "This Mac's checkout ($CHECKOUT_NOW) has no tool/settings.js to say where its drop folder is."
   fi
   DROP="$("$NODE" "$CHECKOUT_NOW/tool/settings.js" show 2>/dev/null | sed -n 's/^  Its drop folder:  //p' | head -n 1 || true)"
   if [[ -z "$DROP" || ! -d "$DROP" ]]; then
-    stop_here "Her drop folder could not be found from her settings (settings.js show)."
+    stop_here "The drop folder could not be found from this Mac's settings (settings.js show)."
   fi
   # A folder that cannot be listed is not an empty one: the glob below would swallow the failure and count nothing.
   if ! ls -A -- "$DROP" >/dev/null 2>&1; then
-    stop_here "Her drop folder could not be read. macOS may have asked whether Terminal may read Dropbox, and the answer may have been no. Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again."
+    stop_here "The drop folder could not be read. macOS may have asked whether Terminal may read Dropbox, and the answer may have been no. Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again."
   fi
   local -a held
   held=("$DROP"/*(N) "$DROP"/.*(N))
   held=(${held:#*/.}) held=(${held:#*/..}) held=(${held:#*/.DS_Store}) held=(${held:#*/.brimm-watched-by})
   if (( ${#held[@]} > 0 )); then
-    stop_here "Her drop folder holds ${#held[@]} file$([[ ${#held[@]} -eq 1 ]] || print -rn s) still to be imported."
+    stop_here "The drop folder holds ${#held[@]} file$([[ ${#held[@]} -eq 1 ]] || print -rn s) still to be imported."
   fi
-  say "  Her drop folder is empty."
+  say "  The drop folder is empty."
   R_COUNT="${#held[@]}"
 }
 
+# Step 1 on a Mac with no brimm-video settings: BRIMM Video is found in Dropbox, and setting the Mac up fresh is asked. Studio's
+# installer makes the settings and the drop folder in step 5.
+set_up_fresh() {
+  local p
+  local -a found
+  # The BRIMM DB is at the top of a Dropbox, or a level deeper, in a team member's folder (as on the Mac Studio:
+  # Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB).
+  for p in $HOME/Library/CloudStorage/Dropbox*/"The BRIMM DB/BRIMM Video"(N/) $HOME/Library/CloudStorage/Dropbox*/*/"The BRIMM DB/BRIMM Video"(N/) \
+      $HOME/Dropbox*/"The BRIMM DB/BRIMM Video"(N/) $HOME/Dropbox*/*/"The BRIMM DB/BRIMM Video"(N/); do
+    # Two paths that resolve to the same folder count once, and the first is kept as found.
+    local same="" f
+    for f in "${found[@]}"; do [[ "${f:A}" != "${p:A}" ]] || same=yes; done
+    [[ -n "$same" ]] || found+=("$p")
+  done
+  if (( ${#found[@]} == 0 )); then
+    stop_here "This Mac has no BRIMM Video folder in Dropbox (The BRIMM DB › BRIMM Video). Sign in to Dropbox, let The BRIMM DB sync, then run the app again."
+  fi
+  if (( ${#found[@]} > 1 )); then
+    stop_here "This Mac has ${#found[@]} BRIMM Video folders in Dropbox: ${(j:, :)found}. Tell Jason which one is The BRIMM's."
+  fi
+  ROOT="${found[1]}"
+  say "  brimm-video's settings:  none on this Mac"
+  if [[ -n "$PRINT_ONLY" ]]; then
+    would "ask to set this Mac up fresh as $MACHINE, with BRIMM Video at $ROOT"
+  else
+    ask "This Mac has no brimm-video settings (~/Library/Application Support/BRIMM Video/settings.json), so it is set up fresh, as $MACHINE: its own drop folder (Drop › $MACHINE), the light import, hand-off version 2 and a BRIMM Video Studio folder for Claude, all made by Studio's installer in step 5. BRIMM Video is at $ROOT."
+  fi
+  R_SETTINGS="none: this Mac had no brimm-video settings, and is set up fresh as $MACHINE"
+}
+
 # Step 1, check 41: what this Mac has, and whether it is as the switch of 26 October left it. It changes nothing, except that
-# Claude Code's sign-in is offered, and only on her y.
+# Claude Code's sign-in is offered, and only on a y.
 look_at_this_mac() {
   heading "1. Looking at this Mac (check 41). This changes nothing."
   local macos kb gb line brew version plan signed told claude_version
@@ -260,7 +304,7 @@ look_at_this_mac() {
   brew="$(find_program brew || true)"
   if [[ -z "$brew" ]]; then
     say "  Homebrew:  not here."
-    stop_here 'In Terminal, Sallie runs this (it asks for her password, which she types herself): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+    stop_here 'In Terminal, run this (it asks for the password of this Mac, which its owner types): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
   fi
   version="$("$brew" --version 2>/dev/null || true)"
   local -a said
@@ -279,19 +323,22 @@ look_at_this_mac() {
   fi
   say "  Node:  $version"
 
-  # Her settings, as the switch of 26 October left them. A checkout that is Studio's is as good as brimm-video's: a later run.
-  ROOT="$(setting root)"
-  CHECKOUT_NOW="$(setting checkout)"
-  local import="$(setting import)" handoff="$(setting handoffVersion)" drop="$(setting drop)"
-  say "  brimm-video's settings:  import $import, hand-off version $handoff, drop folder $drop"
-  [[ "$import" == light ]] || stop_here "Her settings are not as the switch of 26 October left them: the import is \"$import\", and it should be \"light\"."
-  [[ "$drop" == Drop ]] || stop_here "Her settings are not as the switch of 26 October left them: the drop folder is \"$drop\", and it should be \"Drop\"."
-  [[ "$handoff" == 2 ]] || stop_here "Her settings are not as the switch of 26 October left them: the hand-off version is \"$handoff\", and it should be \"2\"."
-  if [[ "$CHECKOUT_NOW" != "$OLD_CHECKOUT" && "$CHECKOUT_NOW" != "$STUDIO" ]]; then
-    stop_here "Her settings are not as the switch of 26 October left them: the checkout is \"$CHECKOUT_NOW\", and it should be brimm-video's ($OLD_CHECKOUT) or Studio's ($STUDIO)."
+  if [[ -n "$FRESH" ]]; then
+    set_up_fresh
+  else
+    # This Mac's settings, as the switch of 26 October left them. A checkout that is Studio's is as good as brimm-video's: a later run.
+    ROOT="$(setting root)"
+    CHECKOUT_NOW="$(setting checkout)"
+    local import="$(setting import)" handoff="$(setting handoffVersion)" drop="$(setting drop)"
+    say "  brimm-video's settings:  import $import, hand-off version $handoff, drop folder $drop"
+    [[ "$import" == light ]] || stop_here "This Mac's settings are not as the switch of 26 October left them: the import is \"$import\", and it should be \"light\"."
+    [[ "$drop" == Drop ]] || stop_here "This Mac's settings are not as the switch of 26 October left them: the drop folder is \"$drop\", and it should be \"Drop\"."
+    [[ "$handoff" == 2 ]] || stop_here "This Mac's settings are not as the switch of 26 October left them: the hand-off version is \"$handoff\", and it should be \"2\"."
+    if [[ "$CHECKOUT_NOW" != "$OLD_CHECKOUT" && "$CHECKOUT_NOW" != "$STUDIO" ]]; then
+      stop_here "This Mac's settings are not as the switch of 26 October left them: the checkout is \"$CHECKOUT_NOW\", and it should be brimm-video's ($OLD_CHECKOUT) or Studio's ($STUDIO)."
+    fi
+    R_SETTINGS="nothing: import $import, hand-off version $handoff, drop folder $drop, checkout as expected"
   fi
-
-  R_SETTINGS="nothing: import $import, hand-off version $handoff, drop folder $drop, checkout as expected"
 
   look_at_import_and_drop
 
@@ -305,9 +352,9 @@ look_at_this_mac() {
   if [[ "$signed" != true ]]; then
     say "  Claude Code:  not signed in."
     if [[ -n "$PRINT_ONLY" ]]; then
-      would "ask to run claude auth login, which opens the browser for Sallie to sign in to her own Claude account."
+      would "ask to run claude auth login, which opens the browser to sign in to this Mac's own Claude account."
     else
-      ask "Claude Code is not signed in. This will run claude auth login, which opens the browser; Sallie signs in to her own Claude account there (signing in to the Claude app does not sign in this command)."
+      ask "Claude Code is not signed in. This will run claude auth login, which opens the browser; sign in there to this Mac's own Claude account (signing in to the Claude app does not sign in this command)."
       "$CLAUDE" auth login || true
       told="$("$CLAUDE" auth status --json 2>/dev/null || true)"
       signed="$(print -rn -- "$told" | plutil -extract loggedIn raw -o - - 2>/dev/null || true)"
@@ -497,7 +544,7 @@ $(local l; for l in "${HOST_BLOCK[@]}"; do print -r -- "    $l"; done)"
     return 0
   fi
   while true; do
-    wait_for "Now the public half goes on GitHub, as a read-only deploy key: Jason does this at github.com, jogden12/brimm-video-studio, Settings, Deploy keys, Add deploy key. Title: Sallie's laptop. Key: the public half above (it is copied; or it is in $PUBLIC_COPY). Write access off. (Or give the public half to Claude on the Mac Studio, who does it.)"
+    wait_for "Now the public half goes on GitHub, as a read-only deploy key: Jason does this at github.com, jogden12/brimm-video-studio, Settings, Deploy keys, Add deploy key. Title: $MACHINE. Key: the public half above (it is copied; or it is in $PUBLIC_COPY). Write access off. (Or give the public half to Claude on the Mac Studio, who does it.)"
     if check_with_github; then break; fi
   done
   if [[ -n "$made" ]]; then R42_KEY="yes: the check of the key worked"; else R42_KEY="yes: the key was made on an earlier run, and the check of it worked"; fi
@@ -613,7 +660,7 @@ get_the_code() {
   run_the_tests
 }
 # Step 4, check 43: the HyperFrames app is on this Mac. Its version is noted for the report; when it is not here, its page is
-# opened in Safari for Sallie to download it, and the app waits.
+# opened in Safari to download it, and the app waits.
 find_the_app() {
   heading "4. The HyperFrames app (check 43)"
   local version
@@ -631,7 +678,7 @@ find_the_app() {
       return 0
     fi
     open -a Safari "$HF_PAGE" || true
-    wait_for "The HyperFrames page is open in Safari ($HF_PAGE). Download the app there, drag it into Applications, and open it once. Then, as check 43 says, sign in to HeyGen (her HeyGen account) and choose Claude Code as the agent, on Auto."
+    wait_for "The HyperFrames page is open in Safari ($HF_PAGE). Download the app there, drag it into Applications, and open it once. Then, as check 43 says, sign in to HeyGen and choose Claude Code as the agent, on Auto."
   done
 }
 
@@ -672,25 +719,25 @@ turn_on_hyperframes() {
     would "ask to turn HyperFrames on as the editing app, with: node \"$STUDIO/tool/settings.js\" set --app hyperframes"
     R44_APP="not turned on: this was a print"
   else
-    ask "This turns HyperFrames on as the editing app here (it is ${app:-off} now), with: node tool/settings.js set --app hyperframes, in Studio's code. Nothing else in her settings changes."
+    ask "This turns HyperFrames on as the editing app here (it is ${app:-off} now), with: node tool/settings.js set --app hyperframes, in Studio's code. Nothing else in this Mac's settings changes."
     out="$("$NODE" "$STUDIO/tool/settings.js" set --app hyperframes 2>&1)" || stop_here "HyperFrames could not be turned on. It said: $out"
     say "  $out"
     R44_APP="$out"
     changed+=("turned HyperFrames on as the editing app")
     fresh=yes
   fi
-  # Her drop folder, shown in Finder, where Dropbox is told to keep it on this Mac.
+  # The drop folder, shown in Finder, where Dropbox is told to keep it on this Mac.
   [[ -n "$fresh" ]] || return 0
   if [[ -n "$PRINT_ONLY" ]]; then
-    would "show her drop folder in Finder with: open -R \"${drop:-her drop folder}\""
+    would "show the drop folder in Finder with: open -R \"${drop:-the drop folder}\""
     return 0
   fi
   if [[ -z "$drop" ]]; then
-    say "  Her drop folder could not be read from Studio's settings, so it is not shown in Finder."
+    say "  The drop folder could not be read from Studio's settings, so it is not shown in Finder."
     return 0
   fi
   open -R "$drop" || true
-  wait_for "Her drop folder, $MACHINE, is shown in Finder. In Finder, Control-click $MACHINE, choose Make available offline, and click Allow if macOS asks whether node may read the Dropbox folder."
+  wait_for "The drop folder, $MACHINE, is shown in Finder. In Finder, Control-click $MACHINE, choose Make available offline, and click Allow if macOS asks whether node may read the Dropbox folder."
 }
 
 run_the_installer() {
@@ -720,7 +767,7 @@ run_the_installer() {
       stop_here "Studio's installer refused (its words are above), so it was not run for real. Nothing it refused has been changed."
     fi
     if print_has '^  Claude Code, signed in:  no'; then
-      stop_here "Claude Code is not signed in. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser), then run the app again."
+      stop_here "Claude Code is not signed in. In Terminal, run: claude auth login (sign in to this Mac's own Claude account in the browser), then run the app again."
     fi
     if print_has "^  Claude Code's version:.*older than"; then
       if (( tries > 1 )); then
@@ -805,7 +852,7 @@ Tell Jason: Claude may not be reachable from the background job, which is where 
 }
 # Step 6: the report Jason carries to the Mac Studio, where each line is copied into the box the By-Hand page labels the same
 # way. One heading a check, one line a box (a value of several lines is joined on one). It holds nothing of the Claude account,
-# the key's private half or her drop folder's files. It shows the run's final state, so step 7 writes it again.
+# the key's private half or the drop folder's files. It shows the run's final state, so step 7 writes it again.
 one_line() { local text="${1-}" fallback="${2-nothing was recorded on this run}"; [[ -n "$text" ]] || text="$fallback"; print -r -- "${(j: | :)${(@f)text}}"; }
 # A print checks none of these, and claims nothing of an earlier run: the words for a line a print leaves empty.
 unchecked() { if [[ -n "$PRINT_ONLY" ]]; then print -r -- "not checked: this was a print"; else print -r -- "$1"; fi; }
@@ -844,14 +891,14 @@ save_report() {
 write_the_report() {
   heading "6. The report"
   if [[ -n "$PRINT_ONLY" ]]; then
-    would "write this report on her Desktop ($REPORT) and show it in Finder:"
+    would "write this report on the Desktop ($REPORT) and show it in Finder:"
     compose_report | while IFS= read -r line; do say "  $line"; done
     return 0
   fi
   save_report
   REPORT_WRITTEN="yes"
   changed+=("wrote the report ($REPORT)")
-  say "  The report is on her Desktop: Studio move report.txt"
+  say "  The report is on the Desktop: Studio move report.txt"
   open -R "$REPORT" || true
 }
 
@@ -859,6 +906,17 @@ write_the_report() {
 # from this Mac. Asked only then; a no keeps them and does not stop the run.
 retire_the_old_key() {
   heading "7. brimm-video's old key (check 48)"
+  # A Mac set up fresh moved nothing from brimm-video, so its key, if there is one, is not this app's to take.
+  if [[ -n "$FRESH" ]]; then
+    R48="not asked: this Mac was set up fresh, so it is left as it is"
+    if [[ -n "$PRINT_ONLY" ]]; then
+      would "leave brimm-video's old key as it is, if there is one: this Mac is set up fresh"
+    else
+      say "  Not asked: this Mac was set up fresh, so brimm-video's old key, if there is one, is left as it is."
+      if [[ -n "$REPORT_WRITTEN" ]]; then save_report; fi
+    fi
+    return 0
+  fi
   if [[ "$(mark_of installed)" != "$COMMIT" ]]; then
     R48="not asked: the move is not finished yet"
     if [[ -n "$PRINT_ONLY" ]]; then would "ask about brimm-video's old key only once Studio's installer has finished at this commit"; fi
@@ -887,7 +945,7 @@ retire_the_old_key() {
 
 main() {
   read_options "$@"
-  refuse_unless_her_laptop
+  which_mac
   trap on_int INT
   trap on_term TERM
   trap on_hup HUP
@@ -916,8 +974,11 @@ main() {
   say ""
   if [[ -n "$PRINT_ONLY" ]]; then
     say "Nothing was changed."
-  else
+  elif [[ "$MACHINE" == "Sallie's laptop" ]]; then
+    # Her laptop's checks on screen come next: 45 to 47 are hers.
     say "Done. Next on the By-Hand page: checks 45 to 47, on screen."
+  else
+    say "Done. Next on the By-Hand page: the rest of the check for $MACHINE."
   fi
   exit 0
 }

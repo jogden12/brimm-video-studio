@@ -1,12 +1,12 @@
 # The Move to Studio app
 
-For Jason, who runs the move with Sallie. This is a small Mac app that moves her laptop from brimm-video to Studio. It does the Terminal work of checks 41, 42 and 44 on the Studio By-Hand Checks page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT) and part of check 43 and check 48. Checks 45 to 47 stay on screen, by hand.
+For Jason, who runs the move with Sallie. This is a small Mac app that moves her laptop from brimm-video to Studio, and sets up Jason's MacBook too: moved from brimm-video, or set up fresh if it has none (6 November). On her laptop it does the Terminal work of checks 41, 42 and 44 on the Studio By-Hand Checks page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT) and part of check 43 and check 48. Checks 45 to 47 stay on screen, by hand.
 
 The app, its build and the notarizing are all run from that page, each on Jason's yes. Nothing is installed on any Mac by building the app.
 
 ## What it is
 
-- "Move to Studio", an app for her laptop alone. It stops at once on any Mac whose brimm-video settings do not say "Sallie's laptop".
+- "Move to Studio", an app for Sallie's laptop and Jason's MacBook. A Mac whose brimm-video settings name one of the two is moved under that name. A Mac with no brimm-video settings is set up fresh as Jason's MacBook, after a y. It stops at once on any Mac whose settings name another Mac, the Mac Studio included.
 - Double-clicked, it opens one Terminal window and walks through the move there, one step at a time.
 - Nothing is typed but y or n.
 - Before each change it says what will change, then asks: `Go ahead? Type y and press Return, or n to stop: `
@@ -27,14 +27,16 @@ The code is in `tool/move-app/`:
 
 It shows:
 
-- her macOS, and her free disk (under 100 GB is said, and does not stop the move);
+- the Mac's macOS, and its free disk (under 100 GB is said, and does not stop the move);
 - Xcode's command line tools, Homebrew and node (22 or later);
 - brimm-video's settings: the light import, hand-off version 2, the drop folder `Drop`, and a checkout that is brimm-video's or Studio's;
 - that no import is running;
-- that her drop folder is empty. The drop folder is the one brimm-video's `settings.js show` names. Files are counted and never named. A folder that cannot be read is not taken for an empty one: the app stops and says to allow Terminal in Privacy & Security;
-- Claude Code in Terminal: signed in or not, its plan and its version. Never her email.
+- that the drop folder is empty. The drop folder is the one brimm-video's `settings.js show` names. Files are counted and never named. A folder that cannot be read is not taken for an empty one: the app stops and says to allow Terminal in Privacy & Security;
+- Claude Code in Terminal: signed in or not, its plan and its version. Never the account's email.
 
-If Claude Code is not signed in, it asks first, then runs `claude auth login`. That opens the browser, where Sallie signs in to her own Claude account.
+If Claude Code is not signed in, it asks first, then runs `claude auth login`. That opens the browser, to sign in to the Mac's own Claude account.
+
+On a Mac with no brimm-video settings, in place of the settings and the drop folder, it finds Dropbox's The BRIMM DB › BRIMM Video. It looks at the top of each Dropbox in `~/Library/CloudStorage` and `~/Dropbox`, and a level deeper, in a team member's folder (as on the Mac Studio: `Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB`). With none, or more than one, it stops before asking anything. Then it asks to set the Mac up fresh as Jason's MacBook. Studio's installer makes the settings and the drop folder in step 5.
 
 ### 2. Studio's key (check 42)
 
@@ -58,12 +60,12 @@ If Claude Code is not signed in, it asks first, then runs `claude auth login`. T
 
 ### 5. Studio's installer (check 44)
 
-- Runs `install.sh --print` with `--machine "Sallie's laptop" --drop Drop --import light --handoff 2` and her BRIMM Video folder (read from her settings). It shows all of it.
+- Runs `install.sh --print` with `--machine "<the Mac's name>" --drop Drop --import light --handoff 2` and the BRIMM Video folder (read from the Mac's settings, or found in Dropbox on a Mac set up fresh). It shows all of it.
 - If the print refuses, the app shows its words and stops. It never runs the installer with `--yes` then.
 - If Claude Code in Terminal is older than the installer wants, it asks, runs `claude update`, and prints again.
 - If the Claude app's own Claude Code is older, it says to choose Claude, then Check for Updates, and prints again when Return is pressed.
 - Repeats the lines that matter: Claude Code's sign-in and versions, HDR video, her folder's lock.
-- Asks once. On y it looks again at her drop folder and the import (the installer does not look at the drop folder here: it does that only when it switches the folder, and her laptop stays on Drop), with the same words and stops as step 1. Then it runs the same line for real with `--yes`. This can take a few minutes, and ends with one real call to Claude from the background job (up to 90 seconds).
+- Asks once. On y it looks again at the drop folder (a Mac set up fresh has none yet) and the import (the installer does not look at the drop folder here: it does that only when it switches the folder, and a Mac already on Drop stays on Drop), with the same words and stops as step 1. Then it runs the same line for real with `--yes`. This can take a few minutes, and ends with one real call to Claude from the background job (up to 90 seconds).
 - Then it checks for the line `From the background job: Claude answered from here`. Any other background-job line ("could not be asked", "did not answer within 90 seconds") stops the app with that line shown, and writes no installed mark. It also checks that the one-shot check agent (`com.thebrimm.claude-check.plist`) is gone.
 - The stop summary lists "ran Studio's installer (if it stopped, its last lines say how far it got)" from the moment it starts, and the plain "ran Studio's installer" once it has finished.
 - Asks, then turns HyperFrames on as the editing app (`settings.js set --app hyperframes`).
@@ -78,12 +80,13 @@ If Claude Code is not signed in, it asks first, then runs `claude auth login`. T
 
 ### 7. brimm-video's old key (check 48)
 
+- On a Mac set up fresh, nothing is asked: brimm-video's old key, if there is one, is left as it is.
 - Asked only once the installer has finished at the app's commit.
 - It asks whether brimm-video's key has been deleted on GitHub (jogden12/brimm-video, Settings, Deploy keys). On y it deletes `~/.ssh/brimm_video_deploy` and its `.pub`, and nothing else in `~/.ssh`.
 - A no keeps the key and does not stop the run. Double-click the app again to be asked once more.
 - The report is written again with this answer.
 
-The last line of a finished run is: `Done. Next on the By-Hand page: checks 45 to 47, on screen.`
+The last line of a finished run is: `Done. Next on the By-Hand page: checks 45 to 47, on screen.` On Jason's MacBook it is: `Done. Next on the By-Hand page: the rest of the check for Jason's MacBook.`
 
 ## What stays by hand
 
@@ -116,7 +119,10 @@ zsh tool/move-app/build-app.sh --out <folder> --sign
 
 Done once on the Mac Studio, from the By-Hand page. Jason types his own passwords: never into chat, and never into a file.
 
-1. **The certificate.** In Keychain Access, Certificate Assistant, Request a Certificate From a Certificate Authority, saved to disk. On developer.apple.com, Certificates, then +, then Developer ID Application, with that request. Download it and double-click it. Claude then checks that `security find-identity -v -p codesigning` shows it.
+1. **The certificate.** In Keychain Access, Certificate Assistant, Request a Certificate From a Certificate Authority, saved to disk. On developer.apple.com, Certificates, then +, then Developer ID Application, with that request. Download it and double-click it. Claude then checks that `security find-identity -v -p codesigning` shows it. Done on 6 November, with three things learned on the way:
+   - Open Apps, type keychain, and choose Keychain Access, not Passwords. On this macOS it isn't in Applications › Utilities, and opening it by its path opens Passwords.
+   - Click login in Keychain Access before importing. With iCloud selected, the import fails with "Error: -25294", and Keychain Access hung.
+   - A Mac with only the Command Line Tools, and no Xcode, lacks Apple's Developer ID G2 intermediate certificate, so `find-identity` shows the identity but 0 valid. Download DeveloperIDG2CA.cer from apple.com/certificateauthority and import it into login too.
 2. **The notary login.** An app-specific password made at account.apple.com, then `xcrun notarytool store-credentials "BRIMM notary"` in Terminal, answering its own questions. The keychain keeps it under that name. Nothing secret is in any file.
 
 ### Notarizing, by hand
@@ -161,15 +167,18 @@ An n (or Return alone, or a line that is not y) at any question also stops the r
 Step 1, looking:
 
 - **"In Terminal, run: xcode-select --install, then run the app again."** Do that.
-- **Homebrew is not here.** "In Terminal, Sallie runs this (it asks for her password, which she types herself)", then Homebrew's install command. Run it, then run the app again.
+- **Homebrew is not here.** "In Terminal, run this (it asks for the password of this Mac, which its owner types)", then Homebrew's install command. Run it, then run the app again.
 - **"Node is not on this Mac, and Studio needs 22 or later. Run: brew install node, then run the app again."** Do that.
 - **"Node here is <version>, and Studio needs 22 or later. Run: brew upgrade node, then run the app again."** Do that.
-- **"Her settings are not as the switch of 26 October left them"**, naming the import (should be "light"), the drop folder (should be "Drop"), the hand-off version (should be "2"), or the checkout (should be brimm-video's or Studio's). Tell Jason.
+- **"This Mac's settings are not as the switch of 26 October left them"**, naming the import (should be "light"), the drop folder (should be "Drop"), the hand-off version (should be "2"), or the checkout (should be brimm-video's or Studio's). Tell Jason.
+- **"This app is for Sallie's laptop and Jason's MacBook, and this Mac's settings say it is "<machine>". Nothing was changed."** The app refuses at once, before any question (exit 2). Tell Jason.
+- **"This Mac has no BRIMM Video folder in Dropbox (The BRIMM DB › BRIMM Video). Sign in to Dropbox, let The BRIMM DB sync, then run the app again."** Only on a Mac with no brimm-video settings, which is set up fresh as Jason's MacBook. Do that.
+- **"This Mac has <n> BRIMM Video folders in Dropbox: <path 1>, <path 2>. Tell Jason which one is The BRIMM's."** Same Mac. Two paths that are the same folder (`~/Dropbox` is often a link to the CloudStorage folder) count once, and so does a folder found both at the top of a Dropbox and a level deeper. Tell Jason.
 - **"An import is running now. Wait until its window in the top right closes, then double-click Move to Studio again."** Do that.
-- **"Her checkout (<folder>) has no tool/settings.js to say where her drop folder is."** Tell Jason.
-- **"Her drop folder could not be found from her settings (settings.js show)."** Tell Jason.
-- **"Her drop folder holds <n> file(s) still to be imported."** The app never names them. Let the import finish, then run the app again. Step 5 looks at this again right before the real install and stops with the same words.
-- **"Her drop folder could not be read. macOS may have asked whether Terminal may read Dropbox…"** In System Settings › Privacy & Security › Files and Folders, allow it, then run the app again.
+- **"This Mac's checkout (<folder>) has no tool/settings.js to say where its drop folder is."** Tell Jason.
+- **"The drop folder could not be found from this Mac's settings (settings.js show)."** Tell Jason.
+- **"The drop folder holds <n> file(s) still to be imported."** The app never names them. Let the import finish, then run the app again. Step 5 looks at this again right before the real install and stops with the same words.
+- **"The drop folder could not be read. macOS may have asked whether Terminal may read Dropbox…"** In System Settings › Privacy & Security › Files and Folders, allow it, then run the app again.
 - **"Move to Studio is already running in another Terminal window. Use that one, or close it and double-click again."** Do that.
 - **"Claude Code is not on this Mac. Install it, then run the app again."** Do that.
 - **"Claude Code is still not signed in."** after the offered sign-in. Run `claude auth login` in Terminal, then run the app again.
@@ -184,7 +193,7 @@ Step 2, the key:
 - **"GitHub's key on this Mac isn't the one GitHub publishes (<fingerprint>). Nothing is trusted until that is looked into: tell Jason."** Tell Jason.
 - **"ssh did not get GitHub's welcome for this key. It said:"** and all of ssh's lines (a host-key warning comes before the rest). Tell Jason. (A "Permission denied" is not a stop: the app says GitHub does not know the key yet and waits again.)
 
-- **"Her Desktop could not be written to. macOS may have asked whether Terminal may write there…"** (this can come in step 2 or step 6). Allow Terminal in System Settings › Privacy & Security › Files and Folders, then run the app again.
+- **"The Desktop could not be written to. macOS may have asked whether Terminal may write there…"** (this can come in step 2 or step 6). Allow Terminal in System Settings › Privacy & Security › Files and Folders, then run the app again.
 
 Step 3, the code:
 
@@ -202,7 +211,7 @@ Step 5, the installer (step 4 only waits, and stops on an n):
 
 - **"<folder>/tool/install.sh is not there."** Tell Jason.
 - **"Studio's installer refused (its words are above), so it was not run for real. Nothing it refused has been changed."** Deal with what its words say, then run the app again. (A video in her drop folder is not one of its reasons: the installer looks at that only when it switches the folder, which is why the app looks itself, right before the real install.)
-- **"Claude Code is not signed in. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser), then run the app again."** Do that.
+- **"Claude Code is not signed in. In Terminal, run: claude auth login (sign in to this Mac's own Claude account in the browser), then run the app again."** Do that.
 - **"Claude Code is still older than the installer needs after claude update. Tell Jason."** Tell Jason.
 - **"The Claude app's own Claude Code is still older than the installer wants. Tell Jason."** after Check for Updates. Tell Jason.
 - **"The installer stopped (it ended with <n>). Its last lines:"** and the lines. Tell Jason. Running the app again goes on from there.
