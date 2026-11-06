@@ -34,7 +34,7 @@ describe("her folder's settings under the open lock", () => {
     const today = studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder });
     assert.deepEqual(studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder, lock: "strict", facts: w.facts }), today);
     const s = JSON.parse(today[".claude/settings.json"]);
-    assert.deepEqual(Object.keys(s), ["permissions", "disableAllHooks", "hooks"]);
+    assert.deepEqual(Object.keys(s), ["permissions", "env", "disableAllHooks", "hooks"]);
     assert.deepEqual(s.permissions, {
       defaultMode: "default",
       allow: [`Bash(${w.node} "${w.checkout}/tool/edit.js" *)`],
@@ -250,14 +250,16 @@ describe("what is changed in her folder's settings under the open lock (lockBrok
   });
   it("names what a folder written strict lacks on a Mac with the open lock", () => {
     const strict = JSON.parse(studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder })[".claude/settings.json"]);
-    assert.deepEqual(broken(strict), ["sandbox", "permissions", "memory", "skill-shell", "receipt"]);
+    // And "other": the strict folder's env (the two variables that turn off /feedback and the survey) is a setting the open shape does not write.
+    assert.deepEqual(broken(strict), ["sandbox", "permissions", "memory", "skill-shell", "receipt", "other"]);
   });
   it("keeps the strict lock's check as it was", () => {
     const strict = () => JSON.parse(studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder })[".claude/settings.json"]);
     assert.deepEqual(lockBroken(strict(), { checkout: w.checkout, folder: w.folder }), []);
     assert.deepEqual(lockBroken(strict(), { ...where(), lock: "strict", node: "/elsewhere/node" }), []);
     // The strict check is not the whole: the node, and any other key, are only out of date there.
-    for (const change of [(s) => { s.hooks.PreToolUse[0].hooks[0].args[1] = "/x/node"; }, (s) => { s.env = { X: "1" }; }, (s) => { s.permissions.deny.pop(); }]) {
+    // The env too, taken away (a folder written before the two variables that turn off /feedback and the survey were added) or another.
+    for (const change of [(s) => { s.hooks.PreToolUse[0].hooks[0].args[1] = "/x/node"; }, (s) => { s.env = { X: "1" }; }, (s) => { delete s.env; }, (s) => { s.permissions.deny.pop(); }]) {
       const s = strict();
       change(s);
       assert.deepEqual(lockBroken(s, { checkout: w.checkout, folder: w.folder }), [], change.toString());
