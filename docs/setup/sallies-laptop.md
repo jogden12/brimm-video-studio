@@ -1,6 +1,6 @@
 # Setting up Sallie's laptop
 
-For Jason, with Sallie, in person or by screen share. About two hours. Each step says what to check. Nothing here is done without your yes; the installer runs with `--print` first.
+For Jason, with Sallie, in person or by screen share. About two hours. Moving her laptop from brimm-video to Studio is done with the Move to Studio app (`docs/setup/move-to-studio-app.md`), which runs checks 41, 42 and 44 for you. Each step says what to check. Nothing here is done without your yes; the installer runs with `--print` first.
 
 Her laptop was set up on 2026-10-15 and switched to the light import on 2026-10-26, at brimm-video 7aaa110 ("Switching her laptop", at the end, says how): its drop folder is `Drop/Sallie's laptop`. The steps below are for setting a laptop up from the start, as it is done since the switch (the Mac Studio was switched on 2026-10-25, at `main` 1b43474). This doc still describes brimm-video. Moving her laptop to Studio is checks 40 to 48 on the Studio By-Hand Checks page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT), after the Mac Studio's own move on 2026-11-03. Her guide is the BRIMM Ops guide (https://claude.ai/artifact/Vu5JmADhftiEsPz4KYN4e4), from recording a video to posting it. It replaced the BRIMM Video Guide (https://claude.ai/artifact/WHVePKCjhjUjtBdHvPipgC), which described brimm-video and was retired on 2026-11-03.
 
