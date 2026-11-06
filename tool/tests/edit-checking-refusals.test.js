@@ -9,8 +9,12 @@
 // Downloads, Dropbox or a program.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { editMain, finishEpisode } from "../edit.js";
-import { lockOf, takeEpisodeLock } from "../detached.js";
+import { lockOf, resultFile, takeEpisodeLock } from "../detached.js";
+import { LATE_CHECK_MS } from "../dropbox.js";
+import { episodeWork } from "../settings.js";
+import { guideWorld } from "./guide-world.js";
 import { markChecking } from "../finish-check.js";
 import { clockAt } from "../unedited.js";
 import { EDITED, FOLDER, PROJECT, episodeFor, reread, setup } from "./episodes.js";
@@ -182,5 +186,43 @@ describe("the stops, when the finish's marker is not the one the lock is held fo
       assert.equal((await on(seeing(w), ...SPELL)).text, STILL.spell, what);
       w.t.done();
     }
+  });
+});
+
+// R1d: a read run whose reading is in the record and which only waits for its own late check stops these in the reading's words.
+describe("the stops, while a read run waits for its own late check (R1d)", () => {
+  /** A raw episode read by Claude, a live read lock (this process) and, when `early` is true, that run's early result. */
+  function reading(early = true) {
+    const w = guideWorld();
+    mkdirSync(episodeWork(w.t.home, FOLDER), { recursive: true });
+    assert.equal(takeEpisodeLock(lockOf(w.t.home, FOLDER), "read", () => true).taken, true);
+    const ended = w.t.now() - 60000;
+    if (early) writeFileSync(resultFile(w.t.home, FOLDER, "read"), JSON.stringify({ version: 1, command: "read", started: ended - 1000, ended, ok: true, made: [], failed: [], next: "", early: true, pid: process.pid }));
+    return { w, at: clockAt(ended + LATE_CHECK_MS) };
+  }
+  const NAMED = { release: "Pricing: what to charge?", kind: FOLDER, ask: FOLDER };
+  it("say when Studio checks Dropbox's copies, from the run's early result, in each command's own words", async () => {
+    const { w, at } = reading();
+    const says = (argv) => on(seeing(w, { tools: { claude: "claude" } }), ...argv);
+    const first = await says(["finish", FOLDER, "--yes"]);
+    assert.equal(first.code, 1, first.text);
+    assert.ok(first.said.includes(`Claude's reading is written, and Studio checks Dropbox's copies at ${at}. Say "hand it off" again then.`), first.text);
+    const release = await says(["release", FOLDER]);
+    assert.deepEqual([release.code, release.text], [1, `Claude's reading of ${NAMED.release} is written, and Studio checks Dropbox's copies at ${at}. Hand it over then. Nothing was handed over.`]);
+    for (const [what, argv] of [["kind", KIND], ["ask", ["ask", FOLDER]]]) {
+      const heard = await says(argv);
+      assert.deepEqual([heard.code, heard.text], [1, `Claude's reading of ${NAMED[what]} is written, and Studio checks Dropbox's copies at ${at}. Say it again then.`], what);
+    }
+    w.t.done();
+  });
+  it("say their generic words with no early result of that run", async () => {
+    const { w } = reading(false);
+    for (const argv of [["release", FOLDER], KIND, ["ask", FOLDER]]) {
+      const heard = await on(seeing(w, { tools: { claude: "claude" } }), ...argv);
+      assert.equal(heard.code, 1);
+      assert.doesNotMatch(heard.text, /Claude's reading/);
+      assert.match(heard.text, /read is running/);
+    }
+    w.t.done();
   });
 });

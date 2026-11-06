@@ -66,7 +66,7 @@ import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, kindOf as recordKind } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
@@ -77,7 +77,7 @@ import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
-import { localSource, readingWaitsUntil, waitFacts } from "./late-wait.js";
+import { localSource, readingCheckAt, readingWaitsUntil, waitFacts } from "./late-wait.js";
 import { heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
@@ -2229,7 +2229,10 @@ const refuse = (ctx, why) => {
     generic one: nothing is written yet, and the finish is what she waits for. `record` is the episode's record in force. */
 function stoppedWords(ctx, found, record, { generic, again, of = "" }) {
   const checking = checkingNow(ctx.home, found.name, record, ctx.alive);
-  return checking ? `The hand-off${of} is written, and Studio checks Dropbox's copies at ${clockAt(checking.due)}. ${again}` : generic;
+  if (checking) return `The hand-off${of} is written, and Studio checks Dropbox's copies at ${clockAt(checking.due)}. ${again}`;
+  // A read run that has put its reading in the record and only waits for its own late check (late-wait.js readingCheckAt; plan R1d).
+  const reads = readingCheckAt(ctx, { name: found.name, record });
+  return reads === null ? generic : `Claude's reading${of} is written, and Studio checks Dropbox's copies at ${clockAt(reads)}. ${again}`;
 }
 const oneLine =(v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
 
@@ -4089,7 +4092,7 @@ function askRefusal(ctx, found, record) {
   if (claimHeld(ctx, record)) return { why: claimHeld(ctx, record) };
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   if (running === "ask") return { why: 'Claude is being asked already. Say "how far is it?" to see how far it has got.' };
-  if (running) return { why: `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.` };
+  if (running) return { why: stoppedWords(ctx, found, record, { generic: `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.`, again: "Say it again then.", of: ` of ${calledAs(ctx, found)}` }) };
   if (!(ctx.deps.tools || findPrograms()).claude) return { why: NO_CLAUDE_CODE };
   return askBlocked({ folder: found.folder, record, root: ctx.root, home: ctx.home, machine: ctx.machine, now: ctx.now(), whole: ctx.isWhole });
 }
@@ -4590,16 +4593,6 @@ const hasFinalCut = (record) => {
 };
 /** Spellings as they are said in a row: "a" as "b", "c" as "d" and "e" as "f". */
 const pairsSaid = (pairs) => listed(pairs.map(([heard, meant]) => `"${heard}" as "${meant}"`));
-
-/** The reading the record holds when it is the current one, or null: one made after her answer (not before it), as the kind the
-    video is now. `kind … --again` keeps the reading and its offers in the record while the new one is made, and a video answered
-    again as another kind holds the old kind's: neither is a reading of this answer (the inverse of reading.js notAsAnswered). A
-    time that cannot be read is not after. */
-function currentReading(record) {
-  const reading = record.reading;
-  if (reading === null || typeof reading !== "object" || record.answer === null || typeof record.answer !== "object") return null;
-  return Date.parse(reading.at) >= Date.parse(record.answer.at) && reading.kind === recordKind(record) ? reading : null;
-}
 
 /** The spellings Claude's reading offered, each { heard, spelled, why }, as the card numbers them (by their place in the record,
     so that a spelling added meanwhile changes no number); null when the video has not been read, by a reading that counts

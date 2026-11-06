@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { childEnv, PIN, readHistory, readOpen } from "../hyperframes.js";
-import { openInApp, projectOnAnotherMac, NOT_SET_UP } from "../app.js";
+import { openInApp, projectOnAnotherMac, readListed, NOT_SET_UP } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { processTable } from "../chain.js";
 import { episodeFault, layoutOf, localStamp, newEpisode, newPlannedEpisode, recordFile, recordText } from "../episode.js";
@@ -421,6 +421,75 @@ describe("app: opening an episode in HyperFrames", () => {
       assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), "read", () => true).taken, true);
       assert.equal(await run(e), 0);
       assert.deepEqual(e.said, ['Claude is still reading it. Say "open Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.']);
+    });
+  });
+  describe("while the reading's own late check is still to come (R1d)", () => {
+    const NOT_WHOLE = 'Some files of Pricing talk are not whole in Dropbox yet, so its HyperFrames project wasn\'t made. Say "open Pricing talk in HyperFrames" again in a few minutes; if it says this again, ask Jason.';
+    /** The episode with a current reading in its record and `files` listing the words, reels.json and the plan at their sizes. */
+    function read(c, over = {}, options = {}) {
+      const e = episode(c, options);
+      const size = (name) => statSync(join(e.folder, name)).size;
+      e.record = { ...e.record, answer: { at: "2026-10-28T12:00:00-04:00" }, reading: { at: "2026-10-28T13:00:00-04:00", kind: "raw" }, files: { "Talk.words.json": size("Talk.words.json"), "reels.json": size("reels.json"), "Talk.cut-plan.json": size("Talk.cut-plan.json") }, ...over };
+      return e;
+    }
+    const hold = (e) => {
+      mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), "read", () => true).taken, true);
+      return readFileSync(lockOf(e.home, FOLDER), "utf8");
+    };
+    it("makes the project once the reading is in the record and the files are at the sizes it lists, and leaves the read lock alone", async (c) => {
+      const e = read(c);
+      const lock = hold(e);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
+      assert.ok(existsSync(join(e.project, "index.html")));
+      assert.equal(readFileSync(lockOf(e.home, FOLDER), "utf8"), lock);
+    });
+    it("makes nothing while a file it reads is not the size the record lists, and makes the project when it is put right", async (c) => {
+      const e = read(c);
+      hold(e);
+      const whole = readFileSync(join(e.folder, "reels.json"), "utf8");
+      writeFileSync(join(e.folder, "reels.json"), whole.slice(0, -5));
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [NOT_WHOLE]);
+      assert.ok(!existsSync(e.project));
+      assert.deepEqual([e.saved, e.runs()], [[], []]);
+      writeFileSync(join(e.folder, "reels.json"), whole);
+      e.said.splice(0);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
+      plain([NOT_WHOLE]);
+    });
+    it("judges the bytes it read: the plan listed at one byte more than the file holds is not whole", async (c) => {
+      const e = read(c);
+      hold(e);
+      e.record.files["Talk.cut-plan.json"] += 1;
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [NOT_WHOLE]);
+      assert.ok(!existsSync(e.project));
+      assert.deepEqual(e.saved, []);
+    });
+    it("readListed compares the byte length of what it read with the listed size, and reads an unlisted file as before", (c) => {
+      const e = read(c);
+      const text = readFileSync(join(e.folder, "Talk.words.json"), "utf8");
+      assert.deepEqual(readListed(e.folder, e.record, "Talk.words.json"), { text });
+      assert.deepEqual(readListed(e.folder, { files: { "Talk.words.json": Buffer.byteLength(text) + 1 } }, "Talk.words.json"), { notWhole: "Talk.words.json" });
+      assert.deepEqual(readListed(e.folder, { files: { "gone.json": 3 } }, "gone.json"), { notWhole: "gone.json" });
+      assert.deepEqual(readListed(e.folder, { files: {} }, "gone.json"), { absent: true });
+      assert.deepEqual(readListed(e.folder, { files: {} }, "Talk.words.json"), { text });
+      writeFileSync(join(e.folder, "n.json"), "é");
+      assert.deepEqual(readListed(e.folder, { files: { "n.json": 2 } }, "n.json"), { text: "é" });
+      assert.deepEqual(readListed(e.folder, { files: { "n.json": 1 } }, "n.json"), { notWhole: "n.json" });
+    });
+    it("checks the files the same way with this Mac's late check of the import still owed and no read run", async (c) => {
+      const e = read(c);
+      const file = join(e.home, "drop.mov");
+      writeFileSync(file, "x");
+      writePending(e.home, { version: 1, id: e.record.id, name: "n", folder: e.folder, video: "Talk.mov", bytes: 1, seconds: 1, drop: file, dropFile: fileId(file), importId: "x", work: e.home, entries: [], lastCopy: AT, root: e.ctx.root, machine: "Mac Studio", planTxt: "x" });
+      writeFileSync(join(e.folder, "Talk.words.json"), "[]");
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [NOT_WHOLE]);
+      assert.ok(!existsSync(e.project));
     });
   });
   describe("while Claude is still reading the episode (a `read` run holds the episode's lock)", () => {

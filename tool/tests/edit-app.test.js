@@ -730,6 +730,18 @@ describe("app: Claude's reading is not finished (architecture 4.1)", () => {
     assert.ok(existsSync(paths.video), "the working copy is where it was, not moved into a project");
     t.done();
   });
+  it("claims, makes and opens the project while the read run is at its own late check (R1d): the reading is in the record and the lock is still the run's", async () => {
+    const { t, found, work } = world({ record: { ...RAW, reading: { kind: "raw", model: "m", at: AT, on: "Mac Studio", account: "a", outcome: "read" } } });
+    readingAtWork(t);
+    const lock = readFileSync(lockOf(t.home, FOLDER), "utf8");
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
+    const record = reread(found);
+    assert.deepEqual([record.rev, record.editing.by, record.app.projects.map((p) => [p.name, p.state])], [3, "Mac Studio", [["Pricing- what to charge- main 3fa9c1", "opened"]]]);
+    assert.ok(existsSync(join(work, "Pricing- what to charge- main 3fa9c1", "index.html")));
+    assert.equal(readFileSync(lockOf(t.home, FOLDER), "utf8"), lock);
+    t.done();
+  });
   it("makes the project when it is said again after the reading has ended, and the claim is not made twice", async () => {
     const { t, found, work } = world();
     readingAtWork(t);

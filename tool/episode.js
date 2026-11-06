@@ -266,6 +266,16 @@ export function kindOf(r) {
   return KINDS.includes(kind) ? kind : null;
 }
 
+/** The reading the record holds when it is the current one, or null: one made after her answer (not before it), as the kind the
+    video is now. `kind … --again` keeps the reading and its offers in the record while the new one is made, and a video answered
+    again as another kind holds the old kind's: neither is a reading of this answer (the inverse of reading.js notAsAnswered). A
+    time that cannot be read is not after. */
+export function currentReading(record) {
+  const reading = record.reading;
+  if (reading === null || typeof reading !== "object" || record.answer === null || typeof record.answer !== "object") return null;
+  return Date.parse(reading.at) >= Date.parse(record.answer.at) && reading.kind === kindOf(record) ? reading : null;
+}
+
 /** How a record is named in all that edit.js prints, which goes into Sallie's chat (spec 2026-10-22, section 1, "Unanswered and
     session videos are named by a neutral label"): a video not yet answered, or left alone, by its label, as the import made it
     and the record keeps it (it is never made again from when the record says it was imported: the label's moment is its

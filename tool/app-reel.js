@@ -49,6 +49,7 @@ import { existsSync, readFileSync, renameSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { clockText } from "./clock.js";
 import { runningCommand } from "./detached.js";
+import { projectWaits } from "./late-wait.js";
 import { isFromPlan, kindOf, localStamp } from "./episode.js";
 import { graphicCuesOf, graphicCuesOfPlan, REEL_CUES_MOST, SHOT_KINDS } from "./graphic-cues.js";
 import { cliPath } from "./hyperframes.js";
@@ -59,7 +60,7 @@ import { episodeWork } from "./settings.js";
 import { snapshotOf } from "./snapshot.js";
 import {
   asideWords, changedSince, copyFits, copyIn, factsIn, fromOf, guidanceOf, jsonIn, keptFits, logosIn, moveIn, noRecording, noWords, notPutBack, notTheSame, notWhole, nothingAt, olderHere, olderMarked, olderThanSnapshot,
-  openProjectInApp, plainName, rebuildHere, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, videoKept, wordsIn
+  openProjectInApp, plainName, readListed, rebuildHere, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, videoKept, wordsIn, wordsOfText
 } from "./app.js";
 import { reelCopyKey, reelCopyPaths, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
@@ -88,6 +89,9 @@ const beingMade = (n, name) => `The video for Reel ${n} is being made. Say "${op
     another Reel's; so it is not said that Reel `n`'s is being made, nor that another is, but that a video is. */
 const busyWith = (n, name) => `A video for HyperFrames is being made already, and they are made one at a time. Say "${openReelWords(n, name)}" again when it is done; "how far is it?" shows how far it has got.`;
 const stillReading = (n, name) => `Claude is still reading it. Say "${openReelWords(n, name)}" again when it has finished; "how far is it?" shows how far it has got.`;
+/** What is said when Reel `n`'s project is not made because a file it reads is not at the size the record lists, while the reading's own
+    late check is still to come (plan R1d). */
+export const reelNotWholeYet = (n, name) => `Some files of ${name} are not whole in Dropbox yet, so the project of Reel ${n} wasn't made. Say "${openReelWords(n, name)}" again in a few minutes; if it says this again, ask Jason.`;
 const reelMade = ({ start, end }, n) => `Reel ${n} is made: the recording from ${clockText(start)} to ${clockText(end)}.`;
 const unreadable = (name) => `The Reel suggestions of ${name} cannot be read. Ask Jason.`;
 /** What is said when Reel `n` is not among the suggestions `numbers`, as markReels says it. */
@@ -111,12 +115,13 @@ export const madeInApp = (record, n) => (record.app?.projects ?? []).some((p) =>
 /** Why `app … reel <n>` may not go on for this episode, from the record alone, in her words, or "" when it may. It is asked before
     anything is claimed or brought, so that a Reel that is not there claims nothing:
     - a Reel the record lists a project for is opened whatever else is said (it is made already), and so is any Reel while Claude's
-      reading is at work on this Mac, since the Reels are its work: what the record lists may be the last reading's;
+      reading is at work on this Mac and not yet in the record (projectWaits "reading"), since the Reels are its work: what the record
+      lists may be the last reading's. Once the reading is in the record, the record judges, as at any other time;
     - a Reel the record does not list is "There is no Reel 9. The Reels are 2, 3.";
     - a finished Reel is "Reel 2 is finished: it is in the hand-off already.", as `reel` says it of one: it is not made again. */
 export function reelWhy(ctx, found, record, n) {
   if (madeInApp(record, n)) return "";
-  if (runningCommand(ctx.home, found.name, ctx.alive) === "read") return "";
+  if (projectWaits(ctx, { name: found.name, record }) === "reading") return "";
   const reels = Array.isArray(record.reels) ? record.reels : [];
   const reel = reels.find((r) => r.n === n);
   if (!reel) return noSuchReel(n, reels.map((r) => r.n));
@@ -126,10 +131,10 @@ export function reelWhy(ctx, found, record, n) {
 /** The suggestion for Reel `n` in the list in the episode's folder `folder` (reels.json): { candidate }, or why not: { gone,
     numbers } when the list does not have the Reel (`numbers` are the ones it has), { nothing } with the reason when the suggestion
     has no stretch to show, or { unreadable } when the list is not there, is not a list or is one a newer brimm-video wrote. */
-function suggestion(folder, n) {
+function suggestion(folder, n, text = undefined) {
   let read;
   try {
-    read = readReels(readFileSync(join(folder, REELS_FILE), "utf8"));
+    read = readReels(text === undefined ? readFileSync(join(folder, REELS_FILE), "utf8") : text);
   } catch {
     return { unreadable: true };
   }
@@ -205,16 +210,24 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   const { home } = ctx;
   const name = record.name.text;
   const stem = basename(record.video.file, extname(record.video.file));
-  const words = wordsIn(join(found.folder, `${stem}.words.json`));
+  const wait = projectWaits(ctx, { name: found.name, record });
+  // While the reading's own late check is still to come (plan R1d), the words, the suggestions and the cut plan are held to the sizes the
+  // record lists, judged by the bytes read.
+  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel) => readListed(found.folder, record, rel)) : null;
+  if (checked && checked.some((got) => got.notWhole)) {
+    ctx.say(reelNotWholeYet(n, name));
+    return { code: 0 };
+  }
+  const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(join(found.folder, `${stem}.words.json`));
   if (!words) {
     ctx.say(noWords(name));
     return { code: 1 };
   }
-  if (runningCommand(home, found.name, ctx.alive) === "read") {
+  if (wait === "reading") {
     ctx.say(stillReading(n, name));
     return { code: 0 };
   }
-  const listed = suggestion(found.folder, n);
+  const listed = suggestion(found.folder, n, checked ? checked[1].text ?? "" : undefined);
   if (!listed.candidate) {
     ctx.say(listed.gone ? noSuchReel(n, listed.numbers) : listed.nothing ? `Reel ${n} has nothing to show: ${listed.nothing}.` : unreadable(name));
     return { code: 1 };
@@ -242,7 +255,7 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   const stretch = facts.stretch ?? asked;
   // The cut plan places the words' starts, as it does the main video's (project.js saidWords); it cuts nothing of the Reel, and with
   // none the words are only moved inside their time.
-  const plan = jsonIn(join(found.folder, `${stem}.cut-plan.json`));
+  const plan = checked ? (checked[2].text === undefined ? undefined : JSON.parse(checked[2].text)) : jsonIn(join(found.folder, `${stem}.cut-plan.json`));
   const input = {
     kind: "reel", part: { reel: n }, id: record.id, name, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words, stretch,
     plan, faces: factsIn(copy.faces), ...cuesFor(kindOf(record), { plan, file: copy.cues, record }),
@@ -285,11 +298,17 @@ function putReelVideoBack(ctx, { found, record, n, project, dir, kept = null }, 
     ctx.say(videoGoneAndChanged(name));
     return { code: 1 };
   }
-  if (runningCommand(home, found.name, ctx.alive) === "read") {
+  const wait = projectWaits(ctx, { name: found.name, record });
+  if (wait === "reading") {
     ctx.say(stillReading(n, name));
     return { code: 0 };
   }
-  const listed = suggestion(found.folder, n);
+  const checked = wait === "verify" ? readListed(found.folder, record, REELS_FILE) : null;
+  if (checked && checked.notWhole) {
+    ctx.say(reelNotWholeYet(n, name));
+    return { code: 0 };
+  }
+  const listed = suggestion(found.folder, n, checked ? checked.text ?? "" : undefined);
   if (!listed.candidate) {
     ctx.say(listed.gone ? noSuchReel(n, listed.numbers) : listed.nothing ? `Reel ${n} has nothing to show: ${listed.nothing}.` : unreadable(name));
     return { code: 1 };

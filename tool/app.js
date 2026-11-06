@@ -64,7 +64,7 @@ import { readResult, runningCommand } from "./detached.js";
 import { isFromPlan, kindOf, localStamp } from "./episode.js";
 import { sessionNotCleared } from "./gate.js";
 import { copyIn as copyTakes, waitWords } from "./guide.js";
-import { readingWaitsUntil, waitFacts } from "./late-wait.js";
+import { projectWaits, readingWaitsUntil, waitFacts } from "./late-wait.js";
 import { chatHeld } from "./held.js";
 import { PIN, childEnv, cliPath, handoverAllowed, readOpen, toolchainDir } from "./hyperframes.js";
 import { transcriptOf } from "./loosened.js";
@@ -111,6 +111,9 @@ function stillReading(ctx, record) {
   const starts = due === null ? "" : ` It starts at ${clockAt(due)}, when Dropbox has checked its copies.`;
   return `Claude is still reading it.${starts} Say "open ${record.name.text} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
 }
+/** What is said when the project is not made because a file it reads is not at the size the record lists, while the reading's own
+    late check is still to come (plan R1d). */
+export const notWholeYet = (name) => `Some files of ${name} are not whole in Dropbox yet, so its HyperFrames project wasn't made. Say "open ${name} in HyperFrames" again in a few minutes; if it says this again, ask Jason.`;
 export const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
 /** What is said of an explainer's HyperFrames project in a HeyGen voice when its folder is not on this Mac and there is no snapshot to rebuild it from (PR H6):
     it holds no media to make it again from, since the voice was made in it. */
@@ -278,13 +281,40 @@ export function jsonIn(path) {
   }
 }
 
+/** What the file `rel` in the episode's `folder` holds, read whole and judged by the bytes read (plan R1d): { text } when the record
+    lists the file and the bytes read are the size it lists, or it lists none and the file is there; { notWhole: rel } when it lists
+    the file and it is missing or of another size; { absent: true } when it lists none and the file is not there. The size is that
+    of what was read, not of a look before it. */
+export function readListed(folder, record, rel) {
+  const listed = record.files && Object.prototype.hasOwnProperty.call(record.files, rel);
+  let bytes;
+  try {
+    bytes = readFileSync(join(folder, rel));
+  } catch (e) {
+    if (e.code === "ENOENT") return listed ? { notWhole: rel } : { absent: true };
+    if (listed) return { notWhole: rel };
+    throw e;
+  }
+  return listed && bytes.length !== record.files[rel] ? { notWhole: rel } : { text: bytes.toString("utf8") };
+}
+
+/** The words, [{ w, start, end }], that `text` holds: the import writes { video, duration, words }, and a bare list is taken too.
+    null when it is no JSON or holds no list. */
+export const wordsOfText = (text) => {
+  try {
+    const held = JSON.parse(text);
+    const words = Array.isArray(held) ? held : held?.words;
+    return Array.isArray(words) ? words : null;
+  } catch {
+    return null;
+  }
+};
+
 /** The episode's words, [{ w, start, end }], from its .words.json: the import writes { video, duration, words }, and a bare list is
     taken too. null when the file is not there, cannot be read, or holds no list: then the words are not on this Mac yet. */
 export function wordsIn(path) {
   try {
-    const held = JSON.parse(readFileSync(path, "utf8"));
-    const words = Array.isArray(held) ? held : held?.words;
-    return Array.isArray(words) ? words : null;
+    return wordsOfText(readFileSync(path, "utf8"));
   } catch {
     return null;
   }
@@ -488,14 +518,22 @@ function adoptProject(ctx, { found, record, at, projects }) {
 async function makeProject(ctx, { found, record, at, projects }, { cli, guidance, planned }) {
   const { home } = ctx;
   const stem = basename(record.video.file, extname(record.video.file));
-  const words = wordsIn(join(found.folder, `${stem}.words.json`));
+  const wait = projectWaits(ctx, { name: found.name, record });
+  // While the reading's own late check is still to come (plan R1d), the three files read from the episode's folder are held to the
+  // sizes the record lists, judged by the bytes read; one that is not whole makes nothing.
+  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel) => readListed(found.folder, record, rel)) : null;
+  if (checked && checked.some((got) => got.notWhole)) {
+    ctx.say(notWholeYet(record.name.text));
+    return { code: 0 };
+  }
+  const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(join(found.folder, `${stem}.words.json`));
   if (!words) {
     ctx.say(noWords(record.name.text));
     return { code: 1 };
   }
   const raw = statSync(join(found.folder, record.video.file));
   const copy = copyPathsOf(home, found.name, record, raw);
-  const reading = runningCommand(home, found.name, ctx.alive) === "read";
+  const reading = wait === "reading";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     requestWorkCopy(ctx, { folder: found.name });
     ctx.say(reading ? stillReading(ctx, record) : beingMade(record.name.text, readyAt(ctx, record)));
@@ -507,8 +545,8 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   }
   const facts = JSON.parse(readFileSync(copy.facts, "utf8"));
   const { name, number } = nextMain(record, projects);
-  const reels = jsonIn(join(found.folder, REELS_FILE));
-  const plan = jsonIn(join(found.folder, `${stem}.cut-plan.json`));
+  const reels = checked ? (checked[1].text === undefined ? undefined : JSON.parse(checked[1].text)) : jsonIn(join(found.folder, REELS_FILE));
+  const plan = checked ? (checked[2].text === undefined ? undefined : JSON.parse(checked[2].text)) : jsonIn(join(found.folder, `${stem}.cut-plan.json`));
   // The graphic cues go in beside the suggested cuts, placed on the project's words (project.js). A raw video's are the cut plan's own,
   // or for a plan made before them its ideas for graphics as cues (graphic-cues.js graphicCuesOfPlan). An iPhone clip's are the ones its
   // reading kept in its record (graphicCuesOfRecord, PR H2): its cut plan is the import's, and holds none.

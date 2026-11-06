@@ -461,6 +461,48 @@ describe("app … reel: the Reel's video", () => {
     assert.deepEqual([r.code, r.said, t.started, runsOf(t), reread(found).app], [0, [STILL], [], [], undefined]);
     t.done();
   });
+  describe("while the read run is at its own late check, its reading in the record (R1d)", () => {
+    const reading = () => ({ ...RAW, reading: { kind: "raw", model: "m", at: "2026-10-20T15:00:00-05:00", on: "Mac Studio", account: "a", outcome: "read" } });
+    const hold = (t) => {
+      mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(t.home, FOLDER), "read", () => true).taken, true);
+      t.ctx.deps.alive = (pid) => pid === process.pid;
+    };
+    it("refuses a Reel the record does not list, in the record's words", async () => {
+      const { t } = world({ record: reading() });
+      hold(t);
+      const r = await app(t.ctx.deps, FOLDER, "reel", "9");
+      assert.deepEqual([r.code, r.said, t.started, runsOf(t)], [1, ["There is no Reel 9. The Reels are 1, 2."], [], []]);
+      t.done();
+    });
+    it("asks for Reel 2's video when it is not made, and makes its project when it is: no still-reading stop", async () => {
+      const none = world({ copy: false, record: reading() });
+      hold(none.t);
+      const first = await app(none.t.ctx.deps, FOLDER, "reel", "2");
+      assert.deepEqual([first.code, first.said], [0, [MAKING]]);
+      assert.equal(none.t.started.length, 1);
+      none.t.done();
+      const { t, work, stretch } = world({ record: reading() });
+      hold(t);
+      const r = await app(t.ctx.deps, FOLDER, "reel", "2");
+      assert.deepEqual([r.code, r.said], [0, [made(stretch), OPEN, BUTTONS]]);
+      assert.ok(existsSync(join(work, PROJECT, "index.html")));
+      t.done();
+    });
+    it("makes and asks for nothing while reels.json is shorter than the record lists (the claim's own look at the files stops it first; the Reel's line is app-reel.test.js's)", async () => {
+      for (const copy of [true, false]) {
+        const { t, found, work } = world({ copy, record: reading() });
+        hold(t);
+        const at = join(found.folder, "reels.json");
+        writeFileSync(at, readFileSync(at, "utf8").slice(0, -4));
+        const r = await on(t.ctx.deps, "app", FOLDER, "reel", "2");
+        assert.deepEqual([t.started.filter(([, args]) => args[1] === "workcopy"), runsOf(t)], [[], []]);
+        assert.ok(!existsSync(join(work, PROJECT)));
+        assert.doesNotMatch(r.text, /It's open in HyperFrames/);
+        t.done();
+      }
+    });
+  });
   it("says the words of the episode are not on this Mac, ending with 1, and makes and asks for nothing", async () => {
     const { t, found } = world();
     rmSync(join(found.folder, "Pricing talk.words.json"));
