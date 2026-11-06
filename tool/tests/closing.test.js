@@ -59,9 +59,9 @@ describe("dropClosing", () => {
     assert.equal(r.edge, null);
   });
   it("takes a caption with 75% of its time in the pause and keeps one with less", () => {
-    const srt = [cap(1, "00:00:50,000", "00:00:60,000", "talk"), cap(2, "00:01:00,000", "00:01:04,000", "three quarters")].join("\n");
-    assert.deepEqual(captionsOf(dropClosing(srt, [61, 80]).srt).map((c) => c.text), ["talk"]);
-    assert.deepEqual(captionsOf(dropClosing(srt, [62, 80]).srt).map((c) => c.text), ["talk", "three quarters"]);
+    const srt = [cap(1, "00:00:55,000", "00:01:00,000", "talk"), cap(2, "00:01:00,000", "00:01:04,000", "three quarters")].join("\n");
+    assert.deepEqual(captionsOf(dropClosing(srt, [61, 80], [[55.5, 56], [61, 80]]).srt).map((c) => c.text), ["talk"]);
+    assert.deepEqual(captionsOf(dropClosing(srt, [62, 80], [[55.5, 56], [62, 80]]).srt).map((c) => c.text), ["talk", "three quarters"]);
   });
   it("leaves out a caption with no length when its moment lies in the pause, and keeps one before it", () => {
     const srt = [cap(1, "00:01:00,000", "00:01:05,000", "kept"), cap(2, "00:01:20,000", "00:01:20,000", "Thank you.")].join("\n");
@@ -94,7 +94,7 @@ describe("dropClosing, by the sound", () => {
     assert.equal(r.srt, srt);
   });
   it("takes a caption padded into the silence when an earlier caption owns the last stretch of sound, and one wholly in the pause either way", () => {
-    const srt = [cap(1, "00:01:14,000", "00:01:16,500", "talk"), cap(2, "00:01:17,000", "00:01:19,000", "Thanks."), cap(3, "00:01:19,000", "00:01:20,000", "Thanks.")].join("\n");
+    const srt = [cap(1, "00:01:10,800", "00:01:16,500", "talk"), cap(2, "00:01:17,000", "00:01:19,000", "Thanks."), cap(3, "00:01:19,000", "00:01:20,000", "Thanks.")].join("\n");
     assert.equal(dropClosing(srt, [77.2, 84.167], [[70, 71], [77.2, 84.167]]).dropped, 2);
     const owned = [cap(1, "00:01:10,000", "00:01:15,000", "talk"), cap(2, "00:01:17,000", "00:01:19,000", "Thanks."), cap(3, "00:01:19,000", "00:01:20,000", "Thanks.")].join("\n");
     assert.equal(dropClosing(owned, [77.2, 84.167], [[76, 76.9], [77.2, 84.167]]).dropped, 1);
@@ -104,6 +104,22 @@ describe("dropClosing, by the sound", () => {
     const r = dropClosing(srt, [77.298, 84.167], [[76.3, 76.6], [77.298, 84.167]]);
     assert.deepEqual(captionsOf(r.srt).map((c) => c.text), ["talk", "Bye."]);
     assert.equal(r.dropped, 1);
+  });
+  it("lets a caption that contains the end of the last pause own the stretch when none starts with it (a breath inside the last sentence)", () => {
+    const pauses = [[10, 11], [74.439, 74.766], [75.5, 75.8], [77.298, 84.167]];
+    const r = dropClosing(LIVE, [77.298, 84.167], pauses);
+    assert.deepEqual(captionsOf(r.srt).map((c) => c.text), ["and then what.", "would it take to make it this week?"]);
+    assert.equal(r.dropped, 2);
+  });
+  it("drops a phantom right after a real caption that contains the end of the last pause", () => {
+    const srt = [cap(1, "00:01:14,600", "00:01:16,700", "real"), cap(2, "00:01:16,700", "00:01:19,000", "phantom")].join("\n");
+    const r = dropClosing(srt, [77, 84.167], [[76, 76.3], [77, 84.167]]);
+    assert.deepEqual(captionsOf(r.srt).map((c) => c.text), ["real"]);
+  });
+  it("keeps a caption 75-99% in the closing pause when no caption can be placed as the owner, and still drops one wholly in it", () => {
+    const srt = [cap(1, "00:01:10,000", "00:01:16,000", "earlier"), cap(2, "00:01:17,000", "00:01:19,000", "unplaced"), cap(3, "00:01:19,000", "00:01:20,000", "wholly")].join("\n");
+    const r = dropClosing(srt, [77.3, 84.167], [[75.5, 76.3], [77.3, 84.167]]);
+    assert.deepEqual(captionsOf(r.srt).map((c) => c.text), ["earlier", "unplaced"]);
   });
   it("lets only the first caption own the stretch when no pause comes before the closing one", () => {
     const srt = [cap(1, "00:00:00,000", "00:00:02,000", "Hello."), cap(2, "00:00:03,000", "00:00:05,000", "Padded.")].join("\n");
@@ -148,7 +164,7 @@ describe("closingCleaned", () => {
     const calls = [];
     return { calls, run: async (cmd, args) => { calls.push({ cmd, args }); return { code, stderr: printed }; }, tools: { ffmpeg: "FFMPEG" } };
   };
-  const heard = "[silencedetect @ 0x1] silence_start: 77.298\n[silencedetect @ 0x1] silence_end: 84.167 | silence_duration: 6.869\n";
+  const heard = "[silencedetect @ 0x1] silence_start: 74.439\n[silencedetect @ 0x1] silence_end: 74.766 | silence_duration: 0.327\n[silencedetect @ 0x1] silence_start: 77.298\n[silencedetect @ 0x1] silence_end: 84.167 | silence_duration: 6.869\n";
   it("asks ffmpeg for the cut plan's pauses, to the length, and cleans the captions", async () => {
     const s = stand(heard);
     const r = await closingCleaned(LIVE, "/w/sound.wav", s, 84.167);

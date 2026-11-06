@@ -14,9 +14,11 @@ const AT_THE_END = 0.05;
 const SHARE = 0.75;
 /** A caption this much in the pause or more is words nobody said whatever else is heard; between SHARE and this it is kept only
     when it owns the last stretch of sound (see dropClosing), because the transcriber pads a real last caption's end into the
-    silence. A caption owns that stretch when it starts up to SOUND_BEFORE seconds before the stretch does, or after. */
+    silence. A caption owns that stretch when it starts from SOUND_BEFORE seconds before the stretch to SOUND_AFTER seconds after
+    its start, or contains the stretch's start. */
 const WHOLLY = 0.99;
 const SOUND_BEFORE = 0.5;
+const SOUND_AFTER = 0.25;
 const CAPTION_TIMES = /(\d{1,2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[.,](\d{3})/;
 const secondsOf = (h, m, s, ms) => Number(h) * 3600 + Number(m) * 60 + Number(s) + Number(ms) / 1000;
 
@@ -33,9 +35,11 @@ export function closingPause(pauses, length = 0) {
 /** The captions without the ones that lie in the closing pause: {srt, dropped, edge}. A caption with 75% or more of its time in
     it is left out, with two exceptions. One 99% or more in it is always left out. One between 75% and 99% in it is kept when it
     owns the last stretch of sound: O is the end of the last of `pauses` ([start, end], all of them) that ends before the closing
-    pause starts (0 when there is none), the sound from O to the closing pause is the last stretch, and its own caption is the
-    first caption, in time order, that starts in [O - 0.5 s, the closing pause's start). Any other has no sound of its own.
-    One case is accepted: a real short last word said straight on, with no pause before it (so no new stretch of sound), whose end
+    pause starts (0 when there is none), and the sound from O to the closing pause is the last stretch. Its own caption is, in this
+    order: (1) the first caption, by start, that starts in [O - 0.5 s, O + 0.25 s] (it begins with that sound); else (2) the
+    caption that contains O (start <= O < end: a breath inside the last sentence); else (3) none, and then a caption we cannot
+    place is not left out, so one 75% to 99% in the pause is kept (one 99% or more still goes). Otherwise one that is not
+    the owner has no sound of its own and is left out. One case is accepted: a real short last word said straight on, with no pause before it (so no new stretch of sound), whose end
     the transcriber padded 75% or more into the closing pause, is left out. A caption with no length is left out when its moment
     lies in the pause. The captions that are left are numbered again. `edge` is the second the last caption kept ends, and only
     when a caption was left out; otherwise null. With none left out the captions come back as they were. */
@@ -51,13 +55,14 @@ export function dropClosing(srt, pause, pauses = []) {
     found.push({ text: lines.slice(at).join("\n"), start: secondsOf(t[1], t[2], t[3], t[4]), end: secondsOf(t[5], t[6], t[7], t[8]) });
   }
   const last = pauses.filter(([, b]) => b < from).reduce((o, [, b]) => Math.max(o, b), 0);
-  const own = found.filter((c) => c.start >= last - SOUND_BEFORE && c.start < from).sort((a, b) => a.start - b.start)[0];
+  const byStart = [...found].sort((a, b) => a.start - b.start);
+  const own = byStart.find((c) => c.start >= last - SOUND_BEFORE && c.start <= last + SOUND_AFTER) || byStart.find((c) => c.start <= last && last < c.end) || null;
   const kept = [];
   let dropped = 0;
   let edge = null;
   for (const c of found) {
     const share = c.end > c.start ? Math.max(0, Math.min(c.end, to) - Math.max(c.start, from)) / (c.end - c.start) : null;
-    const inside = share === null ? c.start >= from && c.start < to : share >= WHOLLY || (share >= SHARE && c !== own);
+    const inside = share === null ? c.start >= from && c.start < to : share >= WHOLLY || (share >= SHARE && own !== null && c !== own);
     if (inside) dropped += 1;
     else {
       kept.push(c.text);
