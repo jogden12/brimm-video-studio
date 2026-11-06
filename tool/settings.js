@@ -184,7 +184,7 @@ export function factsOf(home, s, { tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp
 }
 
 /** Whether this Mac does the light import, which asks Claude nothing about a video until its person answers. Anything but
-    "light" in the import setting, and no setting, is today's import. */
+    "light" in the import setting, and no setting, is not set up for them: the import itself is light all the same. */
 export const lightImport = (s) => s?.import === "light";
 
 /** Whether Claude may read what is taught in a client or group session on this Mac: only when Jason has turned the teachings on

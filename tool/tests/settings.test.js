@@ -2148,7 +2148,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       t.done();
     });
     it("names a video that has no label the same whether the file says full or light", async () => {
-      // Every import is light, whatever the file says of it, so no video is named: over a file that still says "full", and over one that says "light".
+      // A file that says "full" is read as before and one that says "light" is as it is; told --import light over either, no video is named by its file.
       for (const [held, told] of [[{ import: "full" }, "light"], [{ import: "light" }, "light"]]) {
         const t = mac(held);
         put(t.folder(), "Coaching call Jane Doe.mp4");

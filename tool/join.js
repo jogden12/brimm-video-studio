@@ -432,7 +432,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
             workingCopy: { bytes: made.video.bytes, seconds: facts.duration, fps: 30 }, opened: project.opened, handover: false, fromSuggestion: null, state: "opened"
           }
         })
-      }, { ...deps, episode, work, shown: title, light: true });
+      }, { ...deps, episode, work, shown: title });
       if (!imported.filed) return stop(String(imported.message || "the work stopped").replace(/^it could not be filed into Episodes: /, ""));
       kept = true;
       if (!imported.ok) ctx.say(`${title}: ${imported.message}.`);
@@ -547,7 +547,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       if (ended.overMemory || ended.outOfTime) return stop(`ffmpeg was stopped: ${ended.stopped}`);
       if (ended.signal) return stop(`ffmpeg was killed by ${ended.signal}`);
       if (ended.code !== 0 || !existsSync(output) || !(statSync(output).size > 0)) return stop(lastLine(ended.stderr) || "ffmpeg wrote nothing");
-      const imported = await importInto(output, into(null), { ...fdeps, work, shown: title, light: true });
+      const imported = await importInto(output, into(null), { ...fdeps, work, shown: title });
       if (!imported.filed) return stop(String(imported.message || "the work stopped").replace(/^it could not be filed into Episodes: /, ""));
       filed = imported.filed;
       kept = true;

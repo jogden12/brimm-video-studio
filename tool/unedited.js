@@ -886,7 +886,7 @@ export async function uneditedFile(file, deps) {
     Date), and the rule's `clone` and `sameDisk`. */
 export async function importInto(file, into, deps) {
   try {
-    return await workOn(file, { ...deps, into, light: true });
+    return await workOn(file, { ...deps, into });
   } catch (e) {
     (deps.log || (() => {}))(`${deps.shown || basename(file)}: the work stopped (${e.code || e.message}).`);
     return { ok: false, name: basename(file), message: String(e.code || e.message) };

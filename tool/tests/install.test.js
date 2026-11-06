@@ -263,7 +263,7 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
       const r = ask(...args);
       assert.equal(r.status, 0, r.err);
       assert.deepEqual(r.agents.map(held), [agent(r, ["/Volumes/Work/Unedited video"], ["--rules-only"])], args.join(" "));
-      assert.ok(r.out.includes("\n  Claude, to read a video once its person has said what it is:  not asked (--rules-only), so nothing leaves this Mac\n"), r.out);
+      assert.ok(r.out.includes("\n  Claude, to read a video once its person has said what it is:  not asked (--rules-only: no reading is made in folder mode, and with --machine readings are off), so nothing leaves this Mac\n"), r.out);
       assert.doesNotMatch(r.out, /Claude Code, to read|Sent to Claude/);
       changedNothing(r);
     }
@@ -351,7 +351,7 @@ describe("the installer's own text", () => {
     const r = ask("--print", "--help");
     assert.match(r.out, /\n {2}\.\/install\.sh "\/path\/to\/folder" --rules-only\n/);
     const help = r.out.replace(/\s+/g, " ");
-    assert.ok(help.includes("No video and no sound ever leaves the Mac. The import is always the light one: nothing is sent to Claude when a video is dropped. Claude reads a video only once its person has said what it is, and never a session's file name; what is sent then is the words of the transcript with their times and the rules' plan, through Claude Code, on the Claude account signed in on this Mac. With --rules-only nothing leaves the Mac."), r.out);
+    assert.ok(help.includes("No video and no sound ever leaves the Mac. The import is always the light one: nothing is sent to Claude when a video is dropped. Claude reads a video only once its person has said what it is, and never a session's file name; what is sent then is the words of the transcript with their times, the rules' plan, and the video's file name and length (never a session's), through Claude Code, on the Claude account signed in on this Mac. With --machine, --rules-only turns the readings off, so nothing leaves the Mac; in folder mode no reading is made."), r.out);
     // The help is the comment the file opens with, whole: it ends where the script begins.
     assert.ok(text.includes(`\n# ${r.out.trimEnd().split("\n").pop()}\nset -euo pipefail\n`), r.out);
   });
@@ -1158,7 +1158,7 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     const r = askWith({ onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") }, finalCut: "12.4" }, "--print", "--machine", "Sallie's laptop", "--rules-only", d.root);
     assert.equal(r.status, 0, r.err + r.out);
     assert.doesNotMatch(r.out, /\n {2}At the end:/);
-    assert.ok(r.out.includes("\n  Claude, to read a video once its person has said what it is:  not asked (--rules-only), so nothing leaves this Mac\n"), r.out);
+    assert.ok(r.out.includes("\n  Claude, to read a video once its person has said what it is:  not asked (--rules-only: no reading is made in folder mode, and with --machine readings are off), so nothing leaves this Mac\n"), r.out);
     // Her folder for Claude is still written, so Claude Code's sign-in and version are still told.
     assert.ok(r.out.includes("\n  Claude Code's version:  2.1.296 (her folder's guard needs 2.1.295 or later)\n"), r.out);
     changedNothing(r);
@@ -1818,7 +1818,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const line = readme.split("\n").find((l) => l.startsWith("Add `--rules-only` to that line"));
     assert.ok(line, "README's --rules-only paragraph");
     assert.ok(line.includes("The import never asks Claude, with it or without"), line);
-    assert.ok(line.includes("To have Claude asked again to read a video, run the line again without `--rules-only`"), line);
+    assert.ok(line.includes("To have Claude asked again to read a video, run the line again without `--rules-only`, and turn the readings on"), line);
     assert.ok(line.includes("with `--machine`, `--rules-only` wrote `readings: false` into this Mac's settings, and a run without it leaves that as it is: turn the readings on with `node settings.js set --readings on`"), line);
   });
   it("says in its help what the three options do, and that a switch is refused while the old folder holds work", () => {

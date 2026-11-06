@@ -5,7 +5,7 @@
 #   ./install.sh "/path/to/folder" "/path/to/another"
 #                                    watch more than one folder. Name every folder each time: the list replaces the last one
 #   ./install.sh "/path/to/folder" --rules-only
-#                                    the same, and her readings ask Claude nothing (the import never does: each cut plan is the rules' alone)
+#                                    the same (the import never asks Claude: each cut plan is the rules' alone; with --machine, her readings are also off)
 #   ./install.sh --print "/path/to/folder"
 #                                    show what would be done and change nothing. With --remove, show what would be stopped
 #   ./install.sh --yes "/path/to/folder"
@@ -54,8 +54,9 @@
 # under that name, and what it does is in ~/Library/Logs/brimm-video.log.
 # Nothing here needs a password or a key. No video and no sound ever leaves the Mac. The import is always the light one: nothing is
 # sent to Claude when a video is dropped. Claude reads a video only once its person has said what it is, and never a session's file
-# name; what is sent then is the words of the transcript with their times and the rules' plan, through Claude Code, on the Claude
-# account signed in on this Mac. With --rules-only nothing leaves the Mac.
+# name; what is sent then is the words of the transcript with their times, the rules' plan, and the video's file name and length
+# (never a session's), through Claude Code, on the Claude account signed in on this Mac. With --machine, --rules-only turns the
+# readings off, so nothing leaves the Mac; in folder mode no reading is made.
 set -euo pipefail
 
 LABEL="com.thebrimm.unedited"
@@ -760,7 +761,7 @@ fi
 # Claude reads a video through Claude Code once its person has said what it is. Nothing here installs that or signs in to it. When
 # Claude is going to be asked, this says what is sent to it, before anything is changed. The import itself sends nothing.
 if [[ -n "$rules_only" ]]; then
-  say "  Claude, to read a video once its person has said what it is:  not asked (--rules-only), so nothing leaves this Mac"
+  say "  Claude, to read a video once its person has said what it is:  not asked (--rules-only: no reading is made in folder mode, and with --machine readings are off), so nothing leaves this Mac"
 elif claude="$(find_claude)"; then
   say "  Claude Code, to read a video once its person has said what it is:  here already, at $claude"
   say "  Sent to Claude:  nothing when a video is dropped, since this Mac's import is the light one. Claude reads a video only once its person has said what it is, on the Claude account signed in on this Mac, and never a session's file name. The video and its sound never leave it. To send nothing: --rules-only"
