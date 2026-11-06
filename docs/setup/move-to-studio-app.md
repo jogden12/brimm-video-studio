@@ -161,15 +161,18 @@ An n (or Return alone, or a line that is not y) at any question also stops the r
 Step 1, looking:
 
 - **"In Terminal, run: xcode-select --install, then run the app again."** Do that.
-- **Homebrew is not here.** "In Terminal, Sallie runs this (it asks for her password, which she types herself)", then Homebrew's install command. Run it, then run the app again.
+- **Homebrew is not here.** "In Terminal, run this (it asks for the password of this Mac, which its owner types)", then Homebrew's install command. Run it, then run the app again.
 - **"Node is not on this Mac, and Studio needs 22 or later. Run: brew install node, then run the app again."** Do that.
 - **"Node here is <version>, and Studio needs 22 or later. Run: brew upgrade node, then run the app again."** Do that.
-- **"Her settings are not as the switch of 26 October left them"**, naming the import (should be "light"), the drop folder (should be "Drop"), the hand-off version (should be "2"), or the checkout (should be brimm-video's or Studio's). Tell Jason.
+- **"This Mac's settings are not as the switch of 26 October left them"**, naming the import (should be "light"), the drop folder (should be "Drop"), the hand-off version (should be "2"), or the checkout (should be brimm-video's or Studio's). Tell Jason.
+- **"This app is for Sallie's laptop and Jason's MacBook, and this Mac's settings say it is "<machine>". Nothing was changed."** The app refuses at once, before any question (exit 2). Tell Jason.
+- **"This Mac has no BRIMM Video folder in Dropbox (The BRIMM DB › BRIMM Video). Sign in to Dropbox, let The BRIMM DB sync, then run the app again."** Only on a Mac with no brimm-video settings, which is set up fresh as Jason's MacBook. Do that.
+- **"This Mac has <n> BRIMM Video folders in Dropbox: <path 1>, <path 2>. Tell Jason which one is The BRIMM's."** Same Mac. Two paths that are the same folder (`~/Dropbox` is often a link to the CloudStorage folder) count once. Tell Jason.
 - **"An import is running now. Wait until its window in the top right closes, then double-click Move to Studio again."** Do that.
-- **"Her checkout (<folder>) has no tool/settings.js to say where her drop folder is."** Tell Jason.
-- **"Her drop folder could not be found from her settings (settings.js show)."** Tell Jason.
-- **"Her drop folder holds <n> file(s) still to be imported."** The app never names them. Let the import finish, then run the app again. Step 5 looks at this again right before the real install and stops with the same words.
-- **"Her drop folder could not be read. macOS may have asked whether Terminal may read Dropbox…"** In System Settings › Privacy & Security › Files and Folders, allow it, then run the app again.
+- **"This Mac's checkout (<folder>) has no tool/settings.js to say where its drop folder is."** Tell Jason.
+- **"The drop folder could not be found from this Mac's settings (settings.js show)."** Tell Jason.
+- **"The drop folder holds <n> file(s) still to be imported."** The app never names them. Let the import finish, then run the app again. Step 5 looks at this again right before the real install and stops with the same words.
+- **"The drop folder could not be read. macOS may have asked whether Terminal may read Dropbox…"** In System Settings › Privacy & Security › Files and Folders, allow it, then run the app again.
 - **"Move to Studio is already running in another Terminal window. Use that one, or close it and double-click again."** Do that.
 - **"Claude Code is not on this Mac. Install it, then run the app again."** Do that.
 - **"Claude Code is still not signed in."** after the offered sign-in. Run `claude auth login` in Terminal, then run the app again.
@@ -184,7 +187,7 @@ Step 2, the key:
 - **"GitHub's key on this Mac isn't the one GitHub publishes (<fingerprint>). Nothing is trusted until that is looked into: tell Jason."** Tell Jason.
 - **"ssh did not get GitHub's welcome for this key. It said:"** and all of ssh's lines (a host-key warning comes before the rest). Tell Jason. (A "Permission denied" is not a stop: the app says GitHub does not know the key yet and waits again.)
 
-- **"Her Desktop could not be written to. macOS may have asked whether Terminal may write there…"** (this can come in step 2 or step 6). Allow Terminal in System Settings › Privacy & Security › Files and Folders, then run the app again.
+- **"The Desktop could not be written to. macOS may have asked whether Terminal may write there…"** (this can come in step 2 or step 6). Allow Terminal in System Settings › Privacy & Security › Files and Folders, then run the app again.
 
 Step 3, the code:
 
@@ -202,7 +205,7 @@ Step 5, the installer (step 4 only waits, and stops on an n):
 
 - **"<folder>/tool/install.sh is not there."** Tell Jason.
 - **"Studio's installer refused (its words are above), so it was not run for real. Nothing it refused has been changed."** Deal with what its words say, then run the app again. (A video in her drop folder is not one of its reasons: the installer looks at that only when it switches the folder, which is why the app looks itself, right before the real install.)
-- **"Claude Code is not signed in. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser), then run the app again."** Do that.
+- **"Claude Code is not signed in. In Terminal, run: claude auth login (sign in to this Mac's own Claude account in the browser), then run the app again."** Do that.
 - **"Claude Code is still older than the installer needs after claude update. Tell Jason."** Tell Jason.
 - **"The Claude app's own Claude Code is still older than the installer wants. Tell Jason."** after Check for Updates. Tell Jason.
 - **"The installer stopped (it ended with <n>). Its last lines:"** and the lines. Tell Jason. Running the app again goes on from there.

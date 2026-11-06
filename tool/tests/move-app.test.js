@@ -366,7 +366,7 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
     const malformed = moveOn({ commit: "abc123" });
     assert.equal(malformed.status, 2);
 
-    for (const r of [other, none, unknown, missing, malformed]) {
+    for (const r of [other, unknown, missing, malformed]) {
       assert.deepEqual(r.tree, r.before, "nothing is written");
       assert.equal(r.ran, "", "nothing is run");
     }
@@ -393,18 +393,18 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
   it("counts the files in her drop folder, never names one, and stops when there are any", () => {
     const r = moveOn({ dropFiles: ["Client Name Session.mov"] });
     assert.equal(r.status, 1);
-    assert.match(r.out, /Her drop folder holds 1 file still to be imported\./);
+    assert.match(r.out, /The drop folder holds 1 file still to be imported\./);
     assert.ok(!r.out.includes("Client Name") && !r.log.includes("Client Name") && !r.err.includes("Client Name"));
     const two = moveOn({ dropFiles: ["a.mov", "b.mov"] });
-    assert.match(two.out, /Her drop folder holds 2 files still to be imported\./);
+    assert.match(two.out, /The drop folder holds 2 files still to be imported\./);
   });
 
   it("stops, saying to allow Terminal, when her drop folder cannot be read, and does not take it for empty", () => {
     const r = moveOn({ dropMode: 0o000 });
     assert.equal(r.status, 1, r.out);
-    assert.match(r.out, /Her drop folder could not be read\. macOS may have asked whether Terminal may read Dropbox/);
+    assert.match(r.out, /The drop folder could not be read\. macOS may have asked whether Terminal may read Dropbox/);
     assert.match(r.out, /Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again\./);
-    assert.ok(!r.out.includes("Her drop folder is empty."), r.out);
+    assert.ok(!r.out.includes("The drop folder is empty."), r.out);
     assert.ok(r.out.endsWith(STOPPED_NOTHING), r.out);
   });
 
@@ -1047,8 +1047,8 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     const dropped = moveOn({ marks: NOT_INSTALLED, install: { printDrops: "Client Name Session.mov" }, answers: "y\ny\n" });
     assert.equal(dropped.status, 1, dropped.out);
     assert.ok(!dropped.ran.includes("install.sh --yes"), dropped.ran);
-    assert.match(dropped.out, /Her drop folder holds 1 file still to be imported\./);
-    assert.equal((dropped.out.match(/Her drop folder is empty\./g) ?? []).length, 1, "step 1 found it empty; the second look found a file");
+    assert.match(dropped.out, /The drop folder holds 1 file still to be imported\./);
+    assert.equal((dropped.out.match(/The drop folder is empty\./g) ?? []).length, 1, "step 1 found it empty; the second look found a file");
     for (const text of [dropped.out, dropped.log, dropped.report, dropped.err]) assert.ok(!text.includes("Client Name"), "no file's name anywhere");
     assert.ok(dropped.out.endsWith(STOPPED_NOTHING), dropped.out);
 
@@ -1061,7 +1061,7 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     // Nothing new in her drop folder and no import: it goes on, and says so a second time.
     const clear = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n" });
     assert.equal(clear.status, 0, clear.out);
-    assert.equal((clear.out.match(/Her drop folder is empty\./g) ?? []).length, 2);
+    assert.equal((clear.out.match(/The drop folder is empty\./g) ?? []).length, 2);
     assert.equal((clear.out.match(/No import is running\./g) ?? []).length, 2);
   });
 
