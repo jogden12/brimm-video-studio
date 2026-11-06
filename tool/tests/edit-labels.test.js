@@ -399,7 +399,7 @@ describe("findEpisode, for a video named by its label", () => {
     assert.equal(findEpisode(ctx, "2026").name, "2026-10-18 Pricing talk (Mac Studio)");
     t.done();
   });
-  it("names a conflicted episode by the label of a gated record, read past the copies or a copy's own, and one a newer brimm-video wrote by its short id", () => {
+  it("names a conflicted episode by the label of a gated record, read past the copies or a copy's own, and one a newer BRIMM Video Studio wrote by its short id", () => {
     const t = setup();
     const e = clientEpisode(t);
     conflictedRecord(e.folder, { label: "Video B" });
@@ -409,7 +409,7 @@ describe("findEpisode, for a video named by its label", () => {
     const newer = clientEpisode(t, { folder: "2026-10-18 Call with Ann Other (Mac Studio)", video: "Call with Ann Other.mov", id: "e-20261018-0d0d0d", over: { version: 9 } });
     conflictedRecord(newer.folder);
     const why = findEpisode(ctxOf(t), "nothing fits this").why;
-    assert.equal(why, `No episode fits "nothing fits this". The episodes are: ${LABEL} (a1b2c3), ${SESSION} (0c0c0c) and an episode a newer brimm-video wrote (0d0d0d).`);
+    assert.equal(why, `No episode fits "nothing fits this". The episodes are: ${LABEL} (a1b2c3), ${SESSION} (0c0c0c) and an episode a newer BRIMM Video Studio wrote (0d0d0d).`);
     assert.doesNotMatch(why, /Bloggs \(Mac|Ann Other|2026-10-1/);
     t.done();
   });
@@ -480,7 +480,7 @@ describe("a command the gate lets through, for a gated video", () => {
     writeSettings(u.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(u, { over: MARKED_OVER });
     const r = await on(u.ctx.deps, "finish", LABEL);
-    assert.deepEqual([r.code, r.said], [1, [`${LABEL} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`]]);
+    assert.deepEqual([r.code, r.said], [1, [`${LABEL} is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written.`]]);
     assert.doesNotMatch(r.said.join("\n"), SECRET);
     t.done();
     u.done();
@@ -510,12 +510,12 @@ describe("episodes, on a Mac that does the light import", () => {
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Acme/);
     t.done();
   });
-  it("lists a video left alone, not for brimm-video, apart, under its own heading", async () => {
+  it("lists a video left alone, not for BRIMM Video Studio, apart, under its own heading", async () => {
     const t = setup();
     writeSettings(t.home, { import: "light" });
     clientEpisode(t, { over: { answer: { ...ANSWER, state: "not for brimm-video" } } });
     const said = await listing(t);
-    assert.deepEqual(said.slice(0, 3), ["Left alone, not for brimm-video:", `  ${LABEL}: a video of 2:00, id a1b2c3`, "On this Mac:"]);
+    assert.deepEqual(said.slice(0, 3), ["Left alone, not for BRIMM Video Studio:", `  ${LABEL}: a video of 2:00, id a1b2c3`, "On this Mac:"]);
     t.done();
   });
   it("names a gated episode with a conflicted copy by its label, and its files that are not right without the video's name; a newer one by its id", async () => {
@@ -531,7 +531,7 @@ describe("episodes, on a Mac that does the light import", () => {
     assert.equal(said[1], `  ${LABEL}: a video waiting for your answer, of 2:00, id a1b2c3`);
     assert.deepEqual(said.slice(2, 6), ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes", `    Card: ${JSON.stringify(cardFor({ label: LABEL, guess: "raw", maybe: null }))}`]);
     assert.match(said[6], /^ {4}Not right: Dropbox has kept a conflicted copy in this episode: record\/0001 \(Sallie's laptop's conflicted copy 2026-10-20\)\.json\./);
-    assert.ok(said.includes("  An episode a newer brimm-video wrote (0d0d0d): Jason updates this Mac before it is changed here."), said.join("\n"));
+    assert.ok(said.includes("  An episode a newer BRIMM Video Studio wrote (0d0d0d): Jason updates this Mac before it is changed here."), said.join("\n"));
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Ann Other/);
     t.done();
   });
@@ -736,7 +736,7 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
       ["a session, its mark cleared", { kind: "session", answer: ANSWERED, session: cleared, ...asSession }, true, false, TARGET],
       ["a finished video marked a session, not cleared", { kind: "finished", answer: ANSWERED, session: sessionMark, name: stem }, true, true],
       ["an archived video", { kind: "finished", answer: ANSWERED, archived: { at: AT }, name: stem }, false, false],
-      ["a video a newer brimm-video wrote", { kind: "finished", answer: ANSWERED, version: 9, name: stem }, true, false]
+      ["a video a newer BRIMM Video Studio wrote", { kind: "finished", answer: ANSWERED, version: 9, name: stem }, true, false]
     ];
     const SESSIONS_LINE = "    Maybe a new version of a client or group session.";
     const noMaybe = (said, what, base, session = false) => {
@@ -874,7 +874,7 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     clientEpisode(t, { folder: "2026-10-17 Left alone (Mac Studio)", video: "Left alone.mov", id: "e-20261017-0b0b0b", label: "Video of 17 Oct, 10:00 (Mac Studio)", over: { answer: { ...ANSWER, state: "not for brimm-video" } } });
     const said = (await on(depsOf(t), "episodes")).said;
     assert.ok(!said.some((line) => /^ {4}(Seen|Came|Guess|Maybe a new version of):/.test(line)), said.join("\n"));
-    assert.ok(said.includes("Left alone, not for brimm-video:"), said.join("\n"));
+    assert.ok(said.includes("Left alone, not for BRIMM Video Studio:"), said.join("\n"));
     t.done();
   });
   it("puts the card's lines before anything else under the video's line, and the video's other lines stay", async () => {
@@ -1104,7 +1104,7 @@ describe("status, and the result files of detached runs, for a gated video", () 
     await on({ ...depsOf(t), clone }, "finish", "--now", LIGHT_FOLDER);
     const result = readResult(t.home, LIGHT_FOLDER, "finish");
     assert.ok(result && result.failed.length === 2, JSON.stringify(result));
-    assert.equal(result.failed[0], `${SESSION} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`);
+    assert.equal(result.failed[0], `${SESSION} is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written.`);
     assert.match(result.failed[1], /^This Mac still has the episode open: it could not be let go \(/);
     assert.match(result.failed[1], /the video/, "the folder's name in the error was put as the video");
     assert.doesNotMatch(readFileSync(resultFile(t.home, LIGHT_FOLDER, "finish"), "utf8"), SECRET);

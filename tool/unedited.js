@@ -70,6 +70,7 @@ import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutName
 import { fingerprintOf, matchVersion } from "./versions.js";
 import { runDetached } from "./detached.js";
 import { LEFT, leftAlone, sessionNotCleared } from "./gate.js";
+import { STUDIO_NAME } from "./name.js";
 import { readStatuses, importState } from "./importing.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
@@ -1350,7 +1351,7 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
   // Why the episode cannot be gone on with as it is now, or "".
   const notAsWas = (found, rev) => {
     if (!found.record) return `the episode's record cannot be read: ${String(found.why || "it is not there").replace(/\.$/, "")}`;
-    if (found.newer) return "the episode was written by a newer brimm-video. Ask Jason to update this Mac";
+    if (found.newer) return "the episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac";
     const gone = undone(found.record, home);
     if (gone) return gone.replace(/\.$/, "");
     if (rev !== undefined && found.record.rev > rev) return "this episode changed on the other Mac meanwhile. Say it again";
@@ -1891,7 +1892,7 @@ export async function askAgain({ folder, record }, deps) {
 /** What --from-plan says when it is asked for a light episode, whose videos are made when it is read. */
 const LIGHT_REFUSAL = "This episode was imported lightly: its videos are made when it is read, not from the plan.";
 /** What --from-plan says when a newer brimm-video wrote the episode's record. */
-const NEWER_STOP = "its episode was written by a newer brimm-video. Ask Jason to update this Mac";
+const NEWER_STOP = "its episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac";
 
 /** Make the videos of one video again from the cut plan an earlier run wrote for it (--from-plan): its rough cut, its upright
     version when it is wider than it is tall, and each of Claude's clips and each part of a clip's Story that the plan names
@@ -2229,7 +2230,7 @@ export function parseArgs(argv) {
   return a;
 }
 
-const HELP = `For an unedited video: a transcript with a time for every word, a cut plan that Claude is asked to read, a rough cut and
+const HELP = `For a video that is not edited yet: a transcript with a time for every word, a cut plan that Claude is asked to read, a rough cut and
 its captions, an upright version for Instagram, a Final Cut Pro project file, Claude's notes for the editor and the short
 clips it picked.
 
@@ -2266,8 +2267,9 @@ and how long is left. Closing it changes nothing about the work.
 
 /** A banner on the Mac's screen. It is a courtesy: when it cannot be shown, nothing else changes. The import posts its notices
     through it, and so does a reading (reading.js). */
+export const bannerArgs = (text) => ["-e", `display notification ${JSON.stringify(text)} with title ${JSON.stringify(STUDIO_NAME)}`];
 export const banner = (text) => {
-  const child = spawn("/usr/bin/osascript", ["-e", `display notification ${JSON.stringify(text)} with title "BRIMM unedited video"`], { stdio: "ignore" });
+  const child = spawn("/usr/bin/osascript", bannerArgs(text), { stdio: "ignore" });
   child.on("error", () => {});
 };
 

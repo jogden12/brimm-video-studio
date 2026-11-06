@@ -172,7 +172,7 @@ export function lockLoosened({ home, checkout, deps = {} }) {
       const broken = open ? lockBroken(own, { checkout, folder, lock: "open", facts: factsFor(home, settings, deps), node: studioNodeOf(settings) }) : lockBroken(own, { checkout, folder });
       changed = Object.keys(OPEN_PARTS).filter((part) => broken.includes(part));
       if (broken.includes("hooks")) why.push("(Jason: her folder's .claude/settings.json turns hooks off (disableAllHooks), and the lock rests on them. Its contents are not shown here.)");
-      if (broken.includes("guard")) why.push("(Jason: her folder's .claude/settings.json no longer has the guard hook this brimm-video writes for it. Its contents are not shown here.)");
+      if (broken.includes("guard")) why.push("(Jason: her folder's .claude/settings.json no longer has the guard hook this BRIMM Video Studio writes for it. Its contents are not shown here.)");
       const modes = [broken.includes("bypass") && "does not disable Bypass mode (disableBypassPermissionsMode)", broken.includes("auto") && "does not disable Auto mode (disableAutoMode)"].filter(Boolean);
       if (modes.length) why.push(`(Jason: her folder's .claude/settings.json ${modes.join(" and ")}. Its contents are not shown here.)`);
     }
@@ -186,7 +186,7 @@ export function lockLoosened({ home, checkout, deps = {} }) {
   }
   if (!open) return why;
   // The open lock: what else could loosen it, after PR #40's lines.
-  if (changed.length) why.push(`(Jason: her folder's .claude/settings.json no longer holds the open lock as this brimm-video writes it: ${changed.map((part) => OPEN_PARTS[part]).join(", ")}. Its contents are not shown here.)`);
+  if (changed.length) why.push(`(Jason: her folder's .claude/settings.json no longer holds the open lock as this BRIMM Video Studio writes it: ${changed.map((part) => OPEN_PARTS[part]).join(", ")}. Its contents are not shown here.)`);
   for (const [label, set] of [[userLabel, user], ...managed]) if (set) why.push(...sourceWhy(label, set));
   for (const [label, , unread] of managed) if (unread) why.push(`(Jason: ${label}, could not be read (plutil did not finish), so it is not known whether it loosens the lock. Its contents are not shown here.)`);
   if (settings && settings.userDeny === true && !userDenyHeld(user, factsFor(home, settings, deps))) why.push(USER_DENY_LOST);
@@ -246,7 +246,7 @@ export function beyondWhy({ env, home }) {
 }
 
 /** What `behind` says when her user settings no longer hold the Read deny rules `settings.js user-deny` added to them (question 5). */
-const USER_DENY_LOST = "(Jason: her user settings, ~/.claude/settings.json, no longer hold every Read deny rule brimm-video added for the places only it reads. Its contents are not shown here.)";
+const USER_DENY_LOST = "(Jason: her user settings, ~/.claude/settings.json, no longer hold every Read deny rule BRIMM Video Studio added for the places only it reads. Its contents are not shown here.)";
 
 /** Whether her user settings, `user` (the object Claude Code reads, or null), still deny Claude's Read every gated place on the Mac
     `facts` describes, as `settings.js user-deny` added them (studio.js gatedReadRules). Looked at only where this Mac's settings note
@@ -422,7 +422,7 @@ export function environmentWhy(env, list = ENVIRONMENT) {
   if (names.includes("CLAUDE_CODE_DISABLE_AUTO_MEMORY") && FALSE_WORDS.includes(String(env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).trim().toLowerCase())) why.push("(Jason: this chat's environment turns Claude Code's memory on (CLAUDE_CODE_DISABLE_AUTO_MEMORY). Its value is not shown here.)");
   const listed = new Set([...(list.deny || []), ...(list.harmless || []), ...MEMORY_SERVER]);
   for (const name of names) {
-    if (!listed.has(name) && SECRET_WORDS.some((word) => name.toUpperCase().includes(word))) why.push(`(Jason: this chat's environment has ${name}, which looks like a secret and is not on brimm-video's list. Its value is not shown here.)`);
+    if (!listed.has(name) && SECRET_WORDS.some((word) => name.toUpperCase().includes(word))) why.push(`(Jason: this chat's environment has ${name}, which looks like a secret and is not on BRIMM Video Studio's list. Its value is not shown here.)`);
   }
   return why;
 }
@@ -487,7 +487,7 @@ const APP_LABEL = "the Claude app's --settings for this chat";
 
 /** The parts of her folder's own open settings that lockBroken can find changed beyond PR #40's four, as the line for Jason names them,
     in the order it names them. */
-const OPEN_PARTS = { sandbox: "the sandbox's settings", permissions: "the allow and deny rules", memory: "memory off", "skill-shell": "skills' shell lines off", receipt: "the card's receipt hook", "other-hooks": "a hook beside the guard and the receipt", other: "settings brimm-video does not write there", node: "the node it was written with (this Mac's settings name none)" };
+const OPEN_PARTS = { sandbox: "the sandbox's settings", permissions: "the allow and deny rules", memory: "memory off", "skill-shell": "skills' shell lines off", receipt: "the card's receipt hook", "other-hooks": "a hook beside the guard and the receipt", other: "settings BRIMM Video Studio does not write there", node: "the node it was written with (this Mac's settings name none)" };
 
 /** The sandbox's keys, in a settings source, that only narrow it, and so loosen nothing: more places it may not read or write, and
     `credentials.envVars` while every entry of it takes a name away (`mode` "deny"). Every other sandbox key loosens the lock. */
@@ -526,7 +526,7 @@ export function sourceWhy(label, settings) {
   const added = permissions.additionalDirectories;
   if (added !== undefined && !(Array.isArray(added) && added.length === 0)) why.push(`(Jason: ${label}: permissions.additionalDirectories, which adds folders to every session. Its contents are not shown here.)`);
   const sessionStart = isObject(settings.hooks) ? settings.hooks.SessionStart : undefined;
-  if (sessionStart !== undefined && !(Array.isArray(sessionStart) && sessionStart.length === 0)) why.push(`(Jason: ${label}: a SessionStart hook, which can change the id brimm-video marks chats by. Its contents are not shown here.)`);
+  if (sessionStart !== undefined && !(Array.isArray(sessionStart) && sessionStart.length === 0)) why.push(`(Jason: ${label}: a SessionStart hook, which can change the id BRIMM Video Studio marks chats by. Its contents are not shown here.)`);
   return why;
 }
 

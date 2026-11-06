@@ -436,7 +436,7 @@ export function chainGapWords(record, gap) {
 export function cannotFinish(record) {
   const who = shownName(record);
   const kind = kindOf(record);
-  if (kind === "session" || (kind !== null && gated(record))) return `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`;
+  if (kind === "session" || (kind !== null && gated(record))) return `${who} is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written.`;
   if (kind === null) return `${who} is not answered yet: say what it is first. Nothing was written.`;
   return "";
 }
@@ -1564,7 +1564,7 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
 const SESSION_NAME_FILES = "This session's name is the name of its video's file: give it another name first. Nothing was written.";
 const SESSION_NAME_NO_FILE = "This session's name cannot name its files: give it another name first. Nothing was written.";
 const SESSION_NAME_LONG = `This session's name is longer than ${SESSION_NAME_MOST} characters: give it a shorter one first. Nothing was written.`;
-const sessionNameHolds = (word) => `This session's name holds "${word}", a name brimm-video can see in it: give it another name first. Nothing was written.`;
+const sessionNameHolds = (word) => `This session's name holds "${word}", a name BRIMM Video Studio can see in it: give it another name first. Nothing was written.`;
 
 /** Write the hand-off of a client or group session, of what she approved of its teachings (edit.js finish, for a session): the
     principles she kept (without their source_context), the recurring principles she kept, and the Reel ideas she kept that are
@@ -1624,7 +1624,7 @@ export async function finishSession(ctx, found, { host } = {}) {
   const edits = (record.session && record.session.edits) || {};
   const writtenItems = { principles: approved.session.principles, recurringPrinciples: approved.session.recurringPrinciples, reelIdeas: approved.session.reelsToFilm };
   const hers = [["principles", "Principle"], ["recurringPrinciples", "Recurring principle"], ["reelIdeas", "Reel idea"]].flatMap(([key, label]) =>
-    writtenItems[key].flatMap((item) => Object.keys(((edits[key] || {})[String(item.n)]) || {}).map((field) => [field, herWordsName(item[field], seen.hers)]).filter(([, word]) => word).map(([field, word]) => `${label} ${item.n}'s ${field}, as you changed it, holds "${word}", a name brimm-video can see: say it another way, or drop it.`)));
+    writtenItems[key].flatMap((item) => Object.keys(((edits[key] || {})[String(item.n)]) || {}).map((field) => [field, herWordsName(item[field], seen.hers)]).filter(([, word]) => word).map(([field, word]) => `${label} ${item.n}'s ${field}, as you changed it, holds "${word}", a name BRIMM Video Studio can see: say it another way, or drop it.`)));
   if (hers.length) return { why: hers.join("\n") };
   const target = handoffTarget(ctx, { folder, record });
   if (target.refusal) return { why: target.refusal };

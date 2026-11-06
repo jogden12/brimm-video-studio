@@ -892,7 +892,7 @@ describe("plan … agreed: asking on a dialog Claude cannot press", () => {
     assert.deepEqual([r.code, r.said, again.asked.length], [0, [`${labelOf(1)}'s client agreed already, on ${dayText(dayOf(t))}.`], 0]);
     t.done();
   });
-  it("refuses before any dialog a part whose episode Dropbox has kept a conflicted copy in, and one a newer brimm-video wrote, and writes nothing", async () => {
+  it("refuses before any dialog a part whose episode Dropbox has kept a conflicted copy in, and one a newer BRIMM Video Studio wrote, and writes nothing", async () => {
     const { t } = await clientWorld();
     const folder = join(t.root, "Episodes", "2026-11-04 Drop 1 (Mac Studio)");
     const record = readEpisode(folder, { pastCopies: true }).record;

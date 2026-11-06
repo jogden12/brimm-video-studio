@@ -20,7 +20,7 @@ const SETTINGS = fileURLToPath(new URL("../settings.js", import.meta.url));
 /** What Jason does about a setting in the file that will not do, as settings.js says it. */
 const MEND_SETTING = "Jason puts that setting right by hand, or runs install.sh --machine on it, which writes this Mac's name, BRIMM Video and the checkout every time, the import, the hand-off version and the drop folder when told --import, --handoff or --drop, and readings off with --rules-only.";
 const ROOT = "/Users/sallie/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
-const CHECKOUT = "/Users/sallie/brimm-video";
+const CHECKOUT = "/Users/sallie/BRIMM Video Studio";
 
 /** One test's home folder, the settings a Mac might be given, and what the command line said. */
 function setup() {
@@ -78,7 +78,7 @@ describe("this Mac's settings", () => {
     const t = setup();
     assert.throws(() => writeSettings(t.home, { ...t.given, machine: "Mac: Studio" }), { message: 'a Mac\'s name cannot hold any of / \\ : * ? " < > |' });
     assert.throws(() => writeSettings(t.home, { ...t.given, root: "BRIMM Video" }), { message: "the path to BRIMM Video is not a whole path" });
-    assert.throws(() => writeSettings(t.home, { ...t.given, checkout: "" }), { message: "the path to the checkout of brimm-video is not a whole path" });
+    assert.throws(() => writeSettings(t.home, { ...t.given, checkout: "" }), { message: "the path to the checkout of BRIMM Video Studio is not a whole path" });
     assert.ok(readSettings(t.home).why.startsWith("This Mac has no settings for episodes"));
     t.done();
   });
@@ -95,11 +95,11 @@ describe("this Mac's settings", () => {
     assert.equal(settingsFault(good), "");
     const cases = [
       ["{", "it is not JSON"],
-      ["[]", "they are not version 1 of brimm-video's settings"],
-      [JSON.stringify({ ...good, version: 2 }), "they are not version 1 of brimm-video's settings"],
+      ["[]", "they are not version 1 of BRIMM Video Studio's settings"],
+      [JSON.stringify({ ...good, version: 2 }), "they are not version 1 of BRIMM Video Studio's settings"],
       [JSON.stringify({ ...good, machine: ".studio" }), "a Mac's name cannot start with a dot"],
       [JSON.stringify({ ...good, root: "Dropbox/BRIMM Video" }), "the path to BRIMM Video is not a whole path"],
-      [JSON.stringify({ ...good, checkout: undefined }), "the path to the checkout of brimm-video is not a whole path"]
+      [JSON.stringify({ ...good, checkout: undefined }), "the path to the checkout of BRIMM Video Studio is not a whole path"]
     ];
     for (const [text, why] of cases) {
       writeFileSync(file, text);
@@ -107,7 +107,7 @@ describe("this Mac's settings", () => {
     }
     t.done();
   });
-  it("keep any field a later version of brimm-video adds, or an earlier draft wrote, such as claudeModel", () => {
+  it("keep any field a later version of BRIMM Video Studio adds, or an earlier draft wrote, such as claudeModel", () => {
     const t = setup();
     mkdirSync(dirname(settingsFile(t.home)), { recursive: true });
     writeFileSync(settingsFile(t.home), JSON.stringify({ version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, claudeModel: "claude-opus-5-5", studio: "/Users/sallie/BRIMM Video Studio" }));
@@ -252,7 +252,7 @@ describe("the switch's settings", () => {
     assert.match(settingsFault({ ...BASE, version: 2 }), /version 1/);
     assert.match(settingsFault({ ...BASE, machine: ".x" }), /start with a dot/);
     assert.match(settingsFault({ ...BASE, root: "x" }), /BRIMM Video is not a whole path/);
-    assert.match(settingsFault({ ...BASE, checkout: "x" }), /checkout of brimm-video is not a whole path/);
+    assert.match(settingsFault({ ...BASE, checkout: "x" }), /checkout of BRIMM Video Studio is not a whole path/);
   });
   it("are a light import only when import says light", () => {
     assert.equal(lightImport({ ...BASE, import: "light" }), true);
@@ -618,7 +618,7 @@ describe("node settings.js user-deny: her user settings' Read deny rules (questi
     writeFileSync(t.user, JSON.stringify(hers));
     for (let i = 0; i < 2; i++) {
       assert.equal(t.run("user-deny"), 0);
-      assert.deepEqual(t.said, [`Written: ~/.claude/settings.json (${want.length} deny rules for the places only brimm-video reads)`]);
+      assert.deepEqual(t.said, [`Written: ~/.claude/settings.json (${want.length} deny rules for the places only BRIMM Video Studio reads)`]);
       const now = JSON.parse(readFileSync(t.user, "utf8"));
       assert.deepEqual(now, { ...hers, permissions: { ...hers.permissions, deny: [...hers.permissions.deny, ...want.filter((rule) => rule !== want[3])] } });
     }
@@ -821,7 +821,7 @@ describe("node settings.js", () => {
   it("says how it is used, and ends with 0, when it is asked to", () => {
     const t = setup();
     assert.equal(t.asked("--help"), 0);
-    assert.match(t.said[0], /node settings\.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"/);
+    assert.match(t.said[0], /node settings\.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"/);
     assert.match(t.said[0], /node settings\.js show/);
     assert.match(t.said[0], /node settings\.js studio --node "<path to node>"/);
     t.done();
@@ -837,7 +837,7 @@ describe("node settings.js", () => {
       `  Its drop folder:  ${ROOT}/Unedited Video/Mac Studio`,
       `  Episodes:  ${ROOT}/Episodes`,
       `  References:  ${ROOT}/References`,
-      `  brimm-video, run from:  ${CHECKOUT}`,
+      `  BRIMM Video Studio, run from:  ${CHECKOUT}`,
       `  Work in Final Cut:  ${t.home}/BRIMM Video Work`,
       `  From Final Cut:  ${t.home}/BRIMM Video Work/From Final Cut`
     ]);
@@ -1155,7 +1155,7 @@ describe("node settings.js set and sessions", () => {
       `  Its drop folder:  ${ROOT}/Drop/Mac Studio`,
       `  Episodes:  ${ROOT}/Episodes`,
       `  References:  ${ROOT}/References`,
-      `  brimm-video, run from:  ${CHECKOUT}`,
+      `  BRIMM Video Studio, run from:  ${CHECKOUT}`,
       `  Work in Final Cut:  ${t.home}/BRIMM Video Work`,
       `  From Final Cut:  ${t.home}/BRIMM Video Work/From Final Cut`,
       "  Import:  light",

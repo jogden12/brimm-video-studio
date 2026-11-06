@@ -299,7 +299,7 @@ describe("the speakers of a Zoom transcript", () => {
   });
 });
 
-describe("the names brimm-video can see", () => {
+describe("the names BRIMM Video Studio can see", () => {
   const sorted = (names) => [...names].sort();
 
   it("are the words of the speakers' labels that it replaced", () => {
@@ -320,7 +320,7 @@ describe("the names brimm-video can see", () => {
     assert.deepEqual(sorted(visibleNames({ map: { "Sally Jones": "Participant 1" } })), ["Jones", "Sally"]);
     const names = visibleNames({ map: { "Kip - Sallie Ogden": "Participant 1" } });
     const reading = { principles: [{ n: 1, name: "Price first", description: "Sallie's rule is to price first.", example_application: "Ogden says it.", steps: ["Price first", "Ask Kip"] }] };
-    assert.deepEqual(checkNames(reading, names).dropped, [{ field: "Principle 1's steps, entry 2", why: "it held a name brimm-video can see" }]);
+    assert.deepEqual(checkNames(reading, names).dropped, [{ field: "Principle 1's steps, entry 2", why: "it held a name BRIMM Video Studio can see" }]);
   });
 
   it("are not, in a label, the words of a device or of a role, which a label of Zoom's often holds", () => {
@@ -576,7 +576,7 @@ describe("the names brimm-video can see", () => {
 
   describe("when the recording is capitalised throughout", () => {
     const CAPS = "We Are Going To Talk About Pricing With Mara Today And Then Kip Will Ask Questions About Hiring And Training Plans For The Spring Quarter";
-    const LINE = "The transcriber wrote this recording with capitals throughout, so brimm-video did not check its capitalised words for names: only the speakers' names and the file's name were checked.";
+    const LINE = "The transcriber wrote this recording with capitals throughout, so BRIMM Video Studio did not check its capitalised words for names: only the speakers' names and the file's name were checked.";
 
     it("have the capitalised-word check skipped, with a line saying so", () => {
       const words = say(CAPS);
@@ -602,7 +602,7 @@ describe("the names brimm-video can see", () => {
 });
 
 describe("the name check on a reading", () => {
-  const WHY = "it held a name brimm-video can see";
+  const WHY = "it held a name BRIMM Video Studio can see";
   const principle = (n, extra = {}) => ({
     n, name: `Rule ${n}`, category: "pricing", description: "Say the price early.", steps: ["Name the price", "Then explain"], red_flags: ["Hiding the price"],
     green_flags: ["Calm talk of price"], decision_criteria: ["Is the price said?"], example_application: "A coach names the price in the first minute.",
@@ -1074,9 +1074,9 @@ describe("what a session hands over once she has decided", () => {
     assert.deepEqual(got.reelsToFilm[0], { n: 1, idea: "Idea 1", words: "Words 1.", why: "", principle: 1 });
     assert.ok(!JSON.stringify(got).includes("Mark"));
     assert.deepEqual(dropped, [
-      { field: "Principle 1's steps, entry 1", why: "it held a name brimm-video can see" },
-      { field: "Principle 1's example_application", why: "it held a name brimm-video can see" },
-      { field: "Reel idea 1's why", why: "it held a name brimm-video can see" }
+      { field: "Principle 1's steps, entry 1", why: "it held a name BRIMM Video Studio can see" },
+      { field: "Principle 1's example_application", why: "it held a name BRIMM Video Studio can see" },
+      { field: "Reel idea 1's why", why: "it held a name BRIMM Video Studio can see" }
     ]);
   });
 
@@ -1089,9 +1089,9 @@ describe("what a session hands over once she has decided", () => {
     assert.deepEqual(got.principles[0].verbatim_key_phrases, []);
     assert.deepEqual(got.principles[0].red_flags, ["Hiding it"]);
     assert.deepEqual(dropped, [
-      { field: "Principle 1's steps, entry 2", why: "it held a name brimm-video can see" },
-      { field: "Principle 1's decision_criteria, entry 2", why: "it held a name brimm-video can see" },
-      { field: "Principle 1's verbatim_key_phrases, entry 1", why: "it held a name brimm-video can see" }
+      { field: "Principle 1's steps, entry 2", why: "it held a name BRIMM Video Studio can see" },
+      { field: "Principle 1's decision_criteria, entry 2", why: "it held a name BRIMM Video Studio can see" },
+      { field: "Principle 1's verbatim_key_phrases, entry 1", why: "it held a name BRIMM Video Studio can see" }
     ]);
     assert.ok(!JSON.stringify(got).includes("Mark"));
     // The list she kept is not changed.
@@ -1111,7 +1111,7 @@ describe("what a session hands over once she has decided", () => {
     given.principles[1] = principle(2, { description: "Mark says so.", approved: false });
     given.reelIdeas[2] = idea(3, { refilm: false, from: "p5", to: "p7", words: "Mark says it.", principle: null });
     const { dropped } = approvedSession(given, ["Mark"]);
-    assert.deepEqual(dropped, [{ field: "Principle 1's description", why: "it held a name brimm-video can see" }]);
+    assert.deepEqual(dropped, [{ field: "Principle 1's description", why: "it held a name BRIMM Video Studio can see" }]);
     assert.deepEqual(approvedSession(session(), ["Mark"]).dropped, []);
   });
 
@@ -1174,7 +1174,7 @@ describe("what a session hands over once she has decided", () => {
     const given = session();
     given.principles[2] = principle(3, { name: "Mark's rule" });
     const refused = approvedSession(given, ["Mark"]);
-    assert.deepEqual(refused, { why: "Principle 3's name held a name brimm-video took out: give it another name, or drop it." });
+    assert.deepEqual(refused, { why: "Principle 3's name held a name BRIMM Video Studio took out: give it another name, or drop it." });
     assert.ok(!refused.why.includes("Mark"));
     const renamed = approve(given.principles, ["edit", "3", "--name", "Wait longer"]).items;
     const { session: got, why } = approvedSession({ ...given, principles: renamed }, ["Mark"]);
@@ -1191,17 +1191,17 @@ describe("what a session hands over once she has decided", () => {
     given.reelIdeas[0] = idea(1, { words: "Mark says it.", principle: 1 });
     const refused = approvedSession(given, ["Mark"]);
     assert.deepEqual(refused, { why: lines(
-      "Recurring principle 1's text held a name brimm-video took out: say it another way, or drop it.",
-      "Reel idea 1's words held a name brimm-video took out: say it another way, or drop it.",
-      "Reel idea 2's idea held a name brimm-video took out: say it another way, or drop it.",
-      "Reel idea 2's words held a name brimm-video took out: say it another way, or drop it."
+      "Recurring principle 1's text held a name BRIMM Video Studio took out: say it another way, or drop it.",
+      "Reel idea 1's words held a name BRIMM Video Studio took out: say it another way, or drop it.",
+      "Reel idea 2's idea held a name BRIMM Video Studio took out: say it another way, or drop it.",
+      "Reel idea 2's words held a name BRIMM Video Studio took out: say it another way, or drop it."
     ) });
     assert.ok(!refused.why.includes("Mark"));
   });
 
   it("refuses a kept item whose name, text, idea or words is missing, not text, or blank", () => {
-    const NAME = "Principle 1's name held a name brimm-video took out: give it another name, or drop it.";
-    const TEXT = "Recurring principle 1's text held a name brimm-video took out: say it another way, or drop it.";
+    const NAME = "Principle 1's name held a name BRIMM Video Studio took out: give it another name, or drop it.";
+    const TEXT = "Recurring principle 1's text held a name BRIMM Video Studio took out: say it another way, or drop it.";
     const given = (name, text, idea_, words) => ({
       principles: [principle(1, { name })],
       recurringPrinciples: [{ n: 1, text, approved: true }],
@@ -1210,15 +1210,15 @@ describe("what a session hands over once she has decided", () => {
     for (const blank of ["", "   ", "\n", undefined, null, 3, ["x"], { a: 1 }]) {
       assert.equal(approvedSession(given(blank, "Text.", "Idea", "Words."), []).why, NAME, JSON.stringify(blank));
       assert.equal(approvedSession(given("Name", blank, "Idea", "Words."), []).why, TEXT, JSON.stringify(blank));
-      assert.equal(approvedSession(given("Name", "Text.", blank, "Words."), []).why, "Reel idea 1's idea held a name brimm-video took out: say it another way, or drop it.", JSON.stringify(blank));
-      assert.equal(approvedSession(given("Name", "Text.", "Idea", blank), []).why, "Reel idea 1's words held a name brimm-video took out: say it another way, or drop it.", JSON.stringify(blank));
+      assert.equal(approvedSession(given("Name", "Text.", blank, "Words."), []).why, "Reel idea 1's idea held a name BRIMM Video Studio took out: say it another way, or drop it.", JSON.stringify(blank));
+      assert.equal(approvedSession(given("Name", "Text.", "Idea", blank), []).why, "Reel idea 1's words held a name BRIMM Video Studio took out: say it another way, or drop it.", JSON.stringify(blank));
     }
     const missing = given("Name", "Text.", "Idea", "Words.");
     delete missing.principles[0].name;
     delete missing.recurringPrinciples[0].text;
     delete missing.reelIdeas[0].idea;
     delete missing.reelIdeas[0].words;
-    assert.equal(approvedSession(missing, []).why, lines(NAME, TEXT, "Reel idea 1's idea held a name brimm-video took out: say it another way, or drop it.", "Reel idea 1's words held a name brimm-video took out: say it another way, or drop it."));
+    assert.equal(approvedSession(missing, []).why, lines(NAME, TEXT, "Reel idea 1's idea held a name BRIMM Video Studio took out: say it another way, or drop it.", "Reel idea 1's words held a name BRIMM Video Studio took out: say it another way, or drop it."));
   });
 
   it("gives every line in one refusal, principles first", () => {
@@ -1227,9 +1227,9 @@ describe("what a session hands over once she has decided", () => {
     given.principles[2] = principle(3, { name: "Mark again" });
     given.recurringPrinciples[0] = { n: 1, text: "Ask Mark.", approved: true };
     assert.deepEqual(approvedSession(given, ["Mark"]), { why: lines(
-      "Principle 1's name held a name brimm-video took out: give it another name, or drop it.",
-      "Principle 3's name held a name brimm-video took out: give it another name, or drop it.",
-      "Recurring principle 1's text held a name brimm-video took out: say it another way, or drop it."
+      "Principle 1's name held a name BRIMM Video Studio took out: give it another name, or drop it.",
+      "Principle 3's name held a name BRIMM Video Studio took out: give it another name, or drop it.",
+      "Recurring principle 1's text held a name BRIMM Video Studio took out: say it another way, or drop it."
     ) });
   });
 

@@ -180,7 +180,7 @@ export const EDITED = {
     label, else by its short id. */
 const SESSION_NAME = "Session, 2026-10-14";
 export const NOT_YET = [
-  ["a client or group session", { kind: "session", name: { text: SESSION_NAME, placeholder: false } }, (who) => `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`, () => SESSION_NAME],
+  ["a client or group session", { kind: "session", name: { text: SESSION_NAME, placeholder: false } }, (who) => `${who} is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written.`, () => SESSION_NAME],
   ["a video not yet answered", { kind: null, answer: { state: "needs your answer", guess: "finished", seen: "wide, 42:10", came: "camera" } }, (who) => `${who} is not answered yet: say what it is first. Nothing was written.`, (label) => label || `a video not yet answered (${ID.slice(-6)})`]
 ];
 

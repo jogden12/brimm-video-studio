@@ -258,7 +258,7 @@ export function writeStudio(home, { checkout, node, lock = "strict", facts }) {
 }
 
 /** Why the guard refuses a tool call, as Claude says it to her. */
-const REFUSED = "In this folder Claude runs only brimm-video's own commands. Ask Jason for anything else.";
+const REFUSED = "In this folder Claude runs only BRIMM Video Studio's own commands. Ask Jason for anything else.";
 
 /** The tools the guard leaves to Claude Code's own rules: Claude's own bookkeeping, its list of what it is doing, its
     questions to her, and ToolSearch, which only loads a tool that then meets this guard. Read is left to them only inside
@@ -338,7 +338,7 @@ export function guardDecision(input, { checkout, node, folder = "", tmp = proces
   if (name === "Bash") {
     const command = input.tool_input && input.tool_input.command;
     const edit = new RegExp(`^(?:node|${literally(node)}) "${literally(checkout)}/tool/edit\\.js"(?: ${WORD})*$`);
-    if (typeof command === "string" && edit.test(command)) return { decision: "allow", reason: "brimm-video's own command" };
+    if (typeof command === "string" && edit.test(command)) return { decision: "allow", reason: "BRIMM Video Studio's own command" };
   }
   return { decision: "deny", reason: REFUSED };
 }

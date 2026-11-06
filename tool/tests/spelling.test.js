@@ -45,7 +45,7 @@ describe("the final transcripts, spelled again", () => {
     assert.deepEqual(JSON.parse(made.words).words, [{ w: "Sallie.", start: 1, end: 2 }]);
     assert.equal(respelledPart({ srt, words: null }, SALLIE).words, null);
   });
-  it("make the hand-off again as the next revision, with each part's captions as spelled now, by this brimm-video", () => {
+  it("make the hand-off again as the next revision, with each part's captions as spelled now, by this BRIMM Video Studio", () => {
     const srt = (words) => `1\n00:00:01,000 --> 00:00:02,000\n${words}\n\n`;
     const record = { id: "e-20261014-3fa9c1", kind: "episode", name: { text: "Pricing talk" }, video: { recorded: "2026-10-14", recordedFrom: "video" }, title: { text: "Price like you mean it", approved: true }, reels: [{ n: 2, title: "Know your costs" }] };
     const handoff = buildHandoff({ record, revision: 1, made: "2026-10-20T15:00:00-05:00", madeOn: "Mac Studio", commit: "c709b57", main: { file: "m.mov", seconds: 9, srt: srt("Sally.") }, reels: [{ n: 2, title: "Know your costs", file: "r.mov", seconds: 7, srt: srt("Sally.") }] });

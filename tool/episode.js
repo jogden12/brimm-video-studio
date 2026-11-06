@@ -428,7 +428,7 @@ export function newPlannedEpisode({ id, machine, at, title, route, voice = null,
     `known` stands in for a Mac on older code, in a test. */
 export const faultFor = (known) => (r) => {
   if (!isObject(r)) return "it is not an episode's record";
-  if (!Number.isInteger(r.version) || r.version < 1 || r.version > known) return `it is version ${JSON.stringify(r.version)}, and this brimm-video reads versions 1 to ${known}`;
+  if (!Number.isInteger(r.version) || r.version < 1 || r.version > known) return `it is version ${JSON.stringify(r.version)}, and this BRIMM Video Studio reads versions 1 to ${known}`;
   const v = r.video;
   const m = r.main;
   // A record with no video, and a record with no kind but the answer "planned", are whole only as a planned episode is: a planned
@@ -645,7 +645,7 @@ export function undone(record, home) {
     was. `pastCopies`, which `resolve` alone gives, writes past the conflicted copies, as it sorts them out one at a time. */
 export function writeEpisode(folder, record, { expectRev, writeText, writer, home, pastCopies = false }) {
   if (!Number.isInteger(expectRev) || expectRev < 0) throw new Error("the episode's record was not written, because the rev it was read at was not given");
-  if (isObject(record) && Number.isInteger(record.version) && record.version > NEWEST_VERSION) throw Object.assign(new Error("Jason has a newer brimm-video. Ask him to update this Mac."), { code: "NEWER" });
+  if (isObject(record) && Number.isInteger(record.version) && record.version > NEWEST_VERSION) throw Object.assign(new Error("Jason has a newer BRIMM Video Studio. Ask him to update this Mac."), { code: "NEWER" });
   const copies = conflictedCopies(folder);
   if (copies.length && !pastCopies) throw Object.assign(new Error(conflictWhy(copies)), { code: "CONFLICTED" });
   if (recordNumbers(folder).some((n) => n > expectRev)) throw Object.assign(new Error("this episode changed on the other Mac: open it again"), { code: "CHANGED" });

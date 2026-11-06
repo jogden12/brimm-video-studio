@@ -60,7 +60,7 @@ const CLEARED_RECORD = { ...SESSION_RECORD, session: { ...SESSION_MARK, cleared:
 const HERS = { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00" };
 
 const WAITING = "This video is waiting for its answer: say what it is first.";
-const LEFT_ALONE = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+const LEFT_ALONE = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Jason.";
 const OPEN = "It's open in HyperFrames.";
@@ -71,7 +71,7 @@ const PROJECT = "Pricing- what to charge- reel 2 3fa9c1";
 const AGAIN = openReelWords(2, NAME);
 /** What a Mac that is not set up for HyperFrames says of the Reels it cannot make: Reels are made in HyperFrames (OpusClip is no longer used:
     Jason, 2 November 2026). `them` is "Reels", "Reel 2" or "Reels 1 and 2". */
-const CANNOT_MAKE = (them) => `brimm-video cannot make ${them} on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.`;
+const CANNOT_MAKE = (them) => `BRIMM Video Studio cannot make ${them} on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.`;
 const MAKING = `The video for Reel 2 is being made. Say "${AGAIN}" again when it is done; "how far is it?" shows how far it has got.`;
 const STILL = `Claude is still reading it. Say "${AGAIN}" again when it has finished; "how far is it?" shows how far it has got.`;
 /** What is said while a video is being made already and Reel 2's is not started: the run at work holds the one lock, so it may be
@@ -838,7 +838,7 @@ describe("title: a Reel that HyperFrames opened has a title on screen", () => {
 
 describe("reels: how to make one", () => {
   const MAKE_ONE = `To make one, say "${openReelWords(1, NAME)}", with the number of the one you want.`;
-  it("ends the list of an answered video, on a Mac set up for HyperFrames, with how to make one, and not with the line that says brimm-video cannot make Reels on this Mac", async () => {
+  it("ends the list of an answered video, on a Mac set up for HyperFrames, with how to make one, and not with the line that says BRIMM Video Studio cannot make Reels on this Mac", async () => {
     const { t } = suggested();
     const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
     assert.equal(r.code, 0, r.text);
@@ -865,7 +865,7 @@ describe("reels: how to make one", () => {
     assert.doesNotMatch(r.text, /To make|cannot make Reel/);
     t.done();
   });
-  it("tells her brimm-video cannot make Reels on a Mac that is not set up for HyperFrames, and to ask Jason", async () => {
+  it("tells her BRIMM Video Studio cannot make Reels on a Mac that is not set up for HyperFrames, and to ask Jason", async () => {
     const { t } = suggested({ set: false });
     const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
     assert.equal(r.said.at(-1), CANNOT_MAKE("Reels"));
@@ -910,7 +910,7 @@ describe("reels: how to make one", () => {
     mixed.t.done();
     dropped.t.done();
   });
-  it("does not say brimm-video cannot make a Reel another Mac made, on a Mac that is not set up for HyperFrames, and still says it for one that is not made", async () => {
+  it("does not say BRIMM Video Studio cannot make a Reel another Mac made, on a Mac that is not set up for HyperFrames, and still says it for one that is not made", async () => {
     const { t, found } = suggested({ set: false });
     withMade(found, [2]);
     assert.equal((await on(t.ctx.deps, "reels", FOLDER, "--no-play")).said.at(-1), CANNOT_MAKE("Reels"));
@@ -919,7 +919,7 @@ describe("reels: how to make one", () => {
     assert.doesNotMatch((await on(t.ctx.deps, "reels", FOLDER, "--no-play")).text, /To make|cannot make Reel/);
     t.done();
   });
-  it("says nothing of making one for a video whose Reels are not suggestions, which brimm-video still makes in Final Cut", async () => {
+  it("says nothing of making one for a video whose Reels are not suggestions, which BRIMM Video Studio still makes in Final Cut", async () => {
     const { t } = world({ set: true });
     const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
     assert.doesNotMatch(r.text, /To make|cannot make Reel/);
@@ -949,7 +949,7 @@ describe("push and the changes on a Reel: one HyperFrames opened is a project th
     assert.deepEqual((await on(t.ctx.deps, "push", FOLDER, "reel", "2")).said, [IN_HYPERFRAMES]);
     t.done();
   });
-  it("tells her how to make a Reel nobody has opened on a Mac set up for HyperFrames, as `title` and `reels` do, and that brimm-video cannot make it on one that is not", async () => {
+  it("tells her how to make a Reel nobody has opened on a Mac set up for HyperFrames, as `title` and `reels` do, and that BRIMM Video Studio cannot make it on one that is not", async () => {
     // On a Mac set up for the app the way to make it is to open it; the line that brimm-video cannot make it on this Mac is for a Mac that is not set up.
     const NOT_MADE_YET = `Reel 2 isn't made yet. Say "${AGAIN}" to make it.`;
     for (const [set, said] of [[true, NOT_MADE_YET], [false, CANNOT_MAKE("Reel 2")]]) {

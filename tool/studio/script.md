@@ -1,6 +1,6 @@
 # From her script to a plan
 
-Read this when she says she has a script, wants a video made from it, or wants an explainer made from it. Run brimm-video's commands as SKILL.md says, and never show her a command, a path or a flag: say what was done, in plain words. Nothing here is posted, sent or published: a plan is saved for her to film from, and the video is made in HyperFrames after.
+Read this when she says she has a script, wants a video made from it, or wants an explainer made from it. Run BRIMM Video Studio's commands as SKILL.md says, and never show her a command, a path or a flag: say what was done, in plain words. Nothing here is posted, sent or published: a plan is saved for her to film from, and the video is made in HyperFrames after.
 
 1. Take the script. She pastes it in the chat, or puts it in the `Scripts` folder of her BRIMM Video Studio folder and tells you its name, and you Read it there. A file anywhere else can't be read, so ask her to move it into `Scripts` or to paste it.
 2. Ask about the content and the direction, one question at a time, in the chat: who it is for, what she wants them to do, how it should feel, what she will film and what she would rather show.

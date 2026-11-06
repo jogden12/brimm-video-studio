@@ -50,8 +50,8 @@ describe("the record's layout", () => {
     assert.equal(episodeFault({ ...BASE, brand: { logo: "/Users/x/logo.png" } }), "its logo cannot be read");
     assert.equal(episodeFault({ ...BASE, main: { ...BASE.main, graphics: [{ id: "g1", picture: "media/..", at: 3, for: 2, place: "corner" }] } }), "its main video cannot be read");
     assert.equal(episodeFault({ ...BASE, brand: { logo: "media/." } }), "its logo cannot be read");
-    assert.equal(episodeFault({ ...BASE, version: 6 }), "it is version 6, and this brimm-video reads versions 1 to 5");
-    assert.equal(faultFor(2)({ ...BASE, version: 3 }), "it is version 3, and this brimm-video reads versions 1 to 2");
+    assert.equal(episodeFault({ ...BASE, version: 6 }), "it is version 6, and this BRIMM Video Studio reads versions 1 to 5");
+    assert.equal(faultFor(2)({ ...BASE, version: 3 }), "it is version 3, and this BRIMM Video Studio reads versions 1 to 2");
     assert.equal(faultFor(2)({ ...BASE, version: 2 }), "");
   });
 });
@@ -93,7 +93,7 @@ describe("layout 4: the HyperFrames projects of an episode (architecture 7.1)", 
     assert.equal(ofTheSwitch({ ...RAW, app: APP }), true);
   });
   it("is refused by a Mac that knows layout 3, and changes nothing there", () => {
-    assert.equal(faultFor(3)({ ...RAW, version: 4, app: APP }), "it is version 4, and this brimm-video reads versions 1 to 3");
+    assert.equal(faultFor(3)({ ...RAW, version: 4, app: APP }), "it is version 4, and this BRIMM Video Studio reads versions 1 to 3");
   });
 });
 
@@ -107,15 +107,15 @@ describe("layout 5: the planned episode (PR H4)", () => {
     assert.equal(layoutOf({ ...BASE, app: { toolchain: "0.8.208", projects: [] } }), 4);
     assert.ok(layoutOf(PLAN) > RECORD_VERSION, "no record but a plan is above the layout a Mac on older code reads");
   });
-  it("is read whole by this brimm-video and refused by a Mac that knows layout 4, which reads it as newer, not as an import that has not finished", () => {
+  it("is read whole by this BRIMM Video Studio and refused by a Mac that knows layout 4, which reads it as newer, not as an import that has not finished", () => {
     assert.equal(episodeFault(PLAN), "");
-    assert.equal(faultFor(RECORD_VERSION)(PLAN), "it is version 5, and this brimm-video reads versions 1 to 4");
+    assert.equal(faultFor(RECORD_VERSION)(PLAN), "it is version 5, and this BRIMM Video Studio reads versions 1 to 4");
     // The same record with no video, as a record of layout 4 would be: this brimm-video reads it as an unfinished import too, which is why it is layout 5.
     assert.equal(faultFor(RECORD_VERSION)({ ...PLAN, version: 4 }), "its plan cannot be read");
   });
-  it("is the newest layout this brimm-video reads: a record of layout 6 is newer here too", () => {
+  it("is the newest layout this BRIMM Video Studio reads: a record of layout 6 is newer here too", () => {
     assert.equal(NEWEST_VERSION, PLANNED_VERSION);
-    assert.equal(episodeFault({ ...PLAN, version: 6 }), "it is version 6, and this brimm-video reads versions 1 to 5");
+    assert.equal(episodeFault({ ...PLAN, version: 6 }), "it is version 6, and this BRIMM Video Studio reads versions 1 to 5");
   });
 });
 
@@ -134,7 +134,7 @@ describe("the record's layout 3", () => {
     assert.equal(layoutOf(r), 3);
     assert.equal(kindOf(r), null);
   });
-  it("needs a kind once the record is answered, and lets a record that is not for brimm-video have none", () => {
+  it("needs a kind once the record is answered, and lets a record that is not for BRIMM Video Studio have none", () => {
     assert.match(episodeFault({ ...made(), kind: null, answer: { state: "answered", guess: null, seen: "", came: "camera" } }), /kind/);
     assert.match(episodeFault({ ...made(), kind: null }), /kind/);
     assert.match(episodeFault({ ...made(), kind: "reel", answer: ANSWER }), /kind/);
@@ -312,7 +312,7 @@ describe("layout 5 for a part: a dropped video that is footage for a planned vid
       // A Mac on older code reads the part as a newer brimm-video's record, and not the video waiting for its answer under it.
       const older = readEpisode(folder, { known: RECORD_VERSION });
       assert.deepEqual([older.newer, older.record.rev, older.record.version], [true, 2, 5]);
-      assert.equal(faultFor(RECORD_VERSION)(answered), "it is version 5, and this brimm-video reads versions 1 to 4");
+      assert.equal(faultFor(RECORD_VERSION)(answered), "it is version 5, and this BRIMM Video Studio reads versions 1 to 4");
       // Taken back, the record is no part but stays at layout 5: a Mac on older code still leaves it alone.
       const { partOf, ...rest } = answered;
       const back = writeEpisode(folder, { ...rest, answer: WAITING_ANSWER }, options(2));

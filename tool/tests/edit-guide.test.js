@@ -162,7 +162,7 @@ describe("guide, from the records", () => {
     for (const said of ["Launch talk", older.name]) assert.deepEqual(await on(light(t), "guide", said), { code: 1, said: [NO_FIT] }, said);
     t.done();
   });
-  it("reads a hand-off of a kind brimm-video never writes from the record, and does not stop at it", async () => {
+  it("reads a hand-off of a kind BRIMM Video Studio never writes from the record, and does not stop at it", async () => {
     const t = setup();
     const h = handedOff(t);
     writeFileSync(join(h.folder, "final/Launch talk.brimm-ops.json"), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: h.record.id, kind: "film", name: "Launch talk" } }));
@@ -403,7 +403,7 @@ describe("guide opens a folder, the page, or a file's place in Finder", () => {
     assert.deepEqual(await on(light(t, { run: async () => ({ code: 1, stderr: "no" }) }), "guide", "page"), { code: 1, said: ["The BRIMM Ops page could not be opened: ask Jason."] });
     t.done();
   });
-  it("shows in Finder what the step needs: the hand-off, then the video to post; and nothing for a step of brimm-video's", async () => {
+  it("shows in Finder what the step needs: the hand-off, then the video to post; and nothing for a step of BRIMM Video Studio's", async () => {
     const t = setup();
     const h = handedOff(t);
     assert.deepEqual(await on(light(t), "guide", "Launch talk", "show"), { code: 0, said: ["Shown in Finder: the hand-off of Launch talk (a1a1a1)."] });
@@ -600,7 +600,7 @@ describe("guide notes her word", () => {
     assert.equal((await on(light(t), "guide")).said[1], "Nothing is under way. To start, put the video in your drop folder.");
     t.done();
   });
-  it("refuses a step for a video whose next step is brimm-video's, and a note that cannot be written", async () => {
+  it("refuses a step for a video whose next step is BRIMM Video Studio's, and a note that cannot be written", async () => {
     const t = setup();
     episodeAs(t, VIDEOS.read);
     assert.deepEqual(await on(light(t), "guide", "Pricing talk", "done", "taken"), { code: 1, said: ['Not noted: Pricing talk (bbbbbb) has no step on the BRIMM Ops page now. Claude has read it. Say "what did Claude find?", then answer the spellings card.'] });

@@ -381,7 +381,7 @@ describe("the open guard, III: Bash", () => {
       assert.equal((await bash(command)).decision, "allow", command);
       assert.ok(command.startsWith(`${NODE} "${CHECKOUT}/tool/edit.js" `), command);
     }
-    assert.equal(RUN_ALONE, "Run brimm-video's commands on their own, exactly as her skill says, and not in the background.");
+    assert.equal(RUN_ALONE, "Run BRIMM Video Studio's commands on their own, exactly as her skill says, and not in the background.");
   });
   it("refuses edit.js with bare node, &&, ;, |, $(…), an environment prefix, cd … &&, another node or another path", async () => {
     for (const command of [`node "${CHECKOUT}/tool/edit.js" episodes`, `${EDIT} episodes && date`, `${EDIT} episodes; date`, `${EDIT} episodes | cat`, `${EDIT} $(date)`, `${EDIT} "$(date)"`, `A=1 ${EDIT} episodes`, `cd /tmp && ${EDIT} episodes`, `/usr/local/bin/node "${CHECKOUT}/tool/edit.js" episodes`, `${NODE} "/tmp/tool/edit.js" episodes`, `${NODE} '${CHECKOUT}/tool/edit.js' episodes`, `${EDIT}  episodes`, `${EDIT} episodes\ndate`, ` ${EDIT} episodes`]) {
@@ -422,7 +422,7 @@ describe("the open guard, III: Bash", () => {
 });
 
 describe("the open guard, IV: falling back to today's, and the hook", () => {
-  const REFUSED = "In this folder Claude runs only brimm-video's own commands. Ask Jason for anything else.";
+  const REFUSED = "In this folder Claude runs only BRIMM Video Studio's own commands. Ask Jason for anything else.";
   const OTHER = "22222222-3333-4444-8555-666666666666";
   const AT = "2026-10-26T10:00:00.000Z";
   /** A made-up open-lock Mac with a chat in her folder: its transcript in her folder's projects folder. */

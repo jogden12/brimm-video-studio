@@ -210,7 +210,7 @@ export const uncropped = (candidate) => Array.isArray(candidate.ranges) && candi
 export const notMadeWords = (n) => {
   const ns = n === undefined ? [] : [].concat(n);
   const them = ns.length === 0 ? "Reels" : ns.length === 1 ? `Reel ${ns[0]}` : `Reels ${ns.slice(0, -1).join(", ")} and ${ns[ns.length - 1]}`;
-  return `brimm-video cannot make ${them} on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.`;
+  return `BRIMM Video Studio cannot make ${them} on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.`;
 };
 
 /** reels.json, as it is written: the candidates of `video`, made by the import, by `ask` or by a reading (`by`) at the moment
@@ -241,7 +241,7 @@ export function readReels(text, { known = REELS_VERSION } = {}) {
   }
   const not = { why: "it is not a list of Reel candidates this tool wrote" };
   if (!reels || reels.format !== "brimm-video reels" || !Number.isInteger(reels.version)) return not;
-  if (reels.version > known) return { why: "it was written by a newer brimm-video. Ask Jason to update this Mac." };
+  if (reels.version > known) return { why: "it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac." };
   if (typeof reels.video !== "string" || !Array.isArray(reels.candidates)) return not;
   if (reels.highest !== undefined && !(Number.isInteger(reels.highest) && reels.highest >= 0)) return not;
   const isCrop = (c) => Boolean(c) && [c.x, c.y, c.w, c.h].every(Number.isFinite);

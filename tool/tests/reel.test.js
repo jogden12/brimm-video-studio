@@ -295,7 +295,7 @@ describe("reels, the list of an episode's Reel candidates (phase 3)", () => {
     assert.deepEqual(t.opened, []);
     t.done();
   });
-  it("never says brimm-video cannot make a Reel of an episode imported before the switch, whose Reels brimm-video still makes", async () => {
+  it("never says BRIMM Video Studio cannot make a Reel of an episode imported before the switch, whose Reels BRIMM Video Studio still makes", async () => {
     const p = phase3();
     const { t } = p;
     assert.equal(await editMain(["reels", "Pricing", "--no-play"], t.ctx.deps), 0);
@@ -304,12 +304,12 @@ describe("reels, the list of an episode's Reel candidates (phase 3)", () => {
     assert.doesNotMatch(t.said(), /cannot make Reel|on this Mac/);
     t.done();
   });
-  it("says why, in one sentence, when the list cannot be read, as one a newer brimm-video wrote", async () => {
+  it("says why, in one sentence, when the list cannot be read, as one a newer BRIMM Video Studio wrote", async () => {
     const { t, found } = phase3();
     writeFile(join(found.folder, "reels.json"), JSON.stringify({ ...JSON.parse(PHASE_3.files["reels.json"]), version: 3 }));
     assert.equal(await editMain(["reels", "Pricing"], t.ctx.deps), 1);
-    assert.equal(t.said(), "Its list of Reel candidates cannot be read: it was written by a newer brimm-video. Ask Jason to update this Mac.");
-    assert.deepEqual(await reelTimeline(found, found.record.reels[1], t.ctx), { why: "The list of Reel candidates cannot be read: it was written by a newer brimm-video. Ask Jason to update this Mac." });
+    assert.equal(t.said(), "Its list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac.");
+    assert.deepEqual(await reelTimeline(found, found.record.reels[1], t.ctx), { why: "The list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac." });
     t.done();
   });
   it("offers to ask again on a Mac that can, though the importing Mac had no Claude Code (PR 19's review)", async () => {
@@ -651,7 +651,7 @@ describe("ask, and a video with a sound ffmpeg cannot read beside one it can, as
 });
 
 describe("ask, when the list or Claude's reply is not as it was read (PR 19's review)", () => {
-  it("writes nothing over a list that a newer brimm-video wrote while Claude was asked, and says why", async () => {
+  it("writes nothing over a list that a newer BRIMM Video Studio wrote while Claude was asked, and says why", async () => {
     const p = askable();
     const at = join(p.found.folder, "reels.json");
     const newer = JSON.stringify({ ...JSON.parse(readFileSync(at, "utf8")), version: 3 });
@@ -667,7 +667,7 @@ describe("ask, when the list or Claude's reply is not as it was read (PR 19's re
     assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
     assert.equal(readFileSync(at, "utf8"), newer);
     assert.equal(reread(p.found).rev, 1);
-    assert.deepEqual(readResult(p.t.home, FOLDER, "ask").failed, ["The list of Reel candidates cannot be read: it was written by a newer brimm-video. Ask Jason to update this Mac."]);
+    assert.deepEqual(readResult(p.t.home, FOLDER, "ask").failed, ["The list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac."]);
     p.t.done();
   });
   it("puts nothing in when the list changed while the previews were made, as when the other Mac added a candidate", async () => {
@@ -1836,13 +1836,13 @@ describe("ask, reels and an episode the other Mac has open (phase 1b's claim)", 
 });
 
 describe("ask, what it refuses (from the review)", () => {
-  it("refuses a list of Reel candidates it cannot read, as one a newer brimm-video wrote, and writes nothing over it", async () => {
+  it("refuses a list of Reel candidates it cannot read, as one a newer BRIMM Video Studio wrote, and writes nothing over it", async () => {
     const p = askable();
     const reels = JSON.parse(readFileSync(join(p.found.folder, "reels.json"), "utf8"));
     rmSync(join(p.found.folder, "reels.json"));
     writeFile(join(p.found.folder, "reels.json"), JSON.stringify({ ...reels, version: 3 }));
     const r = await askedBoth(p);
-    const why = "The list of Reel candidates cannot be read: it was written by a newer brimm-video. Ask Jason to update this Mac.";
+    const why = "The list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac.";
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
     assert.ok(p.t.said().includes(why), p.t.said());
     assert.deepEqual(r.failed, [why]);
@@ -2061,7 +2061,7 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
   });
   // A newer brimm-video may have written a session or a video not yet answered: its detached part, which a stopped run or a
   // person may start by the folder's name, names it by its short id alone, as every other command does, and goes no further.
-  it("refuses, in its detached part, an episode a newer brimm-video wrote, by its short id alone, and asks nothing and writes nothing", async () => {
+  it("refuses, in its detached part, an episode a newer BRIMM Video Studio wrote, by its short id alone, and asks nothing and writes nothing", async () => {
     const p = askable();
     relayout(p.found, { version: NEWEST_VERSION + 1 });
     const { id } = JSON.parse(readFileSync(join(p.found.folder, "record", "0001.json"), "utf8"));
@@ -2069,7 +2069,7 @@ describe("ask, and a video not yet answered or a session (Part L's review)", () 
     const listing = () => readdirSync(p.found.folder, { recursive: true }).sort().map((n) => [n, statSync(join(p.found.folder, n)).size]);
     const before = listing();
     assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
-    const why = `That is an episode a newer brimm-video wrote (${id.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`;
+    const why = `That is an episode a newer BRIMM Video Studio wrote (${id.slice(-6)}). Jason has a newer BRIMM Video Studio. Ask him to update this Mac.`;
     assert.equal(p.t.said(), why);
     // The gate refuses it first, in the same sentence, and a --now it refuses leaves a result in its words: nothing asked of
     // Claude, nothing written into the episode.

@@ -118,7 +118,7 @@ describe("2. the gate", () => {
     const found = episodeFor(t, { record: { version: 3, kind: "session", answer: ANSWERED, label: "Session, 2026-10-20", session: SESSION } });
     const before = listAll(found.folder);
     const r = await on(taught(t), "finish", FOLDER, "reels");
-    assert.deepEqual([r.code, r.said], [1, ["Session, 2026-10-20 is a client or group session: brimm-video cannot finish a session yet. Nothing was written."]]);
+    assert.deepEqual([r.code, r.said], [1, ["Session, 2026-10-20 is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written."]]);
     assert.deepEqual([t.started, t.calls, listAll(found.folder)], [[], [], before]);
     t.done();
   });

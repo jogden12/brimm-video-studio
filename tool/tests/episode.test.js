@@ -180,7 +180,7 @@ describe("reading an episode's record", () => {
     const stoodIn = readEpisode(t.folder, { known: 2 });
     assert.deepEqual(stoodIn, { record: unanswered, file: recordFile(t.folder, 2), newer: true }, "the newest record, marked as newer, not record 1");
     assert.notEqual(stoodIn.record.rev, RECORD.rev);
-    assert.equal(faultFor(2)(unanswered), "it is version 3, and this brimm-video reads versions 1 to 2");
+    assert.equal(faultFor(2)(unanswered), "it is version 3, and this BRIMM Video Studio reads versions 1 to 2");
     assert.deepEqual(t.files(), before, "reading writes nothing");
     assert.deepEqual(t.written, []);
     t.done();
@@ -298,7 +298,7 @@ describe("writing an episode's record", () => {
     const t = setup();
     const newer = { version: NEWEST_VERSION + 1, id: RECORD.id, rev: 1 };
     t.store(newer);
-    assert.throws(() => writeEpisode(t.folder, newer, { expectRev: 1, writeText: t.writeText, writer: WRITER, home: t.home }), { message: "Jason has a newer brimm-video. Ask him to update this Mac.", code: "NEWER" });
+    assert.throws(() => writeEpisode(t.folder, newer, { expectRev: 1, writeText: t.writeText, writer: WRITER, home: t.home }), { message: "Jason has a newer BRIMM Video Studio. Ask him to update this Mac.", code: "NEWER" });
     assert.deepEqual(t.written, []);
     t.done();
   });

@@ -67,7 +67,7 @@ const CLEARED_RECORD = { ...SESSION_RECORD, session: { ...SESSION_MARK, cleared:
 const HERS = { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00" };
 
 const WAITING = "This video is waiting for its answer: say what it is first.";
-const LEFT_ALONE = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+const LEFT_ALONE = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Jason.";
 const OPEN = "It's open in HyperFrames.";

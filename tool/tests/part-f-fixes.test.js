@@ -230,7 +230,7 @@ describe("behind takes away only what show and which put in shown/, by their mar
     mkdirSync(join(work, "2026-10-16 Third (Mac Studio)", "renders"), { recursive: true });
     writeFileSync(join(work, "2026-10-16 Third (Mac Studio)", "renders", "v0.mp4"), "a render");
     const r = await behind(t);
-    assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."]);
+    assert.deepEqual([r.code, r.text], [0, "This Mac has the newest BRIMM Video Studio."]);
     assert.ok(!existsSync(join(marked, "a copy.txt")));
     assert.deepEqual(treeOf(marked).filter((n) => n !== SHOWN_MARKER), ["hers.txt", "sub", "sub/c.txt"]);
     assert.deepEqual(treeOf(unmarked), ["x.txt"]);
@@ -688,7 +688,7 @@ describe("the README's rows for the commands of the fork (item 7)", () => {
   it("gives kind every flag of its usage, and the rows of leave, which, a client's agreement and retry's label", () => {
     const [kind] = rowsOf("kind");
     for (const flag of ["--private yes\\|no", "--version-of <id>\\|none", "--not-a-session", "--again", "--clear-session", "--here"]) assert.ok(kind.includes(flag), flag);
-    assert.match(rowsOf("leave")[0], /not for brimm-video/);
+    assert.match(rowsOf("leave")[0], /not for BRIMM Video Studio/);
     assert.match(rowsOf("which")[0], /clone/);
     assert.ok(rowsOf("reel").some((row) => row.startsWith('| `reel "<label>" <n> --client-agreed` |')));
     assert.match(rowsOf("retry")[0], /by the label a light import's status gives it/);

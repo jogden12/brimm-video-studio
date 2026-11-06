@@ -148,7 +148,7 @@ const NOTICE = `Claude has read ${NAME}: say "what did Claude find?"`;
 /** What every command that would need a Reel a reading suggested says of it on a Mac that is not set up for HyperFrames: Reels are made
     in HyperFrames, so brimm-video cannot make it on this Mac, and she is to ask Jason. `them` is "Reels", "Reel 3" or "Reels 3 and 4".
     Never "make it first": nothing here makes one. OpusClip is no longer used (Jason, 2 November 2026). */
-const ELSEWHERE = (them) => `brimm-video cannot make ${them} on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.`;
+const ELSEWHERE = (them) => `BRIMM Video Studio cannot make ${them} on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.`;
 const NOT_MADE = (n) => ELSEWHERE(`Reel ${n}`);
 
 /** A crop-less stretch as a reading writes it, from `start` to `end` in seconds of the video, on the video's picture grid. */
@@ -731,7 +731,7 @@ describe("reels.json version 2", () => {
   });
   it("is refused by an older reader in the words it has always used for a newer one", () => {
     const text = JSON.stringify(reelsFile({ video: VIDEO, by: "read", made: AT, candidates: [UNCROPPED] }));
-    assert.deepEqual(readReels(text, { known: 1 }), { why: "it was written by a newer brimm-video. Ask Jason to update this Mac." });
+    assert.deepEqual(readReels(text, { known: 1 }), { why: "it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac." });
   });
   it("still needs every crop at version 1", () => {
     const text = JSON.stringify({ ...reelsFile({ video: VIDEO, by: "import", made: AT, candidates: [CROPPED] }), candidates: [UNCROPPED] });
@@ -791,9 +791,9 @@ describe("a Reel with no crops yet, which every reader that needs crops refuses"
   });
 });
 
-describe("the Reel suggestions of a video she has answered, which brimm-video cannot make yet", () => {
+describe("the Reel suggestions of a video she has answered, which BRIMM Video Studio cannot make yet", () => {
   const list = JSON.stringify(reelsFile({ video: VIDEO, by: "read", made: AT, candidates: [UNCROPPED] }));
-  it("are listed, then that brimm-video cannot make them on this Mac, which is not set up for HyperFrames", async () => {
+  it("are listed, then that BRIMM Video Studio cannot make them on this Mac, which is not set up for HyperFrames", async () => {
     for (const kind of ["finished", "raw"]) {
       const { t } = reading(kind, { over: { reels: [{ n: 3, status: "candidate", from: 6.07, to: 21.097, title: "", why: "", files: [], pushed: [] }] }, files: { ...LIGHT_FILES, "reels.json": list } });
       const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
@@ -804,7 +804,7 @@ describe("the Reel suggestions of a video she has answered, which brimm-video ca
       t.done();
     }
   });
-  it("say that brimm-video cannot make them only for a suggestion she has not dropped", async () => {
+  it("say that BRIMM Video Studio cannot make them only for a suggestion she has not dropped", async () => {
     const { t } = reading("finished", { over: { reels: [{ n: 3, status: "dropped", from: 6.07, to: 21.097, title: "", why: "", files: [], pushed: [] }] }, files: { ...LIGHT_FILES, "reels.json": list } });
     const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
     assert.equal(r.code, 0, r.text);

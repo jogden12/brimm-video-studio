@@ -186,15 +186,15 @@ describe("the limits a preview is made under", () => {
   });
 });
 
-describe("what brimm-video says of a Reel it cannot make on a Mac that is not set up for HyperFrames", () => {
+describe("what BRIMM Video Studio says of a Reel it cannot make on a Mac that is not set up for HyperFrames", () => {
   // Reels are made in HyperFrames, so a Mac that is not set up for it cannot make one. OpusClip is no longer used (Jason, 2 November 2026).
   it("is said of no number, of one, of several joined with the last after \"and\", with the words written out", () => {
-    assert.equal(notMadeWords(), "brimm-video cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
-    assert.equal(notMadeWords([]), "brimm-video cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
-    assert.equal(notMadeWords(2), "brimm-video cannot make Reel 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
-    assert.equal(notMadeWords([2]), "brimm-video cannot make Reel 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
-    assert.equal(notMadeWords([1, 2]), "brimm-video cannot make Reels 1 and 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
-    assert.equal(notMadeWords([1, 2, 3]), "brimm-video cannot make Reels 1, 2 and 3 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords(), "BRIMM Video Studio cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords([]), "BRIMM Video Studio cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords(2), "BRIMM Video Studio cannot make Reel 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords([2]), "BRIMM Video Studio cannot make Reel 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords([1, 2]), "BRIMM Video Studio cannot make Reels 1 and 2 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
+    assert.equal(notMadeWords([1, 2, 3]), "BRIMM Video Studio cannot make Reels 1, 2 and 3 on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
   });
   it("sends her to OpusClip nowhere, and says nothing of cutting a Reel for now or of BRIMM Ops writing its post text", () => {
     for (const n of [undefined, 3, [1, 2], [1, 2, 3]]) assert.doesNotMatch(notMadeWords(n), /OpusClip|for now|cut |post text|New short video/i, String(n));
@@ -258,7 +258,7 @@ describe("reels.json", () => {
     assert.deepEqual(readReels("not json"), { why: "it is not JSON" });
     assert.deepEqual(readReels(JSON.stringify({ format: "something else", version: 1 })), { why: "it is not a list of Reel candidates this tool wrote" });
     // Version 2 is the reading's (a candidate with no crops yet): the next one up is a newer brimm-video's.
-    assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 3, video: "a.mov", candidates: [] })), { why: "it was written by a newer brimm-video. Ask Jason to update this Mac." });
+    assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 3, video: "a.mov", candidates: [] })), { why: "it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac." });
     assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 1, video: "a.mov", candidates: [{ n: 1, ranges: [{ start: 1 }] }] })), { why: "candidate 1 in it cannot be read" });
     assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 1, video: "a.mov", highest: "three", candidates: [] })), { why: "it is not a list of Reel candidates this tool wrote" });
   });

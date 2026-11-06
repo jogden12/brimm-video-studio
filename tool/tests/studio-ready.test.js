@@ -20,6 +20,6 @@ describe("her skill's Not ready yet", () => {
   });
   it("says what is not, and what to do meanwhile: a logo or a look on a Reel, and bringing in her hand edits", () => {
     assert.ok(skill.includes('- A logo or a look on a Reel: "That comes with the brand templates, later. For now, do it by hand in Final Cut."'), notReady);
-    assert.ok(skill.includes('- Bringing in her hand edits: "That part of brimm-video isn\'t ready yet. Make your changes by hand last, after brimm-video\'s, or finish that timeline by hand in Final Cut."'), notReady);
+    assert.ok(skill.includes('- Bringing in her hand edits: "That part of BRIMM Video Studio isn\'t ready yet. Make your changes by hand last, after BRIMM Video Studio\'s, or finish that timeline by hand in Final Cut."'), notReady);
   });
 });
