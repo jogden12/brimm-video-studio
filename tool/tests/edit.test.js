@@ -219,13 +219,14 @@ describe("node edit.js episodes", () => {
     ].join("\n")), r.text);
     t.done();
   });
-  it("shows each library on this Mac with its size, and the free space on the disk", async () => {
+  it("lists no library, a Final Cut library in BRIMM Video Work included, and shows the free space on the disk", async () => {
     const t = setup();
     const library = libraryFor(t.home, "2026-10-13 Talk (Mac Studio)");
     mkdirSync(join(library, "Event"), { recursive: true });
     writeFileSync(join(library, "Event", "media"), "x".repeat(3 * 2 ** 20));
     const r = await t.run("episodes");
-    assert.ok(r.text.endsWith(["On this Mac:", "  2026-10-13 Talk (Mac Studio).fcpbundle: 3.0 MB", "  Free on the disk: 300 GB"].join("\n")), r.text);
+    assert.ok(r.text.endsWith(["On this Mac:", "  Free on the disk: 300 GB"].join("\n")), r.text);
+    assert.doesNotMatch(r.text, /fcpbundle|library/i);
     t.done();
   });
   it("says there are none yet when there are none", async () => {
@@ -794,7 +795,7 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
     return made;
   };
   const OFFLINE = (t, path) => `So that Dropbox keeps this episode on this Mac, Control-click its folder in Finder and choose Make available offline: ${path}`;
-  it("1. lists a library Final Cut has made, with its .fcpcache link to itself, counting its own files once and no linked media", async () => {
+  it("1. lists no library a Final Cut left behind, with its .fcpcache link to itself and its linked media", async () => {
     const t = setup();
     const library = libraryFor(t.home, FOLDER);
     mkdirSync(join(library, "Event", "Original Media"), { recursive: true });
@@ -804,7 +805,7 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
     symlinkSync(join(t.dir, "outside.mov"), join(library, "Event", "Original Media", "Talk.mov"));
     const r = await t.run("episodes");
     assert.equal(r.code, 0, r.text);
-    assert.ok(r.text.includes(`  ${FOLDER}.fcpbundle: 2.0 MB`), r.text);
+    assert.doesNotMatch(r.text, /fcpbundle/, r.text);
     t.done();
   });
   it("5. lists an episode written by a newer BRIMM Video Studio by its short id alone, without reading its fields", async () => {

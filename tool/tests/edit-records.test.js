@@ -82,7 +82,6 @@ describe("what every record command does first", () => {
     assert.equal(await editMain(["title", FOLDER, "--words", "Hello"], t.ctx.deps), 1);
     assert.equal(await editMain(["reel", "drop", FOLDER, "1"], t.ctx.deps), 1);
     assert.equal(await editMain(["finish", FOLDER], t.ctx.deps), 1);
-    assert.equal(await editMain(["free", FOLDER, "library"], t.ctx.deps), 1);
     assert.match(t.said(), /Ask him to update this Mac\./);
     t.done();
   });

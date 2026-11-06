@@ -80,20 +80,6 @@ describe("handing the video off again, while a finish waits for its late check",
     assert.ok(heard.again.said.includes(`${written(heard.due)} Say "hand off the Reels" again then.`), heard.again.text);
     w.t.done();
   });
-  it("is stopped in the words of the Final Cut way for a finish from Final Cut's files", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: { ...EDITED, version: 3, kind: "raw", answer: ANSWERED, reading: READ("raw"), offers: OFFERS } });
-    t.shared(`${PROJECT.main}.mp4`, 2000);
-    t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    t.shared(`${PROJECT["reel 1"]}.mov`, 2000);
-    t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 3000);
-    t.shared(`${PROJECT["reel 2"]}.mov`, 2000);
-    assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
-    const heard = await whileChecking({ t, found }, { again: ["finish", FOLDER, "--yes", "--no-hand-edits", "reel 2"] });
-    assert.equal(heard.again.code, 1, heard.again.text);
-    assert.ok(heard.again.said.includes(`${written(heard.due)} Say finish again then.`), heard.again.text);
-    t.done();
-  });
   it("is stopped in the words it had while the finish still copies", async () => {
     const w = await exported();
     let copying = null;

@@ -93,7 +93,7 @@ export function noteAfter(handoff, note, step, at) {
   return { kind, step, revision: done === null ? handoff.revision : note.revision, at };
 }
 
-/** What follows taking a raw episode, which was edited in Final Cut: freeing the space its folder takes on this Mac. */
+/** What follows taking a raw episode: freeing the space its folder takes on this Mac. */
 const ONLINE_ONLY = ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".';
 
 /** What follows taking a newer revision of an episode whose note is already at the cascade, the last step. The Reels of a video her
@@ -160,12 +160,11 @@ export function opsText(handoff, step, again, note) {
       is, for a raw video whose reading waits (`later`), the time its rough cut should be ready, "" when not known.
       `offersAnswered`, once the spellings card is answered; `v2`, when this Mac hands off version 2; `app`, when this Mac's settings turn
       the app (HyperFrames) on.
-    - For a raw video: `placeholder`, while its name is still to be given; `shownInFinalCut`; `finishRunning` (an iPhone clip's too);
-      and `shownSinceFinish`, when it was shown in Final Cut again since its finish. Both Final Cut facts, and the stages that use
-      them, stay for a raw video on the Final Cut way (`way`) until the retirement's wave 4.
+    - For a raw video: `placeholder`, while its name is still to be given; `editedInFinalCut`, when a part of it was shown in Final Cut
+      once (an episode from the Final Cut days: its record lists a push); and `finishRunning` (an iPhone clip's too).
     - `checking`, for a video whose finish has written its hand-off and shown it and now only waits for its late check (finish-check.js),
       and is otherwise `finishRunning`: { due, took, at }, `due` the time the check is made (ms), `at` the same as this Mac's clock says
-      it ("15:20") and `took` the places the finish took originals from ("Downloads", "From Final Cut"); null for any other. She need not
+      it ("15:20") and `took` the places the finish took originals from ("Downloads"); null for any other. She need not
       wait for the check, so a raw video, an iPhone clip or a finished video is not at its finish running then: the stage is the one it
       is once the finish has ended, for a finished video's Reels exported meanwhile the Reels' (said for after the check, which
       `finish … reels` is stopped until). What Studio is still to do is said in a line edit.js adds of its own (Item `also`).
@@ -178,9 +177,8 @@ export function opsText(handoff, step, again, note) {
       another kind with a mark, as a Dropbox conflict or a hand edit leaves one): it is told how to clear the mark, and nothing of
       HyperFrames or Final Cut (plan PR 10, review I2).
     - For a raw video and an iPhone clip (plan PR 10): `way`, how `finish` goes for it (edit.js finishWay): "hyperframes" (a main project
-      in use), "unopened" (a raw video never pushed to Final Cut, with no main project in use, on a Mac set up for the app, or on any Mac
-      when the record lists a Reel's project), "clip" (an iPhone clip the app
-      has not opened), "final cut" or "finished"; the first two are the HyperFrames way (viaApp). `copy`, while this Mac's run makes
+      in use), "unopened" (a raw video with no main project in use, whether or not it was ever in Final Cut), "clip" (an iPhone clip the
+      app has not opened) or "finished"; a raw video is on the HyperFrames way whichever of the first two it is. `copy`, while this Mac's run makes
       the video for HyperFrames, and null otherwise: { left, usual }, the seconds left as the panel's run says (null when it says none)
       and the seconds it usually takes by the speed this Mac measured (copyIn; null while not known). `project`, the main project in use
       when its folder is here and no hand-off is written yet, and null otherwise: { opened, last, exported }, whether the record says
@@ -331,12 +329,6 @@ function sessionNext(facts, notes, now) {
   return toDo("session-done", 'Every item is decided. Say "done" to write its hand-off.');
 }
 
-/** Whether a video goes the HyperFrames way (plan PR 10): edit.js reads `way` from the record as `finish` does (finishWay). "hyperframes"
-    is a main project in use, and "unopened" a raw video never pushed to Final Cut that has none, on a Mac set up for the app or with a
-    Reel's project (the rule of finishWay). Any other way, or none given, is the Final Cut way of a raw video, whose stages stay until
-    the retirement's wave 4 (the ruling of PR 10). */
-const viaApp = (facts) => facts.way === "hyperframes" || facts.way === "unopened";
-
 /** What is said of a video for HyperFrames that must wait for Dropbox's late check (plan R1a; late-wait.js waitFacts), by its `checkAt`, `readyAt`
     and `inSeconds`, the same in the guide's step and in `app`: when it will be ready, after the check, or only when the check is made while no
     speed of making it is known. */
@@ -355,6 +347,9 @@ function copyStep({ left, usual, wait }) {
   return toDo("making-copy", `The video for HyperFrames is being made${time}.${often} Say "open it in HyperFrames" when it is done.`);
 }
 
+/** The one line her words keep of Final Cut: for an episode edited there before. */
+const FROM_FINAL_CUT = 'It was edited in Final Cut before. Studio doesn\'t use Final Cut now: say "open it in HyperFrames" to edit it there, from the recording.';
+
 /** The next step of a video on the HyperFrames way (plan PR 10): its main project, if one is here, says where it is. Exported, it waits
     for its hand-off; opened and not exported, she edits it, and the time of her last request there is said when the app's history
     has one; made and never opened, or not made yet, she opens it, unless the video for it is still being made. On a Mac whose settings
@@ -368,6 +363,8 @@ function appStep(facts) {
   if (project && project.opened) return toDo("in-app", `Edit it in HyperFrames.${project.last ? ` Your last request there was ${project.last}.` : ""} When you are done, export it on This Mac, as MP4, then say "hand it off".`);
   if (!facts.app) return toDo("app-off", APP_NOT_SET_UP);
   if (!project && facts.copy) return copyStep(facts.copy);
+  // An episode from the Final Cut days: its Final Cut edits are not carried over, and it is made from the recording.
+  if (facts.editedInFinalCut) return toDo("open-app", FROM_FINAL_CUT);
   return toDo("open-app", 'Say "open it in HyperFrames" to edit it there.');
 }
 
@@ -418,8 +415,8 @@ function filmStep({ route, voice, footage = "", joining = false, joinFailed = fa
 }
 
 /** The next step for a finished episode, a raw one or a short video: Claude's reading, the spellings, a raw video's edit and
-    finish, then its hand-off's BRIMM Ops steps. A raw video and an iPhone clip are edited in HyperFrames (appStep), unless a raw video
-    goes the Final Cut way, which keeps its stages. A planned episode is told to film (filmStep) before anything else. */
+    finish, then its hand-off's BRIMM Ops steps. A raw video and an iPhone clip are edited in HyperFrames (appStep). A planned episode
+    is told to film (filmStep) before anything else. */
 function videoNext(facts, notes, now) {
   if (facts.planned) return filmStep(facts.planned);
   const raw = facts.kind === "raw";
@@ -429,7 +426,6 @@ function videoNext(facts, notes, now) {
   // hand-off is ready, and the page's step is hers to do.
   if ((raw || clip) && facts.finishRunning && !facts.checking) return toDo("finish-running", FINISH_RUNNING);
   if (facts.handoff) {
-    if (raw && !viaApp(facts) && facts.shownSinceFinish) return toDo("finish-again", 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".');
     // A finished video's Reels exported from HyperFrames and not in its hand-off (plan PR 16) come ahead of the page's steps. Her note that the video is
     // finished (nextFor) is above them: her word stands. While a finish copies, `finish … reels` refuses another, so the stage is that finish's. Once it
     // only waits for its late check (`checking`) it is no finish at work as far as she is concerned: the stage is the Reels', said for after the check,
@@ -452,15 +448,13 @@ function videoNext(facts, notes, now) {
   if (clip && facts.explainer) return appStep(facts);
   if (raw) {
     if (facts.placeholder) return toDo("name", 'It needs its name before it is finished. Say "call it", then the name.');
-    if (viaApp(facts)) return appStep(facts);
-    if (!facts.shownInFinalCut) return toDo("show", 'Ask for any changes in your own words, then say "show it in Final Cut".');
-    return toDo("finish", 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".');
+    return appStep(facts);
   }
   // An iPhone clip's hand-off is not written by the spellings card: she opens it in HyperFrames and exports it, or hands it off as it is.
   // Once the app has opened its project it is edited there; before, the video for the app is made first, on a Mac set up for the app, while
   // no project is here: a video at work beside a project is not the main video's (a Reel's holds the same lock), as for a raw video (appStep;
   // plan PR 17, the review of PR 10, M3).
-  if (clip) return viaApp(facts) ? appStep(facts) : facts.app && facts.copy && !facts.project ? copyStep(facts.copy) : clipStep(facts);
+  if (clip) return facts.way === "hyperframes" ? appStep(facts) : facts.app && facts.copy && !facts.project ? copyStep(facts.copy) : clipStep(facts);
   if (!facts.v2) return toDo("waits-v2", WAITS_V2);
   return toDo("handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.');
 }

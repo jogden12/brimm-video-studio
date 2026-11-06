@@ -6,8 +6,8 @@
 // by the rule (dropbox.js), and every change to an episode is a new record (episode.js). Long work is started detached and
 // returns at once (detached.js).
 //
-//   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
-//                                         Mac's libraries
+//   node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and the
+//                                         free space on this Mac's disk
 //   node edit.js kind "<video>" finished|raw|clip|session --private yes|no
 //                                         her answer to "what is this video?": claim it, record it, and start Claude's
 //                                         reading (leave "<video>" and which "<video>" are its other two answers)
@@ -24,7 +24,7 @@
 //   node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped
 //   node edit.js name, title, reel drop, push … reel <n>
 //                                         the episode's name, its title, its Reels, and a Reel shown in Final Cut Pro
-//   node edit.js finish "<episode>"       gather what Final Cut Shared and exported, ask what it must, and then, detached,
+//   node edit.js finish "<episode>"       gather what HyperFrames exported, ask what it must, and then, detached,
 //                                         transcribe again, copy into final/ and write the hand-off for BRIMM Ops
 //   node edit.js finish "<episode>" reels the same for the Reels of a video her editor finished: the next revision of the
 //                                         hand-off it has, with the Reels added (finish-reels.js)
@@ -67,21 +67,20 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
-import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
+import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, studioAllowOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
-import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
+import { localMedia, retitle, withImportOptions } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reel-candidates.js";
 import { readStatuses, importState, removeStatus, shownStep } from "./importing.js";
 import { localSource, projectWaits, readingCheckAt, readingWaitsUntil, waitFacts } from "./late-wait.js";
 import { fileId, heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
-import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { HAND_OFF_ASK, REELS_ASK, finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, matchedSession, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
+import { HAND_OFF_ASK, REELS_ASK, finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, matchedSession, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
 import { BRINGING, REEL_KEY, exportAgainWords, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
 import { checkingNow, problemFlagged } from "./finish-check.js";
 import { endedSinceYes, endedWithoutHandoff } from "./finish-ended.js";
@@ -137,8 +136,8 @@ import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
-  node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and this
-                                        Mac's libraries
+  node edit.js episodes                 the episodes, the videos waiting in the drop folders, the imports, and the
+                                        free space on this Mac's disk
   node edit.js guide ["<video>"]        the one next step for each video under way, in her words: a video waiting for her
                                         answer first, then the newest; this Mac's drop folder in Finder's words; and how
                                         many videos from before the switch are not guided. With a video, its next step,
@@ -257,11 +256,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         show a picked Reel in Final Cut Pro, upright; with v<k>, its version k as it was
                                         stored
   node edit.js finish "<episode>" [--yes] [--take "<part>=<file>"] [--final "<part>"]
-                     [--no-hand-edits "<part>"] [--without "reel <n>"] [--as-it-is]
+                     [--without "reel <n>"] [--as-it-is]
                      [--on-screen "<words>"]… [--no-on-screen]
                                         find what HyperFrames exported of each part (in Downloads, or where the export's own
-                                        record says it went), or for a video edited in Final Cut what Final Cut Shared and
-                                        exported, and ask what it must. --final says an export is the final one though the
+                                        record says it went), and ask what it must. --final says an export is the final one though the
                                         project changed after it. With --yes and nothing left to ask, it transcribes the
                                         finished videos again, copies them into final/ and writes the hand-off for BRIMM Ops,
                                         detached. It says when the hand-off will be ready, and returns once the run has begun
@@ -303,8 +301,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         something is at work on the episode, while a video HyperFrames rendered may be kept
                                         nowhere else (the episode is not handed off yet), and when the recording is not in the
                                         episode as the project was made from it: the video could not be made again. It takes
-                                        no flag. Deleting a Final Cut library by command is not built: free "<episode>"
-                                        library says so
+                                        no flag
   node edit.js captions "<episode>" reel <n> on|off
                                         a Reel's running captions, in its caption style; its title on screen stays
   node edit.js spell "<episode>" [add "<as heard>" "<as spelled>" [add …]… | drop "<as heard>" | offers [all | none | <n> <n>…]]
@@ -830,32 +827,6 @@ export function ageText(ms) {
   return `${Math.round(hours / 24)} days`;
 }
 
-/** The size of the files in a folder, at any depth, without following a link: a Final Cut library holds .fcpcache, a link
-    to itself, and links to media kept elsewhere, and neither is counted. */
-function folderSize(folder) {
-  let sum = 0;
-  const walk = (dir) => {
-    let names = [];
-    try {
-      names = readdirSync(dir);
-    } catch (e) {
-      return;
-    }
-    for (const name of names) {
-      let found;
-      try {
-        found = lstatSync(join(dir, name));
-      } catch (e) {
-        continue;
-      }
-      if (found.isDirectory()) walk(join(dir, name));
-      else if (found.isFile()) sum += found.size;
-    }
-  };
-  walk(folder);
-  return sum;
-}
-
 /** A line for each import in Episodes/.importing/, from its status: running, stopped, failed, or with a problem found by its
     late check. Only those whose video `fits`, when it is given: by its label when it has one, and otherwise by its file's
     name, so that words of a file's name never tell which label is its. A video that is held in
@@ -1130,20 +1101,8 @@ export async function episodes(ctx) {
     say("Imports:");
     for (const line of imports) say(line);
   }
-  // This Mac's libraries, and the space left for them. A library of a gated episode is named as its episode is.
+  // The space left on this Mac's disk.
   say("On this Mac:");
-  let work = [];
-  try {
-    work = readdirSync(workFolder(ctx.home)).filter((n) => !n.startsWith(".")).sort();
-  } catch (e) {
-    // There is no BRIMM Video Work yet.
-  }
-  for (const name of work) {
-    const library = join(workFolder(ctx.home), name, `${name}.fcpbundle`);
-    if (!statSync(library, { throwIfNoEntry: false })) continue;
-    const named = listedAs(ctx, episodeAt(ctx, name, links));
-    say(`  ${named === name ? `${name}.fcpbundle` : `The library of ${named}`}: ${sizeText(folderSize(library))}`);
-  }
   try {
     const disk = ctx.statfs(ctx.home);
     say(`  Free on the disk: ${sizeText(Number(disk.bavail) * Number(disk.bsize))}`);
@@ -2321,39 +2280,21 @@ export async function pushReel(ctx, found, n, { noHandEdits = false, handEdits =
   return pushPart(ctx, found, { part: { reel: n }, xml: made.xml, told: made.told, noHandEdits, handEdits, withoutOther });
 }
 
-/** The files of one folder, each {name, bytes, mtimeMs}: none when the folder is not there. An export bundle is a folder,
-    and is as new as the later of its own time and its Info.fcpxml's: saving over a bundle of the same name may leave the
-    folder's time as it was (phase 0, A5). */
-function listing(dir) {
-  try {
-    return readdirSync(dir).map((file) => {
-      const found = statSync(join(dir, file));
-      if (!found.isDirectory()) return { name: file, bytes: found.size, mtimeMs: found.mtimeMs };
-      const info = statSync(join(dir, file, "Info.fcpxml"), { throwIfNoEntry: false });
-      return { name: file, bytes: 1, mtimeMs: Math.max(found.mtimeMs, info ? info.mtimeMs : 0) };
-    });
-  } catch (e) {
-    return [];
-  }
-}
 const capital = (text) => text[0].toUpperCase() + text.slice(1);
 
 /** Which way `finish` goes for a video, by its record (plan PR 7, item 1): "hyperframes" for a raw video that has a main project in
     use, and for an iPhone clip whose main project in use the app has opened, to be finished from the exports the app made of it
     (exports.js); "clip" for any other iPhone clip she answered, which is asked whether to hand it off as it is (finishClip); "finished"
-    for a finished video, which is not edited here; "unopened" for a raw video with no main project in use and no push, on a Mac whose
-    settings turn the app on, or on any Mac when the record lists a project (a Reel's), which has nothing to finish yet and is told so in
-    HyperFrames' words; and "final cut" for the rest, which go as they always went. The Final Cut way stays for the episodes already
-    under way in it, until the retirement's wave 4. */
+    for a finished video, which is not edited here; and "unopened" for a raw video with no main project in use, which has nothing to
+    finish yet and is told so in HyperFrames' words, whether or not it was ever shown in Final Cut: an episode from the Final Cut days
+    is a raw video not yet opened in HyperFrames, and `app` makes its project from the recording. */
 function finishWay(ctx, record) {
   const kind = recordKind(record);
   const projects = (record.app?.projects ?? []).filter((p) => p.state !== PROJECT_KEPT);
   if (kind === "raw" && projects.some(inUse)) return "hyperframes";
   if (isClip(record)) return projects.some((p) => inUse(p) && Array.isArray(p.opened) && p.opened.length > 0) ? "hyperframes" : "clip";
   if (!hasFinalCut(record)) return "finished";
-  // A Reel project (plan PR 5) can be made before the main video is opened: the main video still has nothing to finish.
-  if (kind === "raw" && !partsOf(record)[0].pushes.length && (appOf(ctx.settings) || projects.length > 0)) return "unopened";
-  return "final cut";
+  return "unopened";
 }
 
 /** The Reels of the record that `app … reel N` made a project for (plan PR 5): { reel: n } for each Reel project not kept for an earlier
@@ -2450,14 +2391,14 @@ export async function finishEpisode(ctx, found, answers = {}) {
     if (got.why) return refuse(ctx, got.why);
     based = got;
   }
-  // A finished video is not edited in Final Cut: its hand-off is written from its spellings (saveSpellings), as version 2, which a
+  // A finished video is not edited here: its hand-off is written from its spellings (saveSpellings), as version 2, which a
   // version 1 hand-off could not hold. An iPhone clip she answered is edited in HyperFrames, if at all: not opened there, it is asked
-  // about once (finishClip). Said at once too, before any part is looked for or transcribed, and with no folder named.
+  // about once (finishClip). A raw video not opened there is told to open it. Said at once too, before any part is looked for or
+  // transcribed, and with no folder named.
   const way = forReels ? "reels" : finishWay(ctx, record);
   if (way === "finished") return refuse(ctx, notInFinalCut(ctx, found, record));
   if (way === "clip") return finishClip(ctx, found, answers);
   if (way === "unopened") return refuse(ctx, NEVER_OPENED);
-  const app = way === "hyperframes" || way === "reels";
   // Where its hand-off goes (finish.js handoffTarget, which every hand-off writer asks), and why it cannot be written, if it
   // cannot: under version 2, a gap in the chain of its versions, or a version of it, earlier or later, that is a session not
   // cleared. That is refused at once too, as the detached part refuses it before anything is copied, and before any claim.
@@ -2478,74 +2419,36 @@ export async function finishEpisode(ctx, found, answers = {}) {
   const problems = filesProblems(found.folder, record);
   if (problems.length) stops.push(`${calledAs(ctx, found)} is not whole in Dropbox: ${problems.join(" ")}`);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
-  // What she says to hand it off, in the words of the way it goes: the Reels', HyperFrames' or Final Cut's.
-  const sayIt = forReels ? '"hand off the Reels"' : app ? '"hand it off"' : "finish";
+  // What she says to hand it off, in the words of the way it goes: the Reels' or HyperFrames'.
+  const sayIt = forReels ? '"hand off the Reels"' : '"hand it off"';
   if (running) stops.push(stoppedWords(ctx, found, record, { generic: `${running} is running for this episode. Say "how far is it?"`, again: `Say ${sayIt} again then.` }));
-  const noHandEdits = answers.noHandEdits || [];
   // A finished Reel's title is the words in its picture, which BRIMM Ops is told: one that has none is asked for, never made up.
-  const plan = (() => {
-    try {
-      return JSON.parse(readFileSync(join(found.folder, `${basename(record.video.file, extname(record.video.file))}.cut-plan.json`), "utf8"));
-    } catch (e) {
-      return null;
-    }
-  })();
-  let looked;
   /** What is said of each part, and then of what was passed over, before the stops and the asks. */
   const lines = [];
-  if (app) {
-    // HyperFrames' exports, in Downloads (exports.js), for the projects of the record.
-    const seen = exportsFound({ home: ctx.home, name: found.name, folder: found.folder, record, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
-    if (seen.unreadable) return refuse(ctx, DOWNLOADS_UNREADABLE);
-    // A finished video has no main project, so no part is made for the main video and nothing asks for one.
-    looked = lookForExports(forReels ? { ...seen.input, parts: seen.input.parts.filter((part) => part.reel) } : seen.input, answers);
-    // A Reel number another version of the video gave under the same id is never given again: said now, before any export is waited for,
-    // in the words the detached part says it in (numbersTakenWords), of the hand-off as it would then be.
-    if (forReels) {
-      const again = numbersTakenWords(record, nextHandoff({ onFile: based.onFile, reels: looked.parts.filter((part) => !part.kept).map((part) => ({ n: part.reel })) }), target.taken);
-      if (again) return refuse(ctx, again);
-    }
-    lines.push(...looked.parts.map((part) => part.line), ...looked.mentions);
-    // A Reel picked that has no project cannot be exported from the app: it is left out, and said.
-    const projects = record.app?.projects ?? [];
-    for (const reel of (record.reels || []).filter((r) => r.status === "picked" && !projects.some((p) => p.key === `reel ${r.n}` && p.state !== PROJECT_KEPT))) {
-      lines.push(`Reel ${reel.n} is picked but has no HyperFrames project, so it is left out. Say "make Reel ${reel.n}" to make one.`);
-    }
-  } else {
-    const here = fromFinalCutFolder(ctx.home);
-    mkdirSync(here, { recursive: true });
-    const released = join(found.folder, "edit", "from-final-cut");
-    // A Reel that `app … reel N` made a project for is finished from that project's export, wherever the main video was edited: it
-    // is not asked for as a Reel picked with no Share (plan PR 5 marks it picked).
-    const inApp = new Set(reelProjectsOf(record).map((p) => p.reel));
-    looked = lookFor(partsOf(record).filter((part) => !(part.reel && inApp.has(part.reel))), { fromFinalCut: { dir: here, files: listing(here) }, released: { dir: released, files: listing(released) }, finished: record.finished }, answers);
-    // A part whose Share is of a version shown before the session asked for more would finish without it: it is shown again
-    // first. A version pushed before pushes kept what was asked for cannot be told, and is taken as it is.
-    for (const part of looked.parts.filter((p) => p.video)) {
-      const timeline = part.reel ? { reel: part.reel } : "main";
-      const target = part.reel ? (record.reels || []).find((r) => r.n === part.reel) : record.main;
-      const shown = ((target && target.pushed) || []).find((p) => p.project === part.video.name.replace(/\.[^.]*$/, ""));
-      if (shown && shown.asked && shown.asked !== askedOf(record, timeline)) looked.asks.push(`${capital(part.label)} has changes asked for since v${shown.v} was shown in Final Cut: say "show it in Final Cut", Share it again, and then finish.`);
-    }
-    for (const part of looked.parts) {
-      if (part.kept) lines.push(`${capital(part.label)}: kept as the last finish made it.`);
-      else lines.push(`${capital(part.label)}: ${part.video.name}, from ${part.video.where}${part.export ? `, with its export ${part.export.name}` : noHandEdits.includes(part.key) ? ", with no hand edits" : ""}.`);
-    }
-    if (inApp.size) {
-      const seen = exportsFound({ home: ctx.home, name: found.name, folder: found.folder, record, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
-      if (seen.unreadable) return refuse(ctx, DOWNLOADS_UNREADABLE);
-      const reels = lookForExports(seen.input, answers, { rest: false });
-      looked = { parts: [...looked.parts, ...reels.parts], asks: [...looked.asks, ...reels.asks], stops: [...looked.stops, ...reels.stops], looked: looked.looked };
-      lines.push(...reels.parts.map((part) => part.line), ...reels.mentions);
-    }
+  // HyperFrames' exports, in Downloads (exports.js), for the projects of the record.
+  const seen = exportsFound({ home: ctx.home, name: found.name, record, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
+  if (seen.unreadable) return refuse(ctx, DOWNLOADS_UNREADABLE);
+  // A finished video has no main project, so no part is made for the main video and nothing asks for one.
+  const looked = lookForExports(forReels ? { ...seen.input, parts: seen.input.parts.filter((part) => part.reel) } : seen.input, answers);
+  // A Reel number another version of the video gave under the same id is never given again: said now, before any export is waited for,
+  // in the words the detached part says it in (numbersTakenWords), of the hand-off as it would then be.
+  if (forReels) {
+    const again = numbersTakenWords(record, nextHandoff({ onFile: based.onFile, reels: looked.parts.filter((part) => !part.kept).map((part) => ({ n: part.reel })) }), target.taken);
+    if (again) return refuse(ctx, again);
+  }
+  lines.push(...looked.parts.map((part) => part.line), ...looked.mentions);
+  // A Reel picked that has no project cannot be exported from the app: it is left out, and said.
+  const projects = record.app?.projects ?? [];
+  for (const reel of (record.reels || []).filter((r) => r.status === "picked" && !projects.some((p) => p.key === `reel ${r.n}` && p.state !== PROJECT_KEPT))) {
+    lines.push(`Reel ${reel.n} is picked but has no HyperFrames project, so it is left out. Say "make Reel ${reel.n}" to make one.`);
   }
   // The words on the main video's picture (plan PR 8; architecture 8.5): those the project holds, read for her to confirm with her yes, or the
-  // ones she gives; with none found, she is asked. A main video kept as the last finish made it is not asked, and Final Cut's has its own.
+  // ones she gives; with none found, she is asked. A main video kept as the last finish made it is not asked.
   let onPicture = null;
   // Whether this call showed her the words found for her to say they are right: her yes is to the words she was shown, so this call starts nothing.
   let showing = false;
   const work = episodeWork(ctx.home, found.name);
-  const main = app ? looked.parts.find((p) => p.key === "main") : undefined;
+  const main = looked.parts.find((p) => p.key === "main");
   if (main && v2) {
     const read = main.video ? projectWordsIn(work, main.project) : { here: true, words: [] };
     const said = mainWordsSaid({ found: read.words, here: read.here, incomplete: read.incomplete, given: answers.onScreen, none: answers.noOnScreen, yes: answers.yes, taking: Boolean(main.video), shown: sameLines(shownWords(work), read.words.map((word) => word.text)) });
@@ -2563,15 +2466,13 @@ export async function finishEpisode(ctx, found, answers = {}) {
     const reel = (record.reels || []).find((r) => r.n === part.reel);
     if (reel && String(reel.title || "").trim()) continue;
     // A Reel project must have its Reel in the record, whose title and numbers the hand-off takes; one finished another way is kept as it is.
-    // Whether a Reel is HyperFrames' is the part's to say (it has a project), also in an episode whose main video went the Final Cut way.
-    const mine = app || Boolean(part.project);
-    if (mine && !reel) {
+    if (!reel) {
       if (part.project) stops.push(`The record has no Reel ${part.reel} for its HyperFrames project: ask Jason.`);
       continue;
     }
-    const opening = mine ? suggestionOpening(found.folder, part.fromSuggestion) : expectedWords(part, record, plan);
+    const opening = suggestionOpening(found.folder, part.fromSuggestion);
     // What the Reel's picture holds is a proposal for its title, which she confirms as she gives any title (plan PR 8).
-    looked.asks.push(reelTitleAsk({ n: part.reel, found: mine && part.project ? projectWordsIn(work, part.project).words : [], opening }));
+    looked.asks.push(reelTitleAsk({ n: part.reel, found: part.project ? projectWordsIn(work, part.project).words : [], opening }));
   }
   for (const line of [...lines, ...looked.stops, ...stops, ...looked.asks]) ctx.say(line);
   // An explainer in a HeyGen voice (PR H6) is told what YouTube asks of it, ending what the finish found.
@@ -2584,7 +2485,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // may take an export).
   if (forReels && !looked.asks.length && !looked.parts.some((part) => !part.kept)) return refuse(ctx, nothingNewWords(shownName(record), based.base.revision, retitledReels(based.onFile.reels, record.reels)));
   if (looked.asks.length || !answers.yes || showing) {
-    if (!looked.asks.length) ctx.say(forReels ? `Hand-off question: ${REELS_ASK}` : app ? `Hand-off question: ${HAND_OFF_ASK}` : 'Say "yes, finish it" to start.');
+    if (!looked.asks.length) ctx.say(`Hand-off question: ${forReels ? REELS_ASK : HAND_OFF_ASK}`);
     return 0;
   }
   // The finish holds the episode while it runs: an episode nobody has open is claimed for this Mac first, so the other Mac's
@@ -2596,19 +2497,16 @@ export async function finishEpisode(ctx, found, answers = {}) {
     if (!again.record) return refuse(ctx, notRead(ctx, { ...found, read: again }));
     rev = again.record.rev;
   }
-  // What finish was told, for the detached part. A part from HyperFrames says its project, the suggestion it was made from and the words
-  // it is expected to start with; its video is the export, with no export of the edit to go with it.
-  const askedPart = (p) => {
-    const mine = app || Boolean(p.project);
-    return {
-      key: p.key, label: p.label, ...(p.reel ? { reel: p.reel } : {}), projects: p.projects,
-      ...(mine ? { project: p.project, fromSuggestion: p.fromSuggestion ?? null, expected: p.reel && !p.kept ? suggestionOpening(found.folder, p.fromSuggestion) : "" } : {}),
-      ...(p.key === "main" && onPicture !== null ? { onPicture } : {}),
-      video: mine && p.video ? { name: p.video.name, dir: p.video.dir, where: p.video.where, bytes: p.video.bytes, mtimeMs: p.video.mtimeMs } : p.video,
-      export: p.export, kept: p.kept, noHandEdits: mine ? false : noHandEdits.includes(p.key)
-    };
-  };
-  const asked = { version: 1, ...(app ? { source: "hyperframes" } : {}), ...(forReels ? { base: based.base } : {}), at: localStamp(new Date(ctx.now())), rev, ...(rev !== record.rev ? { claimed: true } : {}), parts: looked.parts.map(askedPart) };
+  // What finish was told, for the detached part. A part says its project, the suggestion it was made from and the words it is expected to
+  // start with; its video is the export, with no export of the edit to go with it.
+  const askedPart = (p) => ({
+    key: p.key, label: p.label, ...(p.reel ? { reel: p.reel } : {}), projects: p.projects,
+    project: p.project, fromSuggestion: p.fromSuggestion ?? null, expected: p.reel && !p.kept ? suggestionOpening(found.folder, p.fromSuggestion) : "",
+    ...(p.key === "main" && onPicture !== null ? { onPicture } : {}),
+    video: p.video ? { name: p.video.name, dir: p.video.dir, where: p.video.where, bytes: p.video.bytes, mtimeMs: p.video.mtimeMs } : p.video,
+    export: p.export, kept: p.kept, noHandEdits: false
+  });
+  const asked = { version: 1, source: "hyperframes", ...(forReels ? { base: based.base } : {}), at: localStamp(new Date(ctx.now())), rev, ...(rev !== record.rev ? { claimed: true } : {}), parts: looked.parts.map(askedPart) };
   mkdirSync(work, { recursive: true });
   writeFileSync(join(work, "finish.asked.json"), JSON.stringify(asked, null, 2) + "\n");
   // A finish that has started has used what it was shown: the next finish shows its words again.
@@ -2654,10 +2552,10 @@ async function runStarted(ctx, found) {
 }
 
 /** `finish "<episode>" [--yes] [--take "<part>=<file>"]… [--final "<part>"]…
-    [--no-hand-edits "<part>"]… [--without "reel <n>"]… [--as-it-is]`, and the
+    [--without "reel <n>"]… [--as-it-is]`, and the
     detached part it starts, `finish --now "<episode folder>"`, which runs finishNow holding the episode's lock. */
 async function finish(ctx, rest) {
-  const { words, flags } = flagsOf(rest, ["take", "no-hand-edits", "without", "final", "on-screen"]);
+  const { words, flags } = flagsOf(rest, ["take", "without", "final", "on-screen"]);
   if (flags.now) {
     const found = findEpisode(ctx, words.join(" "));
     if (!found.read || !found.read.record) {
@@ -2693,51 +2591,7 @@ async function finish(ctx, rest) {
   // A session's finish is its own: the hand-off of what she approved of its teachings. It has no Reels to hand off this way.
   if (taughtSession(got.record)) return reels ? refuse(ctx, cannotFinish(got.record)) : finishSessionCommand(ctx, { ...got.found, record: got.record });
   const take = Object.fromEntries((flags.take || []).map((given) => [given.slice(0, given.indexOf("=")).trim(), given.slice(given.indexOf("=") + 1).trim()]).filter(([part]) => part));
-  return finishEpisode(ctx, { ...got.found, record: got.record }, { yes: Boolean(flags.yes), take, noHandEdits: flags["no-hand-edits"] || [], without: flags.without || [], final: flags.final || [], asItIs: Boolean(flags["as-it-is"]), onScreen: flags["on-screen"] || [], noOnScreen: Boolean(flags["no-on-screen"]), reels: Boolean(reels) });
-}
-
-/** Is a program running on this Mac, by its name, as pgrep finds it? */
-const programRunning = async (name) => spawnSync("/usr/bin/pgrep", ["-x", name], { stdio: "ignore" }).status === 0;
-/** The size of a library, as a person reads it. */
-const librarySize = (folder) => sizeText(folderSize(folder));
-
-/** Delete an episode's Final Cut library on this Mac, to free space (spec section 5, step 9). Only when the episode is
-    finished; each part's edit is kept in an export copied into final/, or the part had no hand edits; every medium those
-    exports name is inside the episode's folder; and Final Cut Pro is not running. Without `yes` it says what it would delete
-    and how large it is. It deletes only inside this Mac's work folder for the episode. Render files alone are freed in
-    Final Cut, with File > Delete Generated Library Files. */
-export async function freeLibrary(ctx, found, { yes = false } = {}) {
-  const { record } = found;
-  const { finished } = record;
-  if (!finished) return refuse(ctx, "It is not finished yet, so its library holds work kept nowhere else.");
-  const work = resolve(episodeWork(ctx.home, found.name));
-  const library = resolve(libraryFor(ctx.home, found.name));
-  if (!library.startsWith(`${work}/`) || !work.startsWith(`${resolve(workFolder(ctx.home))}/`)) return refuse(ctx, "Its library is not in this Mac's work folder for the episode, so it is left alone.");
-  const unkept = unkeptParts(record, ctx.machine);
-  if (unkept.length) return refuse(ctx, `The hand work of ${listed(unkept)} is kept only in the library: finish it with its export, or say it had no hand edits, first.`);
-  for (const [key, p] of Object.entries(finished.parts || {}).filter(([, part]) => part.export)) {
-    const at = join(found.folder, p.export);
-    const xml = existsSync(join(at, "Info.fcpxml")) ? join(at, "Info.fcpxml") : at;
-    let media = [];
-    try {
-      media = mediaIn(readFileSync(xml, "utf8"), xml);
-    } catch (e) {
-      return refuse(ctx, `The export of ${key}, ${p.export}, cannot be read, so its library is kept.`);
-    }
-    const outside = media.filter((path) => !path.normalize("NFC").includes(`/Episodes/${found.name}/`.normalize("NFC")));
-    if (outside.length) return refuse(ctx, `The export of ${key} uses media outside the episode folder (${outside[0]}). Copy it into media/ first.`);
-  }
-  if (await (ctx.deps.running || programRunning)("Final Cut Pro")) return refuse(ctx, "Quit Final Cut Pro first.");
-  if (!existsSync(library)) return refuse(ctx, "There is no library of it on this Mac.");
-  const size = librarySize(library);
-  if (!yes) {
-    ctx.say(`This deletes ${library}, ${size}. Its edits are kept in final/. Say yes to delete it.`);
-    return 0;
-  }
-  rmSync(library, { recursive: true, force: true });
-  // The record stops naming a library on this Mac, so the next push makes a new one and names it there.
-  const { [ctx.machine]: gone, ...libraries } = record.libraries || {};
-  return save(ctx, found, { ...record, libraries }, `Deleted its Final Cut library on this Mac, ${size}.`);
+  return finishEpisode(ctx, { ...got.found, record: got.record }, { yes: Boolean(flags.yes), take, without: flags.without || [], final: flags.final || [], asItIs: Boolean(flags["as-it-is"]), onScreen: flags["on-screen"] || [], noOnScreen: Boolean(flags["no-on-screen"]), reels: Boolean(reels) });
 }
 
 /** The newest push of each part of an episode, by its key ("main", "reel 2"): { key, label, last }, where `last` is the push
@@ -3487,16 +3341,11 @@ async function resolveIn(ctx, found, keep) {
   return step ? 1 : 0;
 }
 
-/** What `free "<episode>" library` says: held back from this version (the lead's ruling, 2026-10-14). Deleting a Final Cut library by
-    command needs the record of every version handed to Final Cut on this Mac, which phase 5 was to bring. freeLibrary and
-    unkeptParts stay, with their tests, unreachable, until the Final Cut half is retired with parts.js (architecture 10, wave 4). */
-const LIBRARY_HELD_BACK = "Deleting an episode's Final Cut library by command comes in a later version. To free space now, use Final Cut's File > Delete Generated Library Files.";
-
 /** `free "<episode>"`: take away an episode's working copy and the renders of its HyperFrames projects from this Mac, to give the room
     back (free.js; plan PR 15; architecture 6.1 and 7.4). The project, with everything done in it, stays, and `app` makes the video
     again. In order:
-    - the old spelling, `free "<episode>" library` (with or without `--yes`), is a Final Cut library, which is still held back: it
-      says so (LIBRARY_HELD_BACK) and takes nothing. It names no episode in what it says, so the gate does not ask;
+    - the old spelling, `free "<episode>" library` (with or without `--yes`), is no command now: it says the help and ends with 2,
+      and takes nothing. It names no episode in what it says, so the gate does not ask;
     - it takes no flag, and with no words it says the help and ends with 2. A flag nobody built (`--dry-run`) is not taken for one
       that is, since this command deletes files;
     - the gate, as for every command that names an episode (episodeFor): `free` is in no gate list (architecture 6.2), so a video not
@@ -3506,8 +3355,7 @@ const LIBRARY_HELD_BACK = "Deleting an episode's Final Cut library by command co
       `ctx.deps.running` is how a test says whether HyperFrames is running; it asks pgrep otherwise. */
 async function free(ctx, rest) {
   const { words, flags } = flagsOf(rest, []);
-  if (words.length >= 2 && words[words.length - 1] === "library") return refuse(ctx, LIBRARY_HELD_BACK);
-  if (Object.keys(flags).length) {
+  if ((words.length >= 2 && words[words.length - 1] === "library") || Object.keys(flags).length) {
     ctx.say(HELP);
     return 2;
   }
@@ -4259,14 +4107,14 @@ const HANDOFF_WAITS = "The hand-off is written once this Mac hands off version 2
 /** What `finish` says of a video whose hand-off is written from its spellings (a finished video, an iPhone clip she answered) on a
     Mac that hands off version 1. */
 const handoffFromSpellingsWaits = (name) => `${name}'s hand-off is written from its spellings once this Mac hands off version 2: ask Jason.`;
-/** What `finish` says of a video that has no Final Cut (hasFinalCut), `found` with its `record`: on a Mac that hands off version 1,
+/** What `finish` says of a video that is not edited here (a finished video, or an iPhone clip she answered: not hasFinalCut), `found` with its `record`: on a Mac that hands off version 1,
     that its hand-off waits for version 2; once it is written, its revision; otherwise that it comes from the spellings card. */
 function notInFinalCut(ctx, found, record) {
   const name = shownName(record);
   if (!writesV2For(ctx.settings, found.folder, record)) return handoffFromSpellingsWaits(name);
   // A finished video whose Reels were made in HyperFrames is told where they go (plan PR 9): `finish … reels` adds them to this hand-off.
   if (record.finished && Number.isInteger(record.finished.revision)) return `${name}'s hand-off is written already, as revision ${record.finished.revision}: a spelling changed writes its next revision.${recordKind(record) === "finished" && reelProjectsOf(record).length ? ' Its Reels are added after you export them from HyperFrames: say "hand off the Reels".' : ""}`;
-  return `${name} is not edited in Final Cut: its hand-off is written once its spellings are answered. Say "show me the spellings".`;
+  return `${name} is not edited here: its hand-off is written once its spellings are answered. Say "show me the spellings".`;
 }
 const handoffWritten = (revision, shown = true) => (shown ? `The hand-off is written as revision ${revision} and shown in Finder: drop it on the BRIMM Ops page.` : `The hand-off is written as revision ${revision}.`);
 /** A finished video has no Final Cut, and nothing of it is shown there; nor has an iPhone clip of the switch, a record that holds
@@ -6840,7 +6688,6 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
   const away = heldElsewhere(r, ctx.machine);
   const v2 = writesV2For(ctx.settings, e.folder, r);
   const running = runningCommand(ctx.home, e.name, ctx.alive);
-  const pushed = r.main.pushed;
   const handoff = guideHandoff(ctx, e, r, links, v2);
   // The way `finish` goes for a raw video and an iPhone clip (plan PR 10), so that the guide never sends one where `finish` will not take
   // it: its Final Cut stages are for the Final Cut way alone. What the HyperFrames way reads of the disk (the video being made, the
@@ -6885,12 +6732,11 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
     app: Boolean(appOf(ctx.settings)),
     placeholder: r.name.placeholder === true,
     explainer: isFromPlan(r) && r.planned.route === "explainer",
-    shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
+    editedInFinalCut: kind === "raw" && everShownInFinalCut(r),
     finishRunning: running === "finish",
     checking,
     lateProblem,
     finishFailed,
-    shownSinceFinish: Boolean(r.finished) && pushed.some((p) => p.how !== "render" && Date.parse(p.at) > Date.parse(r.finished.at)),
     gated: kind !== "session" && sessionNotCleared(r),
     way,
     copy: way ? guideCopy(ctx, e, r, rates) : null,
@@ -6977,10 +6823,10 @@ function guideDrops(ctx) {
 }
 
 /** What Studio does at the late check of a finish, as one sentence: when it checks Dropbox's copies (`due`, ms, as this Mac's clock
-    shows it) and then takes away the originals it took, from the places it took them (`took`: Downloads, From Final Cut). A finish that
+    shows it) and then takes away the originals it took, from the place it took them (`took`: Downloads). A finish that
     took none says only when it checks. */
 function checkSentence({ due, took }) {
-  const out = took.map((place) => (place === "Downloads" ? "the export out of Downloads" : "what it took out of From Final Cut"));
+  const out = took.map(() => "the export out of Downloads");
   return `Studio checks Dropbox's copies at ${clockAt(due)}${out.length ? `, and then takes ${listed(out)}` : ""}.`;
 }
 

@@ -305,17 +305,6 @@ describe("B5. when it is not asked", () => {
     assert.doesNotMatch(w.t.said(), /On screen|picture/);
     w.t.done();
   });
-  it("says nothing of words, and takes none, for a main video that went the Final Cut way beside a Reel from HyperFrames", async () => {
-    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
-    const w = world({ projects: ["reel 2"], over: { main: { ...EDITED.main, pushed: pushes } } });
-    w.t.shared(`${PROJECT.main}.mp4`, 2000);
-    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    exportOf(w, "reel 2");
-    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true, onScreen: ["Ignored"] }), 0, w.t.said());
-    assert.doesNotMatch(w.t.said(), /On screen|picture/);
-    assert.deepEqual(w.asked().parts.map((p) => [p.key, p.onPicture]), [["main", undefined], ["reel 2", undefined]]);
-    w.t.done();
-  });
   it("says nothing of words, and takes none, on a Mac that hands off version 1, which has no words on the picture", async () => {
     const w = ready({ handoffVersion: 1, over: { title: { text: "Price like you mean it", from: "person", approved: true } } });
     assert.equal(await finishEpisode(w.t.ctx, w.found, { onScreen: ["Ignored"] }), 0);

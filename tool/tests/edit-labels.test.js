@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { COMMAND_NAMES, contextFor, editMain, findEpisode } from "../edit.js";
 import { newEpisode, readEpisode, recordFile, recordText, shownName } from "../episode.js";
-import { episodeWork, fromFinalCutFolder, workFolder, writeSettings } from "../settings.js";
+import { episodeWork, workFolder, writeSettings } from "../settings.js";
 import { readStatuses, writeStatus } from "../importing.js";
 import { readResult, resultFile, runDetached } from "../detached.js";
 import { sessionLabel, withoutNames } from "../kinds.js";
@@ -22,7 +22,7 @@ import { cardOf as cardFor } from "../receipts.js";
 import { uneditedFolder, uneditedFolders } from "../unedited.js";
 import { noProgress } from "../progress.js";
 import { probed, TOLD, SRT, PAUSES } from "./fixtures.js";
-import { setup, episodeFor, FOLDER, NAME } from "./episodes.js";
+import { setup, episodeFor, fromFinalCutFolder, FOLDER, NAME } from "./episodes.js";
 import { episode } from "./phase4.js";
 
 /** Run a command of edit.js by its deps: { code, said }, with each line it said. */
@@ -560,7 +560,7 @@ describe("episodes, on a Mac that does the light import", () => {
     assert.ok(said.includes(`  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as ${LABEL} (a1b2c3). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`), said.join("\n"));
     t.done();
   });
-  it("names this Mac's library of a gated episode by its label, an answered one's as today, and one of no episode here by its day and Mac", async () => {
+  it("lists no library on this Mac, whatever episode a .fcpbundle in its work folder would belong to, so no label or name of an episode is said there", async () => {
     const t = setup();
     writeSettings(t.home, { import: "light" });
     clientEpisode(t, { over: SESSION_OVER });
@@ -568,7 +568,9 @@ describe("episodes, on a Mac that does the light import", () => {
     for (const folder of [LIGHT_FOLDER, "2026-10-18 Pricing talk (Mac Studio)", "2026-10-17 Call with Joe Bloggs (Mac Studio)"]) library(t, folder);
     const said = await listing(t);
     const at = said.indexOf("On this Mac:");
-    assert.deepEqual(said.slice(at, at + 4), ["On this Mac:", "  The library of an episode of 2026-10-17 from the Mac Studio whose record cannot be read: 9 bytes", "  2026-10-18 Pricing talk (Mac Studio).fcpbundle: 9 bytes", `  The library of ${SESSION} (a1b2c3): 9 bytes`]);
+    assert.equal(said[at], "On this Mac:");
+    assert.match(said[at + 1], /^  Free on the disk: /);
+    assert.doesNotMatch(said.slice(at).join("\n"), /fcpbundle|library/i);
     t.done();
   });
 });
@@ -1307,7 +1309,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     const episodes = seen["waiting for its answer: episodes"];
     assert.ok(episodes.includes(`  ${LABEL}: a video waiting for your answer, of 2:00, id ${short}`), episodes.join("\n"));
     assert.ok(episodes.includes(`  ${NAME}: an episode of 0:23, in ${FOLDER}, id 3fa9c1`), episodes.join("\n"));
-    assert.ok(episodes.includes(`  The library of ${LABEL} (${short}): 9 bytes`), episodes.join("\n"));
+    assert.ok(!episodes.some((line) => /library|fcpbundle/i.test(line)), episodes.join("\n"));
     assert.ok(!seen["waiting for its answer: open 2026"].some((line) => line.includes(LABEL)), seen["waiting for its answer: open 2026"].join("\n"));
     assert.deepEqual(seen["waiting for its answer: open nothing fits this"], [`No episode fits "nothing fits this". The episodes are: ${LABEL} (${short}), ${TARGET_LABEL} (0e0e0e) and ${FOLDER}.`]);
     // Her card's facts are printed with the video's line, and the match, not answered, is not offered; it is listed by its label.
@@ -1454,13 +1456,6 @@ describe("an error that leaves a command for a gated video (fix 2)", () => {
     assert.doesNotMatch(r.said.join("\n"), SECRET);
     t.done();
   });
-  it("leaves a command for an episode of today exactly as today: thrown", async () => {
-    // A record of the switch's layout says only the work stopped, as a gated one does (final fix 20).
-    const t = setup();
-    episodeFor(t);
-    await refusing("mkdirSync", workFolder(t.home), () => assert.rejects(on(t.ctx.deps, "finish", FOLDER), (err) => err.code === "EACCES" && err.message.includes("From Final Cut")));
-    t.done();
-  });
   it("ends a detached run that cannot make its folder in BRIMM Video Work with no name of the video, and no rejection", async () => {
     for (const argv of [["bring", "--now", LABEL], ["bring", "--now", LIGHT_FOLDER], ["ask", "--now", LIGHT_FOLDER]]) {
       const t = setup();
@@ -1516,6 +1511,7 @@ describe("the names a gated video had before (fix 3)", () => {
     const raw = { ...base, rev: 1, name: { text: "Jane Doe: her pricing", placeholder: false }, main: { ...base.main, pushed: [{ v: 1, at: AT, on: "Mac Studio", file: "edit/main.v1.mac-studio.fcpxml", project, asked: null }] } };
     writeFileSync(recordFile(folder, 1), recordText(raw));
     writeFileSync(recordFile(folder, 2), recordText({ ...raw, ...SESSION_OVER, rev: 2 }));
+    mkdirSync(fromFinalCutFolder(t.home), { recursive: true });
     for (const name of [`${project}.mov`, `${project} 2.mov`]) writeFileSync(join(fromFinalCutFolder(t.home), name), "a finished video");
     for (const argv of [["finish", SESSION], ["show", SESSION, "transcript"], ["resolve", SESSION]]) {
       const r = await on(t.ctx.deps, ...argv);

@@ -34,8 +34,9 @@ describe("the marker of a finish that waits for its late check", () => {
     const t = setup();
     mark(t, { took: ["From Final Cut", "Downloads"] });
     assert.equal(join(t.work, CHECKING_FILE), join(t.home, "BRIMM Video Work", FOLDER, "finish.checking.json"));
-    assert.deepEqual(JSON.parse(readFileSync(join(t.work, CHECKING_FILE), "utf8")), { version: 1, nonce: t.nonce, revision: 2, due: DUE, took: ["Downloads", "From Final Cut"] });
-    assert.deepEqual(PLACES, ["Downloads", "From Final Cut"]);
+    // The one place originals are taken from is Downloads, where the app's exports are: a place of the Final Cut days is none now.
+    assert.deepEqual(JSON.parse(readFileSync(join(t.work, CHECKING_FILE), "utf8")), { version: 1, nonce: t.nonce, revision: 2, due: DUE, took: ["Downloads"] });
+    assert.deepEqual(PLACES, ["Downloads"]);
     assert.deepEqual(readdirSync(t.work).filter((name) => name.endsWith(".writing")), [], "written whole, under a name of its own, then renamed");
     t.done();
   });
@@ -49,8 +50,8 @@ describe("the marker of a finish that waits for its late check", () => {
   });
   it("counts while a live finish run holds the episode's lock under its nonce and the record in force holds the revision it names", () => {
     const t = setup();
-    mark(t, { took: ["Downloads", "From Final Cut"] });
-    assert.deepEqual(believed(t), { revision: 2, due: DUE, took: ["Downloads", "From Final Cut"] });
+    mark(t, { took: ["Downloads"] });
+    assert.deepEqual(believed(t), { revision: 2, due: DUE, took: ["Downloads"] });
     t.done();
   });
   it("is none when there is no marker", () => {

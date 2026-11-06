@@ -87,23 +87,6 @@ describe("the timeline a command names", () => {
   });
 });
 
-describe("finish, once the session has asked for more since a part was shown", () => {
-  it("asks for the part to be shown and Shared again, and starts nothing", async () => {
-    const { t, found } = episode({ title: { text: "Price it right", from: "person", approved: true } }, {}, episodeFiles({ picked: false }));
-    assert.equal((await on(t.ctx.deps, "push", FOLDER)).code, 0);
-    const { project } = reread(found).main.pushed[0];
-    t.shared(`${project}.mp4`, 2000);
-    t.shared(`${project}.fcpxmld`, 3000);
-    const again = /The main video has changes asked for since v1 was shown in Final Cut/;
-    assert.doesNotMatch((await on(t.ctx.deps, "finish", FOLDER)).text, again);
-    assert.equal((await on(t.ctx.deps, "text", FOLDER, "add", "lower-third", "--at", "0:01", "--line", "Sallie Ogden", "--no-hand-edits")).code, 0);
-    const r = await on(t.ctx.deps, "finish", FOLDER, "--yes");
-    assert.match(r.text, /\nThe main video has changes asked for since v1 was shown in Final Cut: say "show it in Final Cut", Share it again, and then finish\./);
-    assert.deepEqual(t.started, []);
-    t.done();
-  });
-});
-
 describe("words she quotes, once the episode spells them", () => {
   it("are found as the captions she watches spell them, a spelling of several words included", async () => {
     const { t, found } = episode();

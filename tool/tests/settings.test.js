@@ -12,7 +12,7 @@ import { studioFolder, studioFiles, openSettingsOf, workshopFolder, ALLOW_DEFAUL
 import { claudeDirName, realOf } from "../places.js";
 import { chatHeld } from "../held.js";
 import { heldFolder } from "../scan.js";
-import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, appOf, appHandoverOn, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf, effectiveLock, factsOf } from "../settings.js";
+import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, appOf, appHandoverOn, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf, effectiveLock, factsOf } from "../settings.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
 
@@ -41,7 +41,6 @@ describe("where this Mac keeps its settings, and the folders found from them", (
   });
   it("keeps its work in Final Cut in BRIMM Video Work, outside Dropbox: what Final Cut saves, the runs' own folders, and a folder, a library and the pushed copies for each episode", () => {
     assert.equal(workFolder("/Users/sallie"), "/Users/sallie/BRIMM Video Work");
-    assert.equal(fromFinalCutFolder("/Users/sallie"), "/Users/sallie/BRIMM Video Work/From Final Cut");
     assert.equal(runsFolder("/Users/sallie"), "/Users/sallie/BRIMM Video Work/.runs");
     assert.equal(pushedFolder("/Users/sallie", "2026-10-14 Pricing talk"), "/Users/sallie/BRIMM Video Work/2026-10-14 Pricing talk/pushed");
     assert.equal(episodeWork("/Users/sallie", "2026-10-14 Pricing talk"), "/Users/sallie/BRIMM Video Work/2026-10-14 Pricing talk");
@@ -838,8 +837,7 @@ describe("node settings.js", () => {
       `  Episodes:  ${ROOT}/Episodes`,
       `  References:  ${ROOT}/References`,
       `  BRIMM Video Studio, run from:  ${CHECKOUT}`,
-      `  Work in Final Cut:  ${t.home}/BRIMM Video Work`,
-      `  From Final Cut:  ${t.home}/BRIMM Video Work/From Final Cut`
+      `  Work in Final Cut:  ${t.home}/BRIMM Video Work`
     ]);
     t.done();
   });
@@ -1157,7 +1155,6 @@ describe("node settings.js set and sessions", () => {
       `  References:  ${ROOT}/References`,
       `  BRIMM Video Studio, run from:  ${CHECKOUT}`,
       `  Work in Final Cut:  ${t.home}/BRIMM Video Work`,
-      `  From Final Cut:  ${t.home}/BRIMM Video Work/From Final Cut`,
       "  Import:  light",
       "  Readings:  off",
       "  Hand-off version:  2",

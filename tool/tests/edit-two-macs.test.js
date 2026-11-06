@@ -1,15 +1,16 @@
 // What the review of PR 21 found when two Macs share an episode: a finish that goes on writing after the other Mac has it, and
 // the things a finish does for the claim. (The release, the take-over and the "still arriving" wait are gone: Phase 2, F5.) Two Macs
-// share one root here (otherMac); every program is a stand-in.
+// share one root here (otherMac); every program is a stand-in. The finish is from HyperFrames' exports (exports-world.js).
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain } from "../edit.js";
-import { episodeWork, fromFinalCutFolder } from "../settings.js";
+import { episodeWork } from "../settings.js";
 import { readResult } from "../detached.js";
 import { claimed, filesProblems, recordFile, recordText } from "../episode.js";
-import { setup, episodeFor, reread, otherMac, FOLDER, EDITED, PROJECT } from "./episodes.js";
+import { reread, otherMac, FOLDER } from "./episodes.js";
+import { AT, MAIN_WORDS, exportOf, fw } from "./exports-world.js";
 
 /** Run a command of edit.js on a Mac, by its deps: { code, text }, with what it said. */
 async function on(deps, ...argv) {
@@ -17,26 +18,27 @@ async function on(deps, ...argv) {
   const code = await editMain(argv, { ...deps, say: (line) => said.push(line) });
   return { code, text: said.join("\n") };
 }
-/** Final Cut's files at the end of the made-up edit, as finish's own tests have them. */
-function sharedAll(t) {
-  t.shared(`${PROJECT.main}.mp4`, 2000);
-  t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-  t.shared(`${PROJECT["reel 1"]}.mov`, 2000);
-  t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 3000);
-  t.shared(`${PROJECT["reel 2"]}.mov`, 2000);
+/** The made-up raw video of exports-world.js with the exports of its main video and of Reel 2 in Downloads, as the app leaves them. `over`
+    changes its record, `programs` the stand-ins. */
+function exported({ over = {}, programs = {} } = {}) {
+  const w = fw({ over, programs });
+  const main = exportOf(w, "main");
+  exportOf(w, "reel 2");
+  return { ...w, main: main.name, found: w.found };
 }
+/** finish has shown her the words on the main picture again, as it must before a yes, since a finish that started used what it had shown. */
+const shownAgain = (w) => writeFileSync(join(w.work, "finish.shown.json"), JSON.stringify({ version: 1, at: AT, lines: MAIN_WORDS }));
+const stem = (file) => file.replace(/\.[^.]+$/, "");
 const MINE2 = { by: "Mac Studio", since: "2026-10-20T14:00:00-05:00" };
 const finalOf = (found) => (existsSync(join(found.folder, "final")) ? readdirSync(join(found.folder, "final"), { recursive: true }) : []);
 
 describe("finish, with the other Mac", () => {
   it("claims an episode nobody has open when it starts, so the other Mac cannot open it while it runs", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: EDITED });
-    sharedAll(t);
-    const r = await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2");
+    const { t, found } = exported();
+    const r = await on(t.ctx.deps, "finish", FOLDER, "--yes");
     assert.equal(r.code, 0, r.text);
-    assert.deepEqual([reread(found).rev, reread(found).editing && reread(found).editing.by], [2, "Mac Studio"]);
-    assert.equal(JSON.parse(readFileSync(join(episodeWork(t.home, FOLDER), "finish.asked.json"), "utf8")).rev, 2);
+    assert.deepEqual([reread(found).rev, reread(found).editing && reread(found).editing.by], [found.record.rev + 1, "Mac Studio"]);
+    assert.equal(JSON.parse(readFileSync(join(episodeWork(t.home, FOLDER), "finish.asked.json"), "utf8")).rev, found.record.rev + 1);
     const her = otherMac(t);
     const refused = await on(her.deps, "open", FOLDER);
     assert.equal(refused.code, 1);
@@ -47,11 +49,9 @@ describe("finish, with the other Mac", () => {
     t.done();
   });
   it("copies nothing into final/ when the other Mac claimed the episode while it ran", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: EDITED });
-    sharedAll(t);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
-    // While the finish waits for Final Cut's files, her Mac claims the episode (Dropbox brings her record across).
+    const { t, found } = exported();
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
+    // While the finish waits for HyperFrames' exports, her Mac claims the episode (Dropbox brings her record across).
     const wait = t.ctx.deps.wait;
     let taken = false;
     t.ctx.deps.wait = async (ms) => {
@@ -74,10 +74,8 @@ describe("the two Macs, as the P1 check found them", () => {
   const MINE = { by: "Mac Studio", since: "2026-10-20T14:00:00-05:00" };
   const refusal = "v1 of reel 1 was shown on Mac Studio, and Mac Studio has not said whether it was changed there.";
   it("lets its claim go when the finish it started fails, and says so (T4)", async () => {
-    const t = setup({ programs: { WHISPER: () => ({ code: 3, stderr: "error: failed to initialize whisper context" }) } });
-    const found = episodeFor(t, { record: EDITED });
-    sharedAll(t);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
+    const { t, found } = exported({ programs: { WHISPER: () => ({ code: 3, stderr: "error: failed to initialize whisper context" }) } });
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
     assert.equal(reread(found).editing.by, "Mac Studio");
     assert.equal(await editMain(["finish", "--now", FOLDER], t.ctx.deps), 1);
     assert.equal(reread(found).editing, null);
@@ -85,10 +83,8 @@ describe("the two Macs, as the P1 check found them", () => {
     t.done();
   });
   it("lets its claim go when the finish never takes its lock (T17)", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: EDITED });
-    sharedAll(t);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
+    const { t, found } = exported();
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
     writeFileSync(join(episodeWork(t.home, FOLDER), "episode.lock"), JSON.stringify({ pid: 4242, command: "bring" }));
     const r = await on({ ...t.ctx.deps, alive: (pid) => pid === 4242 }, "finish", "--now", FOLDER);
     assert.equal(r.code, 1);
@@ -97,10 +93,8 @@ describe("the two Macs, as the P1 check found them", () => {
     t.done();
   });
   it("shows no hand-off in Finder when the record of the finish could not be written (T18)", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: EDITED });
-    sharedAll(t);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
+    const { t, found } = exported();
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
     const clone = t.ctx.deps.clone;
     let wrote = false;
     t.ctx.deps.clone = (from, to) => {
@@ -117,10 +111,8 @@ describe("the two Macs, as the P1 check found them", () => {
     t.done();
   });
   it("copies nothing into final/ again at its late check once the other Mac has the episode (T20)", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: EDITED });
-    sharedAll(t);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
+    const { t, found, main } = exported();
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
     const her = otherMac(t);
     const wait = t.ctx.deps.wait;
     t.ctx.deps.wait = async (ms) => {
@@ -128,29 +120,27 @@ describe("the two Macs, as the P1 check found them", () => {
       // At the late check's wait, she opens it, and a copy in final/ goes missing.
       if (ms > 60000 && reread(found).finished && !reread(found).editing) {
         assert.equal((await on(her.deps, "open", FOLDER)).code, 0);
-        rmSync(join(found.folder, "final", `${PROJECT["reel 1"]}.srt`), { force: true });
+        rmSync(join(found.folder, "final", `${stem(main)}.srt`), { force: true });
       }
     };
     await editMain(["finish", "--now", FOLDER], t.ctx.deps);
-    assert.equal(existsSync(join(found.folder, "final", `${PROJECT["reel 1"]}.srt`)), false);
+    assert.equal(existsSync(join(found.folder, "final", `${stem(main)}.srt`)), false);
     assert.match(readResult(t.home, FOLDER, "finish").failed.join(" "), /Sallie's laptop has .* open now, so it was not copied in again/);
     assert.equal(reread(found).editing.by, "Sallie's laptop");
     t.done();
   });
   it("lists what final/ holds when a finish's copy made again fails, so a finish again goes through (T3)", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: EDITED });
-    sharedAll(t);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
+    const w = exported();
+    const { t, found } = w;
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
     assert.equal(await editMain(["finish", "--now", FOLDER], t.ctx.deps), 0);
-    // Main Shared again after a trim, under the same name, and the finish asked again.
-    writeFileSync(join(fromFinalCutFolder(t.home), `${PROJECT.main}.mp4`), "main, trimmed by hand, a little longer");
-    utimesSync(join(fromFinalCutFolder(t.home), `${PROJECT.main}.mp4`), new Date(Date.parse("2026-10-20T16:00:00-05:00")), new Date(Date.parse("2026-10-20T16:00:00-05:00")));
-    t.shared(`${PROJECT.main}.fcpxmld`, 2 * 3600000 + 60000);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
+    // Main exported again after a trim, and the finish asked again.
+    const again = exportOf(w, "main", { start: [14, 20, 0], name: w.main, text: "main, trimmed by hand, a little longer" });
+    shownAgain(w);
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
     const clone = t.ctx.deps.clone;
     t.ctx.deps.clone = (from, to) => {
-      if (to.endsWith(`final/${PROJECT.main}.mp4`)) throw new Error("cp: clonefile failed");
+      if (to.endsWith(`final/${again.name}`)) throw new Error("cp: clonefile failed");
       clone(from, to);
     };
     assert.equal(await editMain(["finish", "--now", FOLDER], t.ctx.deps), 1);
@@ -160,10 +150,8 @@ describe("the two Macs, as the P1 check found them", () => {
     t.done();
   });
   it("writes no record over a take-over that lands while the finish copies into final/, and says so (T1)", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: EDITED });
-    sharedAll(t);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
+    const { t, found } = exported();
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
     const her = otherMac(t);
     const clone = t.ctx.deps.clone;
     let taken = false;
@@ -182,19 +170,15 @@ describe("the two Macs, as the P1 check found them", () => {
     t.done();
   });
   it("writes no claim when this Mac already has the episode it finishes (T19)", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: { ...EDITED, editing: MINE2 } });
-    sharedAll(t);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
-    assert.equal(JSON.parse(readFileSync(join(episodeWork(t.home, FOLDER), "finish.asked.json"), "utf8")).rev, 1);
-    assert.equal(reread(found).rev, 1);
+    const { t, found } = exported({ over: { editing: MINE2 } });
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
+    assert.equal(JSON.parse(readFileSync(join(episodeWork(t.home, FOLDER), "finish.asked.json"), "utf8")).rev, found.record.rev);
+    assert.equal(reread(found).rev, found.record.rev);
     t.done();
   });
   it("leaves a result naming the conflict when finish's claim met the other Mac's open as a conflicted copy (T6)", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: EDITED });
-    sharedAll(t);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
+    const { t, found } = exported();
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
     const mine = reread(found);
     const copy = `${String(mine.rev).padStart(4, "0")} (Sallie's laptop's conflicted copy 2026-10-20).json`;
     writeFileSync(join(found.folder, "record", copy), recordText({ ...claimed({ ...mine, editing: null }, "Sallie's laptop", "2026-10-20T15:00:05-05:00"), rev: mine.rev, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
@@ -205,15 +189,14 @@ describe("the two Macs, as the P1 check found them", () => {
     assert.equal(existsSync(join(found.folder, "final")), false);
     t.done();
   });
-  /** A finish, then the main video trimmed by hand and Shared again under the same name, and a finish asked again. */
-  async function refinish(t) {
-    const found = episodeFor(t, { record: EDITED });
-    sharedAll(t);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
+  /** A finish, then the main video trimmed by hand and exported again, and a finish asked again. */
+  async function refinish(w) {
+    const { t, found } = w;
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
     assert.equal(await editMain(["finish", "--now", FOLDER], t.ctx.deps), 0);
-    t.shared(`${PROJECT.main}.mp4`, 5000, "main, trimmed by hand, longer now");
-    t.shared(`${PROJECT.main}.fcpxmld`, 6000);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
+    w.again = exportOf(w, "main", { start: [14, 20, 0], name: w.main, text: "main, trimmed by hand, longer now" });
+    shownAgain(w);
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
     return found;
   }
   /** At the hand-off's copy into final/, the last one, the record is changed as `change` says. */
@@ -230,8 +213,9 @@ describe("the two Macs, as the P1 check found them", () => {
     return () => (t.ctx.deps.clone = clone);
   }
   it("lists what final/ holds in the record in force when the other Mac's claim lands while a finish again copies, so neither Mac is stuck (T1)", async () => {
-    const t = setup();
-    const found = await refinish(t);
+    const w = exported();
+    const { t } = w;
+    const found = await refinish(w);
     const back = atHandOff(t, found, (now) => writeFileSync(recordFile(found.folder, now.rev + 1), recordText({ ...claimed(now, "Sallie's laptop", "2026-10-20T15:10:00-05:00"), rev: now.rev + 1, writer: { commit: "c709b57", on: "Sallie's laptop" } })));
     assert.equal(await editMain(["finish", "--now", FOLDER], t.ctx.deps), 1);
     back();
@@ -239,22 +223,24 @@ describe("the two Macs, as the P1 check found them", () => {
     assert.deepEqual(filesProblems(found.folder, reread(found)), []);
     assert.deepEqual([reread(found).editing.by, reread(found).finished], ["Sallie's laptop", null]);
     // final/ mixes two finishes now: none is "kept as the last finish made it", so her finish asks for her own Shares.
-    const hers = await on(otherMac(t).deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2");
+    const hers = await on(otherMac(t).deps, "finish", FOLDER, "--yes");
     assert.equal(hers.code, 1);
     assert.doesNotMatch(hers.text, /kept as the last finish made it/);
-    assert.match(hers.text, /^The main video has not been Shared from Final Cut\./);
+    assert.match(hers.text, /^The main video's HyperFrames project is on Mac Studio, so its exports are there\. Finish it on that Mac\./);
     // She lets it go, and this Mac opens it again.
     const letGo = reread(found);
     writeFileSync(recordFile(found.folder, letGo.rev + 1), recordText({ ...letGo, editing: null, rev: letGo.rev + 1, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
     assert.equal((await on(t.ctx.deps, "open", FOLDER)).code, 0);
-    const again = await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2");
+    shownAgain(w);
+    const again = await on(t.ctx.deps, "finish", FOLDER, "--yes");
     assert.equal(again.code, 0, again.text);
     assert.doesNotMatch(again.text, /kept as the last finish made it/);
     t.done();
   });
   it("lists what final/ holds when the record changed only by the time a finish again writes it, so a finish again goes through (T1)", async () => {
-    const t = setup();
-    const found = await refinish(t);
+    const w = exported();
+    const { t } = w;
+    const found = await refinish(w);
     const back = atHandOff(t, found, (now) => {
       const hers = { ...claimed(now, "Sallie's laptop", "2026-10-20T15:10:00-05:00"), rev: now.rev + 1, writer: { commit: "c709b57", on: "Sallie's laptop" } };
       writeFileSync(recordFile(found.folder, now.rev + 1), recordText(hers));
@@ -262,15 +248,17 @@ describe("the two Macs, as the P1 check found them", () => {
     });
     assert.equal(await editMain(["finish", "--now", FOLDER], t.ctx.deps), 1);
     back();
-    assert.match(readResult(t.home, FOLDER, "finish").failed.join(" "), /the record was not written: .*\. The record lists what final\/ holds now, and no finish: .* Say finish again\./);
+    assert.match(readResult(t.home, FOLDER, "finish").failed.join(" "), /the record was not written: .*\. The record lists what final\/ holds now, and no finish: .* Say "hand it off" again\./);
     assert.deepEqual(filesProblems(found.folder, reread(found)), []);
     assert.equal(reread(found).finished, null);
-    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes", "--no-hand-edits", "reel 2")).code, 0);
+    shownAgain(w);
+    assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
     t.done();
   });
   it("does not tell this Mac it still has the episode when the other Mac's take-over is on its way at the record write (t1-5)", async () => {
-    const t = setup();
-    const found = await refinish(t);
+    const w = exported();
+    const { t } = w;
+    const found = await refinish(w);
     const back = atHandOff(t, found, (now) => {
       const text = recordText({ ...claimed(now, "Sallie's laptop", "2026-10-20T15:10:00-05:00"), rev: now.rev + 1, writer: { commit: "c709b57", on: "Sallie's laptop" } });
       writeFileSync(recordFile(found.folder, now.rev + 1), text.slice(0, 60));
@@ -284,8 +272,9 @@ describe("the two Macs, as the P1 check found them", () => {
     t.done();
   });
   it("says which file is out of step, and that a conflict needs Jason, when a side kept leaves the files unlike its record (round 2, D: W1, W8)", async () => {
-    const t = setup();
-    const found = await refinish(t);
+    const w = exported();
+    const { t } = w;
+    const found = await refinish(w);
     const asked = reread(found);
     assert.equal(await editMain(["finish", "--now", FOLDER], t.ctx.deps), 0);
     const mine = reread(found);
@@ -295,12 +284,13 @@ describe("the two Macs, as the P1 check found them", () => {
     assert.equal((await on(t.ctx.deps, "resolve", FOLDER)).code, 0);
     const kept = await on(t.ctx.deps, "resolve", FOLDER, "--keep", "B");
     assert.equal(kept.code, 1, kept.text);
-    assert.match(kept.text, /^Kept B of record\/0005\.json\. The other is set aside in history\/\.\nThe files are not as the record now lists them: final\/Pricing- what to charge- main v5 3fa9c1\.mp4 is 33 bytes, not the 16 the record lists\. Once Dropbox has finished, say "open" again; if it still says a file is not whole, a conflict needs Jason: tell him the episode's name\.$/);
+    assert.match(kept.text, /^Kept B of record\/0005\.json\. The other is set aside in history\/\.\nThe files are not as the record now lists them: final\/Pricing- what to charge- main 3fa9c1 2026-10-20 13\.56\.mp4 is 33 bytes, not the 18 the record lists\. Once Dropbox has finished, say "open" again; if it still says a file is not whole, a conflict needs Jason: tell him the episode's name\.$/);
     t.done();
   });
   it("says nothing more after a keep that leaves the files as the record lists them (round 2, D)", async () => {
-    const t = setup();
-    const found = await refinish(t);
+    const w = exported();
+    const { t } = w;
+    const found = await refinish(w);
     const asked = reread(found);
     assert.equal(await editMain(["finish", "--now", FOLDER], t.ctx.deps), 0);
     const mine = reread(found);
@@ -313,8 +303,9 @@ describe("the two Macs, as the P1 check found them", () => {
     t.done();
   });
   it("names a file out of step after a keep whose copy could not be deleted too (round 2, D)", async () => {
-    const t = setup();
-    const found = await refinish(t);
+    const w = exported();
+    const { t } = w;
+    const found = await refinish(w);
     const asked = reread(found);
     assert.equal(await editMain(["finish", "--now", FOLDER], t.ctx.deps), 0);
     const mine = reread(found);
@@ -335,7 +326,7 @@ describe("the two Macs, as the P1 check found them", () => {
     const kept = await on(t.ctx.deps, "resolve", FOLDER, "--keep", "B");
     t.ctx.deps.clone = clone;
     assert.equal(kept.code, 1, kept.text);
-    assert.match(kept.text, /the copy could not be deleted yet .*\nThe files are not as the record now lists them: final\/Pricing- what to charge- main v5 3fa9c1\.mp4 is 33 bytes, not the 16 the record lists\./s);
+    assert.match(kept.text, /the copy could not be deleted yet .*\nThe files are not as the record now lists them: final\/Pricing- what to charge- main 3fa9c1 2026-10-20 13\.56\.mp4 is 33 bytes, not the 18 the record lists\./s);
     t.done();
   });
 });

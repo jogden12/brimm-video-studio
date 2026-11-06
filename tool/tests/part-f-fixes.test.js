@@ -148,13 +148,13 @@ describe("the Final Cut finish of a kind a version 1 hand-off cannot hold (item 
   });
 });
 
-describe("finish of a video that is not edited in Final Cut (item 5)", () => {
+describe("finish of a video that is not edited here (item 5)", () => {
   const FINISHED = { revision: 2, at: AT, on: "Mac Studio", handoff: "final/Pricing talk.brimm-ops.json", parts: {} };
   for (const [kind, what] of [["finished", "a finished video"], ["short video", "an iPhone clip she answered"]]) {
     it(`says of ${what} that its hand-off comes from its spellings, or is written already, or waits for version 2, and names no folder`, async () => {
       for (const [settings, over, said] of [
         // An iPhone clip is edited in HyperFrames if at all, so it is not said to be "not edited in Final Cut" (plan PR 7, item 4).
-        [{ handoffVersion: 2 }, {}, kind === "short video" ? 'Pricing talk\'s hand-off is written once its spellings are answered. Say "show me the spellings".' : 'Pricing talk is not edited in Final Cut: its hand-off is written once its spellings are answered. Say "show me the spellings".'],
+        [{ handoffVersion: 2 }, {}, kind === "short video" ? 'Pricing talk\'s hand-off is written once its spellings are answered. Say "show me the spellings".' : 'Pricing talk is not edited here: its hand-off is written once its spellings are answered. Say "show me the spellings".'],
         [{ handoffVersion: 2 }, { finished: FINISHED }, "Pricing talk's hand-off is written already, as revision 2: a spelling changed writes its next revision."],
         [{ handoffVersion: 1 }, {}, "Pricing talk's hand-off is written from its spellings once this Mac hands off version 2: ask Jason."]
       ]) {

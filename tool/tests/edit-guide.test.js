@@ -82,7 +82,7 @@ describe("guide, from the records", () => {
       DROP_LINE, "Under way:",
       '  Video of 20 Oct, 09:00 (Mac Studio) (aaaaaa): It is waiting for your answer. Say "what\'s waiting?" to see its card.',
       '  Pricing talk (bbbbbb): Claude has read it. Say "what did Claude find?", then answer the spellings card.',
-      '  Morning talk (cccccc): Ask for any changes in your own words, then say "show it in Final Cut".',
+      '  Morning talk (cccccc): This Mac isn\'t set up for HyperFrames yet: ask Jason.',
       "  Session, 2026-10-20 (dddddd): Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.",
       "2 videos from before the switch are not guided."
     ] });

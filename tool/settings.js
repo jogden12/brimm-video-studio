@@ -51,8 +51,6 @@ export const referencesFolder = (root) => join(root, "References");
 export const importingFolder = (root) => join(episodesFolder(root), ".importing");
 /** Where this Mac keeps its work in Final Cut: on its own disk, never in Dropbox. */
 export const workFolder = (home) => join(home, "BRIMM Video Work");
-/** The one folder Final Cut's Share and File > Export XML… both save into, on this Mac's own disk. */
-export const fromFinalCutFolder = (home) => join(workFolder(home), "From Final Cut");
 /** Where the HyperFrames app saves an export unless the Export dialog is given another folder (architecture 8.1). On the Mac Studio it is a
     link into Dropbox, so a file in it can be a Dropbox placeholder. exports.js is the one module that looks in it. */
 export const downloadsFolder = (home) => join(home, "Downloads");
@@ -657,7 +655,6 @@ function show(home, say, now) {
   say(`  References:  ${referencesFolder(s.root)}`);
   say(`  BRIMM Video Studio, run from:  ${s.checkout}`);
   say(`  Work in Final Cut:  ${workFolder(home)}`);
-  say(`  From Final Cut:  ${fromFinalCutFolder(home)}`);
   if (s.import !== undefined) say(`  Import:  ${s.import}`);
   if (s.readings !== undefined) say(`  Readings:  ${s.readings ? "on" : "off"}`);
   if (s.handoffVersion !== undefined) say(`  Hand-off version:  ${s.handoffVersion}`);

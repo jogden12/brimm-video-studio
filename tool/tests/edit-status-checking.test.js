@@ -37,14 +37,14 @@ describe("status while a finish waits for its late check", () => {
     assert.deepEqual(heard.status.said, [`${WRITTEN} ${studio(heard.due)}`]);
     w.t.done();
   });
-  it("names the places the originals were taken from: Downloads, From Final Cut, both, or none", async () => {
+  it("names the place the originals were taken from, Downloads, or none; a place from the Final Cut days is none", async () => {
     const w = await finished();
     const took = takeEpisodeLock(lockOf(w.t.home, FOLDER), "finish", () => true);
     const due = w.t.now() + LATE_CHECK_MS;
     for (const [places, where] of [
       [["Downloads"], "the export out of Downloads"],
-      [["From Final Cut"], "what it took out of From Final Cut"],
-      [["From Final Cut", "Downloads"], "the export out of Downloads and what it took out of From Final Cut"],
+      [["From Final Cut"], ""],
+      [["From Final Cut", "Downloads"], "the export out of Downloads"],
       [[], ""]
     ]) {
       markChecking(w.t.home, FOLDER, { nonce: took.nonce, revision: reread(w.found).finished.revision, due, took: places });

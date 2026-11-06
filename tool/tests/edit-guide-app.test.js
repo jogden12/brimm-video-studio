@@ -32,9 +32,8 @@ const OPEN = 'Say "open it in HyperFrames" to edit it there.';
 const AFTER = 'Say "open it in HyperFrames" when it is done.';
 const EXPORTED = 'You have exported it. Say "hand it off" and I will check what you exported.';
 const edit = (last = "") => `Edit it in HyperFrames.${last ? ` Your last request there was ${last}.` : ""} When you are done, export it on This Mac, as MP4, then say "hand it off".`;
-const SHOW = 'Ask for any changes in your own words, then say "show it in Final Cut".';
-const FINISH = 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".';
-const AGAIN = 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".';
+/** The one line her words keep of Final Cut: for an episode edited there before (allow-listed, F8). */
+const FROM_FINAL_CUT = 'It was edited in Final Cut before. Studio doesn\'t use Final Cut now: say "open it in HyperFrames" to edit it there, from the recording.';
 const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
 const CLIP_NEXT = 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
@@ -95,16 +94,16 @@ describe("the guide picks the way as finish does, by the record", () => {
       assert.doesNotMatch(await line(w), /Final Cut/);
       w.t.done();
     }
-    // A Reel's project beside a push to Final Cut is the Final Cut way, as without it.
+    // A Reel's project beside a push to Final Cut makes it an episode edited there before: unopened, as without the push, and on a Mac not set up it is told so.
     const pushed = guideWorld({ projects: ["reel 2"], set: false, over: { main: MAIN_PUSHED([push(1, "2026-10-20T10:00:00-05:00")]) } });
-    assert.equal(await line(pushed), says(FINISH));
+    assert.equal(await line(pushed), says(NOT_SET_UP));
     pushed.t.done();
   });
-  it("leaves a raw video that was pushed to Final Cut and has no project on the Final Cut way, and so one on a Mac whose settings have the app off", async () => {
+  it("tells a raw video that was pushed to Final Cut and has no project that it was edited there before and to open it in HyperFrames, from the recording; one on a Mac whose settings have the app off is told that this Mac isn't set up", async () => {
     const pushed = guideWorld({ projects: null, over: { main: MAIN_PUSHED([push(1, "2026-10-20T10:00:00-05:00")]) } });
-    assert.equal(await line(pushed), says(FINISH));
+    assert.equal(await line(pushed), says(FROM_FINAL_CUT));
     const off = guideWorld({ projects: null, set: false });
-    assert.equal(await line(off), says(SHOW));
+    assert.equal(await line(off), says(NOT_SET_UP));
     pushed.t.done();
     off.t.done();
   });
@@ -116,7 +115,7 @@ describe("the guide picks the way as finish does, by the record", () => {
     both.t.done();
     kept.t.done();
   });
-  it("does not send a video on the HyperFrames way back to Final Cut after a finish, as it does one on the Final Cut way", async () => {
+  it("does not send a video back to Final Cut after a finish, whether or not it has a project: the page's step comes", async () => {
     const over = { finished: FINISHED, main: MAIN_PUSHED([push(1, "2026-10-20T09:00:00-05:00"), push(2, "2026-10-20T11:00:00-05:00")]) };
     const app = guideWorld({ over });
     handOff(app);
@@ -125,7 +124,8 @@ describe("the guide picks the way as finish does, by the record", () => {
     assert.doesNotMatch(step, /Final Cut|Share|Export XML/);
     const old = guideWorld({ projects: null, over });
     handOff(old);
-    assert.equal(await line(old), says(AGAIN));
+    assert.doesNotMatch(await line(old), /Final Cut|Share|Export XML/);
+    assert.equal(await line(old), says(TAKE + ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".'));
     app.t.done();
     old.t.done();
   });

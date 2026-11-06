@@ -190,7 +190,7 @@ describe("the gate walks every command that names an episode", () => {
       }
     }
   });
-  it("leaves the commands that name no episode, and the old spelling of free, which says a Final Cut library is held back and names no episode, alone", async () => {
+  it("leaves the commands that name no episode, and the old spelling of free, which says the help and names no episode, alone", async () => {
     const t = setup();
     episodeFor(t, { record: UNANSWERED_RECORD });
     const free = await on(t.ctx.deps, "free", FOLDER, "library");

@@ -34,7 +34,7 @@ import { finishNow } from "../finish.js";
 import { recordFile, recordText } from "../episode.js";
 import { PIN } from "../hyperframes.js";
 import { episodeWork, writeSettings } from "../settings.js";
-import { EDITED, FOLDER, PROJECT, episodeFor, reread, setup } from "./episodes.js";
+import { EDITED, EXPORTED, FOLDER, PROJECT, askedFor, episodeFor, reread, setup } from "./episodes.js";
 import { EPISODE } from "./phase4.js";
 import { AT, READING, REEL1, SPELLINGS, entry, exportOf, fw, world } from "./exports-world.js";
 import { HANDOFF_REL, finishedWorld } from "./reels-world.js";
@@ -87,20 +87,18 @@ async function clipFinished() {
   assert.equal(result.ok, true, result.failed.join(" "));
   return { ...w, found };
 }
-/** The made-up edit finished through Final Cut, as finish.test.js finishes it: Shared and exported, Reel 2 with no hand edits. */
+/** The made-up edit as a finish of the Final Cut days left it: the record says each part was made through Final Cut (an `export` for the main
+    video and Reel 1, "no hand edits" for Reel 2). Nothing finishes that way now, so the made-up edit is finished from exports in Downloads
+    (as finish.test.js does) and its record is then written as the old finish wrote it: no project in any part. */
 async function finalCutFinished() {
   const t = setup();
   const given = episodeFor(t, { record: EDITED });
-  t.shared(`${PROJECT.main}.mp4`, 2000);
-  t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-  t.shared(`${PROJECT["reel 1"]}.mov`, 2000);
-  t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 3000);
-  t.shared(`${PROJECT["reel 2"]}.mov`, 2000);
-  assert.equal(await finishEpisode(t.ctx, given, { yes: true, noHandEdits: ["reel 2"] }), 0);
-  const found = { ...given, record: reread(given) };
-  const result = await finishNow(t.ctx, found);
+  for (const name of Object.values(EXPORTED)) t.exported(name, 2000);
+  const result = await finishNow(t.ctx, askedFor(t, given));
   assert.equal(result.ok, true, result.failed.join(" "));
-  return { t, found };
+  const found = { ...given, record: reread(given) };
+  remake(found, (parts) => Object.fromEntries(Object.entries(parts).map(([key, { project: _project, ...part }]) => [key, key === "reel 2" ? { ...part, noHandEdits: true } : { ...part, export: `final/${PROJECT[key]}.fcpxmld` }])));
+  return { t, found: { ...found, record: reread(given) } };
 }
 /** A video her editor finished, its Reels `projects` made in HyperFrames and handed off by `finish … reels`, and a project made as well for each of
     `left`, which that hand-off leaves out, as it does a Reel that is not exported yet. The record lists the projects in the order given. */

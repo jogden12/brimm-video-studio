@@ -364,18 +364,18 @@ describe("F4. what does not change", () => {
     assert.equal(r.text, `${NAME} has no timeline to show in Final Cut: an iPhone clip is not edited here.`);
     t.done();
   });
-  it("still takes a short video from before the switch, with no answer, the Final Cut way", async () => {
+  it("takes a short video from before the switch, with no answer, for a video not yet opened in HyperFrames, and says nothing of Final Cut", async () => {
     const t = setup();
     episodeFor(t, { record: { kind: "short video", name: { text: "Hello clip", placeholder: false } } });
     const r = await on(t.ctx.deps, "finish", FOLDER);
-    assert.match(r.text, /was never shown in Final Cut|has not been Shared|Looked in/);
-    assert.doesNotMatch(r.text, /HyperFrames/);
+    assert.match(r.text, /was never opened in HyperFrames/);
+    assert.doesNotMatch(r.text, /Final Cut|Shared|Looked in/);
     t.done();
   });
-  it("still tells a finished video what it told: its hand-off is written from its spellings", async () => {
+  it("tells a finished video that its hand-off is written from its spellings", async () => {
     const { t } = clip({ over: { kind: "finished", reading: { ...READING, kind: "finished" } } });
     const r = await on(t.ctx.deps, "finish", FOLDER);
-    assert.deepEqual([r.code, r.text], [1, `${NAME} is not edited in Final Cut: its hand-off is written once its spellings are answered. Say "show me the spellings".`]);
+    assert.deepEqual([r.code, r.text], [1, `${NAME} is not edited here: its hand-off is written once its spellings are answered. Say "show me the spellings".`]);
     t.done();
   });
 });
