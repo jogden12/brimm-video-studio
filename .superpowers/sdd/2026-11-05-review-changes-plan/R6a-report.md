@@ -19,4 +19,9 @@ Worktree: /Users/jasonogden/Claude Code/brimm-video-studio/.claude/worktrees/age
 - Old plan files are not set aside in history/ (only kept in memory for the undo).
 
 ## Concerns
-- If putting the old files back also fails, nothing says so beyond the next `episodes` check naming the file.
+- (Fixed in round 1, below.) If putting the old files back also fails, the first version said nothing.
+
+## Fix round 1
+Change: in `tool/edit.js` the keep's rollback no longer stays silent. After a failed plan-file write or a refused record write, `planOff()` compares each plan file with what it was (by reading the disk). If any is not as it was, the refusal is `The record was not changed (<why>), but the plan's files may not match it: <names>. The next "episodes" names any that is wrong. Say "sort out the conflict" again to put them right; if it still says a file is not whole, ask Jason and tell him the episode's name.` and never says "Nothing was written". Otherwise the old words stay.
+Test: plan-conflict.test.js "says so plainly when the files cannot be put back after a refused record write, and never claims nothing was written" (stand-in clone refuses every put-back of teleprompter.txt).
+Commands: `node --test tests/plan-conflict.test.js tests/plan.test.js` -> pass 64, fail 0. `cd tool && node --test` -> tests 7287, pass 7287, fail 0.

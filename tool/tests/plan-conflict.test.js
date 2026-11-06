@@ -180,4 +180,23 @@ describe("resolve, for a plan: plain lines and the plan's files", () => {
     assert.deepEqual(filesNow(folder), before);
     t.done();
   });
+  it("says so plainly when the files cannot be put back after a refused record write, and never claims nothing was written", async () => {
+    const t = setup();
+    const folder = await conflictedBy(t, withPlanned({ lines: ["The first line.", "Mine."] }), withPlanned({ lines: ["The first line.", "Hers, a longer line."] }));
+    await on(depsOf(t), "resolve", nameOf(t));
+    const deps = depsOf(t);
+    const clone = deps.clone;
+    let puts = 0;
+    deps.clone = (from, to) => {
+      // Every put-back of the teleprompter script is refused: only the first clone into it (the keep's own write) goes through.
+      if (to.includes("teleprompter.txt") && ++puts >= 2) throw new Error("the disk said no");
+      clone(from, to);
+      if (to.includes("/history/") && !existsSync(recordFile(folder, 4))) writeFileSync(recordFile(folder, 4), recordText({ ...readEpisode(folder, { pastCopies: true }).record, rev: 4 }));
+    };
+    const r = await on(deps, "resolve", nameOf(t), "--keep", "B");
+    assert.equal(r.code, 1, r.text);
+    assert.ok(!r.text.includes("Nothing was written"), r.text);
+    assert.match(r.text, /^The record was not changed \(.*\), but the plan's files may not match it: teleprompter\.txt\. The next "episodes" names any that is wrong\. Say "sort out the conflict" again to put them right; if it still says a file is not whole, ask Jason/, r.text);
+    t.done();
+  });
 });

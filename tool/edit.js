@@ -3705,11 +3705,16 @@ async function resolveIn(ctx, found, keep) {
       rmSync(putWork, { recursive: true, force: true });
     }
   };
+  // The plan's files that are not as they were before this keep, by what is on the disk now.
+  const planOff = () => planNow.map(([name]) => name).filter((name) => (existsSync(at(name)) ? readFileSync(at(name), "utf8") : null) !== planHad[name]);
+  const unsure = (names, why) => `The record was not changed (${why}), but the plan's files may not match it: ${names.join(", ")}. The next "episodes" names any that is wrong. Say "sort out the conflict" again to put them right; if it still says a file is not whole, ask Jason and tell him the episode's name.`;
   let written = null;
   if (planNow.length) {
     try {
       putPlan(planNow);
     } catch (e) {
+      const stuck = planOff();
+      if (stuck.length) return refuse(ctx, unsure(stuck, `the plan's files could not be written: ${plainWhy(e)}`));
       return refuse(ctx, `Nothing was written, and nothing deleted: the plan's files could not be written (${plainWhy(e)}). Say "sort out the conflict" again in a minute, or ask Jason.`);
     }
   }
@@ -3721,8 +3726,10 @@ async function resolveIn(ctx, found, keep) {
         putPlan(planNow.filter(([name]) => planHad[name] !== null).map(([name]) => [name, planHad[name]]));
         for (const [name] of planNow) if (planHad[name] === null) rmSync(at(name), { force: true });
       } catch (back) {
-        // A file that could not be put back is named by the check after any later command.
+        // What is still not as it was is found below.
       }
+      const stuck = planOff();
+      if (stuck.length) return refuse(ctx, unsure(stuck, plainWhy(e)));
       return refuse(ctx, `Nothing was written, and nothing deleted: ${plainWhy(e)}. Say "sort out the conflict" again to see it as it is now.`);
     }
   }
