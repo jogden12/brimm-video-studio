@@ -1,9 +1,9 @@
 // The episode import's own steps. When this Mac has settings and the folder the import watches is this Mac's drop folder,
 // in BRIMM Video in Dropbox, each video is made into an episode: everything is made as for any video, held in the run's own
 // folder, and then filed into a folder of its own in Episodes. The raw video is cloned in from the drop folder, each file
-// made of it is cloned in from the run's folder, the Final Cut file goes into edit/ as main.v0.fcpxml, naming its video by a
-// path from itself and naming no library, and the episode's first record, record/0001.json, comes last: it is the sign that
-// the import finished. Nothing in Dropbox is renamed, moved or written into (dropbox.js). The raw video stays in the drop
+// made of it is cloned in from the run's folder, and the episode's first record, record/0001.json, comes last: it is the sign that
+// the import finished. The import makes no Final Cut file and no edit/ folder (Phase 2); an episode of an older import still has
+// them, and they are read as they were. Nothing in Dropbox is renamed, moved or written into (dropbox.js). The raw video stays in the drop
 // folder, and the run's folder stays, until the late check.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -14,7 +14,7 @@ import { createdOf, waitingToCut } from "./cuts.js";
 import { isMedia } from "./lib.js";
 import { LATE_CHECK_MS, cloneIn, lateCheck, replaceIn, textWriter } from "./dropbox.js";
 import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, recordCopies, recordNumbers, writeEpisode, shownName } from "./episode.js";
-import { episodeFolderName, fileSafe, timelineFile } from "./names.js";
+import { episodeFolderName, fileSafe } from "./names.js";
 import { dropFolder, episodeWork, episodesFolder, pendingFolder, runsFolder, seenFile } from "./settings.js";
 // detached.js takes caffeinate and thisCheckout from here: each is used only when called, as kinds.js's are, so the cycle costs nothing at load.
 import { releaseEpisodeLock, takeEpisodeLock } from "./detached.js";
@@ -94,13 +94,12 @@ export const thisCheckout = () => dirname(dirname(fileURLToPath(import.meta.url)
 
 /** File a video that has been worked on into its episode, in Episodes under BRIMM Video. `file` is the raw video in the drop
     folder; `made` are the files made of it, each where it belongs, and `at(to)` where its whole copy is in the run's own
-    folder `work`; `fcpxml` is which of them is the Final Cut file, which goes into edit/main.v0.fcpxml; `facts` and
-    `printed` are what ffprobe said; `kind` is the episode's kind; `read` is Claude's reply as it was read, or null; `reels`
+    folder `work`; `facts` and `printed` are what ffprobe said; `kind` is the episode's kind; `read` is Claude's reply as it was read, or null; `reels`
     are the record's Reels, made of the Reel candidates (reelEntries, in reel-candidates.js). A made file goes into the episode folder
     where it sits beside the video, "Talk.srt" or "previews/reel-1.mp4", and a folder it needs there is made. `deps` gives `episode` ({ root, machine, checkout, home }), and `clone`, `sameDisk`, `log`,
     `today`, `now`, `commit` and `rand` when a test gives others. A video the facts say has no sound (`facts.sound` is false; PR H5a)
     is filed with `video.sound` false in its record, and nothing else made of it (`made` is empty).
-    The light import (spec 2026-10-22, section 1) gives no Final Cut file, so no edit/ folder is made, and `kind` null, with
+    The import (the light import, spec 2026-10-22, section 1) gives no Final Cut file, so no edit/ folder is made, and `kind` null, with
     `answer` (her answer, waiting, with the guess and the episode whose words it matched, or null), `label` and
     `fingerprint`, which go into the record as they are (newEpisode). An import never sets `versionOf`: her answer does.
     The folder is made, or the one a stopped import left is used again; the raw video is cloned in from the drop folder; each
@@ -119,7 +118,7 @@ export const thisCheckout = () => dirname(dirname(fileURLToPath(import.meta.url)
     never over a file: one of the names is there already, and the call throws. And when it throws, for that or for a record that
     cannot be written, every file this call put in is taken away again, so that the episode is as it was. `file` and `made` are
     then wherever the call's caller made them, and there is no drop folder: `dropFile` is not asked. */
-export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, reels = [], work, dropFile, answer = null, label = "", fingerprint = "", into = null }, deps) {
+export function fileEpisode({ file, made, at, facts, printed, kind, read, reels = [], work, dropFile, answer = null, label = "", fingerprint = "", into = null }, deps) {
   const { episode, log = () => {} } = deps;
   // The video in the drop folder must still be the one that was worked on: one put in its place meanwhile, as a corrected
   // export, is another recording, and is never filed with this one's transcript and cuts.
@@ -132,7 +131,6 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
   mkdirSync(episodes, { recursive: true });
   const found = into ? { name: basename(into.folder), reused: false } : findFolder(episodes, { video, bytes, machine: episode.machine, day });
   const path = into ? into.folder : join(episodes, found.name);
-  if (fcpxml) mkdirSync(join(path, "edit"), { recursive: true });
   // A stopped import may have left a record that is not whole. It is no one's record, and the first one is written anew.
   if (found.reused) rmSync(join(path, RECORD_DIR), { recursive: true, force: true });
   const entries = [];
@@ -153,7 +151,7 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
   let record;
   try {
     put(file, video);
-    for (const to of made) put(at(to), to === fcpxml ? timelineFile({ part: "main", v: 0 }) : relative(dirname(file), to).split(sep).join("/"));
+    for (const to of made) put(at(to), relative(dirname(file), to).split(sep).join("/"));
     const first = newEpisode({
       id: into ? into.record.id : newId(day, deps.rand),
       machine: episode.machine,

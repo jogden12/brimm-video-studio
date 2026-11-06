@@ -31,7 +31,7 @@
 #                                    still holds a video, or an import of this Mac failed or found a problem: it says which,
 #                                    and to deal with each first. Run it with --print first
 #   ./install.sh --machine "Mac Studio" --import light --handoff 2 "/path/to/The BRIMM DB/BRIMM Video"
-#                                    write the import (light or full) and the version of the hand-off (1 or 2) in this Mac's
+#                                    write the import (light; full is gone and refused) and the version of the hand-off (1 or 2) in this Mac's
 #                                    settings, with --drop's own rules: a setting that is not named is left as it is. With
 #                                    --machine, --rules-only also writes readings off. These three options are for --machine only
 #   ./install.sh --machine "Sallie's laptop" --user-deny "/path/to/The BRIMM DB/BRIMM Video"
@@ -165,6 +165,14 @@ if [[ -n "$switch_missing" ]]; then
   esac
   exit 2
 fi
+# The full import is gone (Phase 2, "Final Cut retired"): every import is the light one, so --import full is refused, whatever else
+# is told, and nothing is changed.
+for (( i = 1; i < ${#switch_options[@]}; i += 2 )); do
+  if [[ "${switch_options[i]}" == "--import" && "${switch_options[i+1]}" == "full" ]]; then
+    say "The full import is gone: this Mac imports lightly."
+    exit 2
+  fi
+done
 # --remove stops the watching and changes no settings: it takes none of them.
 if [[ ${#switch_options[@]} -gt 0 && "$mode" == "remove" ]]; then
   say "--remove stops the watching and changes no settings, so it does not take --drop, --import or --handoff."

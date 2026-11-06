@@ -508,7 +508,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       }
       try {
         filed = fileEpisode({
-          file: video, made: rels.map((rel) => join(part.folder, rel)), at: (to) => to, fcpxml: "", facts, printed: printeds[0], kind: taken.explainer || episodeKind(facts) === "short video" ? "short video" : "raw",
+          file: video, made: rels.map((rel) => join(part.folder, rel)), at: (to) => to, facts, printed: printeds[0], kind: taken.explainer || episodeKind(facts) === "short video" ? "short video" : "raw",
           read: null, reels: [], work, fingerprint: typeof part.record.fingerprint === "string" ? part.record.fingerprint : "", into: into(part.record.answer.seen)
         }, fdeps);
       } catch (e) {

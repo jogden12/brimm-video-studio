@@ -1388,7 +1388,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
       assert.ok(r.out.includes(`\n${LIGHT_SENT}\n`), r.out);
       assert.doesNotMatch(r.out, /file name and length/);
     }
-    for (const [settings, args] of [[undefined, []], [d.mine({ import: "light" }), ["--import", "full"]], [d.mine(), []]]) {
+    for (const [settings, args] of [[undefined, []], [d.mine(), []]]) {
       const r = askWith({ settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
       assert.equal(r.status, 0, r.err + r.out);
       assert.ok(r.out.includes(`\n${TODAY_SENT}\n`), r.out);
@@ -1465,12 +1465,12 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.match(r.out, /\nNothing was changed\.\n$/);
     d.done();
   });
-  it("shows every setting it keeps, and writes what it is told over them: --import full, --handoff, --drop, and --rules-only as readings off", () => {
+  it("shows every setting it keeps, and writes what it is told over them: --import light, --handoff, --drop, and --rules-only as readings off", () => {
     const d = box();
-    const kept = d.mine({ import: "light", readings: true, handoffVersion: 1, drop: "Unedited Video", later: { x: 1 } });
-    const r = askWith({ settings: kept }, "--print", "--machine", "Mac Studio", "--import", "full", "--handoff", "2", "--rules-only", d.root);
+    const kept = d.mine({ import: "full", readings: true, handoffVersion: 1, drop: "Unedited Video", later: { x: 1 } });
+    const r = askWith({ settings: kept }, "--print", "--machine", "Mac Studio", "--import", "light", "--handoff", "2", "--rules-only", d.root);
     assert.equal(r.status, 0, r.err + r.out);
-    assert.deepEqual(shown(r), { ...kept, version: 1, import: "full", readings: false, handoffVersion: 2 });
+    assert.deepEqual(shown(r), { ...kept, version: 1, import: "light", readings: false, handoffVersion: 2 });
     // Not told, they stay as the file has them, readings on included: no --rules-only never writes readings on.
     const quiet = askWith({ settings: d.mine({ readings: false }) }, "--print", "--machine", "Mac Studio", d.root);
     assert.deepEqual(shown(quiet), { ...d.mine({ readings: false }), version: 1 });
@@ -1510,9 +1510,9 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     refusedWith(ask("--print", "--machine", "Mac Studio", d.root, "--handoff", "3"), ["Not written: --handoff takes 1 or 2."]);
     refusedWith(askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", d.root), ['This Mac\'s settings could not be written (the import must be "full" or "light"). Jason puts that setting right by hand, or runs install.sh --machine on it, which writes this Mac\'s name, BRIMM Video and the checkout every time, the import, the hand-off version and the drop folder when told --import, --handoff or --drop, and readings off with --rules-only.'], true);
     // What it is told mends that one.
-    const mended = askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", "--import", "full", d.root);
+    const mended = askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", "--import", "light", d.root);
     assert.equal(mended.status, 0, mended.out);
-    assert.equal(shown(mended).import, "full");
+    assert.equal(shown(mended).import, "light");
     d.done();
   });
   it("refuses to switch while the old folder holds a video, naming it by its file name when the import is today's, and says what to do", () => {
@@ -1601,7 +1601,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   it("refuses plainly, before any change, when node is not here and it is told --drop, --import or --handoff, or this Mac has settings", () => {
     const d = box();
     const WHY = "Node is not on this Mac, and the installer needs it to read and check this Mac's settings before it changes anything. Install it with Homebrew (brew install node; Homebrew is at https://brew.sh), then run this again.";
-    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "full"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
+    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "light"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
       const r = askWith({ bare: true, settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
       assert.deepEqual([r.status, r.out], [2, `${WHY}\n\nNothing was changed.\n`], args.join(" "));
       assert.deepEqual([r.left, r.ran], [settings ? ["Library", "Library/Application Support", "Library/Application Support/BRIMM Video", "Library/Application Support/BRIMM Video/settings.json"] : [], ""]);
@@ -1673,7 +1673,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   const OLD_NODE = "Node here is v20.1.0, and the tool needs 22 or later. Run: brew upgrade node";
   it("treats a node older than 22 as no node when the settings are to be read and checked: refused before any change, with the node's own words", () => {
     const d = box();
-    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "full"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
+    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "light"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
       const r = askWith({ onPath: { node: NODE_OF("20.1.0") }, settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
       assert.deepEqual([r.status, r.out], [2, `${OLD_NODE}\n\nNothing was changed.\n`], args.join(" "));
       assert.deepEqual([r.left, r.ran, r.agents], [settings ? SETTINGS_LEFT : [], "", []]);
@@ -1761,7 +1761,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   });
   it("refuses --drop, --import and --handoff with --remove, which changes no settings, plainly and before anything else", () => {
     const d = box();
-    for (const args of [["--drop", "Drop"], ["--import", "full"], ["--handoff", "2"], ["--machine", "Mac Studio", "--drop", "Drop", d.root]]) {
+    for (const args of [["--drop", "Drop"], ["--import", "light"], ["--handoff", "2"], ["--machine", "Mac Studio", "--drop", "Drop", d.root]]) {
       const r = ask("--print", "--remove", ...args);
       assert.deepEqual([r.status, r.out], [2, "--remove stops the watching and changes no settings, so it does not take --drop, --import or --handoff.\n"], args.join(" "));
       assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
@@ -1980,5 +1980,21 @@ describe("the installer and her folder's lock (the open lock, K1), asked what it
     const removing = ask("--print", "--remove", "--user-deny");
     assert.equal(removing.status, 2);
     assert.ok(removing.out.includes("--remove stops the watching and changes no settings, so it does not take --user-deny."), removing.out);
+  });
+});
+
+describe("the full import is gone (Phase 2, F4)", { skip: notAMac }, () => {
+  it("--import full prints that the full import is gone, changes nothing and ends 2, on a Mac set up with --machine or not", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    for (const args of [["--machine", "Mac Studio", "--import", "full", root], ["--import", "full", "/Volumes/Work/Unedited video"], ["--machine", "Mac Studio", "--drop", "Drop", "--import", "full", root]]) {
+      const r = ask("--print", ...args);
+      assert.deepEqual([r.status, r.out], [2, "The full import is gone: this Mac imports lightly.\n"], args.join(" "));
+      assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
+    }
+    // --import light is as it was.
+    assert.equal(ask("--print", "--machine", "Mac Studio", "--import", "light", root).status, 0);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

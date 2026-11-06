@@ -1,76 +1,58 @@
 #!/usr/bin/env node
-// For an unedited video: writes a transcript with a time for every word, and a cut plan that suggests what to take out
-// (retakes, false starts, spoken cues to start over, long pauses). Claude is then asked to read the plan: it may change what
-// is cut, it writes notes for the person who edits the video, and it picks short clips. From the plan come a rough cut to
-// watch, captions that match the rough cut, an upright version of the rough cut for Instagram, when the video is wider than
-// it is tall, a Final Cut Pro project file with the same cuts made on its timeline, and the short clips.
+// For an unedited video: writes a transcript with a time for every word, a cut plan that suggests what to take out (retakes,
+// false starts, spoken cues to start over, long pauses), and the captions of the rough cut, worked out from the plan. That is the
+// light import (spec 2026-10-22, section 1), and it is the only import (Phase 2): Claude is not asked, no video is made, and there
+// is no Final Cut file, reels.json or notes. The rough cut itself is made when a video is read (roughCut, below).
 //
-// The video and its sound never leave this Mac. When Claude is asked, the words of the transcript with their times and the
-// rules' plan are sent to Claude through Claude Code, on the Claude account signed in on this Mac. The video's file name and
-// its length go with them. --rules-only keeps everything on the Mac.
+// The video and its sound never leave this Mac, and nothing of them goes to Claude when a video is imported.
 //
 //   node unedited.js <file>             one video: its files appear beside it, and nothing is moved
 //   node unedited.js --watch <folder>   every video in the folder that has no cut plan yet, then stop. Each one is then moved,
 //                                       with its files, into a new folder there named for the day
 //   options:  --watch <folder>   again, to work more than one folder
 //             --out <folder>     where to write, for one file
-//             --rules-only       never ask Claude: the plan is the rules' alone, and there are no notes and no clips
-//             --from-plan        make the videos of one video again from the cut plan an earlier run wrote beside it: the
-//                                rough cut, its upright version and the clips Claude picked, as the tool writes videos now.
-//                                No transcript is made, Claude is not asked, and no other file is touched
+//             --rules-only       accepted, and means nothing now: the import never asks Claude
+//             --from-plan        gone: the import makes no videos now. It says so and ends with 2
 //
 // The files, each named after the video: <name>.srt and <name>.transcript.txt as the transcript tool writes them,
-// <name>.words.json, <name>.cut-plan.json and <name>.cut-plan.txt, <name>.rough-cut.mp4, <name>.rough-cut.srt and
-// <name>.rough-cut.transcript.txt, <name>.rough-cut.vertical.mp4, and <name>.fcpxml. And when Claude has read the plan:
-// <name>.edit-notes.txt, and for each clip it picked <name>.reel-<n>.mp4 with its captions, <name>.reel-<n>.srt, and
-// <name>.reel-<n>.story-<k>.mp4 for each part of a Story of more than a minute. The cuts are suggested by rules (cuts.js)
-// and by Claude (notes.js), which reads the words and never sees the picture. All of them are for a person to check.
+// <name>.words.json, <name>.cut-plan.json and <name>.cut-plan.txt, <name>.rough-cut.srt and <name>.rough-cut.transcript.txt.
+// The cuts are suggested by rules (cuts.js), and are for a person to check.
 // Each file is written whole in the run's own folder, among the Mac's temporary files, and only then moved where it belongs,
 // under its own name. So a folder that syncs to a cloud drive never sees a file half written, and never sees one renamed.
 //
-// ffprobe reads the file's facts. ffmpeg takes the sound out, finds the pauses, and makes the rough cut, the upright version
-// and the clips. whisper.cpp writes the captions and the time of every word. They are the transcript tool's programs, and
-// install.sh sets them up. swift, which comes with Xcode's command line tools, runs faces.swift to find the speaker's face for
-// the upright version and the clips: without it they are cropped at the centre of the picture. claude is Claude Code:
-// without it, or when Claude cannot be reached, the plan is the rules' alone. Final Cut Pro is never opened from here.
-// While it works, it says how far it has got in a small file on this Mac's own disk (progress.js), and swift runs
-// progress.swift to show that in a small window: closing the window, or its failing to open, changes nothing about the work.
+// ffprobe reads the file's facts. ffmpeg takes the sound out and finds the pauses. whisper.cpp writes the captions and the time
+// of every word. They are the transcript tool's programs, and install.sh sets them up. While it works, it says how far it has
+// got in a small file on this Mac's own disk (progress.js), and swift runs progress.swift to show that in a small window: closing
+// the window, or its failing to open, changes nothing about the work.
 // "install.sh <folder>" has the Mac run the --watch form whenever something lands in that folder.
-// When this Mac's settings say `import: "light"` (settings.js), a video in its drop folder is imported lightly (spec
-// 2026-10-22, section 1): its transcript, words, cut plan and cut log, and the rough cut's captions worked out from the plan,
-// and nothing more. Claude is not asked, no video is made, and there is no Final Cut file, reels.json or notes: the episode's
-// record waits for her to say what the video is, and until then the video is named by its label, never by its file. Until
-// the import takes Zoom's downloads (phase Z), a file named as Zoom names them is left where it is, with a status that says
-// so (filing.js), and --from-plan refuses an episode imported lightly. A watched folder that is not this Mac's drop folder, and
-// the one file given on the command line, keep the full run whatever the setting says.
-import { mainProject } from "./projects.js";
+// A video in this Mac's drop folder is made into an episode whose record waits for her to say what the video is, and until then the
+// video is named by its label, never by its file. Until the import takes Zoom's downloads (phase Z), a file named as Zoom names
+// them is left where it is, with a status that says so (filing.js). A watched folder that is not this Mac's drop folder, and the
+// one file given on the command line, are imported the same way, and name the video by its file.
+// What Claude is still asked from here: askClaude and askAgain (Reel candidates, asked for in her chat) and the readings (reading.js).
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { localDay, stamp } from "./shared/text.js";
-import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount, captionsOf, settled } from "./lib.js";
+import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount, settled } from "./lib.js";
 import { runProgram, findTools, lockFile, takeLock, isRunning, lastLine, sizeOnDisk } from "./run.js";
 import { closingFrom, withoutClosingWords } from "./closing.js";
-import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, colourOf, streamsOf, soundStream, joinNotes, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "./cuts.js";
-import { notesRequest, readNotes, applyDecisions, clipRanges, notesText, pausesOfPlan } from "./notes.js";
-import { cueMarkers } from "./graphic-cues.js";
-import { heardWords } from "./clock.js";
-import { stillsArgs, needsReframe, cropsFor, verticalArgs, stretchesOf, STORY_MAX } from "./reframe.js";
-import { fcpxml, checkFcpxml, relativeUrl, colorSpaceOf } from "./fcpxml.js";
+import { probeArgs, factsOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, streamsOf, soundStream, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipFiles, waitingToCut } from "./cuts.js";
+import { notesRequest, readNotes, clipRanges, pausesOfPlan } from "./notes.js";
+import { stillsArgs } from "./reframe.js";
 import { previewSteps, previewLimits } from "./reels.js";
-import { previewPath, reelCandidates, reelsFile, reelEntries, readReels, mergeCandidates, REELS_FILE } from "./reel-candidates.js";
+import { previewPath, reelCandidates, reelsFile, readReels, mergeCandidates, REELS_FILE } from "./reel-candidates.js";
 import { runGuarded } from "./guard.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
-import { isWhole, readThrough, textWriter, replaceIn, lateCheck, LATE_CHECK_MS } from "./dropbox.js";
+import { isWhole, readThrough, textWriter, replaceIn, LATE_CHECK_MS } from "./dropbox.js";
 import { episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
-import { readSettings, runsFolder, episodeWork, episodesFolder, lightImport } from "./settings.js";
-import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf, ofTheSwitch } from "./episode.js";
+import { readSettings, runsFolder, episodeWork, episodesFolder } from "./settings.js";
+import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf } from "./episode.js";
 import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
 import { fingerprintOf, matchVersion } from "./versions.js";
-import { runDetached } from "./detached.js";
 import { LEFT, leftAlone, sessionNotCleared } from "./gate.js";
 import { STUDIO_NAME } from "./name.js";
 import { readStatuses, importState, shownStep } from "./importing.js";
@@ -79,11 +61,6 @@ import { readStatuses, importState, shownStep } from "./importing.js";
     transcript tool's own numbers. */
 const LOOK_MS = 5000;
 const MAX_LOOKS = 120;
-
-/** Final Cut Pro cannot keep a library in a folder that syncs to a cloud drive, and on this Mac the Movies folder does. So
-    the Final Cut file names a library in the home folder itself: this folder there, and this library in it. Final Cut Pro
-    makes the library the first time such a file is opened. */
-const LIBRARY = join("BRIMM Video Work", "BRIMM rough cuts.fcpbundle");
 
 /** The face finder, which swift runs, and how much of what it prints is read. It prints a line for each still, and there is a
     still for every two seconds, so a whole day of video is well within this. */
@@ -126,8 +103,8 @@ const hasXcodeTools = () => spawnSync("/usr/bin/xcode-select", ["-p"], { stdio: 
     `xcodeTools` says the tools are here. claude is Claude Code, which Claude is asked through. It is looked for where the
     other programs are, and then in .local/bin in the home folder, where its own installer puts it: the launch agent's PATH
     has no home folder in it. `missing` says what is not there, in plain words. swift and claude are never among it: without
-    swift the work goes on, and the upright version is cropped at the centre of the picture, and without claude the cut
-    plan is the rules' alone. */
+    swift the work goes on, and a Reel candidate is cropped at the centre of the picture, and without claude a reading and `ask` cannot ask
+    Claude (the import never does). */
 export function findPrograms(given = {}) {
   const { exists = existsSync, env = process.env, xcodeTools = hasXcodeTools } = given;
   const found = findTools(given);
@@ -138,16 +115,6 @@ export function findPrograms(given = {}) {
   const swift = named && xcodeTools() ? named : "";
   const claude = [...path, "/opt/homebrew/bin", "/usr/local/bin", join(env.HOME || homedir(), ".local", "bin")].map((dir) => join(dir, "claude")).find((file) => exists(file)) || "";
   return { ...found, ffprobe, swift, claude, missing: ffprobe ? found.missing : [...found.missing, "ffprobe is not installed. It comes with ffmpeg."] };
-}
-
-/** The name of the folder a video in a watched folder would be filed in now: the first one free for the day. "" when the
-    folder cannot be read. The move then finds the same, and says so. */
-function dayFor(dir, { today = () => localDay() }) {
-  try {
-    return dayFolder(readdirSync(dir), today());
-  } catch (e) {
-    return "";
-  }
 }
 
 /** Put a file that is whole, at `from` in the run's own folder, where it belongs, at `to`: one move, so that it appears there
@@ -206,12 +173,11 @@ export function filesOf(work, { name, hold = false, log = () => {}, move, copy }
     transcript tool files a video. The video is moved first: a run cut short part-way then never leaves it in the watched
     folder to be done a second time. It is the one file renamed in the watched folder, and it has been whole there since
     before the run began. The files `made` of it were held in the run's own folder (see filesOf), and each is put straight
-    into the new folder after it, so that it appears there whole. `day` is the folder's name when it was worked out already,
-    as it is for a video whose Final Cut file names it there. When the video cannot be moved it stays where it is, `stayed`
-    is called, and its files are put beside it. When a file cannot be put in the new folder, it and the ones after it are
+    into the new folder after it, so that it appears there whole. When the video cannot be moved it stays where it is, and its
+    files are put beside it. When a file cannot be put in the new folder, it and the ones after it are
     put in the watched folder instead. The log says which, and says so of a file that could not be put there either.
     Returns the new folder's name when every file is in it, and "" otherwise. */
-function fileAway(dir, file, made, deps, day, stayed) {
+function fileAway(dir, file, made, deps) {
   const { log = () => {}, today = () => localDay(), move = renameSync, files } = deps;
   const name = basename(file);
   /** Put files in the watched folder, beside where the video was. */
@@ -226,7 +192,7 @@ function fileAway(dir, file, made, deps, day, stayed) {
   };
   let into = "";
   try {
-    const folder = day || dayFolder(readdirSync(dir), today());
+    const folder = dayFolder(readdirSync(dir), today());
     mkdirSync(join(dir, folder));
     into = join(dir, folder);
     move(file, join(into, name));
@@ -238,7 +204,6 @@ function fileAway(dir, file, made, deps, day, stayed) {
       // Something is in it by now, so it is left.
     }
     log(`${name}: could not be moved into a folder for the day (${e.code || e.message}), so it stays in the watched folder, and its files are put beside it there.`);
-    stayed();
     beside(made);
     return "";
   }
@@ -271,29 +236,18 @@ function oldClips(out) {
     something else. */
 const reasonOf = (ended) => (ended.signal ? `it was killed by ${ended.signal}` : lastLine(ended.stderr));
 
-/** Some things as they are said in a row: "a", "a and b", "a, b and c". */
-const listed = (things) => (things.length < 2 ? things.join("") : `${things.slice(0, -1).join(", ")} and ${things[things.length - 1]}`);
-
-/** A text with a capital for its first letter. */
-const capital = (text) => text[0].toUpperCase() + text.slice(1);
 /** A sentence as a part of another: without its full stop, and without its capital, unless it opens with Claude's name or
     with a quoted word. And a part made a sentence of its own. */
 const clause = (whole) => {
   const said = String(whole).replace(/\.$/, "");
   return !said || /^(Claude|")/.test(said) ? said : said[0].toLowerCase() + said.slice(1);
 };
-const sentence = (part) => `${capital(part)}.`;
 
-/** The steps of the work on one video, as the progress panel counts them: Claude is asked (`claude`), there is an upright
-    version to make (`wide`), there are clips to cut (`clips`), or, for an episode, Reel previews to make (`previews`), and the
-    video is filed away after (`watched`). The light import (`light`) reads, transcribes, plans and files, and nothing more. */
+/** The steps of the work on one video, as the progress panel counts them: the import reads, transcribes, plans and files, and
+    nothing more. */
 const LIGHT_STEPS = ["Reading the sound", "Writing the transcript", "Making the cut plan", "Filing"];
 /** The steps of the light import of a video with a picture and no sound (PR H5a): there is nothing to hear, so it is looked at and filed. */
 const SILENT_STEPS = ["Reading the sound", "Filing"];
-const stepsFor = ({ claude, wide, clips, previews, watched, light }) => light ? [...LIGHT_STEPS] : [
-  "Reading the sound", "Writing the transcript", "Making the cut plan", ...(claude ? ["Asking Claude"] : []), "Making the rough cut",
-  ...(wide ? ["Finding the faces", "Making the upright version"] : []), ...(previews ? ["Making the Reel previews"] : clips ? ["Cutting the short clips"] : []), ...(watched ? ["Filing"] : [])
-];
 
 /** The seconds that stretches of a video come to. */
 const secondsIn = (stretches) => stretches.reduce((sum, s) => sum + (s.end - s.start), 0);
@@ -440,134 +394,6 @@ export async function facesIn(file, work, { run, tools, limit = 0 }) {
   return { why: "what the face finder printed could not be read" };
 }
 
-/** Have ffmpeg write stretches of a video, joined, as one file at `to`: each with its crop, and the whole made 1080 by 1920,
-    or with no crops for a video that keeps its shape. Resolves "" when the file is made, or why it is not. It is written
-    whole in the run's own folder and then put where it belongs, as every other file is. */
-async function joined(file, to, { ranges, crops, streams = null }, { run, tools, files, progress = noProgress }) {
-  const writing = files.at(to);
-  const watch = progress.encoding(secondsIn(ranges));
-  let made;
-  try {
-    made = await run(tools.ffmpeg, [...watch.args, ...verticalArgs({ video: file, ranges, crops, out: writing, streams })]);
-  } finally {
-    watch.stop();
-  }
-  if (made.code !== 0 || !existsSync(writing)) {
-    rmSync(writing, { force: true });
-    return `ffmpeg stopped (${lastLine(made.stderr)})`;
-  }
-  files.done(to);
-  return "";
-}
-
-/** Make the upright version of a video for Instagram: its kept stretches as the rough cut takes them, each with one fixed crop
-    placed on the speaker's face, and the whole made 1080 by 1920. Resolves `why` it could not be made, which is "" when it
-    was. When the faces could not be looked for, every stretch is cropped at the centre of the picture, the log says so, and
-    `centred` is the reason. `stills` is what the face finder said of the video, for the short clips to be cropped by: the
-    faces are looked for once. Nothing is thrown from here, so a failure costs this file and no other. */
-async function upright(file, to, { facts, spans, streams = null }, work, deps) {
-  const { log = () => {}, progress = noProgress } = deps;
-  const name = basename(file);
-  let seen = {};
-  try {
-    log(`${name}: making the upright version.`);
-    progress.step("Finding the faces");
-    seen = await facesIn(file, work, deps).catch((e) => ({ why: `the work stopped (${e.code || e.message})` }));
-    if (seen.why) log(`${name}: the faces could not be looked for (${seen.why}), so the upright version is cropped at the centre of the picture.`);
-    const ranges = stretchesOf(spans);
-    const crops = cropsFor(facts, ranges, seen.stills || []);
-    const guessed = crops.filter((crop) => !crop.found).length;
-    if (seen.stills && guessed) {
-      log(seen.stills.some((still) => still.faces.length) ? `${name}: no face was found in ${guessed} of the ${crops.length} kept stretches, so the crop of the whole video is used there.`
-        : `${name}: no face was found in the video, so the upright version is cropped at the centre of the picture.`);
-    }
-    progress.step("Making the upright version");
-    return { why: await joined(file, to, { ranges, crops, streams }, deps), centred: seen.why || "", stills: seen.stills || [] };
-  } catch (e) {
-    rmSync(deps.files.at(to), { force: true });
-    return { why: `the work stopped (${e.code || e.message})`, centred: seen.why || "", stills: seen.stills || [] };
-  }
-}
-
-/** Stretches as keptSpans gives them, cut down to hold `most` seconds at most. Each end of a stretch was moved to the nearest
-    whole picture, and that can leave the stretches a picture or two longer than they were given: 60 seconds of a video
-    of 29.97 pictures a second can come out as 1799 pictures, which is 60.027 seconds. What they hold over `most`, in
-    whole pictures, is taken off their end. */
-function noLonger(spans, most, fps) {
-  const rate = framesASecond(fps);
-  const pictures = (span) => Math.round((span.end - span.start) * rate);
-  let over = spans.reduce((sum, span) => sum + pictures(span), 0) - Math.floor(most * rate);
-  const held = spans.slice();
-  while (over > 0 && held.length) {
-    const last = held.pop();
-    const left = pictures(last) - over;
-    if (left > 0) held.push({ ...last, end: (Math.round(last.start * rate) + left) / rate });
-    over -= pictures(last);
-  }
-  return held;
-}
-
-/** One file made of stretches of a video, each a {start, end} in seconds: a short clip, or a part of its Story. Each edge is
-    moved to the nearest whole picture, as the rough cut's are, and the file is made as the upright version is. Of a video
-    that is wider than it is tall, each stretch is cropped on the speaker by `stills`, what the face finder said of the
-    video, and the whole is made 1080 by 1920. With no stills that is the centre of the picture. A video that is upright or
-    square already keeps its shape. `most` is how many seconds the file may hold, for a part of a Story: the whole
-    pictures over that are left off its end, and are in no part. Resolves {spans}, the stretches as they were taken, each
-    with the moment it starts in the file, or {why} the file could not be made. Nothing is thrown from here, so a failure
-    costs this file and no other. */
-async function cutPiece(file, to, given, { facts, stills, most = 0, streams = null }, deps) {
-  try {
-    if (!facts.height) return { why: "there is no picture in the file" };
-    const whole = keptSpans(given.map((range) => ({ ...range, keep: true })), roughRate(facts));
-    const spans = most ? noLonger(whole, most, roughRate(facts)) : whole;
-    if (!spans.length) return { why: "it is shorter than one picture" };
-    const ranges = stretchesOf(spans);
-    const why = await joined(file, to, { ranges, crops: needsReframe(facts) ? cropsFor(facts, ranges, stills) : null, streams }, deps);
-    return why ? { why } : { spans };
-  } catch (e) {
-    rmSync(deps.files.at(to), { force: true });
-    return { why: `the work stopped (${e.code || e.message})` };
-  }
-}
-
-/** Cut the short clips Claude picked, each as clipRanges gives it. For each clip, in turn: the whole clip, which is its
-    ranges with what the plan cuts between them left out, then its captions on the clip's own clock, and then each part of
-    its Story, when the Story has more than one. Resolves, for each clip, {clip, files, failed}: the files that were made,
-    and what could not be made and why, each as the log says it. A clip that could not be cut has no captions and no Story,
-    and the clips after it are cut all the same. A clip is cut whether or not it fits a Reel: the notes say when it does
-    not. Nothing is burned into the picture: this Mac's ffmpeg has no filter for captions, so they come as a file. */
-async function cutClips(file, clips, { plan, facts, stills, streams = null }, deps) {
-  const { progress = noProgress } = deps;
-  const cut = [];
-  for (const [i, clip] of clips.entries()) {
-    progress.step("Cutting the short clips", `Cutting short clip ${i + 1} of ${clips.length}`);
-    const out = clipOutputs(file, clip.n, clip.story.length, deps.outDir || undefined);
-    const files = [];
-    const failed = [];
-    const whole = await cutPiece(file, out.video, clip.ranges, { facts, stills, streams }, deps);
-    if (whole.why) failed.push(`clip ${clip.n} could not be cut: ${whole.why}`);
-    else {
-      files.push(out.video);
-      try {
-        // The captions are the kept phrases of the clip, placed as the rough cut's captions are placed in the rough cut. A
-        // phrase is the clip's when some of it lies in the clip. The transcriber may time the last words past the end of the
-        // file, which is where the clip ends: such a time is placed at the clip's end.
-        deps.files.text(out.srt, roughCaptions(plan.phrases.filter((p) => p.keep && p.start < clip.end && p.end > clip.start), whole.spans));
-        files.push(out.srt);
-      } catch (e) {
-        failed.push(`the captions of clip ${clip.n} could not be written: the work stopped (${e.code || e.message})`);
-      }
-      for (const [k, to] of out.story.entries()) {
-        const part = await cutPiece(file, to, clip.story[k].ranges, { facts, stills, most: STORY_MAX, streams }, deps);
-        if (part.why) failed.push(`part ${k + 1} of the Story of clip ${clip.n} could not be cut: ${part.why}`);
-        else files.push(to);
-      }
-    }
-    cut.push({ clip, files, failed });
-  }
-  return cut;
-}
-
 /** Make the preview of each of an episode's Reel candidates, in turn: in parts and then joined (previewSteps), each step by an
     ffmpeg run under the watchdog with a preview's limits (runGuarded and previewLimits, or `deps.runGuarded` for a test), so
     that no preview can grow without end. Resolves the candidates, each with `preview`, its path in the episode folder, when
@@ -630,15 +456,6 @@ export function soundOf(printed) {
   } catch (e) {
     return {};
   }
-}
-
-/** The Final Cut file of a plan, for the video at `video`: {text}, or {why} there is none: the main video's project
-    (projects.js mainProject), with what ffprobe printed of the video for its asset's sound and colour. `library` is where
-    Final Cut Pro is to keep the project, and `writer` is what writes the file's text. */
-function finalCut(video, { plan, facts, spans, srt, printed, ideas = [] }, { library, src, writer = fcpxml }) {
-  if (!facts.height) return { why: "there is no picture in the file" };
-  if (!spans.length) return { why: "the plan keeps nothing" };
-  return mainProject({ video, facts, more: { ...soundOf(printed), colorSpace: colorSpaceOf(colourOf(printed)) }, plan, srt, ideas, library, src, writer });
 }
 
 /** The first line of a light import's cut log: its times are the recording's, since no rough cut is made at a drop, and the plan
@@ -739,12 +556,12 @@ async function workOn(file, deps) {
   // title names it, `deps.shown`), written in no status, and it posts no notice of its own: the join run says when it is ready.
   const into = deps.into || null;
   const notify = into ? () => {} : deps.notify || (() => {});
-  // With this Mac's settings saying `import: "light"`, an episode's import is the light one (below). Its every log line names the
-  // video by its label (`shown`), and until the label is known as "A video in the drop folder"; and what a step logs on the
+  // Every import is the light one (Phase 2): the transcript, the cut plan and its text, and the rough cut's captions, worked out
+  // from the plan; no Claude, no video made, no Final Cut file, no reels.json and no notes. An episode's import names the video
+  // by its label (`shown`), and until the label is known as "A video in the drop folder"; and what a step logs on the
   // way, as a program's error or a file that could not be put somewhere, is logged with nothing of the file's names or a path
   // in it (kinds.js withoutNames), as is why it failed in its status. Its file is often named for a client.
-  const light = Boolean(episode && deps.light);
-  const quiet = light && !into;
+  const quiet = Boolean(episode) && !into;
   const hide = { names: quiet ? namesOf(file) : [], keep: [] };
   const plain = (text) => (quiet ? withoutNames(text, hide.names, hide.keep) : text);
   const said = deps.log || (() => {});
@@ -779,9 +596,7 @@ async function workOn(file, deps) {
   }
   // What the video in the drop folder is when its import begins, so that one put in its place meanwhile is told apart.
   const arrived = episode && !into ? fileId(file) : null;
-  // With this Mac's settings saying `import: "light"`, an episode's import is the light one (spec 2026-10-22, section 1): the
-  // transcript, the cut plan and its text, and the rough cut's captions, worked out from the plan; no Claude, no video made,
-  // no Final Cut file, no reels.json and no notes. Its record waits for her answer. Her screen may be shared, so the progress
+  // An episode's record waits for her answer (spec 2026-10-22, section 1). Her screen may be shared, so the progress
   // panel and every notice name the video by its label, made of the Mac and the moment it was dropped, and never by its file:
   // `shown`. The label's short form, the one kept, holds no length, so it is known before the video is read. The moment is when
   // this Mac first saw the video in its drop folder (seen.json, filing.js noteSeen), so that a queue of drops keeps their own
@@ -816,7 +631,7 @@ async function workOn(file, deps) {
   /** Keep the late check of the episode just filed (`filed`) on this Mac's own disk, so that a run stopped first leaves it for the next. */
   const keepLateCheck = (filed) => {
     // The video the join made is not in a drop folder: the file the check takes away is one in the run's own folder that is nobody's.
-    const pending = pendingFor(filed, { video: name, drop: into ? join(work, "not in a drop folder") : file, dropFile: arrived, importId: importIdOf(arrived), work, planTxt: basename(out.planTxt), label: into ? shown : light ? label : "" }, { episode, clock: deps.clock || Date.now });
+    const pending = pendingFor(filed, { video: name, drop: into ? join(work, "not in a drop folder") : file, dropFile: arrived, importId: importIdOf(arrived), work, planTxt: basename(out.planTxt), label: into ? shown : label }, { episode, clock: deps.clock || Date.now });
     try {
       writePending(episode.home, pending);
       log(`${shown}: copied into Dropbox. Its late check is due at ${new Date(dueAt(pending)).toTimeString().slice(0, 5)}.`);
@@ -839,13 +654,9 @@ async function workOn(file, deps) {
     notify(episode ? `No transcript could be made from ${shown}. It stays in the drop folder; see the log.` : `No transcript could be made from ${name}. See the note beside it.`);
     return { ok: false, name, message: why };
   };
-  // The progress panel is told each step as it begins. It is told the steps to come as far as they are known, and again as
-  // more is known: whether there is an upright version to make, once the video has been read, and whether there are clips.
-  // `asking` and not `claude`: the plan's own record of Claude's reply is called claude further down, in the same scope.
-  const asking = !light && !deps.rulesOnly && Boolean(tools.claude);
-  const watched = Boolean(deps.watched);
+  // The progress panel is told each step as it begins.
   progress.begin(shown);
-  progress.steps(stepsFor({ claude: asking, wide: true, clips: asking && !episode, previews: asking && Boolean(episode), watched, light }));
+  progress.steps([...LIGHT_STEPS]);
   // Whether the work on the video finished with every file made: only then is what its steps took kept as a measure.
   let finished = false;
   try {
@@ -855,18 +666,18 @@ async function workOn(file, deps) {
     const probe = await run(tools.ffprobe, probeArgs(file, probed));
     const printed = probe.code === 0 && existsSync(probed) ? readFileSync(probed, "utf8") : "";
     const facts = printed ? factsOf(printed) : null;
-    // A video with a picture and no sound (PR H5a) can only be footage for a planned video: nothing is said in it to read, so the light
-    // import of an episode files it alone, with its record waiting for her answer. Any other file with no sound fails, as it always did:
-    // one with no picture too, a heavy import's, and one given to the import alone.
+    // A video with a picture and no sound (PR H5a) can only be footage for a planned video: nothing is said in it to read, so the
+    // import of an episode files it alone, with its record waiting for her answer. Any other file with no sound fails, as it always
+    // did: one with no picture too, and one given to the import alone.
     if (facts && !facts.sound) {
-      if (!(light && !into && facts.height > 0)) return fail("there is no sound in the file");
+      if (!(episode && !into && facts.height > 0)) return fail("there is no sound in the file");
       progress.steps(SILENT_STEPS);
       progress.step("Filing");
       log(`${shown}: it has a picture and no sound, so it is filed with nothing made of it.`);
       let filed = null;
       try {
         // No sound is read, no transcript, plan or words are made, and so there are no retakes, no guess and no fingerprint to match.
-        filed = fileEpisode({ file, made: [], at: files.at, fcpxml: "", facts, printed, kind: null, read: null, reels: [], work, dropFile: arrived, label, ...lightFields({ name, facts, plan: null, words: [], root: episode.root }, { log, whole }) }, deps);
+        filed = fileEpisode({ file, made: [], at: files.at, facts, printed, kind: null, read: null, reels: [], work, dropFile: arrived, label, ...lightFields({ name, facts, plan: null, words: [], root: episode.root }, { log, whole }) }, deps);
         keepWork = true;
         keepLateCheck(filed);
       } catch (e) {
@@ -889,13 +700,9 @@ async function workOn(file, deps) {
     // iPhone's clip carries Apple's APAC beside its AAC, and ffmpeg on its own takes the sound with the most channels.
     const streams = streamsOf(printed);
     if (facts && streams.audio === null && streams.unreadable.length) return fail(`its sound is in a form this Mac's ffmpeg cannot read (${streams.unreadable.join(", ")})`);
-    // An episode of a recording that is upright, square or short is a short video: it gets no upright version and no clips.
+    // An episode of a recording that is upright, square or short is a short video.
     const kind = episode && facts ? episodeKind(facts) : "";
-    const wide = (f) => needsReframe(f) && kind !== "short video";
-    if (facts) {
-      progress.length(facts.duration);
-      progress.steps(stepsFor({ claude: asking, wide: wide(facts), clips: asking && !episode, previews: asking && Boolean(episode) && kind !== "short video", watched, light }));
-    }
+    if (facts) progress.length(facts.duration);
     const wav = join(work, "sound.wav");
     const a = await run(tools.ffmpeg, ffmpegArgs(file, wav, streams.audio));
     if (a.code !== 0 || !existsSync(wav)) return fail(`the sound could not be read from the file (${lastLine(a.stderr)})`);
@@ -940,51 +747,31 @@ async function workOn(file, deps) {
     log(`${shown}: the transcript is written, ${captions} captions.`);
 
     // From here on a step that fails costs the plan or a file made from it, and never the transcript: what was made is kept
-    // and filed, and the plan's own text says what is missing. A short clip that could not be cut is the one thing it does
-    // not name: the log and the notes for the editor do.
+    // and filed, and the plan's own text says what is missing.
     progress.step("Making the cut plan");
     const planned = await planFor({ facts, probe, told: outBase + ".json", untimed, silent, wav, edge: closed.edge, heard: heardPauses }, deps).catch((e) => ({ why: `the work on the plan stopped (${e.message})` }));
-    // The plan the rules made. Claude's decisions may change it below, and the plan they give is the plan for all that follows.
-    let { plan } = planned;
-    // What could not be made, each as the log says it. And of the files made from the plan, the ones that are missing, each
-    // {what, why}.
+    // The plan the rules made: the plan of every import is the rules' alone.
+    const { plan } = planned;
+    // What could not be made, each as the log says it.
     const missing = [];
-    const lacks = [];
-    // What came of asking Claude: {read} or {why}, and nothing when it was not asked. And the short clips as they were cut, or,
-    // for an episode, its Reel candidates with their previews, and why there are none when there are none (reels.json).
-    let asked = null;
-    let cut = [];
-    let candidates = [];
-    let noReels = { none: kind === "short video" ? "it is a short video" : episode && facts && !facts.height ? "it has no picture" : "", cannotAsk: "" };
-    // The folder for the day the video is to be filed in, and the Final Cut file that names it there.
-    let day = "";
-    let project = null;
-    // Have the Final Cut file name the video at `video`, where the video is, when it names it anywhere else. A video is named
-    // by its whole path, whatever path the tool was given.
-    const nameAgain = (video) => {
-      if (!project || resolve(video) === project.named) return;
-      try {
-        files.text(out.fcpxml, project.textFor(resolve(video)).text);
-      } catch (e) {
-        log(`${shown}: its Final Cut file names it in a folder it is not in, and could not be written again (${e.code || e.message}).`);
-      }
-    };
     /** What a plan comes to, as the log says it. */
     const sums = (made) => {
       const cuts = made.ranges.filter((r) => !r.keep).length;
       return `keeps ${stamp(Math.round(made.kept))} of ${stamp(Math.round(facts.duration))} and suggests ${cuts} cut${cuts === 1 ? "" : "s"}`;
     };
-    /** The plan `made` as its file holds it (see where it is written, below), with `claude`, what Claude made of it, or null. */
-    const planJson = (made, claude) => JSON.stringify({ version: 1, video: name, facts, phrases: made.phrases, ranges: made.ranges, kept: made.kept, cut: made.cut, pauses: planned.pauses.map(([start, end]) => [start, Math.min(end, facts.duration)]), by: made.by || "rules", ...(made.changes ? { changes: made.changes } : {}), ...(claude ? { claude } : {}) }, null, 2) + "\n";
+    /** The plan `made` as its file holds it (see where it is written, below). */
+    const planJson = (made) => JSON.stringify({ version: 1, video: name, facts, phrases: made.phrases, ranges: made.ranges, kept: made.kept, cut: made.cut, pauses: planned.pauses.map(([start, end]) => [start, Math.min(end, facts.duration)]), by: made.by || "rules", ...(made.changes ? { changes: made.changes } : {}) }, null, 2) + "\n";
     if (!plan) {
-      if (!noReels.none) noReels = { none: "no cut plan could be made", cannotAsk: "" };
       missing.push(`no cut plan could be made: ${planned.why}`);
       files.text(out.planTxt, `No cut plan could be made for ${name}.\n\nWhy: ${planned.why}.\n\nIts transcript was made, and is beside this note.\n`);
-    } else if (light) {
-      // The light import makes no video: the words, the rough cut's captions, placed by the plan's own arithmetic, the cut log,
+    } else {
+      // The import makes no video: the words, the rough cut's captions, placed by the plan's own arithmetic, the cut log,
       // whose first line says its times are the recording's, and the plan, written last, as below. A file that cannot be written
       // ends the import as one that failed, whose status says why with nothing of the file's names in it (fail), and nothing is
-      // filed: the next try makes them again.
+      // filed: the next try makes them again. The plan is written after everything made from it: it is what says this video is
+      // done. It keeps the pauses ffmpeg heard, which the plan was made from, so that a reading made later, perhaps on the other
+      // Mac with no sound file, changes the plan with the same pauses (pausesOfPlan, in notes.js). A pause that never ends lasts to
+      // the end of the video, and is written so: JSON has no time with no end, and nothing changes by it.
       log(`${shown}: the cut plan ${sums(plan)}.`);
       try {
         files.text(out.words, JSON.stringify({ video: name, duration: facts.duration, words: planned.words }, null, 2) + "\n");
@@ -992,198 +779,29 @@ async function workOn(file, deps) {
         files.text(out.roughTxt, stampedText(roughSrt));
         files.text(out.roughSrt, roughSrt);
         files.text(out.planTxt, planText(plan, LIGHT_PLAN_NOTE));
-        files.text(out.plan, planJson(plan, null));
+        files.text(out.plan, planJson(plan));
       } catch (e) {
+        // A video that is not an episode's stops the run with the error, and is done again the next time (uneditedFile logs it).
+        if (!episode) throw e;
         return fail(`the work stopped (${e.code || e.message})`);
       }
-    } else {
-      log(`${shown}: the cut plan ${sums(plan)}.`);
-
-      // Claude reads the rules' plan before anything is made from it. Its decisions are applied with the pauses ffmpeg heard,
-      // so a cut of its own falls where the rules' cuts fall, and the clips it picked are taken from the plan as it then is.
-      // Without a reply, the plan stays the rules' alone, and there are no notes and no clips.
-      if (asking) progress.step("Asking Claude");
-      asked = deps.rulesOnly || !tools.claude ? null : await askClaude(name, plan, facts, work, deps);
-      // What Claude wrote, as it was read, and what of it was left out on the way, each with its reason. And its clips, as
-      // they can be cut.
-      const read = asked && asked.read;
-      let ignored = [];
-      let clips = [];
-      let changes = 0;
-      if (read) {
-        const applied = applyDecisions(plan, read.decisions, planned.pauses);
-        const picked = clipRanges(applied.plan, read.clips, planned.pauses);
-        plan = applied.plan;
-        ignored = [...read.problems, ...applied.ignored, ...picked.ignored];
-        clips = picked.clips;
-        if (kind === "short video" && clips.length) {
-          log(`${shown}: it is a short video, so the clips Claude picked are not cut.`);
-          clips = [];
-        }
-        // A recording with no picture gets no Reel candidates: none could have a preview or a project.
-        if (episode && !facts.height && clips.length) {
-          log(`${shown}: it has no picture, so the clips Claude picked are not Reel candidates.`);
-          clips = [];
-        }
-        changes = (plan.changes || []).length;
-        log(changes ? `${name}: Claude changed the cut plan in ${changes} place${changes === 1 ? "" : "s"}: it now ${sums(plan)}.` : `${name}: Claude changed nothing in the cut plan.`);
-      }
-
-      progress.steps(stepsFor({ claude: asking, wide: wide(facts), clips: clips.length > 0 && !episode, previews: clips.length > 0 && Boolean(episode), watched }));
-      // Why an episode has no Reel candidates, when it has none, and why asking Claude again would not help, when it would not.
-      if (episode && !noReels.none) {
-        if (deps.rulesOnly) noReels = { none: "Claude was not asked", cannotAsk: `the import on ${episode.machine} is set to go by the rules alone`, rulesOnly: true };
-        // The Mac is named: the other Mac, or this one later, may have Claude Code, and whether Claude can be asked is for the
-        // Mac that shows the list to say.
-        else if (!tools.claude) noReels = { none: `Claude was not asked, since Claude Code is not installed on ${episode.machine}`, cannotAsk: "" };
-        else if (!read) noReels = { none: `Claude could not be asked (${asked.why})`, cannotAsk: "" };
-        else if (!clips.length) noReels = { none: "Claude picked no clip that stands alone", cannotAsk: "" };
-      }
-      const spans = keptSpans(plan.ranges, roughRate(facts));
-      let why = "";
-      let note = "";
-      try {
-        files.text(out.words, JSON.stringify({ video: name, duration: facts.duration, words: planned.words }, null, 2) + "\n");
-        const roughSrt = roughCaptions(plan.phrases, spans);
-        files.text(out.roughTxt, stampedText(roughSrt));
-        files.text(out.roughSrt, roughSrt);
-        why = await roughCut(file, out.rough, { plan, facts, spans, streams }, deps);
-      } catch (e) {
-        // Something nobody foresaw, such as a file that cannot be written. What was made is kept, and the plan names the rest.
-        why = `the work stopped (${e.code || e.message})`;
-        rmSync(files.at(out.rough), { force: true });
-        const gone = [out.words, out.roughTxt, out.roughSrt].filter((f) => !files.has(f)).map((f) => basename(f));
-        if (gone.length) note = ` Not made either: ${gone.join(", ")}.`;
-      }
-      if (why) lacks.push({ what: "rough cut", why, note });
-
-      // The upright version is for a picture that is wider than it is tall. One that is upright or square already needs none.
-      // The faces are looked for once, for it, and what was found is kept for the clips, which are cropped by the same
-      // stills. `centred` says why the faces could not be looked for, when they could not: what is made of the video is
-      // then cropped at the centre of the picture, and `atCentre` names what was.
-      let stills = [];
-      let centred = "";
-      const atCentre = [];
-      if (!needsReframe(facts)) {
-        if (facts.height) log(`${shown}: its picture is not wider than it is tall, so it needs no upright version.`);
-      } else if (kind === "short video") {
-        log(`${shown}: it is a short video, so it gets no upright version.`);
-      } else if (!spans.length) lacks.push({ what: "upright version", why: "the plan keeps nothing" });
-      else {
-        const made = await upright(file, out.vertical, { facts, spans, streams }, work, deps);
-        ({ stills, centred } = made);
-        if (made.why) lacks.push({ what: "upright version", why: made.why });
-        else atCentre.push("the upright version");
-      }
-
-      // An episode's Reel candidates: Claude's clips, each with its stretches cropped on the speaker by the stills found for
-      // the upright version, and a small upright preview of each. No full-size clip, no Story and no caption file: only a Reel
-      // that is picked gets more (design, section 3). A preview that cannot be made is noted, as a clip that cannot be cut is.
-      if (episode && clips.length) {
-        log(`${shown}: making the previews of ${clips.length} Reel candidate${clips.length === 1 ? "" : "s"}.`);
-        candidates = await makePreviews(file, reelCandidates({ clips, plan, facts, stills }), { facts, streams }, deps);
-        cut = candidates.map((c) => ({ clip: clips.find((clip) => clip.n === c.n), files: c.preview ? [join(dirname(file), c.preview)] : [], named: c.preview ? [c.preview] : [], failed: c.failed ? [`the preview of Reel ${c.n} could not be made: ${c.failed}`] : [] }));
-        if (wide(facts) && candidates.some((c) => c.preview)) atCentre.push("the Reel previews");
-      } else if (clips.length) {
-        log(`${shown}: cutting ${clips.length} short clip${clips.length === 1 ? "" : "s"}.`);
-        cut = await cutClips(file, clips, { plan, facts, stills, streams }, deps);
-        if (wide(facts) && cut.some((made) => made.files.length)) atCentre.push("the short clips");
-      }
-
-      // The Final Cut file names the video where it ends up. For a video in a watched folder that is in the folder for the
-      // day, so the folder's name is settled here, as late as can be, and the move below is given it. The library is in the
-      // home folder, and the folder it is kept in is made when it is not there.
-      // An episode's Final Cut file is kept in its edit/ folder, and names the video by a path from there and no library, so it
-      // reads the same on either Mac: each Mac is handed a copy of its own when the timeline is shown in Final Cut (edit.js).
-      day = deps.watched && !episode ? dayFor(deps.watched, deps) : "";
-      const named = resolve(day ? join(deps.watched, day) : dirname(file), name);
-      const library = deps.home && !episode ? join(deps.home, LIBRARY) : "";
-      // Each of Claude's graphic cues placed in kept words is a note at the moment its words start, as they are said (heardWords).
-      const ideas = read ? cueMarkers({ ...plan, claude: { graphicCues: read.graphicCues } }, heardWords(planned.words, plan.phrases)) : [];
-      const src = episode ? relativeUrl(`../${name}`) : "";
-      const textFor = (video) => finalCut(video, { plan, facts, spans, srt, printed, ideas }, { library, src, writer: deps.finalCut });
-      const first = textFor(named);
-      let wrong = first.why || "";
-      try {
-        if (!wrong && library) mkdirSync(dirname(library), { recursive: true });
-      } catch (e) {
-        wrong = `the folder for its library could not be made (${e.code || e.message})`;
-      }
-      try {
-        if (!wrong) files.text(out.fcpxml, first.text);
-      } catch (e) {
-        wrong = `the work stopped (${e.code || e.message})`;
-      }
-      if (wrong) lacks.push({ what: "Final Cut file", why: wrong });
-      else project = { named, textFor };
-
-      // What could not be cut of the clips, each as the log says it.
-      const uncut = cut.flatMap((made) => made.failed);
-      // The notes Claude wrote for the editor. With them goes everything of its reply that could not be used, and why:
-      // what could not be read, each decision and each clip that was left out, and each clip that could not be cut.
-      if (read) {
-        try {
-          files.text(out.notes, notesText({ ...read, problems: [...ignored, ...uncut.map(sentence)] }, plan, clips));
-        } catch (e) {
-          lacks.push({ what: "notes for the editor", why: `the work stopped (${e.code || e.message})` });
-        }
-      }
-
-      // What the plan's text says first, after the files that are missing: who made the plan, and what was cropped at the
-      // centre of the picture and not on the speaker.
-      const said = [];
-      if (read) said.push(`Claude read this plan and ${changes ? `changed it in ${changes} place${changes === 1 ? "" : "s"}` : "changed nothing in it"}.${files.has(out.notes) ? ` Its notes are in ${basename(out.notes)}.` : ""}`);
-      else if (asked) said.push(`Claude could not be asked (${asked.why}), so this plan is the rules' alone.`);
-      else if (!deps.rulesOnly) said.push("Claude Code is not installed, so this plan is the rules' alone.");
-      if (centred && atCentre.length) said.push(`${capital(listed(atCentre))} ${atCentre.includes("the short clips") || atCentre.includes("the Reel previews") ? "are" : "is"} cropped at the centre of the picture, and not on the speaker: ${centred}.`);
-
-      missing.push(...lacks.map((lack) => `the ${lack.what} could not be made: ${lack.why}`), ...uncut);
-      files.text(out.planTxt, planText(plan, [...lacks.map((lack) => `The ${lack.what} could not be made: ${lack.why}.${lack.note || ""}`), ...said].join("\n")));
-      // The plan is written after everything made from it. It is what says this video is done, so a run cut short while the
-      // rough cut, the upright version or a clip is being made does the video again. When it cannot be written the run
-      // stops here, and the video is done again the next time: for a watched folder nothing has been put anywhere, and what
-      // was held in the run's own folder goes with it. It keeps the pauses ffmpeg heard, which the plan was made from, so that
-      // a reading made later, perhaps on the other Mac with no sound file, changes the plan with the same pauses (pausesOfPlan,
-      // in notes.js). A pause that never ends lasts to the end of the video, and is written so: JSON has no time with no end,
-      // and nothing changes by it. It says who made the plan. When Claude read it, it keeps what Claude decided, its graphic cues
-      // as they were read, what was left out of its reply and why, and each clip with the names of the files that were made of
-      // it, so that a person can see what changed. The cues are what the timeline's markers and the HyperFrames project are
-      // made from later (graphic-cues.js): they are put on her words when they are used, and not here. A plan made before them
-      // holds `graphics` in their place, the ideas it was written with, which are still read. The title Claude recommends comes
-      // first, when it gave one: the import of an episode takes it for the episode's title, for a person to approve.
-      const claude = read ? { ...(read.title ? { title: read.title } : {}), decisions: read.decisions, graphicCues: read.graphicCues, ignored, clips: cut.map((made) => ({ ...made.clip, files: made.named || made.files.map((f) => basename(f)), ...(made.failed.length ? { failed: made.failed.map(sentence) } : {}) })) } : null;
-      files.text(out.plan, planJson(plan, claude));
     }
     for (const what of missing) log(`${shown}: ${what}.`);
     if (!missing.length) log(`${shown}: done.`);
-    // For a watched folder, the video is filed away with the files the run held for it, the plan last. Its Final Cut file
-    // names it in the folder it is filed in: when it cannot be moved there, the file is first written again to name the
-    // video where it stays.
-    // An episode's Reel candidates go into reels.json, beside its other files, with why there are none when there are none.
-    const reelsAt = join(dirname(file), REELS_FILE);
-    if (episode && !light) {
-      try {
-        files.text(reelsAt, JSON.stringify(reelsFile({ video: name, by: "import", made: localStamp(deps.now ? deps.now() : new Date()), candidates, ...noReels }), null, 2) + "\n");
-      } catch (e) {
-        missing.push(`its list of Reel candidates could not be written: the work stopped (${e.code || e.message})`);
-      }
-    }
-    const held = [out.srt, out.txt, out.words, out.planTxt, out.rough, out.roughSrt, out.roughTxt, out.vertical, out.fcpxml, out.notes, ...(episode ? [reelsAt] : []), ...cut.flatMap((made) => made.files), out.plan];
+    // For a watched folder, the video is filed away with the files the run held for it, the plan last.
+    const held = [out.srt, out.txt, out.words, out.planTxt, out.roughSrt, out.roughTxt, out.plan];
     if (deps.watched || into) progress.step("Filing");
-    const unasked = asked && !asked.read ? " Claude could not be asked, so the plan is the rules' alone." : "";
     if (episode) {
       // An episode is filed into its own folder in Episodes, by clones, and the raw video stays in the drop folder until the
       // late check. When it cannot be filed, no record is written, and the next run files it again.
-      const stem = basename(name, extname(name));
       let filed = null;
       try {
-        const given = { file, made: held.filter((f) => files.has(f)), at: files.at, fcpxml: out.fcpxml, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: kind || "episode", read: asked && asked.read, reels: kind === "short video" ? [] : reelEntries(candidates), work, dropFile: arrived };
-        // A light import's video waits for her answer: it has no kind yet and no Final Cut file, and it has its label, its guess,
-        // the fingerprint of its words, and the episode whose words it holds, when they match one on this Mac, for her card to
-        // offer first. It is a new version of that one only once she says so. The video the join made is filed into its plan
-        // instead (`into`), as the kind the rule gives it ("raw", or "short video"), and is nobody's new version.
-        filed = fileEpisode(light ? { ...given, fcpxml: "", kind: into ? (kind === "short video" ? "short video" : "raw") : null, label, ...(into ? { into } : {}), ...lightFields({ name, facts, plan, words: planned.words || [], root: episode.root, matching: !into }, { log, whole }) } : given, deps);
-        const match = light && filed.record.answer ? filed.record.answer.match : null;
+        // The video waits for her answer: it has no kind yet, and it has its label, its guess, the fingerprint of its words, and
+        // the episode whose words it holds, when they match one on this Mac, for her card to offer first. It is a new version of
+        // that one only once she says so. The video the join made is filed into its plan instead (`into`), as the kind the rule
+        // gives it ("raw", or "short video"), and is nobody's new version.
+        filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: into ? (kind === "short video" ? "short video" : "raw") : null, read: null, reels: [], work, dropFile: arrived, label, ...(into ? { into } : {}), ...lightFields({ name, facts, plan, words: planned.words || [], root: episode.root, matching: !into }, { log, whole }) }, deps);
+        const match = filed.record.answer ? filed.record.answer.match : null;
         if (match) log(`${shown}: its words are those of the episode ${match}, so her card offers it as a new version of that one.`);
         keepWork = true;
         // The late check is kept on this Mac's own disk, so a run stopped before it leaves it for the next run.
@@ -1195,7 +813,7 @@ async function workOn(file, deps) {
           progress.drop();
           return { ok: false, name, arriving: true, changed: true, message: "it changed in the drop folder while it was imported" };
         }
-        // A light import's record is the last file filed: why it could not be, as a clone's error naming the file, is said in its
+        // The record is the last file filed: why it could not be, as a clone's error naming the file, is said in its
         // status with nothing of the file's names in it.
         const why = plain(`it could not be filed into Episodes: ${String(e.message).replace(/\.$/, "")}`);
         missing.push(why);
@@ -1203,23 +821,22 @@ async function workOn(file, deps) {
         log(into ? `${shown}: ${why}.` : `${shown}: ${why}. It stays in the drop folder, and is done again the next time.`);
       }
       // The label names the Mac it was dropped on, so the notice does not say it again.
-      if (filed && light) notify(`Ready: ${label}. In Claude, say "what's waiting?"`);
-      else if (filed) notify(`Ready: ${stem}${lacks.length ? `, but ${listed(lacks.map((lack) => `its ${lack.what}`))} could not be made` : ""}. In Claude, say "open ${stem}".${unasked}`);
+      if (filed) notify(`Ready: ${label}. In Claude, say "what's waiting?"`);
       else notify(`${shown} could not be put into Episodes. It stays in the drop folder; see the log.`);
       finished = !missing.length;
       return { ok: !missing.length, name, captions, ...(plan ? { kept: plan.kept, cut: plan.cut } : {}), folder: filed ? filed.name : "", ...(filed ? { filed } : {}), message: missing.join("; ") };
     }
-    const folder = deps.watched ? fileAway(deps.watched, file, held.filter((f) => files.has(f)), deps, day, () => nameAgain(file)) : "";
+    const folder = deps.watched ? fileAway(deps.watched, file, held.filter((f) => files.has(f)), deps) : "";
     const where = folder ? `, in the folder ${folder}` : "";
-    if (plan) notify(`The cut plan for ${name} is ready${where}${lacks.length ? `, but ${listed(lacks.map((lack) => `its ${lack.what}`))} could not be made` : ""}.${unasked}`);
+    if (plan) notify(`The cut plan for ${name} is ready${where}.`);
     else notify(`The transcript of ${name} is ready${where}, but no cut plan could be made. See ${basename(out.planTxt)}.`);
     finished = !missing.length;
     return { ok: !missing.length, name, captions, ...(plan ? { kept: plan.kept, cut: plan.cut } : {}), folder, message: missing.join("; ") };
   } catch (e) {
     // Something nobody foresaw stopped an episode's import: its status says so, so that both Macs see it failed, and it is not
-    // taken again until a person says to. A light import's label goes with the error, for the log to name the video by it.
+    // taken again until a person says to. An episode's label goes with the error, for the log to name the video by it.
     if (episode && !into) progress.fail(plain(`the work stopped (${e.code || e.message})`));
-    if (light && e !== null && typeof e === "object") e.label = label;
+    if (episode && e !== null && typeof e === "object") e.label = label;
     throw e;
   } finally {
     progress.end(finished);
@@ -1231,19 +848,14 @@ async function workOn(file, deps) {
     file was made, and `message` says what was not. When no transcript could be made there is a note beside the video, as the
     transcript tool leaves one, and {ok: false, name, message}. A file that is still arriving gets {ok: false, arriving: true}
     and no note. For a video in a watched folder (`deps.watched`) what was made is then filed away with the video, and `folder`
-    is the folder it went into. `deps.home` is the home folder, where the Final Cut file's library is kept: told none, the
-    file names no library, and Final Cut Pro asks where the project goes. `deps.finalCut` is the writer of that file, for a
-    test to give another. Nothing is thrown from here: when something nobody foresaw stops the work, the log says so.
-    Claude is asked to read the rules' plan when `deps.tools.claude` is there and `deps.rulesOnly` is not set. `kept` and
-    `cut` are then the plan's with Claude's decisions applied. When Claude could not be asked, the plan is the rules'
-    alone, there are no notes and no clips, and that is no failure: `ok` is still true. A short clip that could not be
-    cut is one, as any other file that could not be made is. */
+    is the folder it went into. Nothing is thrown from here: when something nobody foresaw stops the work, the log says so.
+    Every import is the light import: Claude is never asked, no video is made, and the plan is the rules' alone. */
 export async function uneditedFile(file, deps) {
   try {
     return await workOn(file, deps);
   } catch (e) {
-    // A light import names the video by its label, and says why with nothing of the file's names in it, as workOn does.
-    const light = Boolean(deps.episode && deps.light);
+    // An episode's import names the video by its label, and says why with nothing of the file's names in it, as workOn does.
+    const light = Boolean(deps.episode);
     const why = light ? withoutNames(String(e.code || e.message), namesOf(file)) : String(e.code || e.message);
     (deps.log || (() => {}))(`${light ? (e && e.label) || "A video in the drop folder" : basename(file)}: the work stopped (${why}).`);
     return { ok: false, name: basename(file), message: why };
@@ -1280,23 +892,6 @@ export async function importInto(file, into, deps) {
     that video. ffprobe gives the same length for the same file, but another version of ffprobe may read it a little
     differently. */
 const SAME_LENGTH = 0.1;
-
-/** What is wrong with a cut plan, as it was read from its JSON, for its videos to be made again: "" when nothing is. Only what
-    the videos are made of is looked at: the facts of the video, the ranges, and each clip's ranges, the ranges of each part
-    of its Story and the names of the files that were made of it. */
-function planFault(plan) {
-  const isRange = (r) => Boolean(r) && Number.isFinite(r.start) && Number.isFinite(r.end);
-  const ranges = (v) => Array.isArray(v) && v.length > 0 && v.every(isRange);
-  if (!plan || typeof plan !== "object" || Array.isArray(plan) || plan.version !== 1 || typeof plan.video !== "string") return "it is not a cut plan this tool wrote";
-  const facts = plan.facts || {};
-  if (![facts.duration, facts.width, facts.height].every(Number.isFinite) || typeof facts.fps !== "string") return "the facts of its video cannot be read";
-  if (!ranges(plan.ranges) || !plan.ranges.every((r) => typeof r.keep === "boolean")) return "its ranges cannot be read";
-  if (!plan.claude) return "";
-  if (!Array.isArray(plan.claude.clips)) return "its clips cannot be read";
-  const bad = plan.claude.clips.findIndex((clip) => !clip || !Number.isInteger(clip.n) || clip.n < 1 || !ranges(clip.ranges) || !Array.isArray(clip.story)
-    || !clip.story.every((part) => part && ranges(part.ranges)) || !Array.isArray(clip.files) || !clip.files.every((f) => typeof f === "string"));
-  return bad === -1 ? "" : `clip ${bad + 1} in it cannot be read`;
-}
 
 /** A video's facts as they tell one video from another, in plain words, and whether two such are of one video. */
 export const described = (facts) => `${facts.duration} seconds, ${facts.width} by ${facts.height}${facts.fps ? ` at ${facts.fps}` : ""}`;
@@ -1897,238 +1492,6 @@ export async function askAgain({ folder, record }, deps) {
   }
 }
 
-/** What --from-plan says when it is asked for a light episode, whose videos are made when it is read. */
-const LIGHT_REFUSAL = "This episode was imported lightly: its videos are made when it is read, not from the plan.";
-/** What --from-plan says when a newer brimm-video wrote the episode's record. */
-const NEWER_STOP = "its episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac";
-
-/** Make the videos of one video again from the cut plan an earlier run wrote for it (--from-plan): its rough cut, its upright
-    version when it is wider than it is tall, and each of Claude's clips and each part of a clip's Story that the plan names
-    as made. They are made as a run makes them today, from the plan's facts, its ranges and each clip's ranges as they are,
-    and the faces are looked for again. So the cuts and the clips are the ones that run made, and only how the videos are
-    written can differ. No transcript is made, Claude is not asked, and no other file is touched: the transcripts, the words,
-    the plan's two files, the notes, the captions and the Final Cut file stay as that run wrote them. The Final Cut file names
-    the video and none of the videos made here, so it needs nothing new. The plan is read where that run wrote it: beside
-    the video, or in `deps.outDir`. The video is never moved.
-    Each video is written whole in the run's own folder and then put in place over the one made before, so until then that
-    one is there as it was. One that cannot be made leaves the one made before as it is, the log says so, and the others are
-    made all the same.
-    Resolves {ok, name, made, message}: `made` names the videos made again, and `message` says what could not be. When there
-    is no video, no plan, a plan that cannot be read or one of another video, or the plan's video has no picture or the plan
-    keeps nothing, it stops before anything is made, the log says why, and it resolves {ok: false, stopped: true} with
-    `message` saying why.
-    A video in an episode's folder (one with a record/) is made again only when the episode can be gone on with: it stops in
-    the same way when the record cannot be read (a conflicted copy, or an import not finished), when this Mac has no settings
-    for episodes, when Dropbox undid this Mac's last change to it, while the import still holds the video (importHolds), and
-    while another command is at work on the episode. The work holds the episode's lock, kept awake, and waits for the late
-    check of what it put in before it ends.
-    A light episode, one whose record is at layout 3, is never made again from its plan: it stops first of all, before anything
-    is read or made and with or without --out, saying it was imported lightly (LIGHT_REFUSAL). Before even that, an episode
-    whose record a newer brimm-video wrote stops in the same way, saying so (NEWER_STOP). */
-export async function videosFromPlan(file, deps) {
-  const { log = () => {} } = deps;
-  const name = basename(file);
-  const out = cutOutputs(file, deps.outDir || undefined);
-  const stop = (why) => {
-    log(`${name}: ${why}. Nothing was made.`);
-    return { ok: false, name, made: [], stopped: true, message: why };
-  };
-  // A light episode is never made again from its plan (spec 2026-10-22, "Who else keeps the heavy path"): that would make the
-  // whole-video rough cut and the upright version the light import leaves out, and its videos are made when it is read. It is
-  // the record that says what an episode is: layout 3, which is a kind other than "episode" or "short video", an answer, and
-  // the rest of the switch's fields. The refusal is the first thing, before the plan is read or anything is made, and it is
-  // the same with --out. A record a newer brimm-video wrote is refused first, in today's words: what it is cannot be read
-  // here, so it is never taken for a light episode, nor made from.
-  const folder = dirname(file);
-  if (existsSync(join(folder, RECORD_DIR))) {
-    const { record, newer } = readEpisode(folder, { pastCopies: true });
-    if (newer) return stop(NEWER_STOP);
-    if (record && ofTheSwitch(record)) {
-      log(`${name}: ${LIGHT_REFUSAL} Nothing was made.`);
-      return { ok: false, name, made: [], stopped: true, message: LIGHT_REFUSAL };
-    }
-  }
-  // Videos written straight into an episode's folder would skip the claim, the lock and the rule: --out anywhere in one, or in
-  // Episodes itself, is refused.
-  if (deps.outDir) {
-    // --out as the disk has it: its nearest folder that is there, with links followed and its own case, then the rest as
-    // given. So a link to Episodes, or Episodes in another case, is seen for what it is.
-    let near = resolve(deps.outDir);
-    let rest = "";
-    while (!existsSync(near) && dirname(near) !== near) {
-      rest = rest ? join(basename(near), rest) : basename(near);
-      near = dirname(near);
-    }
-    const realOf = (p) => {
-      try {
-        return realpathSync.native(p);
-      } catch (e) {
-        return resolve(p);
-      }
-    };
-    const at = rest ? join(realOf(near), rest) : realOf(near);
-    // Only a real episode counts: a folder whose record/, so named, is a folder holding record files.
-    const isEpisode = (d) => {
-      try {
-        return readdirSync(d).includes(RECORD_DIR) && statSync(join(d, RECORD_DIR)).isDirectory() && recordNumbers(d).length > 0;
-      } catch (e) {
-        return false;
-      }
-    };
-    let inEpisode = false;
-    for (let d = at; !inEpisode; d = dirname(d)) {
-      inEpisode = isEpisode(d);
-      if (dirname(d) === d) break;
-    }
-    const episodes = deps.settings ? realOf(episodesFolder(deps.settings.root)) : null;
-    if (inEpisode || (episodes && `${at}${sep}`.toLowerCase().startsWith(`${episodes}${sep}`.toLowerCase()))) return stop("--out is in an episode's folder, or is Episodes itself: an episode's videos are made again without --out, so they go in by the rule");
-  }
-  if (!existsSync(file)) return stop(`there is no video at ${file}`);
-  if (!existsSync(out.plan)) return stop(`there is no cut plan at ${out.plan}`);
-  let plan;
-  try {
-    plan = JSON.parse(readFileSync(out.plan, "utf8"));
-  } catch (e) {
-    return stop(`the cut plan at ${out.plan} could not be read (${e instanceof SyntaxError ? "it is not JSON" : e.code || e.message})`);
-  }
-  const fault = planFault(plan);
-  if (fault) return stop(`the cut plan at ${out.plan} could not be read (${fault})`);
-  if (plan.video !== name) return stop(`the cut plan at ${out.plan} is the plan of ${plan.video}, and not of ${name}`);
-  // A video in an episode's folder, which has a record/ whatever its record says: what is made of it goes into the folder by
-  // the rule (dropbox.js), never by a move, and only when the episode can be gone on with. The work holds the episode's lock,
-  // as a detached command of edit.js does, so that no other works on the episode meanwhile.
-  if (deps.outDir || !existsSync(join(folder, RECORD_DIR))) return remakeVideos(file, { out, plan, episode: false, stop }, deps);
-  const read = readEpisode(folder);
-  if (!read.record) return stop(`its episode's record cannot be read: ${read.why}`);
-  if (read.newer) return stop(NEWER_STOP);
-  if (!deps.settings) return stop("this Mac has no settings for episodes, so nothing can be put into its episode");
-  const home = deps.home || studioHome();
-  const held = undone(read.record, home) || heldText(read.record, deps.settings.machine) || importHolds({ root: deps.settings.root, home, machine: deps.settings.machine, record: read.record, now: deps.clock ? deps.clock() : Date.now() });
-  // Its own closing is the run's: "Nothing was made."
-  if (held) return stop(held.replace(/ Nothing was changed\.$/, "").replace(/\.$/, ""));
-  let made = null;
-  const ran = await runDetached({ home, folder: basename(folder), command: "from-plan", ...(deps.keepAwake ? { keepAwake: deps.keepAwake } : {}), ...(deps.alive ? { alive: deps.alive } : {}) }, async () => {
-    made = await remakeVideos(file, { out, plan, episode: true, stop, expectRev: read.record.rev }, deps);
-    return { ok: made.ok, made: made.made, failed: made.message ? [made.message] : [], next: "" };
-  });
-  if (ran.running || ran.taking) return stop(ran.running ? `${ran.running} is running for ${basename(folder)} already` : `another run is taking over the lock of ${basename(folder)}`);
-  return made || { ok: false, name, made: [], message: ran.failed.join(" ") };
-}
-
-/** The work of videosFromPlan, once the plan `plan` (read from `out.plan`) is known to be the video's, and an `episode` it is
-    in can be gone on with, its record at rev `expectRev` when it was looked at. `stop` stops it, as there. */
-async function remakeVideos(file, { out, plan, episode, stop, expectRev }, deps) {
-  const { run, tools, log = () => {}, progress = noProgress } = deps;
-  const name = basename(file);
-  const work = episode ? join(runsFolder(deps.home || studioHome()), `${process.pid}-${Date.now()}`) : join(deps.tmpDir || tmpdir(), `brimm-unedited-${process.pid}-${Date.now()}`);
-  mkdirSync(work, { recursive: true });
-  // Each video goes through `files`, and is put in place as soon as it is whole, or, for an episode, held until all are made.
-  const files = filesOf(work, { name, hold: episode, log, move: deps.move, copy: deps.copy });
-  deps = { ...deps, files };
-  let finished = false;
-  try {
-    // ffprobe is asked what the video is now, so that a plan is never used on a video it was not made of.
-    const probed = join(work, "facts.json");
-    const probe = await run(tools.ffprobe, probeArgs(file, probed));
-    const reprinted = probe.code === 0 && existsSync(probed) ? readFileSync(probed, "utf8") : "";
-    const now = reprinted ? factsOf(reprinted) : null;
-    // The streams to take, as a run takes them (streamsOf).
-    const streams = streamsOf(reprinted);
-    if (!now) return stop(`the video could not be read (${lastLine(probe.stderr)})`);
-    const { facts } = plan;
-    if (!sameVideo(facts, now)) return stop(`the cut plan at ${out.plan} was made of another video: one of ${described(facts)}, and ${name} is ${described(now)}`);
-    if (!facts.height) return stop("its cut plan says it has no picture, so it has no videos to make");
-    const spans = keptSpans(plan.ranges, roughRate(facts));
-    if (!spans.length) return stop("its cut plan keeps nothing, so it has no videos to make");
-    log(`${name}: making its videos again from ${basename(out.plan)}.`);
-    const clipped = (plan.claude ? plan.claude.clips : []).some((clip) => clip.files.length > 0);
-    progress.begin(name);
-    progress.length(facts.duration);
-    progress.steps(["Making the rough cut", ...(needsReframe(facts) ? ["Finding the faces", "Making the upright version"] : []), ...(episode ? ["Making the Reel previews"] : clipped ? ["Cutting the short clips"] : [])]);
-
-    const made = [];
-    const failed = [];
-    // The videos made, where each belongs: for an episode, each is put in after all are made.
-    const madeAt = [];
-    /** What became of the video at `to`: `why` it could not be made, which is "" when it was. `what` says it could not. */
-    const madeOr = (to, what, why) => {
-      if (!why) {
-        made.push(basename(to));
-        madeAt.push(to);
-      } else {
-        failed.push(`${what}: ${why}`);
-        log(`${name}: ${what}: ${why}.${existsSync(to) ? " The one made before is kept." : ""}`);
-      }
-    };
-    let why = "";
-    try {
-      why = await roughCut(file, out.rough, { plan, facts, spans, streams }, deps);
-    } catch (e) {
-      rmSync(files.at(out.rough), { force: true });
-      why = `the work stopped (${e.code || e.message})`;
-    }
-    madeOr(out.rough, "the rough cut could not be made again", why);
-    // The faces are looked for once, for the upright version, and the clips are cropped by the same stills.
-    let stills = [];
-    if (needsReframe(facts)) {
-      const up = await upright(file, out.vertical, { facts, spans, streams }, work, deps);
-      stills = up.stills;
-      madeOr(out.vertical, "the upright version could not be made again", up.why);
-    }
-    // An episode's Reel candidates have previews in place of clips: each made again, as the import makes them, from the
-    // stretches and the crops reels.json holds, so a preview still matches the Reel's project, which is made with the same.
-    if (episode) {
-      const reelsAt = join(dirname(file), REELS_FILE);
-      const read = existsSync(reelsAt) ? readReels(readFileSync(reelsAt, "utf8")) : { why: "there is no reels.json" };
-      if (read.why) log(`${name}: no Reel previews are made again: ${read.why}.`);
-      const again = read.reels ? read.reels.candidates.filter((c) => c.preview) : [];
-      for (const c of again.length ? await makePreviews(file, again.map((c) => ({ ...c, preview: null })), { facts, streams }, deps) : []) {
-        madeOr(join(dirname(file), previewPath(c.n)), `the preview of Reel ${c.n} could not be made again`, c.failed || "");
-      }
-    }
-    // Each clip, and each part of its Story, that the run which wrote the plan made. One it could not cut is not cut now:
-    // it has no captions, and the notes say it could not be cut.
-    const pieces = [];
-    let clips = 0;
-    for (const clip of plan.claude && !episode ? plan.claude.clips : []) {
-      const named = clipOutputs(file, clip.n, clip.story.length, deps.outDir || undefined);
-      const has = (to) => clip.files.includes(basename(to));
-      const notCut = (what) => log(`${name}: ${what} was not cut by the run that wrote the plan, so it is not cut now.`);
-      if (!has(named.video)) {
-        notCut(`clip ${clip.n}`);
-        continue;
-      }
-      clips += 1;
-      pieces.push({ to: named.video, ranges: clip.ranges, most: 0, what: `clip ${clip.n}` });
-      named.story.forEach((to, k) => {
-        const what = `part ${k + 1} of the Story of clip ${clip.n}`;
-        if (has(to)) pieces.push({ to, ranges: clip.story[k].ranges, most: STORY_MAX, what });
-        else notCut(what);
-      });
-    }
-    if (clips) log(`${name}: cutting ${clips} short clip${clips === 1 ? "" : "s"}.`);
-    for (const piece of pieces) {
-      progress.step("Cutting the short clips", `Cutting ${piece.what}`);
-      const cut = await cutPiece(file, piece.to, piece.ranges, { facts, stills, most: piece.most, streams }, deps);
-      madeOr(piece.to, `${piece.what} could not be cut again`, cut.why || "");
-    }
-    if (episode && madeAt.length) {
-      const into = await intoEpisode(file, madeAt, work, deps, { expectRev });
-      failed.push(...into.problems);
-      for (const note of into.notes) log(`${name}: ${note}.`);
-      // When nothing was put in, nothing was made again in the episode.
-      if (!into.put) made.length = 0;
-    }
-    if (!failed.length) log(`${name}: done. Made again: ${listed(made)}.`);
-    else log(made.length ? `${name}: made again: ${listed(made)}.` : `${name}: nothing was made again.`);
-    finished = !failed.length;
-    return { ok: !failed.length, name, made, message: failed.join("; ") };
-  } finally {
-    progress.end(finished);
-    rmSync(work, { recursive: true, force: true });
-  }
-}
-
 /** Do every video in a folder that has no cut plan yet, and file each one away in a folder of its own. One run at a time works
     on a folder, and the lock is the transcript tool's own, so the two never work on one folder at the same time. When this
     Mac has settings for episodes and the folder is its own drop folder, each video is made into an episode in Episodes
@@ -2234,13 +1597,12 @@ export function parseArgs(argv) {
     else if (!a.file) a.file = v;
   }
   a.folders = a.folders.filter(Boolean);
-  if (!a.file && !a.folders.length && !a.checkClaude) a.help = true;
+  if (!a.file && !a.folders.length && !a.checkClaude && !a.fromPlan) a.help = true;
   return a;
 }
 
-const HELP = `For a video that is not edited yet: a transcript with a time for every word, a cut plan that Claude is asked to read, a rough cut and
-its captions, an upright version for Instagram, a Final Cut Pro project file, Claude's notes for the editor and the short
-clips it picked.
+const HELP = `For a video that is not edited yet: a transcript with a time for every word, a cut plan made by the rules, and the
+rough cut's captions. Claude is not asked, and no video is made: the import is always the light import.
 
   node unedited.js <file>             one video: its files appear beside it, and nothing is moved
   node unedited.js --watch <folder>   every video in the folder that has no cut plan yet. Each one is then moved, with its
@@ -2248,26 +1610,17 @@ clips it picked.
 
   --watch <folder>   again, to work more than one folder
   --out <folder>     where to write, for one file
-  --rules-only       never ask Claude: the plan is the rules' alone, there are no notes and no clips, and nothing leaves
-                     this Mac
-  --check-claude     ask Claude once, as the import does, and say whether it answered: the installer runs this from a
+  --rules-only       accepted, and means nothing now: the import never asks Claude
+  --check-claude     ask Claude once, as a reading does, and say whether it answered: the installer runs this from a
                      launch agent of its own, to see that the background job can reach Claude
   --until <time>     with --check-claude: ask Claude nothing once this time, in seconds since 1970, has passed. The
                      installer gives it, so that a check a cut-short setup left behind asks nothing at the next login
-  --from-plan        make the videos of one video again from the cut plan an earlier run wrote beside it: the rough
-                     cut, its upright version and the clips Claude picked, as the tool writes videos now. No transcript
-                     is made, Claude is not asked, and no other file is touched. Never with --watch
+  --from-plan        gone: the import makes no videos now. It says so and ends with 2
 
-An episode, made of a video in this Mac's drop folder, gets Reel candidates in place of the short clips: reels.json, and a
-small upright preview of each in previews/. --from-plan of an episode's video makes the previews again, and puts every
-file into the episode by the rule. See the README, "Reel candidates". With this Mac's settings saying import light, a video
-in the drop folder is imported lightly instead: its transcript, cut plan and the rough cut's captions, and nothing else.
-Claude is not asked, and no video is made, until its person says what it is. A Zoom download is not imported yet: it is
-left in the folder, and its status says to put it in BRIMM VIDEO Transfer. --from-plan refuses an episode imported lightly.
+A video in this Mac's drop folder is made into an episode that waits for its person to say what it is. A Zoom download is
+not imported yet: it is left in the folder, and its status says to put it in BRIMM VIDEO Transfer.
 
-The video and its sound never leave this Mac. When Claude is asked, the words of the transcript with their times and the
-rules' plan are sent to Claude through Claude Code, on the Claude account signed in on this Mac. The video's file name and
-its length go with them.
+The video and its sound never leave this Mac, and nothing of them goes to Claude when a video is imported.
 
 While it works, a small window in the top right corner of the screen shows how far each video has got: the step, a bar,
 and how long is left. Closing it changes nothing about the work.
@@ -2282,42 +1635,33 @@ export const banner = (text) => {
 };
 
 /** What a run started from the command line is given: the real way of running a program, the programs `found` on this Mac,
-    the log, the banner and a real wait. And the home folder, where the Final Cut file's library is kept: the one HOME names,
-    as it does for the launch agent and in a shell, and the Mac's own word for it when HOME names none. `args` is what the
-    run was asked to do: with --rules-only among it, the run is told never to ask Claude. When this Mac's settings say
-    `import: "light"`, the run is told so (`light`), and the episodes of its drop folder are imported lightly: nothing else
-    is, neither the one file nor a folder that is not its drop folder. With no such setting the run is given what it was. */
+    the log, the banner and a real wait. And the home folder: the one HOME names, as it does for the launch agent and in a
+    shell, and the Mac's own word for it when HOME names none. Every import is the light import (Phase 2), so the run is told so
+    (`light`) whatever this Mac's settings say of the import: the episodes of its drop folder are imported lightly, and so are
+    the one file and a folder that is not its drop folder. `args` is what the run was asked to do; --rules-only means nothing
+    now, since the import never asks Claude. */
 export function depsFor(found, log, env = process.env, args = {}) {
   const home = studioHome(env);
   // This Mac's settings for episodes, when it has them: with them, the import of its own drop folder makes episodes.
   const settings = readSettings(home).settings || null;
-  return { run: runProgram, tools: found, model: found.model, home, settings, ...(lightImport(settings) ? { light: true } : {}), rulesOnly: Boolean(args.rulesOnly), log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)), progress: reporter({ folder: progressFolder(home), swift: found.swift, log }) };
+  return { run: runProgram, tools: found, model: found.model, home, settings, light: true, rulesOnly: Boolean(args.rulesOnly), log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)), progress: reporter({ folder: progressFolder(home), swift: found.swift, log }) };
 }
 
 /** Do what a run was asked to do, with what it was given: the watched folders, or the one video. Resolves what the run ends
     with: for folders what uneditedFolders gives, and for one video 0 when everything was made, 1 when something was not, and
-    2 when there is no such file. When Claude is not going to be asked, the log says so here, once for the whole run, and
-    says why: the run was told to go by the rules alone, or Claude Code is not on this Mac, or it makes videos again from a
-    plan (--from-plan). That is only ever done for one video, and never for a watched folder, whose videos are moved: asked
-    for one, the run says so and ends with 2. It also ends with 2 when it stopped before it made anything. */
+    2 when there is no such file. --from-plan is gone, since the import makes no videos now: asked for, the run says so and
+    ends with 2, whatever else it was asked, before anything is made. */
 export async function doAsked(args, deps) {
   const { log = () => {} } = deps;
-  if (args.fromPlan && args.folders.length) {
-    log("--from-plan is for one video, named by its file, and never for a watched folder. Nothing was made.");
+  if (args.fromPlan) {
+    log("--from-plan is gone: the import makes no videos now.");
     return 2;
   }
-  if (args.fromPlan) log("Claude is not asked in this run (--from-plan), and no transcript is made: the videos are made again from the cut plan an earlier run wrote, as it is.");
-  else if (deps.rulesOnly) log("Claude is not asked in this run (--rules-only): each cut plan is the rules' alone.");
-  else if (!deps.tools.claude) log("Claude Code is not installed, so Claude is not asked in this run: each cut plan is the rules' alone.");
   if (args.folders.length) return uneditedFolders(args.folders, deps);
   const file = resolve(args.file);
   if (!existsSync(file)) {
     log(`There is no file at ${file}.`);
     return 2;
-  }
-  if (args.fromPlan) {
-    const r = await videosFromPlan(file, { ...deps, outDir: args.out ? resolve(args.out) : "" });
-    return r.ok ? 0 : r.stopped ? 2 : 1;
   }
   if (args.out) mkdirSync(resolve(args.out), { recursive: true });
   const r = await uneditedFile(file, { ...deps, outDir: args.out ? resolve(args.out) : "" });

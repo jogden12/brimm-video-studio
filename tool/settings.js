@@ -14,10 +14,10 @@
 // settings of the switch later, but never the drop folder: it says to switch that with the installer, and changes nothing.
 //
 //   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-//                          [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+//                          [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
 //   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-//                         [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
-//   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+//                         [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+//   node settings.js set [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
 //   node settings.js sessions --teachings on --cli-account <email> --app-account <email>
 //   node settings.js sessions --teachings off
 //   node settings.js show
@@ -286,7 +286,7 @@ export function writeSettings(home, fields) {
 const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Support/BRIMM Video/settings.json.
 
   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+                               [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
                                write them, as install.sh --machine does, and say where. The settings of the switch that it
                                is told are written with them, read as set reads them, and any setting it is not told is
                                kept. It refuses a value that will not do. Unlike set it changes the drop folder watched
@@ -297,13 +297,13 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                version of such a session is named by the episode's label or, with none, by what it is and
                                its short id ("a client or group session (3fa9c1)"), never by its own file
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+                               [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the
                                teachings from sessions, shown as (not shown), and then the import it will be, the drop
                                folder as it is now and as it will be, and, when the folder watched changes, the old one's
                                whole path, a line each, or why it would refuse it. Nothing is written. install.sh asks this
                                before it changes anything
-  node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+  node settings.js set [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
                                change the settings of the switch to the light import, and say what changed. Any other
                                setting is kept. It does not change the drop folder: it is switched by the installer, which
                                makes the new folder, marks it and points the import at it, after it has checked the old one.
@@ -356,11 +356,16 @@ function pairsOf(rest, options) {
 /** Each option of SETTABLE as `set` has it, by the name `pairsOf` gives what it is told. */
 const OF_SET = () => Object.fromEntries(Object.keys(SETTABLE).map((option) => [option, option]));
 
+/** What is said, and nothing is written, when the full import is asked for (Phase 2, "Final Cut retired"): every import is the light
+    one now. A Mac whose settings still say `import: "full"` is read as before, and imports lightly all the same. */
+const FULL_GONE = "The full import is gone: this Mac imports lightly.";
+
 /** What `write` and `plan` are told, as the fields of the settings: { fields }, or { code, said } when it is asked wrongly (2),
     or refused (1): a value that will not do, by the same readers `set` has. */
 function fieldsToldBy(rest) {
   const told = pairsOf(rest, { ...WRITTEN, ...OF_SET() });
   if (!told || told.machine === undefined || told.root === undefined || told.checkout === undefined) return { code: 2, said: HELP };
+  if (told["--import"] === "full") return { code: 2, said: FULL_GONE };
   const values = {};
   for (const option of Object.keys(SETTABLE).filter((o) => told[o] !== undefined)) {
     values[option] = SETTABLE[option].read(told[option]);
@@ -502,7 +507,7 @@ function plan(home, rest, say, now) {
     it will not do); how that is said; what the setting is while the file does not say; and how a line about it is worded. */
 export const SETTABLE = {
   "--import": {
-    field: "import", takes: "light or full", read: (v) => (v === "light" || v === "full" ? v : undefined), said: String,
+    field: "import", takes: "light", read: (v) => (v === "light" || v === "full" ? v : undefined), said: String,
     otherwise: "full", subject: "The import", be: "is", was: "it was"
   },
   "--readings": {
@@ -550,6 +555,10 @@ function set(home, rest, say) {
   const told = pairsOf(rest, OF_SET());
   if (!told || !Object.keys(told).length) {
     say(HELP);
+    return 2;
+  }
+  if (told["--import"] === "full") {
+    say(FULL_GONE);
     return 2;
   }
   const values = {};
