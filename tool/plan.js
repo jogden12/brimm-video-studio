@@ -232,6 +232,19 @@ export function packageFiles(title, plan, { explainer = false } = {}) {
   };
 }
 
+/** The plan's files as a record makes them: `packageFiles` of its `planned`, headed by the name the record shows, and an explainer
+    without a shot list. `{}` for a plan whose package was never set (`planned.set` is null), which has no files. Resolving a conflict
+    writes these for the side she keeps. */
+export function planFilesFrom(record) {
+  const { planned } = record;
+  if (planned.set === null) return {};
+  const title = record.name && typeof record.name.text === "string" && record.name.text ? record.name.text : planned.title;
+  return packageFiles(title, planned, { explainer: planned.route === "explainer" });
+}
+
+/** The names of the files a plan keeps, which a record's `files` lists with their sizes. */
+export const PLAN_FILE_NAMES = [GUIDE_FILE, SHOT_LIST_FILE, TELEPROMPTER_FILE];
+
 /** How long the teleprompter script is, as { words, minutes }: its words, and the minutes they take at 150 a minute, rounded and at least 1. */
 function scriptLength(plan) {
   const words = plan.lines.reduce((sum, line) => sum + countWords(line), 0);
