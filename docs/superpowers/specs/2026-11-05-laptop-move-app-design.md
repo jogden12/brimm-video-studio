@@ -54,13 +54,18 @@ Checks 45 to 47 (her folder's lock in the Code tab, a first video, BRIMM Ops) st
 
 ## How it is packaged
 
-An app bundle wrapping zsh scripts, made by a build script in the repo and zipped for AirDrop. Its program has Terminal run the move script inside the bundle, with at most one macOS question to let it open Terminal and no second Gatekeeper question; how is the builder's call (a `.command` file it writes into a fresh temporary folder and opens, or Terminal's `do script`).
+An app bundle, made by a build script in the repo and zipped for AirDrop. Its program is a small native launcher (an AppleScript applet or a few lines of Swift: the builder's call), since code signing and Apple's notary service expect a native program, not a script. The launcher has Terminal run the zsh move script inside the bundle, with no macOS question beyond Gatekeeper's one; a `.command` file it writes into a fresh temporary folder and opens is one way.
 
 Not a `.pkg`. Installer runs its scripts as root, and Homebrew, her user's launch agents and her `~/.ssh` all need her user. It cannot show the installer's print and ask between steps. And it asks for her password though nothing needs it.
 
-**Gatekeeper, unsigned.** A file that comes by AirDrop, Messages, Mail or a browser carries macOS's quarantine mark, and an unsigned app with that mark is blocked the first time it is opened ("Apple could not verify…"). Since macOS 15, Control-click › Open no longer gets past it. Instead: Done, then System Settings › Privacy & Security, where it says the app was blocked; Open Anyway (shown for about an hour after the blocked try); her password; Open. Once. A copy from a USB stick has no mark, and opens with no question. The trial on the Mac Studio (macOS 27.0.1) reads Gatekeeper's verdict on a marked copy with `spctl`, which opens nothing.
+**Signed and notarized** (Jason has a paid Apple Developer membership, 5 November). The build signs the app with his Developer ID Application certificate, with the hardened runtime and a secure timestamp. Notarizing sends the app to Apple, which scans it and returns a ticket that is stapled to the app. That sends a file out of the Mac, so it is not in the repo's scripts: it is a by-hand step on the page, two commands Claude runs on Jason's yes. Her Mac then opens the app with one question: "'Move to Studio' is an app downloaded from the Internet. Are you sure you want to open it?" Open.
 
-**Signed.** With an Apple Developer account ($99 a year), the build signs the app with a Developer ID and has Apple notarize it. Her Mac then opens it with only "downloaded from the internet: are you sure?". The certificate stays in the Mac Studio's keychain and the notary login in a `notarytool` keychain profile: no credential is ever in a file. Without an account, the build makes it unsigned and the Open Anyway steps go on the page.
+**Once, by hand, on the Mac Studio** (on the page; Jason types his own passwords, never into chat or a file):
+
+1. The certificate. Today the Mac Studio has none (`security find-identity -v -p codesigning` finds 0). In Keychain Access, Certificate Assistant › Request a Certificate From a Certificate Authority, saved to disk; on developer.apple.com, Certificates › + › Developer ID Application, with that request; download it and double-click it. Claude then checks that `security find-identity` shows it.
+2. The notary login. An app-specific password made at account.apple.com, then `xcrun notarytool store-credentials "BRIMM notary"` in Terminal, answering its own questions. The keychain keeps it under that name, and the notarizing step names only that.
+
+**Unsigned**, for the tests and the trial, and as a fallback, the build script makes one when told to. From AirDrop, macOS blocks an unsigned app the first time ("Apple could not verify…"). Since macOS 15, Control-click › Open no longer gets past it: Done, then System Settings › Privacy & Security, Open Anyway (shown for about an hour after the blocked try), her password, Open. A copy from a USB stick has no quarantine mark and opens with no question. The trial on the Mac Studio (macOS 27.0.1) reads Gatekeeper's verdict on a marked copy with `spctl`, which opens nothing.
 
 ## The next round
 
@@ -69,7 +74,7 @@ The working folder and the drop folders become local in the next round. So the a
 ## Testing
 
 - Tests first, in `tool/tests/`. The move script runs in a home made for each test, with stand-ins for every program that could change something or reach out (`ssh-keygen`, `ssh`, `git`, `claude`, `launchctl`, `brew`, `open`, `pbcopy`, `caffeinate`) and a stand-in installer that only notes how it was called. No test makes a real key, clones from GitHub or runs the real installer. Tests that need a Mac skip themselves elsewhere, as the installer's do.
-- The build script's tests: what the bundle holds, its Info.plist, the commit written into it, and that it writes nowhere else.
+- The build script's tests: what the bundle holds, its Info.plist, the commit written into it, and that it writes nowhere else. Its signing is tested with stand-ins for `codesign` and `security`: the identity it picks, the hardened runtime and timestamp, and that it refuses unless exactly one Developer ID Application identity is found.
 - On the Mac Studio, only in a temporary home and with `--print`: the move script against a made-up brimm-video laptop there, before and after a local clone. Nothing installed, nothing launched.
 
 ## Details for the builder
@@ -87,7 +92,7 @@ From the page's checks 41 to 44, and calls made here:
 
 ## The By-Hand page
 
-Checks 41, 42 and 44 (and 48's key) get the app's way first, with the Terminal steps kept as the fallback. New steps before them: Claude builds the app on the Mac Studio after the merge, on Jason's yes; Jason carries it over and opens it (with Open Anyway, if unsigned); the report comes back by AirDrop. They run only on Jason's yes.
+Checks 41, 42 and 44 (and 48's key) get the app's way first, with the Terminal steps kept as the fallback. New steps before them: the one-time signing setup (above); Claude builds and signs the app on the Mac Studio after the merge, then notarizes it, each on Jason's yes; Jason carries it over and opens it; the report comes back by AirDrop. They run only on Jason's yes.
 
 ## Not now
 
@@ -100,6 +105,8 @@ Checks 41, 42 and 44 (and 48's key) get the app's way first, with the Terminal s
 - A Terminal window, not a window of its own: the installer's print shows whole there.
 - The commit is fixed when the app is made, so a new commit on main means making the app again.
 - A failed install is shown and stopped, never undone: a second run goes on, and going back to brimm-video stays by hand.
+- Notarizing is a by-hand step, not in the repo's scripts: it sends the app to Apple, and nothing in the repo sends anything.
+- An unsigned build stays possible, for the tests, the trial and a fallback.
 - The report and the key's public half go back by AirDrop.
 - The tidy of brimm-video's key is in the app, on a later run, asked on its own.
 - The name "Move to Studio".
