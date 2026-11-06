@@ -55,6 +55,7 @@ COMMIT=""
 changed=()           # each change this run made, in words, for the stop summary
 made_partial=""      # set when this run made $PARTIAL, so that a Ctrl-C takes it away again
 R41=()               # the report's lines for check 41
+R42_KEY="" R42_SSH=""   # the report's lines for check 42: whether the key is on GitHub and how, and what ssh -T printed
 ROOT="" DROP="" CHECKOUT_NOW="" NODE="" CLAUDE=""
 
 say() {
@@ -300,8 +301,182 @@ look_at_this_mac() {
   fi
 }
 
-# The steps after the look. Each is replaced by its own task; until then it says its heading and does nothing.
-make_the_key() { heading "2. Studio's key (check 42)"; }
+# Step 2, check 42: Studio's own read-only key, its Host entry in ~/.ssh/config, GitHub's host key, and the check that GitHub
+# knows the key. Only the public half is ever shown or copied; ssh-keygen alone touches the private half.
+HOST_BLOCK=("Host $HOST_ALIAS" "  HostName github.com" "  User git" "  IdentityFile ~/.ssh/brimm_video_studio_deploy" "  IdentitiesOnly yes")
+
+# Adds $2 as lines at the end of file $1 (made private if it is new), after a newline if the file does not end in one, and after
+# a blank line when $3 is set. What is there stays byte for byte.
+append_lines() {
+  local file="$1" text="$2" blank="${3-}"
+  if [[ ! -e "$file" ]]; then ( umask 077; : > "$file" ); fi
+  if [[ -s "$file" ]]; then
+    [[ -z "$(tail -c 1 "$file")" ]] || print -rn -- $'\n' >> "$file"
+    [[ -z "$blank" ]] || print -rn -- $'\n' >> "$file"
+  fi
+  print -r -- "$text" >> "$file"
+}
+
+# Whether ~/.ssh/config has this app's Host entry: none, same, or different.
+host_entry_state() {
+  local config="$HOME/.ssh/config" line norm pat="^[[:space:]]*Host[[:space:]]+${HOST_ALIAS}[[:space:]]*\$"
+  local in_block="" found=""
+  local -a got want words
+  [[ -f "$config" ]] || { print none; return 0; }
+  for line in "${HOST_BLOCK[@]:1}"; do words=(${=line}); want+=("${words[*]}"); done
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ '^[[:space:]]*(Host|Match)[[:space:]]' ]]; then
+      if [[ "$line" =~ $pat ]]; then in_block=yes; found=yes; continue; fi
+      in_block=""
+    fi
+    [[ -n "$in_block" ]] || continue
+    words=(${=line})
+    (( ${#words} )) || continue
+    [[ "${words[1]}" != \#* ]] || continue
+    got+=("${words[*]}")
+  done < "$config"
+  if [[ -z "$found" ]]; then print none
+  elif [[ "${(j:|:)got}" == "${(j:|:)want}" ]]; then print same
+  else print different; fi
+}
+
+# Whether this Mac's known_hosts has GitHub's ed25519 key: none, same, or different.
+host_key_state() {
+  local file="$HOME/.ssh/known_hosts" found want="${GITHUB_HOST_KEY#github.com }"
+  [[ -f "$file" ]] || { print none; return 0; }
+  found="$(ssh-keygen -F github.com -f "$file" 2>/dev/null || true)"
+  if [[ "$found" == *"$want"* ]]; then print same
+  elif [[ "$found" == *ssh-ed25519* ]]; then print different
+  else print none; fi
+}
+
+# Asks GitHub who the key is. Success is the text "Hi jogden12/brimm-video-studio!" (GitHub ends the call with 1 even then).
+# Returns 0 for that, 1 for "Permission denied" (GitHub does not know the key yet); anything else stops, saying what ssh said.
+check_with_github() {
+  local told
+  local -a lines
+  told="$(ssh "${SSH_OPTS[@]}" -T "git@$HOST_ALIAS" 2>&1 || true)"
+  lines=("${(@f)told}")
+  R42_SSH="${lines[1]-}"
+  if [[ "$told" == *"Hi jogden12/brimm-video-studio!"* ]]; then
+    say "  GitHub says: $R42_SSH"
+    return 0
+  fi
+  if [[ "$told" == *"Permission denied"* ]]; then
+    say "  GitHub does not know this key yet."
+    return 1
+  fi
+  stop_here "ssh did not get GitHub's welcome for this key. It said: ${R42_SSH:-nothing}"
+}
+
+make_the_key() {
+  heading "2. Studio's key (check 42)"
+  local pub comment state pending="" made="" via
+  local -a words
+
+  # The key. One of that name made earlier, with this comment, is kept; one with another comment is not touched.
+  if [[ -e "$KEY" ]]; then
+    [[ -f "$KEY.pub" ]] || stop_here "There is a file $KEY but no $KEY.pub beside it, and this app does not touch it."
+    pub="$(<"$KEY.pub")"
+    words=(${=pub})
+    comment="${(j: :)words[3,-1]}"
+    [[ "$comment" == "$KEY_COMMENT" ]] || stop_here "There is already a key at $KEY with another comment (\"$comment\"), so it is not Studio's. This app does not touch it."
+    done_already "Studio's key is there ($KEY), made on an earlier run"
+  else
+    [[ ! -e "$KEY.pub" ]] || stop_here "There is a file $KEY.pub but no $KEY, and this app does not touch it."
+    if [[ -n "$PRINT_ONLY" ]]; then
+      would "make Studio's key, with: ssh-keygen -t ed25519 -f \"$KEY\" -N \"\" -C \"$KEY_COMMENT\""
+      would "show its public half, copy it, and keep a copy of it at $PUBLIC_COPY"
+      pending=yes
+    else
+      ask "Studio gets its own key, so that this laptop can read Studio's code and nothing else. This makes two files in ~/.ssh: $KEY (the private half, which stays on this Mac and is never shown) and $KEY.pub (the public half, which goes to GitHub), and puts a copy of the public half at $PUBLIC_COPY."
+      [[ -d "$HOME/.ssh" ]] || mkdir -m 700 "$HOME/.ssh"
+      ssh-keygen -t ed25519 -f "$KEY" -N "" -C "$KEY_COMMENT" >/dev/null 2>&1 || stop_here "The key could not be made."
+      changed+=("made Studio's key ($KEY and $KEY.pub)")
+      made=yes
+      pub="$(<"$KEY.pub")"
+    fi
+  fi
+
+  # Its public half: shown, copied, and kept on the Desktop.
+  if [[ -n "$pub" ]]; then
+    say "  Its public half (the part that goes to GitHub):"
+    say "  $pub"
+    if [[ -n "$PRINT_ONLY" ]]; then
+      [[ "$(cat "$PUBLIC_COPY" 2>/dev/null || true)" == "$pub" ]] || would "keep a copy of it at $PUBLIC_COPY"
+    else
+      print -r -- "$pub" | pbcopy 2>/dev/null || true
+      if [[ "$(cat "$PUBLIC_COPY" 2>/dev/null || true)" != "$pub" ]]; then
+        mkdir -p "${PUBLIC_COPY:h}"
+        print -r -- "$pub" > "$PUBLIC_COPY"
+        changed+=("kept a copy of the public half at $PUBLIC_COPY")
+      fi
+      say "  It is copied, and kept at $PUBLIC_COPY."
+    fi
+  fi
+
+  # The Host entry that makes ssh use this key for Studio's repository.
+  state="$(host_entry_state)"
+  case "$state" in
+    same) done_already "the Host entry for $HOST_ALIAS in ~/.ssh/config" ;;
+    different) stop_here "~/.ssh/config already has a \"Host $HOST_ALIAS\" entry that is not the one Studio needs. This app does not change it." ;;
+    none)
+      if [[ -n "$PRINT_ONLY" ]]; then
+        would "add this entry to ~/.ssh/config, after what is there:"
+        local l; for l in "${HOST_BLOCK[@]}"; do say "    $l"; done
+        pending=yes
+      else
+        ask "This adds an entry to ~/.ssh/config, after what is there (the rest stays as it is), so that Studio's repository uses Studio's key:
+$(local l; for l in "${HOST_BLOCK[@]}"; do print -r -- "    $l"; done)"
+        [[ -d "$HOME/.ssh" ]] || mkdir -m 700 "$HOME/.ssh"
+        append_lines "$HOME/.ssh/config" "${(F)HOST_BLOCK}" yes
+        changed+=("added the $HOST_ALIAS entry to ~/.ssh/config")
+      fi ;;
+  esac
+
+  # GitHub's own host key, so that ssh knows it is talking to GitHub.
+  state="$(host_key_state)"
+  case "$state" in
+    same) done_already "GitHub's host key is in ~/.ssh/known_hosts" ;;
+    different) stop_here "GitHub's key on this Mac isn't the one GitHub publishes ($GITHUB_FINGERPRINT). Nothing is trusted until that is looked into: tell Jason." ;;
+    none)
+      if [[ -n "$PRINT_ONLY" ]]; then
+        would "add GitHub's published host key (fingerprint $GITHUB_FINGERPRINT) to ~/.ssh/known_hosts"
+        pending=yes
+      else
+        ask "This adds GitHub's published host key (fingerprint $GITHUB_FINGERPRINT) to ~/.ssh/known_hosts, so that ssh trusts GitHub and nothing else."
+        [[ -d "$HOME/.ssh" ]] || mkdir -m 700 "$HOME/.ssh"
+        append_lines "$HOME/.ssh/known_hosts" "$GITHUB_HOST_KEY"
+        changed+=("added GitHub's host key to ~/.ssh/known_hosts")
+      fi ;;
+  esac
+
+  # Whether GitHub knows the key. A key made just now cannot be there yet.
+  if [[ -n "$PRINT_ONLY" ]]; then
+    if [[ -n "$pending" ]]; then
+      would "wait for the public half to be put on GitHub, then check it with ssh -T git@$HOST_ALIAS"
+      R42_KEY="not checked: this was a print"
+    elif check_with_github; then
+      R42_KEY="yes: it is on GitHub, and the check of the key worked"
+    else
+      would "wait for the public half to be put on GitHub, then check it with ssh -T git@$HOST_ALIAS"
+      R42_KEY="no: GitHub does not know the key yet"
+    fi
+    return 0
+  fi
+  if [[ -z "$made" ]] && check_with_github; then
+    done_already "the key is on GitHub"
+    R42_KEY="yes: it was on GitHub already, and the check of the key worked"
+    return 0
+  fi
+  while true; do
+    wait_for "Now the public half goes on GitHub, as a read-only deploy key: Jason does this at github.com, jogden12/brimm-video-studio, Settings, Deploy keys, Add deploy key. Title: Sallie's laptop. Key: the public half above (it is copied; or it is in $PUBLIC_COPY). Write access off. (Or give the public half to Claude on the Mac Studio, who does it.)"
+    if check_with_github; then break; fi
+  done
+  if [[ -n "$made" ]]; then R42_KEY="yes: the check of the key worked"; else R42_KEY="yes: the key was made on an earlier run, and the check of it worked"; fi
+}
+
+# The steps after the key. Each is replaced by its own task; until then it says its heading and does nothing.
 get_the_code() { heading "3. Studio's code (check 42)"; }
 find_the_app() { heading "4. The HyperFrames app (check 43)"; }
 run_the_installer() { heading "5. Studio's installer (check 44)"; }

@@ -8,7 +8,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,10 @@ const EMAIL = "sallie@example.com";
 const ORG = "The BRIMM Secret Org";
 const SIGNED_IN = `{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max","email":"${EMAIL}","orgName":"${ORG}"}`;
 const SIGNED_OUT = '{"loggedIn":false}';
+const KEY_COMMENT = "brimm-video-studio read-only, Sallie's laptop";
+const GITHUB_HOST_KEY = "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
+const HOST_BLOCK = "Host github-brimm-video-studio\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/brimm_video_studio_deploy\n  IdentitiesOnly yes\n";
+const HI = "Hi jogden12/brimm-video-studio! You've successfully authenticated, but GitHub does not provide shell access.";
 const STOPPED_NOTHING = "Stopped. This run changed nothing.\nDouble-click Move to Studio again to go on from here.\n";
 const HEADINGS = [
   "1. Looking at this Mac (check 41). This changes nothing.",
@@ -70,6 +74,10 @@ if (command === "show") {
     dropFiles  names put in her drop folder (it always holds .DS_Store and .brimm-watched-by too)
     claude     { status, version }: what the stand-in prints for `auth status --json` (default signed in, Max), and for --version;
                `auth login` flips it to signed in
+    key        the comment of a key already in ~/.ssh (default: KEY_COMMENT, so a key made earlier), or null for none
+    sshConfig  text of ~/.ssh/config (default: just the Host entry), or null for none
+    knownHosts text of ~/.ssh/known_hosts (default: GitHub's published ed25519 key), or null for none
+    ssh        what `ssh -T` answers, one answer a call: "ok", "denied" or a list of them (default "ok"; the last repeats)
     commit     the commit to pass: the "GitHub" repo's own by default, null for none
     answers    stdin, such as "y\ny\n\n"
     Returns { status, out, ran, home, before, tree, log, report }: `before` and `tree` list every file in the home folder before
@@ -111,10 +119,43 @@ function moveOn(options = {}, ...args) {
     // The stand-ins: each writes what it was asked into `ran`.
     const stand = (name, body = "") => put(join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${ran}"\n${body}`, 0o755);
     stand("launchctl", `[ "$1" = "list" ] && printf '%b\\n' '${options.launchctl ?? "-\\t0\\tcom.thebrimm.unedited"}'\nexit 0\n`);
-    for (const name of ["ssh-keygen", "ssh", "open", "pbcopy", "caffeinate", "brew"]) stand(name, name === "brew" ? 'echo "Homebrew 4.5.0"\n' : "");
+    for (const name of ["open", "caffeinate", "brew"]) stand(name, name === "brew" ? 'echo "Homebrew 4.5.0"\n' : "");
+    // pbcopy keeps what it was given; ssh-keygen makes a stand-in key (-t) and looks in known_hosts (-F); ssh answers one answer a call.
+    const copied = join(dir, "pbcopied");
+    stand("pbcopy", `cat > "${copied}"\n`);
+    stand("ssh-keygen", `case "$1" in
+  -t) file=""; comment=""
+      while [ $# -gt 0 ]; do case "$1" in -f) file="$2"; shift ;; -C) comment="$2"; shift ;; esac; shift; done
+      echo PRIVATE-HALF > "$file"; chmod 600 "$file"
+      echo "ssh-ed25519 AAAAstandin $comment" > "$file.pub" ;;
+  -F) [ -f "$4" ] && grep "^$2 " "$4" && exit 0
+      exit 1 ;;
+esac
+`);
+    const answers = join(dir, "ssh-answers");
+    const asked = join(dir, "ssh-asked");
+    const said = [options.ssh ?? "ok"].flat();
+    writeFileSync(answers, said.join("\n") + "\n");
+    stand("ssh", `n=$(cat "${asked}" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${asked}"
+a=$(sed -n "$n"p "${answers}"); [ -n "$a" ] || a=$(tail -n 1 "${answers}")
+case "$a" in
+  ok) echo "${HI}"; exit 1 ;;
+  denied) echo "git@github.com: Permission denied (publickey)."; exit 255 ;;
+esac
+`);
     stand("sw_vers", '[ "$1" = "-productVersion" ] && echo 15.1\n');
     stand("df", 'echo "Filesystem 1024-blocks Used Available Capacity iused ifree %iused Mounted on"\necho "/dev/disk3s1s1 971350180 400000000 450000000 47% 400000 4000000000 0% /"\n');
     stand("xcode-select", '[ "$1" = "-p" ] && echo /Library/Developer/CommandLineTools\n');
+    const ssh = join(home, ".ssh");
+    const keyComment = options.key === undefined ? KEY_COMMENT : options.key;
+    if (keyComment !== null) {
+      put(join(ssh, "brimm_video_studio_deploy"), "PRIVATE-HALF\n", 0o600);
+      put(join(ssh, "brimm_video_studio_deploy.pub"), `ssh-ed25519 AAAAstandin ${keyComment}\n`);
+    }
+    const sshConfig = options.sshConfig === undefined ? HOST_BLOCK : options.sshConfig;
+    if (sshConfig !== null) put(join(ssh, "config"), sshConfig, 0o600);
+    const knownHosts = options.knownHosts === undefined ? `${GITHUB_HOST_KEY}\n` : options.knownHosts;
+    if (knownHosts !== null) put(join(ssh, "known_hosts"), knownHosts, 0o644);
     const state = join(dir, "claude-state");
     writeFileSync(state, (options.claude?.status ?? SIGNED_IN).includes('"loggedIn":true') ? "in" : "out");
     stand("claude", `case "$*" in
@@ -135,7 +176,10 @@ esac
     const commit = options.commit === undefined ? ["--commit", sha] : options.commit === null ? [] : ["--commit", options.commit];
     const r = spawnSync("/bin/zsh", [MOVE, ...commit, ...args], { encoding: "utf8", input: options.answers ?? "", env });
     const text = (file) => (existsSync(file) ? readFileSync(file, "utf8") : "");
+    const mode = (file) => (existsSync(file) ? statSync(file).mode & 0o777 : null);
     return {
+      copied: text(copied), sshConfig: text(join(ssh, "config")), sshConfigMode: mode(join(ssh, "config")), knownHosts: text(join(ssh, "known_hosts")),
+      publicCopy: text(join(home, "Desktop", "Studio key (public half).txt")), sshAsked: Number(text(asked).trim() || 0),
       status: r.status, out: r.stdout, err: r.stderr, home, before, tree: readdirSync(home, { recursive: true }).sort(),
       ran: text(ran), log: text(join(home, "Library", "Logs", "brimm-video-studio-move.log")), report: text(join(home, "Desktop", "Studio move report.txt"))
     };
@@ -247,7 +291,7 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
     }
     assert.ok(r.out.trimEnd().endsWith("Nothing was changed."), r.out);
     assert.deepEqual(r.tree, r.before, "no log, no report, no Desktop file");
-    const reading = /^(launchctl list|claude auth status --json|claude --version|sw_vers.*|df.*|xcode-select -p|brew --version)$/;
+    const reading = /^(launchctl list|claude auth status --json|claude --version|sw_vers.*|df.*|xcode-select -p|brew --version|ssh-keygen -F github\.com -f .*|ssh -F .* -T git@github-brimm-video-studio)$/;
     const calls = r.ran.split("\n").filter(Boolean);
     assert.ok(calls.length > 0);
     for (const call of calls) assert.match(call, reading, `a call that reads and changes nothing: ${call}`);
@@ -297,5 +341,116 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the move script, Studio's key (check 42)", { skip: notAMac }, () => {
+  const KEYFILE = (home) => `${home}/.ssh/brimm_video_studio_deploy`;
+
+  it("makes the key on y, with exactly check 42's line, and shows and copies its public half", () => {
+    const r = moveOn({ key: null, answers: "y\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.ok(r.ran.split("\n").includes(`ssh-keygen -t ed25519 -f ${KEYFILE(r.home)} -N  -C ${KEY_COMMENT}`), r.ran);
+    const pub = `ssh-ed25519 AAAAstandin ${KEY_COMMENT}\n`;
+    assert.equal(r.copied, pub);
+    assert.equal(r.publicCopy, pub);
+    assert.ok(r.out.includes(pub.trim()));
+    assert.match(r.out, /Press Return when that's done/);
+    for (const text of [r.out, r.err, r.log, r.report]) assert.ok(!text.includes("PRIVATE-HALF"), "the private half is never shown");
+    assert.match(r.log, /Studio's key/);
+  });
+
+  it("with --print and no key, says it would make the key, and the exact line, and changes nothing", () => {
+    const r = moveOn({ key: null }, "--print");
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /Would make Studio's key/);
+    assert.ok(r.out.includes(`ssh-keygen -t ed25519 -f "${KEYFILE(r.home)}" -N "" -C "${KEY_COMMENT}"`), r.out);
+    assert.ok(!r.ran.includes("ssh-keygen -t"));
+    assert.deepEqual(r.tree, r.before);
+    assert.ok(r.out.trimEnd().endsWith("Nothing was changed."));
+  });
+
+  it("keeps a key of that name made earlier with the same comment, and stops on one with another comment", () => {
+    const same = moveOn({ key: KEY_COMMENT });
+    assert.equal(same.status, 0, same.out);
+    assert.match(same.out, /Already done: .*key/);
+    assert.ok(!same.ran.includes("ssh-keygen -t"), same.ran);
+
+    const other = moveOn({ key: "someone else" });
+    assert.equal(other.status, 1);
+    assert.ok(!other.ran.includes("ssh-keygen -t"));
+    assert.ok(other.out.endsWith(STOPPED_NOTHING), other.out);
+  });
+
+  it("adds the Host entry on y, exactly, after what is there, and leaves the rest byte for byte", () => {
+    const before = "Host other\n  HostName example.com";
+    const r = moveOn({ sshConfig: before, answers: "y\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.equal(r.sshConfig, `${before}\n\n${HOST_BLOCK}`);
+
+    const withNewline = moveOn({ sshConfig: "Host other\n  HostName example.com\n", answers: "y\n" });
+    assert.equal(withNewline.sshConfig, `Host other\n  HostName example.com\n\n${HOST_BLOCK}`);
+
+    const made = moveOn({ sshConfig: null, answers: "y\n" });
+    assert.equal(made.status, 0, made.out);
+    assert.equal(made.sshConfig, HOST_BLOCK);
+    assert.equal(made.sshConfigMode, 0o600);
+
+    const declined = moveOn({ sshConfig: before, answers: "n\n" });
+    assert.equal(declined.status, 1);
+
+    const again = moveOn({ sshConfig: `Host other\n  HostName example.com\n\n${HOST_BLOCK}` });
+    assert.equal(again.status, 0, again.out);
+    assert.match(again.out, /Already done: .*Host entry/);
+    assert.equal(again.sshConfig, `Host other\n  HostName example.com\n\n${HOST_BLOCK}`);
+
+    const different = moveOn({ sshConfig: HOST_BLOCK.replace("github.com", "example.org") });
+    assert.equal(different.status, 1);
+    assert.match(different.out, /Host github-brimm-video-studio/);
+    assert.equal(different.sshConfig, HOST_BLOCK.replace("github.com", "example.org"), "left alone");
+  });
+
+  it("offers GitHub's published host key when this Mac has none, and stops on a different one", () => {
+    const r = moveOn({ knownHosts: null, answers: "y\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.equal(r.knownHosts, `${GITHUB_HOST_KEY}\n`);
+
+    const declined = moveOn({ knownHosts: null, answers: "n\n" });
+    assert.equal(declined.status, 1);
+
+    const other = moveOn({ knownHosts: "github.com ssh-ed25519 AAAAOTHER\n" });
+    assert.equal(other.status, 1);
+    assert.match(other.out, /GitHub's key on this Mac isn't the one GitHub publishes/);
+    assert.equal(other.knownHosts, "github.com ssh-ed25519 AAAAOTHER\n");
+  });
+
+  it("waits for the key to be on GitHub, then checks it with ssh, with her own files and GitHub's ed25519 key only", () => {
+    const r = moveOn({ key: null, answers: "y\n\n" });
+    assert.equal(r.status, 0, r.out);
+    const line = `ssh -F ${r.home}/.ssh/config -o UserKnownHostsFile=${r.home}/.ssh/known_hosts -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -T git@github-brimm-video-studio`;
+    assert.ok(r.ran.split("\n").includes(line), r.ran);
+    assert.ok(r.out.includes(HI), r.out);
+    assert.match(r.out, /Settings.*Deploy keys/s);
+    assert.match(r.out, /write access off/i);
+    assert.equal(r.sshAsked, 1);
+  });
+
+  it("asks to try again when GitHub doesn't know the key yet", () => {
+    const again = moveOn({ key: null, ssh: ["denied", "ok"], answers: "y\n\n\n" });
+    assert.equal(again.status, 0, again.out);
+    assert.equal(again.sshAsked, 2);
+    assert.equal((again.out.match(/Press Return when that's done/g) ?? []).length, 2, again.out);
+
+    const stops = moveOn({ key: null, ssh: ["denied"], answers: "y\n\nn\n" });
+    assert.equal(stops.status, 1);
+    assert.equal(stops.sshAsked, 1);
+    assert.ok(!/Already done: .*on GitHub/.test(stops.out));
+
+    // A key made earlier that GitHub already knows needs no waiting.
+    const known = moveOn({ answers: "" });
+    assert.equal(known.status, 0, known.out);
+    assert.match(known.out, /Already done: .*GitHub/);
+    assert.ok(!known.out.includes("Press Return when that's done"));
+
   });
 });
