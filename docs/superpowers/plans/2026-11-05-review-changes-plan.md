@@ -192,17 +192,387 @@ Where the work happens:
 
 ---
 
-### R1c. The reading starts at once too (only on Jason's yes to Question 1)
+### R1c. The reading starts at once too (Jason: "Yes, build it now", 5 Nov)
 
-**Goal:** Claude reads a raw video straight away, so a raw episode opens in HyperFrames without the fifteen minutes.
+**Goal:** On the Mac that imported a raw video, Claude's reading starts as soon as she answers, not when the import's late check is made. When the reading puts its files in, it takes them out of that check, under a lock the check also takes. So the check never puts the import's older file back over the reading's, and every other file of the import is still checked. A raw episode then opens in HyperFrames about fifteen minutes sooner, less the time she took to answer.
 
-This is an outline, not a task, until Jason answers.
+**Evidence:** `arch.md` finding 1 and option 1b ("Let the reading keep the late check's entries in step"). `flow.md` F1 and F4: the wait before Claude reads is 13 of the 21 minutes before the edit.
 
-- **Modules:** `reading.js` (:245-310, the hold loop), `unedited.js` (`intoEpisode` :1640-1680, `importHold` :1707), `filing.js` (`readPendings` :375, `finishLate` :442, `pendingFor` :193), `edit.js` (`kind`'s "Claude reads it at …" line, :5954-5970).
-- **Why it waits today:** the reading replaces files the import's late check looks at (the cut plan, its captions and transcript, reels.json). The check would put its own copies back over them.
-- **Order:** (1) `late-wait.js` gets `keepCheckInStep(home, record, replaced)`: for each file the reading puts in, update the matching entry of this Mac's pending (`bytes`, `from`) under the pending's lock, written whole (the rule: made outside, never written over). (2) The reading starts at once, reads from the local copy, and calls it. (3) `kind` stops saying "Claude reads it at …" and says it is reading now.
-- **Risks:** a reading that fails half-way leaves the pending half-updated; the late check may find a file short and put the old one back. The other Mac's import status may still be "running". Test with `checking-world.js` (late-check worlds) before anything else.
-- **Size:** L. Needs its own review by someone who has read `filing.js` end to end.
+**Why it waits today, in the code:**
+- `dropbox.js` `lateCheck` (:89-110) judges a file by its size alone (:93). A file of another size than its entry is put in again from the import's work copy, whoever wrote it.
+- A raw reading replaces four files that the light import's pending names: `<stem>.cut-plan.json`, `<stem>.cut-plan.txt`, `<stem>.rough-cut.srt` and `<stem>.rough-cut.transcript.txt`. The full import's pending also names `edit/main.v0.fcpxml`, `<stem>.edit-notes.txt` and `reels.json`. So `reading.js` (:296-311) waits on `importHold` (`unedited.js` :1707) while the check is owed.
+- Only the import's run makes the check: `filing.js` `finishDue` (:604-612) and its loop (:705-730), from this Mac's pending file (`writePending` :367, `readPendings` :375). Nothing locks the pending today. Nothing else writes it but `noteProblem` (:499-513), inside the check.
+
+**Files:**
+- `tool/filing.js`:
+  - New: `lateCheckLockOf`, `takeLateCheckLock`, `releaseLateCheckLock`, `settleReading`, `LOCK_AGAIN_MS`.
+  - `finishDue` (:604-612): each due check takes the lock, and is put off while a reading holds it. Under the lock it reads the pending again, settles a reading's mark, and gives the fresh pending to `finishLate`. It returns how many checks it put off.
+  - The wait loop (:705-730): when `finishDue(false)` put one off, it waits `LOCK_AGAIN_MS` before it looks again.
+  - The per-minute timer (:663-673) is unchanged, but for what `finishDue` now does.
+  - `finishLate`, `noteProblem`, `pendingFor`, `writePending` and `readPendings` are unchanged. Once a reading has taken the cut plan's text out of the check, `noteProblem` finds no entry for it and writes nothing (:503-504).
+  - New imports: `takeEpisodeLock` and `releaseEpisodeLock` from `detached.js`, `episodeWork` from `settings.js`, `recordNumbers` from `episode.js`. `detached.js` imports `caffeinate` and `thisCheckout` from `filing.js`. Each is used only when called, as `filing.js` says of `kinds.js` at :21, so the cycle costs nothing at load.
+- `tool/late-wait.js` (R1b's module; R1a adds `lateWaitFor` to it):
+  - New: `ownCheckOnly`, `readingWaitsUntil`, `keepCheckInStep`, `LOCK_LOOK_MS`, `LOCK_WAIT_MS`.
+  - R1a's `lateWaitFor`: its clause "a reading that replaces files is to run" holds only while `readingWaitsUntil(ctx, record)` is not null. (If R1a named things otherwise, follow its names.)
+- `tool/reading.js`:
+  - New `asFiled(folder, record)`: every file the record's `files` lists, the video among them, is in the folder at its listed size. False when the record lists none.
+  - `readEpisodeNow`'s hold loop (:296-311): before it waits or stops, it breaks and reads now when `ownCheckOnly(ctx, record) && asFiled(found.folder, record)`, with a log line.
+  - `written` (:437-597): `keepCheckInStep` right before `intoEpisode` (:588); `end({ put: true })` first thing in the `onPut` it gives `intoEpisode`; `end({ put: false })` after `intoEpisode` returns, and in a `finally`. Two failed lines (Words, below).
+  - The header comment (:7-10) and `readEpisodeNow`'s comment (:255-257): what a reading waits for now.
+- `tool/edit.js`:
+  - `answerKind` (:5954): `holdsUntil` comes from `readingWaitsUntil(ctx, wrote.record)`, in place of `lateCheckAt`. Its words at :5966 stay, for a reading that still waits.
+  - `guideReading` (:6877): `due` comes from `readingWaitsUntil(ctx, r)`.
+- `README.md`: the `kind` row (:278, "a raw video's reading waits for the import's late check"), the `guide` row (:317, "While a raw video's reading waits for the import's late check"), and `late-wait.js`'s row.
+- Not changed: `dropbox.js`; `unedited.js` (`intoEpisode`, `importHold`); `join.js`; `workcopy.js`; `guide.js`; the skill; `app.js` (it changes only through `lateWaitFor`).
+- Tests: `late-wait.test.js`, `filing.test.js`, `reading.test.js`, `edit-kind.test.js`, `edit-guide.test.js`, and R1a's cases in `app.test.js`.
+
+**Interfaces.**
+
+Consumes: R1b's `lateCheckAt(ctx, record)` (`late-wait.js`); R1a's `lateWaitFor(ctx, record)`; `importHold` (`unedited.js`); `readPendings`, `writePending` (`filing.js`); `readStatuses`, `holdsVideo`, `importState` (`importing.js`); `takeEpisodeLock`, `releaseEpisodeLock` (`detached.js`); `readEpisode`, `recordNumbers` (`episode.js`); `intoEpisode`'s `onPut`, as it is.
+
+Produces:
+- The pending file (this Mac's own disk; its version stays 1) may hold `reading: { pid, at, to }`. It says a reading of this Mac is putting in the files at `to`: absolute paths, each one an entry's `to`. It is written under the lock before the first file goes in, and taken away when the reading lets the lock go. `readPendings` reads it as any other field.
+- `filing.js`:
+  - `lateCheckLockOf(home, name) -> path`: `<BRIMM Video Work>/<episode folder>/late-check.lock`, beside `episode.lock` (`detached.js` `lockOf`). `name` is the pending's `name`, the episode's folder, which is the reading's `found.name`.
+  - `takeLateCheckLock(home, name, command, alive) -> { file, text } | null`: makes the folder, then calls `takeEpisodeLock`. null while a live run holds it, or while another run takes it over. Throws when it cannot be made: that is an error of the check, as a file that cannot be looked at is today.
+  - `releaseLateCheckLock(held)`: `releaseEpisodeLock(held.file, held.text)`.
+  - `settleReading(pending, { home, log }) -> { pending } | { later: true }`. A pending with no mark comes back as it is. For one with a mark, the record in force is read (`readEpisode(pending.folder)`). With no whole record, one a newer brimm-video wrote, or a record file above it still coming (`recordNumbers`): `{ later: true }`, and nothing is written. Otherwise each entry the mark does not name is kept, and so is each it names whose file the record lists at the entry's `bytes`; the rest go. The pending is written whole without the mark, and given back.
+  - `LOCK_AGAIN_MS = 10 * 1000`.
+- `late-wait.js`:
+  - `ownCheckOnly(ctx, record) -> boolean`: this Mac owes the late check of the record's import (a pending of `ctx.machine`, of `ctx.root`, with the record's id), with no problem; and every status of the video (its file and size) that holds it (`holdsVideo`) is this Mac's and at work (`importState` "running"). A video joined from parts has no status, so its pending alone decides.
+  - `readingWaitsUntil(ctx, record) -> ms | null`: null when `ownCheckOnly`; else `lateCheckAt(ctx, record)`.
+  - `keepCheckInStep(ctx, { name, record, paths }, { wait, log }) -> Promise<{ none: true } | { why } | { end }>`:
+    - With no pending of this Mac for the record, or none of whose entries' `to` is among `paths`: `{ none: true }`. No lock is taken and nothing is written.
+    - Otherwise it takes the lock (command "read"). While the import's check holds it, it tries again every `LOCK_LOOK_MS` (by `wait`), for `LOCK_WAIT_MS` in all; then `{ why }`.
+    - Under the lock it reads the pending again. Gone (the check was made): it lets the lock go, `{ none: true }`. A problem: it lets the lock go, `{ why: importHold(...).why }`. Otherwise it writes the pending whole with `reading: { pid: process.pid, at: ctx.now(), to }`, where `to` is the entries' `to` that are among `paths`, and gives `{ end }`.
+    - `end({ put })` runs once, whatever happens. Under the lock it reads the pending again. With `put`, it takes out of `entries` each entry whose `to` the mark names. With or without, it takes the mark away, writes the pending whole and lets the lock go. A write that fails is logged and leaves the mark, for `settleReading`; the lock goes all the same.
+  - `LOCK_LOOK_MS = 1000`, `LOCK_WAIT_MS = 2 * 60 * 1000`.
+
+**What each side does, in order.** The reviewer checks every step against the lock.
+- The reading: the hold loop sees `ownCheckOnly && asFiled` → Claude is asked, the rough cut is rendered → `keepCheckInStep` (lock, mark) → `intoEpisode` puts each file in and writes the record → its `onPut`: `end({ put: true })` (the entries out, the mark and the lock gone), then the rough cut opens, the notice goes out, the early result is written → 15 minutes later `intoEpisode`'s own late check looks at every file it put in, as today.
+  - When a put fails, or the record cannot be written: `intoEpisode` puts the import's files back, waits its 15 minutes, checks what it put back, and returns `{ put: false }` → `end({ put: false })` leaves the entries as they were. The lock is held through that wait, so the import's check is put off for those 15 minutes. It is not skipped.
+- The import: `finishDue` → for each due pending, `takeLateCheckLock(…, "late check", alive)`.
+  - null: the check is put off. It is not added to `checked`, and the log says so once in the run.
+  - Taken: the pending is read again (`readPendings`, by id). Gone: the lock is let go. With a mark: `settleReading`. `{ later }`: the pending is added to `checked` (the next run tries again), the log says so once, and the lock is let go. Otherwise: `checked.add`, then `finishLate(fresh)`, and the lock is let go in a `finally`.
+  - The loop: `if (finishDue(false)) await wait(LOCK_AGAIN_MS)`. It never loops without a wait.
+
+**Failing tests first.**
+
+`late-wait.test.js` (R1b's file). A home and root of the test's own, from `setup()` and `episodeFor()` in `episodes.js`, with `writePending` and `writeStatus`. Each test gives `ctx.alive`, since the world's own says every process is gone.
+1. `ownCheckOnly` is true with this Mac's pending and no status; true with this Mac's import status at work ("Waiting for its late check"); false with the other Mac's status of the video at work; false with a failed or a problem status; false with a pending that found a problem; false with no pending (this Mac's status alone); false with another Mac's or another root's pending.
+2. `readingWaitsUntil` is null in the first two cases of 1, and `lateCheckAt` in the others.
+3. `keepCheckInStep` with no pending gives `{ none }`: no lock file, and the pending folder as it was. With a pending none of whose entries is among `paths`: `{ none }`, the pending byte for byte as it was, and no lock file.
+4. A pending with entries for the video, the srt, the words, the record and the four files a raw reading replaces gives `{ end }`. The lock file holds this pid and "read". The mark names exactly the four `to`. After `end({ put: true })`: those four entries are gone; the others are as they were (`from`, `to`, `bytes`); there is no mark and no lock file; every other field (`drop`, `dropFile`, `lastCopy`, `label`) is as it was.
+5. After `end({ put: false })`: the entries as they were, no mark, no lock file. A second `end` changes nothing.
+6. The lock held by a live process: `wait` is called with `LOCK_LOOK_MS`, and the lock is taken once it is freed at the third look. Held for `LOCK_WAIT_MS`: `{ why }` in the exact words below, and nothing is written.
+7. The lock left by a dead process is taken at once, with no wait.
+8. The pending has found a problem by the time the lock is taken: `{ why }` with `importHold`'s words, the lock let go, nothing written.
+9. `end` whose write fails (the pending folder made read-only): the lock is let go, the mark stays, and the log says so.
+
+`filing.test.js`, in "the wait for late checks", with its `world` and `holdCheck` helpers (the test helper is named `holdCheck`; rename it only if it gets in the way). The run is given `alive`.
+10. "A check due while a reading holds its lock is put off: no file is put back, it waits LOCK_AGAIN_MS between tries, and it is made once the lock is let go." The entry's file is the reading's, at another size. The lock is taken with `takeLateCheckLock(…, "read")`, and `alive` is true for this pid. At the second wait, the stand-in does what `end({ put: true })` does. Then: the reading's file is as it was; `LOCK_AGAIN_MS` was waited twice, and the number of looks is bounded; the pending and the status are gone.
+11. "A mark left by a reading that stopped after its record was written is settled by the record: the reading's file is left as it is, and the rest is checked." The record lists the reading's size for the marked file. Another entry's file is missing, with its work copy there. The lock was left by a dead pid. Then: the marked file is as the reading left it; the missing one is put in again; the pending is gone.
+12. "A mark left by a reading that stopped before its record keeps every entry, and the import's file is put back." The record lists the import's size; the marked file is at the reading's size. Then the import's bytes are back.
+13. "A mark whose record cannot be read (a conflicted copy) waits for the next run." The run ends, the pending keeps its mark, and the log says so once.
+14. "The per-minute timer puts off a check whose lock a reading holds, and throws nothing" (in test 37's world).
+15. The existing first test (a pending folder that cannot be written) passes as it is: the lock is in the episode's own folder in BRIMM Video Work.
+
+`reading.test.js`, with `reading("raw")`, `pendingFor(t, found, over)` given entries whose work copies are in `t.work`, `claudeDoing` and `onWaits`.
+16. "Reads a raw video at once while this Mac's own late check of the import is still to come, and takes the files it replaced out of that check." No `READ_LOOK_MS` wait, and Claude is asked once. Afterwards the pending holds the entries the test gave for the video, the srt, the transcript, the words and the record, and none for the cut plan, the cut log, or the rough cut's captions and transcript. There is no mark and no lock file. Then `finishLate(pending, …)`, with the clone and same-disk stand-ins, passes, and each file the reading put in is still the reading's, byte for byte.
+17. "Holds the late check's lock while it puts its files in." At the first clone into the episode, the clone stand-in asks `takeLateCheckLock` as the import would, with `alive` true for this pid, and gets null.
+18. "The import's check is made while Claude reads (the pending is taken away): the reading puts its files in as before, with no lock and no mark."
+19. "The import's check finds a problem while Claude reads: nothing is put in, the result says the problem, and the rough cut's kept line follows."
+20. "A put that fails half-way leaves the import's check as it was." A clone stand-in fails at the third file. After the run, the pending's entries deep-equal those before, with no mark and no lock file.
+21. "Waits as today when a file is not as the import filed it." This Mac's pending, and the srt shorter than the record lists: it waits `READ_LOOK_MS`. The stand-in check puts the srt right and takes the pending away, and then it reads.
+22. The tests that pin today's wait keep their meaning with a hold that is not this Mac's own: the other Mac's status at work, or a file not as filed. These are :514, :545, :920 and :1150. The fix-3 test (:948, a finished reading of the full import's `reels.json`) becomes "reads at once, and reels.json leaves the check", with a waiting twin given the other Mac's status.
+
+`edit-kind.test.js`, with its `owe(t, ago)`:
+23. "A raw answer while this Mac's own late check is still to come is waited for as one with no check": `waitForReading`'s words (`Claude is still reading <name>. A notice will come on this Mac when it is done: then say "what did Claude find?"`), with the read and copy runs started.
+24. The tests at :777-785 and :884-913 that use `owe` take (23)'s words. The one with the other Mac's import at work (:914-924) keeps `Answered. Claude reads it at …`.
+
+`edit-guide.test.js`:
+25. :188-217: with this Mac's own pending the step is "reading" (`Claude is reading it. A notice comes when it is done; then say "what did Claude find?".`), with no time. With the other Mac's import at work, it is "reading-later", as today.
+
+R1a's `app.test.js` cases: with this Mac's own pending, `stillReading` is the sentence with no start time.
+
+**Steps:**
+- [ ] Read `filing.js` whole, and `intoEpisode` and `importHold` in `unedited.js`.
+- [ ] Write the tests above. Run `cd tool && node --test tests/late-wait.test.js tests/filing.test.js tests/reading.test.js tests/edit-kind.test.js tests/edit-guide.test.js tests/app.test.js`. They fail.
+- [ ] `filing.js`: the lock's helpers; `settleReading`; `finishDue` under the lock, with the pending read again; the loop's `LOCK_AGAIN_MS` wait; the log lines.
+- [ ] `late-wait.js`: `ownCheckOnly`, `readingWaitsUntil`, `keepCheckInStep`; R1a's `lateWaitFor` through `readingWaitsUntil`.
+- [ ] `reading.js`: `asFiled`; the hold loop's start at once; `written` around `intoEpisode`, with a `try`/`finally` so the lock always goes; the failed lines; the comments.
+- [ ] `edit.js`: `answerKind` and `guideReading` through `readingWaitsUntil`.
+- [ ] The README rows.
+- [ ] Run the whole suite: `cd tool && node --test`. Expected: all pass.
+- [ ] Commit.
+- [ ] For the merge checklist (the coordinator's): pull this onto a Mac only while no import is at work there (`status` lists none), so that no import run of the earlier code is alive to make a check without the lock.
+
+**Words Sallie sees:**
+- New. When the import's check holds the lock for two minutes, the reading's result says: `The import was still checking its copies of <name> in Dropbox after two minutes, so nothing Claude read was put in.` It is followed, as for any reading that put nothing in, by `The rough cut of <name> is kept on this Mac, in BRIMM Video Work, as "<file>".` when the rough cut was made, and by the next step `Nothing was changed. Say what it is again, with --again, to have Claude read it.` (`reading.js` `AGAIN`, as today).
+- When the late check found a problem while Claude read: `importHold`'s words, as today: `The late check of this episode's import found a problem: <problem>. Once it is put right, say "try it again" for <video> on <Mac>, then say this again.`, with the kept line.
+- Nothing else is new. For a raw reading that starts at once, `kind` says what it says when nothing holds a raw reading (`waitForReading`); the guide says its "reading" step; `app` says its old `stillReading` (R1a's start time only while the reading waits).
+- In the log only (not her words; a light import's video is named by its label, as in `finishLate`'s lines):
+  - `<named>: Claude reads it now, while the import's late check of its copies is still to come.`
+  - `<who>: its late check waits a moment: a reading is putting its files in.`
+  - `<who>: a reading stopped while it put its files in. Its late check leaves out <n> file(s) the record says are the reading's.`
+  - `<who>: its late check waits for the next run: a reading stopped while it put its files in, and the episode's record cannot be read now.`
+
+**Contract touched:** none. The pending file is this Mac's own, in Application Support. The status files, the record and the hand-off do not change.
+
+**Does not do:**
+- The other Mac's reading of a video this Mac imported still waits for this Mac's check (its status), as today. Only this Mac can keep its own pending in step.
+- The project still opens only once the read run ends, 15 minutes after the reading's files go in. That run holds the episode's lock until `intoEpisode` returns (`detached.js` :204), and `app` makes no project while it does (`app.js` :488). See the question for Jason.
+- `importHold` does not change. The copy (R1b), `ask`, `--from-plan` and every other hold stay as they are.
+- `dropbox.js`, `intoEpisode` and its own late check, `LATE_CHECK_MS` and a pending's due time do not change.
+- An iPhone clip's and a session's readings do not change: they never waited. A finished video's reading that replaces the full import's `reels.json` goes the same way as a raw one. No Mac does the full import now: both use the light import.
+
+**Risks:**
+- An import run of the earlier code, still alive at the upgrade, makes its check without the lock. It reads the pending again before each check, so it can miss only the seconds of a reading's put. The merge line above closes this.
+- While a reading holds the lock, the import's check waits. This is seconds as a rule; 15 minutes when the reading's put fails (`intoEpisode` waits before it returns); and as long as a hung reading holds it. The drop file and the status stay that long. Nothing is skipped.
+- A reading killed during its own 15-minute wait leaves its files unchecked, as it does today. More of the episode now rests on that check, since the files it replaced leave the import's.
+- `kind` and the guide judge by `ownCheckOnly` alone. When a file is not as filed, they say Claude is reading while the run waits for the check. This is rare: a file Dropbox damaged within minutes of the import.
+- The render now runs beside the import of the next video and beside R1b's copy. Each may be slower.
+- Each test that pins today's wait needs a hold that is not this Mac's own. A test changed wrongly would hide a real wait.
+- Found while designing, not R1c's: a join writes no status, so the other Mac cannot know that the joined video's check is owed. An `ask` or a reading there within the 15 minutes is not held.
+
+**Review Focus** (for a reviewer who has read `filing.js` end to end):
+1. No put-back over a reading's file. Walk each order of `finishDue` and the reading's put: before the lock, inside it, after it; the reading killed inside it, before and after its record; `end`'s write failing. At each point, say which entries the check holds and which file is on disk.
+2. `finishDue` reads the pending again under the lock and gives that object to `finishLate`, which writes it back on a problem. Never the one `mine()` read before the lock.
+3. A check put off is never in `checked`, and the loop waits `LOCK_AGAIN_MS`. One that cannot be settled is in `checked` and waits for the next run, so the run can still end.
+4. The mark names only entries among the reading's own paths, and `end({ put: true })` takes out exactly those. The entries of the video (R1b's `localSource` reads it), the record, the srt and the words stay.
+5. The reading starts at once only for this Mac's own pending (id, machine, root), with no problem, with only this Mac's statuses at work, and with the files as filed. Every other hold waits exactly as today.
+6. The lock goes on every path: success, failure and a throw. It is taken over only from a dead process. It lives in the episode's own work folder, not the pending folder.
+7. No new word names a file, a path, a flag or a session. The log names a light import's video by its label.
+8. `importHold` is unchanged, and so is everything R1b does.
+
+**Check:** `cd tool && node --test`.
+
+**Size:** L. About 250 lines of code and 25 tests, of which about 8 change tests that pin today's wait.
+
+---
+
+#### Rulings for R1c
+
+1. **The reading takes the files it replaces out of the import's late check. It does not re-point the check at them,** as the outline's step 1 did.
+   - Reason: the import's check judges by size alone (`dropbox.js` :93), never by the record. Pointed at the reading's files, it would put them back over anything that changes them within its window. Her correction (`kind … --again`, which no hold stops) takes the reading's files out and puts the rules' plan back; so does a second reading. The reading's own late check (`intoEpisode` `ownLateCheck`) already checks each of its files 15 minutes after the put, judges by the record and the other Mac's claim, and is what checks every reading's files today. Re-pointing would also need the reading's work copies kept in the import's run folder: the reading's folder goes when it ends (`reading.js` :391-393), and `clearRuns` spares only a pending's `work`. And it would need the check's due time moved to the reading's put, or the check comes too soon for the reading's files; that keeps the drop file, the status and the other Mac's hold that much longer.
+   - Cost if wrong: a reading run killed during its own 15-minute wait leaves its files unchecked, exactly as today.
+2. **A lock both sides take, in the episode's own folder in BRIMM Video Work** (`late-check.lock`, beside `episode.lock`), taken with `detached.js` `takeEpisodeLock`.
+   - Reason: reading the pending again before each put-back still leaves milliseconds in which the reading's file lands. Only a lock makes "never" true. `takeEpisodeLock` takes a dead run's lock safely (its takeover guard); `run.js` `takeLock` does not. The episode's work folder, not the pending folder, so that a pending folder that cannot be written (`filing.test.js` :138) changes nothing.
+   - Cost if wrong: a check put off for as long as a hung reading holds the lock.
+3. **The pending keeps a mark while the reading puts its files in. The import settles a mark it meets by the record in force.**
+   - Reason: a reading killed between writing its record and taking its files out of the pending, or whose write failed, must not have its files put back (it finished). One killed before its record must not leave its half-put files where the import's check no longer looks (it did not finish). The record tells the two apart: once the reading's record is in, it lists each file at the reading's size.
+   - Cost if wrong: a mark whose record cannot be read waits for the next run.
+4. **The reading starts at once only when the one hold is this Mac's own pending check** (no problem; every status of the video that holds it is this Mac's import at work), **and every file the record lists is there at its listed size.** Otherwise it waits exactly as today.
+   - Reason: the other Mac's pending is on that Mac's disk. A file not as filed is what the check is there to put right before Claude reads it. This includes "owed, past its time, with no import at work", where today the reading stops and says "try it again". Now the reading goes on, and the check is made at the next run.
+   - Cost if wrong: in those cases she waits as today.
+5. **`importHold` does not change.**
+   - Reason: only the reading keeps the pending in step. The copy (R1b), `ask`, `--from-plan` and the other Mac keep their holds.
+   - Cost: none.
+6. **The render reads the episode's video, as today, not the drop file.** (The outline said "reads from the local copy".)
+   - Reason: on the Mac that imported it, the video is a fresh clone on this Mac's disk. `asFiled` checks its size, the reading checks it is whole, and `sameVideo` checks its facts. An open file stays readable if Dropbox takes it away.
+   - Cost if wrong: a rough cut not made, said as today.
+7. **`kind` treats a raw reading that starts at once like one with nothing to wait for** (`waitForReading`, up to 90 seconds), so there are no new words.
+   - Reason: one behaviour for "the reading starts now", in words that exist.
+   - Cost: her chat may wait up to 90 seconds, and most raw readings then end with "Claude is still reading … A notice will come …".
+8. **A pending's due time and `LATE_CHECK_MS` do not change.**
+   - Reason: the import's check still checks only files the import put in, 15 minutes after it put them.
+   - Cost: none.
+9. **The late-check test worlds are `filing.test.js` ("the wait for late checks") and `reading.test.js` (`reading()` and `pendingFor`), not `checking-world.js`,** which is the finish's.
+   - Reason: it corrects the outline's "Test with `checking-world.js`".
+   - Cost: none.
+10. **It is pulled onto a Mac only while no import is at work there.**
+    - Reason: an import run of the earlier code, still alive, would make its check without the lock.
+    - Cost: one line in the merge checklist.
+
+---
+
+### R1d. The project opens once Claude's files are in (Jason: "Yes, build R1d too", 5 Nov)
+
+**Goal:** `app` makes a raw episode's HyperFrames project, and a Reel's project, as soon as Claude's reading is in the record and the files the project reads are at the sizes that record lists. The reading's own late check still runs behind, 15 minutes after the reading put its files in. That check is never skipped or weakened: the read run keeps the episode's lock through it, so every command that writes into the episode still waits for it, as today. Only the making of a project, which reads, no longer waits.
+
+**Evidence:**
+- `app.js` :488-497: `makeProject` says "Claude is still reading it" while a `read` run holds the episode's lock. `app-reel.js` does the same at :119, :213 and :288.
+- The read run holds that lock until `intoEpisode` returns (`detached.js` :204). `intoEpisode` returns only after its own late check: `onPut` at `unedited.js` :1671, the wait at :1673, the check at :1674.
+- So the project waits 15 minutes after the reading's notice. `h7-raw`: "the read run waits for its copies' late check (about 15 minutes), then the open worked". `h7-reel`: "once the read's late check … were done".
+- The guide already says the reading is done once its record is in (`edit.js` `guideReading` :6876), so `guide` and `app` disagree for those 15 minutes.
+- The precedent: `spell` lets a spelling through while the read run waits for its own check, "but only once the record holds the current reading" (`edit.js` :4942-4946). So do a session's decisions (`sessionBusy` :6577-6589).
+
+**What may run while the reading's own check is still owed (the read run alive, its reading in the record):**
+- New with R1d: `app` for the main video (its project is made and opened) and `app … reel <n>` (made, or its video put back).
+- As today:
+  - the video for HyperFrames and a Reel's video, which run under their own lock (R1b makes them from the local copy);
+  - HyperFrames itself, her edits and her export;
+  - commands that write only the record: the spellings card (`spell`), the name, a title, a Reel's pick or drop;
+  - `show me the Reels`, `what did Claude find?`, `status`, `guide`, `episodes`.
+
+**What still waits for it** (each is refused until the read run ends; the words are under Words):
+- the hand-off: the first one, a second one, the Reels' (`finish`; `edit.js` :2565-2568);
+- handing the edit over (`release`; :2880-2881);
+- asking Claude again for Reels (`ask`; :3979-3981);
+- a new answer (`kind … --again`; :5613-5614);
+- the Final Cut commands (`layerStart`; :4326-4327);
+- `free` (`free.js` :296);
+- any new detached run on the episode: `bring`, `read`, another `finish`.
+
+**If the reading's check later finds a file short or missing after the project was made:**
+- The check puts the file in again from the reading's own work copy (`intoEpisode` `ownLateCheck`, unchanged). Those are the bytes the project was made from: the project read the file at the size the record lists. The project holds its own copies, so nothing changes for her. The log says what was put back.
+- If the check cannot put it back (the work copy gone, a conflicted copy, the other Mac's claim, a clone that fails):
+  - The read run ends with that problem in its result. "How far is it?" says `<name>: read ended … ago. Made: …. Not done: <the problem>.` (`ranLine`, as today).
+  - The file is then not as the record lists. `episodes` names it, and the hand-off is refused in its existing words: `<name> is not whole in Dropbox: <file> is missing.` (`edit.js` :2563-2564).
+  - Her project, her edits and her export stay as they are. Jason puts the file right, as for any problem a reading's check finds today.
+
+**Files:**
+- `tool/episode.js`: `currentReading(record)` moves here from `edit.js` (:4470-4478), word for word, and is exported. `app.js` and `late-wait.js` cannot import `edit.js`.
+- `tool/late-wait.js` (R1b's module): new `projectWaits` and `readingCheckAt`.
+- `tool/app.js`:
+  - `makeProject` (:478-526): `projectWaits` decides the "still reading" stops at :488-497. While it says "verify", the three files read from the episode's folder go through `readListed`. A file not at its listed size makes nothing and says the new line.
+  - New exported `readListed`, and the new line `notWholeYet(name)`.
+- `tool/app-reel.js`:
+  - `reelWhy` (:117-127): any Reel passes only while the reading is not in the record (`projectWaits` "reading"). Once it is in, the record judges, as at any other time.
+  - `makeReel` (:204-268) and `putReelVideoBack` (:275-…): the "still reading" stops (:213, :288) through `projectWaits`. In "verify", the words, `reels.json` (`suggestion`, :129) and the cut plan through `readListed`, and the Reel's line `reelNotWholeYet(n, name)`.
+- `tool/edit.js`:
+  - `currentReading` is imported from `episode.js`.
+  - `stoppedWords` (:2211-2214): a branch for the read run at its own check (`readingCheckAt`).
+  - `askRefusal` (:3976-3984): its running stop goes through `stoppedWords`.
+- `README.md`: the `app` row (:282, "nothing is made while Claude's reading of the episode is still at work …") and the `app … reel` row (:285, the same).
+- Not changed: `reading.js`, `unedited.js` (`intoEpisode` and its check), `detached.js`, `dropbox.js`, `filing.js`, `guide.js`, `free.js`, `project.js`, the skill.
+- Tests: `late-wait.test.js`, `app.test.js`, `edit-app.test.js`, `app-reel.test.js`, `edit-app-reel.test.js`, `edit-checking-refusals.test.js`, `reading.test.js`.
+
+**Interfaces.**
+
+Consumes:
+- From R1b's `tool/late-wait.js`: the module itself, as the home both `app.js` and `edit.js` can import.
+- From R1c: this Mac's pending check of the import (`readPendings`, by id, machine and root), which says a late check of the import's files may still be owed after the reading is in. R1d takes neither R1c's `late-check.lock` nor the episode's lock (ruling 3).
+- `runningCommand`, `runningRun`, `readResult` (`detached.js`); `LATE_CHECK_MS` (`dropbox.js`); `kindOf` (`episode.js`); the read run's early result (`runDetached`'s `early`: `{ early: true, pid, ended }`, written at the end of the reading's `onPut`, `reading.js` :564).
+
+Produces:
+- `episode.js` `currentReading(record) -> reading | null`, moved unchanged.
+- `late-wait.js` `projectWaits(ctx, { name, record }) -> "reading" | "verify" | ""`:
+  - "reading": a live `read` run holds the episode's lock (`runningCommand(ctx.home, name, ctx.alive) === "read"`), and `currentReading(record)` is null;
+  - "verify": that run holds it with the reading in the record; or no read run, and this Mac has a pending check of the record's import (R1c), with or without a problem;
+  - "" otherwise, as today.
+- `late-wait.js` `readingCheckAt(ctx, { name, record }) -> ms | null`: when the run holding the episode's lock is `read` (`runningRun`), `currentReading(record)` is set, and the `read` result is that run's early one (`early === true`, `pid` the run's): `ended + LATE_CHECK_MS`. Otherwise null.
+- `app.js` `readListed(folder, record, rel) -> { text } | { absent: true } | { notWhole: rel }`: reads the file whole, then compares the bytes read (not a look before) with `record.files[rel]` when the record lists it. Missing, or another size: `notWhole`. A file the record does not list is read as today: `{ text }`, or `{ absent }` when it is not there.
+
+**Failing tests first.**
+
+`late-wait.test.js` (a home of the test's own; a lock taken with `takeEpisodeLock(lockOf(...), command, ...)`; `ctx.alive` given; an early result written with `resultFile`):
+1. `projectWaits`:
+   - "reading" with a live `read` lock and a record whose reading is older than its answer, or has none;
+   - "verify" with the live `read` lock and a record whose current reading is in;
+   - "verify" with no run and this Mac's pending of the record;
+   - "" with no run and no pending; with a live lock of another command; with a `read` lock whose process is gone.
+2. `readingCheckAt`:
+   - the early result of the live read run gives `ended + LATE_CHECK_MS`;
+   - an early result of another pid gives null; no early result gives null; a final (not early) result gives null; no current reading gives null.
+
+`app.test.js` (its `episode(c)` world and `atWork(e)` helper; the record given a current reading and `files` listing the words, `reels.json` and the plan at their sizes):
+3. "Makes the project while the reading's own check is still to come, once the reading is in the record and the files are at the sizes it lists." Said: `It's open in HyperFrames.` and the buttons line. The project is made from the reading's plan and `reels.json`. The read lock is untouched.
+4. "Makes nothing while a file it reads is not the size the record lists": `reels.json` shorter than listed. Said: the new line, exactly. Nothing is written, and the code is 0. Then the file is put right and asked again: made.
+5. "Judges the bytes it read": the record lists the cut plan at one byte more than the file holds. The new line is said, and no project is written. A unit test of `readListed` shows the comparison is of the text read (its byte length), with no `statSync` before the read.
+6. "With this Mac's late check of the import still owed and no read run (R1c), the files are checked the same way": `words.json` short, giving the new line.
+7. The existing "while Claude is still reading" tests (:343-…) keep a record with no current reading, and say `STILL` as today.
+
+`edit-app.test.js` (its `world()` and `readingAtWork(t)`; the record with a current reading):
+8. "Claims, makes and opens the project while the read run is at its own late check." Said: `[OPEN, BUTTONS]`; the record at the claim's rev plus one, with the project "opened"; `episode.lock` still the read run's.
+9. The existing :713-… tests (a record with no reading) keep `STILL`.
+
+`app-reel.test.js` and `edit-app-reel.test.js` (their worlds; a raw and a finished record whose current reading lists `reels.json`):
+10. In the window, `app … reel 9` is refused `There is no Reel 9. The Reels are 1, 2.` by the record (today any number passes while the read run is at work).
+11. In the window, Reel 2's video is asked for when it is not made, and its project is made when it is: no `STILL`.
+12. In the window, with `reels.json` shorter than listed: the Reel's new line, exactly; nothing asked for or made.
+13. Putting a Reel's video back in the window goes ahead (no `STILL`).
+14. The existing `STILL` tests (`app-reel.test.js` :98-…, `edit-app-reel.test.js` :455) keep a record with no current reading.
+
+`edit-checking-refusals.test.js`, a new describe with `guide-world.js`'s `guideWorld()` (a raw episode read by Claude: `READ(kind)` at `AT`), a live `read` lock and that run's early result at `ended`:
+15. The hand-off (`finish`, asked as "hand it off") says `Claude's reading is written, and Studio checks Dropbox's copies at <clockAt(ended + LATE_CHECK_MS)>. Say "hand it off" again then.`
+16. `release` says `Claude's reading of <name> is written, and Studio checks Dropbox's copies at <time>. Hand it over then. Nothing was handed over.`
+17. A new answer (`kind … --again`) says `Claude's reading of <name> is written, and Studio checks Dropbox's copies at <time>. Say it again then.`
+18. `ask` (and the end of `show me the Reels`) says `Claude's reading of <name> is written, and Studio checks Dropbox's copies at <time>. Say it again then.`
+19. With no early result of that run, each says its generic words as today. `free` says its own words as today.
+
+`reading.test.js`, the fix-1 world (:850-894; the read run held at its `LATE_CHECK_MS` wait by a promise):
+20. "While the read run waits for its own late check, `app` makes the project": with the app's stand-ins as `edit-app.test.js` gives them. When the promise is let go, the run's check finds every file as it put it, and the final result is ok.
+
+**Steps:**
+- [ ] Read `app.js` `makeProject` and `openInApp`, `app-reel.js` :100-330, `edit.js` `stoppedWords` and its callers, and `intoEpisode` from :1631 to its end.
+- [ ] Write the tests above. Run `cd tool && node --test tests/late-wait.test.js tests/app.test.js tests/edit-app.test.js tests/app-reel.test.js tests/edit-app-reel.test.js tests/edit-checking-refusals.test.js tests/reading.test.js`. They fail.
+- [ ] Move `currentReading` to `episode.js`; import it in `edit.js`. Run the suite: nothing else changes.
+- [ ] `late-wait.js`: `projectWaits`, `readingCheckAt`.
+- [ ] `app.js`: `readListed`, `notWholeYet`, and `makeProject` through `projectWaits`.
+- [ ] `app-reel.js`: `reelWhy`, `makeReel`, `putReelVideoBack`; `reelNotWholeYet`.
+- [ ] `edit.js`: the `stoppedWords` branch; `askRefusal` through it.
+- [ ] The README rows.
+- [ ] Run the whole suite: `cd tool && node --test`. Expected: all pass.
+- [ ] Commit.
+
+**Words Sallie sees:**
+- New, `app` in the window when a file it reads is not at its listed size: `Some files of <name> are not whole in Dropbox yet, so its HyperFrames project wasn't made. Say "open <name> in HyperFrames" again in a few minutes; if it says this again, ask Jason.`
+- New, `app … reel <n>`, the same case: `Some files of <name> are not whole in Dropbox yet, so the project of Reel <n> wasn't made. Say "open Reel <n> of <name> in HyperFrames" again in a few minutes; if it says this again, ask Jason.`
+- Changed: every stop that goes through `stoppedWords` (and `ask`'s), while the read run is at its own check with its reading in and its early result written, says `Claude's reading<of> is written, and Studio checks Dropbox's copies at <HH:MM>. <again>`. The sentence mirrors the finish's own. The time is the early result's `ended` plus 15 minutes, as the clock shows it (`clockAt`). Examples:
+  - the hand-off: `Claude's reading is written, and Studio checks Dropbox's copies at 17:41. Say "hand it off" again then.`
+  - `release`: `Claude's reading of Pricing talk is written, and Studio checks Dropbox's copies at 17:41. Hand it over then. Nothing was handed over.`
+  - a new answer, and `ask`: `Claude's reading of Pricing talk is written, and Studio checks Dropbox's copies at 17:41. Say it again then.`
+- Unchanged:
+  - `free`: `Something is still at work on <name>. Say "how far is it?", and ask again when it is done. Nothing was taken away.`
+  - `app` before the reading is in: `Claude is still reading it. …`
+  - the opening lines, and "how far is it?".
+
+**Contract touched:** none. In the window `app` writes only the record into Dropbox (the claim and the project's entry), as it does at any other time. The project and the copies are on this Mac's disk.
+
+**Does not do:**
+- It does not change the reading's own check: where it runs, when, what it judges by, or the lock its run holds. Nothing that writes into the episode goes on before that check, but the record-only commands that go on today.
+- It does not check sizes outside the window, when no check of the episode's files is owed on this Mac. That stays as today.
+- The guide does not say that a reading's check found a problem (it says nothing today either). The hand-off's refusal and "how far is it?" do.
+- Nothing changes on the other Mac. Its `app` is refused by this Mac's claim, as today.
+- A session gets no project, as today.
+- `free`'s line stays generic: `free.js` cannot use `stoppedWords`.
+
+**Risks:**
+- A project made in the window holds the reading's files as read. If the reading's check then cannot put a Dropbox copy right, the project is right and the episode is not: the hand-off is refused until Jason puts it right. Before R1d she could not have had the project yet.
+- A file that went back to an older version of exactly the same size would pass the size check. The late check itself has the same blind spot, and judges by size too.
+- The new stop line needs the run's early result. Without it the stop says its generic words, as today.
+- Moving `currentReading` touches every use in `edit.js`. A missed import fails at load, loudly.
+- The tests that pin `STILL` must keep a record with no current reading, or they would pass for the wrong reason.
+
+**Review Focus:**
+1. No writer gets through. Only `app` and `app-reel`'s "still reading" stops change, and only once the record holds the current reading. Every other `runningCommand` check keeps its effect; only its words change, and only through `stoppedWords` and `askRefusal`.
+2. The size check is made on the bytes read, after reading them, against the record `app` was given after the claim, for each file that record lists. An unlisted file is read as today.
+3. The reading's own check is untouched: `intoEpisode`, `runDetached`, and the episode's lock, held until the check is made.
+4. "verify" also holds while this Mac owes the import's check (R1c), so `words.json` is checked too.
+5. `reelWhy`'s "any Reel" holds only while the reading is not in the record.
+6. In the window `app` writes into Dropbox only the record. The project is written on this Mac's disk.
+7. No new word names a path, a flag or a command. The time is the early result's `ended` plus `LATE_CHECK_MS`.
+
+**Check:** `cd tool && node --test`.
+
+**Size:** M. About 120 lines of code and 20 tests, of which about 6 change tests that pin today's stops.
+
+---
+
+#### Rulings for R1d
+
+1. **"Claude's files are in" means the record in force holds the current reading** (`currentReading`), as `spell` already judges it. It does not mean the early result.
+   - Reason: `intoEpisode` writes the record only after every file is in, and the sizes the check uses come from that record. The early result is written milliseconds later, and is used only for the time in the words.
+   - Cost if wrong: none; the two are milliseconds apart.
+2. **While a check of the episode's files may still be owed on this Mac, `app` checks each file it reads, after reading it, against the size the record lists.** "Owed" means the read run at its own check, or this Mac's pending check of the import (R1c). Outside that, it reads as today.
+   - Reason: the late check judges by size. Checking the bytes read, not a look before, leaves no gap for a put-back in progress. Outside the window the check has been made, and when it failed the hand-off refuses.
+   - Cost if wrong: a project refused for a file Dropbox damaged for a moment. She says it again.
+3. **`app` takes no lock**: neither R1c's `late-check.lock` nor the episode's.
+   - Reason: it only reads. A read checked afterwards can only refuse, never take a wrong file. A lock would only make her wait on a writer.
+   - Cost: none.
+4. **The read run keeps the episode's lock through its own check**, so every writer waits as today.
+   - Reason: that check judges by the record and the other Mac's claim, and puts the reading's files back. A writer let through could meet it half-way. Letting the lock go early would weaken it.
+   - Cost: the hand-off, `release`, `ask`, `free` and a new answer still wait up to 15 minutes after Claude's notice (see the question).
+5. **The stops that wait for the reading's check say when it is made**, through `stoppedWords`, as a finish's check is said; `ask`'s refusal goes through it too.
+   - Reason: with R1d she can reach these in the window. "read is running" names a command, and gives no time.
+   - Cost: one branch in `stoppedWords`. `free`'s line stays generic.
+6. **`currentReading` moves from `edit.js` to `episode.js`.**
+   - Reason: `app.js` and `late-wait.js` need it and cannot import `edit.js`.
+   - Cost: one import line.
+7. **A project made in the window is not made again when the reading's check later puts a file back.**
+   - Reason: the bytes are the same, and the project holds its own copies. When the check cannot put a file back, the project stays, and the hand-off's existing refusal stops the episode until Jason puts it right.
+   - Cost if wrong: none to her project; the episode needs Jason, as today.
 
 ---
 
