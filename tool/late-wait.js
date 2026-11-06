@@ -6,16 +6,21 @@
 // A reading that replaces files the import's check looks at (plan R1c) need not wait either, on the Mac that owns that check: it
 // takes its files out of the check under a lock the check also takes (keepCheckInStep), so the check never puts an older file back
 // over one the reading wrote, and still looks at every other file.
+// And the making of an episode's HyperFrames project need not wait for the reading's own late check (plan R1d): once the reading is in the
+// record, `projectWaits` says to verify the files the project reads against the sizes the record lists (app.js readListed), and
+// `readingCheckAt` says when the read run's own check is made, for the words of the commands it stops.
 import { statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { LATE_CHECK_MS } from "./dropbox.js";
 import { dueAt, readPendings, releaseLateCheckLock, sameFile, settleReading, takeLateCheckLock, writePending } from "./filing.js";
 import { holdsVideo, importState, readStatuses } from "./importing.js";
-import { shownName } from "./episode.js";
+import { currentReading, shownName } from "./episode.js";
+import { readResult, runningCommand, runningRun } from "./detached.js";
 import { clockAt, importHold } from "./unedited.js";
 
-/** This Mac's pending late check of the episode with `record`, with no problem found: the check it still owes, or undefined. */
-const owedFor = (ctx, record) => readPendings(ctx.home).find((p) => p.id === record.id && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root) && !p.problem);
+/** This Mac's pending late check of the episode with `record`: the check it still owes, or undefined. It leaves out one that has found a
+    problem, unless `problem` is true (projectWaits holds while the check is owed, with or without a problem). */
+const owedFor = (ctx, record, { problem = false } = {}) => readPendings(ctx.home).find((p) => p.id === record.id && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root) && (problem || !p.problem));
 
 /** The size of the file at `path`, or -1 when it is not there. */
 const sizeOf = (path) => {
@@ -168,4 +173,24 @@ export function waitFacts(ctx, record, copySeconds) {
   if (due === null) return null;
   const ready = copySeconds === null || copySeconds === undefined ? null : due + copySeconds * 1000;
   return { checkAt: clockAt(due), readyAt: ready === null ? "" : clockNear(ready), inSeconds: ready === null ? null : Math.max(0, Math.round((ready - ctx.now()) / 1000)) };
+}
+
+/** What the making of an episode's HyperFrames project waits for (plan R1d), from the run at work and the record `record` (of the
+    folder `name`): "reading" while a read run holds the episode's lock and the record holds no current reading, so there is nothing
+    to make a project from yet; "verify" when the reading is in the record (the run is at its own late check) or no read run is at
+    work and this Mac owes the import's late check, with or without a problem found: then the project may be made, from the files
+    the record lists at the sizes it lists (app.js readListed); "" when nothing holds it. Nothing is locked, written or waited for. */
+export function projectWaits(ctx, { name, record }) {
+  if (runningCommand(ctx.home, name, ctx.alive) === "read") return currentReading(record) ? "verify" : "reading";
+  return owedFor(ctx, record, { problem: true }) ? "verify" : "";
+}
+
+/** When the late check of the read run at work on the episode `name` is made, in milliseconds, or null: the run holding the episode's
+    lock is a read (`runningRun`), the record holds the current reading, and the read result is that run's early one (`early`, its
+    `pid`), written when the reading put its files in: its end plus LATE_CHECK_MS. Without that result it is not known. */
+export function readingCheckAt(ctx, { name, record }) {
+  const run = runningRun(ctx.home, name, ctx.alive);
+  if (!run || run.command !== "read" || !currentReading(record)) return null;
+  const result = readResult(ctx.home, name, "read");
+  return result && result.early === true && result.pid === run.pid && Number.isFinite(result.ended) ? result.ended + LATE_CHECK_MS : null;
 }

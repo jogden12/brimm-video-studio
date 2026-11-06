@@ -8,7 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { fileId, lateCheckLockOf, readPendings, takeLateCheckLock, writePending } from "../filing.js";
-import { LOCK_LOOK_MS, LOCK_WAIT_MS, keepCheckInStep, lateCheckAt, localSource, ownCheckOnly, readingWaitsUntil } from "../late-wait.js";
+import { LOCK_LOOK_MS, LOCK_WAIT_MS, keepCheckInStep, lateCheckAt, localSource, ownCheckOnly, projectWaits, readingCheckAt, readingWaitsUntil } from "../late-wait.js";
+import { lockOf, resultFile, takeEpisodeLock } from "../detached.js";
 import { pendingFolder } from "../settings.js";
 import { writeStatus } from "../importing.js";
 
@@ -358,6 +359,72 @@ describe("keepCheckInStep (R1c)", () => {
     assert.ok(readPendings(s.home)[0].reading, "the mark stays");
     assert.equal(w.logs.length, 1);
     assert.match(w.logs[0], /could not be kept in step/);
+    s.done();
+  });
+});
+
+describe("projectWaits and readingCheckAt (R1d)", () => {
+  const read = (s, over = {}) => ({ ...s.record, kind: "raw", name: { text: "Pricing talk", placeholder: false }, answer: { at: "2026-10-14 10:00" }, reading: { at: "2026-10-14 10:05", kind: "raw" }, ...over });
+  const unread = (s) => read(s, { reading: { at: "2026-10-14 09:00", kind: "raw" } });
+  const lock = (s, command = "read") => {
+    mkdirSync(join(s.home, "work", NAME), { recursive: true });
+    const path = lockOf(s.home, NAME);
+    mkdirSync(join(path, ".."), { recursive: true });
+    assert.ok(takeEpisodeLock(path, command, ALIVE).taken);
+  };
+  const early = (s, over = {}) => {
+    mkdirSync(join(resultFile(s.home, NAME, "read"), ".."), { recursive: true });
+    writeFileSync(resultFile(s.home, NAME, "read"), JSON.stringify({ version: 1, command: "read", started: NOW - 1000, ended: NOW - 5000, ok: true, made: [], failed: [], next: "", early: true, pid: process.pid, ...over }));
+  };
+  const asks = (s, record) => ({ name: NAME, record });
+  it("says reading with a live read lock and a record whose reading is older than its answer or has none", () => {
+    const s = setup();
+    lock(s);
+    assert.equal(projectWaits(ctxOf(s), asks(s, unread(s))), "reading");
+    const none = read(s);
+    delete none.reading;
+    assert.equal(projectWaits(ctxOf(s), asks(s, none)), "reading");
+    s.done();
+  });
+  it("says verify with the live read lock and the current reading in the record", () => {
+    const s = setup();
+    lock(s);
+    assert.equal(projectWaits(ctxOf(s), asks(s, read(s))), "verify");
+    s.done();
+  });
+  it("says verify with no run and this Mac's pending of the record, with or without a problem", () => {
+    const s = setup();
+    writePending(s.home, s.pending());
+    assert.equal(projectWaits(ctxOf(s), asks(s, read(s))), "verify");
+    writePending(s.home, s.pending({ problem: "x is missing" }));
+    assert.equal(projectWaits(ctxOf(s), asks(s, read(s))), "verify");
+    s.done();
+  });
+  it("says nothing with no run and no pending, with a live lock of another command, and with a read lock whose process is gone", () => {
+    const s = setup();
+    assert.equal(projectWaits(ctxOf(s), asks(s, read(s))), "");
+    s.done();
+    const t = setup();
+    lock(t, "finish");
+    assert.equal(projectWaits(ctxOf(t), asks(t, read(t))), "");
+    t.done();
+    const u = setup();
+    lock(u);
+    assert.equal(projectWaits({ ...ctxOf(u), alive: () => false }, asks(u, read(u))), "");
+    u.done();
+  });
+  it("gives the early result's end plus the late check for the live read run, and null otherwise", () => {
+    const s = setup();
+    lock(s);
+    early(s);
+    assert.equal(readingCheckAt(ctxOf(s), asks(s, read(s))), NOW - 5000 + LATE_CHECK_MS);
+    assert.equal(readingCheckAt(ctxOf(s), asks(s, unread(s))), null, "no current reading");
+    early(s, { pid: process.pid + 1 });
+    assert.equal(readingCheckAt(ctxOf(s), asks(s, read(s))), null, "another pid");
+    early(s, { early: undefined });
+    assert.equal(readingCheckAt(ctxOf(s), asks(s, read(s))), null, "a final result");
+    rmSync(resultFile(s.home, NAME, "read"));
+    assert.equal(readingCheckAt(ctxOf(s), asks(s, read(s))), null, "no result");
     s.done();
   });
 });

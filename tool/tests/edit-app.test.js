@@ -730,6 +730,64 @@ describe("app: Claude's reading is not finished (architecture 4.1)", () => {
     assert.ok(existsSync(paths.video), "the working copy is where it was, not moved into a project");
     t.done();
   });
+  it("claims, makes and opens the project while the read run is at its own late check (R1d): the reading is in the record and the lock is still the run's", async () => {
+    const { t, found, work } = world({ record: { ...RAW, reading: { kind: "raw", model: "m", at: AT, on: "Mac Studio", account: "a", outcome: "read" } } });
+    readingAtWork(t);
+    const lock = readFileSync(lockOf(t.home, FOLDER), "utf8");
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
+    const record = reread(found);
+    assert.deepEqual([record.rev, record.editing.by, record.app.projects.map((p) => [p.name, p.state])], [3, "Mac Studio", [["Pricing- what to charge- main 3fa9c1", "opened"]]]);
+    assert.ok(existsSync(join(work, "Pricing- what to charge- main 3fa9c1", "index.html")));
+    assert.equal(readFileSync(lockOf(t.home, FOLDER), "utf8"), lock);
+    t.done();
+  });
+  const READING = { kind: "raw", model: "m", at: AT, on: "Mac Studio", account: "a", outcome: "read" };
+  it("says some files are not whole yet, ends with 0 and writes nothing, when a listed file is short in the window (R1d fix 1)", async () => {
+    const { t, found, work } = world({ record: { ...RAW, reading: READING } });
+    readingAtWork(t);
+    const at = join(found.folder, "reels.json");
+    writeFileSync(at, readFileSync(at, "utf8").slice(0, -3));
+    const before = reread(found).rev;
+    const r = await app(t.ctx.deps, FOLDER);
+    assert.deepEqual([r.code, r.said], [0, [`Some files of ${NAME} are not whole in Dropbox yet, so its HyperFrames project wasn't made. Say "open ${NAME} in HyperFrames" again in a few minutes; if it says this again, ask Jason.`]]);
+    assert.deepEqual([reread(found).rev, reread(found).editing === undefined || reread(found).editing === null ? "none" : "claimed", runsOf(t), t.started], [before, "none", [], []]);
+    assert.ok(!existsSync(join(work, "Pricing- what to charge- main 3fa9c1")));
+    t.done();
+  });
+  it("keeps today's refusal for a short file with a conflicted copy beside it, in the window too", async () => {
+    const { t, found } = world({ record: { ...RAW, reading: READING } });
+    readingAtWork(t);
+    const at = join(found.folder, "reels.json");
+    writeFileSync(at, readFileSync(at, "utf8").slice(0, -3));
+    writeFileSync(join(found.folder, "reels (Sallie's laptop's conflicted copy 2026-10-20).json"), "{}");
+    const r = await on(t.ctx.deps, "app", FOLDER);
+    assert.equal(r.code, 1, r.text);
+    assert.match(r.text, /conflicted copy/);
+    assert.doesNotMatch(r.text, /not whole in Dropbox yet/);
+    t.done();
+  });
+  it("keeps today's refusal for a short file Dropbox may have kept under another name, in the window too: that is not a plain wait", async () => {
+    const { t, found } = world({ record: { ...RAW, reading: READING } });
+    readingAtWork(t);
+    const at = join(found.folder, "reels.json");
+    writeFileSync(at, readFileSync(at, "utf8").slice(0, -3));
+    writeFileSync(join(found.folder, "reels.json.writing"), "x");
+    const r = await on(t.ctx.deps, "app", FOLDER);
+    assert.equal(r.code, 1, r.text);
+    assert.ok(r.said.includes(`${FOLDER} is not whole in Dropbox:`), r.text);
+    assert.ok(r.said.includes(`It is not opened. Say "what's waiting?" to see the episodes.`), r.text);
+    t.done();
+  });
+  it("reads a short listed file as before when no read run is at work and no check is owed: the claim refuses it in today's words", async () => {
+    const { t, found } = world({ record: { ...RAW, reading: READING } });
+    const at = join(found.folder, "reels.json");
+    writeFileSync(at, readFileSync(at, "utf8").slice(0, -3));
+    const r = await on(t.ctx.deps, "app", FOLDER);
+    assert.equal(r.code, 1, r.text);
+    assert.ok(r.said.includes(`${FOLDER} is not whole in Dropbox:`), r.text);
+    t.done();
+  });
   it("makes the project when it is said again after the reading has ended, and the claim is not made twice", async () => {
     const { t, found, work } = world();
     readingAtWork(t);

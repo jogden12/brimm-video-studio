@@ -11,6 +11,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { workCopyPaths, workCopyKey } from "../workcopy.js";
 import { editMain, pickReels } from "../edit.js";
 import { episodeFault, isFromPlan, localStamp, newPlannedEpisode, recordFile, recordText } from "../episode.js";
 import { episodeWork, pendingFolder, writeSettings } from "../settings.js";
@@ -897,6 +899,46 @@ describe("read's result, written once what it read is in (fix 1)", () => {
     assert.deepEqual(final.made, early.made);
     assert.deepEqual(final.failed.slice(0, early.failed.length), early.failed);
     assert.ok(final.failed.slice(early.failed.length).some((f) => /^reels\.json has a conflicted copy in the episode/.test(f)), final.failed.join(" | "));
+    t.done();
+  });
+});
+
+describe("app, while the read run waits for its own late check (R1d)", () => {
+  it("makes the project from what the reading put in; when the run's check is let go it finds every file as it put it, and the result is ok", async () => {
+    const { t, found } = reading("raw");
+    let release;
+    const held = new Promise((done) => {
+      release = done;
+    });
+    const wait = t.ctx.deps.wait;
+    t.ctx.deps.wait = async (ms) => {
+      if (ms === LATE_CHECK_MS) await held;
+      if (ms === READ_POLL_MS) await new Promise((done) => setImmediate(done));
+      await wait(ms);
+    };
+    t.ctx.deps.alive = (pid) => pid === process.pid;
+    // The app's stand-ins, as edit-app.test.js gives them: this Mac's settings, the pinned command line, and the working copy.
+    writeSettings(t.home, { app: "hyperframes" });
+    writeFileSync(join(t.home, "hyperframes-stand-in.json"), JSON.stringify({ open: "opened" }));
+    t.ctx.deps.app = { cli: fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url)), node: process.execPath, guidance: fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url)) };
+    const video = statSync(join(found.folder, VIDEO));
+    const copy = workCopyPaths(t.home, FOLDER, workCopyKey({ bytes: video.size, mtimeMs: video.mtimeMs }));
+    mkdirSync(dirname(copy.video), { recursive: true });
+    writeFileSync(copy.video, "the working copy");
+    writeFileSync(copy.facts, JSON.stringify({ seconds: 23.423, fps: 30, width: 1280, height: 720, bytes: 16 }));
+    const run = editMain(readArgs("raw"), { ...t.ctx.deps, say: () => {} });
+    for (let i = 0; i < 2000 && !(readResult(t.home, FOLDER, "read") || {}).early; i++) await new Promise((done) => setImmediate(done));
+    assert.equal(readResult(t.home, FOLDER, "read").early, true, "the reading's files are in and its result is written early");
+    const lock = readFileSync(join(episodeWork(t.home, FOLDER), "episode.lock"), "utf8");
+    const opened = await on(t.ctx.deps, "app", FOLDER);
+    assert.equal(opened.code, 0, opened.text);
+    assert.ok(opened.said.includes("It's open in HyperFrames."), opened.text);
+    assert.equal(readFileSync(join(episodeWork(t.home, FOLDER), "episode.lock"), "utf8"), lock, "the run's lock is untouched");
+    release();
+    assert.equal(await run, 0);
+    const final = readResult(t.home, FOLDER, "read");
+    assert.equal(final.early, undefined);
+    assert.equal(final.ok, true, JSON.stringify(final));
     t.done();
   });
 });
