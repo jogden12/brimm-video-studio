@@ -13,7 +13,7 @@ import { COMMAND_NAMES, HELP } from "../edit.js";
 import { HELD } from "../gate.js";
 import { lockOf, readResult, resultFile } from "../detached.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
-import { RECORD_VERSION, recordFile, recordText } from "../episode.js";
+import { NEWEST_VERSION, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
 import { removeStatus, writeStatus } from "../importing.js";
 import { READ_HOLD_MS, READ_LOOK_MS } from "../reading.js";
@@ -197,6 +197,16 @@ describe("workcopy: only for a raw video or an iPhone clip", () => {
     assert.deepEqual([r.code, guarded, readResult(t.home, FOLDER, "workcopy").failed], [1, [], [NOT_RAW_OR_CLIP]]);
     t.done();
   });
+  it("makes the footage's copies alone for a video made from a plan, and says in words that a raw video is none (`--footage`, PR H5b)", async () => {
+    for (const record of [RAW, CLIP, FINISHED]) {
+      const { t, found, paths, guarded } = world({ record });
+      const before = dropbox(found);
+      const r = await on(t.ctx.deps, "workcopy", "--now", FOLDER, "--footage");
+      assert.deepEqual([r.code, guarded, existsSync(paths.video), existsSync(paths.dir), dropbox(found)], [1, [], false, false, before]);
+      assert.deepEqual(readResult(t.home, FOLDER, "workcopy").failed, [record === FINISHED ? NOT_RAW_OR_CLIP : "It can't be used: it is not a video made from its footage."]);
+      t.done();
+    }
+  });
 });
 
 describe("workcopy: what it cannot make, it says in words", () => {
@@ -240,7 +250,7 @@ describe("workcopy: an episode that cannot be gone on with", () => {
   });
   it("names a record a newer brimm-video wrote by its short id alone, as the gate does, and makes nothing", async () => {
     const { t, found, guarded } = world();
-    writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: RECORD_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
+    writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
     const r = await on(t.ctx.deps, "workcopy", "--now", FOLDER);
     assert.deepEqual([r.code, r.said, guarded], [1, [`That is an episode a newer brimm-video wrote (${ID.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`], []]);
     t.done();

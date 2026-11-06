@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RECORD_DIR, RECORD_VERSION, recordFile, newEpisode, episodeFault, faultFor, recordText, readEpisode, writeEpisode, conflictedCopies, conflictedOf, conflictedBy, CONFLICT_FORMS, filesProblems, lastWritten, undone, heldElsewhere, claimed, released, newId, localStamp, shown, isDay } from "../episode.js";
+import { RECORD_DIR, RECORD_VERSION, NEWEST_VERSION, recordFile, newEpisode, episodeFault, faultFor, recordText, readEpisode, writeEpisode, conflictedCopies, conflictedOf, conflictedBy, CONFLICT_FORMS, filesProblems, lastWritten, undone, heldElsewhere, claimed, released, newId, localStamp, shown, isDay } from "../episode.js";
 import { writtenFile } from "../settings.js";
 
 const AT = "2026-10-14T09:12:00-05:00";
@@ -163,7 +163,7 @@ describe("reading an episode's record", () => {
   });
   it("reads a record of a newer layout, and says so, without checking the fields it does not know", () => {
     const t = setup();
-    const newer = { version: RECORD_VERSION + 1, id: RECORD.id, rev: 1, somethingNew: true };
+    const newer = { version: NEWEST_VERSION + 1, id: RECORD.id, rev: 1, somethingNew: true };
     t.store(newer);
     assert.deepEqual(readEpisode(t.folder), { record: newer, file: recordFile(t.folder, 1), newer: true });
     t.done();
@@ -296,7 +296,7 @@ describe("writing an episode's record", () => {
   });
   it("never writes a record of a newer layout, and says this Mac needs updating", () => {
     const t = setup();
-    const newer = { version: RECORD_VERSION + 1, id: RECORD.id, rev: 1 };
+    const newer = { version: NEWEST_VERSION + 1, id: RECORD.id, rev: 1 };
     t.store(newer);
     assert.throws(() => writeEpisode(t.folder, newer, { expectRev: 1, writeText: t.writeText, writer: WRITER, home: t.home }), { message: "Jason has a newer brimm-video. Ask him to update this Mac.", code: "NEWER" });
     assert.deepEqual(t.written, []);

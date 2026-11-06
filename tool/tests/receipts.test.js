@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { NO_RECEIPT, PRIVATE_Q, WHAT_Q, cardOf, expectedAnswers, formOf, notSessionCardOf, receiptFrom, receiptWhy, receiptsFolder, writeReceipt } from "../receipts.js";
+import { CLIENT_Q, NO_RECEIPT, PLANNED_Q, PRIVATE_Q, SHOT_ANSWERS, SHOT_Q, WHAT_Q, cardOf, expectedAnswers, expectedFootage, footageOption, formOf, notSessionCardOf, partCardOf, plannedCardOf, receiptFrom, receiptWhy, receiptsFolder, writeReceipt } from "../receipts.js";
 import { editMain } from "../edit.js";
 import { readEpisode } from "../episode.js";
 import { setup, episodeFor, episodeAs } from "./episodes.js";
@@ -575,6 +575,239 @@ describe("kind, with the card's receipt", () => {
     assert.equal(receiptWhy({ home: h.home, expected, now: NOW }), NO_RECEIPT);
     for (const one of expected) writeReceipt(h.home, { at: NOW, label: LABEL, ...one });
     assert.equal(receiptWhy({ home: h.home, expected, now: NOW }), "");
+    h.done();
+  });
+});
+
+// --- The planned card and the part card (PR H5a): the cards that answer a video as footage for a planned video ---
+
+describe("the planned card and the part card, in code (PR H5a)", () => {
+  const TITLES = ["Too many SKUs", "Why SKUs sink you", "Price like you mean it"];
+  const OFFERS = (...titles) => titles.map((title) => ({ record: {}, option: footageOption(title) }));
+  const QUESTION = { multiSelect: false };
+  it("words the planned card exactly: one question, each plan offered as Footage for its title, then No, and no description", () => {
+    assert.equal(footageOption("Too many SKUs"), 'Footage for "Too many SKUs"');
+    assert.equal(PLANNED_Q("Talk 3"), "Is Talk 3 for a planned video?");
+    assert.deepEqual(plannedCardOf({ label: "Talk 3", offers: OFFERS(...TITLES.slice(0, 2)) }), {
+      questions: [{ question: "Is Talk 3 for a planned video?", header: "Planned", ...QUESTION, options: [
+        { label: 'Footage for "Too many SKUs"', description: "" }, { label: 'Footage for "Why SKUs sink you"', description: "" }, { label: "No", description: "" }] }]
+    });
+    // One offer, three offers, and offers given as the words alone.
+    assert.deepEqual(shape(plannedCardOf({ label: "Talk 3", offers: OFFERS(TITLES[0]) })), [["Is Talk 3 for a planned video?", ['Footage for "Too many SKUs"', "No"]]]);
+    assert.deepEqual(shape(plannedCardOf({ label: "Talk 3", offers: OFFERS(...TITLES) }))[0][1], [...TITLES.map(footageOption), "No"]);
+    assert.deepEqual(plannedCardOf({ label: "Talk 3", offers: TITLES.map(footageOption) }), plannedCardOf({ label: "Talk 3", offers: OFFERS(...TITLES) }));
+    assert.ok(plannedCardOf({ label: "Talk 3", offers: OFFERS(TITLES[0]) }).questions.every((q) => q.header.length <= 12));
+  });
+  it("words the part card exactly: the kind of shot, and whether it shows a client, a client's name or their work", () => {
+    assert.deepEqual([SHOT_Q("Talk 3"), CLIENT_Q("Talk 3")], ["Which kind of shot is Talk 3?", "Does Talk 3 show a client, a client's name or their work?"]);
+    assert.deepEqual(SHOT_ANSWERS, { talking: "Talking to the camera", screen: "A screen recording", "b-roll": "B-roll" });
+    assert.deepEqual(partCardOf({ label: "Talk 3" }), {
+      questions: [
+        { question: "Which kind of shot is Talk 3?", header: "Shot", ...QUESTION, options: [{ label: "Talking to the camera", description: "" }, { label: "A screen recording", description: "" }, { label: "B-roll", description: "" }] },
+        { question: "Does Talk 3 show a client, a client's name or their work?", header: "Client", ...QUESTION, options: [{ label: "Yes", description: "" }, { label: "No", description: "" }] }
+      ]
+    });
+    for (const q of partCardOf({ label: "Talk 3" }).questions) assert.ok(q.header.length <= 12, q.header);
+  });
+  it("finds the label and the form of each card, with one to three offers, whatever the label and the titles hold", () => {
+    for (const label of ["Talk 3", LABEL, "Sallie's \"Q&A\": part 2", "Q&A / part 2?", ".hidden", "What is it", "Is it for a planned video?"]) {
+      for (const n of [1, 2, 3]) {
+        const card = plannedCardOf({ label, offers: OFFERS(...TITLES.slice(0, n)) });
+        assert.deepEqual(formOf(card.questions), { label, form: "planned" }, `${label}, ${n} offers`);
+      }
+      assert.deepEqual(formOf(partCardOf({ label }).questions), { label, form: "part" }, label);
+    }
+    // A title holds a quote, a question mark, a pipe, a dollar sign, a percent sign and "Footage for" itself.
+    for (const title of ['Say "hi" to SKUs', "Why? Because | $10 and 100%", 'Footage for "Too many SKUs"', "A", "No"]) {
+      assert.deepEqual(formOf(plannedCardOf({ label: "Talk 3", offers: OFFERS(title) }).questions), { label: "Talk 3", form: "planned" }, title);
+    }
+    // A result may leave out the header, the descriptions and multiSelect, as one of her card's may.
+    const bare = plannedCardOf({ label: "Talk 3", offers: OFFERS(...TITLES) }).questions.map((q) => ({ question: q.question, options: q.options.map((o) => ({ label: o.label })) }));
+    assert.deepEqual(formOf(bare), { label: "Talk 3", form: "planned" });
+    assert.deepEqual(formOf(partCardOf({ label: "Talk 3" }).questions.map((q) => ({ question: q.question, options: q.options.map((o) => ({ label: o.label })) }))), { label: "Talk 3", form: "part" });
+  });
+  it("finds no card that is worded otherwise, offers four plans, has No anywhere but last, describes an answer, or has another header", () => {
+    const planned = plannedCardOf({ label: "Talk 3", offers: OFFERS(...TITLES) }).questions[0];
+    const part = partCardOf({ label: "Talk 3" }).questions;
+    const options = (q, labels) => ({ ...q, options: labels.map((label) => ({ label })) });
+    const labels = (q) => q.options.map((o) => o.label);
+    for (const [what, questions] of [
+      ["four plans offered", [options(planned, [...labels(planned).slice(0, 3), footageOption("A fourth plan"), "No"])]],
+      ["no plan offered, only No", [options(planned, ["No"])]],
+      ["no answers", [options(planned, [])]],
+      ["No first", [options(planned, ["No", ...labels(planned).slice(0, 3)])]],
+      ["No in the middle", [options(planned, [footageOption(TITLES[0]), "No", footageOption(TITLES[1])])]],
+      ["no No at all", [options(planned, labels(planned).slice(0, 3))]],
+      ["No twice", [options(planned, [...labels(planned), "No"])]],
+      ["an answer that is not Footage for", [options(planned, [footageOption(TITLES[0]), "Something else", "No"])]],
+      ["an answer that is Footage for with no title", [options(planned, ['Footage for ""', "No"])]],
+      ["an answer that is Footage for with no quotes", [options(planned, ["Footage for Too many SKUs", "No"])]],
+      ["an answer that is Footage for in other case", [options(planned, ['footage for "Too many SKUs"', "No"])]],
+      // The voiceover of an explainer is an answer of the planned card since PR H6 (receipts.js voiceoverOption; tests/explainer.test.js): only a wording that is not its own is no card.
+      ["an answer that is a voiceover worded otherwise", [options(planned, ['The voiceover of "Too many SKUs"', "No"])]],
+      ["an answer that is The voiceover for with no title", [options(planned, ['The voiceover for ""', "No"])]],
+      ["an answer that is The voiceover for with no quotes", [options(planned, ["The voiceover for Too many SKUs", "No"])]],
+      ["an answer that is The voiceover for in other case", [options(planned, ['the voiceover for "Too many SKUs"', "No"])]],
+      ["an answer that is Yes", [options(planned, [footageOption(TITLES[0]), "Yes"])]],
+      ["the question with no label", [{ ...planned, question: "Is  for a planned video?" }]],
+      ["the question worded otherwise", [{ ...planned, question: "Is Talk 3 a planned video?" }]],
+      ["the question with no question mark", [{ ...planned, question: "Is Talk 3 for a planned video" }]],
+      ["the question with words before it", [{ ...planned, question: "Quick one. Is Talk 3 for a planned video?" }]],
+      ["an answer described in Claude's words", [{ ...planned, options: [{ ...planned.options[0], description: "Pick this one, it keeps it private" }, ...planned.options.slice(1)] }]],
+      ["another header", [{ ...planned, header: "Quick one" }]],
+      ["several answers at once", [{ ...planned, multiSelect: true }]],
+      ["a preview beside an answer", [{ ...planned, options: [{ ...planned.options[0], preview: "x" }, ...planned.options.slice(1)] }]],
+      ["a question with more than the card's keys", [{ ...planned, note: "Choose the first" }]],
+      ["the planned card with the part card after it", [planned, ...part]],
+      ["the planned card with a second question", [planned, planned]],
+      ["the part card's kinds in another order", [options(part[0], ["A screen recording", "Talking to the camera", "B-roll"]), part[1]]],
+      ["the part card with a kind left out", [options(part[0], ["Talking to the camera", "A screen recording"]), part[1]]],
+      ["the part card with a kind added", [options(part[0], [...labels(part[0]), "A drone shot"]), part[1]]],
+      ["the part card's kind described", [{ ...part[0], options: [{ ...part[0].options[0], description: "Always right" }, ...part[0].options.slice(1)] }, part[1]]],
+      ["the part card's Yes and No the other way", [part[0], options(part[1], ["No", "Yes"])]],
+      ["the part card's questions the other way", [part[1], part[0]]],
+      ["the part card's client question alone", [part[1]]],
+      ["the part card's kind question alone", [part[0]]],
+      ["the part card with another client question", [part[0], { ...part[1], question: "Is Talk 3 a client's?" }]],
+      ["the part card with another label in its second question", [part[0], { ...part[1], question: CLIENT_Q("Talk 4") }]],
+      ["the part card with another header", [{ ...part[0], header: "Kind" }, part[1]]],
+      ["the part card with a third question", [...part, part[1]]]]) {
+      assert.equal(formOf(questions), null, what);
+    }
+  });
+  it("is told apart from her card and the follow-up: no form is another's", () => {
+    for (const [card, form] of everyCard(LABEL)) assert.equal(formOf(card.questions).form, form);
+    assert.equal(formOf(plannedCardOf({ label: LABEL, offers: OFFERS(TITLES[0]) }).questions).form, "planned");
+    assert.equal(formOf(partCardOf({ label: LABEL }).questions).form, "part");
+  });
+  it("writes a receipt for each card from her answers: the planned card keeps every answer it offered, in order, as `offered`", () => {
+    const h = home();
+    const planned = plannedCardOf({ label: LABEL, offers: OFFERS(...TITLES) });
+    const first = receiptFrom(hookInput(answered(planned, [footageOption(TITLES[1])])), NOW);
+    assert.deepEqual(first, { at: NOW, label: LABEL, form: "planned", answers: { [PLANNED_Q(LABEL)]: footageOption(TITLES[1]) }, offered: [...TITLES.map(footageOption), "No"] });
+    // Her No is a receipt too, and offers what the card offered.
+    assert.deepEqual(receiptFrom(hookInput(answered(planned, ["No"])), NOW).answers, { [PLANNED_Q(LABEL)]: "No" });
+    const part = partCardOf({ label: LABEL });
+    const second = receiptFrom(hookInput(answered(part, ["B-roll", "Yes"])), NOW);
+    assert.deepEqual(second, { at: NOW, label: LABEL, form: "part", answers: { [SHOT_Q(LABEL)]: "B-roll", [CLIENT_Q(LABEL)]: "Yes" } });
+    writeReceipt(h.home, first);
+    writeReceipt(h.home, second);
+    assert.deepEqual(receiptsIn(h.home).map(({ receipt }) => receipt.form).sort(), ["part", "planned"]);
+    h.done();
+  });
+  it("writes none for either card left idle, followed up, answered in Other's words or with an answer that is not one of its options", () => {
+    const planned = plannedCardOf({ label: LABEL, offers: OFFERS(TITLES[0]) });
+    const part = partCardOf({ label: LABEL });
+    for (const [card, picks] of [[planned, [footageOption(TITLES[0])]], [part, ["Talking to the camera", "No"]]]) {
+      const good = answered(card, picks);
+      assert.ok(receiptFrom(hookInput(good), NOW));
+      assert.equal(receiptFrom(hookInput({ ...good, afkTimeoutMs: 60000 }), NOW), null);
+      assert.equal(receiptFrom(hookInput({ ...good, followUp: "She asked something else" }), NOW), null);
+      assert.equal(receiptFrom(hookInput({ ...good, answers: { ...good.answers, [card.questions[0].question]: "It's a podcast" } }), NOW), null);
+      assert.equal(receiptFrom(hookInput({ questions: good.questions }), NOW), null);
+    }
+    // The answer to the second question of the part card is missing.
+    const half = answered(part, ["B-roll", "No"]);
+    assert.equal(receiptFrom(hookInput({ ...half, answers: { [part.questions[0].question]: "B-roll" } }), NOW), null);
+  });
+  it("is written by the hook as committed, for both cards", () => {
+    const h = home();
+    const planned = plannedCardOf({ label: LABEL, offers: OFFERS(...TITLES.slice(0, 2)) });
+    const part = partCardOf({ label: LABEL });
+    for (const response of [answered(planned, [footageOption(TITLES[0])]), answered(part, ["A screen recording", "No"])]) {
+      const ran = spawnSync("/bin/sh", [RECEIPT_SH, process.execPath, h.folder], { input: JSON.stringify(hookInput(response)), encoding: "utf8" });
+      assert.deepEqual([ran.status, ran.stdout, ran.stderr], [0, "", ""]);
+    }
+    const written = receiptsIn(h.home).map(({ receipt }) => ({ ...receipt, at: 0 }));
+    assert.equal(written.length, 2);
+    assert.deepEqual(written.find((r) => r.form === "planned"), { at: 0, label: LABEL, form: "planned", answers: { [PLANNED_Q(LABEL)]: footageOption(TITLES[0]) }, offered: [footageOption(TITLES[0]), footageOption(TITLES[1]), "No"] });
+    assert.deepEqual(written.find((r) => r.form === "part"), { at: 0, label: LABEL, form: "part", answers: { [SHOT_Q(LABEL)]: "A screen recording", [CLIENT_Q(LABEL)]: "No" } });
+    h.done();
+  });
+});
+
+describe("expectedFootage, and the receipts footage asks for (PR H5a)", () => {
+  const TITLE = "Too many SKUs";
+  const NOW_OFFERED = [footageOption(TITLE), footageOption("Why SKUs sink you")];
+  /** The expectations for a b-roll part that shows no client, with the plans offered now. */
+  const expect = (more = {}) => expectedFootage({ label: LABEL, title: TITLE, as: "b-roll", client: false, offeredNow: NOW_OFFERED, ...more });
+  /** A receipt of the planned card (offering `offered`, answered with `pick`) and of the part card, written at the clock. */
+  const planned = (h, over = {}) => {
+    const { pick = footageOption(TITLE), label = LABEL, at = NOW } = over;
+    // A receipt that kept no list of what it offered has no `offered` at all (an explicit undefined is left out when it is written).
+    const offered = Object.hasOwn(over, "offered") ? over.offered : [...NOW_OFFERED, "No"];
+    return writeReceipt(h.home, { at, label, form: "planned", answers: { [PLANNED_Q(label)]: pick }, offered });
+  };
+  const shotted = (h, { kind = "B-roll", client = "No", label = LABEL, at = NOW } = {}) => writeReceipt(h.home, { at, label, form: "part", answers: { [SHOT_Q(label)]: kind, [CLIENT_Q(label)]: client } });
+  it("expects her answer on the planned card, among plans that are each still offered, and her answers on the part card", () => {
+    const [a, b] = expect();
+    assert.deepEqual([a.form, a.answers, b.form, b.answers], ["planned", { [PLANNED_Q(LABEL)]: footageOption(TITLE) }, "part", { [SHOT_Q(LABEL)]: "B-roll", [CLIENT_Q(LABEL)]: "No" }]);
+    assert.equal(typeof a.offered, "function");
+    for (const [as, kind] of [["talking", "Talking to the camera"], ["screen", "A screen recording"], ["b-roll", "B-roll"]]) assert.equal(expect({ as })[1].answers[SHOT_Q(LABEL)], kind, as);
+    assert.equal(expect({ client: true })[1].answers[CLIENT_Q(LABEL)], "Yes");
+  });
+  it("holds when both receipts are in the last hour, and for no other answer", () => {
+    const h = home();
+    assert.equal(receiptWhy({ home: h.home, expected: expect(), now: NOW }), NO_RECEIPT, "none");
+    planned(h);
+    assert.equal(receiptWhy({ home: h.home, expected: expect(), now: NOW }), NO_RECEIPT, "the planned card alone");
+    shotted(h, { kind: "A screen recording", client: "Yes" });
+    assert.equal(receiptWhy({ home: h.home, expected: expect(), now: NOW }), NO_RECEIPT, "another kind of shot");
+    shotted(h, { kind: "B-roll", client: "Yes" });
+    assert.equal(receiptWhy({ home: h.home, expected: expect(), now: NOW }), NO_RECEIPT, "another client answer");
+    h.done();
+    // Both, and then each thing asked for otherwise.
+    const g = home();
+    planned(g);
+    shotted(g);
+    assert.equal(receiptWhy({ home: g.home, expected: expect(), now: NOW }), "", "both");
+    assert.equal(receiptWhy({ home: g.home, expected: expect({ as: "screen" }), now: NOW }), NO_RECEIPT, "asked as another kind");
+    assert.equal(receiptWhy({ home: g.home, expected: expect({ client: true }), now: NOW }), NO_RECEIPT, "asked as showing a client");
+    assert.equal(receiptWhy({ home: g.home, expected: expect({ title: "Why SKUs sink you" }), now: NOW }), NO_RECEIPT, "asked for another plan");
+    assert.equal(receiptWhy({ home: g.home, expected: expect({ label: "Video of 4 Nov, 10:00 (Mac Studio)" }), now: NOW }), NO_RECEIPT, "asked of another video");
+    assert.equal(receiptWhy({ home: g.home, expected: expect(), now: NOW + HOUR }), NO_RECEIPT, "an hour later");
+    assert.equal(receiptWhy({ home: g.home, expected: [], now: NOW }), NO_RECEIPT, "nothing asked for");
+    g.done();
+  });
+  it("holds a planned card's receipt only while every plan it offered is still offered", () => {
+    const h = home();
+    shotted(h);
+    // She answered a card that offered a plan dropped since.
+    planned(h, { offered: [footageOption(TITLE), footageOption("A plan dropped since"), "No"] });
+    assert.equal(receiptWhy({ home: h.home, expected: expect(), now: NOW }), NO_RECEIPT);
+    planned(h);
+    assert.equal(receiptWhy({ home: h.home, expected: expect(), now: NOW }), "");
+    // A card that offered only some of the plans offered now is still the very plan she picked.
+    const only = home();
+    shotted(only);
+    planned(only, { offered: [footageOption(TITLE), "No"] });
+    assert.equal(receiptWhy({ home: only.home, expected: expect(), now: NOW }), "");
+    only.done();
+    // A receipt that kept no list of what it offered, or not a list of words, or one that did not offer the plan she picked, holds nothing.
+    for (const offered of [undefined, null, "Too many SKUs", [], ["No"], [footageOption("Why SKUs sink you"), "No"], [footageOption(TITLE), 3, "No"], [footageOption(TITLE), "Something else", "No"], [footageOption(TITLE)]]) {
+      const bad = home();
+      shotted(bad);
+      planned(bad, { offered });
+      assert.equal(receiptWhy({ home: bad.home, expected: expect(), now: NOW }), NO_RECEIPT, JSON.stringify(offered));
+      bad.done();
+    }
+    h.done();
+  });
+  it("holds nothing for a receipt of the planned card whose answer is No, or whose label is another video's", () => {
+    const h = home();
+    shotted(h);
+    planned(h, { pick: "No" });
+    planned(h, { label: "Video of 4 Nov, 10:00 (Mac Studio)" });
+    assert.equal(receiptWhy({ home: h.home, expected: expect(), now: NOW }), NO_RECEIPT);
+    h.done();
+  });
+  it("reads a receipt only as the card of its own label: a planned receipt whose question names another video holds nothing", () => {
+    const h = home();
+    shotted(h);
+    writeReceipt(h.home, { at: NOW, label: LABEL, form: "planned", answers: { [PLANNED_Q("Video of 4 Nov, 10:00 (Mac Studio)")]: footageOption(TITLE) }, offered: [...NOW_OFFERED, "No"] });
+    assert.equal(receiptWhy({ home: h.home, expected: expect(), now: NOW }), NO_RECEIPT);
+    writeReceipt(h.home, { at: NOW, label: LABEL, form: "part", answers: { [SHOT_Q(LABEL)]: "B-roll", [CLIENT_Q("Video of 4 Nov, 10:00 (Mac Studio)")]: "No" } });
+    assert.equal(receiptWhy({ home: h.home, expected: expect(), now: NOW }), NO_RECEIPT, "a part receipt whose second question names another video");
     h.done();
   });
 });

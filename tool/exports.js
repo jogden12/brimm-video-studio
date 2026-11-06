@@ -105,11 +105,12 @@ export function beganAt({ date, time }, zone = LOCAL_ZONE) {
     node_modules, renders and snapshots, so that the agent's own render, snapshot and check do not look like edits (8.1). */
 const NOT_CHANGES = new Set(["node_modules", "renders", "snapshots"]);
 const notAChange = (part) => part.startsWith(".") || NOT_CHANGES.has(part);
-/** The project's own recording: `free` takes it out and `app` puts it back, with a time of its own. That is no edit. */
-const RECORDING = "media/recording.mp4";
+/** The project's own video: `free` takes it out and `app` puts it back, with a time of its own. That is no edit. It is the recording, or an explainer's
+    voiceover (PR H6: its media, app.js mediaOf). */
+const OWN_VIDEO = new Set(["media/recording.mp4", "media/voiceover.m4a"]);
 
 /** When a project last changed in the app, in milliseconds, or null when that is not known: the later of its newest file change, outside
-    the folders above at any depth and but for the project's own recording (media/recording.mp4), and its last turn in app-history.jsonl.
+    the folders above at any depth and but for the project's own video (media/recording.mp4, or an explainer's media/voiceover.m4a), and its last turn in app-history.jsonl.
     `files` are { path, mtimeMs }, a path from the project's folder with "/", and `turns` are the app's turns (hyperframes.js turnsOf). A
     turn whose date is not a date is passed over. */
 export function lastChangeOf({ files = [], turns = [] } = {}) {
@@ -117,7 +118,7 @@ export function lastChangeOf({ files = [], turns = [] } = {}) {
   const see = (ms) => {
     if (Number.isFinite(ms) && (latest === null || ms > latest)) latest = ms;
   };
-  for (const file of files) if (file && typeof file.path === "string" && file.path !== RECORDING && !file.path.split("/").some(notAChange)) see(file.mtimeMs);
+  for (const file of files) if (file && typeof file.path === "string" && !OWN_VIDEO.has(file.path) && !file.path.split("/").some(notAChange)) see(file.mtimeMs);
   for (const turn of turns) see(typeof (turn && turn.at) === "string" ? Date.parse(turn.at) : NaN);
   return latest;
 }

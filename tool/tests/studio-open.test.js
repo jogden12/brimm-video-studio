@@ -175,7 +175,11 @@ describe("her folder's settings under the open lock", () => {
     assert.notEqual(files[".claude/skills/brimm-edit/SKILL.md"], studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder })[".claude/skills/brimm-edit/SKILL.md"]);
     assert.ok(files[".claude/skills/brimm-edit/SKILL.md"].includes(`${w.node} "${w.checkout}/tool/edit.js"`));
     assert.equal(files["CLAUDE.md"], template("CLAUDE-open.md"));
+    // The skill's script.md (PR H4) is the same file under either lock, beside SKILL.md, and Scripts/ is made beside Pictures/.
+    assert.equal(files[".claude/skills/brimm-edit/script.md"], template("script.md"));
+    assert.equal(files[".claude/skills/brimm-edit/script.md"], studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder })[".claude/skills/brimm-edit/script.md"]);
     assert.ok(statSync(join(w.folder, "Pictures")).isDirectory());
+    assert.ok(statSync(join(w.folder, "Scripts")).isDirectory());
   });
 });
 

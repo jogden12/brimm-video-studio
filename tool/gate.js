@@ -8,7 +8,7 @@
 // asks it wherever it finds the episode a command names (findEpisode), which reads records only. It also says how a gated record,
 // and one held as a session, is named (gatedName, gatedAsOf), for edit.js and for the installer's check of the old drop folder
 // (switch.js), which are given the versions of a video (finish.js linksOf) to ask it with.
-import { kindOf, shownName } from "./episode.js";
+import { isPlannedRecord, kindOf, shownName } from "./episode.js";
 
 /** The commands that name no episode: their output is built from labels alone, and is not gated here. */
 export const UNSCOPED = ["episodes", "status", "behind", "retry", "guide"];
@@ -17,6 +17,21 @@ export const UNSCOPED = ["episodes", "status", "behind", "retry", "guide"];
 export const UNANSWERED = ["kind", "leave", "which", "show", "release", "resolve"];
 /** The commands that run for a session not cleared, with this Mac's training gate on or off: those, and `name`. */
 export const SESSION = [...UNANSWERED, "name"];
+/** The commands that run for a planned episode (isPlannedRecord), beside those that name no episode: `plan`, which shows and sets its
+    package, `name`, and (PR H5b) `join`, the detached run that makes the plan its video once its footage is in, which `plan … join` starts.
+    `join` is in no list of a record with no kind but this one: a video not yet answered, one left alone, a part and a session are refused
+    it in the gate's words, as `workcopy` is. `leave` says how to drop a plan; every other command is refused, for it is not made from its
+    footage yet. And (PR H6) `app`, which opens a HeyGen explainer's project before its voice is made: the command itself refuses every plan but
+    that one, in the gate's own words (noFootageWhy), so that a script and an explainer in her voice hear what every other command says. And (the final
+    review, fix 2) `resolve`, which sorts out Dropbox's conflicted copies of a plan's record, as it does a video's: both Macs write a plan's record
+    (`set`, `agreed`, the open of a HeyGen project, the join), and the guide's step for a conflicted plan is "sort out the conflict". */
+export const PLANNED = ["plan", "name", "join", "app", "resolve"];
+/** The commands that run for a record with no kind, beside those of UNANSWERED (PR H5a): `footage`, which answers a dropped video as
+    footage for a planned video, or takes it back. It runs for a video waiting for its answer, one she left alone, and a part, and for no
+    other record: a session not cleared is refused it in the gate's words (it is in none of the lists of a session), and so is a video held
+    beside one (heldGateFor lets only UNANSWERED through). The command itself refuses a Zoom download and a video that holds a session's
+    words. */
+export const FOOTAGE = ["footage"];
 /** The commands that run for a session not cleared once this Mac's training gate is on. `reel` and `render` are narrowed by
     their words (below), and `read` is the session reading's own detached run, which starts only through `teachings`. */
 export const SESSION_TAUGHT = [...SESSION, "teachings", "principles", "ideas", "finish", "reel", "render", "read"];
@@ -26,12 +41,21 @@ const WAITING = "This video is waiting for its answer: say what it is first.";
 /** What a video she left alone is refused in, by the gate and by askBlocked: it is not waiting for anything. */
 export const LEFT = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
+/** Why a command is refused for a planned episode (isPlannedRecord), which is not made from its footage yet, naming the title she gave it: true
+    whether it has footage or none (PR H5b). `leave` is answered by how to drop a plan instead: a plan is not left alone as a video is, it is
+    dropped. */
+const NO_FOOTAGE = (record) => `"${shownName(record)}" is a planned video, and it isn't made from its footage yet.`;
+/** The same words, for a command that the gate lets run for a plan and that then refuses it (PR H6: `app` opens a HeyGen explainer's project alone). */
+export const noFootageWhy = NO_FOOTAGE;
+const TO_DROP = (record) => `To drop a plan, say "drop the plan for ${shownName(record)}".`;
 export const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac yet: ask Jason.";
 /** What the training gate says once Jason's check of it is 90 days old or more (settings.js teachingsLapsed): he checks again. */
 export const TEACHINGS_LAPSED = "Teachings from sessions were turned on more than 90 days ago on this Mac: ask Jason to check the training setting again.";
 const REEL_NOT_AGREED = "A Reel is cut from a session only once you have noted the client's agreement.";
 /** What a video one of whose other versions is a client or group session not cleared is refused in (heldGateFor). */
 export const HELD = "This video is a version of a client or group session: answer it as a session too, or ask Jason.";
+/** Why a video whose import matched a session's words (finish.js matchedSession) is answered only as one. */
+export const MATCHED_SESSION = "This video holds most of the words of a client or group session: answer it as a session, or ask Jason.";
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 /** A whole number from 1, as a person types it: no sign, no zero in front, no fraction. */
@@ -55,8 +79,12 @@ export const leftAlone = (record) => isObject(record) && kindOf(record) === null
 
 /** Whether a record is gated at all: a video with no kind (not yet answered, or left alone as not for brimm-video), or a session
     whose mark is not cleared. Such a record is named by its label in everything edit.js prints (shownName, in episode.js), and
-    never by its folder or its file. Anything that is not a record is not one. */
-export const gated = (record) => isObject(record) && (kindOf(record) === null || sessionNotCleared(record));
+    never by its folder or its file. Anything that is not a record is not one.
+    Not gated: a planned episode (PR H4), and no other record with no kind. It was made in her chat from words she gave and never
+    from a file, so it cannot be a client's session, and it is named by its title. A record is treated so only when isPlannedRecord
+    says it is whole in every way: its answer says "planned", its `planned` is whole, it has no video and no kind, and it was written
+    at layout 5. One that only claims to be planned, failing any of those, is gated as a video not yet answered is. */
+export const gated = (record) => isObject(record) && !isPlannedRecord(record) && (kindOf(record) === null || sessionNotCleared(record));
 
 /** Whether a record has a label of the import's to be named by. */
 export const isLabelled = (r) => typeof r.label === "string" && r.label.trim() !== "";
@@ -115,9 +143,11 @@ const transcriptOnly = (words) => wordsOf(words).includes("--transcript-only");
 /** Why `command`, with `words`, may not run for the episode with this `record`: the plain words of why, or "" when it may.
     `said` is what the episode was asked for by (findEpisode's second argument), with which the words of a Reel are matched.
     - A command that names no episode (UNSCOPED) is not gated.
-    - A record with no kind, whatever its answer says (a video left alone as not for brimm-video included), only the commands of
-      UNANSWERED. Any other is refused in the words of a video waiting for its answer, or, for one she left alone, in words that
-      say so: it is not waiting for an answer.
+    - A planned episode (isPlannedRecord), only the commands of PLANNED; `leave` is told how to drop a plan, and any other is refused
+      in words that say it is not made from its footage yet. A record that only claims to be planned is none, and is gated as follows.
+    - A record with no kind, whatever its answer says (a video left alone as not for brimm-video included and a part, PR H5a), only the
+      commands of UNANSWERED, and `footage` (FOOTAGE). Any other is refused in the words of a video waiting for its answer, or, for one
+      she left alone, in words that say so: it is not waiting for an answer.
     - A session whose mark is not cleared, only those of SESSION, and `teachings … --transcript-only`, her answer that nothing of
       it goes to Claude; and, once the training gate is on (`teachingsOn`), those of SESSION_TAUGHT, refused until then in the
       words of the gate being off, or, when Jason's check of it has lapsed (`lapsed`), in words that say so. Of those, `reel` and
@@ -126,7 +156,8 @@ const transcriptOnly = (words) => wordsOf(words).includes("--transcript-only");
     A command named in none of the lists is refused for a record that is gated at all. */
 export function gateFor(command, record, { teachingsOn = false, lapsed = false, said } = {}, words = []) {
   if (UNSCOPED.includes(command)) return "";
-  if (kindOf(record) === null) return UNANSWERED.includes(command) ? "" : leftAlone(record) ? LEFT : WAITING;
+  if (isPlannedRecord(record)) return PLANNED.includes(command) ? "" : command === "leave" ? TO_DROP(record) : NO_FOOTAGE(record);
+  if (kindOf(record) === null) return UNANSWERED.includes(command) || FOOTAGE.includes(command) ? "" : leftAlone(record) ? LEFT : WAITING;
   if (!sessionNotCleared(record)) return "";
   if (SESSION.includes(command)) return "";
   if (!SESSION_TAUGHT.includes(command)) return NOT_FOR_SESSION;

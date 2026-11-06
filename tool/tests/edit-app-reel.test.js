@@ -81,9 +81,10 @@ const BUSY = `A video for HyperFrames is being made already, and they are made o
 /** The made-up recording (phase4.js: its words, its cut plan and its Reel candidates, as the import files them, Reel 2 not picked),
     answered as `record` says. `set`: this Mac's settings turn the app on. `copy`: the Reel's video is made already (and `faces`, the
     faces found in it). `open`: how the stand-in answers `open`. The pinned command line is the stand-in, given to `app` through the
-    deps. */
-function world({ set = true, copy = true, faces = false, open = "opened", record = RAW } = {}) {
-  const { t, found } = episode(record, {}, episodeFiles({ picked: false }));
+    deps. `claude`: what the cut plan holds of Claude (phase4.js episodeFiles: an older plan's one idea for a graphic unless it is given
+    others), and `cues`: the file of cues that the run that made the Reel's video of a finished video kept beside it. */
+function world({ set = true, copy = true, faces = false, open = "opened", record = RAW, claude, cues, programs = {} } = {}) {
+  const { t, found } = episode(record, programs, episodeFiles({ picked: false, ...(claude ? { claude } : {}) }));
   if (set) writeSettings(t.home, { app: "hyperframes" });
   writeFileSync(join(t.home, "hyperframes-stand-in.json"), JSON.stringify({ open }));
   const raw = statSync(join(found.folder, "Pricing talk.mp4"));
@@ -95,6 +96,7 @@ function world({ set = true, copy = true, faces = false, open = "opened", record
     writeFileSync(paths.video, REEL_COPY);
     writeFileSync(paths.facts, JSON.stringify({ seconds, fps: 30, width: 1280, height: 720, bytes: REEL_COPY.length, stretch }));
     if (faces) writeFileSync(paths.faces, JSON.stringify({ every: 2, stills: [{ file: "0001.jpg", faces: [{ x: 0.4, y: 0.2, w: 0.2, h: 0.3 }] }] }));
+    if (cues) writeFileSync(paths.cues, JSON.stringify({ version: 1, cues }));
   }
   t.ctx.deps.app = { cli: STAND_IN, node: process.execPath, guidance: GUIDANCE };
   return { t, found, raw, paths, stretch, seconds, work: episodeWork(t.home, FOLDER) };
@@ -553,6 +555,154 @@ describe("app … reel: the project, the record and the app", () => {
     assert.deepEqual([r.code, r.said], [0, [OPEN, BUTTONS]]);
     assert.deepEqual(reread(found).app.projects.map((p) => [p.key, p.state]), [["reel 2", "opened"]]);
     t.done();
+  });
+});
+
+describe("app … reel: its graphic cues (PR H2)", () => {
+  /** The cues of the made-up episode's cut plan: one in Reel 1's words (the welcome), and two in Reel 2's, which runs from p7 to p9. */
+  const CUES = [
+    { n: 1, words: "Welcome to the show", kind: "words", show: "The show's name.", seconds: 3, style: null, phrase: "p4" },
+    { n: 2, words: "know your costs", kind: "graphic", show: "A chart of costs.", seconds: 4, style: null, phrase: "p7" },
+    { n: 3, words: "very very important", kind: "words", show: "The words very important.", seconds: 3, style: null, phrase: "p8" }
+  ];
+  const fileOf = (work) => JSON.parse(readFileSync(join(work, PROJECT, "brimm", "graphic-cues.json"), "utf8"));
+  const transcriptOf = (work) => JSON.parse(readFileSync(join(work, PROJECT, "transcript.json"), "utf8"));
+  /** Where words are in the Reel's transcript: the id of the first and the last, and their times. */
+  const spanOf = (transcript, first, last) => {
+    const from = transcript.find((w) => w.text.toLowerCase().replace(/[^a-z']/g, "") === first);
+    const to = transcript.findLast((w) => w.text.toLowerCase().replace(/[^a-z']/g, "") === last);
+    return { from: from.id, to: to.id, start: from.start, end: to.end };
+  };
+
+  it("puts the cut plan's cues that fall in the Reel's stretch into its project, on the Reel's own clock with the ids of its transcript, and none that are in another Reel's words", async () => {
+    const { t, work } = world({ claude: { decisions: [], graphicCues: CUES, ignored: [], clips: [] } });
+    const r = await app(t.ctx.deps, FOLDER, "reel", "2");
+    assert.equal(r.code, 0, r.text);
+    const transcript = transcriptOf(work);
+    assert.deepEqual(fileOf(work), { version: 1, clock: "reel", cues: [{ ...CUES[1], at: spanOf(transcript, "know", "costs") }, { ...CUES[2], at: spanOf(transcript, "very", "important") }] });
+    // The ids are the Reel's own, from w0, whatever they are in the whole recording; and its first word starts the Reel at 0.
+    assert.equal(transcript[0].id, "w0");
+    const length = JSON.parse(readFileSync(join(work, PROJECT, "brimm", "facts.json"), "utf8")).seconds;
+    assert.ok(fileOf(work).cues.every((cue) => cue.at.start > 0 && cue.at.end <= length), "on the Reel's clock, from 0 to its length");
+    assert.match(readFileSync(join(work, PROJECT, "CLAUDE.md"), "utf8"), /- \*\*Graphic cues\.\*\* .* word ids and times on the Reel's clock\. .* On this upright Reel, keep graphics and words out of the top 14% and the bottom 35%\./);
+    t.done();
+  });
+  it("puts an older plan's idea for a graphic into the project of a Reel it falls in, as a cue on the words of its phrase", async () => {
+    // The made-up episode's plan is one made before the cues: it holds one idea, on p7, which is in Reel 2.
+    const { t, work } = world();
+    assert.equal((await app(t.ctx.deps, FOLDER, "reel", "2")).code, 0);
+    const [cue] = fileOf(work).cues;
+    assert.deepEqual([fileOf(work).cues.length, cue.words, cue.show, cue.phrase], [1, "So the first thing you need to do is know your costs.", "A chart of what it costs to run the business", "p7"]);
+    assert.deepEqual(cue.at, spanOf(transcriptOf(work), "so", "costs"));
+    t.done();
+  });
+  it("has no cue in the project of a Reel when the plan's cues are in no part of its words, and the file is there", async () => {
+    const { t, work } = world({ claude: { decisions: [], graphicCues: [CUES[0]], ignored: [], clips: [] } });
+    assert.equal((await app(t.ctx.deps, FOLDER, "reel", "2")).code, 0);
+    assert.deepEqual(fileOf(work), { version: 1, clock: "reel", cues: [] });
+    t.done();
+  });
+  it("puts the cues of the run that made a finished video's Reel into its project, placed on the Reel's words, and takes none from the cut plan", async () => {
+    const kept = [{ n: 1, words: "know your costs", kind: "graphic", show: "A chart of costs.", seconds: 4, style: null, phrase: "p7" }, { n: 2, words: "the moon landing", kind: "words", show: "The moon.", seconds: 3, style: null, phrase: "p8" }];
+    const { t, work } = world({ record: FINISHED, cues: kept, claude: { decisions: [], graphicCues: CUES, ignored: [], clips: [] } });
+    const r = await app(t.ctx.deps, FOLDER, "reel", "2");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(fileOf(work), { version: 1, clock: "reel", cues: [{ ...kept[0], at: spanOf(transcriptOf(work), "know", "costs") }, { ...kept[1], at: null }] });
+    t.done();
+  });
+  it("makes a finished video's Reel without cues when the run kept none beside its video, and says nothing of them", async () => {
+    const { t, work } = world({ record: FINISHED });
+    const r = await app(t.ctx.deps, FOLDER, "reel", "2");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(fileOf(work), { version: 1, clock: "reel", cues: [] });
+    assert.deepEqual(r.said.slice(1), [OPEN, BUTTONS]);
+    t.done();
+  });
+
+  describe("from the run that asked Claude, to the project made from what it kept", () => {
+    const REPLY = { graphicCues: [{ id: "p7", words: "know your costs", kind: "graphic", show: "A chart of what it costs", seconds: 4 }, { id: "p8", words: "very very important", kind: "words", show: "The words very important", seconds: 3 }] };
+    /** A world where the Reel's video is not made yet, finished, and Claude Code stands in with `reply`; `asks` notes each request. */
+    function finishedWorld(reply) {
+      const asks = [];
+      const w = world({ copy: false, record: FINISHED });
+      const seconds = w.stretch.end - w.stretch.start + 0.02;
+      const run = w.t.ctx.deps.run;
+      w.t.ctx.deps.run = async (cmd, args, asked) => {
+        if (cmd === "FFPROBE") {
+          const file = args[args.length - 1];
+          writeFileSync(args[args.indexOf("-o") + 1], probed({ sound: { sample_rate: "48000", channels: 2 }, ...(file.includes("/.runs/") ? { duration: seconds.toFixed(6) } : {}) }));
+          return { code: 0, stderr: "" };
+        }
+        if (cmd === "CLAUDE") {
+          asks.push(asked.input);
+          return typeof reply === "function" ? reply() : { code: 0, stderr: "", stdout: JSON.stringify({ type: "result", is_error: false, result: JSON.stringify(reply) }) };
+        }
+        return run(cmd, args, asked);
+      };
+      w.t.ctx.deps.runGuarded = async (cmd, args) => {
+        writeFileSync(args[args.length - 1], "THE REEL CUT FROM THE RECORDING");
+        return { code: 0, signal: null, stderr: "", overMemory: false, outOfTime: false, peak: 0, stopped: "" };
+      };
+      w.t.ctx.deps.tools = { ...w.t.ctx.deps.tools, claude: "CLAUDE" };
+      return { ...w, asks };
+    }
+    /** `app` asks for the video, the run it started is run as the detached run would, and `app` is said again. */
+    async function madeThenOpened(w) {
+      const first = await app(w.t.ctx.deps, FOLDER, "reel", "2");
+      assert.deepEqual([first.code, first.said], [0, [MAKING]]);
+      const [, args] = w.t.started[0];
+      const cut = await on(w.t.ctx.deps, ...args.slice(1));
+      assert.equal(cut.code, 0, cut.text);
+      return app(w.t.ctx.deps, FOLDER, "reel", "2");
+    }
+    it("asks Claude for the Reel's cues while its video is made, and the project made afterwards holds them, on the Reel's words", async () => {
+      const w = finishedWorld(REPLY);
+      const second = await madeThenOpened(w);
+      assert.deepEqual([second.code, second.said], [0, [made(w.stretch), OPEN, BUTTONS]]);
+      assert.equal(w.asks.length, 1);
+      assert.ok(existsSync(w.paths.cues), "the run kept them beside the Reel's video, where the project is made from them");
+      const transcript = transcriptOf(w.work);
+      assert.deepEqual(fileOf(w.work).cues.map(({ at, ...cue }) => cue), [
+        { n: 1, words: "know your costs", kind: "graphic", show: "A chart of what it costs", seconds: 4, style: null, phrase: "p7" },
+        { n: 2, words: "very very important", kind: "words", show: "The words very important", seconds: 3, style: null, phrase: "p8" }
+      ]);
+      assert.deepEqual(fileOf(w.work).cues.map((cue) => cue.at), [spanOf(transcript, "know", "costs"), spanOf(transcript, "very", "important")]);
+      assert.equal(fileOf(w.work).clock, "reel");
+      // The request held the Reel's phrases alone.
+      assert.ok(w.asks[0].includes("p7 | 0:13 |") && w.asks[0].includes("p9 | 0:19 |") && !w.asks[0].includes("p4 |"));
+      w.t.done();
+    });
+    it("makes the project without cues when Claude could not be asked, and does not ask again for a video that is made", async () => {
+      const w = finishedWorld(() => ({ code: 1, stderr: "Error: connect ECONNREFUSED\n", stdout: "" }));
+      const second = await madeThenOpened(w);
+      assert.deepEqual([second.code, second.said], [0, [made(w.stretch), OPEN, BUTTONS]]);
+      assert.deepEqual([w.asks.length, existsSync(w.paths.cues), fileOf(w.work)], [1, false, { version: 1, clock: "reel", cues: [] }]);
+      // Asked again for the same Reel, in a project made already: nothing is asked.
+      assert.equal((await app(w.t.ctx.deps, FOLDER, "reel", "2")).code, 0);
+      assert.equal(w.asks.length, 1);
+      w.t.done();
+    });
+    it("asks Claude nothing for a raw video's Reel, whose project has the cues of its cut plan", async () => {
+      const w = world({ copy: false, record: RAW, claude: { decisions: [], graphicCues: CUES, ignored: [], clips: [] } });
+      const asks = [];
+      const run = w.t.ctx.deps.run;
+      const seconds = w.stretch.end - w.stretch.start + 0.02;
+      w.t.ctx.deps.run = async (cmd, args, asked) => {
+        if (cmd === "FFPROBE") {
+          const file = args[args.length - 1];
+          writeFileSync(args[args.indexOf("-o") + 1], probed({ sound: { sample_rate: "48000", channels: 2 }, ...(file.includes("/.runs/") ? { duration: seconds.toFixed(6) } : {}) }));
+          return { code: 0, stderr: "" };
+        }
+        if (cmd === "CLAUDE") return (asks.push(asked.input), { code: 0, stderr: "", stdout: "" });
+        return run(cmd, args, asked);
+      };
+      w.t.ctx.deps.runGuarded = async (cmd, args) => (writeFileSync(args[args.length - 1], "THE REEL"), { code: 0, signal: null, stderr: "", overMemory: false, outOfTime: false, peak: 0, stopped: "" });
+      w.t.ctx.deps.tools = { ...w.t.ctx.deps.tools, claude: "CLAUDE" };
+      const second = await madeThenOpened(w);
+      assert.equal(second.code, 0, second.text);
+      assert.deepEqual([asks, fileOf(w.work).cues.map((cue) => cue.n)], [[], [2, 3]]);
+      w.t.done();
+    });
   });
 });
 

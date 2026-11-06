@@ -435,3 +435,19 @@ describe("app-history.js", () => {
     assert.equal(source.match(/spawnSync/g).length, 2, "imported, and the default of the spawn it is given");
   });
 });
+
+describe("the command line's HOME, in a check that gives Studio a home of its own (BRIMM_VIDEO_HOME)", () => {
+  /** The HOME the stand-in's `history` is run with, given `env`. */
+  const homeGiven = (c, env) => {
+    const w = world(c);
+    const seen = [];
+    versionsOf(w.ctx, { found: w.found, record: w.record }, { ...w.deps, env: { LANG: "en_US.UTF-8", ...env }, spawn: (file, args, options) => { seen.push(options.env.HOME); return { status: 1, stdout: "", stderr: "" }; } });
+    return { home: w.home, seen };
+  };
+  it("is the real HOME when BRIMM_VIDEO_HOME is set, and Studio's home as it was when it is not", (c) => {
+    const checked = homeGiven(c, { HOME: "/the/real/home", BRIMM_VIDEO_HOME: "/the/scratch/home" });
+    assert.deepEqual(checked.seen, ["/the/real/home"]);
+    const plain = homeGiven(c, { HOME: "/the/real/home" });
+    assert.deepEqual(plain.seen, [plain.home]);
+  });
+});

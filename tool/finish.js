@@ -382,6 +382,22 @@ export function linksOf(root) {
   };
 }
 
+/** Whether the episode the import matched in the video of `record` (answer.match, an id, never the record's own) is a client or group
+    session not cleared, or one of its other versions is, in its record or a conflicted copy (finish.js linksOf: holdsSession,
+    sessionsBeside), as Episodes holds it now. The video of `record` is never counted among them: once it is a version of the match
+    and marked a session itself, its own mark must not hold its clearing back (as sessionAmong leaves out the session being
+    cleared). And for a clearing of its mark (`clearing`, with the video's own `folder`), a match among the video's own versions (the
+    same first id) says nothing: each mark of a set is cleared by a click of its own, and the video cleared is then held as a session
+    while another of them is marked (STILL_HELD). A match outside its own versions still counts. A match this Mac cannot read says
+    nothing. */
+export function matchedSession(links, record, { clearing = false, folder = null } = {}) {
+  const id = record.answer && typeof record.answer === "object" ? record.answer.match : null;
+  if (typeof id !== "string" || id === record.id) return false;
+  const match = links.find(id);
+  if (!match) return false;
+  if (clearing && links.firstOf(match.record, match.folder) === links.firstOf(record, folder)) return false;
+  return links.holdsSession(match) || links.sessionsBeside(match.record, match.folder).some((one) => one.record.id !== record.id);
+}
 /** Why the chain of a video's versions cannot be followed to its first, or null when it can: { id, reason }. `missing` is an
     episode `versionOf` names that this Mac cannot read in Episodes, the first version too, as one Dropbox has not yet brought
     over; `loop` is an episode the chain names a second time, as two episodes that each say they are a version of the other.

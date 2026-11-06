@@ -30,6 +30,28 @@
 //                                         hand-off it has, with the Reels added (finish-reels.js)
 //   node edit.js free "<episode>"         take the working copy and the renders of its HyperFrames projects away from this
 //                                         Mac to give the room back, by named paths in BRIMM Video Work alone (free.js)
+//   node edit.js refs [look "<name>" | use "<episode>" "<name>" [reel <n>]]
+//                                         the reference folder (references.js): what is in it; a picture of it copied into her
+//                                         Looking folder for Claude to look at; or copied into an episode's HyperFrames project
+//                                         on this Mac to be followed as a style. Studio only reads the folder
+//   node edit.js plan new "<title>" [--explainer [--voice sallie|heygen]]
+//                                         plan a video before it is shot: an episode with no footage, filed in Episodes (plan.js)
+//   node edit.js plan "<planned>" [set … | drop]
+//                                         a planned video's package (its video guide, shot list and teleprompter script): said in
+//                                         plain words, set whole in one record write, or dropped
+//   node edit.js footage "<video>" "<planned>" talking|screen|b-roll --client yes|no [--shot <n>]
+//   node edit.js footage "<video>" none   a video dropped for a planned video, answered as one of its parts (or taken back
+//                                         until the plan is filmed): kept out of the lists, and out of any project while it
+//                                         shows a client who has not agreed (footage.js)
+//   node edit.js plan "<planned>" agreed "<video>"
+//                                         a client's agreement to being shown in a part: noted from a dialog on this Mac that
+//                                         only her click answers; who agreed stays on this Mac (footage.js)
+//   node edit.js plan "<planned>" join ["<video>"…]
+//                                         "that's all the footage": the plan's talking parts joined, in the order of its script,
+//                                         into its video (join.js). The detached half, `join --now`, and the working copy's
+//                                         `workcopy --now … --footage`, are runs of its own and in no help
+//   node edit.js plan "<planned>" voice   "the HeyGen voice is done": the voice the app's agent made in a HeyGen explainer's
+//                                         project taken in as the plan's video (explainer.js). `app` opens that project
 //
 // Everything it prints goes into Sallie's Claude chat. So a command that names an episode is checked first against the
 // episode's record (gate.js, asked by findEpisode): for a video not yet answered, and for a client or group session, only a few
@@ -40,13 +62,13 @@
 import { spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
 import { appendFileSync, chmodSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, shownName, kindOf as recordKind } from "./episode.js";
+import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
-import { SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
+import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
@@ -58,7 +80,7 @@ import { readStatuses, importState, removeStatus } from "./importing.js";
 import { heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
+import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, matchedSession, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
 import { BRINGING, REEL_KEY, START as REELS_START, exportAgainWords, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
 import { checkingNow, problemFlagged } from "./finish-check.js";
 import { endedSinceYes, endedWithoutHandoff } from "./finish-ended.js";
@@ -71,6 +93,8 @@ import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } fr
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
+import { spelled } from "./final-transcript.js";
+import { GRAPHIC_CUE_KINDS, SHOT_KINDS, graphicCuesOf, keptIndexes, keptPhraseSpans, placeGraphicCues } from "./graphic-cues.js";
 import { handoffText, handoffFault } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, VERSION_2 } from "./handoff-v2.js";
 import { presetOf } from "./layers.js";
@@ -78,7 +102,7 @@ import { JOBS, CAPTION_STYLES, LOOKS, defaultPreset, presetFault, nameOf, idOf }
 import { cutSpan, cutPhrases, keptRanges } from "./recut.js";
 import { REEL_FRAME } from "./reels.js";
 import { findPrograms, askAgain, askBlocked, clockAt, facesIn, importHold, keptList, banner } from "./unedited.js";
-import { readEpisodeNow, accountOf, READ_KINDS, READ_HOLD_MS, READ_LOOK_MS, rulesPlanKept } from "./reading.js";
+import { readEpisodeNow, accountOf, askReelCues, READ_KINDS, READ_HOLD_MS, READ_LOOK_MS, rulesPlanKept } from "./reading.js";
 import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
@@ -94,13 +118,21 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, isMain as inUse, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, guidanceOf, isMain as inUse, mediaOf, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
+import { VOICEOVER } from "./project.js";
+import { openVoiceProject, voiceProjectWhy } from "./explainer.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
 import { historyTail, mainProjectDir, toldTurns, turnTime, versionsOf, whatHappened } from "./app-history.js";
 import { recordingPlacementsIn, timelineTranscript } from "./on-timeline.js";
 import { freeEpisode, hyperFramesRunning } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
-import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
+import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeFootageCopies, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
+import { lookAt, referencesAsked, sayReferences, useIn } from "./references.js";
+import { newPlan, planAsked, planFor, plannedLine, textArg } from "./plan.js";
+import { SHOT_SAID } from "./sentences.js";
+import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
+import { afterJoin, joinRun } from "./join.js";
+import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -120,8 +152,11 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         where it would say to open the video there or that its video is being made. A
                                         finished video whose hand-off is written is told to hand off the Reels once a Reel
                                         is exported from HyperFrames that the hand-off does not hold. A raw video that
-                                        goes the Final Cut way keeps its Final Cut steps. Only on a Mac that does the
-                                        light import: on any other, every form says to ask Jason
+                                        goes the Final Cut way keeps its Final Cut steps. A planned video (plan) is told
+                                        to film it to its shot list, or for an explainer to record or choose its voice;
+                                        once footage is in, what it has so far, and which part is waiting for a client's
+                                        agreement. Only on a Mac that does the light import: on any other, every form says
+                                        to ask Jason
   node edit.js guide drop [zoom] | page | wait
                                         open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
                                         BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
@@ -313,10 +348,79 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js cut "<episode>" remove [main | reel <n>] (--words "<words>" | --at <time> --to <time>) [--no-hand-edits]
   node edit.js cut "<episode>" keep [main | reel <n>] (--words "<words>" | --at <time>) [--no-hand-edits]
                                         take whole phrases out, at a pause, as read on the timeline; or keep what was
-                                        cut, by its words or at the join nearest a time on the timeline`;
+                                        cut, by its words or at the join nearest a time on the timeline
+  node edit.js refs                     what is in the reference folder: the pictures she can name as a style, and any
+                                        other file in it, which Studio does not use. It writes nothing there
+  node edit.js refs look "<name>"       copy the picture of that name from the reference folder into the Looking folder in
+                                        her BRIMM Video Studio folder (a HEIC or TIFF picture as a JPEG), and say where it
+                                        is, for Claude to look at. Her skill never repeats that to her
+  node edit.js refs use "<episode>" "<name>" [reel <n>]
+                                        copy the picture of that name from the reference folder into the episode's
+                                        HyperFrames project on this Mac, the main video's or Reel n's, as a style to
+                                        follow, and say what to say in HyperFrames to have it followed. The gate asks
+                                        first, as for app; a finished video has no main project, a short video no Reels,
+                                        and a project that is not on this Mac is to be opened first
+  node edit.js plan new "<title>" [--explainer [--voice sallie|heygen]]
+                                        plan a video before it is shot, from her script: an episode with no footage yet,
+                                        filed in Episodes under the title she gives (at most 80 characters; a title already
+                                        planned and not yet filmed is refused). With --explainer it is a video of graphics
+                                        and words on screen alone, whose voice is hers or a HeyGen voice she picks in
+                                        HyperFrames (--voice says which). Its guide, shot list and teleprompter script
+                                        are made next, by plan … set
+  node edit.js plan "<planned>" set [--cue "<kind> | <seconds> | <words> | <what to show>[ | <key>: <value>]…"]…
+                     [--shot "<kind> | <what>"]… [--line "<paragraph>"]…
+                                        replace the whole package of a planned video in one record write: its cues (kind
+                                        graphic, words, b-roll or screen; seconds from 1 to 10; the words they go with;
+                                        what they show; and the keys shot, ref, inspiration and link), its shots (talking,
+                                        screen or b-roll) and the lines of its teleprompter script. A b-roll or screen cue
+                                        names a shot of its own kind; an explainer has graphic and words cues and no
+                                        shots; a ref is a picture in the reference folder. A double quote, a dollar sign,
+                                        a percent sign, a backslash, a backtick or a pipe in a word is written %22, %24,
+                                        %25, %5C, %60 or %7C, and a bare pipe splits a cue's parts. At most 60 cues, 40
+                                        shots and 400 lines, of 2,000 characters at most. Every problem is said on its
+                                        own line and nothing is saved. Saved, it makes video guide.md, shot list.md
+                                        (none for an explainer) and teleprompter.txt in the plan's folder, each put in
+                                        by the rule and the record last
+  node edit.js plan "<planned>"         say a planned video's package in plain words: each cue, each shot and how long
+                                        the teleprompter script is, and a line for each part of its footage
+  node edit.js plan "<planned>" drop    drop a plan: it is archived, so that episodes and the guide no longer show it. A plan
+                                        that has footage is dropped only once each piece is taken back, and one made from
+                                        its footage already is not dropped
+  node edit.js plan "<planned>" join ["<video>"…]
+                                        for "that's all the footage": join the plan's talking parts, in the order of its
+                                        script, into its video. With one talking part, or the parts named in the order she
+                                        wants them, a detached run makes it (the parts joined by copying, the words read,
+                                        the plan written as a raw video or an iPhone clip) and a notice comes when it is
+                                        ready; with two or more and no order given, it says the order the script puts them
+                                        in and starts nothing. Once they are joined no more talking parts can be added,
+                                        but b-roll and screen recordings still can. An explainer has no footage to join:
+                                        its voiceover, once answered, is taken in at once
+  node edit.js plan "<planned>" voice   for "the HeyGen voice is done": take in the voice the app's agent made in a HeyGen
+                                        explainer's project, once it plays one. A detached run copies it out, reads its
+                                        words and makes the plan its video, a short video whose project is that one; a notice
+                                        comes when it is ready
+  node edit.js footage "<video>" "<planned>" talking|screen|b-roll --client yes|no [--shot <n>]
+                                        answer a dropped video as footage for a planned video: talking to the camera, a
+                                        screen recording or b-roll, and whether it shows a client, a client's name or their
+                                        work. A screen recording or b-roll shows one shot of the plan's shot list, which is
+                                        taken when the plan has one of its kind and otherwise named with --shot. It is
+                                        answered on her two cards (the planned card and the part card), a receipt of each
+                                        under Claude Code on a Mac whose lock is open, as kind is, and never for a Zoom
+                                        download, a video that holds a client or group session's words, or one held beside a
+                                        session. A part is kept out of episodes and the guide; it goes into no project while
+                                        it shows a client who has not agreed
+  node edit.js footage "<video>" "<planned>" voiceover [--not-a-session]
+                                        answer a dropped recording of sound alone as the voiceover of an explainer in her
+                                        voice, on the planned card and the not-a-session card: it is taken in at once as the
+                                        plan's video
+  node edit.js footage "<video>" none  take a video back from a planned video, until the plan is filmed: it waits for
+                                        its answer again, with its cards
+  node edit.js plan "<planned>" agreed "<video>"
+                                        for footage that shows a client: notes, on a dialog on this Mac that only her click
+                                        answers, that the client agreed to being shown in it. Who agreed stays on this Mac`;
 
-/** The home folder commands work from: the one a test gives, else the one HOME names, else the Mac's own word for it. */
-const homeOf = (deps) => deps.home || process.env.HOME || homedir();
+/** The home folder commands work from: the one a test gives, else Studio's own (home.js: BRIMM_VIDEO_HOME, else HOME, else the Mac's own word for it). */
+const homeOf = (deps) => deps.home || studioHome();
 
 /** The context every command is given: this Mac's settings and what it finds from them, and the ways of doing things,
     each the Mac's own unless a test gives another. {why} when this Mac has no settings for episodes. */
@@ -572,6 +676,14 @@ function hideNames(ctx, e) {
     video's names. Undefined, so that runDetached writes it as it is, for any other. */
 const resultClean = (ctx) => (ctx.hidden && ctx.hidden.names.length ? (text) => withoutNames(text, ctx.hidden.names, ctx.hidden.keep, { paths: false }) : undefined);
 
+/** The same, for a detached run that finds other episodes as it works, whose names are hidden only then (PR H5b: the join finds its parts, which
+    the gate holds as videos with no kind, and hides them while it reads them): resultClean is asked when the run starts, when nothing of them is
+    hidden yet, and would give nothing; this is asked for each line as the result is written, and takes out every name hidden by then. */
+const lateClean = (ctx) => (text) => {
+  const clean = resultClean(ctx);
+  return clean ? clean(text) : text;
+};
+
 /** What is said of the episode `found` when its record cannot be gone on with, as `found.read` says why (a conflicted copy, a
     folder that cannot be read): "<said>: <why>.", as always, where `said` is the folder as the command was given it. But a
     gated episode is named by its label and short id, and its why names no file of its video; one a newer brimm-video wrote is
@@ -654,38 +766,64 @@ function handOverWords(ctx, code) {
     and by each conflicted copy of a record, since the Mac whose change became the copy knows the episode by the name it gave
     there. Its `read` still says it is conflicted, so every command but `resolve` refuses it. In the lists of episodes it says,
     each is named as listedAs names it: never a gated one by its folder. A video held as a session (episodeAt's `held`) is gated
-    so too, found by its label and short id, and `held` is true in what is given back.
+    so too, found by its label and short id, and `held` is true in what is given back. A planned episode (episode.js isPlannedRecord)
+    is the one record with no kind that is not gated: it is found by its title, the whole of it, whatever its case and spacing (and by
+    the title and short id as `episodes` could list it), and by words of its folder and its name, as any episode is; a plan she
+    dropped is not found by its title, so that a new plan of that title is. A record that only claims to be planned is gated, and
+    found by none of that.
+    `plannedAs` is for a plan alone (`plan` and `leave`; episodeFor's `codes`): the word `said` with the codes of plan.js textArg
+    turned, as `plan new` turned them in the title it was given, so that a plan is named by the string it was made with. It is tried
+    only when `said` as it is fits no episode, and is taken only when it fits one episode alone and that one is a planned episode
+    (episode.js isPlannedRecord of the record in force, a plan she dropped as well), which the gate then runs for as for any. What
+    else it fits is not taken, and the word as given says what it says when it fits none. No other command gives it, so that no
+    other command's word is turned.
     When it finds one episode for a command that editMain is running (`ctx.asked`), it gives that episode back only if the
     gate lets the command run for it (gateOf), and otherwise { why }, the gate's words, so that the command ends there, having
     read nothing but records. Without `ctx.asked`, as in a test or a helper, it is not gated. A gated episode it finds has every
     line the command says after hold nothing of its names (hideNames). */
-export function findEpisode(ctx, said) {
+export function findEpisode(ctx, said, { plannedAs } = {}) {
   // An import that has not finished has no whole record, and is not an episode yet. The versions of each are read once.
   const links = linksOf(ctx.root);
   const all = folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE");
   const known = (e) => e.records;
   const nameOf = (r) => (r.name && typeof r.name.text === "string" ? r.name.text : "");
-  const words = plainly(said).split(/\s+/).filter(Boolean);
-  const exact = all.filter((e) => plainly(e.name) === plainly(said));
-  // A label, and a label with the short id after it as the lists name a gated video ("<label> (3fa9c1)").
+  // A label, and a label with the short id after it as the lists name a gated video ("<label> (3fa9c1)"). A planned episode's title is its
+  // label too, the whole of it, so that "Too many SKUs" fits it alone when the words of another episode's name fit as well; a plan she
+  // dropped is not found so, and a new plan of that title is.
   const labelled = (e, r) => {
-    const labels = [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : e.held ? heldName(r) : ""].filter(Boolean);
+    const labels = [typeof r.label === "string" ? r.label : "", gated(r) ? shownName(r) : e.held ? heldName(r) : isPlannedRecord(r) && !r.archived ? shownName(r) : ""].filter(Boolean);
     return typeof r.id === "string" ? [...labels, ...labels.map((label) => `${label} (${r.id.slice(-6)})`)] : labels;
   };
-  const byLabel = all.filter((e) => known(e).some((r) => labelled(e, r).some((label) => spaced(label) === spaced(said))));
-  const byId = all.filter((e) => known(e).some((r) => typeof r.id === "string" && (r.id === said || r.id.slice(-6) === said)));
-  // A gated video is never found by words of its folder or its name, which are its file's: words that fit would tie them to its
-  // label. One a newer brimm-video wrote is found by them as always: it is named by its short id alone, and its kind cannot be
-  // read here.
-  const byWords = all.filter((e) => (e.newer || !isGated(e)) && words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
-  const fits = exact.length ? exact : byLabel.length ? byLabel : byId.length ? byId : byWords;
+  // The episodes that fit what a person said, by the first way that fits any: its folder's name, a label, an id, then words.
+  const fitting = (word) => {
+    const words = plainly(word).split(/\s+/).filter(Boolean);
+    const exact = all.filter((e) => plainly(e.name) === plainly(word));
+    const byLabel = all.filter((e) => known(e).some((r) => labelled(e, r).some((label) => spaced(label) === spaced(word))));
+    const byId = all.filter((e) => known(e).some((r) => typeof r.id === "string" && (r.id === word || r.id.slice(-6) === word)));
+    // A gated video is never found by words of its folder or its name, which are its file's: words that fit would tie them to its
+    // label. One a newer brimm-video wrote is found by them as always: it is named by its short id alone, and its kind cannot be
+    // read here.
+    const byWords = all.filter((e) => (e.newer || !isGated(e)) && words.length && words.every((w) => plainly(e.name).includes(w) || known(e).some((r) => plainly(nameOf(r)).includes(w))));
+    return exact.length ? exact : byLabel.length ? byLabel : byId.length ? byId : byWords;
+  };
+  let fits = fitting(said);
+  let named = said;
+  // The word as it was given comes first. A plan's title written with codes, as `plan new` was given it, fits no episode as it is: with its
+  // codes turned it may fit a plan, and a plan alone is taken (plannedAs).
+  if (!fits.length && plannedAs !== undefined && plannedAs !== said) {
+    const turned = fitting(plannedAs);
+    if (turned.length === 1 && isPlannedRecord(turned[0].inForce)) {
+      fits = turned;
+      named = plannedAs;
+    }
+  }
   if (fits.length === 1) {
     const e = fits[0];
     hideNames(ctx, e);
     // A record of the switch's layout (3) or a later one may be a light import's, whose folder and file are named for a client:
     // an error nobody foresaw names none of it (editMain).
     if (ctx.hidden && e.records.some((r) => recordShaped(r) && ofTheSwitch(r))) ctx.hidden.switched = true;
-    return gateOf(ctx, e, known(e), said, e.inForce) || holdWords(ctx, e) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
+    return gateOf(ctx, e, known(e), named, e.inForce) || holdWords(ctx, e) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
   }
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => listedAs(ctx, e)))}. Say which.` };
   // A detached run is given its episode's folder, which is named for the video's file: when it is gone, or has no whole record,
@@ -845,11 +983,23 @@ function cardFor(named, label, others, links) {
     first. `others` and `links` are as cardLines has them. */
 export function cardLinesFor(named, label, others, links, { notASession = false } = {}) {
   const answer = named.answer !== null && typeof named.answer === "object" ? named.answer : {};
-  const lines = [`    Card: ${JSON.stringify(cardFor(named, label, others, links))}`];
+  // A plan waiting for footage is offered first (PR H5a): the planned card and the part card, before the card, unless the video came from
+  // Zoom, has no picture, has a session's words in it (its Maybe line is a session's) or is held beside a session.
+  const maybe = maybeOf(named, others, links);
+  const blocked = Boolean((maybe && maybe.session) || links.sessionsBeside(named, null).length > 0);
+  const lines = footageCards({ record: named, label, records: others.map((e) => e.inForce).filter(Boolean), blocked });
+  // A video with no sound has no card: it can be footage for a planned video, or be left, and takes no kind. Nothing Claude reads of it is said.
+  if (named.video && named.video.sound === false) return [...lines, NO_SOUND];
+  lines.push(`    Card: ${JSON.stringify(cardFor(named, label, others, links))}`);
   const came = answer.came === "zoom" || answer.came === "sound" ? answer.came : null;
   if (came || notASession) lines.push(`    Card if not a session: ${JSON.stringify(notSessionCardOf({ label, came }))}`);
   return lines;
 }
+
+/** What `episodes` says in place of the card under a video with no sound (PR H5a). */
+const NO_SOUND = "    No sound: it can only be footage for a planned video.";
+/** What `kind` says to a video with no sound, whatever it is answered as and on whatever Mac, before any receipt is looked at (PR H5a). */
+const NO_SOUND_WHY = (name) => `${name} has no sound, so Claude can't read it: it can only be footage for a planned video. Or say "leave it".`;
 
 /** The lines `episodes` says of an episode (episodeAt): its name, what it is, its length, its folder and short id, and below
     them who is editing it, its title, how far it has been shown in Final Cut, its finish, and what is not right with its
@@ -858,7 +1008,8 @@ export function cardLinesFor(named, label, others, links, { notASession = false 
     its words, is not said; and no line of it names its video's files (cleanFor). Under the line of a video waiting for her
     answer, and not one left alone, are the lines of her card (cardLines), which look for the video a match names among `all`,
     the episodes `episodes` lists, and through `links` (finish.js linksOf, read once by `episodes`) the versions of that video. An
-    episode whose record cannot be read is named as listedAs names it, and so is one a newer brimm-video wrote. */
+    episode whose record cannot be read is named as listedAs names it, and so is one a newer brimm-video wrote. A planned episode (PR H4)
+    has no video to give a length, and is said by plan.js plannedLine: its title, the day it was planned, what it waits for and its id. */
 function episodeLines(ctx, e, left, all, links) {
   const r = e.read.record;
   if (e.newer) return [`  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
@@ -871,9 +1022,14 @@ function episodeLines(ctx, e, left, all, links) {
     const named = gatedRecord(e);
     const held = e.held && !gated(named);
     const what = left ? "a video of" : recordKind(named) === null ? "a video waiting for your answer, of" : held ? "a version of a client or group session, of" : "a client or group session, of";
-    lines.push(`  ${gatedName(named, e.held)}: ${what} ${stamp(record.video.seconds)}, id ${String(named.id).slice(-6)}`);
+    // The record in force of a gated episode is a planned episode's when a conflicted copy of it only claims to be one: it has no video to give a length.
+    const long = record.video ? ` ${stamp(record.video.seconds)}` : "";
+    lines.push(`  ${gatedName(named, e.held)}: ${long ? what : what.replace(/, of$/, "")}${long}, id ${String(named.id).slice(-6)}`);
     if (!left && recordKind(named) === null) lines.push(...cardLines(named, gatedName(named, e.held), all, links));
     if (!r) lines.push(`    Not right: ${clean(e.read.why)}.`);
+  } else if (isPlannedRecord(record)) {
+    // A planned episode (PR H4) has no video to give a length: it is said by its title and what it waits for.
+    lines.push(`  ${plannedLine(record)}`);
   } else {
     const kind = record.kind === "short video" ? "a short video" : "an episode";
     lines.push(`  ${record.name.text}${record.name.placeholder ? " (a placeholder name)" : ""}: ${kind} of ${stamp(record.video.seconds)}, in ${e.name}, id ${record.id.slice(-6)}`);
@@ -897,8 +1053,9 @@ function shownLine(pushed) {
   return `Shown: v${top.v} (${top.how === "render" ? "rendered" : "in Final Cut"}), on ${top.on}`;
 }
 
-/** The episodes `episodes` lists (episodeAt), newest first: every folder in Episodes with a record, but an archived one. */
-const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived));
+/** The episodes `episodes` lists (episodeAt), newest first: every folder in Episodes with a record, but an archived one, and but a part (PR H5a):
+    a dropped video that is footage for a planned video is said with its plan (`plan "<planned>"`), and is listed nowhere else. */
+const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived) && !isPart(e.inForce));
 
 /** Whether an episode is a video she has left alone, not for brimm-video: its gated record says so. */
 const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boolean(gatedRecord(e).answer) && gatedRecord(e).answer.state === "not for brimm-video";
@@ -998,14 +1155,17 @@ function startProgram(cmd, args) {
 }
 
 /** The episode a command is asked about, by what the person said, with its record: { found, record }, or { code } when the
-    command is to end, having said why. A record of a newer layout is shown as such and goes no further. */
-function episodeFor(ctx, rest, { newerEnds = 0 } = {}) {
+    command is to end, having said why. A record of a newer layout is shown as such and goes no further. `codes` is for `plan` and
+    `leave` alone: what was said may be a plan's title as `plan new` was given it, with the codes of plan.js textArg in it, so that
+    a plan is named by the string it was made with. What was said as it is comes first; with its codes turned it is tried for a
+    plan alone (findEpisode's `plannedAs`). */
+function episodeFor(ctx, rest, { newerEnds = 0, codes = false } = {}) {
   const said = rest.join(" ").trim();
   if (!said) {
     ctx.say(HELP);
     return { code: 2 };
   }
-  const found = findEpisode(ctx, said);
+  const found = findEpisode(ctx, said, codes ? { plannedAs: textArg(said) } : undefined);
   if (found.why) {
     ctx.say(found.why);
     return { code: found.newer ? newerEnds : 1 };
@@ -1364,8 +1524,22 @@ export async function app(ctx, rest) {
   if (!got.found) return got.code;
   const { found } = got;
   if (recordKind(got.record) === "finished") return refuse(ctx, finishedHasNoProject(got.record.name.text));
+  // A planned video (PR H6): only a HeyGen explainer has a project before it is a video, and no question or Reel is asked of a plan.
+  const isPlan = isPlannedRecord(got.record);
+  if (isPlan) {
+    const why = question ? noFootageWhy(got.record) : voiceProjectWhy(ctx, got.record);
+    if (why) return refuse(ctx, why);
+  }
   if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
   const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
+  if (isPlan) {
+    if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
+    const kit = { cues: graphicCuesOf(got.record.planned.cues, { kinds: SHOT_KINDS }).cues };
+    return openVoiceProject(ctx, { found, record: got.record }, {
+      env: ctx.deps.env, ...ctx.deps.app, cli, guidance: ctx.deps.app?.guidance ?? guidanceOf(ctx.home), cues: kit.cues,
+      save: (next) => save(ctx, { ...found, record: got.record }, next, "")
+    });
+  }
   if (question === "what-happened") return whatHappened(ctx, { found, record: got.record }, { ...ctx.deps.app });
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
   if (question === "versions") return versionsOf(ctx, { found, record: got.record }, { env: ctx.deps.env, ...ctx.deps.app, cli });
@@ -1378,7 +1552,7 @@ export async function app(ctx, rest) {
   const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
-  return openInApp(ctx, { found, record }, { env: ctx.deps.env, running: hyperFramesAsked(ctx), ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
+  return openInApp(ctx, { found, record }, { env: ctx.deps.env, running: hyperFramesAsked(ctx), ...ctx.deps.app, cli, plan: (given) => planProject(ctx, given), save: (next) => save(ctx, { ...found, record }, next) });
 }
 
 /** `app "<episode>" reel <n> [--take-over]`: open Reel `n` of the episode in the HyperFrames app, making its project first (app-reel.js
@@ -1412,6 +1586,7 @@ async function appReel(ctx, asked, flags) {
   const { found } = got;
   const name = got.record.name.text;
   const { n } = asked;
+  if (isPlannedRecord(got.record)) return refuse(ctx, noFootageWhy(got.record));
   if (recordKind(got.record) === "short video") return refuse(ctx, NO_REELS);
   if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
   const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
@@ -1762,8 +1937,9 @@ function ranLine(ctx, shown, r, clean, next, live = false) {
 /** What `status` says while the working copy of an episode is made, in the words `app` uses for it. */
 const WORK_COPY_RUNNING = "the video for HyperFrames is being made";
 /** How a result names the run that left it, where the name of its command is not a word a person says: the working copy's run
-    (workcopy.js) is "making the video for HyperFrames". Every other command is named by its own word. */
-const RUN_SAID = { [WORK_COPY_COMMAND]: "making the video for HyperFrames" };
+    (workcopy.js) is "making the video for HyperFrames", and the join's (join.js; PR H5b) "making the video from its footage". Every other
+    command is named by its own word. */
+const RUN_SAID = { [WORK_COPY_COMMAND]: "making the video for HyperFrames", join: "making the video from its footage" };
 
 /** `status ["<words>"]`: what is running on this Mac (each run's step, from the progress panel's files), the imports in
     Episodes/.importing/, and for each episode on this Mac the detached run at work on it and what each one left, with what to
@@ -2483,6 +2659,8 @@ export async function finishEpisode(ctx, found, answers = {}) {
     looked.asks.push(reelTitleAsk({ n: part.reel, found: mine && part.project ? projectWordsIn(work, part.project).words : [], opening }));
   }
   for (const line of [...lines, ...looked.stops, ...stops, ...looked.asks]) ctx.say(line);
+  // An explainer in a HeyGen voice (PR H6) is told what YouTube asks of it, ending what the finish found.
+  if (isFromPlan(record) && record.planned.route === "explainer" && record.planned.voice === "heygen") ctx.say(HEYGEN_YOUTUBE);
   if (looked.stops.length || stops.length) {
     ctx.say(looked.looked);
     return 1;
@@ -2965,7 +3143,8 @@ const IDEAS_ELSEWHERE = 'Say "any ideas for graphics?" to see them, numbered, wi
     times are the recording's and not her timeline's, left out and IDEAS_ELSEWHERE in their place (spec 2026-10-22, section 3,
     "Times"), and with each idea on words that are cut left out of what could not be used, and that heading too when nothing
     else is under it; any other video's as written. Each part of the notes is a heading and its lines, after an empty line
-    (notes.js notesText), and Claude's own notes in them hold no empty line. */
+    (notes.js notesText), and Claude's own notes in them hold no empty line. An idea for a graphic is a graphic cue now (PR H1,
+    graphic-cues.js), told under the same heading and, when it sits on words that are cut, in the same line. */
 function notesForHer(text, record) {
   if (!(isAnswered(record) && recordKind(record) === "raw")) return text;
   return text.split("\n\n").map((block) => {
@@ -3305,6 +3484,8 @@ const NEEDS_JASON = "A conflict needs Jason: tell him the episode's name.";
     which would take the answer back. Each names the video as edit.js names it (shownName). */
 function keptOverWhy(kept, other) {
   if (sessionNotCleared(other) && !sessionNotCleared(kept)) return `One side marks ${shownName(other)} a client or group session: keep that side; the mark is cleared only by her click (say "clear the session mark").`;
+  // A plan (the final review, fix 2) that one side has made into its video by the join: the other side is the plan as it was, and keeping it would unmake the video.
+  if (recordKind(other) !== null && recordKind(kept) === null && isPlannedRecord(kept)) return `One side has "${shownName(kept)}" made from its footage: keep that side; a plan is made from its footage once.`;
   if (recordKind(other) !== null && recordKind(kept) === null) return `One side has ${shownName(kept)} answered: keep that side; an answer is changed only by saying what it is again.`;
   return "";
 }
@@ -3921,6 +4102,8 @@ const NOT_RAW_OR_CLIP = canNotBeUsed("it is not a raw video or an iPhone clip");
 /** The same of a run that makes a Reel's video (`workcopy … --reel <n>`, plan PR 5), which is made for a raw video and a finished one
     (app-reel.js REEL_COPY_KINDS) and never for an iPhone clip, which has no Reels. */
 const NOT_RAW_OR_FINISHED = canNotBeUsed("it is not a raw or a finished video");
+/** The same of a run that makes the copies of a plan's footage (`workcopy … --footage`, PR H5b) for a video that is not made from a plan. */
+const NOT_FROM_PLAN = canNotBeUsed("it is not a video made from its footage");
 
 /** Wait, as a raw reading does (reading.js readEpisodeNow), while the import's late check of the episode's video is still to come
     (unedited.js importHold): the working copy is made from the raw video as filed, whole and checked (architecture 2026-10-27, 5.7),
@@ -3966,7 +4149,23 @@ async function waitForImport(ctx, { found, record, wait, progress, log, kinds = 
   }
 }
 
-/** `workcopy --now "<episode folder>" [--4k | --reel <n>]`, the detached run `kind` and `app` start (workcopy.js requestWorkCopy): it
+/** The copies with no sound of the footage of the video made from the plan `record` (PR H5b), made one after the other (workcopy.js makeFootageCopies):
+    of each b-roll and screen part that may go into its project (join.js footageToUse). Every part that gives nothing now is said in the log, with
+    why: a conflict in its episode, a record a newer brimm-video wrote, a shot that is not of its kind any more, a client who has not agreed. The
+    parts are read once, past any conflicted copy and with the newer ones (footage.js partsOf), so that one that must not be used is known and
+    left out. Each is named in the panel and the log by the plan and what the part shows, "Too many SKUs, b-roll for shot 2". Resolves what
+    makeFootageCopies does, { ok, made, failed, next }. */
+async function planFootage(ctx, { found, record, deps }) {
+  const parts = partsOfPlan(ctx.root, record.id, { newer: true });
+  for (const { part, why } of footageWithheld(record, parts)) deps.log(`${partLabelOf(part)}: its footage is left out of the project: ${why}.`);
+  const items = footageToUse(record, parts)
+    .filter(({ part }) => typeof part.record.video?.file === "string")
+    .map(({ part, as, shot }) => ({ video: join(part.folder, part.record.video.file), shot, name: `${shownName(record)}, ${SHOT_SAID[as]} for shot ${shot}` }));
+  const done = await makeFootageCopies({ home: ctx.home, folder: found.name, items }, { ...deps, isWhole: ctx.isWhole, readAll: ctx.deps.readAll || readThrough });
+  return { ...done, next: "" };
+}
+
+/** `workcopy --now "<episode folder>" [--4k | --reel <n> | --footage]`, the detached run `kind` and `app` start (workcopy.js requestWorkCopy): it
     makes the working copy of the episode's raw video, the video HyperFrames is given to edit (workcopy.js makeWorkCopy, which never
     throws), in this Mac's own folder for the episode. It is detached alone, like `read`: it is in no help, and without --now and a
     folder it prints the help and ends 2, as a command it does not know. The episode is found and gated as every command's is. `workcopy` is
@@ -3987,9 +4186,21 @@ async function waitForImport(ctx, { found, record, wait, progress, log, kinds = 
     `--reel <n>` (a whole number from 1; anything else is the help and 2) makes the video of Reel `n` instead (plan PR 5;
     architecture 4.3): the stretch of the recording as filed that the suggestion has in reels.json (app-reel.js reelStretch), from
     its first moment to its last, made with the working copy's own chain and checks (workcopy.js makeWorkCopy with `reel`), and the
-    faces looked for in it. It runs for a raw video and a finished one (REEL_COPY_KINDS), and for no other: a finished video has no
-    working copy of its own, and an iPhone clip no Reels. It has the same lock, so that one copy of an episode is made at a time, a
-    Reel's or the video's, waits for the import's late check as the working copy does, and says what it cannot make in words. */
+    faces looked for in it. For a Reel of a finished video, on a Mac whose readings are on and that has Claude Code, Claude is then
+    asked once for the Reel's graphic cues, as a third step (reading.js askReelCues; PR H2): never for a raw video's Reel, which takes
+    the cues of its cut plan, and never for a session, which this command refuses. It runs for a raw video and a finished one
+    (REEL_COPY_KINDS), and for no other: a finished video has no working copy of its own, and an iPhone clip no Reels. It has the same
+    lock, so that one copy of an episode is made at a time, a Reel's or the video's, waits for the import's late check as the working
+    copy does, and says what it cannot make in words.
+    The footage of a video made from a plan (PR H5b; join.js, episode.js isFromPlan) is copied with it: once the video's own working copy is
+    made, or was before, a copy with no sound is made of each b-roll and screen part of the plan that may go into its project
+    (join.js footageToUse: her client agreed to it or it shows none, and its episode is not held by a conflict or a newer record, and its
+    shot is still a shot of its kind), each at the step of its own (workcopy.js makeFootageCopies). A part left out is said in the log, with
+    why, and a copy that fails is said there too: neither costs the main copy anything, and the run's result is the main copy's.
+    `--footage` makes these copies alone (and no other, so it is not given with --4k or --reel: the help and 2): for a video made from a plan
+    only, and any other leaves a result that says it can't be used. It waits for no import: the plan's own video is not made, and each
+    part's video is read through from Dropbox when it is not here (makeFootageCopies). Its result is the copies' own: a copy that fails
+    is a failure of the run. */
 async function workcopy(ctx, rest) {
   if (rest[0] !== "--now" || !rest[1]) {
     ctx.say(HELP);
@@ -4005,6 +4216,12 @@ async function workcopy(ctx, rest) {
       return 2;
     }
     reel = Number(given);
+  }
+  // `--footage` makes the footage's copies alone: it is not given with a Reel or with 4K.
+  const footageOnly = flags.footage === true;
+  if (footageOnly && (reel || flags["4k"])) {
+    ctx.say(HELP);
+    return 2;
   }
   const found = findEpisode(ctx, rest[1]);
   if (!found.read || !found.read.record) {
@@ -4028,11 +4245,24 @@ async function workcopy(ctx, rest) {
   const notFor = reel ? NOT_RAW_OR_FINISHED : NOT_RAW_OR_CLIP;
   const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: WORK_COPY_COMMAND, lock: workCopyLockOf(ctx.home, found.name), alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
     if (!kinds.includes(recordKind(record))) return { ok: false, made: [], failed: [notFor], next: "" };
+    // The footage's copies alone (PR H5b): of a video made from a plan, and no wait for the import of its own video, which is not copied.
+    if (footageOnly) return isFromPlan(record) ? planFootage(ctx, { found, record, deps }) : { ok: false, made: [], failed: [NOT_FROM_PLAN], next: "" };
     // `kind` asks for the copy at once; the video it is made from is whole and checked first (waitForImport).
     const held = await waitForImport(ctx, { found, record, wait, progress: deps.progress, log: deps.log, kinds, notFor });
     if (held.why) return { ok: false, made: [], failed: [held.why], next: "" };
     const video = join(found.folder, held.record.video.file);
-    if (!reel) return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), fourK: Boolean(flags["4k"]) }, deps);
+    if (!reel) {
+      // An explainer in her voice (PR H6) is a sound alone: its copy is the voice made ready for the page, a copy of no 4K, and no footage is
+      // made for it. An explainer in a HeyGen voice has its voice in its project, so it has nothing to copy.
+      const media = mediaOf(held.record);
+      if (media === null) return { ok: false, made: [], failed: [canNotBeUsed("its voice is made in its HyperFrames project")], next: "" };
+      if (media === VOICEOVER) return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), voice: true }, deps);
+      const main = await makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), fourK: Boolean(flags["4k"]) }, deps);
+      if (!main.ok || !isFromPlan(held.record)) return main;
+      // A video made from a plan has its footage copied after its own video, in the same run. A copy that fails is in the log and costs nothing.
+      const footage = await planFootage(ctx, { found, record: held.record, deps });
+      return { ...main, made: [...main.made, ...footage.made], ...(footage.failed?.length ? { footageFailed: footage.failed } : {}) };
+    }
     // A Reel's video is the suggestion's stretch of the recording; the list is read once the video is whole and checked.
     const got = reelStretch(found.folder, reel);
     if (!got.stretch) {
@@ -4041,7 +4271,12 @@ async function workcopy(ctx, rest) {
       return { ok: false, made: [], failed: [canNotBeUsed(why)], next: "" };
     }
     const faces = ctx.deps.faces || ((file, work) => facesIn(file, work, { run: deps.run, tools, limit: REEL_FACES_MS }));
-    return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: `${shownName(held.record)}, Reel ${reel}`, reel: got.stretch }, { ...deps, faces });
+    // A Reel of a video her editor finished is asked for its graphic cues as a third step (PR H2), and of no other kind: a raw video's
+    // Reel takes the cues of its cut plan, and a session is never read. Only on a Mac whose readings are on, and that has Claude Code.
+    const cues = recordKind(held.record) === "finished" && ctx.settings.readings !== false && tools.claude
+      ? (stretch, work) => askReelCues({ ctx, found, record: held.record, stretch, work }, deps)
+      : null;
+    return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: `${shownName(held.record)}, Reel ${reel}`, reel: got.stretch }, { ...deps, faces, ...(cues ? { cues } : {}) });
   });
   if (result.taking || result.running) {
     ctx.say(result.running ? `The video for HyperFrames is being made for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
@@ -4288,10 +4523,15 @@ function clipNext(ctx, found, record) {
     the spellings card did before, in its words. A hand-off made already from the import is kept, with the revision the page holds: an
     edited version needs HyperFrames first. Every offer of HyperFrames in these words is left out where this Mac's settings have the app off,
     and on a Mac that hands off version 1 the way that is handed off now (a clip opened in HyperFrames and exported) is named beside the wait. */
+/** What `finish` says at the end of what it found for an explainer in a HeyGen voice, and what it says of any explainer handed off as it is (PR H6). */
+const HEYGEN_YOUTUBE = "It has a HeyGen voice: when you upload it to YouTube, mark it as altered or synthetic content.";
+const EXPLAINER_EXPORT = 'An explainer is made in HyperFrames: export it there, then say "hand it off".';
 async function finishClip(ctx, found, answers) {
   const { record } = found;
   const name = shownName(record);
   const app = Boolean(appOf(ctx.settings));
+  // An explainer (PR H6) is made in HyperFrames, and is never handed off as it is, whether she asked for it or not.
+  if (isFromPlan(record) && record.planned.route === "explainer") return refuse(ctx, EXPLAINER_EXPORT);
   if (!writesV2For(ctx.settings, found.folder, record)) return refuse(ctx, `${handoffFromSpellingsWaits(name)}${app ? ' Or open it in HyperFrames, export it on this Mac and say "hand it off".' : ""}`);
   if (record.finished && Number.isInteger(record.finished.revision)) {
     const how = madeFromImport(record) ? `, from the clip as it was filmed.${app ? " To hand off an edited version, open it in HyperFrames first." : ""}` : ": a spelling changed writes its next revision.";
@@ -4810,34 +5050,72 @@ async function text(ctx, rest) {
   return save(ctx, found, withPart(found.record, part, (t) => ({ ...t, texts: [...texts, layer] })), `Name title ${id} on ${moment.on} at ${clockText(timelineAt(moment.clock, moment.at) ?? 0)}, for ${lengthText(length.seconds)}: "${lines.join('", "')}". ${SHOW_IT}`);
 }
 
-/** Claude's ideas for graphics on a timeline, as she reads them (spec 2026-10-22, section 3, "Times"): each idea of the plan's
-    `claude.graphics` on a phrase of the plan, numbered in the order their words are said (Claude's order for two on one
-    phrase), so that no cut, version or Reel changes a number; one that names no phrase of the plan is left out. Each is
-    { n, idea, phrase, outside, at, for, start, end }: `outside` when the timeline is a Reel whose stretch does not hold its
-    words; `at`, the second of the recording its kept words start at, and `for`, how long they take on the timeline now, `at`
-    null when its words are cut now; `start` and `end`, its times on the clock she is reading (`read.on`), null when its words
-    are not on that version (kept again since it was made). `read` is clockFor's. */
-function graphicIdeas(read) {
-  const phrases = new Map((read.plan.phrases || []).map((p) => [p.id, p]));
-  const listed = ((read.plan.claude && read.plan.claude.graphics) || []).map((g, i) => ({ idea: g.idea, phrase: phrases.get(g.id), i })).filter(({ phrase }) => phrase);
+/** Where words of the recording, a stretch { start, end } in seconds of it, are on the timeline she is reading (`read` is clockFor's):
+    { at: null } when they are cut now; else { at, for, start, end }: `at`, the second of the recording its kept words start at, and
+    `for`, how long they take on the timeline now; `start` and `end`, their times on the clock she is reading (`read.on`), null
+    when they are not on that version (kept again since it was made). */
+function wordsOnTimeline(read, { start: from, end: to }) {
+  const kept = read.pieces.filter((r) => to > r.start && from < r.end);
+  if (!kept.length) return { at: null };
+  const at = Math.max(from, kept[0].start);
+  const until = Math.min(to, kept[kept.length - 1].end);
+  const shown = kept.reduce((sum, r) => sum + Math.max(0, Math.min(until, r.end) - Math.max(at, r.start)), 0);
+  const [start, end] = [timelineAt(read.clock, at), timelineAt(read.clock, until)];
+  const on = start !== null && end !== null;
+  return { at, for: Math.round(shown * 1000) / 1000, start: on ? start : null, end: on ? end : null };
+}
+/** Claude's ideas for graphics on a timeline, as she reads them (spec 2026-10-22, section 3, "Times"), numbered so that no cut,
+    version or Reel changes a number. Each is { n, idea, said, outside, missing, at, for, start, end }: `idea` is what it shows,
+    `said` the words it goes with, `outside` when the timeline is a Reel whose stretch does not hold its words, and `at`, `for`,
+    `start` and `end` as wordsOnTimeline gives them.
+    - A plan the reading of PR H1 wrote holds `claude.graphicCues`: each is placed on the words of the recording (graphic-cues.js
+      placeGraphicCues), spelled as the episode's words are (`spellings`), and keeps the number the cue has. It is first in its own
+      phrase when that is kept, and else in kept words before any cut: one that names a phrase the plan cuts is placed as if it named
+      none. A cue whose words are not found is `missing` (and `outside` on a Reel, whose stretch cannot be said to hold it). It stays
+      for the seconds the cue says (`for`), from the moment its words start.
+    - A plan made before it holds `claude.graphics`: each idea on a phrase of the plan, numbered in the order their words are said
+      (Claude's order for two on one phrase); one that names no phrase of the plan is left out. It goes with the whole phrase, and
+      stays for as long as the phrase takes. */
+function graphicIdeas(read, spellings = []) {
+  const claude = read.plan.claude || {};
+  const phrases = read.plan.phrases || [];
+  const outsideReel = (span) => Boolean(read.span) && !(span.end > read.span.from && span.start < read.span.to);
+  if (Array.isArray(claude.graphicCues)) {
+    const placed = placeGraphicCues(claude.graphicCues, read.words || [], { spans: keptPhraseSpans(phrases), kept: keptIndexes(phrases), spell: (text) => spelled(text, spellings) });
+    return placed.map((g) => {
+      const idea = { n: g.n, idea: g.show, said: g.words };
+      if (!g.at) return read.span ? { ...idea, outside: true, at: null } : { ...idea, missing: true, at: null };
+      if (outsideReel(g.at)) return { ...idea, outside: true, at: null };
+      const on = wordsOnTimeline(read, g.at);
+      return on.at === null ? { ...idea, ...on } : { ...idea, ...on, for: g.seconds };
+    });
+  }
+  const byId = new Map(phrases.map((p) => [p.id, p]));
+  const listed = (claude.graphics || []).map((g, i) => ({ idea: g.idea, phrase: byId.get(g.id), i })).filter(({ phrase }) => phrase);
   return listed.sort((a, b) => a.phrase.start - b.phrase.start || a.i - b.i).map(({ idea, phrase }, k) => {
     const n = k + 1;
-    if (read.span && !(phrase.end > read.span.from && phrase.start < read.span.to)) return { n, idea, phrase, outside: true, at: null };
-    const kept = read.pieces.filter((r) => phrase.end > r.start && phrase.start < r.end);
-    if (!kept.length) return { n, idea, phrase, at: null };
-    const at = Math.max(phrase.start, kept[0].start);
-    const to = Math.min(phrase.end, kept[kept.length - 1].end);
-    const shown = kept.reduce((sum, r) => sum + Math.max(0, Math.min(to, r.end) - Math.max(at, r.start)), 0);
-    const [start, end] = [timelineAt(read.clock, at), timelineAt(read.clock, to)];
-    const on = start !== null && end !== null;
-    return { n, idea, phrase, at, for: Math.round(shown * 1000) / 1000, start: on ? start : null, end: on ? end : null };
+    if (outsideReel(phrase)) return { n, idea, said: phrase.text, outside: true, at: null };
+    return { n, idea, said: phrase.text, ...wordsOnTimeline(read, phrase) };
   });
+}
+/** The ideas a video lists as its graphics (graphic … ideas, and `--idea`): a video made from a plan (PR H5b; episode.js isFromPlan) lists the cues
+    of its video guide, planned.cues read again as a package's are, every kind of cue among them, since its project is made from those and from the
+    reading's none; any other video lists the reading's (graphicIdeas). Each is placed on the words of the recording as the reading's are. */
+function ideasFor(read, record) {
+  if (!isFromPlan(record)) return graphicIdeas(read, record.spellings);
+  const cues = graphicCuesOf(record.planned.cues, { kinds: GRAPHIC_CUE_KINDS }).cues;
+  return graphicIdeas({ ...read, plan: { ...read.plan, claude: { ...(read.plan.claude || {}), graphicCues: cues } } }, record.spellings);
 }
 /** Where an idea is on the clock she is reading, as its line says it: "0:04 to 0:07", "cut now", or "not on main v0 (kept again
     since)". */
 const ideaWhere = (idea, on) => (idea.at === null ? "cut now" : idea.start === null ? `not on ${on} (kept again since)` : `${clockText(idea.start)} to ${clockText(idea.end)}`);
 /** An idea's words as a sentence: with a full stop, unless they end in one already. */
 const ideaSaid = (idea) => (/[.!?…]"?$/.test(oneLine(idea)) ? oneLine(idea) : `${oneLine(idea)}.`);
+/** An idea as the list says it: where it is, what it shows, and the words it goes with; or, for a graphic cue whose words were
+    not found in the video (`missing`), what it shows and that. */
+const ideaLine = (idea, on) => (idea.missing
+  ? `Idea ${idea.n}: ${ideaSaid(idea.idea)} Its words, "${oneLine(idea.said)}", were not found in the video.`
+  : `Idea ${idea.n}, ${ideaWhere(idea, on)}: ${ideaSaid(idea.idea)} Over "${oneLine(idea.said)}"`);
 /** The place an idea says, when it says one: "corner" for a corner of the screen ("in the corner", "at the top right
     corner"), "lower" for a lower third; null otherwise. A corner the picture shows ("the street corner", "a corner shop") and a
     "lower price" are no place: Claude is not asked for a place, so the word alone says what is in the picture. */
@@ -4869,14 +5147,16 @@ async function graphic(ctx, rest) {
     const got = clockRead(ctx, found, part);
     if (got.code !== undefined) return got.code;
     const { read } = got;
-    const ideas = graphicIdeas(read).filter((i) => !i.outside);
+    const ideas = ideasFor(read, found.record).filter((i) => !i.outside);
+    // A video made from a plan lists its video guide's cues (PR H5b), under a head of their own.
+    const guide = isFromPlan(found.record);
     if (!ideas.length) {
-      ctx.say(`Claude gave no ideas for graphics on ${partLabel(part)}.`);
+      ctx.say(guide ? "The graphics of its video guide: none." : `Claude gave no ideas for graphics on ${partLabel(part)}.`);
       return 0;
     }
-    const head = `Claude's ideas for graphics on ${partLabel(part)}: ${ideas.length}, with times on ${read.on}.`;
+    const head = guide ? `The graphics of its video guide: ${ideas.length}, with times on ${read.on}.` : `Claude's ideas for graphics on ${partLabel(part)}: ${ideas.length}, with times on ${read.on}.`;
     const first = ideas.find((i) => i.at !== null);
-    ctx.say([head, ...ideas.map((i) => `Idea ${i.n}, ${ideaWhere(i, read.on)}: ${ideaSaid(i.idea)} Over "${oneLine(i.phrase.text)}"`), ...(first ? [ideasAsk(first.n)] : [])].join("\n"));
+    ctx.say([head, ...ideas.map((i) => ideaLine(i, read.on)), ...(first ? [ideasAsk(first.n)] : [])].join("\n"));
     return 0;
   }
   if (!takes) {
@@ -4901,10 +5181,11 @@ async function graphic(ctx, rest) {
     const got = clockRead(ctx, found, part);
     if (got.code !== undefined) return got.code;
     const { read } = got;
-    chosen = graphicIdeas(read).find((i) => i.n === n);
+    chosen = ideasFor(read, found.record).find((i) => i.n === n);
     if (!chosen) return refuse(ctx, `There is no idea ${n} for graphics. Say "any ideas for graphics?" to see them.`);
     if (chosen.outside) return refuse(ctx, `Idea ${n} is outside Reel ${part.reel}'s stretch of the recording.`);
-    if (chosen.at === null) return refuse(ctx, `Idea ${n} is on words cut from ${partLabel(part)} now: "${oneLine(chosen.phrase.text)}" Keep them first, or pick another idea.`);
+    if (chosen.missing) return refuse(ctx, `Idea ${n}'s words, "${oneLine(chosen.said)}", were not found in the video, so it has no time to go at. Pick another idea, or say when it goes.`);
+    if (chosen.at === null) return refuse(ctx, `Idea ${n} is on words cut from ${partLabel(part)} now: "${oneLine(chosen.said)}" Keep them first, or pick another idea.`);
     moment = { at: chosen.at, for: chosen.for, on: read.on, clock: read.clock, read };
   } else {
     moment = momentFrom(ctx, found, part, flags);
@@ -5129,24 +5410,6 @@ const logNotWritten = (holds) => `The log on this Mac could not be written: the 
 const noMarkToClear = (name) => `${name} has no session mark to clear.`;
 /** Why a session not cleared cannot be cleared: its record holds no mark that can be read (the gate holds it all the same). */
 const markUnreadable = (name) => `${name}'s session mark cannot be read: ask Jason.`;
-/** Why a video whose import matched a session's words (matchedSession) is answered only as one. */
-const MATCHED_SESSION = "This video holds most of the words of a client or group session: answer it as a session, or ask Jason.";
-/** Whether the episode the import matched in the video of `record` (answer.match, an id, never the record's own) is a client or group
-    session not cleared, or one of its other versions is, in its record or a conflicted copy (finish.js linksOf: holdsSession,
-    sessionsBeside), as Episodes holds it now. The video of `record` is never counted among them: once it is a version of the match
-    and marked a session itself, its own mark must not hold its clearing back (as sessionAmong leaves out the session being
-    cleared). And for a clearing of its mark (`clearing`, with the video's own `folder`), a match among the video's own versions (the
-    same first id) says nothing: each mark of a set is cleared by a click of its own, and the video cleared is then held as a session
-    while another of them is marked (STILL_HELD). A match outside its own versions still counts. A match this Mac cannot read says
-    nothing. */
-function matchedSession(links, record, { clearing = false, folder = null } = {}) {
-  const id = record.answer && typeof record.answer === "object" ? record.answer.match : null;
-  if (typeof id !== "string" || id === record.id) return false;
-  const match = links.find(id);
-  if (!match) return false;
-  if (clearing && links.firstOf(match.record, match.folder) === links.firstOf(record, folder)) return false;
-  return links.holdsSession(match) || links.sessionsBeside(match.record, match.folder).some((one) => one.record.id !== record.id);
-}
 /** Why a video one of whose other versions is a client or group session not cleared is answered only as a session: `name` is the
     video being answered. */
 const heldAnswer = (name) => `${name} is a version of a client or group session: answer it as a session too, or ask Jason. Nothing was written.`;
@@ -5211,6 +5474,9 @@ function lateCheckAt(ctx, record) {
 /** Why `kind` may not answer the episode `found` as `plan` says ({ stored, again, notASession, clearSession, versionOf, target })
     when its record is `record`, in plain words, or "". `kind` asks it when it has the record, again once the claim has waited, and
     `plan.target`, the video this is a new version of, is looked for the first time it is asked. In this order:
+    - a part (PR H5a), which is footage for a planned video and is taken back first; and a video with no sound (`video.sound` is false), which
+      takes no kind at all, a session included: it has nothing for Claude to read and no words to be a session's, so it is left alone or made
+      footage. Both are met here, so before any receipt is looked at, on every Mac, whatever the answer and its flags;
     - an answered video, without --again; a session not cleared, answered as anything but a session (which only --clear-session
       does, by her click on a dialog), or as one; and, with --clear-session, a video that has no session mark to clear (no session,
       or one whose mark is cleared already) or whose mark cannot be read. What the other Mac cleared after the record was read is
@@ -5243,6 +5509,11 @@ function answerWhy(ctx, found, record, plan) {
   const name = namedAs(found, record);
   const { stored } = plan;
   const was = recordKind(record);
+  // A part (PR H5a) is footage for a planned video, and is taken back (`footage … none`) before it is answered as anything else.
+  if (isPart(record)) return partRefused(name, planTitleOf(ctx.root, record.partOf.id));
+  // A video with no sound (PR H5a) has nothing for Claude to read and no words to be a session's: it takes no kind, whatever it is answered as. It is
+  // left alone or made footage (`footage`). This is met before the receipts (answerKind), so no Mac is asked for a card that was never printed for it.
+  if (record.video && record.video.sound === false) return NO_SOUND_WHY(name);
   if (was !== null && !plan.again) return `${name} is answered already: it is ${KIND_SAID[was]}. To change it, answer again with --again.`;
   // A video that has a kind and is gated is a session whose mark is not cleared. With --clear-session it has to be one, with a mark to
   // clear; without it, such a video can be answered only as a session (which it is) and never as another kind.
@@ -6157,7 +6428,8 @@ async function waitForReading(ctx, found, name, previous, began) {
     does not claim. */
 export async function leaveCommand(ctx, rest) {
   const { words } = flagsOf(rest, []);
-  const got = episodeFor(ctx, words, { newerEnds: 1 });
+  // A plan she is told to leave is named as `plan` names it, by the string its title was made with: the gate then says how a plan is dropped.
+  const got = episodeFor(ctx, words, { newerEnds: 1, codes: true });
   if (!got.found) return got.code;
   const { found } = got;
   const lock = takeAnswerLock(ctx, found.name, "leave");
@@ -6174,6 +6446,8 @@ export async function leaveCommand(ctx, rest) {
     }
     const { record } = read;
     const name = namedAs(found, record);
+    // A part (PR H5a) is footage for a planned video: it is taken back before it is left.
+    if (isPart(record)) return refuse(ctx, partRefused(name, planTitleOf(ctx.root, record.partOf.id)));
     if (recordKind(record) !== null) return refuse(ctx, `${name} is answered already: leave is for a video still waiting for its answer.`);
     if (record.answer && record.answer.state === "not for brimm-video") {
       ctx.say(`${name} is left already. It is not asked about again.`);
@@ -6721,9 +6995,28 @@ function guideSession(ctx, e, r) {
     read once for the pass). A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
     only by its label, its id or short id, and the name it is listed by (gatedName, of gatedRecord); never by its folder or a name
     given to it, which may be its file's. Any other is named by its name and short id, and found by its folder's name too. `downloads` is
-    the pass's one listing of Downloads (exports.js downloadsOnce, made by guideItems): the videos that look in it for an export are given it. */
-function guideFacts(ctx, e, links, rates, notes, downloads) {
+    the pass's one listing of Downloads (exports.js downloadsOnce, made by guideItems): the videos that look in it for an export are given it.
+    `footageIn` is the pass's one look at the parts of the plans (footage.js partsReader, made by guideItems): a plan is given its parts by it.
+    A planned episode (PR H4) has no video, no reading and no project to look at: it is named by its title and short id, found by those
+    and by its folder, and its one fact is `planned`, { route, voice }, which gives it the guide's stage `film`. */
+function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
   const r = e.inForce;
+  if (isPlannedRecord(r)) {
+    // Gated all the same when a conflicted copy of its record is a record that only claims to be planned: then it is named as any gated video is.
+    const hidden = isGated(e);
+    // Its footage (PR H5a): the parts it has, counted in words, and the labels of those that show a client and wait for the client's agreement.
+    // Nothing of a part is read for a plan the gate holds (a conflicted copy that only claims to be planned).
+    const parts = hidden ? [] : footageIn(r.id);
+    // Her "that's all the footage" (PR H5b): the run that makes the video is at work (`joining`), or its last end was a failure and the plan is a
+    // plan still (`joinFailed`: a failure before the run at work now is its before, and the guide says the run at work first). Nothing is read for a plan the gate holds.
+    const joining = !hidden && runningCommand(ctx.home, e.name, ctx.alive) === "join";
+    const joinFailed = !hidden && !joining && readResult(ctx.home, e.name, "join")?.ok === false;
+    return {
+      name: hidden ? listedAs(ctx, e) : withShortId(shownName(r), r), id: r.id, aliases: [r.id, r.id.slice(-6), hidden ? gatedName(gatedRecord(e), e.held) : shownName(r), ...(hidden ? [] : [e.name])],
+      at: Date.parse(r.imported.at), mac: "", drop: null, conflicted: e.read.code === "CONFLICTED", kind: null, waiting: false, heldAsSession: false, elsewhere: false, handoff: null, source: null,
+      planned: { route: r.planned.route, voice: r.planned.voice, footage: footageCounts(parts), waiting: parts.filter((part) => waitsForClient(part, r.planned)).map((part) => part.record.label || shownName(part.record)), joining, joinFailed, set: r.planned.set !== null, project: Boolean(r.planned.project) }
+    };
+  }
   const kind = recordKind(r);
   const hidden = isGated(e);
   const away = heldElsewhere(r, ctx.machine);
@@ -6773,6 +7066,7 @@ function guideFacts(ctx, e, links, rates, notes, downloads) {
     v2,
     app: Boolean(appOf(ctx.settings)),
     placeholder: r.name.placeholder === true,
+    explainer: isFromPlan(r) && r.planned.route === "explainer",
     shownInFinalCut: pushed.length > 0 && !newestIsRender(r, "main"),
     finishRunning: running === "finish",
     checking,
@@ -6894,18 +7188,24 @@ function guideItems(ctx) {
   // plan PR 17, the review of PR 10, M5): a pass is one `guide`, one look of `guide wait` (every 5 seconds) or one of `guide … tell` (every 15), and a
   // listing costs 20 to 50 ms. A pass in which no video looks in it lists nothing.
   const downloads = downloadsOnce({ home: ctx.home, readdir: ctx.deps.readdir });
+  // The parts of the plans (PR H5a) are read from Episodes once for the pass too, by the first plan that has parts to count and then given to every
+  // other, so that a pass costs the same whatever the number of plans (footage.js partsReader).
+  const footageIn = partsReader(ctx.root);
   const items = guideDrops(ctx).map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
   let old = 0;
   for (const name of folders(ctx)) {
     const e = episodeAt(ctx, name, links);
     const r = e.inForce;
-    if (!r || e.newer || r.archived || leftAlone(r)) continue;
+    // A part (PR H5a) is footage for a plan, which the guide says: it is guided nowhere on its own.
+    if (!r || e.newer || r.archived || leftAlone(r) || isPart(r)) continue;
     if (r.answer === null || typeof r.answer !== "object") {
       old += 1;
       continue;
     }
-    const facts = guideFacts(ctx, e, links, rates, notes, downloads);
-    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r, also: facts.checking ? [`${checkSentence(facts.checking)} ${ON_THE_CHECK}`] : [] });
+    const facts = guideFacts(ctx, e, links, rates, notes, downloads, footageIn);
+    // A plan that has a part which shows a client says, after its step, which are waiting for the client's agreement.
+    const waiting = facts.planned && Array.isArray(facts.planned.waiting) ? facts.planned.waiting.map((label) => `${label} shows a client: it stays out until you say "the client agreed".`) : [];
+    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r, also: [...waiting, ...(facts.checking ? [`${checkSentence(facts.checking)} ${ON_THE_CHECK}`] : [])] });
   }
   const newest = new Map();
   for (const item of items) {
@@ -7102,9 +7402,175 @@ export async function guideCommand(ctx, rest) {
   return 0;
 }
 
+/** The project `refs use` copies a picture into: { dir, who } (its folder on this Mac, and how her words name it: "<episode>" or "Reel 2 of
+    <episode>"), or { code } when there is none to copy into, having said why, in app's words and in app's order (the gate has asked
+    already): a video her editor finished has no main project; an iPhone clip has no Reels; this Mac must be set up for HyperFrames; a
+    project made on another Mac and not handed over is that Mac's; a project of the record that is a session clip's folder is not used;
+    and a project whose folder is not on this Mac is to be opened first, or a Reel the episode does not have is said as app says it.
+    Nothing is claimed, brought or written, and no record is. */
+function refsProject(ctx, { found, record }, reel) {
+  const name = record.name.text;
+  const key = reel === null ? "main" : `reel ${reel}`;
+  const of = reel === null ? "" : `Reel ${reel} of `;
+  const no = (why) => ({ code: refuse(ctx, why) });
+  if (reel === null && recordKind(record) === "finished") return no(finishedHasNoProject(name));
+  if (reel !== null && recordKind(record) === "short video") return no(NO_REELS);
+  if (!appOf(ctx.settings)) return no(APP_NOT_SET_UP);
+  const elsewhere = projectOnAnotherMac(ctx, { found, record }, key);
+  if (elsewhere && !projectSnapshot(record, key)) return no(projectIsElsewhere(name, elsewhere, of, holderOf(ctx, record)));
+  const clip = clipWords(ctx, { found, record }, key, `${of}${name}`);
+  if (clip) return no(clip);
+  const project = (record.app?.projects ?? []).find((p) => (reel === null ? inUse(p) : p.key === key));
+  const dir = project && plainName(project.name) ? join(episodeWork(ctx.home, found.name), project.name) : "";
+  if (dir && existsSync(dir)) return { dir, who: `${of}${name}` };
+  return no((reel === null ? "" : reelWhy(ctx, found, record, reel)) || `Open it in HyperFrames first: say "${reel === null ? openInAppWords(name) : openReelWords(reel, name)}".`);
+}
+
+/** `refs`, `refs look "<name>"` and `refs use "<episode>" "<name>" [reel <n>]`: the reference folder (references.js; PR H3), edit.js being only the wiring.
+    `refs` and `refs look` name no episode, so the gate is never asked of them and they run on any Mac that has the folder. `refs use` finds its
+    episode as every command does, through the gate, and `refs` is in none of the gate's lists, so a video not yet answered, a video left alone,
+    a session not cleared and a video held beside a session are refused in the gate's own words, as `app` refuses them. It then finds the
+    project to copy into (refsProject) and gives it to references.js. It claims nothing, brings nothing and writes no record: the only file it
+    makes is the picture, in a project's folder on this Mac or in Looking/, and nothing is written in the reference folder. */
+async function refs(ctx, rest) {
+  const asked = referencesAsked(rest);
+  if (!asked) {
+    ctx.say(HELP);
+    return 2;
+  }
+  if (asked.form === "list") return sayReferences(ctx);
+  if (asked.form === "look") return lookAt(ctx, asked.name);
+  const got = episodeFor(ctx, [asked.episode], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const where = refsProject(ctx, got, asked.reel);
+  if (where.code !== undefined) return where.code;
+  return useIn(ctx, where, asked.name);
+}
+
+/** `plan new "<title>" [--explainer [--voice sallie|heygen]]` and `plan "<planned>" [set … | drop]`: the planned episode (plan.js; PR H4), edit.js being
+    only the wiring. `plan new` names no episode, so the gate is never asked of it. The others find their episode as every command does, through
+    the gate, which lets a planned episode through `plan` and `name` alone (gate.js PLANNED) and refuses a video not yet answered, a session and
+    a video held beside a session in the gate's own words. */
+async function plan(ctx, rest) {
+  const { words, flags } = flagsOf(rest, ["cue", "shot", "line", "voice"]);
+  const asked = planAsked(words, flags);
+  if (!asked) {
+    ctx.say(HELP);
+    return 2;
+  }
+  if (asked.form === "new") return newPlan(ctx, asked);
+  // A plan is named by the string `plan new` was given for its title, codes and all (episodeFor's `codes`).
+  const got = episodeFor(ctx, [asked.episode], { newerEnds: 1, codes: true });
+  if (!got.found) return got.code;
+  if (asked.form !== "agreed") return planFor(ctx, { found: got.found, record: got.record }, asked, editKit(ctx));
+  // A client's agreement is noted under the plan's answer lock, as a Reel's is under its session's: one dialog at a time for a plan, from before the
+  // dialog to after the write, so that two runs cannot both be open, note twice, and tell her that Dropbox undid a change it did not.
+  const lock = takeAnswerLock(ctx, got.found.name, "plan");
+  if (!lock) return refuse(ctx, busyWhy(shownName(got.record)));
+  try {
+    return await planFor(ctx, { found: got.found, record: got.record }, asked, editKit(ctx));
+  } finally {
+    releaseEpisodeLock(lock.file, lock.text);
+  }
+}
+
+/** What footage.js is given of edit.js's own (it imports no edit.js): how a record is saved, what a dialog asks and answers, the tool log, what is
+    said of a record that cannot be read or is a newer brimm-video's, the words `kind` uses of a video being answered and of each kind, and the check
+    that a video holds a session's words. Nothing here is a path or a program of its own. */
+function editKit(ctx) {
+  return {
+    save: (found, record, done) => save(ctx, found, record, done),
+    ask: (text, options) => askHere(ctx, text, options),
+    log: (line, holds) => toolLog(ctx, line, holds),
+    matchedSession,
+    beingAnswered,
+    kindSaid: KIND_SAID,
+    notRead: (found, read) => notRead(ctx, { ...found, read }),
+    newerWhy,
+    pending: PENDING_WHY,
+    hide: (name) => hideNames(ctx, episodeAt(ctx, name)),
+    calledAs: (found) => calledAs(ctx, found),
+    // What `kind` says of a recording that may be a session, before she has answered the not-a-session card: its words and its card (PR H6: the voiceover).
+    askIfSession: (name, record) => refuseAnswer(ctx, name, record, ASK_IF_SESSION)
+  };
+}
+
+/** `footage "<video>" "<planned>" talking|screen|b-roll --client yes|no [--shot <n>]` and `footage "<video>" none` (footage.js; PR H5a), edit.js
+    being only the wiring: a dropped video is answered as footage for a planned video, or taken back. The video is found as every command finds its
+    episode, through the gate, which lets `footage` run for a video with no kind (gate.js FOOTAGE) and for no other record. It holds the video's answer
+    lock for the whole of its run, as `kind` and `leave` do, and claims nothing. */
+async function footage(ctx, rest) {
+  const { words, flags } = flagsOf(rest, ["client", "shot"]);
+  const asked = footageAsked(words, flags);
+  if (!asked) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const got = episodeFor(ctx, [asked.video], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const lock = takeAnswerLock(ctx, got.found.name, "footage");
+  if (!lock) return refuse(ctx, busyWhy(shownName(got.record)));
+  try {
+    return await footageFor(ctx, got, asked, editKit(ctx));
+  } finally {
+    releaseEpisodeLock(lock.file, lock.text);
+  }
+}
+
+/** `join --now "<the plan's folder>" --parts <id>[,<id>…]`, the detached run `plan … join` starts (join.js; PR H5b): the plan's talking parts, in the
+    order of the ids, joined into one video, which is filed as the plan's own video. It is a detached run's alone, like `read` and `workcopy`: it is in
+    no help, and without --now and a folder, or without --parts and at least an id, it prints the help and ends 2, as a command it does not know. The
+    plan is found and gated as every command's is: `join` is in the gate's list for a plan (gate.js PLANNED) and in none for a video waiting for its
+    answer, one left alone, a part or a session, which are refused in the gate's own words, and the refusal is left as the run's result, as `read`'s and
+    `workcopy`'s are. Past the gate it holds the plan's episode lock (detached.js runDetached), reads the plan again and does the work (join.js
+    joinRun), whose result says why when it made no video. Once it has made the plan its video and let go of the lock it starts what follows (join.js
+    afterJoin): Claude's reading, the working copy, the late check and the notice. What it needs of this Mac it takes from ctx.deps, as the other detached
+    runs do, so that a test gives it stand-ins. Resolves 0 when the plan is its video, and 1 when it is not. */
+async function joinCommand(ctx, rest) {
+  const { flags } = flagsOf(rest.slice(2), ["parts"]);
+  const ids = Array.isArray(flags.parts) && flags.parts.length === 1 ? flags.parts[0].split(",").map((id) => id.trim()) : [];
+  // `--voice` (PR H6) takes a HeyGen voice in from the plan's project, and is given with no part.
+  const voice = flags.voice === true && flags.parts === undefined;
+  if (rest[0] !== "--now" || !rest[1] || (flags.voice !== undefined && !voice) || (!voice && !ids.length) || ids.some((id) => id === "")) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const found = findEpisode(ctx, rest[1]);
+  if (!found.read || !found.read.record) {
+    ctx.say(found.why || notRead(ctx, found, rest[1]));
+    if (found.gate) await leaveGateResult(ctx, found, "join");
+    return 1;
+  }
+  if (found.read.newer) {
+    ctx.say(newerWhy(found.read.record));
+    return 1;
+  }
+  const tools = ctx.deps.tools || findPrograms();
+  const deps = {
+    run: ctx.deps.run || runProgram, tools, model: tools.model, home: ctx.home, settings: ctx.settings, now: () => new Date(ctx.now()), clock: ctx.now, checkout: thisCheckout(),
+    log: (line) => ctx.say(line), wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole,
+    progress: ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: tools.swift }),
+    ...(ctx.deps.readAll ? { readAll: ctx.deps.readAll } : {}), ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {}), ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {})
+  };
+  let started = null;
+  // The result is cleaned late: the parts are hidden while the run reads them (joinRun, kit.hide), after this is made, and a reason that names a file of
+  // one (the filing's, Dropbox's, ffmpeg's last words) must not reach the result, or `status`, which says it, with a name in it.
+  const result = await runDetached({ home: ctx.home, folder: found.name, clean: lateClean(ctx), command: "join", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
+    const done = await joinRun(ctx, { found }, voice ? { voice: true } : ids, deps, editKit(ctx));
+    started = done.started ?? null;
+    return done;
+  });
+  if (result.taking || result.running) {
+    ctx.say(result.running ? `${result.running} is running for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
+    return 1;
+  }
+  if (result.ok && started) afterJoin(ctx, found, started, ctx.deps.notify || banner);
+  return result.ok ? 0 : 1;
+}
+
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
-    and so is `workcopy` (`kind` and `app` start it): both are in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas };
+    and so are `workcopy` (`kind` and `app` start it) and `join` (`plan … join` starts it): all three are in no help. */
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas, refs, plan, footage };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 
@@ -7116,6 +7582,12 @@ export async function editMain(argv, deps = {}) {
   if (command === "--help" || command === "-h") {
     say(HELP);
     return 0;
+  }
+  // A BRIMM_VIDEO_HOME that is not a whole path is refused, never taken for the real home (home.js). A test's own home is not asked.
+  const refusedHome = deps.home ? "" : homeRefusal();
+  if (refusedHome) {
+    say(refusedHome);
+    return 2;
   }
   const made = contextFor({ ...deps, say });
   if (made.why) {
@@ -7156,9 +7628,13 @@ export async function editMain(argv, deps = {}) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   // Inside Claude Code's sandbox nothing runs: it would fail partway through a command (sandboxed.js). The check is the open lock's:
   // a Mac whose lock in effect is strict runs edit.js as it did before the open lock was built, and never asks ps.
-  const open = effectiveLock(readSettings(homeOf({})).settings ?? null) === "open";
+  const refusedHome = homeRefusal();
+  const open = !refusedHome && effectiveLock(readSettings(homeOf({})).settings ?? null) === "open";
   const sandboxed = open ? sandboxedWhy({ env: process.env, pid: process.pid, spawn: spawnSync }) : "";
-  if (sandboxed) {
+  if (refusedHome) {
+    process.stdout.write(`${refusedHome}\n`);
+    process.exitCode = 2;
+  } else if (sandboxed) {
     process.stdout.write(`${sandboxed}\n`);
     process.exitCode = 1;
   } else {

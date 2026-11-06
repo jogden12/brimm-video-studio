@@ -190,6 +190,13 @@ export function opsText(handoff, step, again, note) {
       HyperFrames and are not in that hand-off, as `finish … reels` would take them (edit.js guideReels); [] when there are none, when that
       command would go no further, or when she has said the video is finished, which is read for nothing of its Reels. It is said ahead of the
       BRIMM Ops page's steps, and below her note that the video is finished.
+    - `planned`, for a planned episode (PR H4) and absent for anything else: { route, voice, footage, joining, joinFailed }. `route` is "script" or
+      "explainer", `voice` an explainer's: "sallie", "heygen" or null, and `footage` (PR H5a), for a script, the parts it has counted in words ("2
+      talking parts, 1 screen recording and 2 b-roll clips"), "" while it has none. Its one step is `film` while no footage has come, and `footage`
+      once some has; both come before the reading's branch of videoNext and before every step of the BRIMM Ops page, and change none of them. A
+      script whose footage is being made into one video (PR H5b) has `joining`, true while the run that does it (join.js) is at work, and its
+      step is `joining`; and `joinFailed`, true when that run's last end was a failure and the plan is still a plan, and its step is `join-failed`.
+      Once the run has made the plan its video, it is no planned episode: it has the stages of a raw or a short video.
     - `session`, for a session, and null for anything else: { choice, teachingsOn, undecided, emptyOwed }. `choice` is null until
       she chooses, then "asked" (its teachings) or "transcript only"; `teachingsOn`, when this Mac can read teachings;
       `undecided`, how many of its items she has still to keep, drop or change; `emptyOwed`, when it was a session after all and
@@ -367,10 +374,44 @@ function reelsStep(reels, checking) {
   return toDo("reels-exported", `You have exported ${listed(reels.map((n) => `Reel ${n}`))} from HyperFrames. Say "hand off the Reels"${after} to add ${reels.length === 1 ? "it" : "them"} to the hand-off.`);
 }
 
+/** What is said of a plan whose footage is being made into one video (PR H5b), and of one whose run to do it ended in a failure. */
+const JOINING = "Its footage is being made into one video. A notice comes when it is ready.";
+const JOIN_FAILED = 'Its footage could not be made into one video. Say "how far is it?" to see why.';
+/** The same, for an explainer, whose voice is taken in (PR H6), and what a HeyGen explainer is told before and after its project is made. */
+const VOICE_JOINING = "Its voice is being taken in. A notice comes when it is ready.";
+const VOICE_JOIN_FAILED = 'Its voice could not be taken in. Say "how far is it?" to see why.';
+const HEYGEN_OPEN = 'Say "open it in HyperFrames" to make it there. Then ask there for a HeyGen voice to read the teleprompter script.';
+const HEYGEN_VOICE = 'In HyperFrames, have a HeyGen voice read the teleprompter script. Then say "the HeyGen voice is done".';
+
+/** The step of a planned episode (PR H4), whose footage is still to come: `film`; and, once a script has some (PR H5a), `footage`, which says
+    what it has and that she says when it is all in; and (PR H5b), once she has said so, `joining` while the run that makes its video is at
+    work and `join-failed` when that run's last end was a failure. They come before the reading's branch of videoNext, and before every step on
+    the BRIMM Ops page (opsStep), none of which they change: a planned episode has no video, no reading and no hand-off.
+    A script is filmed to its shot list, and its files dropped in the drop folder. An explainer's voice is hers, recorded from the teleprompter
+    script and dropped as sound alone, unless it is a HeyGen voice, which she chooses in HyperFrames (a voice chosen is dropped as sound too,
+    PR H6 builds the rest of that route). With no voice chosen yet it is hers: a voice made from hers is never the default. */
+function filmStep({ route, voice, footage = "", joining = false, joinFailed = false, set = false, project = false }) {
+  // Her "that's all the footage" has started the run that makes the video (PR H5b): it is at work, or its last end was a failure and the plan
+  // is a plan still. The run at work comes first: a failure before it is the run's before, not this one's.
+  // An explainer's run (PR H6) takes its voice in, and says so.
+  if (joining) return toDo("joining", route === "script" ? JOINING : VOICE_JOINING);
+  if (joinFailed) return toDo("join-failed", route === "script" ? JOIN_FAILED : VOICE_JOIN_FAILED);
+  // A script with footage in (PR H5a) is told what it has: `footage` is the parts counted in words ("2 talking parts, 1 screen recording and 2
+  // b-roll clips"), and "" while no part has come, when the step is the one before.
+  if (route === "script" && footage) return toDo("footage", `Its footage so far: ${footage}. When it is all in, say "that's all the footage".`);
+  if (route === "script") return toDo("film", "Film it to its shot list, then drop the files in your drop folder. The teleprompter script is in its folder in Episodes.");
+  // A HeyGen explainer (PR H6): its project is made in HyperFrames first, and the voice there; she says when the voice is done.
+  if (voice === "heygen" && project) return toDo("heygen-voice", HEYGEN_VOICE);
+  if (voice === "heygen" && set) return toDo("heygen-open", HEYGEN_OPEN);
+  if (voice === "heygen") return toDo("film", "When the HyperFrames part is ready, you'll choose the HeyGen voice there.");
+  return toDo("film", "Record the voiceover from the teleprompter script, then drop the sound file in your drop folder.");
+}
+
 /** The next step for a finished episode, a raw one or a short video: Claude's reading, the spellings, a raw video's edit and
     finish, then its hand-off's BRIMM Ops steps. A raw video and an iPhone clip are edited in HyperFrames (appStep), unless a raw video
-    goes the Final Cut way, which keeps its stages. */
+    goes the Final Cut way, which keeps its stages. A planned episode is told to film (filmStep) before anything else. */
 function videoNext(facts, notes, now) {
+  if (facts.planned) return filmStep(facts.planned);
   const raw = facts.kind === "raw";
   const clip = facts.kind === "short video";
   if (facts.elsewhere && !facts.handoff) return toDo("open-elsewhere", `It is open on ${spokenMac(facts.mac)}. Carry on there, or open it here and take it over.`);
@@ -397,6 +438,8 @@ function videoNext(facts, notes, now) {
     return toDo("reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".');
   }
   if (!facts.offersAnswered) return toDo("spellings", 'Claude has read it. Say "what did Claude find?", then answer the spellings card.');
+  // An explainer (PR H6) is made in HyperFrames and never handed off as it is: after its spellings its step is the app's.
+  if (clip && facts.explainer) return appStep(facts);
   if (raw) {
     if (facts.placeholder) return toDo("name", 'It needs its name before it is finished. Say "call it", then the name.');
     if (viaApp(facts)) return appStep(facts);
@@ -521,10 +564,11 @@ export const WAIT_MS = 90000;
 export const POLL_MS = 5000;
 
 /** The stages at which something is on its way that needs nothing of hers: a video coming into a drop folder or being imported,
-    Claude's reading, and the video for HyperFrames being made. `guide wait` and `guide tell` wait only while a video is at one. A
-    running finish is not among them, for `guide wait`: that answers at once, and cannot tell a finish that failed from one not
-    begun. `guide tell` waits for a finish it was asked about while it ran (told), and knows how it ended by the hand-off. */
-export const COMING = ["arriving", "importing", "reading-later", "reading", "session-reading", "making-copy"];
+    Claude's reading, the video for HyperFrames being made, and (PR H5b) a plan's footage being made into one video. `guide wait` and
+    `guide tell` wait only while a video is at one. A running finish is not among them, for `guide wait`: that answers at once, and
+    cannot tell a finish that failed from one not begun. `guide tell` waits for a finish it was asked about while it ran (told), and
+    knows how it ended by the hand-off. */
+export const COMING = ["arriving", "importing", "reading-later", "reading", "session-reading", "making-copy", "joining"];
 
 /** What `guide wait` compares to see a change: of each video under way, its id, where it has got, and its import's step. A video
     come or gone, a stage passed or an import's next step changes it; a name, which holds the size of a file still coming in, and
@@ -579,7 +623,7 @@ const READ_IT = "Claude has read it.";
 export function told(was, seen, now) {
   if (!now) return `${seen.facts.name} is not under way any more. Say "what's next?" to see the ones that are.`;
   if (now.next.done) return videoLines(now)[0];
-  const on = (item) => (item.next.stage === "finish-running" ? "finish" : !COMING.includes(item.next.stage) ? "" : item.facts.drop ? "import" : item.next.stage === "making-copy" ? "copy" : "reading");
+  const on = (item) => (item.next.stage === "finish-running" ? "finish" : !COMING.includes(item.next.stage) ? "" : item.facts.drop ? "import" : item.next.stage === "making-copy" ? "copy" : item.next.stage === "joining" ? "join" : "reading");
   if (on(now) && on(now) === on(was)) return null;
   const { facts, next } = now;
   if (was.facts.drop && !facts.drop) return `${facts.name}: It is ready. ${next.text}`;

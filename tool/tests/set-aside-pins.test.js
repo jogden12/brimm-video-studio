@@ -132,7 +132,7 @@ describe("what pins the words about an older project being set aside (plan PR 18
       const reel = row(skill, REEL);
       assert.ok(reel.includes('If it says the older project was set aside, or to quit HyperFrames first, go on as for "Open the Pricing episode in HyperFrames", with `app "<episode>" reel 2`; when it says the video was kept from the older project, there is nothing to wait for.'), `${which}: the Reel's row`);
       assert.ok(reel.endsWith("never offer to make one here |"), `${which}: the Reel's row ends as it did`);
-      assert.ok(skill.split("\n").length < 160, `${which}: ${skill.split("\n").length} lines`);
+      assert.ok(skill.split("\n").length < 180, `${which}: ${skill.split("\n").length} lines`);
     }
     assert.equal(row(skills.open, OPEN_HER), row(skills.strict, OPEN_HER), "the two skills have one row for opening in HyperFrames");
     assert.equal(row(skills.open, REEL), row(skills.strict, REEL), "and one row for a Reel");

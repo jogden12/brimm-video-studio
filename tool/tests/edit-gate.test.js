@@ -7,8 +7,8 @@ import fs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { COMMAND_NAMES, contextFor, editMain, findEpisode } from "../edit.js";
-import { UNANSWERED, UNSCOPED } from "../gate.js";
-import { RECORD_VERSION, readEpisode, recordFile, recordText } from "../episode.js";
+import { FOOTAGE, UNANSWERED, UNSCOPED } from "../gate.js";
+import { NEWEST_VERSION, readEpisode, recordFile, recordText } from "../episode.js";
 import { episodeWork } from "../settings.js";
 import { lockOf, readResult } from "../detached.js";
 import { setup, episodeFor, reread, listAll, FOLDER, ID } from "./episodes.js";
@@ -50,7 +50,17 @@ const ASKED = {
   workcopy: ["--now", FOLDER], open: [FOLDER], app: [FOLDER], push: [FOLDER], bring: ["--now", FOLDER], name: [FOLDER, "A new name"], title: [FOLDER], reel: ["drop", FOLDER, "1"], reels: [FOLDER, "--no-play"],
   ask: [FOLDER], finish: [FOLDER], release: [FOLDER], show: [FOLDER, "transcript"], resolve: [FOLDER], spell: [FOLDER], logo: [FOLDER, "on"],
   captions: [FOLDER, "reel", "1", "on"], text: [FOLDER], graphic: [FOLDER], preset: [FOLDER], cut: [FOLDER, "remove", "--words", "x"],
-  teachings: [FOLDER], principles: [FOLDER], ideas: [FOLDER], free: [FOLDER]
+  teachings: [FOLDER], principles: [FOLDER], ideas: [FOLDER], free: [FOLDER],
+  // `refs` names an episode only in `refs use`, which is the form walked here: `refs` and `refs look` name none, and are never gated (tests/edit-refs.test.js).
+  refs: ["use", FOLDER, "blue carousel"],
+  // `plan` names an episode in all its forms but `plan new`, which names none and is never gated: the form walked here shows the plan of the episode
+  // (tests/edit-plan.test.js pins its words, and what the gate says of a planned episode).
+  plan: [FOLDER],
+  // `footage` names the video it answers as footage for a planned video (PR H5a). It runs for a record with no kind alone (gate.js FOOTAGE): the form
+  // walked here is the one that answers (tests/edit-footage.test.js pins its words and its refusals).
+  footage: [FOLDER, "Too many SKUs", "talking", "--client", "no"],
+  // `join` is a detached run's alone (PR H5b), which `plan … join` starts, as `workcopy` is: the gate lets it run for a plan, and refuses every other record with no kind.
+  join: ["--now", FOLDER, "--parts", "e-20261104-a11111"]
 };
 const NAMES_NO_EPISODE = [];
 /** The commands that name an episode, each of COMMAND_NAMES but those that name none. */
@@ -87,7 +97,8 @@ describe("the gate walks every command that names an episode", () => {
       const found = episodeFor(t, { record: UNANSWERED_RECORD });
       const before = filesIn(found);
       const r = await on(taught(t), name, ...ASKED[name]);
-      if (UNANSWERED.includes(name)) assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${name}: ${r.text}`);
+      // `footage` (PR H5a) is let through beside the commands that answer a video: the command itself says what it makes of this video.
+      if (UNANSWERED.includes(name) || FOOTAGE.includes(name)) assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${name}: ${r.text}`);
       else {
         assert.deepEqual([r.code, r.said], [1, [WAITING]], name);
         assert.deepEqual([t.started, t.calls, reread(found).rev, filesIn(found)], [[], [], 1, before], name);
@@ -96,7 +107,8 @@ describe("the gate walks every command that names an episode", () => {
     }
   });
   it("refuses a video left alone ('not for brimm-video') as it does one waiting, in words that do not say it waits for its answer", async () => {
-    for (const name of SCOPED.filter((n) => !UNANSWERED.includes(n))) {
+    // `footage` (PR H5a) is let through for a video left alone, as for one waiting: it may be footage for a planned video all the same.
+    for (const name of SCOPED.filter((n) => !UNANSWERED.includes(n) && !FOOTAGE.includes(n))) {
       const t = setup();
       episodeFor(t, { record: LEFT_RECORD });
       const r = await on(t.ctx.deps, name, ...ASKED[name]);
@@ -271,12 +283,13 @@ describe("the gate, wherever a command names its episode", () => {
       t.done();
     }
   });
-  it("refuses the other detached runs' way in: bring --now, finish --now and workcopy --now", async () => {
+  it("refuses the other detached runs' way in: bring --now, finish --now, workcopy --now and (PR H5b) join --now", async () => {
     for (const [record, name, why] of [[UNANSWERED_RECORD, "bring", WAITING], [SESSION_RECORD, "bring", NOT_FOR_SESSION], [UNANSWERED_RECORD, "finish", WAITING], [SESSION_RECORD, "finish", TEACHINGS_OFF],
-      [UNANSWERED_RECORD, "workcopy", WAITING], [LEFT_RECORD, "workcopy", LEFT_ALONE], [SESSION_RECORD, "workcopy", NOT_FOR_SESSION]]) {
+      [UNANSWERED_RECORD, "workcopy", WAITING], [LEFT_RECORD, "workcopy", LEFT_ALONE], [SESSION_RECORD, "workcopy", NOT_FOR_SESSION],
+      [UNANSWERED_RECORD, "join", WAITING], [LEFT_RECORD, "join", LEFT_ALONE], [SESSION_RECORD, "join", NOT_FOR_SESSION]]) {
       const t = setup();
       const found = episodeFor(t, { record });
-      const r = await on(t.ctx.deps, name, "--now", FOLDER);
+      const r = await on(t.ctx.deps, name, "--now", FOLDER, ...(name === "join" ? ["--parts", "e-20261104-a11111"] : []));
       assert.deepEqual([r.code, r.said, t.calls, reread(found).rev], [1, [why], [], 1], name);
       t.done();
     }
@@ -284,7 +297,8 @@ describe("the gate, wherever a command names its episode", () => {
   it("leaves a result in the gate's words when a detached run is refused, as a run that failed does, naming no folder or file", async () => {
     for (const [record, name, why, argv] of [[UNANSWERED_RECORD, "bring", WAITING, ["--now", FOLDER]], [SESSION_RECORD, "bring", NOT_FOR_SESSION, ["--now", FOLDER]], [UNANSWERED_RECORD, "finish", WAITING, ["--now", FOLDER]],
       [SESSION_RECORD, "finish", TEACHINGS_OFF, ["--now", FOLDER]], [UNANSWERED_RECORD, "ask", WAITING, ["--now", FOLDER]], [SESSION_RECORD, "ask", NOT_FOR_SESSION, ["--now", FOLDER]],
-      [UNANSWERED_RECORD, "read", WAITING, ["--now", FOLDER, "--kind", "raw", "--rev", "1"]], [LEFT_RECORD, "workcopy", LEFT_ALONE, ["--now", FOLDER]], [SESSION_RECORD, "workcopy", NOT_FOR_SESSION, ["--now", FOLDER]]]) {
+      [UNANSWERED_RECORD, "read", WAITING, ["--now", FOLDER, "--kind", "raw", "--rev", "1"]], [LEFT_RECORD, "workcopy", LEFT_ALONE, ["--now", FOLDER]], [SESSION_RECORD, "workcopy", NOT_FOR_SESSION, ["--now", FOLDER]],
+      [UNANSWERED_RECORD, "join", WAITING, ["--now", FOLDER, "--parts", "e-20261104-a11111"]], [LEFT_RECORD, "join", LEFT_ALONE, ["--now", FOLDER, "--parts", "e-20261104-a11111"]], [SESSION_RECORD, "join", NOT_FOR_SESSION, ["--now", FOLDER, "--parts", "e-20261104-a11111"]]]) {
       const t = setup();
       const found = episodeFor(t, { record });
       const r = await on(t.ctx.deps, name, ...argv);
@@ -424,7 +438,7 @@ describe("the gate, a record of a layout newer than this brimm-video's", () => {
   function newer() {
     const t = setup();
     const found = episodeFor(t);
-    writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: RECORD_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
+    writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
     return t;
   }
   it("is refused by every command that names an episode, in today's words, whatever its kind says", async () => {
@@ -661,7 +675,7 @@ describe("the gate, a record Dropbox is still bringing over", () => {
   it("is refused after the newer layout's words when the record read is a newer brimm-video's", async () => {
     const t = setup();
     const found = episodeFor(t);
-    writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: RECORD_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
+    writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
     PENDING_FILE(found, 3, "{");
     const r = await on(light(t), "open", FOLDER);
     assert.deepEqual(r.said, [`That is an episode a newer brimm-video wrote (${ID.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`]);

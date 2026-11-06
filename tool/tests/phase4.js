@@ -4,7 +4,8 @@ import { wordsOf, pausesOf, phrasesOf, cutPlan } from "../cuts.js";
 import { readNotes, applyDecisions, clipRanges } from "../notes.js";
 import { reelCandidates, reelsFile, reelEntries, previewPath } from "../reels.js";
 import { mainProject } from "../projects.js";
-import { ideaNotes } from "../unedited.js";
+import { cueMarkers } from "../graphic-cues.js";
+import { heardWords } from "../clock.js";
 import { relativeMedia } from "../portable.js";
 import { TOLD, PAUSES, probed } from "./fixtures.js";
 import { setup, episodeFor, NAME } from "./episodes.js";
@@ -15,18 +16,19 @@ export const SRT = "1\n00:00:06,070 --> 00:00:07,040\nWelcome to the show.\n\n2\
     whole recording's captions, and the import's own main timeline. */
 /** The episode's files, made from the pauses ffmpeg heard: `drop` takes out the heard pauses of those numbers, as a recording
     whose lead-in or tail has a sound with no words to it. `guessed` marks Reel 2's first stretch as one where no face was
-    found. `picked` is whether Reel 2 is picked in the record. */
-export const episodeFiles = ({ drop = [], guessed = false, picked = true } = {}) => {
+    found. `picked` is whether Reel 2 is picked in the record. `claude` is what the plan holds of Claude: an older plan's one idea for a
+    graphic (`graphics`) unless a test gives its graphic cues (`graphicCues`) or none. */
+export const episodeFiles = ({ drop = [], guessed = false, picked = true, claude = { graphics: [{ id: "p7", idea: "A chart of what it costs to run the business" }] } } = {}) => {
   const heard = pausesOf(PAUSES).filter((_, i) => !drop.includes(i));
   const facts = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0 };
-  const read = readNotes(JSON.stringify({ decisions: [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }], notes: "", graphics: [], clips: [{ from: "p4", to: "p5", hook: "The opening", why: "It says what the talk is about." }, { from: "p7", to: "p9", hook: "Know your costs", why: "It makes one point and stands alone." }] }));
+  const read = readNotes(JSON.stringify({ decisions: [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }], notes: "", graphicCues: [], clips: [{ from: "p4", to: "p5", hook: "The opening", why: "It says what the talk is about." }, { from: "p7", to: "p9", hook: "Know your costs", why: "It makes one point and stands alone." }] }));
   const words = wordsOf(TOLD);
   const plan = applyDecisions(cutPlan(phrasesOf(words, heard), { duration: facts.duration, pauses: heard }), read.decisions, heard).plan;
   const stills = Array.from({ length: 11 }, (_, i) => ({ file: String(i + 1).padStart(4, "0") + ".jpg", faces: [{ x: 0.2, y: 0.2, w: 0.1, h: 0.2 }] }));
   const candidates = reelCandidates({ clips: clipRanges(plan, read.clips, heard).clips, plan, facts, stills }).map((c) => ({ ...c, preview: previewPath(c.n) }))
     .map((c) => (guessed && c.n === 2 ? { ...c, ranges: c.ranges.map((r, i) => (i === 0 ? { ...r, crop: { ...r.crop, found: false } } : r)) } : c));
-  const stored = { version: 1, video: "Pricing talk.mp4", facts, phrases: plan.phrases, ranges: plan.ranges, kept: plan.kept, cut: plan.cut, by: plan.by, claude: { graphics: [{ id: "p7", idea: "A chart of what it costs to run the business" }] } };
-  const v0 = mainProject({ video: "/x/Pricing talk.mp4", facts, more: { audioRate: 48000, audioChannels: 2 }, plan: stored, srt: SRT, ideas: ideaNotes(stored, stored.claude.graphics) }).text;
+  const stored = { version: 1, video: "Pricing talk.mp4", facts, phrases: plan.phrases, ranges: plan.ranges, kept: plan.kept, cut: plan.cut, by: plan.by, claude };
+  const v0 = mainProject({ video: "/x/Pricing talk.mp4", facts, more: { audioRate: 48000, audioChannels: 2 }, plan: stored, srt: SRT, ideas: cueMarkers(stored, heardWords(words, plan.phrases)) }).text;
   const files = {
     "Pricing talk.mp4": "the raw video",
     "Pricing talk.cut-plan.json": JSON.stringify(stored),

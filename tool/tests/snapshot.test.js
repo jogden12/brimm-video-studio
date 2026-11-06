@@ -73,11 +73,12 @@ describe("a snapshot's files (7.3)", () => {
       assert.ok(!/^(?:media|node_modules|renders|snapshots)\//.test(rel), rel);
     }
   });
-  it("is the same for a Reel: its face track goes with it when it has one", (c) => {
+  it("is the same for a Reel: its face track and its graphic cues go with it, and it has no cut or Reel suggestions", (c) => {
     const dir = join(scratch(c), "Pricing talk reel 2 3fa9c1");
     madeProject(dir, { kind: "reel", part: { reel: 2 }, stretch: { start: 0.4, end: 4 }, faces: { every: 2, stills: [{ file: "0001.jpg", faces: [{ x: 0.4, y: 0.2, w: 0.2, h: 0.3 }] }] }, plan: undefined });
     const got = relsOf(snapshotFiles(dir));
     assert.ok(got.includes("brimm/face-track.json"));
+    assert.ok(got.includes("brimm/graphic-cues.json"), "a Reel's file of cues, on the Reel's clock, is handed over with it (PR H2)");
     assert.ok(!got.includes("brimm/cut-suggestions.json") && !got.includes("brimm/reel-suggestions.json"));
   });
   it("leaves out a folder of one of those names only at the project's top level: deeper it is the project's own", (c) => {

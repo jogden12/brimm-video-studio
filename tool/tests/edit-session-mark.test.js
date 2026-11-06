@@ -369,6 +369,8 @@ describe("read --kind session: the session's one reading", () => {
     const { t, found, asks, read } = await readSession();
     assert.deepEqual(asks, [requestFor("session", PLAN, { duration: 26 })]);
     assert.doesNotMatch(asks[0], /Quillon Marsh|\.mp4/);
+    // No graphic cue is asked of a session (PR H2): it is read for its teachings alone, and nothing of it goes to HyperFrames.
+    assert.doesNotMatch(asks[0], /graphicCues|graphic cue/i);
     assert.deepEqual(calls(t)[0].args.slice(0, 3), ["-p", "--model", CLAUDE_MODEL]);
     // The account is read right before the call, and kept in the record, never said.
     assert.equal(authCalls(t).length, 1);
@@ -388,6 +390,8 @@ describe("read --kind session: the session's one reading", () => {
       assert.doesNotMatch(fileOf(found, rel), SECRET, rel);
     }
     for (const rel of ["reels.json", `${STEM}.reel-suggestions.txt`]) assert.ok(!existsSync(join(found.folder, rel)), rel);
+    // Its cut plan is as the import wrote it: no block of Claude's, so no cue (PR H2).
+    assert.equal("claude" in JSON.parse(fileOf(found, `${STEM}.cut-plan.json`)), false);
     assert.equal(record.offers, undefined);
     const kept = JSON.parse(fileOf(found, TEACHINGS_JSON));
     assert.deepEqual(kept.principles.map((p) => [p.n, p.name]), [[1, "Price the outcome"], [2, "Say the price first"], [3, undefined]]);

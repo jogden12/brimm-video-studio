@@ -17,7 +17,7 @@ const crop = (x, found = true) => ({ x, y: 0, w: 606, h: 1080, found });
 const FACTS = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0 };
 const HEARD = pausesOf(PAUSES);
 const RULES = cutPlan(phrasesOf(wordsOf(TOLD), HEARD), { duration: FACTS.duration, pauses: HEARD });
-const READ = readNotes(JSON.stringify({ decisions: [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }], notes: "", graphics: [], clips: [{ from: "p7", to: "p9", hook: "Know your costs", why: "It makes one point and stands alone." }] }));
+const READ = readNotes(JSON.stringify({ decisions: [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }], notes: "", graphicCues: [], clips: [{ from: "p7", to: "p9", hook: "Know your costs", why: "It makes one point and stands alone." }] }));
 const PLAN = applyDecisions(RULES, READ.decisions, HEARD).plan;
 const CLIPS = clipRanges(PLAN, READ.clips, HEARD).clips;
 /** The face finder's stills of the made-up recording: eleven, each with one face whose middle is `centre` of the way across,

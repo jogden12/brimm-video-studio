@@ -43,7 +43,7 @@ const CAMES = ["zoom", "sound", "unknown"];
 
 /** Each question's header, the short title AskUserQuestion shows above it. Like every word of the card, fixed: no answer has a
     description beside it, and she gives one answer at a time. */
-const HEADER = { what: "What it is", private: "Private", notSession: "Session" };
+const HEADER = { what: "What it is", private: "Private", notSession: "Session", planned: "Planned", shot: "Shot", client: "Client" };
 
 const question = (text, header, labels) => ({ question: text, header, multiSelect: false, options: labels.map((label) => ({ label, description: "" })) });
 
@@ -67,6 +67,41 @@ export function cardOf({ label, guess = null, maybe = null }) {
 export function notSessionCardOf({ label, came = null }) {
   const how = came === "zoom" || came === "sound" ? came : "unknown";
   return { questions: [question(NOT_SESSION_Q[how](label), HEADER.notSession, [IS_SESSION, NOT_SESSION])] };
+}
+
+// --- The planned card and the part card (PR H5a): a video with a picture, waiting for its answer, may be footage for a planned video ---
+
+/** The planned card's question, of the video called `label`: is it for a planned video? */
+export const PLANNED_Q = (label) => `Is ${label} for a planned video?`;
+/** The planned card's answer for a plan, by its title: "Footage for "Too many SKUs"". Her answer on the planned card says which plan. */
+export const footageOption = (title) => `Footage for "${title}"`;
+/** The planned card's answer for an explainer, by its title (PR H6): "The voiceover for "Why SKUs sink you"". A video of sound alone is offered an
+    explainer, as a video with a picture is offered a script's footage; the card holds either kind of answer. */
+export const voiceoverOption = (title) => `The voiceover for "${title}"`;
+/** A plan's title out of its answer on the planned card, whether it is footage for a script or the voiceover of an explainer, or null for any other text. */
+const titleOfOption = (text) => /^(?:Footage for|The voiceover for) "([\s\S]+)"$/.exec(text)?.[1] ?? null;
+/** The planned card's last answer: the video is for no plan. */
+const NOT_PLANNED = "No";
+/** The most plans the planned card offers. */
+const MOST_OFFERS = 3;
+
+/** The planned card for the video called `label`, which `episodes` prints under a video waiting for its answer that a plan is offered to:
+    one question, answered by each plan offered, as Footage for its title (`offers`: footage.js plannedOffers' { record, option }, or the
+    words alone, one to three of them), and then No. Her answer on it says whether the video is footage, and for which plan. */
+export function plannedCardOf({ label, offers }) {
+  return { questions: [question(PLANNED_Q(label), HEADER.planned, [...offers.map((offer) => (typeof offer === "string" ? offer : offer.option)), NOT_PLANNED])] };
+}
+
+/** The part card's questions, of the video called `label`: what kind of shot it is, and whether it shows a client. */
+export const SHOT_Q = (label) => `Which kind of shot is ${label}?`;
+export const CLIENT_Q = (label) => `Does ${label} show a client, a client's name or their work?`;
+/** The part card's answers to its first question, by the kind of part (episode.js PART_KINDS) each stands for. */
+export const SHOT_ANSWERS = Object.freeze({ talking: "Talking to the camera", screen: "A screen recording", "b-roll": "B-roll" });
+
+/** The part card for the video called `label`, asked once it is footage: the kind of shot it is, and whether it shows a client, a
+    client's name or their work. */
+export function partCardOf({ label }) {
+  return { questions: [question(SHOT_Q(label), HEADER.shot, Object.values(SHOT_ANSWERS)), question(CLIENT_Q(label), HEADER.client, ["Yes", "No"])] };
 }
 
 /** `questions` as texts and option labels, in order, or null when they are not questions of that shape. */
@@ -102,12 +137,16 @@ function fits(questions, card) {
 }
 
 /** Which fixed card `questions` are, and of which video: { label, form: "what" } for her card, { label, form: "not-a-session" } for
-    the follow-up, when their texts and option labels, in order, are exactly a card cardOf or notSessionCardOf makes for that label,
-    with some guess, Maybe line and way it came, and nothing beside them but that card's own (fits); else null. */
+    the follow-up, { label, form: "planned" } for the planned card and { label, form: "part" } for the part card (PR H5a), when their
+    texts and option labels, in order, are exactly a card cardOf, notSessionCardOf, plannedCardOf or partCardOf makes for that label,
+    with some guess, Maybe line, way it came and one to three plans offered, and nothing beside them but that card's own (fits);
+    else null. */
 export function formOf(questions) {
   const asked = shapeOf(questions);
   if (!asked) return null;
   if (asked.length === 2) {
+    const shot = /^Which kind of shot is ([\s\S]+)\?$/.exec(asked[0][0]);
+    if (shot) return fits(questions, partCardOf({ label: shot[1] })) ? { label: shot[1], form: "part" } : null;
     const m = /^What is ([\s\S]+)\?$/.exec(asked[0][0]);
     if (!m) return null;
     const label = m[1];
@@ -127,6 +166,14 @@ export function formOf(questions) {
       const label = text.slice(0, -after.length);
       if (fits(questions, notSessionCardOf({ label, came: how }))) return { label, form: "not-a-session" };
     }
+    // The planned card: one to three plans offered as Footage for their titles, or The voiceover for their titles (PR H6), then No.
+    const planned = /^Is ([\s\S]+) for a planned video\?$/.exec(asked[0][0]);
+    if (planned) {
+      const answers = asked[0][1];
+      const offers = answers.slice(0, -1);
+      if (offers.length >= 1 && offers.length <= MOST_OFFERS && answers[answers.length - 1] === NOT_PLANNED && offers.every((offer) => titleOfOption(offer) !== null)
+        && fits(questions, plannedCardOf({ label: planned[1], offers }))) return { label: planned[1], form: "planned" };
+    }
   }
   return null;
 }
@@ -145,7 +192,8 @@ const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
 
 /** The receipt of the card answered in the hook's input `input` (PostToolUse on AskUserQuestion), at `now` (ms): { at, label, form,
     answers }, `answers` her answer to each question by its text, and for her card `offered`, its first answer, which names the video
-    its Maybe line offered a new version of; or null. None for any other event or tool, for a result that holds
+    its Maybe line offered a new version of, and for the planned card (PR H5a) `offered`, every answer it offered, in order; or null.
+    None for any other event or tool, for a result that holds
     afkTimeoutMs or followUp, for a card in no fixed form (formOf), and for a question with no answer in the result or one that is not
     one of its options (her own words, in Other). Only the result, `tool_response`, is read: never what Claude asked with. */
 export function receiptFrom(input, now) {
@@ -160,7 +208,8 @@ export function receiptFrom(input, now) {
     if (typeof answer !== "string" || !q.options.some((o) => o.label === answer)) return null;
     answers[q.question] = answer;
   }
-  return { at: now, label: form.label, form: form.form, answers, ...(form.form === "what" ? { offered: result.questions[0].options[0].label } : {}) };
+  // The planned card keeps every answer it offered, in order, so that what is asked of the receipt later is the very card she answered.
+  return { at: now, label: form.label, form: form.form, answers, ...(form.form === "what" ? { offered: result.questions[0].options[0].label } : {}), ...(form.form === "planned" ? { offered: result.questions[0].options.map((o) => o.label) } : {}) };
 }
 
 /** The time a receipt's file name says it was written (ms), or NaN for a name that is not a receipt's. */
@@ -224,20 +273,25 @@ export function expectedAnswers({ label, stored, maybeName = null, maybeKind = n
     session as surely as her first card's "Client or group session" and "Yes" do. */
 export const sessionByFollowUp = ({ label, came = null }) => [{ form: "not-a-session", answers: { [notSessionCardOf({ label, came }).questions[0].question]: IS_SESSION } }];
 
-/** Whether the receipt `r` is of the card it says: the question it answers is the one its form asks of its label. */
+/** Whether the receipt `r` is of the card it says: the question it answers is the one its form asks of its label. The part card has two
+    questions, and both are those of its label. */
 function ownLabel(r) {
-  const [asked] = Object.keys(r.answers);
+  const asked = Object.keys(r.answers);
   if (typeof r.label !== "string") return false;
-  if (r.form === "what") return asked === WHAT_Q(r.label);
-  return r.form === "not-a-session" && ["zoom", "sound", null].some((came) => asked === notSessionCardOf({ label: r.label, came }).questions[0].question);
+  if (r.form === "what") return asked[0] === WHAT_Q(r.label);
+  if (r.form === "planned") return asked.length === 1 && asked[0] === PLANNED_Q(r.label);
+  if (r.form === "part") return asked.length === 2 && asked[0] === SHOT_Q(r.label) && asked[1] === CLIENT_Q(r.label);
+  return r.form === "not-a-session" && ["zoom", "sound", null].some((came) => asked[0] === notSessionCardOf({ label: r.label, came }).questions[0].question);
 }
 
 /** Whether two sets of answers are the same answers to the same questions. */
 const sameAnswers = (a, b) => Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((q) => Object.hasOwn(b, q) && a[q] === b[q]);
 
-/** "" when, for each of `expected` (expectedAnswers), a receipt on this Mac of the last hour before `now` (ms) holds that form and
-    those very answers, to questions that name its label, from a card that offered what it must; else NO_RECEIPT. A file in the
-    folder that is not a receipt, or whose name says it was written at another time, is passed over. */
+/** "" when, for each of `expected` (expectedAnswers, expectedFootage), a receipt on this Mac of the last hour before `now` (ms) holds that
+    form and those very answers, to questions that name its label, from a card that offered what it must; else NO_RECEIPT. What a card
+    must have offered is a word (her card's first answer), or a function of what the receipt kept of what it offered (the planned card's
+    every answer; expectedFootage). A file in the folder that is not a receipt, or whose name says it was written at another time, is
+    passed over. */
 export function receiptWhy({ home, expected, now }) {
   let names = [];
   try {
@@ -254,6 +308,40 @@ export function receiptWhy({ home, expected, now }) {
       // A file not whole, or not JSON, is no receipt.
     }
   }
-  const holds = (one) => receipts.some((r) => r.form === one.form && sameAnswers(r.answers, one.answers) && (one.offered === undefined || r.offered === one.offered));
+  const offeredAs = (one, r) => (one.offered === undefined ? true : typeof one.offered === "function" ? one.offered(r.offered) === true : r.offered === one.offered);
+  const holds = (one) => receipts.some((r) => r.form === one.form && sameAnswers(r.answers, one.answers) && offeredAs(one, r));
   return expected.length > 0 && expected.every(holds) ? "" : NO_RECEIPT;
+}
+
+/** The answers `footage` needs a receipt of, for the video called `label` made footage as `as` (episode.js PART_KINDS) for the plan
+    called `title`, showing a client or not (`client`, true or false): her answer on the planned card, Footage for that plan's title,
+    from a card whose every plan is still offered now (`offeredNow`: the planned card's answers for each plan waiting for its footage
+    now, as footageOption gives them), and her two answers on the part card. Nothing is expected for a plan dropped since, filmed since,
+    or one the card did not offer. */
+export function expectedFootage({ label, title, as, client, offeredNow }) {
+  const option = footageOption(title);
+  return [
+    { form: "planned", answers: { [PLANNED_Q(label)]: option }, offered: stillOffered(option, offeredNow) },
+    { form: "part", answers: { [SHOT_Q(label)]: SHOT_ANSWERS[as] ?? "", [CLIENT_Q(label)]: client === true ? "Yes" : "No" } }
+  ];
+}
+
+/** The answers `footage … voiceover` needs a receipt of (PR H6), for the video called `label`, which came as `came` ("zoom", "sound" or null when the
+    record does not say: how the not-a-session card is worded), made the voiceover of the explainer called `title`: her answer on the planned card,
+    The voiceover for that title, from a card whose every plan is still offered now (`offeredNow`, as above, whichever kind of answer a plan is), and,
+    as `kind` asks of a video that is sound alone, her answer "It is not a session" on the not-a-session card. Sound alone has no part card. */
+export function expectedVoiceover({ label, title, came = null, offeredNow }) {
+  const option = voiceoverOption(title);
+  return [
+    { form: "planned", answers: { [PLANNED_Q(label)]: option }, offered: stillOffered(option, offeredNow) },
+    { form: "not-a-session", answers: { [notSessionCardOf({ label, came }).questions[0].question]: NOT_SESSION } }
+  ];
+}
+
+/** Whether the card a receipt kept (its `offered`, every answer the planned card offered, in order) is one whose every plan is still offered now
+    (`offeredNow`: the planned card's answers for each plan a video may be for now, as footageOption and voiceoverOption give them) and that offered
+    `option`, her answer, before the No it ends with. */
+function stillOffered(option, offeredNow) {
+  return (offered) => Array.isArray(offered) && offered.length >= 2 && offered[offered.length - 1] === NOT_PLANNED
+    && offered.slice(0, -1).every((one) => typeof one === "string" && offeredNow.includes(one)) && offered.includes(option);
 }

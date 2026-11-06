@@ -121,20 +121,23 @@ export const sessionLabel = (day, taken = []) => numbered(`Session, ${day}`, tak
 /** What the tool saw, in a line for her card, with nothing of the file's name: "wide, 42:10, 2 retakes". The shape is "wide",
     "upright" (a square picture too, as episodeKind has it) or "sound only", then the length, then what the rules cut as
     retakes, false starts and spoken cues, counted together. With no plan the rules counted nothing, and the count is left
-    out: "wide, 42:10". */
+    out: "wide, 42:10". A picture with no sound (`facts.sound` is false; PR H5a) has no words to cut, and ends ", no sound"
+    instead: "upright, 0:08, no sound". */
 export function seenLine({ facts, plan }) {
   const shape = !facts.height ? "sound only" : upright(facts) ? "upright" : "wide";
   const seen = `${shape}, ${stamp(Math.round(facts.duration))}`;
+  if (facts.height > 0 && facts.sound === false) return `${seen}, no sound`;
   if (plan == null) return seen;
   const n = retakesIn(plan);
   return `${seen}, ${n === 0 ? "no retakes" : n === 1 ? "1 retake" : `${n} retakes`}`;
 }
 
 /** Whether a text is a line of what was seen, as seenLine makes it, on one line: "wide", "upright" or "sound only", the length, and
-    when there is a plan the retakes, "no retakes", "1 retake" or "<n> retakes". A record may hold any text as what was seen, as a
+    when there is a plan the retakes, "no retakes", "1 retake" or "<n> retakes"; or, for a picture with no sound, "wide" or
+    "upright", the length and ", no sound" (PR H5a), at the end and there alone. A record may hold any text as what was seen, as a
     conflicted copy that was never checked does, so that a line printed from it into the chat is printed only in this shape: it
     holds no line break, and no name of a file. Anything that is not text is not one. */
-export const isSeenLine = (text) => typeof text === "string" && /^(?:wide|upright|sound only), \d+(?::\d{2}){1,2}(?:, (?:no retakes|1 retake|\d+ retakes))?$/.test(text);
+export const isSeenLine = (text) => typeof text === "string" && /^(?:(?:wide|upright|sound only), \d+(?::\d{2}){1,2}(?:, (?:no retakes|1 retake|\d+ retakes))?|(?:wide|upright), \d+(?::\d{2}){1,2}, no sound)$/.test(text);
 
 /** The names a video's file goes by, which a line about it must not hold while it is named by its label: the file's own name,
     that name without its ending, and that in the file-safe form its episode's folder and projects are named with. Each of

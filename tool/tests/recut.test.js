@@ -8,13 +8,13 @@ import { TOLD, PAUSES } from "./fixtures.js";
 
 /** The made-up recording's plan, as phase 3's tests make it: Claude cut "It is very, very important." (p8). */
 const HEARD = heardPauses(PAUSES);
-const DECIDED = applyDecisions(cutPlan(phrasesOf(wordsOf(TOLD), HEARD), { duration: 23.423, pauses: HEARD }), readNotes(JSON.stringify({ decisions: [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }], notes: "", graphics: [], clips: [] })).decisions, HEARD).plan;
+const DECIDED = applyDecisions(cutPlan(phrasesOf(wordsOf(TOLD), HEARD), { duration: 23.423, pauses: HEARD }), readNotes(JSON.stringify({ decisions: [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }], notes: "", graphicCues: [], clips: [] })).decisions, HEARD).plan;
 const PLAN = { ...DECIDED, facts: { duration: 23.423 } };
 /** The same recording, as ffmpeg heard it with no silence after its last words: its tail is a sound with no words to it, which
     the plan keeps, and which the gaps between phrases cannot show. */
 const TAILED = (() => {
   const heard = HEARD.slice(0, -1);
-  return { ...applyDecisions(cutPlan(phrasesOf(wordsOf(TOLD), heard), { duration: 23.423, pauses: heard }), readNotes(JSON.stringify({ decisions: [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }], notes: "", graphics: [], clips: [] })).decisions, heard).plan, facts: { duration: 23.423 } };
+  return { ...applyDecisions(cutPlan(phrasesOf(wordsOf(TOLD), heard), { duration: 23.423, pauses: heard }), readNotes(JSON.stringify({ decisions: [{ id: "p8", keep: false, why: "It adds nothing to the line before it." }], notes: "", graphicCues: [], clips: [] })).decisions, heard).plan, facts: { duration: 23.423 } };
 })();
 /** A recording as ffmpeg heard it with sound before its first words (a lead-in), and a laugh between two pauses after them:
     the plan keeps both, and the gaps between phrases cannot show either (the lead's re-check of the plan). */

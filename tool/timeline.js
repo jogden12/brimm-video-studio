@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { probeArgs, factsOf, colourOf, KEPT } from "./cuts.js";
 import { colorSpaceOf } from "./fcpxml.js";
 import { lastLine, runProgram } from "./run.js";
-import { soundOf, findPrograms, sameVideo, described, ideaNotes } from "./unedited.js";
+import { soundOf, findPrograms, sameVideo, described } from "./unedited.js";
+import { cueMarkers } from "./graphic-cues.js";
 import { relativeMedia } from "./portable.js";
 import { runsFolder } from "./settings.js";
 import { eventName, timelineFile } from "./names.js";
@@ -122,11 +123,15 @@ export function piecesOf(found, part, ctx, extra = [], given = null, { clock = f
   if (short.length) return { why: `${found.name} is not whole in Dropbox: ${short.join(" ")}.` };
   let plan;
   let words = [];
+  let ideaWords = [];
   let planned;
   try {
     plan = given || JSON.parse(readFileSync(join(found.folder, `${stem}.cut-plan.json`), "utf8"));
     // Each word from when it is said: after a pause, not in it (clock.js heardWords).
     if (hasWords) words = heardWords(JSON.parse(readFileSync(join(found.folder, wordsFile), "utf8")).words, plan.phrases);
+    // Where Claude's graphic ideas are marked is found in the words as they are said. An episode read before the words file was kept has none: its
+    // markers are found in the words the plan's own phrases hold, as the notes find them (notes.js), and not lost (the final review, fix 5).
+    ideaWords = hasWords ? words : heardWords((Array.isArray(plan.phrases) ? plan.phrases : []).flatMap((p) => (Array.isArray(p?.words) ? p.words : [])), plan.phrases);
     // The plan the ranges are made from: the plan's own, or for a video that keeps all of it the plan with all of it kept.
     planned = keepsWhole(record) ? wholePlan(plan) : plan;
   } catch (e) {
@@ -135,7 +140,8 @@ export function piecesOf(found, part, ctx, extra = [], given = null, { clock = f
   // The plan's own ranges while no cut is asked for: a layer never cuts her video again (recut.js rangesWith). A video that keeps
   // all of it has none of the plan's: its cuts are made from the plan with the whole video kept.
   const ranges = rangesWith({ plan: planned, cuts: target.cuts || [] });
-  if (part === "main") return { plan, words, hasWords, wordsFile, stem, ranges, pieces: keptOf(ranges), picked, need };
+  // `ideaWords` are for building a timeline; a time read on a clock (clockFor) is given what it always was.
+  if (part === "main") return { plan, words, ...(clock ? {} : { ideaWords }), hasWords, wordsFile, stem, ranges, pieces: keptOf(ranges), picked, need };
   // The note that a stretch's crop is a guess goes with it (reels.js GUESSED), as the pick wrote it.
   const base = picked
     ? clockOf(readFileSync(join(found.folder, v0), "utf8")).map((p) => ({ start: p.from, end: p.to, position: p.position, guessed: p.notes.some((n) => n.split(" / ").includes(GUESSED)) }))
@@ -168,7 +174,7 @@ export async function timelineFor(found, part, ctx, { build = false, plan: given
     return { told: asked ? [`Reel ${part.reel} was cut as a clip before Reels had projects of their own, so what was asked for on it is not shown. Change it by hand in Final Cut.`] : [], ...(await reelTimeline(found, target, ctx)) };
   }
   if (read.why || read.coming) return read;
-  const { plan, words, hasWords, wordsFile, stem, ranges, pieces, span } = read;
+  const { plan, words, ideaWords, hasWords, wordsFile, stem, ranges, pieces, span } = read;
   const name = record.video.file;
   const run = ctx.deps.run || runProgram;
   const tools = ctx.deps.tools || findPrograms();
@@ -194,7 +200,7 @@ export async function timelineFor(found, part, ctx, { build = false, plan: given
     const hdr = colour.primaries === "bt2020" || ["arib-std-b67", "smpte2084"].includes(colour.transfer);
     const layers = layersFor({ record, part, frame, ranges: pieces, words, face: face.face, pictures: sizes, video: { height: plan.facts.height, hdr }, lookPresets: ctx.deps.lookPresets });
     const made = part === "main"
-      ? mainProject({ video, facts: plan.facts, more, plan, ranges, srt: readFileSync(join(found.folder, `${stem}.srt`), "utf8"), spellings: record.spellings, ideas: ideaNotes({ ...plan, phrases: cutPhrases(plan.phrases, target.cuts || []) }, (plan.claude && plan.claude.graphics) || []), titles: layers.titles, stills: layers.stills, look: layers.look, project: "main", event: eventName(found.name) })
+      ? mainProject({ video, facts: plan.facts, more, plan, ranges, srt: readFileSync(join(found.folder, `${stem}.srt`), "utf8"), spellings: record.spellings, ideas: cueMarkers({ ...plan, phrases: cutPhrases(plan.phrases, target.cuts || []) }, ideaWords), titles: layers.titles, stills: layers.stills, look: layers.look, project: "main", event: eventName(found.name) })
       : reelProject({ video, facts: plan.facts, candidate: { start: span.from, end: span.to, ranges: pieces }, plan, planRanges: ranges, titles: layers.titles, stills: layers.stills, look: layers.look, more, project: `reel ${part.reel}`, event: eventName(found.name) });
     if (made.why) return { why: `Its timeline could not be made: ${made.why}.` };
     const kept = join(found.folder, "edit", "timeline.fcpxml");
