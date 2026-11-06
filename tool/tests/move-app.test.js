@@ -91,7 +91,9 @@ if (command === "show") {
     key        the comment of a key already in ~/.ssh (default: KEY_COMMENT, so a key made earlier), or null for none
     sshConfig  text of ~/.ssh/config (default: just the Host entry), or null for none
     knownHosts text of ~/.ssh/known_hosts (default: GitHub's published ed25519 key), or null for none
-    ssh        what `ssh -T` answers, one answer a call: "ok", "denied" or a list of them (default "ok"; the last repeats)
+    ssh        what `ssh -T` answers, one answer a call: "ok", "denied", "noisy" (a line, then the welcome) or "banner" (a host-key
+               warning) or a list of them (default "ok"; the last repeats)
+    dropMode, desktopMode  the mode her drop folder or her Desktop is given for the run (0o000 and 0o555 test the unreadable and the unwritable)
     checkout   Studio's checkout in the home folder: "at-pin" (default), "absent", "other-commit", "dirty", "other-remote", "detached", "other-branch" or
                "partial-left" (no checkout, a half-made .partial beside where it goes)
     marks      text of the checkout's .git/move-to-studio, SHA standing for the pin (default for an at-pin checkout: the tests passed
@@ -132,6 +134,7 @@ function moveOn(options = {}, ...args) {
     const ranFile = join(dir, "ran");
     put(join(github, "tool", "install.sh"), `#!/bin/zsh
 echo "install.sh $*" >> "${ranFile}"
+echo "\${GIT_SSH_COMMAND-unset}" > "${dir}/install-gitenv"
 case "$1" in
   --print)
     n=$(cat "${dir}/install-prints" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${dir}/install-prints"
@@ -219,11 +222,15 @@ esac
     const asked = join(dir, "ssh-asked");
     const said = [options.ssh ?? "ok"].flat();
     writeFileSync(answers, said.join("\n") + "\n");
-    stand("ssh", `n=$(cat "${asked}" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${asked}"
+    // Like the real ssh, this one reads standard input unless it is given -n: a call that forgets -n eats the answers still to come.
+    stand("ssh", `case " $* " in *" -n "*) ;; *) cat > /dev/null ;; esac
+n=$(cat "${asked}" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${asked}"
 a=$(sed -n "$n"p "${answers}"); [ -n "$a" ] || a=$(tail -n 1 "${answers}")
 case "$a" in
   ok) echo "${HI}"; exit 1 ;;
   denied) echo "git@github.com: Permission denied (publickey)."; exit 255 ;;
+  noisy) echo "Warning: a first line that is not the welcome."; echo "${HI}"; exit 1 ;;
+  banner) echo "@@@@@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@@@@@"; echo "Host key verification failed."; exit 255 ;;
 esac
 `);
     if (options.gitStandIn) stand("git", `echo "GIT_SSH_COMMAND=$GIT_SSH_COMMAND" >> "${ran}"\nexit 1\n`);
@@ -260,6 +267,11 @@ esac
 `);
 
     const before = readdirSync(home, { recursive: true }).sort();
+    // A folder made unreadable or unwritable only now, after the listing above, and put right again after the run.
+    const dropDir = settings !== null ? join(settings.root, settings.drop, settings.machine) : null;
+    const desktop = join(home, "Desktop");
+    if (options.dropMode !== undefined) chmodSync(dropDir, options.dropMode);
+    if (options.desktopMode !== undefined) { mkdirSync(desktop, { recursive: true }); chmodSync(desktop, options.desktopMode); }
     // The environment is built from scratch: the stand-ins first, the node that runs these tests last, no Homebrew.
     const env = {
       HOME: home, PATH: `${bin}:/usr/bin:/bin:${dirname(process.execPath)}`, BRIMM_HOMEBREW_DIRS: "",
@@ -269,6 +281,8 @@ esac
     if (options.testFail) env.BRIMM_TEST_FAIL = "1";
     const commit = options.commit === undefined ? ["--commit", sha] : options.commit === null ? [] : ["--commit", options.commit];
     const r = spawnSync("/bin/zsh", [MOVE, ...commit, ...args], { encoding: "utf8", input: options.answers ?? "", env });
+    if (options.dropMode !== undefined) chmodSync(dropDir, 0o755);
+    if (options.desktopMode !== undefined) chmodSync(desktop, 0o755);
     const text = (file) => (existsSync(file) ? readFileSync(file, "utf8") : "");
     const mode = (file) => (existsSync(file) ? statSync(file).mode & 0o777 : null);
     const inStudio = (...a) => spawnSync("git", ["-C", studio, ...a], { encoding: "utf8", env: { ...GIT_ENV, HOME: home } }).stdout.trim();
@@ -277,7 +291,7 @@ esac
           origin: inStudio("remote", "get-url", "origin"), marks: text(join(studio, ".git", "move-to-studio")) }
       : null;
     return {
-      sha, github, studioNow, partialLeft: existsSync(`${studio}.partial`),
+      sha, github, studioNow, installGitEnv: text(join(dir, "install-gitenv")), partialLeft: existsSync(`${studio}.partial`),
       copied: text(copied), sshConfig: text(join(ssh, "config")), sshConfigMode: mode(join(ssh, "config")), knownHosts: text(join(ssh, "known_hosts")),
       publicCopy: text(join(home, "Desktop", "Studio key (public half).txt")), sshAsked: Number(text(asked).trim() || 0),
       status: r.status, out: r.stdout, err: r.stderr, home, before, tree: readdirSync(home, { recursive: true }).sort(),
@@ -340,6 +354,32 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
     assert.ok(!r.out.includes("Client Name") && !r.log.includes("Client Name") && !r.err.includes("Client Name"));
     const two = moveOn({ dropFiles: ["a.mov", "b.mov"] });
     assert.match(two.out, /Her drop folder holds 2 files still to be imported\./);
+  });
+
+  it("stops, saying to allow Terminal, when her drop folder cannot be read, and does not take it for empty", () => {
+    const r = moveOn({ dropMode: 0o000 });
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /Her drop folder could not be read\. macOS may have asked whether Terminal may read Dropbox/);
+    assert.match(r.out, /Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again\./);
+    assert.ok(!r.out.includes("Her drop folder is empty."), r.out);
+    assert.ok(r.out.endsWith(STOPPED_NOTHING), r.out);
+  });
+
+  it("stops with a plain sentence, and the summary, when her Desktop cannot be written to", () => {
+    const copy = moveOn({ key: null, desktopMode: 0o555, answers: "y\n" });
+    assert.equal(copy.status, 1, copy.out);
+    assert.match(copy.out, /Desktop could not be written to\. macOS may have asked whether Terminal may write there/);
+    assert.match(copy.out, /Privacy & Security › Files and Folders/);
+    assert.ok(copy.out.includes("  - made Studio's key"), copy.out);
+    assert.ok(!copy.out.includes("kept a copy"), copy.out);
+    assert.ok(!copy.err.includes("permission denied"), "no raw zsh error");
+
+    const report = moveOn({ desktopMode: 0o555 });
+    assert.equal(report.status, 1, report.out);
+    assert.match(report.out, /Desktop could not be written to/);
+    assert.match(report.out, /Stopped\. This run changed/);
+    assert.ok(!report.ran.includes("open -R"), report.ran);
+    assert.ok(!report.err.includes("permission denied"), report.err);
   });
 
   it("offers claude auth login when Claude Code isn't signed in, and stops on n", () => {
@@ -553,12 +593,24 @@ describe("the move script, Studio's key (check 42)", { skip: notAMac }, () => {
   it("waits for the key to be on GitHub, then checks it with ssh, with her own files and GitHub's ed25519 key only", () => {
     const r = moveOn({ key: null, answers: "y\n\n" });
     assert.equal(r.status, 0, r.out);
-    const line = `ssh -F ${r.home}/.ssh/config -o UserKnownHostsFile=${r.home}/.ssh/known_hosts -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -T git@github-brimm-video-studio`;
+    const line = `ssh -F ${r.home}/.ssh/config -o UserKnownHostsFile=${r.home}/.ssh/known_hosts -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -n -T git@github-brimm-video-studio`;
     assert.ok(r.ran.split("\n").includes(line), r.ran);
     assert.ok(r.out.includes(HI), r.out);
     assert.match(r.out, /Settings.*Deploy keys/s);
     assert.match(r.out, /write access off/i);
     assert.equal(r.sshAsked, 1);
+  });
+
+  it("shows all of ssh's lines when it stops, and keeps the welcome line, not ssh's first line, for the report", () => {
+    const banner = moveOn({ ssh: ["banner"] });
+    assert.equal(banner.status, 1, banner.out);
+    assert.match(banner.out, /ssh did not get GitHub's welcome for this key\. It said:/);
+    assert.ok(banner.out.includes("@@@@@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@@@@@\nHost key verification failed."), banner.out);
+
+    const noisy = moveOn({ ssh: ["noisy"] });
+    assert.equal(noisy.status, 0, noisy.out);
+    assert.match(noisy.report, new RegExp(`^What the check of the key printed: ${HI.replace(/[.!]/g, "\\$&")}$`, "m"));
+    assert.ok(!noisy.report.includes("a first line that is not the welcome"), noisy.report);
   });
 
   it("asks to try again when GitHub doesn't know the key yet", () => {
@@ -947,6 +999,20 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     const early = moveOn({ marks: NOT_INSTALLED, install: { print: [`${printText(PRINT_LINES.signed, PRINT_LINES.older)}\n${filler}`, DEFAULT_PRINT] }, answers: "y\ny\n\n" });
     assert.equal(early.status, 0, early.out.slice(-600));
     assert.ok(early.ran.split("\n").includes("claude update"), "the older line was seen, with more than 64 KiB after it");
+  });
+
+  it("takes only 'Claude answered from here' as the installer's check of Claude, and leaves the environment of git out of the installer", () => {
+    const ok = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n" });
+    assert.equal(ok.status, 0, ok.out);
+    assert.equal(ok.installGitEnv.trim(), "unset", "GIT_SSH_COMMAND is for the clone alone");
+
+    for (const said of ["From the background job: Claude could not be asked from here. What it said is in /tmp/check.log.", "From the background job: Claude did not answer within 90 seconds. What it said is in /tmp/check.log."]) {
+      const r = moveOn({ marks: NOT_INSTALLED, install: { ran: `Setting up Studio...\n${said}\nDone.\n` }, answers: "y\n\n" });
+      assert.equal(r.status, 1, r.out);
+      assert.ok(r.out.split(said).length > 2, `its line is shown again by the stop:\n${r.out}`);
+      assert.ok(!/installed=/.test(r.studioNow.marks), "no installed mark");
+      assert.ok(!r.out.includes("Studio's installer finished."), r.out);
+    }
   });
 
   it("when the install moves her settings and agent to Studio, goes on and marks it", () => {

@@ -45,7 +45,8 @@ HOMEBREW_DIRS="${BRIMM_HOMEBREW_DIRS-/opt/homebrew/bin:/usr/local/bin}"
 # ssh and git always use her own files, never the ones of the home folder the passwd database names (a Terminal can be started
 # with another HOME). StrictHostKeyChecking=yes with her known_hosts, so that a host that is not GitHub's is never trusted.
 SSH_OPTS=(-F "$HOME/.ssh/config" -o "UserKnownHostsFile=$HOME/.ssh/known_hosts" -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes)
-export GIT_SSH_COMMAND="ssh ${(j: :)${(@q)SSH_OPTS}}"
+# Given to the clone alone (not exported), so that Studio's tests, the installer, brew and npm do not inherit it.
+GIT_SSH="ssh ${(j: :)${(@q)SSH_OPTS}}"
 
 SELF="${(%):-%x}"
 # State of the run.
@@ -124,6 +125,11 @@ wait_for() {
   [[ -z "${line//[[:space:]]/}" ]] || stop_here
 }
 
+# The words for a write to her Desktop that macOS refused.
+desktop_stop() {
+  stop_here "Her Desktop could not be written to. macOS may have asked whether Terminal may write there, and the answer may have been no. Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again."
+}
+
 # Programs, as install.sh finds them: along PATH, then Homebrew's folders.
 find_program() {
   local name dir
@@ -200,6 +206,10 @@ look_at_import_and_drop() {
   DROP="$("$NODE" "$CHECKOUT_NOW/tool/settings.js" show 2>/dev/null | sed -n 's/^  Its drop folder:  //p' | head -n 1 || true)"
   if [[ -z "$DROP" || ! -d "$DROP" ]]; then
     stop_here "Her drop folder could not be found from her settings (settings.js show)."
+  fi
+  # A folder that cannot be listed is not an empty one: the glob below would swallow the failure and count nothing.
+  if ! ls -A -- "$DROP" >/dev/null 2>&1; then
+    stop_here "Her drop folder could not be read. macOS may have asked whether Terminal may read Dropbox, and the answer may have been no. Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again."
   fi
   local -a held
   held=("$DROP"/*(N) "$DROP"/.*(N))
@@ -367,9 +377,11 @@ host_key_state() {
 check_with_github() {
   local told
   local -a lines
-  told="$(ssh "${SSH_OPTS[@]}" -T "git@$HOST_ALIAS" 2>&1 || true)"
+  # -n: ssh must not read the answers still to come from the terminal.
+  told="$(ssh "${SSH_OPTS[@]}" -n -T "git@$HOST_ALIAS" 2>&1 || true)"
   lines=("${(@f)told}")
-  R42_SSH="${lines[1]-}"
+  # The report keeps the welcome (or the denial), not whatever line ssh happened to print first.
+  R42_SSH="$(print -r -- "$told" | grep -m 1 -e '^Hi jogden12/' -e 'Permission denied' || true)"
   if [[ "$told" == *"Hi jogden12/brimm-video-studio!"* ]]; then
     say "  GitHub says: $R42_SSH"
     return 0
@@ -378,7 +390,8 @@ check_with_github() {
     say "  GitHub does not know this key yet."
     return 1
   fi
-  stop_here "ssh did not get GitHub's welcome for this key. It said: ${R42_SSH:-nothing}"
+  stop_here "ssh did not get GitHub's welcome for this key. It said:
+${told:-nothing}"
 }
 
 make_the_key() {
@@ -419,8 +432,7 @@ make_the_key() {
     else
       print -r -- "$pub" | pbcopy 2>/dev/null || true
       if [[ "$(cat "$PUBLIC_COPY" 2>/dev/null || true)" != "$pub" ]]; then
-        mkdir -p "${PUBLIC_COPY:h}"
-        print -r -- "$pub" > "$PUBLIC_COPY"
+        { mkdir -p "${PUBLIC_COPY:h}" && print -r -- "$pub" > "$PUBLIC_COPY"; } 2>/dev/null || desktop_stop
         changed+=("kept a copy of the public half at $PUBLIC_COPY")
       fi
       say "  It is copied, and kept at $PUBLIC_COPY."
@@ -544,7 +556,7 @@ copy_the_code() {
     changed+=("took away a half-made copy of Studio's code ($PARTIAL)")
   fi
   made_partial=yes
-  if ! told="$("${clone[@]}" 2>&1)"; then
+  if ! told="$(GIT_SSH_COMMAND="$GIT_SSH" "${clone[@]}" 2>&1)"; then
     drop_the_partial
     say "${told}"
     stop_here "Studio's code could not be copied from GitHub (the lines above say why)."
@@ -775,6 +787,11 @@ $R44_RAN"
     stop_here "The setup stopped before its check of Claude (there is no \"From the background job:\" line in what it said). Its last lines:
 $R44_RAN"
   fi
+  if [[ "$line" != "From the background job: Claude answered from here"* ]]; then
+    stop_here "The installer's check of Claude did not get an answer. It said:
+$line
+Tell Jason: Claude may not be reachable from the background job, which is where the imports run."
+  fi
   if [[ -e "$CHECK_FILE" ]]; then
     stop_here "The one-shot check of Claude ($CHECK_FILE) is still there. Left there, launchd would run it at every login. Tell Jason."
   fi
@@ -817,8 +834,7 @@ compose_report() {
 }
 REPORT_WRITTEN=""
 save_report() {
-  compose_report > "$REPORT.new"
-  mv "$REPORT.new" "$REPORT"
+  { mkdir -p "${REPORT:h}" && compose_report > "$REPORT.new" && mv "$REPORT.new" "$REPORT"; } 2>/dev/null || desktop_stop
 }
 write_the_report() {
   heading "6. The report"
@@ -827,7 +843,6 @@ write_the_report() {
     compose_report | while IFS= read -r line; do say "  $line"; done
     return 0
   fi
-  mkdir -p "${REPORT:h}"
   save_report
   REPORT_WRITTEN="yes"
   changed+=("wrote the report ($REPORT)")
