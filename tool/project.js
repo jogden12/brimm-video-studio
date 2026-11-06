@@ -342,12 +342,13 @@ export const transcriptJson = (words, spellings = []) => {
   return (Array.isArray(words) ? words : []).map((word, i) => ({ text: spell(word.w), start: word.start, end: word.end, id: `w${i}` }));
 };
 
-/** brimm/cut-suggestions.json (5.8): the phrases the cut plan cuts, as the rules decided and Claude changed them, each by the ids
-    of its first and last words in transcript.json and those words' times: {n, from, to, start, end, kind, why, by}. The plan's
-    phrases split the episode's words in order (cuts.js phrasesOf), and a word's id is its place in them, so each phrase's words
-    are found by counting, never by their times, which two words can share. A plan that does not hold the transcript's words, as
-    many of them, is refused: its ids would be wrong. A cut that holds no words (a silence: the opening, a shortened pause) is listed too, by its time alone, with `from` and `to` null; all are in time order. `by`
-    is who decided the plan, "rules" unless the plan says otherwise. */
+/** brimm/cut-suggestions.json (5.8): what the cut plan cuts, as the rules decided and Claude changed them, in time order:
+    {n, from, to, start, end, kind, why, by}. A phrase with words is given by the ids of its first and last words in
+    transcript.json and those words' times. The plan's phrases split the episode's words in order (cuts.js phrasesOf), and a
+    word's id is its place in them, so each phrase's words are found by counting, never by their times, which two words can
+    share. A plan that does not hold the transcript's words, as many of them, is refused: its ids would be wrong. A cut that
+    holds no words (a silence: the opening, a shortened pause) is listed too, by its time alone, with `from` and `to` null.
+    `by` is who decided the plan, "rules" unless the plan says otherwise. */
 export function cutSuggestions(plan, transcript) {
   const phrases = Array.isArray(plan?.phrases) ? plan.phrases : [];
   const count = (phrase) => (Array.isArray(phrase.words) ? phrase.words.length : 0);
@@ -693,7 +694,7 @@ const ABOUT = {
   "package.json": "the scripts `npm run dev`, `npm run check` and `npm run render`",
   ".claude/settings.json": "the commands denied here, and the variables the agent runs with",
   "brimm/facts.json": "what this project is, for Studio",
-  "brimm/cut-suggestions.json": "the cuts Studio suggests, by word ids",
+  "brimm/cut-suggestions.json": "the cuts Studio suggests, by word ids, or by time for silence",
   "brimm/reel-suggestions.json": "the Reels Studio suggests, by word ids",
   "brimm/graphic-cues.json": "the graphics Studio suggests, each on the words it goes with, by word ids",
   "brimm/face-track.json": "where the faces are in this Reel, for the upright crop",

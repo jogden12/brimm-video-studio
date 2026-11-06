@@ -274,15 +274,22 @@ function soundsIn(a, b, pauses) {
   return sounds;
 }
 
+/** Sound with no words in it at the edges of a recording is cut with the silence when it adds up to less than this many seconds. */
+const SHORT_SOUND = 1.5;
+/** Whether the sound that lies between `a` and `b`, in no pause, adds up to less than SHORT_SOUND seconds. */
+const shortSound = (a, b, pauses) => b <= a || soundsIn(a, b, pauses).reduce((sum, [x, y]) => sum + (y - x), 0) < SHORT_SOUND;
+
 /** The ranges of a plan: the whole recording in order, from the phrases and what was decided for each. A cut is never placed on
     a word's time. It falls in the pause beside the words that are kept, KEPT_SIDE from them, so the first sound of a word is
     not clipped and two kept phrases never meet with no breath between them. Kept ranges that touch are one range, and so are
     cut ranges that touch and have the same reason.
     Between the phrases, and before the first and after the last, only what ffmpeg heard as silent is cut as a pause. A sound
     there that no word was written for is kept as a kept phrase is: it may be a word the transcriber missed, or timed seconds
-    off. Before the first words it is otherwise once silence was heard there: a sound there is cut with the silence, whatever
-    it was (a hand over the lens, a cough). So where no pause was heard before the first words or after the last, the recording is kept from its start or to its
-    end. Beside a phrase that is cut it is otherwise: the silence there is part of that phrase's range, and so is such a sound. */
+    off. At the two edges, once silence was heard there, it is otherwise for a short sound: what is heard before the first
+    words (up to KEPT_SIDE from them) or after the last (from KEPT_SIDE after them) adding up to less than SHORT_SOUND seconds
+    is cut with the silence (a hand over the lens, a reach for the phone), and a longer one is kept. Where no pause was heard
+    before the first words or after the last, the recording is kept from its start or to its end. Beside a phrase that is cut
+    it is otherwise: the silence there is part of that phrase's range, and so is such a sound. */
 export function rangesOf(phrases, duration, pauses) {
   const ranges = [];
   const add = (start, end, { keep, kind, why }, phrase) => {
@@ -303,9 +310,11 @@ export function rangesOf(phrases, duration, pauses) {
   for (const next of [...phrases, null]) {
     const cut = (before && !before.keep) || (next && !next.keep);
     const kept = (before && before.keep) || (next && next.keep);
-    // Before the first words, once silence was heard there, a sound with no words is no speech: it goes with the silence (a hand over the lens).
-    const opening = !before && next && pauses.some(([start]) => start < next.start);
-    if (kept && !cut && !opening) heard.push(...soundsIn(before ? before.end : 0, next ? next.start : duration, pauses).map(([start, end]) => ({ start, end, ...KEPT })));
+    // Before the first words and after the last, once silence was heard there, a short sound with no words is no speech: it goes with
+    // the silence (a hand over the lens, a reach for the phone). A longer one may be words the transcriber missed, and is kept.
+    const edge = (!before && next && pauses.some(([start]) => start < next.start) && shortSound(0, next.start - KEPT_SIDE, pauses))
+      || (before && !next && pauses.some(([, end]) => end > before.end) && shortSound(before.end + KEPT_SIDE, duration, pauses));
+    if (kept && !cut && !edge) heard.push(...soundsIn(before ? before.end : 0, next ? next.start : duration, pauses).map(([start, end]) => ({ start, end, ...KEPT })));
     if (next) heard.push(next);
     before = next;
   }
@@ -352,7 +361,8 @@ export function rangesOf(phrases, duration, pauses) {
     - Nothing is cut for being said again by a cue, or by words that had no time to be said in.
     - A phrase is only ever cut whole, and only at a pause: phrases with no pause between them are cut together or not at all.
     - A pause of 1.5 seconds or more between kept phrases is shortened to 0.4, and the silence before the first kept words and
-      after the last is cut. Only what was heard as silent is cut so: a sound there with no words to it is kept. */
+      after the last is cut. Only what was heard as silent is cut so: a sound there with no words to it is kept, unless it is short
+      (under 1.5 seconds in all) and silence was heard beside it: then it is cut with the silence. */
 export function cutPlan(phrases, { duration, pauses = [] }) {
   const said = phrases.map((p) => tokens(p.text));
   const cue = said.map(isCue);

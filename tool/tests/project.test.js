@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { wordsOf, pausesOf, phrasesOf } from "../cuts.js";
+import { cutPlan, wordsOf, pausesOf, phrasesOf } from "../cuts.js";
 import { COMMANDS, PIN } from "../hyperframes.js";
 import { wordsOnScreen } from "../on-screen.js";
 import { recordingPlacements } from "../on-timeline.js";
@@ -632,6 +632,31 @@ describe("what the app is given to start from (5.8)", () => {
       [3, "w2", "w2", 8, 8.4, "false start", "a false start"]
     ]);
     assert.ok(made.every((s) => s.by === "rules"));
+  });
+  it("lists the opening first and the silence after the last words last, from a plan made of a recording like the live one", () => {
+    // Silent to 2.531, a 0.06 s sound, silent to 5.157; then words, a shortened pause, a cue that is cut, words, and a reach for the phone.
+    const at = (text, from) => {
+      const words = [];
+      let t = from;
+      for (const w of text.split(" ")) { words.push({ w, start: t, end: Math.round((t + 0.2) * 1000) / 1000 }); t = words[words.length - 1].end; }
+      return words;
+    };
+    const one = at("Here's the plan.", 5.157); // to 5.757
+    const two = at("Next point.", 7.757); // pause 5.757 to 7.757
+    const cue = at("Sorry, again.", 8.457);
+    const three = at("Final point here.", 9.357);
+    const words = [...one, ...two, ...cue, ...three];
+    const end = three[three.length - 1].end;
+    const pauses = [[0, 2.531], [2.587, 5.157], [5.757, 7.757], [two[1].end, 8.457], [cue[1].end, 9.357], [end, end + 1], [end + 1.06, end + 4]];
+    const plan = cutPlan(phrasesOf(words, pauses), { duration: end + 4, pauses });
+    const made = cutSuggestions(plan, transcriptJson(words, [])).suggestions;
+    assert.equal(made[0].why, "silence before the first words");
+    assert.equal(made[made.length - 1].why, "silence after the last words");
+    assert.deepEqual([made[0].from, made[0].to, made[0].start], [null, null, 0]);
+    assert.ok(made.some((s) => s.from !== null), "the cue is a word cut");
+    assert.ok(made.some((s) => /shortened/.test(s.why)));
+    assert.deepEqual(made.map((s) => s.n), made.map((_, i) => i + 1));
+    assert.deepEqual(made.map((s) => s.start), [...made.map((s) => s.start)].sort((x, y) => x - y));
   });
   it("lists no silence when the plan has no ranges", () => {
     assert.equal(cutSuggestions(PLAN, transcript).suggestions.length, 1);
