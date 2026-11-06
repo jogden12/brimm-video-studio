@@ -7,8 +7,9 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { REELS_WORD, START, SAY_AGAIN, BRINGING, exportAgainWords, heldReelParts, keepOldWords, lostReelsWords, missingWords, nextHandoff, nothingNewWords, noHandoffWords, noReelWords, otherKindWords, rawWords, reelsAsked, retitledReels, unusableWords } from "../finish-reels.js";
+import { REELS_WORD, SAY_AGAIN, BRINGING, exportAgainWords, heldReelParts, keepOldWords, lostReelsWords, missingWords, nextHandoff, nothingNewWords, noHandoffWords, noReelWords, otherKindWords, rawWords, reelsAsked, retitledReels, unusableWords } from "../finish-reels.js";
 import { reelsBase } from "../finish.js";
+import { HAND_OFF_ASK, REELS_ASK } from "../finish.js";
 
 const NAME = "Pricing: what to charge?";
 /** Nothing she reads holds a path (but the folder name final/), a flag, or the name of a command. */
@@ -131,7 +132,8 @@ describe("the words she reads", () => {
       [exportAgainWords(1, "hand off the Reels"), `you export it again from HyperFrames and say "hand off the Reels"`],
       [exportAgainWords(1, "hand it off"), `you export it again from HyperFrames and say "hand it off"`],
       [exportAgainWords(2, "hand it off"), `you export each again from HyperFrames and say "hand it off"`],
-      [START, 'Say "yes, hand off the Reels" to start.'],
+      [HAND_OFF_ASK, "I found your export. Hand it off?"],
+      [REELS_ASK, "I found your Reels' exports. Hand off the Reels?"],
       [SAY_AGAIN, 'Say "hand off the Reels" again.'],
       [BRINGING, "Dropbox is still bringing the hand-off over: say it again in a minute."]
     ];

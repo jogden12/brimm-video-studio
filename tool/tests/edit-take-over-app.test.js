@@ -22,6 +22,7 @@ import { FOUND, LOWER_THIRD, ZONE, screen } from "./exports-world.js";
 import {
   COPY_TEXT, FOLDER, GUIDANCE as GUIDANCE_PATH, HELD, MAIN, REEL2, REEL_COPY_TEXT, T1, entry, exportOf, fillProject, filesBelow, listAll, madeCopy, madeReelCopy, ms, reread, takeOverWorld, textOf
 } from "./snapshot-world.js";
+const HAND_OFF_LINE = "Hand-off question: I found your export. Hand it off?";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -676,7 +677,7 @@ describe("finish on the other Mac, after a take-over (group P)", () => {
     await app(w.b.deps, FOLDER);
     const r = await on(w.b.deps, "finish", FOLDER);
     assert.equal(r.code, 0, r.text);
-    assert.deepEqual(r.said, [`The main video: ${main.name}, from what the other Mac released, exported 2026-10-20 13:56.`, FOUND, 'Say "yes, hand it off" to start.']);
+    assert.deepEqual(r.said, [`The main video: ${main.name}, from what the other Mac released, exported 2026-10-20 13:56.`, FOUND, HAND_OFF_LINE]);
     w.t.done();
   });
   it("would ask whether to export again if the rebuilt project's files had lost their times: which is why they keep them", async () => {

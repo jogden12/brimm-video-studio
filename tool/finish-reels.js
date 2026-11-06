@@ -69,8 +69,6 @@ export function keepOldWords(ns) {
   const said = reels.length < 2 ? reels.join("") : `${reels.slice(0, -1).join(", ")} and ${reels[reels.length - 1]}`;
   return `${said} captions keep the old spelling until ${exportAgainWords(ns.length, "hand off the Reels")}.`;
 }
-/** What she is asked to say when everything is found and nothing is left to ask. */
-export const START = 'Say "yes, hand off the Reels" to start.';
 /** What she is told to say again when the detached part could not go on. */
 export const SAY_AGAIN = 'Say "hand off the Reels" again.';
 /** The hand-off is not whole on this Mac yet; Dropbox is bringing it over. */

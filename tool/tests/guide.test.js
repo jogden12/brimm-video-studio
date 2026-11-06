@@ -256,7 +256,7 @@ const STAGE_ROWS = [
   [APP({ way: "hyperframes", app: false, elsewhere: true, mac: "Mac Studio" }), "open-elsewhere", "It is open on the Mac Studio. Carry on there, or open it here and take it over."],
   [APP({ way: "hyperframes", app: false, finishRunning: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
   [APP({ way: "hyperframes", app: false, project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
-  [APP({ way: "hyperframes", app: false, project: PROJECT({ exported: true }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
+  [APP({ way: "hyperframes", app: false, project: PROJECT({ exported: true }) }), "exported", 'You have exported it. Say "hand it off" and I will check what you exported.'],
   // In HyperFrames: the time of the last turn in the app's history when there is one.
   [APP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
   [APP({ way: "hyperframes", project: PROJECT({ last: "yesterday at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was yesterday at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
@@ -264,11 +264,11 @@ const STAGE_ROWS = [
   [APP({ way: "hyperframes", project: PROJECT() }), "in-app", 'Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
   [APP({ way: "hyperframes", project: PROJECT(), copy: { left: 30, usual: null } }), "in-app", 'Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
   // Exported: before in-app, whether or not the record lists a time the app opened it.
-  [APP({ way: "hyperframes", project: PROJECT({ exported: true, last: "today at 3:41 pm" }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
-  [APP({ way: "hyperframes", project: PROJECT({ opened: false, exported: true }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
+  [APP({ way: "hyperframes", project: PROJECT({ exported: true, last: "today at 3:41 pm" }) }), "exported", 'You have exported it. Say "hand it off" and I will check what you exported.'],
+  [APP({ way: "hyperframes", project: PROJECT({ opened: false, exported: true }) }), "exported", 'You have exported it. Say "hand it off" and I will check what you exported.'],
   // An iPhone clip: in HyperFrames only once the app has opened its project; before, the offer of PR 7's F5 stands.
   [CLIP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
-  [CLIP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
+  [CLIP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "exported", 'You have exported it. Say "hand it off" and I will check what you exported.'],
   [CLIP({ project: PROJECT({ opened: false }) }), "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.'],
   // With its video being made again beside the project (a video at work beside a project here is not the main video's: a Reel's holds the same lock), it is offered
   // the same, as a raw video in the same state is told to open it, and not that its video is being made (plan PR 17; the review of PR 10, M3).

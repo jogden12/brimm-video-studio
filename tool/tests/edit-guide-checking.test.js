@@ -324,7 +324,7 @@ describe("`guide … tell` for a video whose finish is running", () => {
     const w = await exported();
     let waits = 0;
     const said = await on(seeing(w, { wait: async () => { waits += 1; } }), "guide", "3fa9c1", "tell");
-    assert.deepEqual([said.said, waits], [[`${NAMED}: You have exported it from HyperFrames. Say "hand it off" to write its hand-off.`], 0]);
+    assert.deepEqual([said.said, waits], [[`${NAMED}: You have exported it. Say "hand it off" and I will check what you exported.`], 0]);
     w.t.done();
   });
   it("waits for the finish that hands off the Reels of a finished video too, and says the new revision is ready", async () => {

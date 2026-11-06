@@ -21,13 +21,14 @@ import { FOLDER, ID, episodeAs, listAll, reread } from "./episodes.js";
 import { ANSWERED, entry, exportOf } from "./exports-world.js";
 import { OFFERS, READ, depsOf, guideWorld } from "./guide-world.js";
 import { PLAIN, RAW as RAW_RECORD, atWork, on, world as copyWorld } from "./workcopy-world.js";
+const HAND_OFF_LINE = "Hand-off question: I found your export. Hand it off?";
 
 const NAMED = "Pricing: what to charge? (3fa9c1)";
 const DROP_LINE = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
 const says = (text) => `${NAMED}: ${text}`;
 const OPEN = 'Say "open it in HyperFrames" to edit it there.';
 const AFTER = 'Say "open it in HyperFrames" when it is done.';
-const EXPORTED = 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.';
+const EXPORTED = 'You have exported it. Say "hand it off" and I will check what you exported.';
 const edit = (last = "") => `Edit it in HyperFrames.${last ? ` Your last request there was ${last}.` : ""} When you are done, export it on This Mac, as MP4, then say "hand it off".`;
 const SHOW = 'Ask for any changes in your own words, then say "show it in Final Cut".';
 const FINISH = 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".';
@@ -665,14 +666,14 @@ describe("a file the app keeps that is a named pipe, where a reader that waits f
     assert.equal(got.hung, false, `${got.stage}`);
     assert.equal(got.code, 0, JSON.stringify(got));
     assert.match(got.said[0], MAIN_EXPORT);
-    assert.equal(got.said.at(-1), 'Say "yes, hand it off" to start.');
+    assert.equal(got.said.at(-1), HAND_OFF_LINE);
   });
   it("answers `finish` when an export's record in renders/ is a pipe", async () => {
     const got = await inChild("record", "finish");
     assert.equal(got.hung, false, `${got.stage}`);
     assert.equal(got.code, 0, JSON.stringify(got));
     assert.match(got.said[0], MAIN_EXPORT);
-    assert.equal(got.said.at(-1), 'Say "yes, hand it off" to start.');
+    assert.equal(got.said.at(-1), HAND_OFF_LINE);
   });
   // A finished video's Reels (plan PR 16): the Reel project's history and record, and the hand-off in final/, which the guide read with a plain read.
   it("answers `guide` for a finished video when a Reel project's history, or its export's record, is a pipe: the Reel is still said", async () => {
