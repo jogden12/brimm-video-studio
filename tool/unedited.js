@@ -40,7 +40,7 @@ import { localDay, stamp } from "./shared/text.js";
 import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount, settled } from "./lib.js";
 import { runProgram, findTools, lockFile, takeLock, isRunning, lastLine, sizeOnDisk } from "./run.js";
 import { closingFrom, withoutClosingWords } from "./closing.js";
-import { probeArgs, factsOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, streamsOf, soundStream, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipFiles, waitingToCut } from "./cuts.js";
+import { probeArgs, factsOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, streamsOf, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipFiles, waitingToCut } from "./cuts.js";
 import { notesRequest, readNotes, clipRanges, pausesOfPlan } from "./notes.js";
 import { stillsArgs } from "./reframe.js";
 import { reelCandidates, reelsFile, readReels, mergeCandidates, REELS_FILE } from "./reel-candidates.js";
@@ -1218,11 +1218,11 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
 
 /** Ask Claude again for an episode's Reel candidates (edit.js ask, detached): with the import's own request and locked-down
     call, of the cut plan the import wrote. Only its clips are taken: the rough cut is made, so its decisions are not applied,
-    and its clips are read on the plan as it is. The faces are found again for the crops. A new candidate has no preview: the retired
-    Final Cut days made them. Every candidate and Reel already there stays as it is, with its number, its stretch and its
-    preview if it has one, and the new candidates are numbered on from the highest number ever given (mergeCandidates). When none is
-    new, nothing is written. Then reels.json and the record go into the episode by the rule, and the late check is made after its wait. When Claude cannot be asked, or picks
-    nothing, nothing is changed. `found` is {folder, record}; `deps` as the import's, with `home`, `settings` and `wait`.
+    and its clips are read on the plan as it is. The faces are found again for the crops. A new candidate has no preview: only the Final
+    Cut days made them. Every candidate and Reel already there stays as it is, with its number, its stretch and its preview if it has
+    one, and the new candidates are numbered on from the highest number ever given (mergeCandidates). When none is new, nothing is
+    written. Then reels.json and the record go into the episode by the rule, and the late check is made after its wait. When Claude
+    cannot be asked, or picks nothing, nothing is changed. `found` is {folder, record}; `deps` as the import's, with `home`, `settings` and `wait`.
     Resolves the detached run's result: {ok, made, failed, next}. */
 /** Why the import of the episode whose record is `record` still holds its video, in plain words, with what to do: its
     status in Episodes/.importing/ under `root` says, at `now`, that it is at work on either Mac (its own late check to come

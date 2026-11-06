@@ -51,7 +51,7 @@ describe("F1. the spellings card, for an iPhone clip", () => {
     const { t, found } = clip({ app: true });
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. ${NEXT}`);
+    assert.equal(r.text, `Spelled now: ${OGDEN}. ${NEXT}`);
     const record = reread(found);
     assert.deepEqual([record.spellings, record.offers.answered.applied, record.finished], [[["Ogdin", "Ogden"]], ["Ogdin"], null]);
     assert.equal(existsSync(join(found.folder, "final")), false);
@@ -68,7 +68,7 @@ describe("F1. the spellings card, for an iPhone clip", () => {
   it("leaves the offer of HyperFrames out on a Mac whose settings have the app off, and says only that it can be handed off as it is", async () => {
     const { t, found } = clip();
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
-    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. ${NEXT_NO_APP}`);
+    assert.equal(r.text, `Spelled now: ${OGDEN}. ${NEXT_NO_APP}`);
     assert.doesNotMatch(r.text, /HyperFrames/);
     assert.equal(reread(found).finished, null);
     t.done();
@@ -84,14 +84,14 @@ describe("F1. the spellings card, for an iPhone clip", () => {
   it("says only that the hand-off waits for version 2 on a Mac that hands off version 1 and has the app off, and keeps the answer", async () => {
     const { t, found } = clip({ version: 1 });
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
-    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. ${WAITS}`);
+    assert.equal(r.text, `Spelled now: ${OGDEN}. ${WAITS}`);
     assert.deepEqual([reread(found).spellings, reread(found).finished], [[["Ogdin", "Ogden"]], null]);
     t.done();
   });
   it("says, on a Mac that hands off version 1 and has the app on, that only as it is waits: a clip edited in HyperFrames is handed off in version 1", async () => {
     const { t, found } = clip({ version: 1, app: true });
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
-    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. ${NEXT_V1}`);
+    assert.equal(r.text, `Spelled now: ${OGDEN}. ${NEXT_V1}`);
     assert.deepEqual([reread(found).spellings, reread(found).finished], [[["Ogdin", "Ogden"]], null]);
     // The card, asked for again once it is answered, says the same.
     const card = await on(t.ctx.deps, "spell", FOLDER, "offers");
@@ -109,7 +109,7 @@ describe("F1. the spellings card, for an iPhone clip", () => {
   it("writes no hand-off for a spelling added or dropped afterwards either", async () => {
     const { t, found } = clip({ answer: [] });
     const add = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
-    assert.deepEqual([add.code, add.text], [0, '"Ogdin" is spelled "Ogden" now, in every caption.']);
+    assert.deepEqual([add.code, add.text], [0, '"Ogdin" is spelled "Ogden" now.']);
     const drop = await on(t.ctx.deps, "spell", FOLDER, "drop", "Ogdin");
     assert.deepEqual([drop.code, drop.text], [0, '"Ogdin" is as the transcriber writes it again.']);
     assert.equal(existsSync(join(found.folder, "final")), false);
@@ -119,7 +119,7 @@ describe("F1. the spellings card, for an iPhone clip", () => {
   it("still writes a finished video's hand-off from the card, as it always did", async () => {
     const { t, found } = clip({ over: { kind: "finished", reading: { ...READING, kind: "finished" } } });
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
-    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. ${WRITTEN(1)}`);
+    assert.equal(r.text, `Spelled now: ${OGDEN}. ${WRITTEN(1)}`);
     assert.equal(handoffIn(found).video.kind, "finished");
     t.done();
   });

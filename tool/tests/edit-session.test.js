@@ -21,7 +21,7 @@ describe("spell", () => {
   it("lists, adds and drops the episode's spellings", async () => {
     const { t, found } = episode();
     assert.deepEqual(await on(t.ctx.deps, "spell", FOLDER), { code: 0, text: "There are no spellings for this episode yet." });
-    assert.deepEqual(await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally"), { code: 0, text: '"Sallie" is spelled "Sally" now, in every caption.' });
+    assert.deepEqual(await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally"), { code: 0, text: '"Sallie" is spelled "Sally" now.' });
     assert.deepEqual(reread(found).spellings, [["Sallie", "Sally"]]);
     assert.equal(reread(found).version, 2);
     assert.equal((await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie Ogden", "Sally")).text, '"Sallie Ogden" is not one word. Say the one word as the transcriber writes it.');
@@ -72,7 +72,7 @@ describe("spell, after a finish", () => {
     const { t, found } = finishedEpisode();
     t.ctx.deps.commit = "e72a170";
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand it off".');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Say "open it in HyperFrames" to edit it there, from the recording.');
     for (const stem of [MAIN, REEL]) assert.match(text(found, `${stem}.srt`), /Thank you so much, Sally\./);
     assert.match(text(found, `${MAIN}.transcript.txt`), /Sally\./);
     assert.deepEqual(JSON.parse(text(found, `${MAIN}.words.json`)).words.map((w) => w.w), ["Sally."]);
@@ -137,9 +137,9 @@ describe("spell, after a finish", () => {
     const { t, found } = finishedEpisode([["Sallie", "Sally"]]);
     const before = text(found, `${MAIN}.srt`);
     // A finish again makes a part's transcripts again only once it is Shared again (finish.js reuses the others).
-    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "drop", "Sallie")).text, '"Sallie" is as the transcriber writes it again. The final transcripts of the main video and Reel 2 keep "Sallie" as "Sally" until you export each again from HyperFrames and say "hand it off".');
+    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "drop", "Sallie")).text, '"Sallie" is as the transcriber writes it again. The final transcripts of the main video and Reel 2 keep "Sallie" as "Sally". Say "open it in HyperFrames" to edit each there, from the recording.');
     assert.deepEqual([reread(found).spellings, reread(found).finished.revision, text(found, `${MAIN}.srt`)], [[], 1, before]);
-    assert.match((await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Salli")).text, /The final transcripts of the main video and Reel 2 keep "Sallie" as "Sally" until you export each again from HyperFrames and say "hand it off"\.$/);
+    assert.match((await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Salli")).text, /The final transcripts of the main video and Reel 2 keep "Sallie" as "Sally"\. Say "open it in HyperFrames" to edit each there, from the recording\.$/);
     t.done();
   });
   it("never spells a part twice after a finish again that reused it, and spells the part it made again afresh", async () => {

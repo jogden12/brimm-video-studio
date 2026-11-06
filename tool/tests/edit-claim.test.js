@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { editMain, CLAIM_WAIT_MS } from "../edit.js";
 import { claimed, localStamp, recordFile, recordText, shown } from "../episode.js";
 import { setup, episodeFor, reread, otherMac, EDITED, FOLDER, NAME } from "./episodes.js";
+import { episode } from "./phase4.js";
 
 /** Run a command of edit.js on a Mac, by its deps: { code, text }, with what it said. */
 async function on(deps, ...argv) {
@@ -180,6 +181,15 @@ describe("the claim", () => {
     assert.equal((await on(t.ctx.deps, "title", FOLDER)).code, 0);
     assert.equal((await on(t.ctx.deps, "title", FOLDER, "reel", "1")).code, 0);
     t.done();
+  });
+  it("still lists what there is while the other Mac has it: the spellings and Claude's ideas for graphics", async () => {
+    for (const argv of [["spell", FOLDER], ["graphic", FOLDER, "ideas"]]) {
+      const { t, found } = episode({ editing: HERS });
+      const r = await on(t.ctx.deps, ...argv);
+      assert.equal(r.code, 0, `${argv.join(" ")}: ${r.text}`);
+      assert.equal(reread(found).rev, 1);
+      t.done();
+    }
   });
   it("lets an episode nobody has open be changed without opening it first, as before", async () => {
     const t = setup();

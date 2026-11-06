@@ -270,7 +270,7 @@ describe("spell … offers all, or some, for a finished video", () => {
     const { t, found } = await readOf("finished");
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "all");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN} and ${PRICING}. Not kept: ${SAME_FAULT} ${LEFT3} ${WRITTEN(1)}`);
+    assert.equal(r.text, `Spelled now: ${OGDEN} and ${PRICING}. Not kept: ${SAME_FAULT} ${LEFT3} ${WRITTEN(1)}`);
     const record = reread(found);
     assert.deepEqual(record.spellings, [["Ogdin", "Ogden"], ["pricing", "Pricing"]]);
     assert.deepEqual([record.offers.answered.applied, record.offers.answered.left], [["Ogdin", "pricing"], ["Sallie"]]);
@@ -290,7 +290,7 @@ describe("spell … offers all, or some, for a finished video", () => {
     const { t, found } = await readOf("finished");
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "3");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, `Spelled now, in every caption: ${PRICING}. ${LEFT3} ${WRITTEN(1)}`);
+    assert.equal(r.text, `Spelled now: ${PRICING}. ${LEFT3} ${WRITTEN(1)}`);
     assert.deepEqual(reread(found).spellings, [["pricing", "Pricing"]]);
     assert.deepEqual(reread(found).offers.answered.left, ["Ogdin", "Sallie"]);
     assert.match(handoffIn(found).main.srt, /Thank you so much, Sallie Ogdin\./);
@@ -385,7 +385,7 @@ describe("spell … offers, with a reading that is not the current one", () => {
     assert.deepEqual([card.code, card.text], [1, NOT_READ]);
     const added = await on(t.ctx.deps, "spell", FOLDER, "add", "pricing", "Pricing");
     assert.equal(added.code, 0, added.text);
-    assert.equal(added.text, '"pricing" is spelled "Pricing" now, in every caption.', "no hand-off is owed to an answer of an old reading");
+    assert.equal(added.text, '"pricing" is spelled "Pricing" now.', "no hand-off is owed to an answer of an old reading");
     t.done();
   });
 });
@@ -431,7 +431,7 @@ describe("a later spell, once the hand-off is written", () => {
     t.calls.length = 0;
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Ogdin" is spelled "Ogden" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again.');
+    assert.equal(r.text, '"Ogdin" is spelled "Ogden" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again.');
     const handoff = handoffIn(found);
     assert.deepEqual([handoff.revision, handoff.video.id, handoff.video.kind, handoffFaultV2(handoff)], [2, ID, "finished", ""]);
     assert.match(handoff.main.srt, /Thank you so much, Sallie Ogden\./);
@@ -477,7 +477,7 @@ describe("a later spell that changes none of the hand-off's words", () => {
     t.calls.length = 0;
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "zzz", "Zzz");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"zzz" is spelled "Zzz" now, in every caption. The final transcripts and the hand-off are as they were.');
+    assert.equal(r.text, '"zzz" is spelled "Zzz" now. The final transcripts and the hand-off are as they were.');
     assert.equal(text(found, `final/${HANDOFF}`), handoff);
     const record = reread(found);
     assert.deepEqual([record.rev, record.finished.revision, record.spellings, record.finished.parts.main.spellings], [rev + 1, 1, [["zzz", "Zzz"]], []]);
@@ -493,7 +493,7 @@ describe("spell … add, with several pairs", () => {
     const rev = reread(found).rev;
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden", "pricing", "Pricing", "costs", "Costs");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, 'Spelled now, in every caption: "Ogdin" as "Ogden", "pricing" as "Pricing" and "costs" as "Costs". The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again.');
+    assert.equal(r.text, 'Spelled now: "Ogdin" as "Ogden", "pricing" as "Pricing" and "costs" as "Costs". The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again.');
     assert.equal(reread(found).rev, rev + 1, "one record for the three");
     assert.deepEqual(reread(found).spellings, [["Ogdin", "Ogden"], ["pricing", "Pricing"], ["costs", "Costs"]]);
     assert.equal(handoffIn(found).revision, 2, "one revision for the three");
@@ -528,9 +528,9 @@ describe("spell … add, with several pairs", () => {
   it("keeps a single pair's words for a raw video as they were", async () => {
     const { t } = rawRead();
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
-    assert.equal(r.text, '"Ogdin" is spelled "Ogden" now, in every caption.');
+    assert.equal(r.text, '"Ogdin" is spelled "Ogden" now.');
     const many = await on(t.ctx.deps, "spell", FOLDER, "add", "pricing", "Pricing", "costs", "Costs");
-    assert.equal(many.text, 'Spelled now, in every caption: "pricing" as "Pricing" and "costs" as "Costs".');
+    assert.equal(many.text, 'Spelled now: "pricing" as "Pricing" and "costs" as "Costs".');
     t.done();
   });
   it("before the offers are answered, only records them: no hand-off", async () => {
@@ -552,7 +552,7 @@ describe("spell … offers, for an iPhone clip", () => {
     // This Mac's settings have the app off here, so the offer of HyperFrames is left out (review, minor 2); with it on, both ways are said.
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. Say "hand it off" to hand it off as it is.`);
+    assert.equal(r.text, `Spelled now: ${OGDEN}. Say "hand it off" to hand it off as it is.`);
     const record = reread(found);
     assert.deepEqual([record.spellings, record.offers.answered.applied, record.finished], [[["Ogdin", "Ogden"]], ["Ogdin"], null]);
     assert.equal(existsSync(join(found.folder, "final")), false);
@@ -578,7 +578,7 @@ describe("spell … offers, for a raw video", () => {
     const { t, found } = rawRead();
     const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. Its hand-off is made when it is finished.`);
+    assert.equal(r.text, `Spelled now: ${OGDEN}. Its hand-off is made when it is finished.`);
     const record = reread(found);
     assert.deepEqual(record.spellings, [["Ogdin", "Ogden"]]);
     assert.deepEqual([record.offers.answered.applied, record.finished], [["Ogdin"], null]);
@@ -599,7 +599,7 @@ describe("spell, for a short video as today's import makes one", () => {
   it("says one spelling in the plain words", async () => {
     const { t } = legacy();
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
-    assert.deepEqual([r.code, r.text], [0, `"Ogdin" is spelled "Ogden" now, in every caption.`]);
+    assert.deepEqual([r.code, r.text], [0, `"Ogdin" is spelled "Ogden" now.`]);
     t.done();
   });
   it("says a drop in the plain words", async () => {
@@ -612,7 +612,7 @@ describe("spell, for a short video as today's import makes one", () => {
   it("says several pairs in the same plain words", async () => {
     const { t, found } = legacy();
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden", "pricing", "Pricing");
-    assert.deepEqual([r.code, r.text], [0, `Spelled now, in every caption: ${OGDEN} and ${PRICING}.`]);
+    assert.deepEqual([r.code, r.text], [0, `Spelled now: ${OGDEN} and ${PRICING}.`]);
     assert.equal(reread(found).rev, found.record.rev + 1, "one record for the two");
     t.done();
   });
@@ -764,7 +764,7 @@ describe("spell … offers, with this Mac handing off version 1", () => {
       const { t, found } = await readOf("finished", { version });
       const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "1");
       assert.equal(r.code, 0, r.text);
-      assert.equal(r.text, `Spelled now, in every caption: ${OGDEN}. ${WAITS}`);
+      assert.equal(r.text, `Spelled now: ${OGDEN}. ${WAITS}`);
       const record = reread(found);
       assert.deepEqual(record.spellings, [["Ogdin", "Ogden"]]);
       assert.deepEqual([record.offers.answered.applied, record.finished], [["Ogdin"], null]);
@@ -794,7 +794,7 @@ describe("spell … offers, with this Mac handing off version 1", () => {
     handoffVersion(t, 2);
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, `"Ogdin" is spelled "Ogden" now, in every caption. ${LEFT3} ${WRITTEN(1)}`);
+    assert.equal(r.text, `"Ogdin" is spelled "Ogden" now. ${LEFT3} ${WRITTEN(1)}`);
     assert.match(handoffIn(found).main.srt, /Sallie Ogden\./);
     t.done();
   });

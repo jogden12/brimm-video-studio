@@ -189,7 +189,7 @@ import { mkdirSync as makeDir } from "node:fs";
 
 /** What Claude Code prints with its reply: one clip, from "Today we are going..." (p5) to "pricing"... that is p5 alone. */
 const claudeSays = (clips) => () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify({ decisions: [], notes: "", graphicCues: [], clips }) }) });
-/** A phase 3 episode whose ctx can ask Claude, find faces and make previews, all by stand-ins. */
+/** A phase 3 episode whose ctx can ask Claude, find faces, all by stand-ins. */
 const askable = (programs = {}, shape = { only: [2] }) => {
   const p = phase3({ CLAUDE: claudeSays([{ from: "p7", to: "p7", hook: "Know your costs, first", why: "It is the point." }, { from: "p5", to: "p5", hook: "What this is about", why: "It says it." }]), SWIFT: () => ({ code: 0, stderr: "", stdout: JSON.stringify(Array.from({ length: 11 }, (_, i) => ({ file: String(i + 1).padStart(4, "0") + ".jpg", faces: [] }))) }), ...programs }, shape);
   p.t.ctx.deps.tools = { ...p.t.ctx.deps.tools, claude: "CLAUDE", swift: "SWIFT" };
@@ -875,6 +875,42 @@ describe("ask's late check and put-back, pinned (PR 19's check of 2d4c8af, F3, F
     const said = () => p.t.said().split("\n").pop();
     assert.equal(await editMain(["reels", "Pricing", "--no-play"], p.t.ctx.deps), 1);
     assert.equal(said(), `reels.json is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. The one its record lists is kept at ${kept}: ask Jason to put it back.`);
+    p.t.done();
+  });
+});
+
+describe("reels.json gone, and a copy not kept (F7: the kept branches, on reels.json)", () => {
+  it("reels says it cannot show the candidates and to say it again once Dropbox has the list back, when this Mac kept no copy", async () => {
+    const p = askable();
+    rmSync(join(p.found.folder, "reels.json"));
+    assert.equal(await editMain(["reels", "Pricing", "--no-play"], p.t.ctx.deps), 1);
+    assert.equal(p.t.said().split("\n").pop(), "reels.json is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. Say this again once Dropbox has it back.");
+    p.t.done();
+  });
+  it("lists a candidate ask added with no preview line: a new candidate has none, which is no failure", async () => {
+    const p = askable();
+    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 0);
+    assert.equal(await editMain(["reels", "Pricing", "--no-play"], p.t.ctx.deps), 0);
+    assert.match(p.t.said(), /\n3\. /);
+    assert.doesNotMatch(p.t.said(), /No preview/);
+    p.t.done();
+  });
+  it("does not name a copy an earlier run kept, when this run put the list back and kept none", async () => {
+    const p = askable();
+    const at = join(p.found.folder, "reels.json");
+    const before = readFileSync(at, "utf8");
+    const stale = join(p.t.home, "BRIMM Video Work", FOLDER, "put back", "reels.json");
+    makeDir(dirname(stale), { recursive: true });
+    writeFile(stale, "an earlier list");
+    p.t.ctx.deps.clone = ((clone) => (from, to) => {
+      if (to.includes("/record/")) throw new Error("No space left on device");
+      clone(from, to);
+    })(p.t.ctx.deps.clone);
+    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
+    const next = readResult(p.t.home, FOLDER, "ask").next;
+    assert.equal(next, "The Reel candidates are as they were.");
+    assert.doesNotMatch(next, /kept at/);
+    assert.equal(readFileSync(at, "utf8"), before);
     p.t.done();
   });
 });

@@ -153,7 +153,7 @@ function placedByTime(c, clock) {
   return { start: timelineAt(clock, Math.min(...inside.map((i) => i.start))), end: timelineAt(clock, Math.max(...inside.map((i) => i.end))), seconds: secondsIn(inside) };
 }
 
-/** Where a suggestion lies on the clock she is reading (`now`, clockFor's read, with a clock): placed by its words when the
+/** Where a suggestion lies on the clock she is reading (`now`, the video's clock read, video-clock.js, with a clock): placed by its words when the
     read has the recording's words, as the hand-off places a suggestion (handoff-v2.js suggestionsOnClock, which says what it
     keeps), and by its time otherwise. { start, end, seconds, first?, last? } on that clock: `first` and `last` the words it opens
     and closes with there, when it is placed by its words, and `seconds` those of its own stretches the clock keeps (not the
@@ -165,7 +165,7 @@ function placedOn(c, now) {
 }
 
 /** The list of the Reel suggestions of a video of the switch (a video she has answered the card of): a reading's suggestions,
-    each as it is on the clock she is reading (`now`, clockFor's read), the video named as everything edit.js prints names it
+    each as it is on the clock she is reading (`now`, the video's clock read), the video named as everything edit.js prints names it
     (episode.js shownName), never by `reels.video`, the file's name. A short video gets no Reels. With none, why there are none,
     with no offer to ask Claude again. Otherwise the head line says which clock the times are on, and each suggestion has its
     times there, its length, what it is now, the words it opens and closes with there, why Claude picked it, whether it fits a
@@ -206,7 +206,7 @@ function suggestionsText(reels, record, now) {
     which are the clips the import cut of an episode imported before phase 3. `record` is the episode's record, for its kind
     and for what each Reel is now: one it does not know of is a candidate.
     For a video she has answered the card of (episode.js isAnswered) it is the list of suggestions on the clock she is reading,
-    `now` being clockFor's read of the main video, or null (suggestionsText); `whyNot` is then not said, since asking Claude again
+    `now` being the clock read of the main video (video-clock.js), or null (suggestionsText); `whyNot` is then not said, since asking Claude again
     is not offered. So it is for a record the gate holds (gate.js gated: a video not yet answered, or a session not cleared),
     whatever its answer says, so that no line of this can name `reels.video` for one: it is named by its label. For any other
     record it is this list, as it always was, whatever `now` is: layoutOf is not asked, since it turns 3 for an old video that only
@@ -228,7 +228,7 @@ export function reelsText(reels, record, whyNot = "", now = null) {
       c.title && `   On screen: ${c.title}`,
       c.reason && `   Why it holds attention: ${c.reason}`,
       !c.fits.fits && `   It does not fit a Reel. ${c.fits.why}`,
-      c.preview ? `   Preview: ${c.preview}` : `   No preview: ${c.failed || "none was made"}.`,
+      c.preview ? `   Preview: ${c.preview}` : c.failed && `   No preview: ${c.failed}.`,
       c.check && `   ${c.check}`
     ].filter(Boolean).join("\n");
   });

@@ -90,7 +90,7 @@ const stillReading = (n, name) => `Claude is still reading it. Say "${openReelWo
 export const reelNotWholeYet = (n, name) => `Some files of ${name} are not whole in Dropbox yet, so the project of Reel ${n} wasn't made. Say "${openReelWords(n, name)}" again in a few minutes. If it says this again, tell Jason.`;
 const reelMade = ({ start, end }, n) => `Reel ${n} is made: the recording from ${clockText(start)} to ${clockText(end)}.`;
 const unreadable = (name) => `The Reel suggestions of ${name} cannot be read. Ask Jason.`;
-/** What is said when Reel `n` is not among the suggestions `numbers`, as markReels says it. */
+/** What is said when Reel `n` is not among the suggestions `numbers`, as dropReels says it. */
 const noSuchReel = (n, numbers) => `There is no Reel ${n}. The Reels are ${numbers.join(", ") || "none"}.`;
 
 /** What she asked of `app`, from its words (flags taken out): `reel` and a whole number after the episode's words, in any case, is

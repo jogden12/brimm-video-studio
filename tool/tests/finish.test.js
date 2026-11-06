@@ -2524,7 +2524,7 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
   });
 });
 
-const LEGACY_ADD = '"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If the main video shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand it off".';
+const LEGACY_ADD = '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If the main video shows captions on screen, they keep the old spelling. Say "open it in HyperFrames" to edit it there, from the recording.';
 // A short video as today's import makes one, whose record is from the Final Cut days (its finished parts name no project): its spell says
 // the HyperFrames words, as every video's does now, and nothing of Final Cut.
 describe("spell, after a finish, for a short video as today's import makes one", () => {

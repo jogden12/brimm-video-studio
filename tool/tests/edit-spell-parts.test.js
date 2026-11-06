@@ -272,14 +272,14 @@ describe("spell, on a raw video edited in HyperFrames and not finished yet", () 
     const w = fw({ projects: ["reel 2"] });
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every caption. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
     w.t.done();
   });
   it("says the plain words for a raw video with no project at all", async () => {
     const w = fw({ projects: [] });
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every caption.');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now.');
     w.t.done();
   });
 });
@@ -314,7 +314,7 @@ describe("spell, after a finish of a video her editor finished", () => {
     const w = await reelsFinished([]);
     const add = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(add.code, 0, add.text);
-    assert.equal(add.text, '"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again.');
+    assert.equal(add.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again.');
     assert.match(text(w.found, "final/Pricing talk.srt"), /much, Sally\./);
     const drop = await on(w.t.ctx.deps, "spell", FOLDER, "drop", "Sallie");
     assert.equal(drop.code, 0, drop.text);
@@ -326,7 +326,7 @@ describe("spell, after a finish of a video her editor finished", () => {
     const w = await reelsFinished();
     const add = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(add.code, 0, add.text);
-    assert.equal(add.text, '"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels".');
+    assert.equal(add.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels".');
     assert.match(text(w.found, "final/Pricing talk.srt"), /much, Sally\./);
     w.t.done();
   });
@@ -345,21 +345,21 @@ describe("spell, after a finish of a video her editor finished", () => {
     rmSync(join(w.found.folder, reread(w.found).finished.parts["reel 1"].words));
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels".\nReel 1\'s captions keep the old spelling until you export it again from HyperFrames and say "hand off the Reels".');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels".\nReel 1\'s captions keep the old spelling until you export it again from HyperFrames and say "hand off the Reels".');
     w.t.done();
   });
   it("names the Reels together when the spelling reached both", async () => {
     const w = await reelsFinished(["reel 1", "reel 2"]);
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 1 and Reel 2 show captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export each again and say "hand off the Reels".');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 1 and Reel 2 show captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export each again and say "hand off the Reels".');
     w.t.done();
   });
   it("names no Reel when the spelling is not one it holds or has: a word it never had is taken back, and the hand-off comes out as it was", async () => {
     const w = await reelsFinished();
     const same = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Hormozy", "Hormozi");
     assert.equal(same.code, 0, same.text);
-    assert.equal(same.text, '"Hormozy" is spelled "Hormozi" now, in every caption. The final transcripts and the hand-off are as they were.');
+    assert.equal(same.text, '"Hormozy" is spelled "Hormozi" now. The final transcripts and the hand-off are as they were.');
     const drop = await on(w.t.ctx.deps, "spell", FOLDER, "drop", "Hormozy");
     assert.equal(drop.code, 0, drop.text);
     assert.equal(drop.text, '"Hormozy" is as the transcriber writes it again. The final transcripts and the hand-off are as they were.');
@@ -376,7 +376,7 @@ describe("spell, with a Reel project that is not handed off yet: a video her edi
     assert.deepEqual(reread(w.found).app.projects.map((p) => p.key), ["reel 2", "reel 3"]);
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels". Reel 3 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels". Reel 3 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
     assert.match(text(w.found, "final/Pricing talk.srt"), /much, Sally\./);
     w.t.done();
   });
@@ -391,7 +391,7 @@ describe("spell, with a Reel project that is not handed off yet: a video her edi
     assert.deepEqual([Object.keys(reread(w.found).finished.parts), reread(w.found).rev], [["main", "reel 2"], rev], "finish only looked: Reel 3 is not handed off");
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels". Reel 3 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels". Reel 3 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
     w.t.done();
   });
   it("names several together, in the order of their numbers and not of the record, in the plural words", async () => {
@@ -400,7 +400,7 @@ describe("spell, with a Reel project that is not handed off yet: a video her edi
     assert.deepEqual(reread(w.found).app.projects.map((p) => p.key), ["reel 2", "reel 3", "reel 1"]);
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels". Reel 1 and Reel 3 are not handed off yet. If they show captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export each.');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels". Reel 1 and Reel 3 are not handed off yet. If they show captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export each.');
     w.t.done();
   });
   it("orders the numbers as numbers, Reel 9 before Reel 10, and joins three with a comma and an and", async () => {
@@ -408,7 +408,7 @@ describe("spell, with a Reel project that is not handed off yet: a video her edi
     addReelProjects(w.found, ["reel 10", "reel 9"]);
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels". Reel 3, Reel 9 and Reel 10 are not handed off yet. If they show captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export each.');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels". Reel 3, Reel 9 and Reel 10 are not handed off yet. If they show captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export each.');
     w.t.done();
   });
   it("names it after a drop too, in front of the line for a Reel whose captions keep the spelling, so that no Reel is told twice", async () => {
@@ -423,7 +423,7 @@ describe("spell, with a Reel project that is not handed off yet: a video her edi
     const w = await reelsFinished(["reel 2"], ["reel 3"]);
     const add = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Hormozy", "Hormozi");
     assert.equal(add.code, 0, add.text);
-    assert.equal(add.text, '"Hormozy" is spelled "Hormozi" now, in every caption. The final transcripts and the hand-off are as they were.');
+    assert.equal(add.text, '"Hormozy" is spelled "Hormozi" now. The final transcripts and the hand-off are as they were.');
     const drop = await on(w.t.ctx.deps, "spell", FOLDER, "drop", "Hormozy");
     assert.equal(drop.code, 0, drop.text);
     assert.equal(drop.text, '"Hormozy" is as the transcriber writes it again. The final transcripts and the hand-off are as they were.');
@@ -442,7 +442,7 @@ describe("spell, with a Reel project that is not handed off yet: a video her edi
     addReelProjects(w.found, ["reel 3"], { state: KEPT });
     const kept = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(kept.code, 0, kept.text);
-    assert.equal(kept.text, '"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels".');
+    assert.equal(kept.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels".');
     addReelProjects(w.found, ["reel 1"]);
     const both = await on(w.t.ctx.deps, "spell", FOLDER, "drop", "Sallie");
     assert.equal(both.code, 0, both.text);
@@ -459,7 +459,7 @@ describe("spell, with the project of a Reel she dropped", () => {
     assert.ok(reread(w.found).app.projects.some((project) => project.key === "reel 3"), "its project is still in the record");
     const dropped = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(dropped.code, 0, dropped.text);
-    assert.equal(dropped.text, '"Sallie" is spelled "Sally" now, in every caption. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels".');
+    assert.equal(dropped.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels".');
     addReelProjects(w.found, ["reel 1"]);
     const both = await on(w.t.ctx.deps, "spell", FOLDER, "drop", "Sallie");
     assert.equal(both.code, 0, both.text);
@@ -473,7 +473,7 @@ describe("spell, with a Reel project that is not handed off yet: a video her edi
     const w = await offered();
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "offers", "all");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, 'Spelled now, in every caption: "Sallie" as "Sally". The hand-off is written as revision 1 and shown in Finder: drop it on the BRIMM Ops page. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
+    assert.equal(r.text, 'Spelled now: "Sallie" as "Sally". The hand-off is written as revision 1 and shown in Finder: drop it on the BRIMM Ops page. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
     assert.equal(reread(w.found).finished.revision, 1);
     w.t.done();
   });
@@ -499,15 +499,15 @@ describe("spell, with a Reel project that is not handed off yet: a video her edi
     const w = await offered(1);
     const answer = await on(w.t.ctx.deps, "spell", FOLDER, "offers", "all");
     assert.equal(answer.code, 0, answer.text);
-    assert.equal(answer.text, 'Spelled now, in every caption: "Sallie" as "Sally". The hand-off is written once this Mac hands off version 2: ask Jason. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
+    assert.equal(answer.text, 'Spelled now: "Sallie" as "Sally". The hand-off is written once this Mac hands off version 2: ask Jason. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
     const add = await on(w.t.ctx.deps, "spell", FOLDER, "add", "talk", "chat");
     assert.equal(add.code, 0, add.text);
-    assert.equal(add.text, '"talk" is spelled "chat" now, in every caption. The hand-off is written once this Mac hands off version 2: ask Jason. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
+    assert.equal(add.text, '"talk" is spelled "chat" now. The hand-off is written once this Mac hands off version 2: ask Jason. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
     assert.equal(reread(w.found).finished, null, "nothing is written in final/ yet");
     hands(w, 2);
     const first = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Ogden", "Ogdin");
     assert.equal(first.code, 0, first.text);
-    assert.equal(first.text, '"Ogden" is spelled "Ogdin" now, in every caption. The hand-off is written as revision 1 and shown in Finder: drop it on the BRIMM Ops page. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
+    assert.equal(first.text, '"Ogden" is spelled "Ogdin" now. The hand-off is written as revision 1 and shown in Finder: drop it on the BRIMM Ops page. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
     w.t.done();
   });
 });
@@ -571,7 +571,7 @@ describe("spell, with a Reel project that is not handed off yet: a raw video", (
     const w = fw({ projects: ["reel 2"], over: { reading: { ...READING, kind: "raw" }, offers: { spellings: [{ heard: "Sallie", spelled: "Sally", why: "It is her name." }] } } });
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "offers", "all");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, 'Spelled now, in every caption: "Sallie" as "Sally". Its hand-off is made when it is finished. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
+    assert.equal(r.text, 'Spelled now: "Sallie" as "Sally". Its hand-off is made when it is finished. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
     w.t.done();
   });
   it("names a Reel it has not finished, after the Reel the spelling reached, once it is finished from HyperFrames' exports", async () => {

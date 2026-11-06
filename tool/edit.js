@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The command line for episodes, which a Claude Code session on this Mac runs for the person editing: it lists the episodes and
-// what is waiting, opens one, opens its main video in the HyperFrames app, says what is running, and imports a video again. Each command is a function of a context, `ctx`,
-// that holds this Mac's settings and the ways of doing things a test gives stand-ins for. Every file it puts into Dropbox goes
+// what is waiting, opens one, opens its main video in the HyperFrames app, says what is running, and imports a video again. Each
+// command is a function of a context, `ctx`, that holds this Mac's settings and the ways of doing things a test gives stand-ins for. Every file it puts into Dropbox goes
 // by the rule (dropbox.js), and every change to an episode is a new record (episode.js). Long work is started detached and
 // returns at once (detached.js).
 //
@@ -282,7 +282,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         episode as the project was made from it: the video could not be made again. It takes
                                         no flag
   node edit.js spell "<episode>" [add "<as heard>" "<as spelled>" [add …]… | drop "<as heard>" | offers [all | none | <n> <n>…]]
-                                        the episode's spellings, which every caption takes; several pairs of
+                                        the episode's spellings; several pairs of
                                         add are one change; after a finish, the final transcripts too, and the hand-off is
                                         made again. offers shows the spellings Claude offered as one numbered card, or
                                         answers them (all, some or none), and a finished video's or an iPhone clip's
@@ -1092,7 +1092,7 @@ function episodeFor(ctx, rest, { newerEnds = 0, codes = false } = {}) {
   return { found, record: read.record };
 }
 
-/** Say once on this Mac, at the first open or push of an episode that completes, how to keep the episode on this Mac: Dropbox
+/** Say once on this Mac, at the first open of an episode that completes, how to keep the episode on this Mac: Dropbox
     offers no command for it. A marker in this Mac's folder for the episode says it was said. */
 function offlineStep(ctx, found) {
   const said = join(episodeWork(ctx.home, found.name), "offline-step-said");
@@ -1448,7 +1448,7 @@ const ruleOpts = (ctx) => ({ ...(ctx.deps.clone ? { clone: ctx.deps.clone } : {}
     which runs `app`; `--asked-by "app reel <n>"` that `app … reel <n>` did, and what to say next is to open that Reel, `open Reel
     <n> of <name> in HyperFrames`; a bring that was told nobody, or any other command, says `open <name>`, as it always did. */
 export async function bring(ctx, rest) {
-  // Given files after the folder (a Reel's clip, from push reel), only those are brought over.
+  // Given files after the folder (a Reel's clip), only those are brought over.
   const [now, folder, ...after] = rest;
   const askedAt = after.indexOf("--asked-by");
   const asker = askedAt === -1 ? "" : String(after[askedAt + 1] ?? "");
@@ -1885,7 +1885,7 @@ export async function dropReels(ctx, found, ns) {
 }
 
 /** Whether Reel `n` of the episode `found` is one a reading suggested and nobody has made (reels.json version 2): its candidate
-    has no crops, and no project of its own is listed. There is nothing upright to show or change in Final Cut, whatever the
+    has no crops, and no project of its own is listed. It is not made yet, whatever the
     record says of it: a Reel is made in HyperFrames (`app … reel <n>`). */
 function notMade(found, n) {
   const { record } = found;
@@ -1989,7 +1989,8 @@ function startedWords(ctx, record, parts) {
   return `Started. The hand-off is ready about ${clockAt(ctx.now() + seconds * 1000)}, in ${aboutLeft(seconds)}. You can carry on meanwhile.`;
 }
 
-/** finish, the quick part (spec section 5, steps 1 and 2): find what HyperFrames exported of each part (finishWay), say what each is taken for, and ask what it must. With `answers.yes` and nothing left to ask, it writes what
+/** finish, the quick part (spec section 5, steps 1 and 2): find what HyperFrames exported of each part (finishWay), say what each is
+    taken for, and ask what it must. With `answers.yes` and nothing left to ask, it writes what
     it was told in finish.asked.json, on this Mac's own disk, starts the detached part (finishNow) and returns once that run holds the
     episode's lock, a moment later (runStarted): it says if the run did not begin in five seconds, or began and stopped at once.
     For a main video taken from a HyperFrames export it also says the words it found on the project's picture, and asks if they are right
@@ -3152,7 +3153,7 @@ async function reels(ctx, rest) {
   const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
   const { found, record } = { found: got.found, record: got.record };
-  // A short video she has answered has no Reels, and its reading writes no list of them: said as drop and push say it.
+  // A short video she has answered has no Reels, and its reading writes no list of them: said as drop says it.
   if (isAnswered(record) && record.kind === "short video") return refuse(ctx, "A short video has no Reels.");
   const at = join(found.folder, REELS_FILE);
   if (!existsSync(at) && record.files && REELS_FILE in record.files) return refuse(ctx, `${REELS_FILE} is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. ${keptOrWait(ctx, found, record)}`);
@@ -3253,7 +3254,7 @@ async function ask(ctx, rest) {
     const deps = {
       run: ctx.deps.run || runProgram, tools: ctx.deps.tools || findPrograms(), home: ctx.home, settings: ctx.settings, now: ctx.now,
       log: (line) => ctx.say(line), wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole,
-      ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {}), ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {})
+      ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {})
     };
     const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "ask", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, () => askAgain({ folder: found.folder, record: found.read.record }, deps));
     if (result.taking || result.running) {
@@ -3566,8 +3567,8 @@ function partFrom(words) {
 }
 const partLabel = (part) => (part === "main" ? "the main video" : `Reel ${part.reel}`);
 
-/** The clock she reads on a timeline: { read } or { code }, `read` being clockFor's, or what `reader` gives (videoClock's, for a list of
-    times on the video's own clock). A file Dropbox has not brought over yet is asked for (`bring`, unless one is running), and she is told
+/** The clock she reads on a timeline: { read } or { code }, `read` being what `reader` gives: videoClock's, the one-piece clock of the
+    video's own times. A file Dropbox has not brought over yet is asked for (`bring`, unless one is running), and she is told
     to say it again when it is here. */
 function clockRead(ctx, found, part, reader) {
   const read = reader(found, part, ctx);
@@ -3613,8 +3614,8 @@ function notInFinalCut(ctx, found, record) {
   return `${name} is not edited here: its hand-off is written once its spellings are answered. Say "show me the spellings".`;
 }
 const handoffWritten = (revision, shown = true) => (shown ? `The hand-off is written as revision ${revision} and shown in Finder: drop it on the BRIMM Ops page.` : `The hand-off is written as revision ${revision}.`);
-/** A finished video has no Final Cut, and nothing of it is shown there; nor has an iPhone clip of the switch, a record that holds
-    her `answer`. Today's import makes short videos too, answered by no one, and shows them in Final Cut as it shows an episode. */
+/** Whether a video is edited here (the name is from the Final Cut days): a finished video is not, nor is an iPhone clip of the switch, a
+    record that holds her `answer`. Today's import makes short videos too, answered by no one, and they are edited as an episode is. */
 const hasFinalCut = (record) => {
   const kind = recordKind(record);
   if (kind === "short video") return !(record.answer !== null && typeof record.answer === "object");
@@ -3744,24 +3745,37 @@ const ASK_ASSISTANT = " Ask the assistant in HyperFrames to fix any caption alre
 /** What she is told before the first finish of a video edited in HyperFrames: its final transcripts are made, with the spellings, when it is handed off. */
 const AT_HAND_OFF = " The final transcripts take the spellings when you hand it off.";
 
+/** Whether a finished part (its entry in `finished.parts`) was made from an export of HyperFrames: the record says so with `project`. A part an older
+    finish took from Final Cut names none. */
+const partFromApp = (part) => typeof part.project === "string" && part.project !== "";
+
+/** The parts (each { name, app, … }) by the way they were made: those made from an export of HyperFrames first (`app`), then those an older
+    finish took from Final Cut, whose entry names no project. A way no part was made is left out. */
+const byMaking = (parts) => [true, false].map((app) => ({ app, parts: parts.filter((part) => Boolean(part.app) === app) })).filter((group) => group.parts.length);
+
+/** What she is told of a part an older finish took from Final Cut, which has no HyperFrames project: it is edited there from the recording, as the guide says. */
+const openThere = (count) => `Say "open it in HyperFrames" to edit ${count === 1 ? "it" : "each"} there, from the recording.`;
+
 /** What she is told of the final transcripts that keep a spelling taken back or changed: `keeping` is each part that does, { name, pairs }, its name as
     she hears it and the pairs it keeps, as `"a" as "b"`. They keep them until the parts are exported again from HyperFrames and handed off (finish-reels.js
     exportAgainWords has the words, as it has a finished video's Reels'). */
 function keptWords(keeping) {
-  if (!keeping.length) return "";
   const pairsOf = (parts) => listed([...new Set(parts.flatMap((part) => part.pairs))]);
-  return ` The final transcripts of ${listed(keeping.map((part) => part.name))} keep ${pairsOf(keeping)} until ${exportAgainWords(keeping.length, "hand it off")}.`;
+  return byMaking(keeping).map(({ app, parts }, i) => {
+    const begin = ` ${i === 0 ? "The final transcripts of" : "Those of"} ${listed(parts.map((part) => part.name))} keep ${pairsOf(parts)}`;
+    return app ? `${begin} until ${exportAgainWords(parts.length, "hand it off")}.` : `${begin}. ${openThere(parts.length)}`;
+  }).join("");
 }
 
 /** What she is told of the captions drawn into the picture of the parts in `drawn` ({ name, … }, the parts that may have any): they keep the old spelling.
     A spelling is not pushed into a project, so a second sentence says what changes it: the assistant in HyperFrames fixes the captions, then the part is
     exported again and handed off, in the words `handOff` ("hand it off" for a raw video and an iPhone clip, "hand off the Reels" for the Reels of a
     finished video). */
-const stillWords = (drawn, handOff = "hand it off") => {
-  if (!drawn.length) return "";
-  const one = drawn.length === 1;
-  return ` If ${listed(drawn.map((part) => part.name))} ${one ? "shows" : "show"} captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export ${one ? "it" : "each"} again and say "${handOff}".`;
-};
+const stillWords = (drawn, handOff = "hand it off") => byMaking(drawn).map(({ app, parts }) => {
+  const one = parts.length === 1;
+  const keep = ` If ${listed(parts.map((part) => part.name))} ${one ? "shows" : "show"} captions on screen, they keep the old spelling.`;
+  return app ? `${keep} Ask the assistant in HyperFrames to fix them, then export ${one ? "it" : "each"} again and say "${handOff}".` : `${keep} ${openThere(parts.length)}`;
+}).join("");
 
 /** Whether the main video of the record is a full episode, as its preset says, or, when it holds none, by its kind: a wide episode's main video is the
     full episode and has no captions drawn on it; a short video's is as filmed. */
@@ -3800,13 +3814,13 @@ const spellingsChanged = (before, after) => before.length !== after.length || af
     spellings that changed them: its `spellings`, or, for a part no spelling has reached since a finish made it, the record's
     own. Only the others are applied to it, so none is applied twice, and a spelling taken back or changed leaves the part as
     it is, which is said, part by part, by the way each was made (keptWords, stillWords): a finish again makes a part's transcripts
-    again only once its video is new, exported again from HyperFrames or Shared again from Final Cut. Before reading them
+    again only once its video is new, exported again from HyperFrames. Before reading them
     it checks they are here, whole (her folder may be online-only after a hand-off): if not, it starts bringing them over and
     stops. (`spell` has refused already while a finish runs, whose late check would put its own copies back.) When the record
     cannot be written, each final file is put back as it was, each on its own; one that cannot be is named, and she is told
     the episode needs Jason. `set` is what else the command changes in the record (the answer to Claude's offers), written in the
     same record, and `later` what is said at the end when no hand-off is written yet and none is due (a raw video's). `inApp` is whether the
-    video is edited in HyperFrames and was never shown in Final Cut (editedInApp): `done` then holds nothing of Final Cut, and what is said
+    video is edited in HyperFrames (editedInApp): what is said
     after it tells her that the final transcripts take the spellings when she hands it off (before the first finish) and to ask the
     assistant in HyperFrames to fix any caption already drawn, unless a sentence about the captions of a part says so already. A spelling
     changed is also told of the Reel projects not handed off yet (unhandedWords), at the end of the line that says it was saved, after every
@@ -3847,12 +3861,12 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
   const meantOf = (list, heard) => (list.find(([h]) => h === heard) || [])[1];
   const parts = Object.entries(finished.parts || {}).map(([key, part]) => {
     const held = part.spellings || found.record.spellings || [];
-    return { key, part, held, name: key === "main" ? "the main video" : capital(key), stem: `final/${basename(part.file, extname(part.file))}`, toApply: spellings.filter(([h]) => meantOf(held, h) === undefined) };
+    return { key, part, held, name: key === "main" ? "the main video" : capital(key), app: partFromApp(part), stem: `final/${basename(part.file, extname(part.file))}`, toApply: spellings.filter(([h]) => meantOf(held, h) === undefined) };
   });
   // Every part's own list is kept from now on, so a part a finish reuses keeps it, and one it makes again starts afresh.
   const withHeld = (held) => ({ ...finished, parts: Object.fromEntries(parts.map((p) => [p.key, { ...p.part, spellings: held[p.key] || p.held }])) });
   // What each part keeps: the pairs it holds that are taken back or changed now, which cannot be taken out of its words.
-  const keeping = parts.map((p) => ({ name: p.name, pairs: p.held.filter(([h, m]) => meantOf(spellings, h) !== m).map(([h, m]) => `"${h}" as "${m}"`) })).filter((k) => k.pairs.length);
+  const keeping = parts.map((p) => ({ name: p.name, app: p.app, pairs: p.held.filter(([h, m]) => meantOf(spellings, h) !== m).map(([h, m]) => `"${h}" as "${m}"`) })).filter((k) => k.pairs.length);
   const keptNote = keptWords(keeping);
   // A video edited in HyperFrames is told to ask the assistant to fix any caption already drawn where no sentence about the captions of a part says it.
   const ask = inApp ? ASK_ASSISTANT : "";
@@ -4042,7 +4056,7 @@ async function answerOffers(ctx, found, words) {
   let next = record.spellings || [];
   for (const o of applied) next = withSpelling(next, o.heard, o.spelled);
   const answer = { reading: currentReading(record).at, at: localStamp(new Date(ctx.now())), on: ctx.machine, applied: applied.map((o) => o.heard), left: offers.filter((_, i) => !chosen.includes(i)).map((o) => o.heard) };
-  const done = `${applied.length ? `Spelled now, in every caption: ${pairsSaid(applied.map((o) => [o.heard, o.spelled]))}.` : "No spelling applied."}${notKept.length ? ` Not kept: ${notKept.join(" ")}` : ""}`;
+  const done = `${applied.length ? `Spelled now: ${pairsSaid(applied.map((o) => [o.heard, o.spelled]))}.` : "No spelling applied."}${notKept.length ? ` Not kept: ${notKept.join(" ")}` : ""}`;
   // No hand-off is written yet and none is due from the card: a raw video's is made when it is finished, and an iPhone clip's when she
   // says "hand it off", edited in HyperFrames first or as it is (or, on a Mac that hands off version 1, once that Mac hands off version 2).
   const later = recordKind(record) === "raw" ? "Its hand-off is made when it is finished." : isClip(record) ? clipNext(ctx, found, record) : "";
@@ -4096,17 +4110,14 @@ async function spell(ctx, rest) {
   }
   const written = [...new Map(pairs.map(([h, m]) => [h.trim(), [h.trim(), m.trim()]])).values()];
   const next = written.reduce((all, [h, m]) => withSpelling(all, h, m), spellings);
-  const where = "in every caption";
-  const done = inApp
-    ? (written.length === 1 ? `"${written[0][0]}" is spelled "${written[0][1]}" now.` : `Spelled now: ${pairsSaid(written)}.`)
-    : (written.length === 1 ? `"${written[0][0]}" is spelled "${written[0][1]}" now, ${where}.` : `Spelled now, ${where}: ${pairsSaid(written)}.`);
+  const done = written.length === 1 ? `"${written[0][0]}" is spelled "${written[0][1]}" now.` : `Spelled now: ${pairsSaid(written)}.`;
   return saveSpellings(ctx, found, next, done, { inApp });
 }
 
-/** Where words of the recording, a stretch { start, end } in seconds of it, are on the timeline she is reading (`read` is clockFor's):
+/** Where words of the recording, a stretch { start, end } in seconds of it, are on the timeline she is reading (`read` is clockRead's, the video's one-piece clock):
     { at: null } when they are cut now; else { at, for, start, end }: `at`, the second of the recording its kept words start at, and
     `for`, how long they take on the timeline now; `start` and `end`, their times on the clock she is reading (`read.on`), null
-    when they are not on that version (kept again since it was made). */
+    when they are not on that clock. */
 function wordsOnTimeline(read, { start: from, end: to }) {
   const kept = read.pieces.filter((r) => to > r.start && from < r.end);
   if (!kept.length) return { at: null };
@@ -4151,7 +4162,7 @@ function graphicIdeas(read, spellings = []) {
     return { n, idea, said: phrase.text, ...wordsOnTimeline(read, phrase) };
   });
 }
-/** The ideas a video lists as its graphics (graphic … ideas, and `--idea`): a video made from a plan (PR H5b; episode.js isFromPlan) lists the cues
+/** The ideas a video lists as its graphics (graphic … ideas): a video made from a plan (PR H5b; episode.js isFromPlan) lists the cues
     of its video guide, planned.cues read again as a package's are, every kind of cue among them, since its project is made from those and from the
     reading's none; any other video lists the reading's (graphicIdeas). Each is placed on the words of the recording as the reading's are. */
 function ideasFor(read, record) {
@@ -4161,8 +4172,8 @@ function ideasFor(read, record) {
   const cues = graphicCuesOf(record.planned.cues, { kinds: GRAPHIC_CUE_KINDS }).cues;
   return graphicIdeas({ ...read, plan: { ...read.plan, claude: { ...(read.plan.claude || {}), graphicCues: cues } } }, record.spellings);
 }
-/** Where an idea is on the clock she is reading, as its line says it: "0:04 to 0:07", "cut now", or "not on main v0 (kept again
-    since)". */
+/** Where an idea is on the clock she is reading, as its line says it: "0:04 to 0:07", "cut now", or, when its words are not on that
+    clock, "not on <clock> (kept again since)". */
 const ideaWhere = (idea, on) => (idea.at === null ? "cut now" : idea.start === null ? `not on ${on} (kept again since)` : `${clockText(idea.start)} to ${clockText(idea.end)}`);
 /** An idea's words as a sentence: with a full stop, unless they end in one already. */
 const ideaSaid = (idea) => (/[.!?…]"?$/.test(oneLine(idea)) ? oneLine(idea) : `${oneLine(idea)}.`);
@@ -6065,8 +6076,8 @@ function checkSentence({ due, took }) {
   return `Studio checks Dropbox's copies at ${clockAt(due)}${out.length ? `, and then takes ${listed(out)}` : ""}.`;
 }
 
-/** What is said after it, in the guide's answers: the check needs nothing of hers, but the commands that would write into the episode are
-    stopped until it is made (stoppedWords): a spelling and handing the video off again. */
+/** What is said after it, in the guide's answers: the check needs nothing of hers, but the commands that would write into the episode
+    are stopped until it is made (stoppedWords): a spelling and handing the video off again. */
 const ON_THE_CHECK = "You do not need to wait for it. A spelling and handing it off again wait until then.";
 
 /** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old }. Each item (guide.js Item) is a
