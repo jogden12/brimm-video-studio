@@ -280,7 +280,8 @@ function soundsIn(a, b, pauses) {
     cut ranges that touch and have the same reason.
     Between the phrases, and before the first and after the last, only what ffmpeg heard as silent is cut as a pause. A sound
     there that no word was written for is kept as a kept phrase is: it may be a word the transcriber missed, or timed seconds
-    off. So where no pause was heard before the first words or after the last, the recording is kept from its start or to its
+    off. Before the first words it is otherwise once silence was heard there: a sound there is cut with the silence, whatever
+    it was (a hand over the lens, a cough). So where no pause was heard before the first words or after the last, the recording is kept from its start or to its
     end. Beside a phrase that is cut it is otherwise: the silence there is part of that phrase's range, and so is such a sound. */
 export function rangesOf(phrases, duration, pauses) {
   const ranges = [];
@@ -302,7 +303,9 @@ export function rangesOf(phrases, duration, pauses) {
   for (const next of [...phrases, null]) {
     const cut = (before && !before.keep) || (next && !next.keep);
     const kept = (before && before.keep) || (next && next.keep);
-    if (kept && !cut) heard.push(...soundsIn(before ? before.end : 0, next ? next.start : duration, pauses).map(([start, end]) => ({ start, end, ...KEPT })));
+    // Before the first words, once silence was heard there, a sound with no words is no speech: it goes with the silence (a hand over the lens).
+    const opening = !before && next && pauses.some(([start]) => start < next.start);
+    if (kept && !cut && !opening) heard.push(...soundsIn(before ? before.end : 0, next ? next.start : duration, pauses).map(([start, end]) => ({ start, end, ...KEPT })));
     if (next) heard.push(next);
     before = next;
   }
