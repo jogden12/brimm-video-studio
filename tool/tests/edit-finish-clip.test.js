@@ -364,11 +364,11 @@ describe("F4. what does not change", () => {
     assert.equal(r.text, `${NAME} has no timeline to show in Final Cut: an iPhone clip is not edited here.`);
     t.done();
   });
-  it("takes a short video from before the switch, with no answer, for a video not yet opened in HyperFrames, and says nothing of Final Cut", async () => {
+  it("tells a short video from before the switch, with no answer, on a Mac not set up, that this Mac is not set up for HyperFrames, and says nothing of Final Cut", async () => {
     const t = setup();
     episodeFor(t, { record: { kind: "short video", name: { text: "Hello clip", placeholder: false } } });
     const r = await on(t.ctx.deps, "finish", FOLDER);
-    assert.match(r.text, /was never opened in HyperFrames/);
+    assert.match(r.text, /isn't set up for HyperFrames/);
     assert.doesNotMatch(r.text, /Final Cut|Shared|Looked in/);
     t.done();
   });

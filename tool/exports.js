@@ -1,6 +1,6 @@
 // HyperFrames' exports (architecture 2026-10-27, section 8; plan PR 7): what the app leaves when she exports a project, how an export is
-// matched to its project, and which export a part of an episode takes. It does `parts.js`'s job for the projects of the record and keeps
-// its manner: plain data in, and the parts, the asks and the stops out.
+// matched to its project, and which export a part of an episode takes. It works on the projects of the record: plain data in, and the
+// parts, the asks and the stops out.
 //
 // What the app does, and where each fact comes from, is in the architecture's 8.1 (A0, Jason's test of 2026-10-28, and the app's docs).
 // In short: an export is a file named for its project, a day and a time to the minute (the time is when the export began), saved in
@@ -224,15 +224,14 @@ function candidatesOf(part, input, zone) {
     was made from, whether the project is on this Mac and the Mac it was made on, when it last changed (projectChange, null when not known),
     the files its records name (each with `where` and `began`), and the renders in its renders/ that no record names. `downloads` is
     { dir, files }, its video files as { name, bytes, mtimeMs }. `finished` is the record's last finish, for a part kept.
-    `answers`: { take: { <key>: <a file's name> }, final: [<key>], without: [<key>] }. `rest` is false when
-    the main video is finished another way, in which case a Reel the last finish finished that has no project here is left to that way.
+    `answers`: { take: { <key>: <a file's name> }, final: [<key>], without: [<key>] }.
     Gives { parts, asks, stops, mentions, looked, tied }: each part taken as { key, label, reel?, project, projects, fromSuggestion, video,
     export: null, kept, noHandEdits: false, line }, with `video` null when the part is kept as the last finish made it; the questions she is
     to answer; what finish cannot get past by an answer; what was passed over (a WebM, a render); where it looked; and `tied`, the keys of the
     parts whose newest exports began in one minute, so that she is asked which is final, unless every one of those began before the project
     last changed (then she is told it changed after, as of any older export, and the part is not tied): what the guide counts as exported
     (plan PR 10, review M1). Nothing is touched. */
-export function lookForExports(input, answers = {}, { rest = true } = {}) {
+export function lookForExports(input, answers = {}) {
   const { take = {}, final = [], without = [] } = answers || {};
   const zone = input.zone || LOCAL_ZONE;
   const finished = input.finished && input.finished.parts ? input.finished : null;
@@ -249,7 +248,7 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
     const keep = () => made(null, `${Cap}: kept as the last finish made it.`, { kept: true });
     const before = finished ? finished.parts[key] : undefined;
     const prior = before && before.project === part.project ? before : null;
-    // A Reel left out of this finish that the last finish finished stays in the hand-off, as lookFor keeps one.
+    // A Reel left out of this finish that the last finish finished stays in the hand-off as it was.
     if (key !== "main" && without.includes(key)) {
       if (before) keep();
       continue;
@@ -329,10 +328,9 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
       : `${Cap}: ${export_.name}, ${where}, exported ${zone.text(export_.began.ms)}.${older ? " HyperFrames changed after it, and you said it is final." : ""}`);
     passedOver(export_);
   }
-  // A Reel the last finish finished that has no project in the record (it was finished another way) stays in the hand-off as that
-  // finish made it: leaving it out would take it off the page. When the main video went the Final Cut way (`rest` false), that look
-  // keeps such a Reel itself, and keeping it here as well would keep it twice.
-  if (finished && rest) {
+  // A Reel the last finish finished that has no project in the record (it was finished in the Final Cut days) stays in the hand-off as
+  // that finish made it: leaving it out would take it off the page.
+  if (finished) {
     const known = new Set(input.parts.map((part) => part.key));
     const number = (key) => Number(key.slice(5));
     for (const key of Object.keys(finished.parts).filter((k) => /^reel [1-9]\d*$/.test(k) && !known.has(k)).sort((a, b) => number(a) - number(b))) {
@@ -345,7 +343,7 @@ export function lookForExports(input, answers = {}, { rest = true } = {}) {
 
 // --- What is read from the disk ---
 
-/** What finish says of a raw video that was never opened in HyperFrames, on a Mac set up for the app (architecture 4.1, plan PR 7). */
+/** What finish says of a raw video that was never opened in HyperFrames, (architecture 4.1, plan PR 7). `finish` says it on a Mac set up for the app; on any other it says the Mac is not set up (app.js NOT_SET_UP). */
 export const NEVER_OPENED = 'The main video was never opened in HyperFrames. Say "open it in HyperFrames" first, edit it there, export it on This Mac, then say "hand it off".';
 /** What finish says when this Mac will not let it look in Downloads: macOS asks once, and keeps the answer. */
 export const DOWNLOADS_UNREADABLE = 'This Mac does not let BRIMM Video Studio look in the Downloads folder, where HyperFrames puts its exports. Allow it in System Settings, under Privacy & Security, Files and Folders, then say "hand it off" again.';

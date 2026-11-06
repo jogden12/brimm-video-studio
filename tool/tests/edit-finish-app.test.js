@@ -12,6 +12,7 @@ import { DOWNLOADS_UNREADABLE, NEVER_OPENED } from "../exports.js";
 import { finishNow } from "../finish.js";
 import { reelsFile } from "../reel-candidates.js";
 import { episodeWork, writeSettings } from "../settings.js";
+import { NOT_SET_UP as APP_NOT_SET_UP } from "../app.js";
 import { EDITED, FOLDER, PROJECT, episodeFor, reread, setup } from "./episodes.js";
 import { EPISODE } from "./phase4.js";
 import { FOUND, MAIN, REEL2, TAKEN, changeAt, entry, exportOf, ms, named, world } from "./exports-world.js";
@@ -57,7 +58,7 @@ describe("D1. finish goes the way the record says", () => {
       t.shared(`${PROJECT.main}.mp4`, 2000);
       t.shared(`${PROJECT.main}.fcpxmld`, 3000);
       assert.equal(await finishEpisode(t.ctx, found, { yes: true }), 1, String(set));
-      assert.deepEqual(t.said().split("\n"), [NEVER_OPENED], String(set));
+      assert.deepEqual(t.said().split("\n"), [set ? NEVER_OPENED : APP_NOT_SET_UP], String(set));
       assert.deepEqual([t.started, reread(found).rev], [[], found.record.rev], String(set));
       t.done();
     }
@@ -82,10 +83,20 @@ describe("D1. finish goes the way the record says", () => {
     plain([NEVER_OPENED]);
     w.t.done();
   });
-  it("stops that video in HyperFrames' words too on a Mac that is not set up for the app", async () => {
+  it("finishes a short video from before the switch (no answer, a push, a main project the app opened) from its export in Downloads", async () => {
+    const push = { v: 1, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/main.v1.mac-studio.fcpxml" };
+    const w = world({ kind: "short video", projects: ["main"], over: { answer: null, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed: [push] } } });
+    exportOf(w, "main");
+    assert.equal(await finishEpisode(w.t.ctx, w.found, {}), 0, w.t.said());
+    assert.match(w.t.said(), /The main video: .*from Downloads/);
+    assert.match(w.t.said(), /Hand-off question: /);
+    assert.doesNotMatch(w.t.said(), /never opened|Final Cut/);
+    w.t.done();
+  });
+  it("says that this Mac isn't set up for HyperFrames, as the guide does, to a never-opened video on a Mac whose app is off", async () => {
     const w = world({ projects: null, set: false });
     assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1);
-    assert.deepEqual(w.t.said().split("\n"), [NEVER_OPENED]);
+    assert.deepEqual(w.t.said().split("\n"), [APP_NOT_SET_UP]);
     w.t.done();
   });
   it("takes a project kept for an earlier kind for no project in use", async () => {
@@ -415,7 +426,7 @@ describe("D5. a Reel made by `app … reel N`, in the record as plan PR 5 writes
       const w = world({ projects: ["reel 2"], set });
       exportOf(w, "reel 2");
       assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1, String(set));
-      assert.deepEqual(w.t.said().split("\n"), [NEVER_OPENED], String(set));
+      assert.deepEqual(w.t.said().split("\n"), [set ? NEVER_OPENED : APP_NOT_SET_UP], String(set));
       assert.deepEqual(w.t.started, [], String(set));
       w.t.done();
     }

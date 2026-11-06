@@ -11,7 +11,7 @@
 // record from before, may have no project: it is kept as it is.
 // Nothing here asks anything: what a person must check is said in the result, which status shows.
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { probeArgs, factsOf, colourOf, pauseArgs, pausesOf } from "./cuts.js";
 import { clipArgs, storyCuts, STORY_MAX } from "./reframe.js";
 import { captionsOf, settled, stampedText } from "./lib.js";
@@ -83,17 +83,6 @@ function wordsOfCaptions(srt) {
   });
 }
 
-/** Every file inside a folder, as paths from it. */
-function filesIn(dir, from = dir) {
-  let out = [];
-  for (const name of readdirSync(dir)) {
-    const at = join(dir, name);
-    if (statSync(at).isDirectory()) out = out.concat(filesIn(at, from));
-    else out.push(relative(from, at));
-  }
-  return out;
-}
-
 /** What ffprobe says of a file, or null when it cannot read it, as of a file HyperFrames has not finished writing. The facts of cuts.js
     factsOf, and `colour` too: { primaries, transfer } as the picture is tagged, or null when it has no tags (cuts.js colourOf). */
 async function probe(file, work, my) {
@@ -137,32 +126,23 @@ async function whole(file, work, my, { again = "hand it off" } = {}) {
 export const HAND_OFF_ASK = "I found your export. Hand it off?";
 export const REELS_ASK = "I found your Reels' exports. Hand off the Reels?";
 
-/** A file or an export bundle as it is when finish takes it: its size and time, or for a bundle each file's. */
+/** A file as it is when finish takes it: its size and time. */
 function snapshot(path) {
-  if (statSync(path).isDirectory()) return { files: Object.fromEntries(filesIn(path).map((rel) => [rel, snapshot(join(path, rel))])) };
   const now = statSync(path);
   return { size: now.size, mtimeMs: now.mtimeMs };
 }
-/** Is a file or a bundle still as it was when it was taken? */
+/** Is a file still as it was when it was taken? */
 function unchanged(path, snap) {
   try {
-    if (snap.files) {
-      const now = filesIn(path);
-      return now.length === Object.keys(snap.files).length && now.every((rel) => snap.files[rel] && unchanged(join(path, rel), snap.files[rel]));
-    }
     const now = statSync(path);
     return now.size === snap.size && now.mtimeMs === snap.mtimeMs;
   } catch (e) {
     return false;
   }
 }
-/** Take a file or a bundle into the run's own folder, as a clone: what finish works from and copies into final/, whatever
-    happens to the original after. */
+/** Take a file into the run's own folder, as a clone: what finish works from and copies into final/, whatever happens to the
+    original after. */
 function takeCopy(from, to, clone) {
-  if (statSync(from).isDirectory()) {
-    for (const rel of filesIn(from)) takeCopy(join(from, rel), join(to, rel), clone);
-    return;
-  }
   mkdirSync(dirname(to), { recursive: true });
   clone(from, to);
 }
@@ -763,8 +743,8 @@ export async function finishNow(ctx, found, deps = {}) {
     progress.begin(shownName(record));
     progress.steps(STEPS);
 
-    // Each new finished video whole, and its facts. Then the video, and its export, are taken into the run's own folder as
-    // clones, with their sizes and times: everything after works from what was taken.
+    // Each new finished video whole, and its facts. Then the video is taken into the run's own folder as a clone, with its size and
+    // time: everything after works from what was taken.
     progress.step(WAITING);
     const clone = ctx.deps.clone || cloneFile;
     for (const part of news) {
@@ -949,8 +929,8 @@ export async function finishNow(ctx, found, deps = {}) {
     else if (!now.record || now.record.rev !== asked.rev) failed.push(`The episode changed while finish was working, so nothing was copied into final/. ${sayAgain}`);
     if (failed.length) return result();
 
-    // Into final/, by the rule, from what was taken: each new video, its transcripts, its Story parts and its export, and the
-    // hand-off last.
+    // Into final/, by the rule, from what was taken: each new video, its transcripts and its Story parts, and the hand-off
+    // last.
     progress.step("Copying into the episode");
     const entries = [];
     const files = {};

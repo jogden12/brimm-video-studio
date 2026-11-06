@@ -26,7 +26,7 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
     const said = block.join(" ").replace(/\s+/g, " ");
     assert.ok(said.includes("A finished video whose hand-off is written is told to hand off the Reels once a Reel is exported from HyperFrames that the hand-off does not hold."), said);
     // What it said before is still said: the raw video, the iPhone clip and the Final Cut way.
-    for (const words of ["A raw video and an iPhone clip are followed through HyperFrames", "and once it is exported, to hand it off", "A raw video that goes the Final Cut way keeps its Final Cut steps"]) assert.ok(said.includes(words), words);
+    for (const words of ["A raw video and an iPhone clip are followed through HyperFrames", "and once it is exported, to hand it off", "A raw video that was edited in Final Cut before is told so, and to open it in HyperFrames, from the recording"]) assert.ok(said.includes(words), words);
   });
   it("says in the README's rows for guide what the stage is, when, where it comes, and what it leaves out", () => {
     const first = row('| `guide ["<video>"]`');

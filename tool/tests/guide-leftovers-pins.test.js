@@ -23,7 +23,7 @@ describe("what pins the guide's line for a Mac with the app off and its one list
     assert.ok(block.length >= 10 && block.slice(1).every((line) => /^ {40}\S/.test(line) && line.length <= 122), block.join("\n"));
     const said = block.join(" ").replace(/\s+/g, " ");
     assert.ok(said.includes("On a Mac that Jason has not set up for HyperFrames it says that this Mac is not set up, where it would say to open the video there or that its video is being made."), said);
-    for (const words of ["A raw video and an iPhone clip are followed through HyperFrames", "then to open it there", "and once it is exported, to hand it off", "A finished video whose hand-off is written is told to hand off the Reels", "A raw video that goes the Final Cut way keeps its Final Cut steps"]) assert.ok(said.includes(words), words);
+    for (const words of ["A raw video and an iPhone clip are followed through HyperFrames", "then to open it there", "and once it is exported, to hand it off", "A finished video whose hand-off is written is told to hand off the Reels", "A raw video that was edited in Final Cut before is told so, and to open it in HyperFrames, from the recording"]) assert.ok(said.includes(words), words);
   });
   it("says in the README's rows for guide what it says on a Mac with the app off, what it says of a clip beside a project, and what it reads of a video she set aside and how often it reads Downloads", () => {
     const first = row('| `guide ["<video>"]`');

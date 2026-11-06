@@ -526,11 +526,9 @@ describe("C7. a part the last finish took", () => {
     assert.deepEqual(got.parts.slice(1).map((p) => p.line), ["Reel 1: kept as the last finish made it.", "Reel 3: kept as the last finish made it."]);
     assert.deepEqual([got.asks, got.stops], [[], []]);
   });
-  it("leaves a Reel the last finish finished to the Final Cut look when it is told so: the main video went that way, and keeps it once", () => {
+  it("keeps a Reel the last finish finished in the days of Final Cut (it has no project), once, beside the Reel taken now", () => {
     const before = BEFORE("main");
     const finished = { ...before, parts: { ...before.parts, "reel 1": { file: "final/r1.mov", bytes: 7, seconds: 7.7, source: { bytes: 7, mtimeMs: ms(13, 0) }, noHandEdits: true } } };
-    const got = lookForExports(found([reel2()], [file(named(P_REEL2, "14.03"))], finished), NONE, { rest: false });
-    assert.deepEqual(got.parts.map((p) => p.key), ["reel 2"]);
     assert.deepEqual(lookForExports(found([reel2()], [file(named(P_REEL2, "14.03"))], finished), NONE).parts.map((p) => p.key), ["reel 2", "reel 1"]);
   });
   it("is not kept when it was taken from Final Cut (its record has no project), or from another project of the same episode", () => {

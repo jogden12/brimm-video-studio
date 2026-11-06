@@ -152,7 +152,8 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         where it would say to open the video there or that its video is being made. A
                                         finished video whose hand-off is written is told to hand off the Reels once a Reel
                                         is exported from HyperFrames that the hand-off does not hold. A raw video that
-                                        goes the Final Cut way keeps its Final Cut steps. A planned video (plan) is told
+                                        was edited in Final Cut before is told so, and to open it in HyperFrames, from the
+                                        recording. A planned video (plan) is told
                                         to film it to its shot list, or for an explainer to record or choose its voice;
                                         once footage is in, what it has so far, and which part is waiting for a client's
                                         agreement. Only on a Mac that does the light import: on any other, every form says
@@ -258,9 +259,9 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js finish "<episode>" [--yes] [--take "<part>=<file>"] [--final "<part>"]
                      [--without "reel <n>"] [--as-it-is]
                      [--on-screen "<words>"]… [--no-on-screen]
-                                        find what HyperFrames exported of each part (in Downloads, or where the export's own
-                                        record says it went), and ask what it must. --final says an export is the final one though the
-                                        project changed after it. With --yes and nothing left to ask, it transcribes the
+                                        find what HyperFrames exported of each part (in Downloads, or where the export's
+                                        own record says it went), and ask what it must. --final says an export is the final
+                                        one though the project changed after it. With --yes and nothing left to ask, it transcribes the
                                         finished videos again, copies them into final/ and writes the hand-off for BRIMM Ops,
                                         detached. It says when the hand-off will be ready, and returns once the run has begun
                                         (at most five seconds; it says so if none does). An iPhone clip she answered that was
@@ -2291,7 +2292,7 @@ const capital = (text) => text[0].toUpperCase() + text.slice(1);
 function finishWay(ctx, record) {
   const kind = recordKind(record);
   const projects = (record.app?.projects ?? []).filter((p) => p.state !== PROJECT_KEPT);
-  if (kind === "raw" && projects.some(inUse)) return "hyperframes";
+  if ((kind === "raw" || (kind === "short video" && hasFinalCut(record))) && projects.some(inUse)) return "hyperframes";
   if (isClip(record)) return projects.some((p) => inUse(p) && Array.isArray(p.opened) && p.opened.length > 0) ? "hyperframes" : "clip";
   if (!hasFinalCut(record)) return "finished";
   return "unopened";
@@ -2367,8 +2368,7 @@ function startedWords(ctx, record, parts) {
   return `Started. The hand-off is ready about ${clockAt(ctx.now() + seconds * 1000)}, in ${aboutLeft(seconds)}. You can carry on meanwhile.`;
 }
 
-/** finish, the quick part (spec section 5, steps 1 and 2): find what Final Cut Shared and exported of each part, or what HyperFrames
-    exported (finishWay), say what each is taken for, and ask what it must. With `answers.yes` and nothing left to ask, it writes what
+/** finish, the quick part (spec section 5, steps 1 and 2): find what HyperFrames exported of each part (finishWay), say what each is taken for, and ask what it must. With `answers.yes` and nothing left to ask, it writes what
     it was told in finish.asked.json, on this Mac's own disk, starts the detached part (finishNow) and returns once that run holds the
     episode's lock, a moment later (runStarted): it says if the run did not begin in five seconds, or began and stopped at once.
     For a main video taken from a HyperFrames export it also says the words it found on the project's picture, and asks if they are right
@@ -2398,7 +2398,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   const way = forReels ? "reels" : finishWay(ctx, record);
   if (way === "finished") return refuse(ctx, notInFinalCut(ctx, found, record));
   if (way === "clip") return finishClip(ctx, found, answers);
-  if (way === "unopened") return refuse(ctx, NEVER_OPENED);
+  if (way === "unopened") return refuse(ctx, appOf(ctx.settings) ? NEVER_OPENED : APP_NOT_SET_UP);
   // Where its hand-off goes (finish.js handoffTarget, which every hand-off writer asks), and why it cannot be written, if it
   // cannot: under version 2, a gap in the chain of its versions, or a version of it, earlier or later, that is a session not
   // cleared. That is refused at once too, as the detached part refuses it before anything is copied, and before any claim.
@@ -6690,7 +6690,7 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
   const running = runningCommand(ctx.home, e.name, ctx.alive);
   const handoff = guideHandoff(ctx, e, r, links, v2);
   // The way `finish` goes for a raw video and an iPhone clip (plan PR 10), so that the guide never sends one where `finish` will not take
-  // it: its Final Cut stages are for the Final Cut way alone. What the HyperFrames way reads of the disk (the video being made, the
+  // it. What the HyperFrames way reads of the disk (the video being made, the
   // project, its history and exports) is read for those two kinds only, and the project's not once a hand-off is written. A video the
   // gate holds (a session not cleared whatever its kind, or one held beside a session) has no way, and nothing of it is read (review I2).
   const way = !hidden && (kind === "raw" || kind === "short video") ? finishWay(ctx, r) : "";
@@ -6840,8 +6840,7 @@ const ON_THE_CHECK = "You do not need to wait for it. A spelling and handing it 
     and one she left alone are passed over; one from before the switch, which has no answer, is counted in `old`, and not guided.
     Of the versions of a video handed off under one id, the BRIMM Ops page's step is said once, for the one with the newest
     hand-off: the highest revision, and of two at one revision the later written. Another is passed over when its own next step
-    is that page's, or it has none; one whose step is brimm-video's or hers (held as a session, conflicted, shown in Final Cut
-    again since its finish) stays. A video whose finish only waits for its late check (`facts.checking`) says after the guide's lines
+    is that page's, or it has none; one whose step is brimm-video's or hers (held as a session, conflicted) stays. A video whose finish only waits for its late check (`facts.checking`) says after the guide's lines
     when Studio checks Dropbox's copies and what it then takes away, and that she need not wait for it (`also`). Her notes, the
     versions of every video and this Mac's measured speeds are read once. */
 function guideItems(ctx) {

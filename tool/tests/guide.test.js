@@ -214,7 +214,8 @@ const STAGE_ROWS = [
   [RAW({ finishRunning: true, placeholder: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
   [RAW({ placeholder: true }), "name", 'It needs its name before it is finished. Say "call it", then the name.'],
   [RAW(), "open-app", 'Say "open it in HyperFrames" to edit it there.'],
-  [RAW({ editedInFinalCut: true }), "open-app", FROM_FINAL_CUT],
+  [APP({ editedInFinalCut: true }), "open-app", FROM_FINAL_CUT],
+  [APP({ editedInFinalCut: true, way: "hyperframes" }), "open-app", 'Say "open it in HyperFrames" to edit it there.'],
   [SESSION({ choice: null }), "session-choice", "Choose what you want from it: its teachings, or the transcript only."],
   [SESSION({ choice: null, teachingsOn: false }), "session-off", OFF],
   [SESSION({ emptyOwed: true }), "session-empty-owed", 'Say "it was a session after all" again: its empty revision for the BRIMM Ops page is still to be written.'],
@@ -434,7 +435,7 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
     }
   });
   it("tells an episode edited in Final Cut before, with no project in use, that Studio does not use Final Cut now and to open it in HyperFrames from the recording", () => {
-    for (const over of [APP({ editedInFinalCut: true }), RAW({ editedInFinalCut: true })]) {
+    for (const over of [APP({ editedInFinalCut: true })]) {
       const n = nextFor({ ...BASE, ...over }, NONE, NOW);
       assert.deepEqual([n.stage, n.text], ["open-app", FROM_FINAL_CUT], JSON.stringify(over));
     }

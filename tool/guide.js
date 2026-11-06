@@ -364,7 +364,7 @@ function appStep(facts) {
   if (!facts.app) return toDo("app-off", APP_NOT_SET_UP);
   if (!project && facts.copy) return copyStep(facts.copy);
   // An episode from the Final Cut days: its Final Cut edits are not carried over, and it is made from the recording.
-  if (facts.editedInFinalCut) return toDo("open-app", FROM_FINAL_CUT);
+  if (facts.editedInFinalCut && facts.way === "unopened") return toDo("open-app", FROM_FINAL_CUT);
   return toDo("open-app", 'Say "open it in HyperFrames" to edit it there.');
 }
 
@@ -435,7 +435,7 @@ function videoNext(facts, notes, now) {
     return opsStep(facts, notes, now) || { done: true };
   }
   // The gate holds it as a session whose mark is not cleared, though its kind is another (a Dropbox conflict or a hand edit leaves one): `app`
-  // and `finish` refuse it, so it is sent neither to HyperFrames nor to Final Cut, and nothing of either is read for it (plan PR 10, review I2).
+  // and `finish` refuse it, so it is sent to HyperFrames no more than `finish` takes it, and nothing of it is read (plan PR 10, review I2).
   if (facts.gated) return toDo("session-mark", SESSION_MARK);
   if (facts.reading !== "done") {
     if (facts.readingsOff) return toDo("readings-off", "Readings are off on this Mac: ask Jason.");
