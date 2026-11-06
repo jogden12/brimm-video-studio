@@ -60,8 +60,9 @@ function dropboxRoot(root) {
 /** Every gated place of this Mac, by its real path: { path, readRules, kind, carve? }. `tmp` is Claude Code's temp folder
     (CLAUDE_CODE_TMPDIR, or /tmp, by its real path), `uid` this Mac user's id, and `zoomFolder` where Zoom keeps its recordings,
     by default Documents/Zoom in the home folder. */
-export function gatedPlaces({ home, root, uid, tmp = "/private/tmp", zoomFolder = join(home, "Documents", "Zoom") }) {
+export function gatedPlaces({ home, claudeHome = home, root, uid, tmp = "/private/tmp", zoomFolder = join(home, "Documents", "Zoom") }) {
   const AS = join(home, "Library", "Application Support");
+  const claudeAS = join(claudeHome, "Library", "Application Support");
   const BV = realOf(root);
   const DB = dropboxRoot(BV);
   const itself = (path, kind = "folder") => ({ path: realOf(path), readRules: [realOf(path)], kind });
@@ -75,10 +76,10 @@ export function gatedPlaces({ home, root, uid, tmp = "/private/tmp", zoomFolder 
     itself(join(home, "BRIMM Video Work")),
     itself(join(AS, "BRIMM Video")),
     carved(join(AS, "BRIMM Video Words"), "words"),
-    carved(join(home, ".claude"), "claude"),
+    carved(join(claudeHome, ".claude"), "claude"),
     carved(join(tmp, `claude-${uid}`), "tmp"),
-    carved(join(AS, "Claude"), "app"),
-    itself(join(home, ".claude.json"), "file"),
+    carved(join(claudeAS, "Claude"), "app"),
+    itself(join(claudeHome, ".claude.json"), "file"),
     itself(join(AS, "com.apple.sharedfilelist")),
     itself(join(home, "Library", "Preferences", "com.apple.finder.plist"), "file"),
     itself(join(home, ".dropbox")),
@@ -97,6 +98,38 @@ export function gatedPlaces({ home, root, uid, tmp = "/private/tmp", zoomFolder 
     itself(join(home, ".netrc"), "file"),
     itself(join(home, ".git-credentials"), "file"),
     itself(join(home, ".npmrc"), "file"),
+    ...(claudeHome === home ? [] : realHomeOnly(claudeHome, itself, carved)),
+  ];
+}
+
+/** The gated places of the real home when BRIMM_VIDEO_HOME gives Studio another: a program started as Jason, with his real HOME,
+    reaches these, so they are guarded as well as the scratch home's copies. (Claude Code's own are named by claudeHome above.) */
+function realHomeOnly(h, itself, carved) {
+  const AS = join(h, "Library", "Application Support");
+  const containers = join(h, "Library", "Containers");
+  return [
+    itself(join(h, "Documents", "Zoom")),
+    itself(join(h, "Movies", "Final Cut Backups")),
+    itself(join(h, "BRIMM Video Work")),
+    itself(join(AS, "BRIMM Video")),
+    carved(join(AS, "BRIMM Video Words"), "words"),
+    itself(join(AS, "com.apple.sharedfilelist")),
+    itself(join(h, "Library", "Preferences", "com.apple.finder.plist"), "file"),
+    itself(join(h, ".dropbox")),
+    itself(join(AS, "Dropbox")),
+    itself(join(h, "Library", "Group Containers", "G7HH3F8CAK.com.getdropbox.dropbox.sync")),
+    itself(join(containers, "com.getdropbox.dropbox.fileprovider")),
+    itself(join(containers, "com.getdropbox.dropbox.TransferExtension")),
+    itself(join(containers, "com.getdropbox.dropbox.garcon")),
+    itself(join(h, "Library", "Logs", "brimm-video.log"), "file"),
+    itself(join(h, "Library", "Logs", "brimm-video-claude-check.log"), "file"),
+    itself(join(h, ".ssh")),
+    itself(join(h, "Library", "Keychains")),
+    itself(join(h, ".aws")),
+    itself(join(h, ".config")),
+    itself(join(h, ".netrc"), "file"),
+    itself(join(h, ".git-credentials"), "file"),
+    itself(join(h, ".npmrc"), "file"),
   ];
 }
 
@@ -104,12 +137,12 @@ export function gatedPlaces({ home, root, uid, tmp = "/private/tmp", zoomFolder 
     places Bash itself needs (C36): her folder's own subfolder of Claude Code's temp folder, its shell snapshots and Claude Code's
     own program in the app's data. Each is the gated place's real path with the rest after it, never the real path of the whole:
     an open folder that is a link (Assets to Episodes, her temp folder to ~/.claude) would open where it leads. */
-export function readAllowed({ home, root, uid, tmp = "/private/tmp", folder }) {
+export function readAllowed({ home, claudeHome = home, root, uid, tmp = "/private/tmp", folder }) {
   return [
     join(realOf(root), "Assets"),
     join(realOf(join(tmp, `claude-${uid}`)), claudeDirName(folder)),
-    join(realOf(join(home, ".claude")), "shell-snapshots"),
-    join(realOf(join(home, "Library", "Application Support", "Claude")), "claude-code"),
+    join(realOf(join(claudeHome, ".claude")), "shell-snapshots"),
+    join(realOf(join(claudeHome, "Library", "Application Support", "Claude")), "claude-code"),
   ];
 }
 

@@ -221,6 +221,16 @@ describe("what was seen, in a line", () => {
   it("leaves the retakes out when there is no plan, since the rules never counted them", () => {
     for (const plan of [null, undefined]) assert.equal(seenLine({ facts: { ...WIDE, duration: 2529.6 }, plan, came: "camera" }), "wide, 42:10");
   });
+  it("ends \", no sound\" for a picture with no sound (PR H5a), with or without a plan, and never counts retakes in what has no words", () => {
+    assert.equal(seenLine({ facts: { ...UPRIGHT, duration: 8, sound: false }, plan: null, came: "phone" }), "upright, 0:08, no sound");
+    assert.equal(seenLine({ facts: { ...WIDE, duration: 120, sound: false }, plan: undefined, came: "camera" }), "wide, 2:00, no sound");
+    assert.equal(seenLine({ facts: { ...WIDE, duration: 120, sound: false }, plan: plan(3), came: "camera" }), "wide, 2:00, no sound");
+    // A video that has its sound says what it did, whether `sound` is true or not given.
+    assert.equal(seenLine({ facts: { ...WIDE, duration: 120, sound: true }, plan: plan(3), came: "camera" }), "wide, 2:00, 3 retakes");
+    assert.equal(seenLine({ facts: { ...WIDE, duration: 120 }, plan: null, came: "camera" }), "wide, 2:00");
+    // A file with no picture is "sound only", and says nothing of having no sound.
+    assert.equal(seenLine({ facts: { width: 0, height: 0, duration: 60, sound: true }, plan: null, came: "sound" }), "sound only, 1:00");
+  });
 });
 
 describe("what was seen, as a line a record may hold (isSeenLine)", () => {
@@ -231,6 +241,14 @@ describe("what was seen, as a line a record may hold (isSeenLine)", () => {
   });
   it("is false of anything else: other words, a line break, a path or a name, or anything that is not text", () => {
     for (const bad of ["", "wide", "tall, 2:00", "wide, 2:00, 3 retakes\n", "wide, 2:00\n    Guess: raw", "wide, 2:00\r", " wide, 2:00", "wide, 2:00, -1 retakes", "wide, 2:00, 1 retakes and more", "Coaching call Jane Doe.mov", "/Users/sallie/Dropbox/a.mov", "wide, 2:00, 3 retakes, 4", null, undefined, 5, {}, ["wide, 2:00"]]) assert.equal(isSeenLine(bad), false, JSON.stringify(bad));
+  });
+  it("takes \", no sound\" at the end of a picture's line, and there alone (PR H5a)", () => {
+    for (const good of ["upright, 0:08, no sound", "wide, 2:00, no sound", "wide, 1:02:05, no sound", "upright, 0:45, no sound"]) assert.equal(isSeenLine(good), true, good);
+    assert.equal(isSeenLine(seenLine({ facts: { ...UPRIGHT, duration: 8, sound: false }, plan: null, came: "phone" })), true);
+    for (const bad of [
+      "sound only, 0:08, no sound", "wide, 2:00, 3 retakes, no sound", "wide, 2:00, no retakes, no sound", "wide, 2:00, no sound, 3 retakes", "wide, 2:00, no sound, no sound",
+      "wide, no sound", "wide, 2:00 no sound", "wide, 2:00, no sound\n", "wide, 2:00, no sound\r", " wide, 2:00, no sound", "wide, 2:00, No sound", "wide, 2:00, no  sound", "wide, 2:00, no sounds",
+      "wide, 2:00, no sound at all", ", no sound", "no sound", "wide, 2:00,no sound", "wide, 2:00, no sound\n    Card: {}"]) assert.equal(isSeenLine(bad), false, JSON.stringify(bad));
   });
 });
 

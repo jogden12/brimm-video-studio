@@ -2,7 +2,8 @@
 // Claude call", and section 3): `kind` starts it detached as `read --now <folder> --kind <kind> --rev <rev>`, and the run asks
 // Claude once with that kind's request, then writes what it read by the rule. A finished video gets Reel suggestions and
 // spellings; a raw one gets cut decisions, notes, graphic ideas, Reel suggestions and spellings, and its rough cut rendered as
-// version 0; an iPhone clip gets spellings and a line on what it is. A session is read only for its teachings (F7's own tests).
+// version 0; an iPhone clip gets spellings, a line on what it is and up to three graphic cues, all kept in its record (its cut plan
+// is left as the import wrote it). A session is read only for its teachings (F7's own tests).
 // Then reels.json at version 2, whose candidates have no crops yet, and the readers that need crops, which refuse one.
 // Nothing here runs a real program or touches Dropbox: each test has a root and a home of its own, and Claude, ffprobe, ffmpeg,
 // QuickTime Player and the notice are stand-ins.
@@ -11,12 +12,13 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { editMain, pickReels } from "../edit.js";
-import { localStamp, recordFile, recordText } from "../episode.js";
+import { episodeFault, isFromPlan, localStamp, newPlannedEpisode, recordFile, recordText } from "../episode.js";
 import { episodeWork, pendingFolder, writeSettings } from "../settings.js";
 import { readResult, resultFile } from "../detached.js";
 import { writePending } from "../filing.js";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, roughCaptions, keptSpans, roughCutArgs, streamsOf } from "../cuts.js";
 import { applyDecisions } from "../notes.js";
+import { graphicCuesAsk } from "../graphic-cues.js";
 import { requestFor } from "../readings.js";
 import { stretchesOf } from "../reframe.js";
 import { CLAUDE_MODEL, AGAIN_MS } from "../unedited.js";
@@ -90,11 +92,17 @@ const FINISHED_REPLY = {
 const RAW_REPLY = {
   decisions: [{ id: "p6", keep: true, why: "The false start leads into the point." }],
   notes: "Open on the welcome.",
-  graphics: [{ id: "p7", idea: "A chart of what it costs" }],
+  graphicCues: [{ id: "p7", words: "know your costs", kind: "graphic", show: "A chart of what it costs", seconds: 4 }],
   clips: [{ from: "p4", to: "p5", hook: "What this is about", why: "It says what the talk is about.", point: "Pricing is the subject." }],
   spellings: [{ heard: "Sally", spelled: "Sallie", why: "It is her name." }]
 };
-const CLIP_REPLY = { spellings: [{ heard: "Sally", spelled: "Sallie", why: "It is her name." }], about: "A clip about knowing your costs." };
+/** The graphic cues of that reply as the cut plan keeps them: numbered, each with the phrase it was written for. */
+const RAW_CUES = [{ n: 1, words: "know your costs", kind: "graphic", show: "A chart of what it costs", seconds: 4, style: null, phrase: "p7" }];
+const CLIP_REPLY = {
+  spellings: [{ heard: "Sally", spelled: "Sallie", why: "It is her name." }],
+  about: "A clip about knowing your costs.",
+  graphicCues: [{ id: "p7", words: "know your costs", kind: "graphic", show: "A chart of what it costs", seconds: 4 }]
+};
 const REPLIES = { finished: FINISHED_REPLY, raw: RAW_REPLY, "short video": CLIP_REPLY };
 
 /** A Mac with the made-up recording imported lightly and answered as `kind`, its record with `over` laid on it, and Claude
@@ -296,6 +304,111 @@ describe("read, an iPhone clip", () => {
     assert.deepEqual(reread(found).writer, { commit: OWN_COMMIT, on: "Mac Studio" });
     t.done();
   });
+  describe("and its graphic cues (PR H2)", () => {
+    const PLAN_FILE = "Pricing talk.cut-plan.json";
+    /** Four cues, each for a phrase of the made-up plan: only three are kept. */
+    const FOUR = [["p3", "let me do that again"], ["p5", "talk about pricing"], ["p7", "know your costs"], ["p8", "very very important"]].map(([id, words]) => ({ id, words, kind: "words", show: `The words ${words} on screen.`, seconds: 3 }));
+
+    it("asks for them, three at most, in the line a raw video's request has", async () => {
+      const { t, asks } = reading("short video");
+      assert.equal((await on(t.ctx.deps, ...readArgs("short video"))).code, 0);
+      assert.equal(asks.length, 1);
+      assert.ok(asks[0].split("\n").includes(graphicCuesAsk(3)));
+      t.done();
+    });
+    it("keeps the three of four that it keeps in its record as reading.graphicCues, numbered from 1, each with the phrase it was written for", async () => {
+      const { t, found } = reading("short video", { reply: { ...CLIP_REPLY, graphicCues: FOUR } });
+      const r = await on(t.ctx.deps, ...readArgs("short video"));
+      assert.equal(r.code, 0, r.text);
+      assert.deepEqual(reread(found).reading.graphicCues, FOUR.slice(0, 3).map((c, i) => ({ n: i + 1, words: c.words, kind: "words", show: c.show, seconds: 3, style: null, phrase: c.id })));
+      t.done();
+    });
+    it("keeps none when Claude gave none, or gave only what cannot be used", async () => {
+      for (const graphicCues of [undefined, [], [{ id: "p7", words: "", kind: "graphic", show: "", seconds: 4 }], "none"]) {
+        const { t, found } = reading("short video", { reply: { spellings: CLIP_REPLY.spellings, about: CLIP_REPLY.about, ...(graphicCues === undefined ? {} : { graphicCues }) } });
+        const r = await on(t.ctx.deps, ...readArgs("short video"));
+        assert.equal(r.code, 0, r.text);
+        assert.deepEqual(reread(found).reading.graphicCues, [], `graphicCues: ${JSON.stringify(graphicCues) ?? "(none)"}`);
+        assert.deepEqual(readResult(t.home, FOLDER, "read").made, ["a line on what the clip is", "1 spelling to check"]);
+        t.done();
+      }
+    });
+    it("keeps them with its spellings and its line on what the clip is, in the one record write its reading already makes", async () => {
+      const { t, found, notices } = reading("short video");
+      const r = await on(t.ctx.deps, ...readArgs("short video"));
+      assert.equal(r.code, 0, r.text);
+      const record = reread(found);
+      assert.equal(record.rev, 2, "one record write");
+      assert.deepEqual(record.reading, { kind: "short video", model: CLAUDE_MODEL, at: localStamp(new Date(Date.parse(AT))), on: "Mac Studio", account: ACCOUNT, outcome: "read", about: CLIP_REPLY.about, graphicCues: RAW_CUES });
+      assert.deepEqual(record.offers.spellings, CLIP_REPLY.spellings);
+      assert.deepEqual(notices, [NOTICE]);
+      t.done();
+    });
+    it("says the same as before of what it made, and nothing of the cues", async () => {
+      const { t } = reading("short video");
+      assert.equal((await on(t.ctx.deps, ...readArgs("short video"))).code, 0);
+      const result = readResult(t.home, FOLDER, "read");
+      assert.deepEqual([result.ok, result.made, result.failed], [true, ["a line on what the clip is", "1 spelling to check"], []]);
+      t.done();
+    });
+    it("writes no cut plan, and nothing but the record: the plan, the cut log and every other file are as the import left them, nothing is set aside in history/, and only the record is put in", async () => {
+      const { t, found } = reading("short video");
+      const before = snapshot(found);
+      const was = reread(found);
+      assert.equal((await on(t.ctx.deps, ...readArgs("short video"))).code, 0);
+      const after = snapshot(found);
+      const files = (shot) => Object.fromEntries(Object.entries(shot).filter(([rel]) => !rel.startsWith("record/")));
+      assert.deepEqual(files(after), files(before));
+      assert.equal(after[PLAN_FILE], LIGHT_FILES[PLAN_FILE], "the plan is the rules', as the import wrote it");
+      assert.ok(!("claude" in JSON.parse(after[PLAN_FILE])));
+      assert.deepEqual(Object.keys(after).filter((rel) => rel.startsWith("history/")), []);
+      assert.deepEqual(t.clones.map(([, to]) => to), [recordFile(found.folder, 2)]);
+      assert.deepEqual(reread(found).files, was.files, "the record lists the files it listed");
+      t.done();
+    });
+    it("does not wait for the import's late check, which does not look at the record: it asks at once, with the check still to come, and leaves the plan the check looks at as it is", async () => {
+      const { t, found, asks } = reading("short video");
+      pendingFor(t, found);
+      const before = snapshot(found);
+      const r = await on(t.ctx.deps, ...readArgs("short video"));
+      assert.equal(r.code, 0, r.text);
+      assert.equal(asks.length, 1);
+      assert.ok(!t.waits.includes(READ_LOOK_MS), "no look at the import");
+      assert.ok(!t.waits.includes(LATE_CHECK_MS), "no late check of its own");
+      assert.deepEqual(reread(found).reading.graphicCues, RAW_CUES);
+      const files = (shot) => Object.fromEntries(Object.entries(shot).filter(([rel]) => !rel.startsWith("record/")));
+      assert.deepEqual(files(snapshot(found)), files(before));
+      t.done();
+    });
+    it("puts nothing in when the record changed while Claude was asked (the rev it was started from is expected), and says so in the words of a record-only write", async () => {
+      const asks = [];
+      const { t, found, notices } = reading("short video");
+      claudeDoing(t, CLIP_REPLY, asks, { then: () => writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), rev: 2, name: { text: "Pricing, renamed", placeholder: false } })) });
+      const r = await on(t.ctx.deps, ...readArgs("short video"));
+      assert.equal(r.code, 1);
+      assert.equal(reread(found).rev, 2);
+      assert.equal(reread(found).reading, undefined, "the record that is there is the other Mac's, without the reading");
+      assert.deepEqual(notices, []);
+      assert.deepEqual(readResult(t.home, FOLDER, "read").failed, ["Nothing was written: this episode changed while Claude read it."]);
+      t.done();
+    });
+    it("keeps the record as it was, and writes nothing of the cues, when Claude cannot be asked", async () => {
+      const { t, found } = reading("short video", { ended: ERRED });
+      const before = snapshot(found);
+      const r = await on(t.ctx.deps, ...readArgs("short video"));
+      assert.equal(r.code, 1);
+      assert.deepEqual(snapshot(found), before);
+      t.done();
+    });
+    it("never puts a word of a cue into its log or its result", async () => {
+      const SECRET = /Zebra|Quokka/;
+      const { t } = reading("short video", { reply: { ...CLIP_REPLY, graphicCues: [{ id: "p7", words: "know your costs Zebra", kind: "words", show: "Quokka on screen", seconds: 3 }] } });
+      const r = await on(t.ctx.deps, ...readArgs("short video"));
+      assert.equal(r.code, 0, r.text);
+      for (const what of [r.text, readFileSync(resultFile(t.home, FOLDER, "read"), "utf8").replace(/Claude says it is: [^"]*\. /, "")]) assert.doesNotMatch(what, SECRET);
+      t.done();
+    });
+  });
   it("has no Reels, which the list of Reels says as drop and push say it, naming no file", async () => {
     const { t, found } = reading("short video");
     for (const words of [["reels", FOLDER, "--no-play"], ["reel", "drop", FOLDER, "1"], ["push", FOLDER, "reel", "1"]]) {
@@ -303,6 +416,27 @@ describe("read, an iPhone clip", () => {
       assert.deepEqual([r.code, r.said], [1, ["A short video has no Reels."]], words.join(" "));
     }
     assert.equal(reread(found).rev, 1);
+    t.done();
+  });
+});
+
+describe("read, a video made from a plan (PR H5b)", () => {
+  /** The plan, kept whole in the record of the video its footage made (episode.js isFromPlan): the record is at layout 5. */
+  const planned = () => ({
+    ...newPlannedEpisode({ id: ID, machine: "Mac Studio", at: AT, title: "Pricing talk", route: "script", voice: null, writer: { commit: "c709b57", on: "Mac Studio" } }).planned,
+    set: AT, shots: [{ n: 1, kind: "talking", what: "Open." }], cues: [{ n: 1, words: "know your costs", kind: "words", show: "Her title.", seconds: 3, style: null }], lines: ["Know your costs."], filmed: { at: AT, parts: [ID] }
+  });
+  it("reads it as it reads a raw video: its plan stays whole in its record, and its cues are the guide's, which the reading does not change", async () => {
+    const { t, found, asks } = reading("raw", { over: { version: 5, planned: planned() } });
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 0, r.text);
+    assert.equal(asks.length, 1);
+    const record = reread(found);
+    assert.deepEqual([record.kind, record.reading.kind, isFromPlan(record), record.rev], ["raw", "raw", true, found.record.rev + 1]);
+    assert.deepEqual(record.planned, planned());
+    assert.equal(episodeFault(record), "");
+    // The reading kept its own cues in the cut plan, as for any raw video; the project is made from the guide's.
+    assert.deepEqual(JSON.parse(readFileSync(join(found.folder, "Pricing talk.cut-plan.json"), "utf8")).claude.graphicCues, RAW_CUES);
     t.done();
   });
 });
@@ -321,7 +455,9 @@ describe("read, a raw video", () => {
     assert.deepEqual(plan.pauses, HEARD);
     assert.equal(plan.by, "rules and Claude");
     assert.deepEqual(plan.claude.decisions, RAW_REPLY.decisions);
-    assert.deepEqual(plan.claude.graphics, RAW_REPLY.graphics);
+    assert.deepEqual(plan.claude.graphicCues, RAW_CUES);
+    assert.equal("graphics" in plan.claude, false);
+    assert.deepEqual(Object.keys(plan.claude), ["decisions", "graphicCues", "ignored", "clips"]);
     assert.match(readFileSync(join(found.folder, "Pricing talk.cut-plan.txt"), "utf8"), /^The times here are the recording's own, from its start\.\nClaude read this plan and changed it in 1 place\./);
     const rough = roughCaptions(withPauses.phrases, keptSpans(withPauses.ranges, FACTS.fps));
     assert.equal(readFileSync(join(found.folder, "Pricing talk.rough-cut.srt"), "utf8"), rough);
@@ -905,10 +1041,34 @@ describe("read gives up waiting for an import at work after READ_HOLD_MS (fix 6,
 });
 
 describe("the raw reading's version 0 (fix 7, fix 8, fix 9)", () => {
-  it("holds Claude's graphic ideas on its timeline", async () => {
+  it("holds Claude's graphic cues on its timeline as ideas, each at the moment its words start", async () => {
     const { t, found } = reading("raw");
     assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
-    assert.match(readFileSync(join(found.folder, "edit", "main.v0.fcpxml"), "utf8"), /Graphic idea: A chart of what it costs/);
+    // "know" of "know your costs" is said at 15.3 seconds, which is picture 459.
+    assert.match(readFileSync(join(found.folder, "edit", "main.v0.fcpxml"), "utf8"), /<marker start="459459\/30000s" duration="[^"]*" value="Graphic idea: A chart of what it costs"/);
+    t.done();
+  });
+  it("lists Claude's graphic cues in its notes under its ideas for graphics, at the time the words they go with are said, and those words", async () => {
+    const { t, found } = reading("raw");
+    assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
+    const notes = readFileSync(join(found.folder, "Pricing talk.edit-notes.txt"), "utf8");
+    // p7 starts at 0:13, and "know" of "know your costs" is said at 15.3 seconds.
+    assert.match(notes, /\n\nIts ideas for graphics\n0:15  "know your costs"  \|  A chart of what it costs\n\n/);
+    t.done();
+  });
+  it("has a marker for a cue placed in kept words, on the take she keeps when the words are said twice, and none for a cue that is not found or sits in a cut", async () => {
+    // "Welcome to the show" is said twice, and the rules cut the first take (p1): the cue names that take, which is cut, and is on the
+    // one that is kept. "the moon landing" is never said; p3 is cut by the rules.
+    const cue = (id, words, show) => ({ id, words, kind: "words", show, seconds: 3 });
+    const reply = { ...RAW_REPLY, graphicCues: [cue("p1", "Welcome to the show", "The show's name."), cue("p9", "the moon landing", "The moon."), cue("p3", "do that again", "A slow zoom."), RAW_REPLY.graphicCues[0]] };
+    const { t, found } = reading("raw", { reply });
+    assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
+    const xml = readFileSync(join(found.folder, "edit", "main.v0.fcpxml"), "utf8");
+    assert.deepEqual([...xml.matchAll(/<marker start="([^"]*)"[^>]*value="(Graphic idea[^"]*)"/g)].map((m) => `${m[1]} ${m[2]}`), ["182182/30000s Graphic idea: The show's name.", "459459/30000s Graphic idea: A chart of what it costs"]);
+    // The notes tell each by where it is placed: listed at the time its words are said, in a cut, or not found.
+    const notes = readFileSync(join(found.folder, "Pricing talk.edit-notes.txt"), "utf8");
+    assert.match(notes, /Its ideas for graphics\n0:06  "Welcome to the show"  \|  The show's name\.\n0:15  "know your costs"  \|  A chart of what it costs\n\n/);
+    assert.match(notes, /What could not be used from its reply\nGraphic idea 2: its words, "the moon landing", were not found in the video: The moon\.\nAn idea for a graphic sits on words that are cut, at 0:04: A slow zoom\.\n/);
     t.done();
   });
   it("opens the rough cut only once what it read is in the episode", async () => {

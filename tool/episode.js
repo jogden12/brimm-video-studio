@@ -27,10 +27,19 @@ export const RECORD_DIR = "record";
     handed to Final Cut, which may be version 0.
     Layout 4 (Studio) adds `app`: the HyperFrames projects made of the episode, with the toolchain's version (architecture
     2026-10-27, 7.1). It holds numbers, names, states and times, never a session's words.
-    A record is written at layout 2, 3 or 4 only once it holds one of them (layoutOf), so an episode that none of them has
+    Layout 5 (the HyperFrames-led path, PR H4) adds the planned episode: a record made in her chat from words she gave, before
+    any footage exists, with no video and no kind, and `planned`: its route, title, voice, cues, shots and teleprompter lines.
+    A record is written at layout 2, 3, 4 or 5 only once it holds one of them (layoutOf), so an episode that none of them has
     touched is still read by a Mac that knows layout 1 alone, and one that holds them is refused there, never changed by code
-    that would drop them. */
+    that would drop them. Layout 5 is written for a planned record, and for a part (PR H5a: a dropped video answered as footage for a
+    planned video, which holds `partOf`) alone: every other record stays at layout 4 or below, which is RECORD_VERSION, the newest
+    layout of every other record and the one a Mac on older code reads. So a Mac on older code reads a planned record as newer (it has
+    no video, which that Mac would read as an import that has not finished), and a part as newer too, and leaves both alone. */
 export const RECORD_VERSION = 4;
+/** The layout of a planned episode's record, and the newest layout this brimm-video reads and writes (NEWEST_VERSION): a record of
+    a higher layout is read for what it says and never written. */
+export const PLANNED_VERSION = 5;
+export const NEWEST_VERSION = PLANNED_VERSION;
 /** The name of a record file: its number, with four digits. */
 const RECORD_NAME = /^(\d{4})\.json$/;
 /** The record file of one rev, in an episode's folder. */
@@ -40,10 +49,27 @@ export const recordFile = (folder, rev) => join(folder, RECORD_DIR, `${String(re
     upright recording, which gets no Reels. And the switch's: "finished" (the editor's), "raw" (with retakes) and "session"
     (with a client or a group). A video not yet answered has none, and its kind is null (NO_KIND_STATES). */
 const KINDS = ["episode", "short video", "finished", "raw", "session"];
-/** While `answer.state` is one of these, a record may have no kind: the video is waiting for its answer, or has been left. */
-const NO_KIND_STATES = ["needs your answer", "not for brimm-video"];
-/** Where a video stands: waiting for its answer, answered, or left alone by the person ("leave"). */
-const ANSWER_STATES = ["needs your answer", "answered", "not for brimm-video"];
+/** While `answer.state` is one of these, a record may have no kind: the video is waiting for its answer, has been left, or is a part
+    (PR H5a): footage for a planned video, which no card can make anything else of until she takes it back. */
+const NO_KIND_STATES = ["needs your answer", "not for brimm-video", "part"];
+/** Where a video stands: waiting for its answer, answered, left alone by the person ("leave"), or answered as footage for a planned
+    video ("part"; `footage` writes it, with `partOf`, and `footage … none` takes it back). */
+const ANSWER_STATES = ["needs your answer", "answered", "not for brimm-video", "part"];
+/** The answer of a part. */
+const PART_STATE = "part";
+/** The kinds of part: the kinds of shot in a shot list (SHOT_LIST_KINDS), footage she films talking to the camera, a screen recording of work
+    on the computer, and b-roll; and (PR H6) the voiceover, a recording of sound alone that is the voice of an explainer, which is not a shot
+    of any list. */
+export const PART_KINDS = Object.freeze(["talking", "screen", "b-roll", "voiceover"]);
+/** Where a planned episode stands: planned, with no video to answer. It is no state of the card (ANSWER_STATES). */
+const PLANNED_STATE = "planned";
+/** The routes of a planned episode: a video she films from a script, and a video of graphics and words alone (an explainer). The
+    voice of an explainer is hers or a HeyGen voice; a script has none. */
+const PLANNED_ROUTES = ["script", "explainer"];
+const PLANNED_VOICES = ["sallie", "heygen"];
+/** The kinds of shot in a shot list: talking to the camera, a screen recording of work on the computer, and b-roll of her working
+    or in a coaching session (design 5, step 2). */
+export const SHOT_LIST_KINDS = Object.freeze(["talking", "screen", "b-roll"]);
 /** How a video came: from a camera or a phone, as a Zoom download, or as sound alone. */
 const CAMES = ["camera", "phone", "zoom", "sound"];
 /** Where a Reel candidate has got to: Claude's pick, kept by a person, dropped by one, or finished. */
@@ -103,10 +129,32 @@ const isId = (v) => typeof v === "string" && /^e-\d{8}-[0-9a-f]{6}$/.test(v);
     video came, the episode whose words the import found in it (`match`, an id, or null when none), and once answered, who
     answered, on which Mac, when, and whether it is a private session. How it came is null when the import could not read the
     file's facts, and what was seen is then "". The match is only what her card offers first: the record is a new version of
-    that episode (`versionOf`) once she says so, never by the import. */
-const isAnswer = (a) => isObject(a) && ANSWER_STATES.includes(a.state) && (a.guess === null || isText(a.guess)) && typeof a.seen === "string" && (a.came === null || CAMES.includes(a.came))
+    that episode (`versionOf`) once she says so, never by the import. A planned episode's answer is none of the card's
+    (isPlannedAnswer). */
+const isCardAnswer = (a) => ANSWER_STATES.includes(a.state) && (a.guess === null || isText(a.guess)) && typeof a.seen === "string" && (a.came === null || CAMES.includes(a.came))
   && (a.match === undefined || a.match === null || isId(a.match))
   && (a.by === undefined || isText(a.by)) && (a.on === undefined || isText(a.on)) && (a.at === undefined || isTime(a.at)) && (a.private === undefined || ["yes", "no"].includes(a.private));
+/** The answer of a planned episode (layout 5): it says "planned", who made it (`plan new`), on which Mac and when, and that it is not a
+    private session. It has no guess, no sight of a video, no way it came and no match: nothing was imported. It is the whole of it, so
+    that a record is taken for a planned one on exactly this answer. */
+const isPlannedAnswer = (a) => isObject(a) && a.state === PLANNED_STATE && isText(a.by) && isText(a.on) && isTime(a.at) && a.private === "no"
+  && ["guess", "seen", "came", "match"].every((key) => a[key] === undefined);
+/** The answer of a part (PR H5a): the card's own facts (what the import saw, how it came, its guess and match) as they were, and the
+    state "part", with who answered (`footage`), on which Mac, when, and that it is no private session, as `kind` writes them. */
+const isPartAnswer = (a) => isCardAnswer(a) && a.state === PART_STATE && isText(a.by) && isText(a.on) && isTime(a.at) && a.private === "no";
+const isAnswer = (a) => isObject(a) && (a.state === PLANNED_STATE ? isPlannedAnswer(a) : a.state === PART_STATE ? isPartAnswer(a) : isCardAnswer(a));
+
+/** What a part is footage for (PR H5a): `{ id, as, shot, client }`, and nothing else. `id` is the planned episode's; `as` the kind of part
+    (PART_KINDS); `shot` the number of the shot in the plan's shot list that a screen recording or b-roll shows, a whole number from 1,
+    and null for a talking part, which has none (Studio puts the talking parts in order by their words); `client` whether it shows a
+    client, a client's name or their work, which a talking part never does (it is her talking to the camera). A voiceover (PR H6) is sound
+    alone: it has no shot, and no client to ask about, so its `client` is null (not false: nothing was asked). */
+const isPartOf = (p) => isObject(p) && Object.keys(p).length === 4 && isId(p.id) && PART_KINDS.includes(p.as)
+  && (p.as === "voiceover" ? p.shot === null && p.client === null
+    : typeof p.client === "boolean" && (p.as === "talking" ? p.shot === null && p.client === false : Number.isInteger(p.shot) && p.shot >= 1));
+/** Whether a record is a part: no kind, the answer "part" and a whole `partOf`. A part is gated like any video with no kind (gate.js
+    gated), and named by its label. The record read whole (faultFor) holds more: layout 5 and a video. */
+export const isPart = (r) => isObject(r) && r.kind === null && isObject(r.answer) && r.answer.state === PART_STATE && isPartOf(r.partOf);
 /** The keys of each list of a session's items that she may change by her command, by the list: sessions.js EDITS, which a test
     holds this to (episode.js reads no module of a session's). */
 export const SESSION_EDITS = { principles: ["name", "category", "description", "example_application"], recurringPrinciples: ["text"], reelIdeas: ["idea", "words", "why"] };
@@ -140,11 +188,13 @@ const isSession = (x) => isObject(x) && isTime(x.marked) && isText(x.on) && (x.t
   && listOf(x.agreed, isAgreement)
   && (x.emptyRevision === undefined || x.emptyRevision === "owed" || (Number.isInteger(x.emptyRevision) && x.emptyRevision >= 1));
 /** What the one Claude call did (layout 3): which kind it read as, with which model, when, where, as which account, and how it
-    ended; and for a session's reading, the teachings file it wrote (`principles`), `<name>.principles.json` in the episode's
-    own folder. */
+    ended; for a session's reading, the teachings file it wrote (`principles`), `<name>.principles.json` in the episode's own
+    folder; and for an iPhone clip's, the one line on what the clip is (`about`) and the graphic cues it read (`graphicCues`, PR H2),
+    a list of cues as graphic-cues.js has them, which the clip's main project is given (graphicCuesOfRecord reads them again). */
 const isTeachingsFile = (v) => typeof v === "string" && v.length > ".principles.json".length && v.endsWith(".principles.json") && !/[/\\]/.test(v) && !v.startsWith(".");
 const isReading = (x) => isObject(x) && isText(x.kind) && isText(x.model) && isTime(x.at) && isText(x.on) && typeof x.account === "string" && isText(x.outcome)
-  && (x.principles === undefined || isTeachingsFile(x.principles));
+  && (x.principles === undefined || isTeachingsFile(x.principles))
+  && (x.graphicCues === undefined || (Array.isArray(x.graphicCues) && x.graphicCues.every(isObject)));
 /** A field of layout 3 that may be missing or null, and is checked when it is there. */
 const optional = (v, ok) => v === undefined || v === null || ok(v);
 
@@ -163,6 +213,51 @@ const isAppProject = (p) => isObject(p) && /^(?:main|reel [1-9]\d*|clip [1-9]\d*
 /** The HyperFrames projects of an episode (layout 4): the pinned toolchain's version, and each project. */
 const isApp = (x) => isObject(x) && isText(x.toolchain) && Array.isArray(x.projects) && x.projects.every(isAppProject);
 
+/** A shot of a planned episode's shot list (layout 5): its number from 1, its kind (SHOT_LIST_KINDS) and what it is. */
+const isPlannedShot = (s) => isObject(s) && Number.isInteger(s.n) && s.n >= 1 && SHOT_LIST_KINDS.includes(s.kind) && isText(s.what);
+/** One client's agreement to a part being shown in a project (PR H5a), as `plan … agreed` records it: the part by its episode's id, never
+    by its file (whose name may be a client's, and a plan's record is not gated), its label, and the day her click noted the agreement
+    (isDay). Nothing else: who agreed, and what she typed, stay on the Mac that noted them (agreements.txt). */
+const isConsent = (c) => isObject(c) && Object.keys(c).length === 3 && isId(c.id) && isText(c.label) && isDay(c.at);
+/** The HyperFrames project of a HeyGen explainer before its voice is taken in (PR H6), as the plan keeps it: `{ name, madeAt, on, opened }`, and nothing
+    else. `name` is the project's folder in the plan's work folder on the Mac `on` that made it, at the moment `madeAt`, and `opened` the moments it was
+    opened in the app since, which `app` adds to. The name is one folder's name: a name that leads anywhere else is none. */
+const isPlannedProject = (p) => isObject(p) && Object.keys(p).length === 4 && isText(p.name) && p.name !== "." && p.name !== ".." && !/[/\\\0]/.test(p.name)
+  && isTime(p.madeAt) && isText(p.on) && Array.isArray(p.opened) && p.opened.every(isTime);
+
+/** A planned episode's `planned` (layout 5), read whole: its route and title; its voice, which an explainer may have and a script
+    never does; when and on which Mac it was planned and when its package was last set (`set`, or null before the first); the
+    cues, which graphic-cues.js reads and so are only looked at as objects here; the shots; the teleprompter's lines; `filmed`
+    (PR H5): null while there is no footage; `consent` (PR H5a), once a client's agreement is noted for any part: a list of
+    { id, label, at } (isConsent); and `project` (PR H6), once a HeyGen explainer's project is made: { name, madeAt, on, opened }
+    (isPlannedProject), which only an explainer read by a HeyGen voice has. A plan with none of these has none: each key is there only
+    once there is something to keep in it. */
+const isPlanned = (p) => isObject(p) && PLANNED_ROUTES.includes(p.route) && isText(p.title)
+  && (p.voice === null || (p.route === "explainer" && PLANNED_VOICES.includes(p.voice)))
+  && isTime(p.at) && isText(p.on) && (p.set === null || isTime(p.set))
+  && Array.isArray(p.cues) && p.cues.every(isObject) && Array.isArray(p.shots) && p.shots.every(isPlannedShot)
+  && Array.isArray(p.lines) && p.lines.every((line) => typeof line === "string")
+  && (p.filmed === null || isTime(p.filmed) || isObject(p.filmed))
+  && (p.consent === undefined || (Array.isArray(p.consent) && p.consent.every(isConsent)))
+  && (p.project === undefined || (p.route === "explainer" && p.voice === "heygen" && isPlannedProject(p.project)));
+/** Whether a record is a planned episode, whole: the one record with no kind that is not gated (gate.js gated). It is none unless all
+    of these hold, and a record that only claims to be planned, failing any, is a video not yet answered to every command:
+    - its answer says "planned" and is a planned answer's (isPlannedAnswer);
+    - its `planned` is whole (isPlanned);
+    - it has no video (`video` is null) and no kind (`kind` is null), since it was made in her chat from words she gave and never
+      from a file, so it cannot be a client's or a group's session;
+    - it was written at layout 5, which a Mac on older code reads as newer; and
+    - it holds no session mark.
+    It reads nothing else of the record, and anything that is not an object is none. */
+export const isPlannedRecord = (r) => isObject(r) && r.version === PLANNED_VERSION && r.kind === null && r.video === null && isPlannedAnswer(r.answer) && isPlanned(r.planned)
+  && (r.session === undefined || r.session === null);
+
+/** Whether a record is a video made from a plan (PR H5b): the plan's own record, written once more as the video its footage made when she said
+    all the footage was in (`join`). It holds the plan it was (`planned`, whole), the video that was made (`video`) and a kind of its own, "raw"
+    or "short video". It is no plan waiting for its footage (isPlannedRecord is false of it: it has a video and a kind), and it is gated as any
+    answered video is. Its plan is kept in it, so that it stays at layout 5; its `planned.filmed` says when and of which parts it was made. */
+export const isFromPlan = (r) => isObject(r) && isObject(r.video) && KINDS.includes(r.kind) && isPlanned(r.planned);
+
 /** The kind of a record as a person means it: "raw", "finished", "session" or "short video", or null while the video waits for
     its answer. An "episode" is a raw recording imported before the switch. */
 export function kindOf(r) {
@@ -178,10 +273,13 @@ export function kindOf(r) {
     gate holds (gate.js gated): a session is named by its name, which is its label (F3 sets it in the same write as the mark,
     and F7 checks any rename), but never by a name that is still its file's; and a record of another kind whose session mark is
     not cleared is named by its label, and either of them, with no label, as "a client or group session (<short id>)". A
-    record that has no name to give, as a conflicted copy that is not whole may be, is named by its short id. */
+    record that has no name to give, as a conflicted copy that is not whole may be, is named by its short id. A planned episode
+    (isPlannedRecord) is the one record with no kind that is named by its name, which is its title: it was made in her chat from
+    words she gave, and never from a file. A record that only claims to be planned is named as any record with no kind is. */
 export function shownName(r) {
   const short = isObject(r) && typeof r.id === "string" ? r.id.slice(-6) : "";
   const label = isObject(r) && isText(r.label) ? r.label : "";
+  if (isPlannedRecord(r)) return isObject(r.name) && isText(r.name.text) ? r.name.text : r.planned.title;
   if (kindOf(r) === null) return label || `a video not yet answered (${short})`;
   const name = isObject(r.name) && isText(r.name.text) ? r.name.text : "";
   if (!gated(r)) return name || `an episode (${short})`;
@@ -202,8 +300,11 @@ function filesName(r) {
 /** The layout a record is written at: 3 once it holds anything of the switch (a kind other than "episode" or "short video",
     and having none is one; an answer, a session mark, a reading, or the episode it is a version of; or a version with a `how`,
     one that was rendered); otherwise 2 once it holds a layer of phase 4 (a spelling, a text, a graphic, a cut, the logo, a
-    preset, a Reel's captions turned off, or the logo's picture); and 1 while it holds none. */
+    preset, a Reel's captions turned off, or the logo's picture); and 1 while it holds none. 4 once it holds `app`, and 5 once it holds
+    a plan (`planned`) or what a part is footage for (`partOf`, PR H5a): that is a planned episode's layout, and a part's, and it stays
+    5 whatever else the record comes to hold. */
 export function layoutOf(r) {
+  if (isObject(r.planned) || isObject(r.partOf)) return PLANNED_VERSION;
   if (r.app !== undefined && r.app !== null) return 4;
   const layered =(x) => Boolean(x) && (["texts", "graphics", "cuts"].some((k) => Array.isArray(x[k]) && x[k].length > 0) || x.logo === true || Boolean(x.preset) || x.captions === false);
   const withHow = (x) => Boolean(x) && Array.isArray(x.pushed) && x.pushed.some((p) => isObject(p) && p.how !== undefined);
@@ -246,7 +347,9 @@ export const shown = (at) => String(at || "").slice(0, 16).replace("T", " ");
     `fingerprint` of its words, and `versionOf`, the id of the episode it is a new version of, which the import never gives:
     her answer sets it. A record made without them is a record of layout 1.
     The video was recorded on the day its file says, when it says one, and otherwise on the day of the import. Its name is
-    the video's own, without its ending, until a person gives it one. Its rev is 0 until writeEpisode first writes it. */
+    the video's own, without its ending, until a person gives it one. A video with a picture and no sound (the import gives
+    `video.sound` false, PR H5a) says so in its record: `video.sound` is false; a video that has its sound says nothing of it.
+    Its rev is 0 until writeEpisode first writes it. */
 export function newEpisode({ id, machine, at, video, kind, writer, files = {}, title = null, reels = [], answer = null, label = "", fingerprint = "", versionOf = null }) {
   const made = video.created ? new Date(video.created) : null;
   const dated = made !== null && Number.isFinite(made.getTime()) && made.getFullYear() >= FIRST_YEAR;
@@ -256,7 +359,7 @@ export function newEpisode({ id, machine, at, video, kind, writer, files = {}, t
     rev: 0,
     writer,
     kind,
-    video: { file: video.file, bytes: video.bytes, seconds: video.seconds, recorded: dated ? localDay(made) : at.slice(0, 10), recordedFrom: dated ? "video" : "import" },
+    video: { file: video.file, bytes: video.bytes, seconds: video.seconds, recorded: dated ? localDay(made) : at.slice(0, 10), recordedFrom: dated ? "video" : "import", ...(video.sound === false ? { sound: false } : {}) },
     imported: { on: machine, at },
     name: { text: basename(video.file, extname(video.file)), placeholder: true },
     title,
@@ -277,6 +380,38 @@ export function newEpisode({ id, machine, at, video, kind, writer, files = {}, t
   return { ...record, version: layoutOf(record) };
 }
 
+/** The record of a planned episode (layout 5): a video planned in her chat from a script, before any footage exists, so it has no
+    video and no kind. `route` is "script" or "explainer", the `title` is the words she gave, the `voice` is an explainer's
+    ("sallie" or "heygen", or null while it has none) and a script's is null, `machine` and `at` are where and when it was planned
+    (localStamp), and the `writer` is { commit, on }. It holds the answer "planned" (isPlannedAnswer), named by its title, and no
+    package yet: no cues, shots or lines (`plan … set` fills them), and no footage (`filmed` is null; PR H5). Its rev is 0 until
+    writeEpisode first writes it. Every other field is that of a video's record, as newEpisode has it, so that nothing that reads a
+    record has to know a planned one is different. */
+export function newPlannedEpisode({ id, machine, at, title, route, voice = null, writer }) {
+  return {
+    version: PLANNED_VERSION,
+    id,
+    rev: 0,
+    writer,
+    kind: null,
+    video: null,
+    imported: { on: machine, at },
+    name: { text: title, placeholder: false },
+    title: null,
+    editing: null,
+    released: null,
+    archived: null,
+    files: {},
+    spellings: [],
+    main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed: [], base: null },
+    reels: [],
+    libraries: {},
+    finished: null,
+    answer: { state: PLANNED_STATE, by: "plan new", on: machine, at, private: "no" },
+    planned: { route, title, voice, at, on: machine, set: null, cues: [], shots: [], lines: [], filmed: null }
+  };
+}
+
 /** What is wrong with a record, in plain words, by a brimm-video that reads the layouts up to `known`: "" when it is a whole
     record. Fields it does not know are not looked at, since they are kept as they are. Of the fields of layout 3, which are
     all optional, each is checked only when it is there. `episodeFault` is this for the layout this brimm-video reads; another
@@ -286,12 +421,17 @@ export const faultFor = (known) => (r) => {
   if (!Number.isInteger(r.version) || r.version < 1 || r.version > known) return `it is version ${JSON.stringify(r.version)}, and this brimm-video reads versions 1 to ${known}`;
   const v = r.video;
   const m = r.main;
+  // A record with no video, and a record with no kind but the answer "planned", are whole only as a planned episode is: a planned
+  // answer, a whole `planned`, and nothing of a video.
+  const planAlone = isPlannedAnswer(r.answer) && isPlanned(r.planned);
+  // A part (PR H5a) holds `partOf`, which a record has only with the answer "part", and the answer "part" only with it.
+  const hasPart = r.partOf !== undefined && r.partOf !== null;
   const faults = [
     [/^e-\d{8}-[0-9a-f]{6}$/.test(r.id), "its id cannot be read"],
     [Number.isInteger(r.rev) && r.rev >= 1, "its rev cannot be read"],
     [isObject(r.writer) && isText(r.writer.commit) && isText(r.writer.on), "who last wrote it cannot be read"],
-    [KINDS.includes(r.kind) || (r.kind === null && isObject(r.answer) && NO_KIND_STATES.includes(r.answer.state)), "its kind cannot be read"],
-    [isObject(v) && isText(v.file) && !v.file.includes("/") && isCount(v.bytes) && isNumber(v.seconds) && v.seconds >= 0 && /^\d{4}-\d{2}-\d{2}$/.test(v.recorded) && ["video", "import"].includes(v.recordedFrom), "its video cannot be read"],
+    [KINDS.includes(r.kind) || (r.kind === null && isObject(r.answer) && (NO_KIND_STATES.includes(r.answer.state) || (planAlone && v === null))), "its kind cannot be read"],
+    [(isObject(v) && isText(v.file) && !v.file.includes("/") && isCount(v.bytes) && isNumber(v.seconds) && v.seconds >= 0 && /^\d{4}-\d{2}-\d{2}$/.test(v.recorded) && ["video", "import"].includes(v.recordedFrom) && (v.sound === undefined || v.sound === false)) || (v === null && r.kind === null && planAlone), "its video cannot be read"],
     [isObject(r.imported) && isText(r.imported.on) && isTime(r.imported.at), "where and when it was imported cannot be read"],
     [isObject(r.name) && isText(r.name.text) && typeof r.name.placeholder === "boolean", "its name cannot be read"],
     [r.title === null || (isObject(r.title) && isText(r.title.text) && ["claude", "person"].includes(r.title.from) && typeof r.title.approved === "boolean"), "its title cannot be read"],
@@ -305,19 +445,21 @@ export const faultFor = (known) => (r) => {
     [Array.isArray(r.reels) && r.reels.every(isReel), "its Reels cannot be read"],
     [isObject(r.libraries) && Object.values(r.libraries).every(isText), "its libraries cannot be read"],
     [r.finished === null || (isObject(r.finished) && Number.isInteger(r.finished.revision) && r.finished.revision >= 1 && isTime(r.finished.at) && isText(r.finished.on)), "whether it is finished cannot be read"],
-    [optional(r.answer, isAnswer), "its answer cannot be read"],
+    [optional(r.answer, isAnswer) && (!isObject(r.answer) || r.answer.state !== PLANNED_STATE || (r.kind === null && v === null && isPlanned(r.planned))) && (!isObject(r.answer) || r.answer.state !== PART_STATE || hasPart), "its answer cannot be read"],
     [r.label === undefined || typeof r.label === "string", "its label cannot be read"],
     [r.fingerprint === undefined || typeof r.fingerprint === "string", "its fingerprint cannot be read"],
     [optional(r.versionOf, isText), "which episode it is a version of cannot be read"],
     [optional(r.session, isSession), "its session mark cannot be read"],
     [optional(r.reading, isReading), "its reading by Claude cannot be read"],
-    [optional(r.app, isApp), "its HyperFrames projects cannot be read"]
+    [optional(r.app, isApp), "its HyperFrames projects cannot be read"],
+    [r.planned === undefined || r.planned === null || (isPlanned(r.planned) && r.version >= PLANNED_VERSION), "its plan cannot be read"],
+    [!hasPart || (isPartOf(r.partOf) && r.version >= PLANNED_VERSION && r.kind === null && isObject(r.answer) && r.answer.state === PART_STATE), "which plan it is footage for cannot be read"]
   ];
   const found = faults.find(([ok]) => !ok);
   return found ? found[1] : "";
 };
 /** What is wrong with a record, in plain words: "" when it is a whole record of a layout this brimm-video reads. */
-export const episodeFault = faultFor(RECORD_VERSION);
+export const episodeFault = faultFor(NEWEST_VERSION);
 
 /** The text a record file holds: the record, two spaces to a level, and a line end. */
 export const recordText = (record) => JSON.stringify(record, null, 2) + "\n";
@@ -420,7 +562,7 @@ function recordIn(folder, n, known) {
     while Dropbox brings it over, is passed over here, and stops a write (writeEpisode). With `pastCopies`, which `resolve`
     alone gives, the conflicted copies are passed over, and the newest whole record is read as if they were not there. `known`
     is the newest layout this brimm-video reads: a test gives an older one, to stand in for a Mac on older code. */
-export function readEpisode(folder, { pastCopies = false, known = RECORD_VERSION } = {}) {
+export function readEpisode(folder, { pastCopies = false, known = NEWEST_VERSION } = {}) {
   let names;
   try {
     names = everything(folder);
@@ -493,7 +635,7 @@ export function undone(record, home) {
     was. `pastCopies`, which `resolve` alone gives, writes past the conflicted copies, as it sorts them out one at a time. */
 export function writeEpisode(folder, record, { expectRev, writeText, writer, home, pastCopies = false }) {
   if (!Number.isInteger(expectRev) || expectRev < 0) throw new Error("the episode's record was not written, because the rev it was read at was not given");
-  if (isObject(record) && Number.isInteger(record.version) && record.version > RECORD_VERSION) throw Object.assign(new Error("Jason has a newer brimm-video. Ask him to update this Mac."), { code: "NEWER" });
+  if (isObject(record) && Number.isInteger(record.version) && record.version > NEWEST_VERSION) throw Object.assign(new Error("Jason has a newer brimm-video. Ask him to update this Mac."), { code: "NEWER" });
   const copies = conflictedCopies(folder);
   if (copies.length && !pastCopies) throw Object.assign(new Error(conflictWhy(copies)), { code: "CONFLICTED" });
   if (recordNumbers(folder).some((n) => n > expectRev)) throw Object.assign(new Error("this episode changed on the other Mac: open it again"), { code: "CHANGED" });

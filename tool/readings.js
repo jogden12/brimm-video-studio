@@ -1,8 +1,9 @@
 // Having Claude read the words of a video, whatever kind of video it is: what it is asked of each kind, and how its reply is read.
 // There are four kinds. A finished video is asked for Reel suggestions and for the spellings of names and words. A raw video is
 // asked what notes.js asks, with the spellings and the point of each clip as well. A short video, filmed on an iPhone, is asked
-// for the spellings and one line on what it is. A session, a private recording with a client or a group, is asked for what the
-// host teaches, as general principles, and for Reel ideas.
+// for the spellings, one line on what it is, and at most three graphic cues (PR H2). A session, a private recording with a client or
+// a group, is asked for what the host teaches, as general principles, and for Reel ideas, and never for a graphic cue.
+// A Reel of a finished video is asked once more, at the Reel, for its graphic cues alone (reelCuesRequest, PR H2).
 // What Claude is given is the words and the time each phrase starts, with the same guard lines as in notes.js. It is not given
 // what the rules decided, except for a raw video: the rules' cuts are not used for the other kinds. It is never given a session's
 // file name, and is asked to leave out of every field the client's name, business, industry, numbers and story.
@@ -11,6 +12,7 @@
 // never guessed at.
 // Nothing here touches a disk, runs a program or asks Claude anything. It takes plain data and gives back plain data.
 import { notesRequest, readNotes, objectIn, asked, section, runsOf, oneLine, ASK, GUARD, DATA } from "./notes.js";
+import { graphicCuesAsk, graphicCuesInReply, CLIP_CUES_MOST, REEL_CUES_MOST } from "./graphic-cues.js";
 import { plain, stamp, list } from "./shared/text.js";
 import { SHOW, HOST } from "./shared/show.js";
 import { REEL_MIN, REEL_MAX } from "./reframe.js";
@@ -51,7 +53,7 @@ const RECURRING = `- "recurring_principles": a list of short sentences, each a p
 const REEL_IDEAS = `- "reel_ideas": a list of {"from", "to", "idea", "words", "why", "refilm", "principle"}, only from stretches where ${HOST} alone speaks, judged from the words and the speaker labels. "from" and "to" are the ids of the phrases it runs from and to. "idea" is what the Reel would say, in one sentence; "words" are the words she would say in it; "why" is one sentence. "refilm" is true when it is better filmed again by her on its own, and false when the stretch could be cut from the session as it is. "principle" is the place in "frameworks", counted from 1, of the framework it shows, or null. An empty list when nothing fits.`;
 
 /** What a raw video is asked: what notes.js asks, less the title, with the point of each clip and the spellings as well. */
-const RAW_TASK = [ASK.start, ASK.decisions, ASK.notes, ASK.graphics, `${ASK.clips} Each clip has a "point" too: one sentence on the point it makes.`, SPELLINGS].join("\n");
+const RAW_TASK = [ASK.start, ASK.decisions, ASK.notes, ASK.graphicCues, `${ASK.clips} Each clip has a "point" too: one sentence on the point it makes.`, SPELLINGS].join("\n");
 
 /** The file and the length, which a finished video and a short video are shown. */
 const fileAndLength = (about) => [`File: ${oneLine(about.video)}`, `Length: ${stamp(Math.round(about.duration))}`];
@@ -66,7 +68,7 @@ const ASKS = {
   "short video": {
     opening: `This is a short video for ${SHOW}, filmed on an iPhone. The host is ${HOST}, founder of The BRIMM.`,
     recording: fileAndLength,
-    task: [START, SPELLINGS, ABOUT]
+    task: [START, SPELLINGS, ABOUT, graphicCuesAsk(CLIP_CUES_MOST)]
   },
   session: {
     opening: `This is a recording of a private session that ${HOST}, founder of The BRIMM, held with a client or with a group. What is wanted from it is what she teaches, as general principles, and nothing about the people she teaches.`,
@@ -160,11 +162,15 @@ const readFinished = (reply) => reading(reply, ["suggestions", "spellings"], () 
   entries("spellings", read.spellings, spelling, badSpelling);
 });
 
-const readShort = (reply) => reading(reply, ["spellings", "about"], () => ({ spellings: [], about: "" }), (data, read, entries) => {
+const readShort = (reply) => reading(reply, ["spellings", "about", "graphicCues"], () => ({ spellings: [], about: "", graphicCues: [] }), (data, read, entries) => {
   entries("spellings", read.spellings, spelling, badSpelling);
   if (data.about === undefined) read.problems.push('Its reply has no "about".');
   else if (typeof data.about !== "string") read.problems.push('"about" in its reply is not text, so it was left out.');
   else read.about = oneLine(data.about);
+  // Its graphic cues are read as a raw video's are, but three at most.
+  const cues = graphicCuesInReply(data, CLIP_CUES_MOST);
+  read.graphicCues = cues.cues;
+  read.problems.push(...cues.problems);
 });
 
 const readSession = (reply, about) => reading(reply, ["frameworks", "recurring_principles", "reel_ideas"], () => ({ principles: [], recurringPrinciples: [], reelIdeas: [], spellings: [] }), (data, read, entries) => {
@@ -188,7 +194,7 @@ const readSession = (reply, about) => reading(reply, ["frameworks", "recurring_p
     not asked for, so nothing is said of one that is not text. */
 function readRaw(reply) {
   const old = readNotes(reply);
-  const read = { decisions: old.decisions, notes: old.notes, graphics: old.graphics, suggestions: [], spellings: [], problems: old.problems.filter((problem) => problem !== TITLE_NOT_TEXT) };
+  const read = { decisions: old.decisions, notes: old.notes, graphicCues: old.graphicCues, suggestions: [], spellings: [], problems: old.problems.filter((problem) => problem !== TITLE_NOT_TEXT) };
   const data = typeof reply === "string" ? objectIn(reply).data : null;
   if (!asked(data)) return read;
   const clips = list(data.clips);
@@ -196,6 +202,43 @@ function readRaw(reply) {
   listsOf(data, read.problems)("spellings", read.spellings, spelling, badSpelling);
   return read;
 }
+
+// --- A Reel's cues, for a Reel of a video her editor finished (PR H2) ---
+// The reading of a finished video stays as it was ruled on 2026-10-22: Reel suggestions and spellings, nothing more. When she makes a Reel
+// from it, Claude is asked once more, of that Reel's stretch alone, for the Reel's graphic cues ("Yes, at the Reel", Jason, 2026-11-03).
+
+const REEL_OPENING = `This is one stretch of a finished video for ${SHOW}, edited by her editor and ready to post. It is going to be a vertical Reel of its own. The host is ${HOST}, founder of The BRIMM.`;
+
+const REEL_PHRASES = "Each line inside <phrases> is one phrase of the stretch: its id, the time it starts in the video, and its words. A phrase ends at a pause or at the end of a sentence.";
+
+/** The lines of the request for a Reel's cues, one for each phrase of the plan that the Reel's `stretch` ({ start, end } in seconds of the
+    video) holds: `p7 | 0:13 | So the first thing…`, the phrase's id, the time it starts in the video and its words on one line, with any
+    section tag in them written plainly (see untagged). A phrase is in the stretch when its middle is: one that only touches an edge is
+    not, as a word of a Reel is (project.js reelWords). None for phrases that are not a list or a stretch that is not one. */
+export function reelPhraseLines(phrases, stretch) {
+  const { start, end } = stretch !== null && typeof stretch === "object" ? stretch : {};
+  if (!(Number.isFinite(start) && Number.isFinite(end) && end > start)) return [];
+  const inside = (p) => p !== null && typeof p === "object" && Number.isFinite(p.start) && Number.isFinite(p.end) && (p.start + p.end) / 2 >= start && (p.start + p.end) / 2 <= end;
+  return list(phrases).filter(inside).map((p) => `${p.id} | ${stamp(p.start)} | ${untagged(oneLine(p.text))}`);
+}
+
+/** The whole text of the request to Claude for a Reel's graphic cues: `lines` are the phrases of the Reel's stretch (reelPhraseLines),
+    and `about` is {video, duration}: the finished video's file name and the stretch's length in seconds. It is shown the stretch alone,
+    with the same guard lines as every request, what comes from the recording written plainly, and what is asked last, after everything
+    that comes from the recording: the graphic cues, three at most, and nothing else. */
+export function reelCuesRequest(lines, about) {
+  const named = about !== null && typeof about === "object" ? about : {};
+  const shown = list(lines).map((line) => untagged(oneLine(line)));
+  const recording = [`File: ${oneLine(named.video)}`, `The stretch is ${stamp(Math.round(named.duration))} long.`];
+  return [`${REEL_OPENING}\n\n${GUARD}`, section("recording", recording), REEL_PHRASES, section("phrases", shown), DATA, section("task", [[START, graphicCuesAsk(REEL_CUES_MOST)].join("\n")])].join("\n\n");
+}
+
+/** Claude's reply to the request for a Reel's cues, read into { cues, problems }: the cues as a raw video's are read, three at most. */
+export const readReelCues = (reply) => reading(reply, ["graphicCues"], () => ({ cues: [] }), (data, read) => {
+  const cues = graphicCuesInReply(data, REEL_CUES_MOST);
+  read.cues = cues.cues;
+  read.problems.push(...cues.problems);
+});
 
 const READERS = { finished: readFinished, raw: readRaw, session: readSession, "short video": readShort };
 
@@ -205,9 +248,10 @@ const READERS = { finished: readFinished, raw: readRaw, session: readSession, "s
     The things read are:
     - "finished": {suggestions, spellings}. A suggestion is {n, from, to, first, last, why, point}: the ids of its first phrase and
       its last, and the rest as texts, which may be empty. At most eight are read. A spelling is {heard, spelled, why}.
-    - "raw": {decisions, notes, graphics, suggestions, spellings}. The first three are as readNotes reads them. A suggestion is a
+    - "raw": {decisions, notes, graphicCues, suggestions, spellings}. The first three are as readNotes reads them. A suggestion is a
       clip as readNotes reads it, {n, from, to, hook, why}, with its `point`. A reply's title is not read.
-    - "short video": {spellings, about}: its `about` is one line on what the clip is.
+    - "short video": {spellings, about, graphicCues}: its `about` is one line on what the clip is, and its `graphicCues` are read as a
+      raw video's are (graphicCuesInReply), three at most.
     - "session": {principles, recurringPrinciples, reelIdeas, spellings}. A principle is {n, name, category, description, steps,
       red_flags, green_flags, decision_criteria, example_application, verbatim_key_phrases, source_context}. A recurring principle
       is {n, text}. A Reel idea is {n, from, to, idea, words, why, refilm, principle}: `principle` is the `n` of the principle it

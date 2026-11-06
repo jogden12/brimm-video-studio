@@ -512,7 +512,7 @@ describe("the installer's own text", () => {
   });
   it("for one of the two Macs, makes Episodes, marks the drop folder and writes the settings through settings.js, and ends by saying where to drop a video", () => {
     const made = text.slice(text.indexOf('if [[ -n "$machine" ]]; then\n  mkdir -p'), text.indexOf("agent \"$node\" > \"$AGENT_FILE\""));
-    assert.ok(made.includes('mkdir -p "$root/Episodes/.importing" "$WORK/From Final Cut"'), made);
+    assert.ok(made.includes('mkdir -p "$root/Episodes/.importing" "$root/References" "$WORK/From Final Cut"'), made);
     // A library's backups stay on Final Cut's default (B4, the lead's ruling), so no folder is made for them. The one line that names
     // them says what the open lock keeps from Claude, Final Cut's backups among it.
     const backups = text.split("\n").filter((line) => /backup/i.test(line));
@@ -852,6 +852,7 @@ describe("the installer for one of the two Macs (--machine), asked what it would
       `  Its marker there, ${d.root}/Unedited Video/Mac Studio/.brimm-watched-by, saying:  Mac Studio`,
       `  Episodes, to make in Dropbox:  ${d.root}/Episodes`,
       `  The import status files, to make in Dropbox:  ${d.root}/Episodes/.importing`,
+      `  The reference folder, to make in Dropbox:  ${d.root}/References`,
       "  On this Mac:  <home>/BRIMM Video Work/From Final Cut"
     ]) assert.ok(out.includes(`\n${line}\n`), `${line}\n---\n${out}`);
     assert.ok(out.includes(`  This Mac's settings, in <home>/Library/Application Support/BRIMM Video/settings.json:\n{\n  "version": 1,\n  "machine": "Mac Studio",\n  "root": "${d.root}",\n  "checkout": "${dirname(HERE)}"\n}\n`), out);
@@ -1815,7 +1816,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
       assert.deepEqual([r.status, r.stdout, r.stderr], [1, [
         "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:",
         "",
-        `The settings were not written, so they and the launch agent are as they were. This run did make ${dir}/BRIMM Video/Drop/Mac Studio and its marker, and the folders for Episodes and its status files and for Final Cut's work, which a later run uses. Deal with what is said above, then run this again.`,
+        `The settings were not written, so they and the launch agent are as they were. This run did make ${dir}/BRIMM Video/Drop/Mac Studio and its marker, and the folders for Episodes and its status files, for the reference pictures and for Final Cut's work, which a later run uses. Deal with what is said above, then run this again.`,
         ""
       ].join("\n"), ""]);
       // The marker was asked for, then the write, and nothing after it: her folder for Claude is not written.

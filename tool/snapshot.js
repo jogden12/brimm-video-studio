@@ -237,7 +237,8 @@ export function keepAssets({ aside, dir, files, fs = nodeFs }) {
     Which is newer is the record's own order of listing, never the clock that named a snapshot (a Mac whose clock is behind names its
     snapshot earlier than the one it was rebuilt from): a snapshot stands where its first file stands in `files`, and the one listed last is
     the newest. A release adds its files at the end of the list ({ ...record.files, ...copies }) and nothing in this tool sorts or builds
-    the list again, so the order of the list is the order the releases were written in. */
+    the list again, so the order of the list is the order the releases were written in. A planned episode's record (PR H4) lists only its
+    package's three files, none under `app-snapshot/`, so it has no snapshot and is passed over. */
 export function snapshotsOf(files) {
   const found = new Map();
   let at = 0;

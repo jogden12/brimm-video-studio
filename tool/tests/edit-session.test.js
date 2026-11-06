@@ -643,6 +643,19 @@ describe("cut", () => {
     assert.equal(ideas().length, 1);
     t.done();
   });
+  it("takes Claude's graphic cue for the words a cut took out off the next push, and puts it back, at the moment its words start, when they are kept again", async () => {
+    const cues = [{ n: 1, words: "know your costs", kind: "graphic", show: "A chart of what it costs", seconds: 4, style: null, phrase: "p7" }, { n: 2, words: "the moon landing", kind: "graphic", show: "The moon.", seconds: 4, style: null, phrase: "p9" }];
+    const { t } = episode({}, {}, episodeFiles({ claude: { graphicCues: cues } }));
+    const ideas = () => tags(handed(t, "main"), "marker").filter((m) => m.value.startsWith("Graphic idea"));
+    assert.equal((await on(t.ctx.deps, "cut", FOLDER, "remove", "--words", "know your costs")).code, 0);
+    assert.equal((await on(t.ctx.deps, "push", FOLDER)).code, 0);
+    assert.deepEqual(ideas(), []);
+    assert.equal((await on(t.ctx.deps, "cut", FOLDER, "keep", "--words", "know your costs")).code, 0);
+    assert.equal((await on(t.ctx.deps, "push", FOLDER, "--no-hand-edits")).code, 0);
+    // "know" is said at 15.3 seconds, which is picture 459. The cue whose words are not said has no marker.
+    assert.deepEqual(ideas().map((m) => [m.start, m.value]), [["459459/30000s", "Graphic idea: A chart of what it costs"]]);
+    t.done();
+  });
   it("leaves out of the next push a name title whose moment a cut took out, and says so", async () => {
     const { t } = episode();
     assert.equal((await on(t.ctx.deps, "text", FOLDER, "add", "lower-third", "--at", "0:01", "--line", "Sallie Ogden")).code, 0);
