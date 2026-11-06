@@ -26,7 +26,7 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
     const said = block.join(" ").replace(/\s+/g, " ");
     assert.ok(said.includes("A finished video whose hand-off is written is told to hand off the Reels once a Reel is exported from HyperFrames that the hand-off does not hold."), said);
     // What it said before is still said: the raw video, the iPhone clip and the Final Cut way.
-    for (const words of ["A raw video and an iPhone clip are followed through HyperFrames", "and once it is exported, to hand it off", "A raw video that was edited by hand before is told so, and to open it in HyperFrames, from the recording"]) assert.ok(said.includes(words), words);
+    for (const words of ["A raw video and an iPhone clip are followed through HyperFrames", "and once it is exported, to hand it off", "A raw video that was edited in Final Cut before is told so, and to open it in HyperFrames, from the recording"]) assert.ok(said.includes(words), words);
   });
   it("says in the README's rows for guide what the stage is, when, where it comes, and what it leaves out", () => {
     const first = row('| `guide ["<video>"]`');
@@ -63,7 +63,7 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
       assert.ok(guide.trimEnd().split("\n").length <= 30, `${which}: ${guide.split("\n").length} lines`);
       const next = guide.split("\n").find((line) => line.startsWith("- Any other next step:"));
       assert.ok(next && next.includes(run) && !next.includes("Shall I hand"), `${which}: ${next}`);
-      assert.ok(next.indexOf('"Shall I open it in HyperFrames?"') >= 0 && !/Final Cut/.test(next) && next.indexOf("as the table below says.") < next.indexOf(run), `${which}: the offers stay, and the run follows them`);
+      assert.ok(next.indexOf('"Shall I open it in HyperFrames?"') >= 0 && next.includes("also for a video it says was edited in Final Cut before") && next.indexOf("as the table below says.") < next.indexOf(run), `${which}: the offers stay, and the run follows them`);
       assert.ok(skill.split("\n").length < 270, `${which}: ${skill.split("\n").length} lines`);
     }
     // The two skills' sections on the guide, and their rows and section on handing off, are the same words.

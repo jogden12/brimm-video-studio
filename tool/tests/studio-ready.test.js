@@ -16,7 +16,7 @@ describe("her skill's Not ready yet", () => {
     for (const word of LANDED) assert.doesNotMatch(notReady, new RegExp(`\\b${word}\\b`, "i"), word);
   });
   it("says what is not ready, and no longer a logo, a look or her hand edits, which were Final Cut's (Phase 2)", () => {
-    assert.doesNotMatch(skill, /A logo or a look on a Reel|Bringing in her hand edits|Final Cut/);
+    assert.doesNotMatch(skill.split("also for a video it says was edited in Final Cut before").join(""), /A logo or a look on a Reel|Bringing in her hand edits|Final Cut/);
     assert.ok(notReady.includes('- Archiving, checking the setup, freeing space: "That isn\'t ready yet; ask Jason."'), notReady);
   });
 });

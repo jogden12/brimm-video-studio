@@ -15,6 +15,9 @@ const GUIDE_LINE = `It was edited in Final Cut before. Studio doesn't use Final 
 /** What may still say it, in the file it is in: the whole string (`exact`) or a part of it (`has`), and why. None is a word she is shown. */
 const ALLOWED = [
   { file: "guide.js", has: GUIDE_LINE, why: "F6's one line for an episode edited in Final Cut before: the guide's word, and the one place she is told" },
+  { file: "SKILL.md", has: "also for a video it says was edited in Final Cut before", why: "the skill tells Claude to offer HyperFrames for the video the guide's one line (F6) is said of, naming it as the guide does" },
+  { file: "SKILL-open.md", has: "also for a video it says was edited in Final Cut before", why: "the same offer, in the twin skill" },
+  { file: "edit.js", has: "was edited in Final Cut before is told so, and to open it in HyperFrames", why: "HELP's description of what the guide says for such a video (F6's line); help for Claude, the guide's own words" },
   { file: "cuts.js", exact: ".fcpxml", why: "the file ending an earlier import's outputs had; unedited.js still clears it when it redoes a video. A path, never printed" },
   { file: "names.js", has: ".fcpxml", why: "where an old record's timeline file sits in the episode's folder (edit.js reads it to tell an old import); a path, never printed" },
   { file: "edit.js", exact: "pushed", why: "the record field of an old Final Cut timeline, left out of the compare of two copies of a record (twice); a field name, never printed" },

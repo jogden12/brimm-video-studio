@@ -77,9 +77,6 @@ const LABEL = "Video of 14 Oct, 09:12 (Mac Studio)";
 /** A light import's files of the made-up video: the video and its plan, and no timeline of its own (edit/main.v0.fcpxml). */
 const LIGHT = { "Pricing talk.mp4": "the video", "Pricing talk.cut-plan.json": "{}", "Pricing talk.srt": "1\n00:00:00,000 --> 00:00:02,000\nHello\n", "Pricing talk.transcript.txt": "[0:00] Hello" };
 
-describe("push of a video that has no timeline in Final Cut, and an error nobody foresaw for a record of the switch (item 20)", () => {
-});
-
 /** A session mark, as `kind … session` writes it, with `cleared` as given. */
 const markOf = (cleared) => ({ marked: AT, on: "Mac Studio", teachings: null, cleared });
 /** A mark cleared by her click on the dialog: the one clearing the gate takes. */
