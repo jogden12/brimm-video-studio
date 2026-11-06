@@ -407,6 +407,19 @@ describe("plan … set", () => {
     assert.deepEqual(readdirSync(join(folder, "record")), ["0001.json", "0002.json"], "the record it would have written is not there");
     t.done();
   });
+  it("says a conflicted copy kept meanwhile as she sees it: one full stop, and what she can say", async () => {
+    const t = setup();
+    const folder = await planned(t);
+    const clone = t.ctx.deps.clone;
+    let seen = 0;
+    const racing = (from, to) => {
+      clone(from, to);
+      if (basename(to) === "teleprompter.txt" && !seen++) writeFileSync(join(folder, "record", "0001 (Sallie's conflicted copy 2026-10-20).json"), "{}");
+    };
+    const r = await on(depsOf(t, { clone: racing }), "plan", TITLE, "set", "--line", "One.");
+    assert.deepEqual([r.code, r.said], [1, ['Nothing was saved: Dropbox has kept a conflicted copy of it: say "sort out the conflict".']]);
+    t.done();
+  });
   it("writes no record, and no file, when any entry fails: each problem is said on its own line, then that nothing was saved, with 1", async () => {
     const t = setup();
     const folder = await planned(t);

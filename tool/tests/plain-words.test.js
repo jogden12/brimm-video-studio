@@ -52,7 +52,7 @@ describe("a status keeps its stored step and is shown in plain words", () => {
 });
 
 describe("what she can try is told", () => {
-  it("says, of footage that could not be made, to open it again in a few minutes and to tell Jason if it says so again", () => {
+  it("says, of footage that could not be made, that opening it again will not change that, and to tell Jason", () => {
     assert.equal(footageNotMadeWords("Pricing talk"), "Some of its footage could not be made for HyperFrames, and opening it again won't change that. Tell Jason.");
     assert.equal(footageNotInWords("Pricing talk"), 'Some of its footage could not be put into the project. Say "open Pricing talk in HyperFrames" again. If it says this again, tell Jason.');
   });

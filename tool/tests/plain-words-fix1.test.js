@@ -27,7 +27,7 @@ describe("R4c fix 1", () => {
       'Dropbox has kept a conflicted copy in this episode: a. Say "sort out the conflict".');
   });
   it("a plan's conflicted copy says what she can say", () => {
-    assert.equal(notWritten({ code: "CONFLICTED" }), 'Dropbox has kept a conflicted copy of it: say "sort out the conflict".');
+    assert.equal(notWritten({ code: "CONFLICTED" }), 'Dropbox has kept a conflicted copy of it: say "sort out the conflict"');
   });
   it("a step in the middle of a sentence keeps Dropbox's capital", () => {
     assert.equal(midSentence(shownStep("Late check")), "Dropbox's check of its copies");
