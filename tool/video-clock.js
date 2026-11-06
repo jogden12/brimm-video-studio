@@ -47,9 +47,7 @@ export function videoClock(found, ctx, part = "main") {
     return { why: `${wordsFile} cannot be read.` };
   }
   if (!file || !Array.isArray(file.words)) return { why: `${wordsFile} cannot be read.` };
-  // An iPhone clip has no cut plan of its own: its words are placed with no phrases, as the project places them, so a stray plan file moves none.
-  const phrases = record.kind !== "short video" && Array.isArray(plan.phrases) ? plan.phrases : [];
-  const words = spellWords(saidWords(file.words, phrases), record.spellings);
+  const words = spellWords(saidWords(file.words, Array.isArray(plan.phrases) ? plan.phrases : []), record.spellings);
   const length = Number.isFinite(file.duration) && file.duration > 0 ? file.duration : words.reduce((end, w) => Math.max(end, w.end), 0);
   const [from, to] = stretch ? [stretch.from, stretch.to] : [0, length];
   return { clock: [{ at: 0, from, to }], on: stretch ? `Reel ${part.reel}` : "the video", words, raw: file.words, plan, ...(stretch ? { span: stretch } : {}) };

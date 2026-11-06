@@ -5301,8 +5301,8 @@ function graphicIdeas(read, spellings = []) {
     of its video guide, planned.cues read again as a package's are, every kind of cue among them, since its project is made from those and from the
     reading's none; any other video lists the reading's (graphicIdeas). Each is placed on the words of the recording as the reading's are. */
 function ideasFor(read, record) {
-  // An iPhone clip's are the ones its reading kept in its record, placed with no phrases, as its project places them (app.js).
-  if (record.kind === "short video") return graphicIdeas({ ...read, plan: { ...read.plan, phrases: [], claude: { graphicCues: graphicCuesOfRecord(record) } } }, record.spellings);
+  // An iPhone clip's are the ones its reading kept in its record (app.js), placed on its words with its cut plan's phrases as any main video's are.
+  if (record.kind === "short video") return graphicIdeas({ ...read, plan: { ...read.plan, claude: { graphicCues: graphicCuesOfRecord(record) } } }, record.spellings);
   if (!isFromPlan(record)) return graphicIdeas(read, record.spellings);
   const cues = graphicCuesOf(record.planned.cues, { kinds: GRAPHIC_CUE_KINDS }).cues;
   return graphicIdeas({ ...read, plan: { ...read.plan, claude: { ...(read.plan.claude || {}), graphicCues: cues } } }, record.spellings);

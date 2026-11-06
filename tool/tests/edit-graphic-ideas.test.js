@@ -548,13 +548,14 @@ describe("graphic ideas match the project's own cue file", () => {
     assert.deepEqual(printed(r.text), projectList(found, { kind: "main", graphicCues: graphicCuesOf(found.record.planned.cues, { kinds: GRAPHIC_CUE_KINDS }).cues }));
     t.done();
   });
-  it("for an iPhone clip, whose words are placed with no phrases", async () => {
-    const cues = [{ n: 1, words: "know your costs", kind: "graphic", show: "A chart.", seconds: 4, style: null, phrase: "p7" }, { n: 2, words: "very important", kind: "words", show: "A word.", seconds: 3, style: null, phrase: "p8" }];
+  it("for an iPhone clip, its words placed with its cut plan's phrases as for any main video", async () => {
+    // Both are said just after a pause, where the cut plan's phrases start the words later than the transcriber did: 0:04 and 0:14, not 0:03 and 0:13.
+    const cues = [{ n: 1, words: "Let me do that again", kind: "graphic", show: "A chart.", seconds: 4, style: null }, { n: 2, words: "So the first thing", kind: "words", show: "A word.", seconds: 3, style: null }];
     const reading = { kind: "short video", model: "claude-sonnet-4-5", at: AT, on: "Mac Studio", account: "", outcome: "read", about: "A clip.", graphicCues: cues };
     const { t, found } = episode({ version: 3, kind: "short video", reading }, {}, withCues([]));
     const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
     assert.equal(r.code, 0, r.text);
-    assert.deepEqual(printed(r.text), projectList(found, { kind: "main", graphicCues: graphicCuesOfRecord(found.record), plan: { ...planOf(found), phrases: [] } }));
+    assert.deepEqual(printed(r.text), projectList(found, { kind: "main", graphicCues: graphicCuesOfRecord(found.record), short: true }));
     assert.equal(printed(r.text).length, 2, r.text);
     t.done();
   });

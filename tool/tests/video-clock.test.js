@@ -69,12 +69,12 @@ describe("videoClock", () => {
     t.done();
     gone.t.done();
   });
-  it("places an iPhone clip's words with no phrases, whatever plan file is in the folder", () => {
+  it("places an iPhone clip's words with its cut plan's phrases, as any main video's", () => {
     const { t, found } = episode({ version: 3, kind: "short video" });
     const words = JSON.parse(EPISODE.files["Pricing talk.words.json"]).words;
     const got = videoClock(found, t.ctx, "main");
-    assert.deepEqual(got.words, saidWords(words, []));
-    assert.notDeepEqual(got.words, saidWords(words, JSON.parse(EPISODE.files["Pricing talk.cut-plan.json"]).phrases));
+    assert.deepEqual(got.words, saidWords(words, JSON.parse(EPISODE.files["Pricing talk.cut-plan.json"]).phrases));
+    assert.notDeepEqual(got.words, saidWords(words, []));
     t.done();
   });
   it("says why when the cut plan is listed but cannot be read", () => {
