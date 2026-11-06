@@ -2026,7 +2026,11 @@ export async function status(ctx, rest) {
       lines.push(ranLine(ctx, shown, r, clean, isGated(e) ? "" : nextOf(ctx, folder, r), own, voicing));
     }
     // A copy of footage the last run could not make (its result; none while a run of the copy is at work) is said once, with what to do first.
-    if (footageFailed(ctx, folder)) lines.push(`Some of the footage for "${shown}" could not be made. Say "open ${shown} in HyperFrames" again; if it says so again, ask Jason.`);
+    // A gated video is named by its label alone, and is not told to open it, which the gate refuses.
+    if (footageFailed(ctx, folder)) {
+      lines.push(isGated(e) ? `Some of the footage for "${gatedName(gatedRecord(e), e.held)}" could not be made. Ask Jason.`
+        : `Some of the footage for "${shown}" could not be made. Say "open ${shown} in HyperFrames" again; if it says so again, ask Jason.`);
+    }
   }
   for (const line of lines.length ? lines : ["Nothing is running, and nothing is waiting."]) say(line);
   return 0;

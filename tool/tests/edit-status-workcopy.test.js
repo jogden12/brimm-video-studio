@@ -187,8 +187,9 @@ describe("status: the working copy", () => {
     const { t } = world({ record: UNANSWERED });
     left(t, "workcopy", 3 * 60000, { footageFailed: [SHOT_2] });
     const r = await howFar(t);
-    const shown = `${UNANSWERED.label} (${ID.slice(-6)})`;
-    assert.ok(r.said.includes(NOT_MADE(shown)), r.text);
+    // The gate refuses "open" for it: the line names it by its label alone and sends her to Jason.
+    assert.ok(r.said.includes(`Some of the footage for "${UNANSWERED.label}" could not be made. Ask Jason.`), r.text);
+    assert.ok(!r.text.includes("open"), r.text);
     for (const given of [FOLDER, "Pricing", "mp4"]) assert.ok(!r.text.includes(given), `${given} in ${r.text}`);
     t.done();
   });
