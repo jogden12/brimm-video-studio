@@ -3,10 +3,11 @@
 // program the command runs. ffprobe answers for the raw video and for what is made of it, ffmpeg under the watchdog writes a few
 // words into the file it is asked for, and the progress panel is a recorder, so that no test runs ffmpeg or any other program.
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain } from "../edit.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
+import { fileId, writePending } from "../filing.js";
 import { episodeWork } from "../settings.js";
 import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 import { FOLDER, listAll, reread } from "./episodes.js";
@@ -81,3 +82,16 @@ export function atWork(t, command) {
 
 /** What the episode's folder in Dropbox holds, and what its record says: a command that writes none leaves both as they were. */
 export const dropbox = (found) => [listAll(found.folder), reread(found).rev];
+
+/** This Mac owes the late check of the made-up episode's video (R1b), and holds the file the import came from: a drop file of the
+    video's size and of another time than the episode's own, so that a key made from it would be a wrong one. `over` is laid on the
+    pending check. Gives { drop }, the drop file's path. */
+export function owedWithLocal(t, found, { ago = 5 * 60 * 1000, over = {} } = {}) {
+  const drop = join(t.home, "Drop", "Pricing talk.mp4");
+  mkdirSync(join(t.home, "Drop"), { recursive: true });
+  const bytes = found.record.video.bytes;
+  writeFileSync(drop, "d".repeat(bytes));
+  utimesSync(drop, new Date(1_700_000_000_000), new Date(1_700_000_000_000));
+  writePending(t.home, { version: 1, id: found.record.id, name: found.name, folder: found.folder, video: found.record.video.file, bytes, seconds: 23.423, drop, dropFile: fileId(drop), importId: "k3j9x", work: "/work", entries: [], lastCopy: t.now() - ago, root: t.root, machine: "Mac Studio", planTxt: "Pricing talk.cut-plan.txt", ...over });
+  return { drop };
+}
