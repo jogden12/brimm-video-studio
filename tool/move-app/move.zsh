@@ -58,6 +58,8 @@ R41=()               # the report's lines for check 41
 R42_COMMIT="" R42_TESTS=""   # the report's lines for the code: the commit (short sha and subject), and the tests' ℹ summary lines
 R42_KEY="" R42_SSH=""   # the report's lines for check 42: whether the key is on GitHub and how, and what ssh -T printed
 ROOT="" DROP="" CHECKOUT_NOW="" NODE="" CLAUDE=""
+R43_VERSION=""       # the report's line for check 43: the HyperFrames app's version
+R44_PRINT="" R44_RAN="" R44_AGENT="" R44_APP=""   # the report's lines for check 44: the print's lines that matter, the install's last lines, the one-shot check, and turning HyperFrames on
 
 say() {
   print -r -- "$@"
@@ -586,8 +588,188 @@ get_the_code() {
   fi
   run_the_tests
 }
-find_the_app() { heading "4. The HyperFrames app (check 43)"; }
-run_the_installer() { heading "5. Studio's installer (check 44)"; }
+# Step 4, check 43: the HyperFrames app is on this Mac. Its version is noted for the report; when it is not here, its page is
+# opened in Safari for Sallie to download it, and the app waits.
+find_the_app() {
+  heading "4. The HyperFrames app (check 43)"
+  local version
+  while true; do
+    if [[ -d "$HF_APP" ]]; then
+      version="$(plutil -extract CFBundleShortVersionString raw -o - "$HF_APP/Contents/Info.plist" 2>/dev/null || true)"
+      say "  HyperFrames app:  version ${version:-that could not be read}, at $HF_APP"
+      R43_VERSION="${version:-unreadable}"
+      return 0
+    fi
+    say "  HyperFrames app:  not here ($HF_APP)."
+    R43_VERSION="not here"
+    if [[ -n "$PRINT_ONLY" ]]; then
+      would "open the HyperFrames page in Safari ($HF_PAGE) with: open -a Safari $HF_PAGE, and wait for the app to be put in Applications"
+      return 0
+    fi
+    open -a Safari "$HF_PAGE" || true
+    wait_for "The HyperFrames page is open in Safari ($HF_PAGE). Download the app there, drag it into Applications, and open it once."
+  done
+}
+
+# Step 5, check 44: Studio's own installer, shown first with --print, then run for real on a y.
+# The installer's options come from INSTALL_OPTIONS and nowhere else.
+PRINT_TOLD="" PRINT_RC=0
+# The installer's line as it is typed, for a would.
+installer_line() {
+  local word shown=""
+  for word in "${INSTALL_OPTIONS[@]}"; do
+    [[ "$word" == *[[:space:]\']* ]] && word="\"$word\""
+    shown+=" $word"
+  done
+  print -r -- "zsh \"$STUDIO/tool/install.sh\" --print$shown \"$ROOT\""
+}
+# Runs the installer's own --print and shows it. Its text is kept in PRINT_TOLD and its status in PRINT_RC.
+installer_print() {
+  PRINT_RC=0
+  PRINT_TOLD="$(zsh "$STUDIO/tool/install.sh" --print "${INSTALL_OPTIONS[@]}" "$ROOT" 2>&1)" || PRINT_RC=$?
+  say "$PRINT_TOLD"
+}
+print_has() { print -r -- "$PRINT_TOLD" | grep -q -- "$1"; }
+# The last lines of what the installer said, for a stop and for the report.
+last_lines() { print -r -- "$1" | tail -n "${2:-8}"; }
+
+turn_on_hyperframes() {
+  local shown app drop out fresh="${1-}"
+  if [[ ! -f "$STUDIO/tool/settings.js" ]]; then
+    stop_here "$STUDIO/tool/settings.js is not there, so the editing app cannot be looked at."
+  fi
+  shown="$("$NODE" "$STUDIO/tool/settings.js" show 2>/dev/null || true)"
+  app="$(print -r -- "$shown" | sed -n 's/^  The editing app:  //p' | head -n 1 || true)"
+  drop="$(print -r -- "$shown" | sed -n 's/^  Its drop folder:  //p' | head -n 1 || true)"
+  if [[ "$app" == hyperframes ]]; then
+    done_already "HyperFrames is on as the editing app"
+    R44_APP="it was on already"
+  elif [[ -n "$PRINT_ONLY" ]]; then
+    would "ask to turn HyperFrames on as the editing app, with: node \"$STUDIO/tool/settings.js\" set --app hyperframes"
+    R44_APP="not turned on: this was a print"
+  else
+    ask "This turns HyperFrames on as the editing app here (it is ${app:-off} now), with: node tool/settings.js set --app hyperframes, in Studio's code. Nothing else in her settings changes."
+    out="$("$NODE" "$STUDIO/tool/settings.js" set --app hyperframes 2>&1)" || stop_here "HyperFrames could not be turned on. It said: $out"
+    say "  $out"
+    R44_APP="$out"
+    changed+=("turned HyperFrames on as the editing app")
+    fresh=yes
+  fi
+  # Her drop folder, shown in Finder, where Dropbox is told to keep it on this Mac.
+  [[ -n "$fresh" ]] || return 0
+  if [[ -n "$PRINT_ONLY" ]]; then
+    would "show her drop folder in Finder with: open -R \"${drop:-her drop folder}\""
+    return 0
+  fi
+  if [[ -z "$drop" ]]; then
+    say "  Her drop folder could not be read from Studio's settings, so it is not shown in Finder."
+    return 0
+  fi
+  open -R "$drop" || true
+  wait_for "Her drop folder, $MACHINE, is shown in Finder. In Finder, Control-click $MACHINE, choose Make available offline, and click Allow if macOS asks whether node may read the Dropbox folder."
+}
+
+run_the_installer() {
+  heading "5. Studio's installer (check 44)"
+  local tries=0 matter line
+  local -a lines
+  if [[ "$(mark_of installed)" == "$COMMIT" ]]; then
+    done_already "Studio's installer finished at this commit (${COMMIT[1,7]}), on an earlier run"
+    R44_RAN="finished at ${COMMIT[1,7]} on an earlier run"
+    turn_on_hyperframes
+    return 0
+  fi
+  if [[ -n "$PRINT_ONLY" && ! -f "$STUDIO/tool/install.sh" ]]; then
+    would "run Studio's installer with --print first (it changes nothing): $(installer_line)"
+    would "ask, then run it for real with the same line and --yes in place of --print"
+    R44_PRINT="not shown: Studio's code is not on this Mac yet"
+    return 0
+  fi
+  [[ -f "$STUDIO/tool/install.sh" ]] || stop_here "$STUDIO/tool/install.sh is not there."
+
+  # The print, again after Claude Code or the Claude app has been brought up to date.
+  while true; do
+    tries=$(( tries + 1 ))
+    say "  Studio's installer, with --print first (this changes nothing):"
+    installer_print
+    if (( PRINT_RC != 0 )); then
+      stop_here "Studio's installer refused (its words are above), so it was not run for real. Nothing it refused has been changed."
+    fi
+    if print_has '^  Claude Code, signed in:  no'; then
+      stop_here "Claude Code is not signed in. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser), then run the app again."
+    fi
+    if print_has "^  Claude Code's version:.*older than"; then
+      if (( tries > 1 )); then
+        stop_here "Claude Code is still older than the installer needs after claude update. Tell Jason."
+      fi
+      if [[ -n "$PRINT_ONLY" ]]; then
+        would "ask to run claude update, because Claude Code in Terminal is older than the installer wants, and then print the installer again"
+        break
+      fi
+      ask "Claude Code in Terminal is behind what Studio's installer wants. This runs claude update, which brings it up to date, and then the installer's print is shown again."
+      "$CLAUDE" update || true
+      changed+=("ran claude update")
+      continue
+    fi
+    if print_has "^  The Claude app's own Claude Code:.*older than"; then
+      if (( tries > 2 )); then
+        stop_here "The Claude app's own Claude Code is still older than the installer wants. Tell Jason."
+      fi
+      if [[ -n "$PRINT_ONLY" ]]; then
+        would "wait while the Claude app is brought up to date, and then print the installer again"
+        break
+      fi
+      wait_for "The Claude app's own Claude Code is older than the installer wants. In the Claude app, choose Claude > Check for Updates, let it update, and open the app again."
+      continue
+    fi
+    break
+  done
+
+  # The lines that matter, repeated, and kept for the report.
+  matter="$(print -r -- "$PRINT_TOLD" | grep -E "^  (Claude Code, signed in:|Claude Code's version:|The Claude app's own Claude Code:|HDR video:|Her folder's lock:)" || true)"
+  say ""
+  say "The lines that matter:"
+  [[ -z "$matter" ]] || say "$matter"
+  R44_PRINT="$matter"
+
+  if [[ -n "$PRINT_ONLY" ]]; then
+    would "run Studio's installer for real, after asking, with the same line and --yes in place of --print"
+    would "check that its last lines hold the background job's answer from Claude, and that the one-shot check agent ($CHECK_FILE) is gone"
+    turn_on_hyperframes
+    return 0
+  fi
+
+  ask "Studio's installer now runs for real, with the same options as its print above. It sets Studio up on this Mac, changes this Mac's brimm-video settings to run from Studio, and ends with one real call to Claude from the background job (up to 90 seconds). It can take a few minutes."
+  local kept rc
+  kept="$(mktemp)"
+  set +e
+  zsh "$STUDIO/tool/install.sh" --yes "${INSTALL_OPTIONS[@]}" "$ROOT" 2>&1 | while IFS= read -r line; do
+    say "$line"
+    print -r -- "$line" >> "$kept"
+  done
+  rc=${pipestatus[1]}
+  set -e
+  R44_RAN="$(last_lines "$(<"$kept")" 8)"
+  if (( rc != 0 )); then
+    rm -f "$kept"
+    stop_here "The installer stopped (it ended with $rc). Its last lines:
+$R44_RAN"
+  fi
+  line="$(grep '^From the background job:' "$kept" | tail -n 1 || true)"
+  rm -f "$kept"
+  changed+=("ran Studio's installer")
+  if [[ -z "$line" ]]; then
+    stop_here "The setup stopped before its check of Claude (there is no \"From the background job:\" line in what it said). Its last lines:
+$R44_RAN"
+  fi
+  if [[ -e "$CHECK_FILE" ]]; then
+    stop_here "The one-shot check of Claude ($CHECK_FILE) is still there. Left there, launchd would run it at every login. Tell Jason."
+  fi
+  R44_AGENT="${line}; ${CHECK_FILE:t}: gone"
+  write_mark installed "$COMMIT"
+  say "  Studio's installer finished."
+  turn_on_hyperframes yes
+}
 write_the_report() { heading "6. The report"; }
 retire_the_old_key() { heading "7. brimm-video's old key (check 48)"; }
 

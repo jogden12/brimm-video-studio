@@ -34,6 +34,20 @@ const HEADINGS = [
   "6. The report",
   "7. brimm-video's old key (check 48)"
 ];
+/** What the stand-in installer prints for --print: the lines the app repeats, as install.sh words them. */
+const PRINT_LINES = {
+  signed: "  Claude Code, signed in:  yes (max)",
+  version: "  Claude Code's version:  2.1.300 (her folder's guard needs 2.1.0 or later)",
+  older: "  Claude Code's version:  1.0.1, older than the 2.1.0 her folder's guard needs: on it the guard could let a call through. In Terminal: claude update, then run this again. Until then the install does not write her folder for Claude.",
+  app: "  The Claude app's own Claude Code:  2.1.300, the newest copy the app keeps here (her folder's guard needs 2.1.0 or later; /status in the Code tab says which copy runs)",
+  appOlder: "  The Claude app's own Claude Code:  1.0.1, the newest copy the app keeps here, older than the 2.1.0 her folder's guard needs: on it the guard could let a call through. In the app, choose Claude > Check for Updates, then check /status in the Code tab",
+  hdr: "  HDR video:  ffmpeg here can make an HDR video standard, which an iPhone's clip is by default: it has the videotoolbox hwaccel and the scale_vt filter that the working copy needs for it",
+  lock: "  Her folder's lock:  strict (Claude runs only brimm-video's commands there)"
+};
+const printText = (...lines) => ["  Its drop folder, to make in Dropbox and watch:  /somewhere", "  Swift, to find the speaker's face:  here already", ...lines, "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)", ""].join("\n");
+const DEFAULT_PRINT = printText(PRINT_LINES.signed, PRINT_LINES.version, PRINT_LINES.hdr, PRINT_LINES.lock, PRINT_LINES.app);
+const BACKGROUND = "From the background job: Claude answered, so its sign-in is seen there.";
+const DEFAULT_RAN = `Setting up Studio...\n  The launch agent is in place.\nAsking Claude once from the background job (up to 90 seconds)...\n${BACKGROUND}\nDone.\n`;
 const GIT_ENV = { PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
 
 const git = (cwd, ...args) => {
@@ -80,7 +94,13 @@ if (command === "show") {
     ssh        what `ssh -T` answers, one answer a call: "ok", "denied" or a list of them (default "ok"; the last repeats)
     checkout   Studio's checkout in the home folder: "at-pin" (default), "absent", "other-commit", "dirty", "other-remote", "detached", "other-branch" or
                "partial-left" (no checkout, a half-made .partial beside where it goes)
-    marks      text of the checkout's .git/move-to-studio (default: the tests passed at the pin, for an at-pin checkout)
+    marks      text of the checkout's .git/move-to-studio, SHA standing for the pin (default for an at-pin checkout: the tests passed
+               and the installer finished at the pin)
+    hfApp      the version of the HyperFrames app (default "1.4.0"), or null for none; hfAppAfterOpen: the version the app has once
+               `open -a Safari` has been run (the stand-in puts it there)
+    install    what the stand-in tool/install.sh in the "GitHub" repo does: { print, printExit, ran, ranExit, moves, checkLeft }.
+               `print` is the text of --print (a list: one text a call, the last repeating), `ran` the text of --yes; `moves`
+               rewrites settings.json's checkout to Studio and writes the agent's plist; `checkLeft` leaves the one-shot plist
     laterCommit  the "GitHub" repo gets a commit after the pin
     testFail   BRIMM_TEST_FAIL=1 for the tests in the checkout
     gitStandIn a stand-in git that notes its arguments and GIT_SSH_COMMAND, and fails; noRepo leaves BRIMM_STUDIO_REPO unset;
@@ -102,7 +122,27 @@ function moveOn(options = {}, ...args) {
     // The "GitHub" Studio is cloned from: a local repository with a stand-in installer, the fake settings.js and one test.
     mkdirSync(github);
     git(github, "init", "-q", "-b", "main");
-    put(join(github, "tool", "install.sh"), "#!/bin/zsh\nprint -r -- 'stand-in installer'\n", 0o755);
+    // The stand-in installer: it notes its call in `ran`, answers --print from a file a call (the last repeating), and --yes from another.
+    const inst = options.install ?? {};
+    const prints = [inst.print ?? DEFAULT_PRINT].flat();
+    prints.forEach((text, i) => writeFileSync(join(dir, `install-print-${i + 1}`), text));
+    writeFileSync(join(dir, "install-ran"), inst.ran ?? DEFAULT_RAN);
+    const ranFile = join(dir, "ran");
+    put(join(github, "tool", "install.sh"), `#!/bin/zsh
+echo "install.sh $*" >> "${ranFile}"
+case "$1" in
+  --print)
+    n=$(cat "${dir}/install-prints" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${dir}/install-prints"
+    f="${dir}/install-print-$n"; [ -f "$f" ] || f="${dir}/install-print-${prints.length}"
+    cat "$f"; exit ${inst.printExit ?? 0} ;;
+  --yes)
+    cat "${dir}/install-ran"
+    ${inst.moves ? `node -e 'const fs=require("fs");const f=process.argv[1];const s=JSON.parse(fs.readFileSync(f,"utf8"));s.checkout=process.argv[2];fs.writeFileSync(f,JSON.stringify(s))' "$HOME/Library/Application Support/BRIMM Video/settings.json" "$HOME/Claude Code/brimm-video-studio"
+    mkdir -p "$HOME/Library/LaunchAgents"; echo "$HOME/Claude Code/brimm-video-studio/tool/unedited.js" > "$HOME/Library/LaunchAgents/com.thebrimm.unedited.plist"` : ""}
+    ${inst.checkLeft ? 'mkdir -p "$HOME/Library/LaunchAgents"; echo left > "$HOME/Library/LaunchAgents/com.thebrimm.claude-check.plist"' : ""}
+    exit ${inst.ranExit ?? 0} ;;
+esac
+`, 0o755);
     put(join(github, "tool", "settings.js"), FAKE_SETTINGS_JS);
     put(join(github, "tool", "tests", "ok.test.js"), 'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("ok", () => assert.notEqual(process.env.BRIMM_TEST_FAIL, "1"));\n');
     git(github, "add", "-A");
@@ -118,7 +158,7 @@ function moveOn(options = {}, ...args) {
     const oldCheckout = join(home, "Claude Code", "BRIMM video");
     put(join(oldCheckout, "tool", "settings.js"), FAKE_SETTINGS_JS);
     const settings = options.settings === undefined
-      ? { version: 1, machine: "Sallie's laptop", root: join(home, "Dropbox", "The BRIMM DB", "BRIMM Video"), checkout: oldCheckout, import: "light", handoffVersion: 2, drop: "Drop", ...options.settingsChange }
+      ? { version: 1, machine: "Sallie's laptop", root: join(home, "Dropbox", "The BRIMM DB", "BRIMM Video"), checkout: oldCheckout, import: "light", handoffVersion: 2, drop: "Drop", app: "hyperframes", ...options.settingsChange }
       : options.settings;
     if (settings !== null) {
       put(join(home, "Library", "Application Support", "BRIMM Video", "settings.json"), JSON.stringify(settings));
@@ -139,15 +179,21 @@ function moveOn(options = {}, ...args) {
       if (checkout === "other-branch") git(studio, "checkout", "-q", "-b", "feature");
       if (checkout === "dirty") put(join(studio, "tool", "install.sh"), "changed by hand\n");
       if (checkout === "other-remote") git(studio, "remote", "set-url", "origin", "/somewhere/else");
-      const marks = options.marks ?? (checkout === "at-pin" ? `tests=${sha}\n` : null);
-      if (marks !== null) writeFileSync(join(studio, ".git", "move-to-studio"), marks);
+      const marks = options.marks ?? (checkout === "at-pin" ? "tests=SHA\ninstalled=SHA\n" : null);
+      if (marks !== null) writeFileSync(join(studio, ".git", "move-to-studio"), marks.replaceAll("SHA", sha));
     }
     if (checkout === "partial-left") put(`${studio}.partial/half-made`, "cut short\n");
 
     // The stand-ins: each writes what it was asked into `ran`.
     const stand = (name, body = "") => put(join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${ran}"\n${body}`, 0o755);
     stand("launchctl", `[ "$1" = "list" ] && printf '%b\\n' '${options.launchctl ?? "-\\t0\\tcom.thebrimm.unedited"}'\nexit 0\n`);
-    for (const name of ["open", "caffeinate", "brew"]) stand(name, name === "brew" ? 'echo "Homebrew 4.5.0"\n' : "");
+    const hfApp = join(dir, "Applications", "HyperFrames.app");
+    const appPlist = (version) => `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>\n`;
+    const hfVersion = options.hfApp === undefined ? "1.4.0" : options.hfApp;
+    if (hfVersion !== null) put(join(hfApp, "Contents", "Info.plist"), appPlist(hfVersion));
+    for (const name of ["caffeinate", "brew"]) stand(name, name === "brew" ? 'echo "Homebrew 4.5.0"\n' : "");
+    // `open -a Safari <page>` puts the app in place when the test says the app arrives after it.
+    stand("open", options.hfAppAfterOpen ? `[ "$1" = -a ] && { mkdir -p "${hfApp}/Contents"; printf '%s' '${appPlist(options.hfAppAfterOpen)}' > "${hfApp}/Contents/Info.plist"; }\nexit 0\n` : "");
     // pbcopy keeps what it was given; ssh-keygen makes a stand-in key (-t) and looks in known_hosts (-F); ssh answers one answer a call.
     const copied = join(dir, "pbcopied");
     stand("pbcopy", `cat > "${copied}"\n`);
@@ -180,6 +226,8 @@ esac
     if (keyComment !== null) {
       put(join(ssh, "brimm_video_studio_deploy"), "PRIVATE-HALF\n", 0o600);
       put(join(ssh, "brimm_video_studio_deploy.pub"), `ssh-ed25519 AAAAstandin ${keyComment}\n`);
+      // The Desktop copy of its public half, as the key step of an earlier run left it, so that a run that stops changes nothing.
+      put(join(home, "Desktop", "Studio key (public half).txt"), `ssh-ed25519 AAAAstandin ${keyComment}\n`);
     }
     const sshConfig = options.sshConfig === undefined ? HOST_BLOCK : options.sshConfig;
     if (sshConfig !== null) put(join(ssh, "config"), sshConfig, 0o600);
@@ -200,7 +248,7 @@ esac
     // The environment is built from scratch: the stand-ins first, the node that runs these tests last, no Homebrew.
     const env = {
       HOME: home, PATH: `${bin}:/usr/bin:/bin:${dirname(process.execPath)}`, BRIMM_HOMEBREW_DIRS: "",
-      BRIMM_CLAUDE: join(bin, "claude"), BRIMM_STUDIO_REPO: options.repoMissing ? join(dir, "nowhere") : github, BRIMM_HYPERFRAMES_APP: join(dir, "Applications", "HyperFrames.app")
+      BRIMM_CLAUDE: join(bin, "claude"), BRIMM_STUDIO_REPO: options.repoMissing ? join(dir, "nowhere") : github, BRIMM_HYPERFRAMES_APP: hfApp
     };
     if (options.noRepo) delete env.BRIMM_STUDIO_REPO;
     if (options.testFail) env.BRIMM_TEST_FAIL = "1";
@@ -328,7 +376,7 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
     }
     assert.ok(r.out.trimEnd().endsWith("Nothing was changed."), r.out);
     assert.deepEqual(r.tree, r.before, "no log, no report, no Desktop file");
-    const reading = /^(launchctl list|claude auth status --json|claude --version|sw_vers.*|df.*|xcode-select -p|brew --version|ssh-keygen -F github\.com -f .*|ssh -F .* -T git@github-brimm-video-studio)$/;
+    const reading = /^(launchctl list|claude auth status --json|claude --version|sw_vers.*|df.*|xcode-select -p|brew --version|ssh-keygen -F github\.com -f .*|ssh -F .* -T git@github-brimm-video-studio|install\.sh --print .*)$/;
     const calls = r.ran.split("\n").filter(Boolean);
     assert.ok(calls.length > 0);
     for (const call of calls) assert.match(call, reading, `a call that reads and changes nothing: ${call}`);
@@ -494,7 +542,7 @@ describe("the move script, Studio's key (check 42)", { skip: notAMac }, () => {
 
 describe("the move script, Studio's code (check 42)", { skip: notAMac }, () => {
   it("clones main on y into the partial folder, puts main at the app's commit, then renames it", () => {
-    const r = moveOn({ checkout: "absent", laterCommit: true, answers: "y\n" });
+    const r = moveOn({ checkout: "absent", laterCommit: true, answers: "y\ny\n\n" });
     assert.equal(r.status, 0, r.out);
     assert.ok(r.studioNow, "the checkout is there");
     assert.equal(r.studioNow.branch, "main");
@@ -516,7 +564,7 @@ describe("the move script, Studio's code (check 42)", { skip: notAMac }, () => {
   });
 
   it("takes away a half-made clone an earlier run left, then clones", () => {
-    const r = moveOn({ checkout: "partial-left", answers: "y\n" });
+    const r = moveOn({ checkout: "partial-left", answers: "y\ny\n\n" });
     assert.equal(r.status, 0, r.out);
     assert.match(r.out, /half-made/);
     assert.equal(r.partialLeft, false);
@@ -591,11 +639,11 @@ describe("the move script, Studio's code (check 42)", { skip: notAMac }, () => {
     assert.match(fail.out, /✖|✔|ok/);
     assert.ok(!/tests=/.test(fail.studioNow.marks), "nothing is marked on a failure");
 
-    const pass = moveOn({ marks: "installed=abc123\n" });
+    const pass = moveOn({ marks: "installed=SHA\n" });
     assert.equal(pass.status, 0, pass.out);
     assert.match(pass.out, /ℹ pass 1/);
     assert.match(pass.out, /ℹ fail 0/);
-    assert.equal(pass.studioNow.marks, `installed=abc123\ntests=${pass.sha}\n`, "only its own line is written, the rest kept");
+    assert.equal(pass.studioNow.marks, `installed=${pass.sha}\ntests=${pass.sha}\n`, "only its own line is written, the rest kept");
     assert.match(pass.log, /ℹ pass 1/, "kept in the log");
 
     const again = moveOn({});
@@ -627,5 +675,204 @@ describe("the move script, Studio's code (check 42)", { skip: notAMac }, () => {
     assert.equal(there.status, 0, there.out);
     assert.match(there.out, /Would run Studio's tests/);
     assert.ok(!there.out.includes("ℹ pass"));
+  });
+});
+
+describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)", { skip: notAMac }, () => {
+  const OPTIONS = "--machine Sallie's laptop --drop Drop --import light --handoff 2";
+  const rootOf = (home) => `${home}/Dropbox/The BRIMM DB/BRIMM Video`;
+  const installCalls = (r) => r.ran.split("\n").filter((l) => l.startsWith("install.sh "));
+  const NOT_INSTALLED = "tests=SHA\n";
+
+  it("notes HyperFrames' version, or opens its page in Safari and waits", () => {
+    const here = moveOn({ hfApp: "1.4.0" });
+    assert.equal(here.status, 0, here.out);
+    assert.match(here.out, /4\. The HyperFrames app \(check 43\)/);
+    assert.match(here.out, /HyperFrames app:\s+.*1\.4\.0/);
+    assert.ok(!here.ran.includes("open -a Safari"), here.ran);
+
+    const gone = moveOn({ hfApp: null, hfAppAfterOpen: "1.5.2", answers: "\n" });
+    assert.equal(gone.status, 0, gone.out);
+    const calls = gone.ran.split("\n");
+    assert.ok(calls.includes("open -a Safari https://hyperframes.dev/studio"), gone.ran);
+    assert.match(gone.out, /Press Return when that's done/);
+    assert.match(gone.out, /1\.5\.2/, "it looked again after the wait");
+
+    const stops = moveOn({ hfApp: null, answers: "n\n" });
+    assert.equal(stops.status, 1);
+    assert.ok(stops.out.endsWith(STOPPED_NOTHING), stops.out);
+
+    // A print says it would open the page, and opens nothing.
+    const printed = moveOn({ hfApp: null }, "--print");
+    assert.equal(printed.status, 0, printed.out);
+    assert.match(printed.out, /Would open .*https:\/\/hyperframes\.dev\/studio/);
+    assert.ok(!printed.ran.includes("open -a Safari"));
+  });
+
+  it("prints the installer first, with check 44's options and her BRIMM Video, and repeats the lines that matter", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, answers: "n\n" });
+    assert.equal(r.status, 1);
+    assert.match(r.out, /5\. Studio's installer \(check 44\)/);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`]);
+    const at = r.out.indexOf("The lines that matter:");
+    assert.ok(at > 0, r.out);
+    const after = r.out.slice(at);
+    for (const line of [PRINT_LINES.signed, PRINT_LINES.version, PRINT_LINES.app, PRINT_LINES.hdr, PRINT_LINES.lock]) {
+      assert.ok(after.includes(line), `${line} is shown again`);
+      assert.ok(r.out.slice(0, at).includes(line), `${line} is shown by the print`);
+    }
+    assert.ok(!after.includes("By hand afterwards"), "only the lines that matter");
+  });
+
+  it("stops with the installer's own words when its print refuses, and never runs it for real", () => {
+    const words = "A video is in the drop folder, so the installer changed nothing.";
+    const r = moveOn({ marks: NOT_INSTALLED, install: { print: words + "\n", printExit: 2 }, answers: "y\ny\ny\n\n" });
+    assert.equal(r.status, 1, r.out);
+    assert.ok(r.out.includes(words), r.out);
+    assert.ok(!r.ran.includes("install.sh --yes"), r.ran);
+    assert.ok(r.out.endsWith(STOPPED_NOTHING), r.out);
+
+    // A print stops the same way.
+    const printed = moveOn({ marks: NOT_INSTALLED, install: { print: words + "\n", printExit: 2 } }, "--print");
+    assert.equal(printed.status, 1);
+    assert.ok(printed.out.includes(words));
+  });
+
+  it("stops, saying to sign in, when the print says Claude Code is not signed in", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, install: { print: printText("  Claude Code, signed in:  no. In Terminal, run: claude auth login (Sallie signs in), then run this again.") }, answers: "y\n" });
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /claude auth login/);
+    assert.ok(!r.ran.includes("install.sh --yes"));
+  });
+
+  it("on n after the print, runs nothing for real", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, answers: "n\n" });
+    assert.equal(r.status, 1);
+    assert.ok(!r.ran.includes("--yes"), r.ran);
+    assert.equal(r.studioNow.marks, `tests=${r.sha}\n`);
+    assert.ok(r.out.endsWith(STOPPED_NOTHING), r.out);
+  });
+
+  it("on y runs the same line with --yes, then checks the background job's line and the one-shot agent", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`, `install.sh --yes ${OPTIONS} ${rootOf(r.home)}`]);
+    assert.ok(r.out.includes(BACKGROUND), "its output is shown");
+    assert.match(r.studioNow.marks, new RegExp(`installed=${r.sha}`));
+
+    const noCheck = moveOn({ marks: NOT_INSTALLED, install: { ran: "Setting up Studio...\nDone.\n" }, answers: "y\n" });
+    assert.equal(noCheck.status, 1, noCheck.out);
+    assert.match(noCheck.out, /stopped before its check of Claude/);
+    assert.ok(!/installed=/.test(noCheck.studioNow.marks), "a stopped install writes no mark");
+
+    const left = moveOn({ marks: NOT_INSTALLED, install: { checkLeft: true }, answers: "y\n" });
+    assert.equal(left.status, 1, left.out);
+    assert.match(left.out, /launchd would run it at every login/);
+    assert.ok(!/installed=/.test(left.studioNow.marks));
+  });
+
+  it("offers claude update when the print says Terminal's Claude Code is too old, then prints again", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, install: { print: [printText(PRINT_LINES.signed, PRINT_LINES.older, PRINT_LINES.hdr), DEFAULT_PRINT] }, answers: "y\ny\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.equal((r.out.match(/older than/g) ?? []).length, 1, "the older line is shown once, by the first print");
+    assert.ok(r.ran.split("\n").includes("claude update"), r.ran);
+    assert.equal(installCalls(r).filter((c) => c.startsWith("install.sh --print")).length, 2);
+    assert.ok(r.ran.indexOf("claude update") < r.ran.indexOf("install.sh --yes"));
+
+    const declined = moveOn({ marks: NOT_INSTALLED, install: { print: printText(PRINT_LINES.signed, PRINT_LINES.older) }, answers: "n\n" });
+    assert.equal(declined.status, 1);
+    assert.ok(!declined.ran.includes("claude update"));
+
+    // Still too old after the update: it stops, and does not run the installer.
+    const still = moveOn({ marks: NOT_INSTALLED, install: { print: printText(PRINT_LINES.signed, PRINT_LINES.older) }, answers: "y\ny\ny\ny\n" });
+    assert.equal(still.status, 1, still.out);
+    assert.ok(!still.ran.includes("install.sh --yes"));
+  });
+
+  it("waits for the Claude app's own update when its copy is too old, then prints again", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, install: { print: [printText(PRINT_LINES.signed, PRINT_LINES.version, PRINT_LINES.appOlder), DEFAULT_PRINT] }, answers: "\ny\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /Check for Updates/);
+    assert.match(r.out, /Press Return when that's done/);
+    assert.equal(installCalls(r).filter((c) => c.startsWith("install.sh --print")).length, 2);
+    assert.ok(!r.ran.includes("claude update"), "the app's copy is not updated by claude update");
+  });
+
+  it("turns HyperFrames on, asked, unless it is on already, and shows her drop folder in Finder", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, settingsChange: { app: undefined }, answers: "y\ny\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.ok(r.out.includes("The editing app is now hyperframes (it was off)."), r.out);
+    assert.match(r.out, /Make available offline/);
+    assert.match(r.out, /Allow/);
+    assert.match(r.out, /node/);
+    const calls = r.ran.split("\n");
+    assert.ok(calls.includes(`open -R ${rootOf(r.home)}/Drop/Sallie's laptop`), r.ran);
+
+    const on = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n" });
+    assert.equal(on.status, 0, on.out);
+    assert.match(on.out, /Already done: HyperFrames is on/);
+    assert.ok(!on.out.includes("is now hyperframes"));
+
+    const declined = moveOn({ marks: NOT_INSTALLED, settingsChange: { app: undefined }, answers: "y\nn\n" });
+    assert.equal(declined.status, 1, declined.out);
+    assert.ok(!declined.out.includes("is now hyperframes"));
+    assert.match(declined.studioNow.marks, /installed=/, "the install itself was finished");
+
+    // A print turns nothing on and opens nothing.
+    const printed = moveOn({ marks: NOT_INSTALLED, settingsChange: { app: undefined } }, "--print");
+    assert.equal(printed.status, 0, printed.out);
+    assert.match(printed.out, /Would .*set --app hyperframes/);
+    assert.ok(!printed.ran.includes("open -R") && !printed.ran.includes("claude update") && !printed.ran.includes("--yes"), printed.ran);
+  });
+
+  it("says already done for an install finished at this commit, and runs it again otherwise", () => {
+    const done = moveOn({});
+    assert.equal(done.status, 0, done.out);
+    assert.match(done.out, /Already done: .*installer/);
+    assert.deepEqual(installCalls(done), []);
+
+    const other = moveOn({ marks: `tests=SHA\ninstalled=${"0".repeat(40)}\n`, answers: "n\n" });
+    assert.equal(other.status, 1);
+    assert.equal(installCalls(other).length, 1, "it prints again");
+
+    const fresh = moveOn({ marks: "tests=SHA\n", answers: "y\n\n" });
+    assert.equal(fresh.studioNow.marks, `tests=${fresh.sha}\ninstalled=${fresh.sha}\n`, "only its own line is written, the rest kept");
+  });
+
+  it("with --print and no checkout, says the exact line it would print first", () => {
+    const r = moveOn({ checkout: "absent", gitStandIn: true, noRepo: true }, "--print");
+    assert.equal(r.status, 0, r.out);
+    assert.ok(r.out.includes(`Would run Studio's installer with --print first (it changes nothing): zsh "${r.home}/Claude Code/brimm-video-studio/tool/install.sh" --print --machine "Sallie's laptop" --drop Drop --import light --handoff 2 "${rootOf(r.home)}"`), r.out);
+    assert.deepEqual(installCalls(r), []);
+    assert.deepEqual(r.tree, r.before);
+  });
+
+  it("with --print and the checkout there, shows the installer's print and changes nothing", () => {
+    const r = moveOn({ marks: NOT_INSTALLED }, "--print");
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`]);
+    assert.ok(r.out.includes(PRINT_LINES.hdr));
+    assert.match(r.out, /Would run Studio's installer for real/);
+    assert.deepEqual(r.tree, r.before);
+    assert.equal(r.studioNow.marks, `tests=${r.sha}\n`);
+  });
+
+  it("stops, showing its last lines, when the real install fails", () => {
+    const lines = Array.from({ length: 12 }, (_, i) => `step ${i + 1} of the install`);
+    const r = moveOn({ marks: NOT_INSTALLED, install: { ran: lines.join("\n") + "\nThe install could not go on.\n", ranExit: 1 }, answers: "y\n" });
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /The installer stopped/);
+    const tail = r.out.slice(r.out.lastIndexOf("The installer stopped"));
+    assert.ok(tail.includes("The install could not go on."), tail);
+    assert.ok(tail.includes("step 12 of the install"));
+    assert.ok(!tail.includes("step 1 of the install"), "only the last lines");
+    assert.ok(!/installed=/.test(r.studioNow.marks));
+  });
+
+  it("when the install moves her settings and agent to Studio, goes on and marks it", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, install: { moves: true }, answers: "y\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.ok(r.tree.includes("Library/LaunchAgents/com.thebrimm.unedited.plist"));
+    assert.ok(!r.tree.includes("Library/LaunchAgents/com.thebrimm.claude-check.plist"));
   });
 });
