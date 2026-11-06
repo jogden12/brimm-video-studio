@@ -4,13 +4,14 @@
 // real program: the programs are stand-ins (tests/episodes.js), and each test has a folder of its own.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain } from "../edit.js";
 import { conflictedCopies, readEpisode, recordFile, recordText } from "../episode.js";
 import { fileSafe } from "../names.js";
 import { localDay } from "../shared/text.js";
 import { setup } from "./episodes.js";
+import { planFilesFrom } from "../plan.js";
 
 async function on(deps, ...argv) {
   const said = [];
@@ -56,7 +57,7 @@ describe("resolve, for a plan", () => {
     assert.match((await on(light(t), "guide")).text, /sort out the conflict/);
     assert.equal((await on(depsOf(t), "resolve", nameOf(t))).code, 0);
     const kept = await on(depsOf(t), "resolve", nameOf(t), "--keep", "B");
-    assert.deepEqual([kept.code, kept.text], [0, "Kept B of record/0003.json. The other is set aside in history/."], kept.text);
+    assert.deepEqual([kept.code, kept.text], [0, "Kept B. The plan's files are written from it. The other is set aside in history/."], kept.text);
     assert.deepEqual(conflictedCopies(folder), []);
     assert.deepEqual(readEpisode(folder).record.planned.lines, ["Line from the laptop."]);
     const shown = await on(depsOf(t), "plan", TITLE);
@@ -88,6 +89,114 @@ describe("resolve, for a plan", () => {
     assert.equal(r.code, 1, r.text);
     assert.equal(r.text, `One side has "${TITLE}" made from its footage: keep that side; a plan is made from its footage once.`);
     assert.equal(conflictedCopies(folder).length, 1, "nothing was kept or deleted");
+    t.done();
+  });
+});
+
+/** The same, with the record's two sides made by `change` (each a function of the plan's record, giving its own). */
+async function conflictedBy(t, a, b) {
+  assert.equal((await on(depsOf(t), "plan", "new", TITLE)).code, 0);
+  assert.equal((await on(depsOf(t), "plan", TITLE, "set", ...SHOT, "--line", "The first line.", "--line", "The second line.")).code, 0);
+  const folder = join(t.root, "Episodes", nameOf(t));
+  const first = readEpisode(folder).record;
+  const side = (change, on) => ({ ...change(first), rev: 3, writer: { commit: "c709b57", on } });
+  writeFileSync(recordFile(folder, 3), recordText(side(a, "Mac Studio")));
+  writeFileSync(join(folder, "record", COPY), recordText(side(b, "Sallie's laptop")));
+  return folder;
+}
+const withPlanned = (more) => (r) => ({ ...r, planned: { ...r.planned, ...more } });
+const filesNow = (folder) => Object.fromEntries(["video guide.md", "shot list.md", "teleprompter.txt"].map((n) => [n, readFileSync(join(folder, n), "utf8")]));
+
+describe("resolve, for a plan: plain lines and the plan's files", () => {
+  it("says a differing teleprompter line as two quoted lines, the lines that differ only, shortened to 120 characters, and no braces", async () => {
+    const t = setup();
+    const long = "x".repeat(300);
+    const folder = await conflictedBy(t, withPlanned({ lines: ["The first line.", "Second, mine."] }), withPlanned({ lines: ["The first line.", long] }));
+    const r = await on(depsOf(t), "resolve", TITLE);
+    assert.equal(r.code, 0, r.text);
+    const at = r.said.indexOf("The script is different:");
+    assert.ok(at > 0, r.text);
+    assert.equal(r.said[at + 1], 'A: "Second, mine."', r.text);
+    assert.equal(r.said[at + 2], `B: "${"x".repeat(119)}…"`, r.text);
+    assert.ok(!r.text.includes("The first line."), r.text);
+    assert.ok(!/[{}]/.test(r.text), r.text);
+    assert.ok(folder);
+    t.done();
+  });
+  it("says a difference of the cues, of the shots and of the title as one plain line each", async () => {
+    const t = setup();
+    const cue = { n: 1, kind: "graphic", seconds: 4, words: "x", show: "y", style: null };
+    const one = { n: 1, kind: "talking", what: "Open." };
+    const folder = await conflictedBy(t, (r) => ({ ...r, planned: { ...r.planned, title: "Title A", cues: [cue], shots: [one] } }), (r) => ({ ...r, planned: { ...r.planned, title: "Title B", cues: [cue, { ...cue, n: 2 }], shots: [one, { ...one, n: 2 }, { ...one, n: 3 }] } }));
+    const r = await on(depsOf(t), "resolve", folder.split("/").pop());
+    assert.equal(r.code, 0, r.text);
+    for (const line of ["The graphic cues are different: A has 1, B has 2.", "The shots are different: A has 1, B has 3.", 'The title is different: A says "Title A", B says "Title B".']) assert.ok(r.said.some((s) => s.trim() === line), `${line}\n${r.text}`);
+    assert.ok(!/[{}]/.test(r.text), r.text);
+    t.done();
+  });
+  it("after --keep B the plan's files are what planFilesFrom(B) makes, the record lists their sizes, and episodes says nothing wrong", async () => {
+    const t = setup();
+    const folder = await conflictedBy(t, withPlanned({ lines: ["The first line.", "Mine."] }), withPlanned({ lines: ["The first line.", "Hers, a longer line."] }));
+    await on(depsOf(t), "resolve", nameOf(t));
+    const kept = await on(depsOf(t), "resolve", nameOf(t), "--keep", "B");
+    assert.deepEqual([kept.code, kept.text], [0, "Kept B. The plan's files are written from it. The other is set aside in history/."], kept.text);
+    const record = readEpisode(folder).record;
+    const want = planFilesFrom(record);
+    assert.deepEqual(filesNow(folder), want);
+    assert.ok(want["teleprompter.txt"].includes("Hers, a longer line."));
+    for (const [name, text] of Object.entries(want)) assert.equal(record.files[name], Buffer.byteLength(text));
+    const listed = await on(light(t), "episodes");
+    assert.equal(listed.code, 0, listed.text);
+    assert.ok(listed.text.includes(TITLE), listed.text);
+    assert.ok(!/not right|not as the record|is short|is missing|not the \d+ the record/i.test(listed.text), listed.text);
+    t.done();
+  });
+  it("--keep A leaves the files that already match A as they are, with no write", async () => {
+    const t = setup();
+    const folder = await conflictedBy(t, (r) => r, withPlanned({ lines: ["The first line.", "Hers."] }));
+    const before = ["video guide.md", "shot list.md", "teleprompter.txt"].map((n) => statSync(join(folder, n)).ino);
+    await on(depsOf(t), "resolve", nameOf(t));
+    const kept = await on(depsOf(t), "resolve", nameOf(t), "--keep", "A");
+    assert.equal(kept.code, 0, kept.text);
+    assert.deepEqual(["video guide.md", "shot list.md", "teleprompter.txt"].map((n) => statSync(join(folder, n)).ino), before);
+    assert.deepEqual(filesNow(folder), planFilesFrom(readEpisode(folder).record));
+    t.done();
+  });
+  it("a refused record write leaves the files as they were", async () => {
+    const t = setup();
+    const folder = await conflictedBy(t, withPlanned({ lines: ["The first line.", "Mine."] }), withPlanned({ lines: ["The first line.", "Hers, a longer line."] }));
+    await on(depsOf(t), "resolve", nameOf(t));
+    const before = filesNow(folder);
+    // The other Mac writes record 4 while the copy is being set aside: the record write is refused.
+    const deps = depsOf(t);
+    const clone = deps.clone;
+    deps.clone = (from, to) => {
+      clone(from, to);
+      if (to.includes("/history/") && !existsSync(recordFile(folder, 4))) writeFileSync(recordFile(folder, 4), recordText({ ...readEpisode(folder, { pastCopies: true }).record, rev: 4 }));
+    };
+    const r = await on(deps, "resolve", nameOf(t), "--keep", "B");
+    assert.equal(r.code, 1, r.text);
+    assert.match(r.text, /^Nothing was written, and nothing deleted: /);
+    assert.deepEqual(filesNow(folder), before);
+    t.done();
+  });
+  it("says so plainly when the files cannot be put back after a refused record write, and never claims nothing was written", async () => {
+    const t = setup();
+    const folder = await conflictedBy(t, withPlanned({ lines: ["The first line.", "Mine."] }), withPlanned({ lines: ["The first line.", "Hers, a longer line."] }));
+    await on(depsOf(t), "resolve", nameOf(t));
+    const deps = depsOf(t);
+    const clone = deps.clone;
+    let puts = 0;
+    deps.clone = (from, to) => {
+      // Every put-back of the teleprompter script is refused: only the first clone into it (the keep's own write) goes through.
+      if (to.includes("teleprompter.txt") && ++puts >= 2) throw new Error("the disk said no");
+      clone(from, to);
+      if (to.includes("/history/") && !existsSync(recordFile(folder, 4))) writeFileSync(recordFile(folder, 4), recordText({ ...readEpisode(folder, { pastCopies: true }).record, rev: 4 }));
+    };
+    const r = await on(deps, "resolve", nameOf(t), "--keep", "B");
+    assert.equal(r.code, 1, r.text);
+    assert.ok(!r.text.includes("Nothing was written"), r.text);
+    assert.match(r.text, /^The record was not changed \(.*\), but the plan's files may not match it: teleprompter\.txt\. The next "episodes" names any that is wrong\. Say "sort out the conflict" again to put them right; if it still says a file is not whole, ask Jason/, r.text);
     t.done();
   });
 });

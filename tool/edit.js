@@ -129,7 +129,7 @@ import { freeEpisode, hyperFramesRunning } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
 import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeFootageCopies, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 import { lookAt, referencesAsked, sayReferences, useIn } from "./references.js";
-import { newPlan, planAsked, planFor, plannedLine, textArg } from "./plan.js";
+import { PLAN_FILE_NAMES, newPlan, planAsked, planFilesFrom, planFor, plannedLine, textArg } from "./plan.js";
 import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
@@ -3367,6 +3367,34 @@ const nameableNode = (node) => (typeof node === "string" && isAbsolute(node) && 
     every other field that differs is named alone, as [what, null, null], and what it holds is never said into the chat. The
     account a reading was made on (`reading.account`) is never said, whatever the record. */
 function recordDifferences(a, b) {
+  // A plan's own fields (`planned`), said as plain lines and never as JSON: the script's lines that differ, and a count for the cues and the shots.
+  const cut = (t) => (t.length > 120 ? `${t.slice(0, 119)}…` : t);
+  const count = (x, y) => `A has ${(x || []).length}, B has ${(y || []).length}`;
+  const plain = (v) => (v === null || v === undefined ? "none" : typeof v === "string" ? `"${cut(v)}"` : null);
+  const keysOf = (x, y, skip) => [...new Set([...Object.keys(x || {}), ...Object.keys(y || {})])].filter((k) => !skip.includes(k)).sort();
+  const plannedRows = () => {
+    const x = a.planned;
+    const y = b.planned;
+    if (!x && !y) return [];
+    if (!x || !y) return [["The plan", "A", "B", ["Only one side is a plan."]]];
+    const rows = [];
+    const lines = [];
+    const most = Math.max(x.lines.length, y.lines.length);
+    for (let i = 0; i < most; i++) {
+      if (x.lines[i] === y.lines[i]) continue;
+      lines.push(`A: ${i < x.lines.length ? `"${cut(x.lines[i])}"` : "no such line"}`, `B: ${i < y.lines.length ? `"${cut(y.lines[i])}"` : "no such line"}`);
+    }
+    if (lines.length) rows.push(["The script", "A", "B", ["The script is different:", ...lines.slice(0, 12), ...(lines.length > 12 ? [`...and ${(lines.length - 12) / 2} more lines differ.`] : [])]]);
+    if (JSON.stringify(x.cues) !== JSON.stringify(y.cues)) rows.push(["The graphic cues", "A", "B", [`The graphic cues are different: ${count(x.cues, y.cues)}.`]]);
+    if (JSON.stringify(x.shots) !== JSON.stringify(y.shots)) rows.push(["The shots", "A", "B", [`The shots are different: ${count(x.shots, y.shots)}.`]]);
+    if (x.title !== y.title) rows.push(["The title", "A", "B", [`The title is different: A says "${cut(x.title)}", B says "${cut(y.title)}".`]]);
+    for (const k of keysOf(x, y, ["lines", "cues", "shots", "title"])) {
+      if (JSON.stringify(x[k]) === JSON.stringify(y[k])) continue;
+      const [p, q] = [plain(x[k]), plain(y[k])];
+      rows.push([`The plan's ${k}`, "A", "B", [p !== null && q !== null ? `The plan's ${k} is different: A has ${p}, B has ${q}.` : `The plan's ${k} is different.`]]);
+    }
+    return rows;
+  };
   const who = (r) => (r.editing ? r.editing.by : "nobody");
   const title = (r) => (r.title ? `"${r.title.text}"${r.title.approved ? ", approved" : ", not approved"}` : "none");
   const shownIn = (pushed) => (Array.isArray(pushed) && pushed.length ? `shown ${pushed.map((p) => `v${p.v} on ${p.on}`).join(", ")}` : "not shown");
@@ -3387,7 +3415,7 @@ function recordDifferences(a, b) {
   // Claude's reading, but for the account it was read on, which is never said into the chat.
   const reading = (r) => (r.reading !== null && typeof r.reading === "object" && !Array.isArray(r.reading) ? Object.fromEntries(Object.entries(r.reading).filter(([k]) => k !== "account")) : r.reading);
   const others = [
-    ...fields(a, b, ["version", "rev", "writer", "editing", "name", "title", "reels", "main", "finished", "released", "files"]).map((k) => [`${k[0].toUpperCase()}${k.slice(1)}`, as(k === "reading" ? reading(a) : a[k]), as(k === "reading" ? reading(b) : b[k])]),
+    ...fields(a, b, ["version", "rev", "writer", "editing", "name", "title", "reels", "main", "finished", "released", "files", "planned"]).map((k) => [`${k[0].toUpperCase()}${k.slice(1)}`, as(k === "reading" ? reading(a) : a[k]), as(k === "reading" ? reading(b) : b[k])]),
     ...fields(a.main, b.main, ["pushed"]).map((k) => [`The main video's ${k}`, as(a.main && a.main[k]), as(b.main && b.main[k])]),
     ...ns.flatMap((n) => fields(reelOf(a, n), reelOf(b, n), ["n", "status", "pushed"]).map((k) => [`Reel ${n}'s ${k}`, as((reelOf(a, n) || {})[k]), as((reelOf(b, n) || {})[k])]))
   ];
@@ -3395,6 +3423,7 @@ function recordDifferences(a, b) {
     ["Who has it open", who(a), who(b)],
     ["Name", `"${a.name && a.name.text}"`, `"${b.name && b.name.text}"`],
     ["Title", title(a), title(b)],
+    ...plannedRows(),
     ...ns.map((n) => [`Reel ${n}`, reel(a, n), reel(b, n)]),
     ["The main video", shownIn(a.main && a.main.pushed), shownIn(b.main && b.main.pushed)],
     ["Finished", finished(a), finished(b)],
@@ -3554,7 +3583,10 @@ async function resolveIn(ctx, found, keep) {
       else if (copyRecord) {
         const differ = recordDifferences(record, copyRecord);
         ctx.say(differ.length ? "They differ in:" : "They hold the same.");
-        for (const [what, x, y] of differ) ctx.say(x === null ? `  ${what}: they differ.` : `  ${what}: A: ${x}; B: ${y}`);
+        for (const [what, x, y, said] of differ) {
+          if (said) for (const line of said) ctx.say(line);
+          else ctx.say(x === null ? `  ${what}: they differ.` : `  ${what}: A: ${x}; B: ${y}`);
+        }
       }
     } else {
       const side = (s) => (s ? `${sizeText(s.size)}${s.size >= 1024 ? ` (${s.size} bytes)` : ""}, written ${shownAt(localStamp(new Date(s.mtimeMs)))}` : "not there");
@@ -3641,12 +3673,64 @@ async function resolveIn(ctx, found, keep) {
   const aBytes = aHere ? statSync(at(of)).size : null;
   const keptBytes = keep === "A" ? aBytes : bBytes;
   const inForce = isRecord && copyRecord && sameRecord(record, copyRecord);
-  const next = isRecord ? (keep === "B" ? copyRecord : record) : sized(record, keptBytes);
+  const chosen = isRecord ? (keep === "B" ? copyRecord : record) : sized(record, keptBytes);
+  // A plan's files are made from the record kept: each that differs is written by the rule before the record (which lists their
+  // sizes) is, and put back as it was when the record is refused. A file that already matches is left as it is.
+  const planText = isRecord && chosen.planned ? planFilesFrom(chosen) : null;
+  const planHad = {};
+  for (const name of Object.keys(planText || {})) planHad[name] = existsSync(at(name)) ? readFileSync(at(name), "utf8") : null;
+  const planNow = planText ? Object.entries(planText).filter(([name, text]) => planHad[name] !== text) : [];
+  const next = planText
+    ? { ...chosen, files: { ...Object.fromEntries(Object.entries(chosen.files).filter(([name]) => !PLAN_FILE_NAMES.includes(name))), ...Object.fromEntries(Object.entries(planText).map(([name, text]) => [name, Buffer.byteLength(text)])) } }
+    : chosen;
+  const putPlan = (entries) => {
+    const putWork = join(runsFolder(ctx.home), `resolve-plan-${process.pid}-${ctx.now()}`);
+    const put = textWriter({ work: putWork, ...ruleOpts(ctx) });
+    const done = [];
+    try {
+      for (const [name, text] of entries) {
+        done.push(name);
+        put(at(name), text, { replace: true });
+      }
+    } catch (e) {
+      for (const name of done) {
+        try {
+          if (planHad[name] === null) rmSync(at(name), { force: true });
+          else put(at(name), planHad[name], { replace: true });
+        } catch (back) {
+          // The file could not be put back either: the late check of "episodes" names it.
+        }
+      }
+      throw e;
+    } finally {
+      rmSync(putWork, { recursive: true, force: true });
+    }
+  };
+  // The plan's files that are not as they were before this keep, by what is on the disk now.
+  const planOff = () => planNow.map(([name]) => name).filter((name) => (existsSync(at(name)) ? readFileSync(at(name), "utf8") : null) !== planHad[name]);
+  const unsure = (names, why) => `The record was not changed (${why}), but the plan's files may not match it: ${names.join(", ")}. The next "episodes" names any that is wrong. Say "sort out the conflict" again to put them right; if it still says a file is not whole, ask Jason and tell him the episode's name.`;
   let written = null;
-  if (!inForce) {
+  if (planNow.length) {
+    try {
+      putPlan(planNow);
+    } catch (e) {
+      const stuck = planOff();
+      if (stuck.length) return refuse(ctx, unsure(stuck, `the plan's files could not be written: ${plainWhy(e)}`));
+      return refuse(ctx, `Nothing was written, and nothing deleted: the plan's files could not be written (${plainWhy(e)}). Say "sort out the conflict" again in a minute, or ask Jason.`);
+    }
+  }
+  if (!inForce || JSON.stringify(next.files) !== JSON.stringify(record.files)) {
     try {
       written = write(next, record.rev);
     } catch (e) {
+      try {
+        putPlan(planNow.filter(([name]) => planHad[name] !== null).map(([name]) => [name, planHad[name]]));
+        for (const [name] of planNow) if (planHad[name] === null) rmSync(at(name), { force: true });
+      } catch (back) {
+        // What is still not as it was is found below.
+      }
+      const stuck = planOff();
+      if (stuck.length) return refuse(ctx, unsure(stuck, plainWhy(e)));
       return refuse(ctx, `Nothing was written, and nothing deleted: ${plainWhy(e)}. Say "sort out the conflict" again to see it as it is now.`);
     }
   }
@@ -3698,7 +3782,7 @@ async function resolveIn(ctx, found, keep) {
   const finishedFrom = record.finished && JSON.stringify(record.finished).includes(JSON.stringify(of).slice(1, -1));
   const caveat = finishedFrom && listedBytes !== undefined && listedBytes !== keptBytes ? ` The record's finish (revision ${record.finished.revision}, on ${record.finished.on}) was made from the other side's version of it: say "finish the episode" again to make the hand-off from this one.` : "";
   const step = outOfStep();
-  ctx.say(`Kept ${keep} of ${of}. The other is set aside in history/.${caveat}${step}`);
+  ctx.say(planText ? `Kept ${keep}. The plan's files are written from it. The other is set aside in history/.${caveat}${step}` : `Kept ${keep} of ${of}. The other is set aside in history/.${caveat}${step}`);
   return step ? 1 : 0;
 }
 
