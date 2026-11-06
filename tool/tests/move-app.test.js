@@ -112,8 +112,10 @@ if (command === "show") {
     oldKey     true puts brimm-video's old key (its two files) in ~/.ssh, beside an unrelated id_ed25519 that must always stay
     oldReport  text of a report an earlier run left on her Desktop
     answers    stdin, such as "y\ny\n\n"
+    env        more of the run's environment, such as { GIT_SSH: "..." }
     Returns { status, out, ran, home, before, tree, log, report }: `before` and `tree` list every file in the home folder before
-    and after, and `log` and `report` are those files' text, or "". */
+    and after, and `log` and `report` are those files' text, or "". installGitEnv and installGitSsh are what the stand-in installer
+    saw of GIT_SSH_COMMAND and GIT_SSH ("unset" for none). */
 function moveOn(options = {}, ...args) {
   const dir = mkdtempSync(join(tmpdir(), "brimm-move-"));
   try {
@@ -136,6 +138,7 @@ function moveOn(options = {}, ...args) {
     put(join(github, "tool", "install.sh"), `#!/bin/zsh
 echo "install.sh $*" >> "${ranFile}"
 echo "\${GIT_SSH_COMMAND-unset}" > "${dir}/install-gitenv"
+echo "\${GIT_SSH-unset}" > "${dir}/install-gitssh"
 case "$1" in
   --print)
     n=$(cat "${dir}/install-prints" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${dir}/install-prints"
@@ -280,6 +283,7 @@ esac
     };
     if (options.noRepo) delete env.BRIMM_STUDIO_REPO;
     if (options.testFail) env.BRIMM_TEST_FAIL = "1";
+    Object.assign(env, options.env);
     const commit = options.commit === undefined ? ["--commit", sha] : options.commit === null ? [] : ["--commit", options.commit];
     // A first run already open, waiting at its first question (stdin is held open): the one the run under test is a second to.
     let first = null;
@@ -287,7 +291,20 @@ esac
       first = spawn("/bin/zsh", [MOVE, ...commit], { env, stdio: ["pipe", "pipe", "pipe"] });
       const log = join(home, "Library", "Logs", "brimm-video-studio-move.log");
       const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-      for (let i = 0; i < 200 && !(existsSync(log) && readFileSync(log, "utf8").includes("Go ahead?")); i++) sleep(50);
+      const asking = () => existsSync(log) && readFileSync(log, "utf8").includes("Go ahead?");
+      // Node can't see the first run end while this waits, so ps is asked: gone, or a zombie (Z), is ended.
+      const ended = () => !/^[^Z]/.test(spawnSync("ps", ["-o", "stat=", "-p", String(first.pid)], { encoding: "utf8" }).stdout.trim());
+      const limit = Date.now() + 30_000;
+      let why = "";
+      while (!asking() && !why) {
+        if (ended()) why = "it ended first";
+        else if (Date.now() > limit) why = "it was still going after 30 seconds (is this Mac very busy?)";
+        else sleep(100);
+      }
+      if (why) {
+        first.kill("SIGKILL");
+        throw new Error(`The first run never reached its first question: ${why}. Its log:\n${existsSync(log) ? readFileSync(log, "utf8") : "(none)"}`);
+      }
     }
     const r = spawnSync("/bin/zsh", [MOVE, ...commit, ...args], { encoding: "utf8", input: options.answers ?? "", env });
     if (first) first.kill("SIGKILL");
@@ -301,7 +318,7 @@ esac
           origin: inStudio("remote", "get-url", "origin"), marks: text(join(studio, ".git", "move-to-studio")) }
       : null;
     return {
-      sha, github, studioNow, installGitEnv: text(join(dir, "install-gitenv")), partialLeft: existsSync(`${studio}.partial`),
+      sha, github, studioNow, installGitEnv: text(join(dir, "install-gitenv")), installGitSsh: text(join(dir, "install-gitssh")), partialLeft: existsSync(`${studio}.partial`),
       copied: text(copied), sshConfig: text(join(ssh, "config")), sshConfigMode: mode(join(ssh, "config")), knownHosts: text(join(ssh, "known_hosts")),
       publicCopy: text(join(home, "Desktop", "Studio key (public half).txt")), sshAsked: Number(text(asked).trim() || 0),
       status: r.status, out: r.stdout, err: r.stderr, home, before, tree: readdirSync(home, { recursive: true }).sort(),
@@ -536,6 +553,11 @@ describe("the move script, one run at a time", { skip: notAMac }, () => {
     assert.equal(r.out, "Move to Studio is already running in another Terminal window. Use that one, or close it and double-click again.\n");
     assert.equal(r.log.split("\n").filter((l) => l.startsWith("--- ")).length, 1, "only the first run is in the log");
     assert.ok(!r.out.includes("Stopped."), "the second run changed nothing, and says nothing of the first");
+  });
+
+  it("(the test's own set-up) says so plainly when the first run never reaches its question, rather than going on", () => {
+    // Refused at once (this Mac has no settings), the first run never asks, so it never holds the lock the second should meet.
+    assert.throws(() => moveOn({ ...SIGNED_OUT_OPEN, settings: null }), /The first run never reached its first question: it ended first\./);
   });
 
   it("takes no lock under --print, so a print runs beside an open run", () => {
@@ -1036,6 +1058,15 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     const early = moveOn({ marks: NOT_INSTALLED, install: { print: [`${printText(PRINT_LINES.signed, PRINT_LINES.older)}\n${filler}`, DEFAULT_PRINT] }, answers: "y\ny\n\n" });
     assert.equal(early.status, 0, early.out.slice(-600));
     assert.ok(early.ran.split("\n").includes("claude update"), "the older line was seen, with more than 64 KiB after it");
+  });
+
+  it("leaves her own GIT_SSH alone: the clone's ssh command has a name of its own", () => {
+    const hers = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n", env: { GIT_SSH: "/usr/local/bin/her-own-ssh" } });
+    assert.equal(hers.status, 0, hers.out);
+    assert.equal(hers.installGitSsh.trim(), "/usr/local/bin/her-own-ssh", "the installer sees her own GIT_SSH, as it was");
+    const none = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n" });
+    assert.equal(none.status, 0, none.out);
+    assert.equal(none.installGitSsh.trim(), "unset", "and none when she has none");
   });
 
   it("takes only 'Claude answered from here' as the installer's check of Claude, and leaves the environment of git out of the installer", () => {

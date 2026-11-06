@@ -13,7 +13,7 @@ The app, its build and the notarizing are all run from that page, each on Jason'
 - `y` and `yes` go ahead, in any case. Return alone is no. So is anything else.
 - Each step looks first and does only what is not done yet. A second run says "Already done" for what is done and goes on.
 - It keeps the Mac awake while it runs. Keep the lid open and the charger in.
-- One run at a time. A second double-click while a first window is open says so and stops at once; use the open window, or close it and double-click again. A `--print` takes no such lock.
+- One run at a time. A second double-click while a first run is still going says so and stops at once; use that run's window, or close it and double-click again. A window left open after its run stopped holds nothing back: a new double-click runs. A `--print` takes no such lock.
 
 The code is in `tool/move-app/`:
 
@@ -142,7 +142,7 @@ The last command makes the zip again, with the ticket stapled in.
 
 ## Stopping and running again
 
-- An n, a failure, Control-C or closing the Terminal window stops it. It then lists what this run changed (or says it changed nothing), and says: `Double-click Move to Studio again to go on from here.`
+- An n, a failure, Control-C or closing the Terminal window stops it. It then lists what this run changed (or says it changed nothing), and says: `Double-click Move to Studio again to go on from here.` After a closed window there is no window to show that in, so it is only in the log (below).
 - A run stopped in the middle of a clone takes the half-made copy away.
 - It undoes nothing and deletes nothing, except its own half-made clone and, in step 7, brimm-video's old key on her y.
 - A failed install is shown and stopped, never undone. A second run goes on. Going back to brimm-video is Jason's call, by hand, with brimm-video's installer, which stays on disk.

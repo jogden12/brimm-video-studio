@@ -45,8 +45,9 @@ HOMEBREW_DIRS="${BRIMM_HOMEBREW_DIRS-/opt/homebrew/bin:/usr/local/bin}"
 # ssh and git always use her own files, never the ones of the home folder the passwd database names (a Terminal can be started
 # with another HOME). StrictHostKeyChecking=yes with her known_hosts, so that a host that is not GitHub's is never trusted.
 SSH_OPTS=(-F "$HOME/.ssh/config" -o "UserKnownHostsFile=$HOME/.ssh/known_hosts" -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes)
-# Given to the clone alone (not exported), so that Studio's tests, the installer, brew and npm do not inherit it.
-GIT_SSH="ssh ${(j: :)${(@q)SSH_OPTS}}"
+# Given to the clone alone (not exported), so that Studio's tests, the installer, brew and npm do not inherit it. Not named GIT_SSH,
+# git's own variable: a GIT_SSH her shell exports would be overwritten for every program started after.
+CLONE_SSH="ssh ${(j: :)${(@q)SSH_OPTS}}"
 
 SELF="${(%):-%x}"
 # State of the run.
@@ -558,7 +559,7 @@ copy_the_code() {
     changed+=("took away a half-made copy of Studio's code ($PARTIAL)")
   fi
   made_partial=yes
-  if ! told="$(GIT_SSH_COMMAND="$GIT_SSH" "${clone[@]}" 2>&1)"; then
+  if ! told="$(GIT_SSH_COMMAND="$CLONE_SSH" "${clone[@]}" 2>&1)"; then
     drop_the_partial
     say "${told}"
     stop_here "Studio's code could not be copied from GitHub (the lines above say why)."
