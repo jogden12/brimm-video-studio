@@ -93,10 +93,24 @@ describe("dropClosing, by the sound", () => {
     assert.equal(r.dropped, 0);
     assert.equal(r.srt, srt);
   });
-  it("takes the same caption when no sound starts for it, and one wholly in the pause either way", () => {
-    const srt = [cap(1, "00:01:10,000", "00:01:15,000", "talk"), cap(2, "00:01:17,000", "00:01:19,000", "Thanks."), cap(3, "00:01:19,000", "00:01:20,000", "Thanks.")].join("\n");
+  it("takes a caption padded into the silence when an earlier caption owns the last stretch of sound, and one wholly in the pause either way", () => {
+    const srt = [cap(1, "00:01:14,000", "00:01:16,500", "talk"), cap(2, "00:01:17,000", "00:01:19,000", "Thanks."), cap(3, "00:01:19,000", "00:01:20,000", "Thanks.")].join("\n");
     assert.equal(dropClosing(srt, [77.2, 84.167], [[70, 71], [77.2, 84.167]]).dropped, 2);
-    assert.equal(dropClosing(srt, [77.2, 84.167], [[76, 76.9], [77.2, 84.167]]).dropped, 1);
+    const owned = [cap(1, "00:01:10,000", "00:01:15,000", "talk"), cap(2, "00:01:17,000", "00:01:19,000", "Thanks."), cap(3, "00:01:19,000", "00:01:20,000", "Thanks.")].join("\n");
+    assert.equal(dropClosing(owned, [77.2, 84.167], [[76, 76.9], [77.2, 84.167]]).dropped, 1);
+  });
+  it("keeps a short real phrase said after a breath and drops the invented caption after it, which a sound near its start does not save", () => {
+    const srt = [cap(1, "00:01:10,000", "00:01:15,000", "talk"), cap(2, "00:01:16,600", "00:01:17,000", "Bye."), cap(3, "00:01:17,000", "00:01:19,000", "See you next week.")].join("\n");
+    const r = dropClosing(srt, [77.298, 84.167], [[76.3, 76.6], [77.298, 84.167]]);
+    assert.deepEqual(captionsOf(r.srt).map((c) => c.text), ["talk", "Bye."]);
+    assert.equal(r.dropped, 1);
+  });
+  it("lets only the first caption own the stretch when no pause comes before the closing one", () => {
+    const srt = [cap(1, "00:00:00,000", "00:00:02,000", "Hello."), cap(2, "00:00:03,000", "00:00:05,000", "Padded.")].join("\n");
+    const r = dropClosing(srt, [3.5, 84.167], [[3.5, 84.167]]);
+    assert.deepEqual(captionsOf(r.srt).map((c) => c.text), ["Hello."]);
+    const kept = dropClosing(cap(1, "00:00:03,000", "00:00:05,000", "Padded."), [3.5, 84.167], [[3.5, 84.167]]);
+    assert.equal(kept.dropped, 0);
   });
 });
 

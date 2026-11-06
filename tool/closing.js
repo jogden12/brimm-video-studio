@@ -12,9 +12,9 @@ const LONG_ENOUGH = 1;
 const AT_THE_END = 0.05;
 /** How much of a caption has to lie in the closing pause before it is taken for words nobody said. */
 const SHARE = 0.75;
-/** A caption this much in the pause or more is words nobody said whatever else is heard; between SHARE and this it is kept when a
-    sound starts for it (a pause ends up to SOUND_BEFORE seconds before it starts, or after), because the transcriber pads a
-    real last caption's end into the silence. */
+/** A caption this much in the pause or more is words nobody said whatever else is heard; between SHARE and this it is kept only
+    when it owns the last stretch of sound (see dropClosing), because the transcriber pads a real last caption's end into the
+    silence. A caption owns that stretch when it starts up to SOUND_BEFORE seconds before the stretch does, or after. */
 const WHOLLY = 0.99;
 const SOUND_BEFORE = 0.5;
 const CAPTION_TIMES = /(\d{1,2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[.,](\d{3})/;
@@ -31,30 +31,37 @@ export function closingPause(pauses, length = 0) {
 }
 
 /** The captions without the ones that lie in the closing pause: {srt, dropped, edge}. A caption with 75% or more of its time in
-    it is left out, unless it is not wholly in it (under 99%) and a sound starts for it: one of `pauses` (all of them, [start,
-    end]) ends from half a second before the caption starts to where the closing pause starts. A caption with no length is left
-    out when its moment lies in the pause. The captions that are left are numbered again. `edge` is the second the last caption
-    kept ends, and only when a caption was left out; otherwise null. With none left out the captions come back as they were. */
+    it is left out, with two exceptions. One 99% or more in it is always left out. One between 75% and 99% in it is kept when it
+    owns the last stretch of sound: O is the end of the last of `pauses` ([start, end], all of them) that ends before the closing
+    pause starts (0 when there is none), the sound from O to the closing pause is the last stretch, and its own caption is the
+    first caption, in time order, that starts in [O - 0.5 s, the closing pause's start). Any other has no sound of its own.
+    One case is accepted: a real short last word said straight on, with no pause before it (so no new stretch of sound), whose end
+    the transcriber padded 75% or more into the closing pause, is left out. A caption with no length is left out when its moment
+    lies in the pause. The captions that are left are numbered again. `edge` is the second the last caption kept ends, and only
+    when a caption was left out; otherwise null. With none left out the captions come back as they were. */
 export function dropClosing(srt, pause, pauses = []) {
   if (!pause || !captionCount(srt)) return { srt, dropped: 0, edge: null };
   const [from, to] = pause;
-  const kept = [];
-  let dropped = 0;
-  let edge = null;
+  const found = [];
   for (const block of String(srt).replace(/\r\n?/g, "\n").split(/\n{2,}/)) {
     const lines = block.split("\n");
     const at = lines.findIndex((l) => CAPTION_TIMES.test(l));
     if (at === -1) continue;
     const t = CAPTION_TIMES.exec(lines[at]);
-    const start = secondsOf(t[1], t[2], t[3], t[4]);
-    const end = secondsOf(t[5], t[6], t[7], t[8]);
-    const share = end > start ? Math.max(0, Math.min(end, to) - Math.max(start, from)) / (end - start) : null;
-    const spoken = pauses.some(([, b]) => b >= start - SOUND_BEFORE && b < from);
-    const inside = share === null ? start >= from && start < to : share >= WHOLLY || (share >= SHARE && !spoken);
+    found.push({ text: lines.slice(at).join("\n"), start: secondsOf(t[1], t[2], t[3], t[4]), end: secondsOf(t[5], t[6], t[7], t[8]) });
+  }
+  const last = pauses.filter(([, b]) => b < from).reduce((o, [, b]) => Math.max(o, b), 0);
+  const own = found.filter((c) => c.start >= last - SOUND_BEFORE && c.start < from).sort((a, b) => a.start - b.start)[0];
+  const kept = [];
+  let dropped = 0;
+  let edge = null;
+  for (const c of found) {
+    const share = c.end > c.start ? Math.max(0, Math.min(c.end, to) - Math.max(c.start, from)) / (c.end - c.start) : null;
+    const inside = share === null ? c.start >= from && c.start < to : share >= WHOLLY || (share >= SHARE && c !== own);
     if (inside) dropped += 1;
     else {
-      kept.push(lines.slice(at).join("\n"));
-      edge = Math.max(edge === null ? 0 : edge, end);
+      kept.push(c.text);
+      edge = Math.max(edge === null ? 0 : edge, c.end);
     }
   }
   return dropped ? { srt: kept.map((caption, i) => `${i + 1}\n${caption}\n`).join("\n"), dropped, edge } : { srt, dropped: 0, edge: null };
