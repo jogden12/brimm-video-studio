@@ -1064,7 +1064,7 @@ describe("the join run, a talking part with no sound (PR H5b, ruling 5: a video 
       })
     };
     const deps = { episode: { root: t.root, machine: "Mac Studio", checkout: "/checkout", home: t.home }, clone: t.ctx.deps.clone, sameDisk: () => true, commit: "c709b57" };
-    const filing = (facts, printed, kind) => fileEpisode({ file, made: [], at: (to) => to, fcpxml: "", facts, printed, kind, read: null, reels: [], work, fingerprint: "", into }, deps);
+    const filing = (facts, printed, kind) => fileEpisode({ file, made: [], at: (to) => to, facts, printed, kind, read: null, reels: [], work, fingerprint: "", into }, deps);
     const SILENT_FACTS = { duration: 60, width: 1920, height: 1080, fps: "30/1", sound: false };
     for (const kind of ["raw", "short video"]) {
       assert.throws(() => filing(SILENT_FACTS, silentOf("60.000000"), kind), /^Error: a video with no sound takes no kind, so it is not filed as one$/, kind);

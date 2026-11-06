@@ -451,7 +451,7 @@ describe("app … what-happened and app … versions: the README", () => {
 });
 
 describe("app … what-happened and app … versions: a project on another Mac", () => {
-  const THERE = (on) => `The HyperFrames project for ${NAME} is on ${on}, with everything done in it, so there is nothing to look at on this Mac. Ask Jason.`;
+  const THERE = (on) => `The HyperFrames project of ${NAME} is on ${on}. Carry on there.`;
   const madeOn = (on) => ({
     ...RAW, version: 4,
     app: { toolchain: PIN.version, projects: [{

@@ -672,7 +672,7 @@ export function letGoClaim(ctx, found) {
     writeEpisode(found.folder, { ...now.record, editing: null }, { expectRev: asked.rev, writeText: textWriter({ work, ...opts }), writer: { commit: ctx.deps.commit || commitOf(thisCheckout()), on: ctx.machine }, home: ctx.home });
     return "The episode is let go again, as it was before the finish.";
   } catch (e) {
-    // A record written since (one not whole yet, say: the other Mac's take-over on its way) is not this Mac's claim to keep
+    // A record written since (one not whole yet, say: the other Mac's claim on its way) is not this Mac's claim to keep
     // (round 3, t1-5).
     if (e.code === "CHANGED") return "The episode changed on the other Mac while finish ran, so nothing was let go here: say open to see who has it now.";
     return `This Mac still has the episode open: it could not be let go (${String(e.message).replace(/\.$/, "")}). Ask Jason.`;

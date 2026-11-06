@@ -223,8 +223,8 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
   it("says whether Claude Code is on this Mac, where the launch agent will look for it, and what is then sent to Claude. It installs nothing for it", () => {
     const r = ask("--print", "/Volumes/Work/Unedited video");
     assert.equal(r.status, 0, r.err);
-    const found = /\n {2}Claude Code, to read each cut plan: {2}here already, at (\/\S+\/claude)\n {2}Sent to Claude for each cut plan: {2}the words of the transcript with their times, the rules' plan, and the video's file name and length, on the Claude account signed in on this Mac\. The video and its sound never leave it\. To send nothing: --rules-only\n/.exec(r.out);
-    const missing = r.out.includes("\n  Claude Code, to read each cut plan:  not here, so each cut plan is the rules' alone and nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac\n");
+    const found = /\n {2}Claude Code, to read a video once its person has said what it is: {2}here already, at (\/\S+\/claude)\n {2}Sent to Claude: {2}nothing when a video is dropped, since this Mac's import is the light one\. Claude reads a video only once its person has said what it is, on the Claude account signed in on this Mac, and never a session's file name\. The video and its sound never leave it\. To send nothing: --rules-only\n/.exec(r.out);
+    const missing = r.out.includes("\n  Claude Code, to read a video once its person has said what it is:  not here, so nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac\n");
     assert.ok(found || missing, r.out);
     // It is looked for where the launch agent's own PATH leads, and not where this shell's does.
     if (found) assert.ok(["/opt/homebrew/bin/claude", "/usr/local/bin/claude", "/usr/bin/claude", "/bin/claude"].includes(found[1]), found[1]);
@@ -239,7 +239,7 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
   it("finds Claude Code in the home folder's own .local/bin, where the launch agent's PATH does not lead and unedited.js looks all the same", () => {
     const r = askWith({ programs: [".local/bin/claude"], agentPath: NOWHERE }, "--print", "/Volumes/Work/Unedited video");
     assert.equal(r.status, 0, r.err);
-    const found = /\n {2}Claude Code, to read each cut plan: {2}here already, at (\/\S+\/claude)\n/.exec(r.out);
+    const found = /\n {2}Claude Code, to read a video once its person has said what it is: {2}here already, at (\/\S+\/claude)\n/.exec(r.out);
     assert.ok(found, r.out);
     assert.equal(found[1], `${r.home}/.local/bin/claude`);
     assert.deepEqual([r.left, r.ran], [[".local", ".local/bin", ".local/bin/claude"], ""]);
@@ -247,7 +247,7 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
   it("says Claude Code is not here when it is nowhere the launch agent will look, and that each plan is then the rules' alone", () => {
     const r = askWith({ agentPath: NOWHERE }, "--print", "/Volumes/Work/Unedited video");
     assert.equal(r.status, 0, r.err);
-    assert.ok(r.out.includes("\n  Claude Code, to read each cut plan:  not here, so each cut plan is the rules' alone and nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac\n"), r.out);
+    assert.ok(r.out.includes("\n  Claude Code, to read a video once its person has said what it is:  not here, so nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac\n"), r.out);
     assert.doesNotMatch(r.out, /here already, at|Sent to Claude/);
     // The launch agent is given the PATH that was looked along.
     assert.equal(r.agents[0].EnvironmentVariables.PATH, NOWHERE);
@@ -263,7 +263,7 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
       const r = ask(...args);
       assert.equal(r.status, 0, r.err);
       assert.deepEqual(r.agents.map(held), [agent(r, ["/Volumes/Work/Unedited video"], ["--rules-only"])], args.join(" "));
-      assert.ok(r.out.includes("\n  Claude, to read each cut plan:  not asked (--rules-only), so each cut plan is the rules' alone and nothing leaves this Mac\n"), r.out);
+      assert.ok(r.out.includes("\n  Claude, to read a video once its person has said what it is:  not asked (--rules-only: no reading is made in folder mode, and with --machine readings are off), so nothing leaves this Mac\n"), r.out);
       assert.doesNotMatch(r.out, /Claude Code, to read|Sent to Claude/);
       changedNothing(r);
     }
@@ -351,7 +351,7 @@ describe("the installer's own text", () => {
     const r = ask("--print", "--help");
     assert.match(r.out, /\n {2}\.\/install\.sh "\/path\/to\/folder" --rules-only\n/);
     const help = r.out.replace(/\s+/g, " ");
-    assert.ok(help.includes("No video and no sound ever leaves the Mac. Claude is asked to read each cut plan: the words of the transcript with their times and the rules' plan are then sent to Claude through Claude Code, on the Claude account signed in on this Mac, with the video's file name and its length. With --rules-only nothing leaves the Mac."), r.out);
+    assert.ok(help.includes("No video and no sound ever leaves the Mac. The import is always the light one: nothing is sent to Claude when a video is dropped. Claude reads a video only once its person has said what it is, and never a session's file name; what is sent then is the words of the transcript with their times, the rules' plan, and the video's file name and length (never a session's), through Claude Code, on the Claude account signed in on this Mac. With --machine, --rules-only turns the readings off, so nothing leaves the Mac; in folder mode no reading is made."), r.out);
     // The help is the comment the file opens with, whole: it ends where the script begins.
     assert.ok(text.includes(`\n# ${r.out.trimEnd().split("\n").pop()}\nset -euo pipefail\n`), r.out);
   });
@@ -502,13 +502,12 @@ describe("the installer's own text", () => {
     }
   });
   // The lines it ends with are only said once it has set the Mac up, which no test does. So they are read here, not run.
-  it("ends by saying what the folder for unedited video gives", () => {
-    const closing = text.slice(text.lastIndexOf("launchctl bootstrap"));
+  it("ends by saying what the folder for unedited video gives: the transcript, the plan and the rough cut's captions, and no video", () => {
+    const closing = text.slice(text.lastIndexOf('\nsay "Done. Put an unedited video in:"'));
     assert.match(closing, /\nsay "Done\. Put an unedited video in:"\n/);
-    for (const named of ["<name>.cut-plan.txt", "<name>.rough-cut.mp4", "<name>.rough-cut.vertical.mp4", "<name>.fcpxml", "BRIMM Video Work", "<name>.edit-notes.txt", "<name>.reel-1.mp4"]) assert.ok(closing.includes(named), named);
-    // The plan's first lines name every file that could not be made but a short clip. So it says where a clip is named.
-    const told = closing.replace(/"\n +say "/g, " ");
-    assert.ok(told.includes("A clip that could not be cut is named in the log and at the end of the notes, and not in <name>.cut-plan.txt."), told);
+    for (const named of ["<name>.cut-plan.txt", "<name>.rough-cut.srt"]) assert.ok(closing.includes(named), named);
+    for (const gone of ["rough-cut.mp4", "vertical", "fcpxml", "Final Cut", "edit-notes", "reel-1"]) assert.ok(!closing.includes(gone), gone);
+    assert.ok(closing.replace(/"\n *say "/g, " ").includes("No video is made, and Claude is not asked."), closing);
   });
   it("for one of the two Macs, makes Episodes, marks the drop folder and writes the settings through settings.js, and ends by saying where to drop a video", () => {
     const made = text.slice(text.indexOf('if [[ -n "$machine" ]]; then\n  mkdir -p'), text.indexOf("agent \"$node\" > \"$AGENT_FILE\""));
@@ -1159,7 +1158,7 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     const r = askWith({ onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") }, finalCut: "12.4" }, "--print", "--machine", "Sallie's laptop", "--rules-only", d.root);
     assert.equal(r.status, 0, r.err + r.out);
     assert.doesNotMatch(r.out, /\n {2}At the end:/);
-    assert.ok(r.out.includes("\n  Claude, to read each cut plan:  not asked (--rules-only), so each cut plan is the rules' alone and nothing leaves this Mac\n"), r.out);
+    assert.ok(r.out.includes("\n  Claude, to read a video once its person has said what it is:  not asked (--rules-only: no reading is made in folder mode, and with --machine readings are off), so nothing leaves this Mac\n"), r.out);
     // Her folder for Claude is still written, so Claude Code's sign-in and version are still told.
     assert.ok(r.out.includes("\n  Claude Code's version:  2.1.296 (her folder's guard needs 2.1.295 or later)\n"), r.out);
     changedNothing(r);
@@ -1376,37 +1375,26 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.deepEqual(d.held(), before);
     d.done();
   });
-  // Under the light import nothing is sent to Claude when a video is dropped: the installer says what it sends then, and ends by
-  // saying to ask Claude what is waiting, not to open a video by its name. Today's import keeps today's lines.
-  const TODAY_SENT = "  Sent to Claude for each cut plan:  the words of the transcript with their times, the rules' plan, and the video's file name and length, on the Claude account signed in on this Mac. The video and its sound never leave it. To send nothing: --rules-only";
+  // The import is always the light one: the installer says so whatever the settings say, and ends by saying to ask Claude what is waiting.
   const LIGHT_SENT = "  Sent to Claude:  nothing when a video is dropped, since this Mac's import is the light one. Claude reads a video only once its person has said what it is, on the Claude account signed in on this Mac, and never a session's file name. The video and its sound never leave it. To send nothing: --rules-only";
-  it("says under the light import, told or in the settings, that nothing is sent to Claude when a video is dropped, and today's line otherwise", () => {
+  it("says, whatever the settings say of the import, that nothing is sent to Claude when a video is dropped", () => {
     const d = box();
-    for (const [settings, args] of [[undefined, ["--import", "light"]], [d.mine({ import: "light" }), []], [d.mine({ import: "full" }), ["--import", "light"]]]) {
+    for (const [settings, args] of [[undefined, []], [undefined, ["--import", "light"]], [d.mine({ import: "light" }), []], [d.mine({ import: "full" }), []], [d.mine(), []]]) {
       const r = askWith({ settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
       assert.equal(r.status, 0, r.err + r.out);
       assert.ok(r.out.includes(`\n${LIGHT_SENT}\n`), r.out);
       assert.doesNotMatch(r.out, /file name and length/);
     }
-    for (const [settings, args] of [[undefined, []], [d.mine({ import: "light" }), ["--import", "full"]], [d.mine(), []]]) {
-      const r = askWith({ settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
-      assert.equal(r.status, 0, r.err + r.out);
-      assert.ok(r.out.includes(`\n${TODAY_SENT}\n`), r.out);
-      assert.ok(!r.out.includes(LIGHT_SENT), r.out);
-    }
     d.done();
   });
-  it("ends under the light import by saying to ask Claude what is waiting, and today's import by opening the video: its closing lines, read, not run", () => {
+  it("ends by saying to ask Claude what is waiting, always: its closing lines, read, not run", () => {
     const text = readFileSync(INSTALL, "utf8");
     const closing = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
-    assert.ok(closing.includes(`  if [[ -n "$light_import" ]]; then
-    say "in Claude, say \\"what's waiting?\\". What the tool did is in $LOG"
-  else
-    say "in Claude, say \\"open\\" and the video's name. What the tool did is in $LOG"
-  fi`), closing);
+    assert.ok(closing.includes('say "in Claude, say \\"what\'s waiting?\\". What the tool did is in $LOG"'), closing);
+    assert.ok(!closing.includes("light_import") && !closing.includes('\\"open\\"'), closing);
     // The help says so too.
     const help = text.slice(0, text.indexOf("set -euo pipefail")).replace(/\n# ?/g, " ").replace(/\s+/g, " ");
-    assert.ok(help.includes("Under the light import (--import light, or settings that say so) nothing is sent when a video is dropped: Claude reads a video only once its person has said what it is, and never a session's file name."), help);
+    assert.ok(help.includes("The import is always the light one: nothing is sent to Claude when a video is dropped. Claude reads a video only once its person has said what it is, and never a session's file name;"), help);
   });
   it("says at its end that the old folder, the one settings.js checked, is no longer watched, and that Jason checks it is still empty, then deletes it: its closing lines, read, not run", () => {
     const text = readFileSync(INSTALL, "utf8");
@@ -1465,12 +1453,12 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.match(r.out, /\nNothing was changed\.\n$/);
     d.done();
   });
-  it("shows every setting it keeps, and writes what it is told over them: --import full, --handoff, --drop, and --rules-only as readings off", () => {
+  it("shows every setting it keeps, and writes what it is told over them: --import light, --handoff, --drop, and --rules-only as readings off", () => {
     const d = box();
-    const kept = d.mine({ import: "light", readings: true, handoffVersion: 1, drop: "Unedited Video", later: { x: 1 } });
-    const r = askWith({ settings: kept }, "--print", "--machine", "Mac Studio", "--import", "full", "--handoff", "2", "--rules-only", d.root);
+    const kept = d.mine({ import: "full", readings: true, handoffVersion: 1, drop: "Unedited Video", later: { x: 1 } });
+    const r = askWith({ settings: kept }, "--print", "--machine", "Mac Studio", "--import", "light", "--handoff", "2", "--rules-only", d.root);
     assert.equal(r.status, 0, r.err + r.out);
-    assert.deepEqual(shown(r), { ...kept, version: 1, import: "full", readings: false, handoffVersion: 2 });
+    assert.deepEqual(shown(r), { ...kept, version: 1, import: "light", readings: false, handoffVersion: 2 });
     // Not told, they stay as the file has them, readings on included: no --rules-only never writes readings on.
     const quiet = askWith({ settings: d.mine({ readings: false }) }, "--print", "--machine", "Mac Studio", d.root);
     assert.deepEqual(shown(quiet), { ...d.mine({ readings: false }), version: 1 });
@@ -1510,9 +1498,9 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     refusedWith(ask("--print", "--machine", "Mac Studio", d.root, "--handoff", "3"), ["Not written: --handoff takes 1 or 2."]);
     refusedWith(askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", d.root), ['This Mac\'s settings could not be written (the import must be "full" or "light"). Jason puts that setting right by hand, or runs install.sh --machine on it, which writes this Mac\'s name, BRIMM Video and the checkout every time, the import, the hand-off version and the drop folder when told --import, --handoff or --drop, and readings off with --rules-only.'], true);
     // What it is told mends that one.
-    const mended = askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", "--import", "full", d.root);
+    const mended = askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", "--import", "light", d.root);
     assert.equal(mended.status, 0, mended.out);
-    assert.equal(shown(mended).import, "full");
+    assert.equal(shown(mended).import, "light");
     d.done();
   });
   it("refuses to switch while the old folder holds a video, naming it by its file name when the import is today's, and says what to do", () => {
@@ -1590,7 +1578,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     }
     for (const [args, said] of [
       [["--machine", "Mac Studio", d.root, "--drop"], 'Say which folder after --drop, as --drop Drop or --drop "Unedited Video".'],
-      [["--machine", "Mac Studio", "--import", "--print", d.root], "Say which import after --import, as --import light or --import full."],
+      [["--machine", "Mac Studio", "--import", "--print", d.root], "Say which import after --import, as --import light."],
       [["--machine", "Mac Studio", d.root, "--handoff"], "Say which version after --handoff, as --handoff 1 or --handoff 2."]
     ]) {
       const r = ask("--print", ...args);
@@ -1601,7 +1589,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   it("refuses plainly, before any change, when node is not here and it is told --drop, --import or --handoff, or this Mac has settings", () => {
     const d = box();
     const WHY = "Node is not on this Mac, and the installer needs it to read and check this Mac's settings before it changes anything. Install it with Homebrew (brew install node; Homebrew is at https://brew.sh), then run this again.";
-    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "full"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
+    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "light"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
       const r = askWith({ bare: true, settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
       assert.deepEqual([r.status, r.out], [2, `${WHY}\n\nNothing was changed.\n`], args.join(" "));
       assert.deepEqual([r.left, r.ran], [settings ? ["Library", "Library/Application Support", "Library/Application Support/BRIMM Video", "Library/Application Support/BRIMM Video/settings.json"] : [], ""]);
@@ -1673,7 +1661,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   const OLD_NODE = "Node here is v20.1.0, and the tool needs 22 or later. Run: brew upgrade node";
   it("treats a node older than 22 as no node when the settings are to be read and checked: refused before any change, with the node's own words", () => {
     const d = box();
-    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "full"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
+    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "light"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
       const r = askWith({ onPath: { node: NODE_OF("20.1.0") }, settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
       assert.deepEqual([r.status, r.out], [2, `${OLD_NODE}\n\nNothing was changed.\n`], args.join(" "));
       assert.deepEqual([r.left, r.ran, r.agents], [settings ? SETTINGS_LEFT : [], "", []]);
@@ -1761,7 +1749,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   });
   it("refuses --drop, --import and --handoff with --remove, which changes no settings, plainly and before anything else", () => {
     const d = box();
-    for (const args of [["--drop", "Drop"], ["--import", "full"], ["--handoff", "2"], ["--machine", "Mac Studio", "--drop", "Drop", d.root]]) {
+    for (const args of [["--drop", "Drop"], ["--import", "light"], ["--handoff", "2"], ["--machine", "Mac Studio", "--drop", "Drop", d.root]]) {
       const r = ask("--print", "--remove", ...args);
       assert.deepEqual([r.status, r.out], [2, "--remove stops the watching and changes no settings, so it does not take --drop, --import or --handoff.\n"], args.join(" "));
       assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
@@ -1829,7 +1817,8 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
     const line = readme.split("\n").find((l) => l.startsWith("Add `--rules-only` to that line"));
     assert.ok(line, "README's --rules-only paragraph");
-    assert.ok(line.includes("To have Claude asked again, run the line again without `--rules-only`"), line);
+    assert.ok(line.includes("The import never asks Claude, with it or without"), line);
+    assert.ok(line.includes("To have Claude asked again to read a video, run the line again without `--rules-only`, and turn the readings on"), line);
     assert.ok(line.includes("with `--machine`, `--rules-only` wrote `readings: false` into this Mac's settings, and a run without it leaves that as it is: turn the readings on with `node settings.js set --readings on`"), line);
   });
   it("says in its help what the three options do, and that a switch is refused while the old folder holds work", () => {
@@ -1980,5 +1969,21 @@ describe("the installer and her folder's lock (the open lock, K1), asked what it
     const removing = ask("--print", "--remove", "--user-deny");
     assert.equal(removing.status, 2);
     assert.ok(removing.out.includes("--remove stops the watching and changes no settings, so it does not take --user-deny."), removing.out);
+  });
+});
+
+describe("the full import is gone (Phase 2, F4)", { skip: notAMac }, () => {
+  it("--import full prints that the full import is gone, changes nothing and ends 2, on a Mac set up with --machine or not", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    for (const args of [["--machine", "Mac Studio", "--import", "full", root], ["--import", "full", "/Volumes/Work/Unedited video"], ["--machine", "Mac Studio", "--drop", "Drop", "--import", "full", root]]) {
+      const r = ask("--print", ...args);
+      assert.deepEqual([r.status, r.out], [2, "The full import is gone: this Mac imports lightly.\n"], args.join(" "));
+      assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
+    }
+    // --import light is as it was.
+    assert.equal(ask("--print", "--machine", "Mac Studio", "--import", "light", root).status, 0);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -956,8 +956,6 @@ export function writeProject(dir, files, { fs = nodeFs } = {}) {
       if (typeof value === "string") fs.writeFileSync(to, value);
       else if (value && "copy" in value) {
         fs.copyFileSync(value.copy, to);
-        // A file copied with a time keeps it (mtimeMs), as a project rebuilt from a snapshot has the times its files had.
-        if (Number.isFinite(value.mtimeMs)) fs.utimesSync(to, value.mtimeMs / 1000, value.mtimeMs / 1000);
       }
       else if (value && "link" in value) fs.symlinkSync(value.link, to);
       else throw new Error(`writeProject: ${path} is neither a text nor a file to copy, link or move`);

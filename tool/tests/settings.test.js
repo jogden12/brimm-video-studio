@@ -872,27 +872,27 @@ describe("node settings.js set and sessions", () => {
     const t = mac();
     // The Drop folder is written here as the installer would write it: set never changes the drop folder, which the installer
     // switches.
-    writeSettings(t.home, { import: "light", drop: "Drop", later: { x: 1 } });
-    assert.equal(t.run("set", "--import", "full", "--readings", "off", "--handoff", "2", "--drop", "Drop"), 0);
+    writeSettings(t.home, { import: "full", drop: "Drop", later: { x: 1 } });
+    assert.equal(t.run("set", "--import", "light", "--readings", "off", "--handoff", "2", "--drop", "Drop"), 0);
     assert.deepEqual(t.said, [
-      "The import is now full (it was light).",
+      "The import is now light (it was full).",
       "Readings are now off (they were on).",
       "The hand-off version is now 2 (it was 1).",
       "The drop folder is Drop already.",
       `Written: ${settingsFile(t.home)}`
     ]);
-    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "full", readings: false, handoffVersion: 2, drop: "Drop", later: { x: 1 } });
+    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "light", readings: false, handoffVersion: 2, drop: "Drop", later: { x: 1 } });
     t.said.length = 0;
     assert.equal(t.run("set", "--handoff", "1", "--readings", "on"), 0);
     // Each change is said in the order it was told.
     assert.deepEqual(t.said, ["The hand-off version is now 1 (it was 2).", "Readings are now on (they were off).", `Written: ${settingsFile(t.home)}`]);
-    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "full", readings: true, handoffVersion: 1, drop: "Drop", later: { x: 1 } });
+    assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "light", readings: true, handoffVersion: 1, drop: "Drop", later: { x: 1 } });
     t.done();
   });
   it("set takes one setting alone, in any order, and says so when nothing changes", () => {
     const t = mac();
-    assert.equal(t.run("set", "--import", "full"), 0);
-    assert.deepEqual(t.said, ["The import is full already."]);
+    assert.equal(t.run("set", "--readings", "on"), 0);
+    assert.deepEqual(t.said, ["Readings are on already."]);
     unchanged(t);
     t.said.length = 0;
     assert.equal(t.run("set", "--handoff", "2"), 0);
@@ -931,7 +931,7 @@ describe("node settings.js set and sessions", () => {
   it("set refuses a value that will not do, says what the setting takes, changes nothing, and ends with 1", () => {
     const t = mac();
     for (const [argv, said] of [
-      [["--import", "heavy"], "Not changed: --import takes light or full."],
+      [["--import", "heavy"], "Not changed: --import takes light."],
       [["--readings", "true"], "Not changed: --readings takes on or off."],
       [["--handoff", "3"], "Not changed: --handoff takes 1 or 2."],
       [["--handoff", "constructor"], "Not changed: --handoff takes 1 or 2."],
@@ -992,15 +992,16 @@ describe("node settings.js set and sessions", () => {
     // Part F took its refusal away: the card she answers in her chat (her skill, F10).
     const t = mac();
     assert.equal(t.run("set", "--import", "light"), 0);
-    assert.deepEqual(t.said, ["The import is now light (it was full).", `Written: ${settingsFile(t.home)}`]);
+    assert.deepEqual(t.said, ["The import is now light.", `Written: ${settingsFile(t.home)}`]);
     assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "light" });
     assert.equal(lightImport(readSettings(t.home).settings), true);
     t.said.length = 0;
     assert.equal(t.run("set", "--readings", "off", "--import", "light"), 0);
     assert.deepEqual(t.said, ["Readings are now off (they were on).", "The import is light already.", `Written: ${settingsFile(t.home)}`]);
     t.said.length = 0;
-    assert.equal(t.run("set", "--import", "full"), 0);
-    assert.deepEqual(t.said, ["The import is now full (it was light).", `Written: ${settingsFile(t.home)}`]);
+    // The full import is gone: it is refused in words, and nothing is written (the Phase 2 tests below pin that).
+    assert.equal(t.run("set", "--import", "full"), 2);
+    assert.deepEqual(t.said, ["The full import is gone: this Mac imports lightly."]);
     t.done();
   });
   it("set says how it is used, changes nothing, and ends with 2, when it is asked wrongly", () => {
@@ -1199,7 +1200,7 @@ describe("node settings.js set and sessions", () => {
   it("--help says how set and sessions are used", () => {
     const t = setup();
     assert.equal(t.asked("--help"), 0);
-    assert.match(t.said[0], /node settings\.js set \[--import light\|full\] \[--readings on\|off\] \[--handoff 1\|2\] \[--drop Drop\|"Unedited Video"\]/);
+    assert.match(t.said[0], /node settings\.js set \[--import light\] \[--readings on\|off\] \[--handoff 1\|2\] \[--drop Drop\|"Unedited Video"\]/);
     // What set refuses is said: a change of the drop folder, which the installer switches. Nothing is said to be not built yet:
     // the light import and the Drop folder are both built, and the light import is not refused.
     assert.match(t.said[0], /It does not change the drop folder: it is switched by the installer/);
@@ -1359,23 +1360,23 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     const told = ["--machine", "Mac Studio", "--root", ROOT, "--checkout", CHECKOUT];
     assert.equal(await run("plan", ...told), 0);
     assert.equal(t.said[0], JSON.stringify({ version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT }, null, 2));
-    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video"]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video"]);
     t.said.length = 0;
-    assert.equal(await run("plan", ...told, "--readings", "off", "--handoff", "2", "--import", "full", "--drop", "Unedited Video"), 0);
-    assert.deepEqual(JSON.parse(t.said[0]), { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, readings: false, handoffVersion: 2, import: "full", drop: "Unedited Video" });
-    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video"]);
+    assert.equal(await run("plan", ...told, "--readings", "off", "--handoff", "2", "--import", "light", "--drop", "Unedited Video"), 0);
+    assert.deepEqual(JSON.parse(t.said[0]), { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, readings: false, handoffVersion: 2, import: "light", drop: "Unedited Video" });
+    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video"]);
     assert.equal(existsSync(settingsFile(t.home)), false);
     t.done();
   });
   it("plan says the drop folder the file names as the one it is now, and as it will be, so that a Mac on Drop run again stays on it", async () => {
     const t = mac({ drop: "Drop", later: "\u0000" });
     assert.equal(await t.run("plan", ...t.told), 0);
-    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Drop", "The drop folder will be: Drop"]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Drop", "The drop folder will be: Drop"]);
     assert.equal(JSON.parse(t.said[0]).later, "\u0000");
     t.said.length = 0;
     // Told the other, it says both, and the old folder's whole path, which the installer names as the one left.
     assert.equal(await t.run("plan", ...t.told, "--drop", "Unedited Video"), 0);
-    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Drop", "The drop folder will be: Unedited Video", `The old drop folder: ${dropFolder(t.root, "Mac Studio", "Drop")}`]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Drop", "The drop folder will be: Unedited Video", `The old drop folder: ${dropFolder(t.root, "Mac Studio", "Drop")}`]);
     t.done();
   });
   it("write writes the settings of the switch it is told, keeps every other setting, says so, and leaves a setting it is not told as it was", async () => {
@@ -1424,7 +1425,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     for (const command of ["plan", "write"]) {
       for (const [more, said] of [
         [["--drop", "Elsewhere"], 'Not written: --drop takes Drop or "Unedited Video".'],
-        [["--import", "heavy"], "Not written: --import takes light or full."],
+        [["--import", "heavy"], "Not written: --import takes light."],
         [["--handoff", "3"], "Not written: --handoff takes 1 or 2."],
         [["--readings", "maybe"], "Not written: --readings takes on or off."]
       ]) {
@@ -1440,7 +1441,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     const t = mac();
     const before = t.held();
     for (const command of ["plan", "write"]) {
-      for (const more of [["--drop"], ["--import", "full", "--handoff"], ["--rules-only"], ["--clone", "x"], ["--drop", "Drop", "Drop"]]) {
+      for (const more of [["--drop"], ["--import", "light", "--handoff"], ["--rules-only"], ["--clone", "x"], ["--drop", "Drop", "Drop"]]) {
         t.said.length = 0;
         assert.equal(await t.run(command, ...t.told, ...more), 2, `${command} ${more.join(" ")}`);
         assert.equal(t.said.length, 1);
@@ -1465,8 +1466,8 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     }
     // What is told mends it.
     t.said.length = 0;
-    assert.equal(await t.run("write", ...t.told, "--import", "full"), 0);
-    assert.equal(readSettings(t.home).settings.import, "full");
+    assert.equal(await t.run("write", ...t.told, "--import", "light"), 0);
+    assert.equal(readSettings(t.home).settings.import, "light");
     t.done();
   });
 
@@ -2143,10 +2144,9 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       one.done();
       t.done();
     });
-    it("names a video that has no label the same when this run puts the light import on, and when it only did before", async () => {
-      // The videos came under the light import whatever this run says of it, so they are not named: told the light import over a
-      // file of today's import, and told today's over a file of the light one.
-      for (const [held, told] of [[{ import: "full" }, "light"], [{ import: "light" }, "full"]]) {
+    it("names a video that has no label the same whether the file says full or light", async () => {
+      // A file that says "full" is read as before and one that says "light" is as it is; told --import light over either, no video is named by its file.
+      for (const [held, told] of [[{ import: "full" }, "light"], [{ import: "light" }, "light"]]) {
         const t = mac(held);
         put(t.folder(), "Coaching call Jane Doe.mp4");
         const said = await refused(t, "--drop", "Drop", "--import", told);
@@ -2366,5 +2366,25 @@ describe("what --help says of write, plan and set", () => {
       const help = HELP_OF(command).split("\n")[0];
       assert.ok(top.includes(help), `${help}\n---\n${top.join("\n")}`);
     }
+  });
+});
+
+describe("the full import is gone (Phase 2, F4)", () => {
+  it("set --import full prints that the full import is gone, writes nothing and ends 2; the same of plan and write", async () => {
+    const t = setup();
+    writeSettings(t.home, { ...t.given, import: "light" });
+    const before = JSON.stringify(readSettings(t.home));
+    const GONE = "The full import is gone: this Mac imports lightly.";
+    assert.equal(settingsMain(["set", "--import", "full", "--readings", "off"], { home: t.home, say: (line) => t.said.push(line), now: new Date("2026-10-22T20:00:00-04:00") }), 2);
+    assert.deepEqual(t.said, [GONE]);
+    assert.equal(JSON.stringify(readSettings(t.home)), before);
+    for (const command of ["plan", "write"]) {
+      t.said.length = 0;
+      const told = ["--machine", "Mac Studio", "--root", ROOT, "--checkout", CHECKOUT, "--import", "full"];
+      assert.equal(await settingsMain([command, ...told], { home: t.home, say: (line) => t.said.push(line), now: new Date("2026-10-22T20:00:00-04:00") }), 2, command);
+      assert.deepEqual(t.said, [GONE], command);
+      assert.equal(JSON.stringify(readSettings(t.home)), before, command);
+    }
+    t.done();
   });
 });

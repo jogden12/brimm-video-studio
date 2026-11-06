@@ -738,7 +738,7 @@ describe("app … reel: its graphic cues (PR H2)", () => {
   });
 });
 
-describe("app … reel: a Reel project that is on another Mac, and that Mac has not handed over, is not made again here (plan PR 11: a snapshot makes it possible, edit-take-over-app.test.js)", () => {
+describe("app … reel: a Reel project that is on another Mac, is not made again here (one Mac edits a video from start to finish)", () => {
   const THERE = (on) => `The HyperFrames project of Reel 2 of ${NAME} is on ${on}. Carry on there.`;
   const madeOn = (on) => ({
     ...RAW, version: 4,

@@ -1,8 +1,9 @@
 // Opening an episode in the HyperFrames app (architecture 2026-10-27: sections 4.1, 4.8, 5.1, 5.2, 5.6, 5.7 and 7.1).
 //
 // edit.js finds the episode, asks the gate, refuses an episode whose main project in use was made on another Mac and is not on this
-// one (projectOnAnotherMac: one Mac edits a video from start to finish), claims it for this Mac, and then gives it to openInApp, which
-// does the rest:
+// one (projectOnAnotherMac: one Mac edits a video from start to finish), refuses a project whose folder is a session clip's on the
+// volume, however the record spells its name (clipFolders, clipTrouble: PR 15's rule, as free.js has it; decided before the claim),
+// claims it for this Mac, and then gives it to openInApp, which does the rest:
 //   - a project made before is opened again, and nothing is made or started (4.8). If the recording has changed since the project
 //     was made she is told, and the project is opened as it was: a project that may be open in the app is never changed (4.8);
 //   - unless its video has been taken away (`free`, free.js; plan PR 15). The project is still the one in use, so no second is made:
@@ -149,7 +150,7 @@ export function identityOf(path) {
 
 /** The session clips of the record (a project whose key is `clip N`) as the volume knows their folders in the episode's work folder `work`:
     { names, ids } the plain names the record gives them and the identity of each folder that is there, or { bad: true } when any cannot be
-    looked at. A clip is never handed over or opened, and nothing that is its folder is either. */
+    looked at. A clip is never opened, and nothing that is its folder is either. */
 export function clipFolders(work, record) {
   const clips = (Array.isArray(record?.app?.projects) ? record.app.projects : []).filter((p) => typeof p?.key === "string" && /^clip [1-9]\d*$/.test(p.key) && plainName(p.name));
   const ids = new Set();
@@ -326,7 +327,7 @@ export function copyOf(facts) {
 /** The media a project of this episode holds as its video, as a path from the project, or null when it holds none (PR H6): the recording, `media/recording.mp4`,
     for any episode; `media/voiceover.m4a` for an explainer in her own voice (episode.js isFromPlan of a plan whose route is an explainer), whose video is its
     voiceover, a sound alone; and none for an explainer in a HeyGen voice, whose project holds no media at all, the voice being made in it by the app's agent,
-    into its assets/. `free`, the video put back (putVideoBack) and the rebuild of a project ask it: with none there is nothing to take away or put back. */
+    into its assets/. `free` and the video put back (putVideoBack) ask it: with none there is nothing to take away or put back. */
 export function mediaOf(record) {
   if (!isFromPlan(record) || record.planned.route !== "explainer") return "media/recording.mp4";
   return record.planned.voice === "heygen" ? null : VOICEOVER;
@@ -501,8 +502,7 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
     held to. */
 export const sizedFacts = (facts) => Boolean(facts) && Number.isFinite(facts.seconds) && facts.seconds > 0 && Number.isFinite(facts.width) && facts.width > 0 && Number.isFinite(facts.height) && facts.height > 0;
 
-/** The one check every working copy put into a project passes (plan PR 15; the video of a project `free` took the video from, of a rebuilt
-    project, and of an older project's that is kept: plan PR 18): a copy, by its facts `made`, against the project's own `was`
+/** The one check every working copy put into a project passes (plan PR 15; the video of a project `free` took the video from): a copy, by its facts `made`, against the project's own `was`
     (brimm/facts.json), and `size`, the file's size on disk. Gives { workingCopy }, what the record keeps of the copy, when the project's
     facts say its picture and length, the copy's say what the record keeps, the copy is the same picture size and within a second of the same
     length (the job's own allowance), starts where the project says it does (`starts`, which a Reel's check gives; true for the main video),
