@@ -77,6 +77,7 @@ import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
+import { lateCheckAt, localSource } from "./late-wait.js";
 import { heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
@@ -4114,6 +4115,9 @@ const NOT_FROM_PLAN = canNotBeUsed("it is not a video made from its footage");
       its own in the progress panel (WORK_COPY_WAIT_STEP), so that "how far is it?" says it, and it is ended before the copy begins;
     - a hold that does not, an import that failed or stopped, a late check that found a problem, or one this Mac owes past its time
       with no import at work to make it, ends the run at once with that hold's words (importHold's `why`), as the reading's ends;
+    - a hold that waits, while this Mac owes the late check and holds the file the import came from (late-wait.js localSource), does not
+      wait: the run goes on at once with `from`, the path of that file, which it reads in place of the video; the check is still made by
+      the import, behind the run (plan R1b);
     - a wait that has run out ends it with the words of what still holds the video;
     - after each wait the episode is found again, gate and all (findEpisode, as at the start of the run), since she may have said it is
       something else meanwhile, or a session: a video that is no longer a raw video or an iPhone clip, or that the gate now refuses,
@@ -4129,7 +4133,15 @@ async function waitForImport(ctx, { found, record, wait, progress, log, kinds = 
     for (;;) {
       const hold = importHold({ root: ctx.root, home: ctx.home, machine: ctx.machine, record, now: ctx.now() });
       if (!hold.why) return { record };
-      if (!hold.waits || waited >= READ_HOLD_MS) return { why: hold.why };
+      if (!hold.waits) return { why: hold.why };
+      // This Mac still owes the late check, and holds the file the import came from: the copy is read from it, now, and the check goes on
+      // behind the run (plan R1b). The stops above (a failed import, a problem found, a stopped import) have won already.
+      const local = localSource(ctx, record);
+      if (local) {
+        log(`${name}: the video for HyperFrames is made from the copy this Mac holds, while Dropbox's check of its copies goes on.`);
+        return { record, from: local.path };
+      }
+      if (waited >= READ_HOLD_MS) return { why: hold.why };
       if (!shown) {
         shown = true;
         log(`${name}: the video for HyperFrames is made once the import has checked its copies.`);
@@ -4251,13 +4263,15 @@ async function workcopy(ctx, rest) {
     const held = await waitForImport(ctx, { found, record, wait, progress: deps.progress, log: deps.log, kinds, notFor });
     if (held.why) return { ok: false, made: [], failed: [held.why], next: "" };
     const video = join(found.folder, held.record.video.file);
+    // The file this Mac holds of the video, when the run did not wait for the late check (waitForImport): read in place of the video, which stays its identity.
+    const fromOf = (h) => (h.from ? { from: h.from } : {});
     if (!reel) {
       // An explainer in her voice (PR H6) is a sound alone: its copy is the voice made ready for the page, a copy of no 4K, and no footage is
       // made for it. An explainer in a HeyGen voice has its voice in its project, so it has nothing to copy.
       const media = mediaOf(held.record);
       if (media === null) return { ok: false, made: [], failed: [canNotBeUsed("its voice is made in its HyperFrames project")], next: "" };
-      if (media === VOICEOVER) return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), voice: true }, deps);
-      const main = await makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), fourK: Boolean(flags["4k"]) }, deps);
+      if (media === VOICEOVER) return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), voice: true, ...fromOf(held) }, deps);
+      const main = await makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), fourK: Boolean(flags["4k"]), ...fromOf(held) }, deps);
       if (!main.ok || !isFromPlan(held.record)) return main;
       // A video made from a plan has its footage copied after its own video, in the same run. A copy that fails is in the log and costs nothing.
       const footage = await planFootage(ctx, { found, record: held.record, deps });
@@ -4276,7 +4290,7 @@ async function workcopy(ctx, rest) {
     const cues = recordKind(held.record) === "finished" && ctx.settings.readings !== false && tools.claude
       ? (stretch, work) => askReelCues({ ctx, found, record: held.record, stretch, work }, deps)
       : null;
-    return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: `${shownName(held.record)}, Reel ${reel}`, reel: got.stretch }, { ...deps, faces, ...(cues ? { cues } : {}) });
+    return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: `${shownName(held.record)}, Reel ${reel}`, reel: got.stretch, ...fromOf(held) }, { ...deps, faces, ...(cues ? { cues } : {}) });
   });
   if (result.taking || result.running) {
     ctx.say(result.running ? `The video for HyperFrames is being made for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
@@ -5455,20 +5469,6 @@ const busyWhy = (name) => `Another answer for ${name} is being written on this M
     none for an episode that has no whole record. */
 function recordsHere(ctx) {
   return folders(ctx).map((name) => ({ name, record: episodeAt(ctx, name).inForce })).filter((e) => e.record && recordShaped(e.record));
-}
-
-/** When the import's late check will have been made of the episode with this `record`, in milliseconds, or null when nothing is
-    holding it. This Mac owes the check (a pending one in its own folder, which has not found a problem): it is due at its time,
-    or now when that has passed, since the import makes a check that is due within a minute. Or an import of the video is at
-    work on either Mac, by its status: then the check is made at the latest LATE_CHECK_MS from now, since the video has been
-    copied into its episode already. A check that found a problem, or an import that failed or stopped, does not clear by
-    itself, and holds nothing here: the reading says why when it meets it. */
-function lateCheckAt(ctx, record) {
-  const now = ctx.now();
-  const owed = readPendings(ctx.home).find((p) => p.id === record.id && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root) && !p.problem);
-  if (owed) return Math.max(dueAt(owed), now);
-  const working = readStatuses(ctx.root, now).map((s) => s.status).find((s) => s && s.video === record.video.file && s.bytes === record.video.bytes && importState(s, now) === "running");
-  return working ? now + LATE_CHECK_MS : null;
 }
 
 /** Why `kind` may not answer the episode `found` as `plan` says ({ stored, again, notASession, clearSession, versionOf, target })

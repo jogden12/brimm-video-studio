@@ -25,7 +25,7 @@ import { reelCuesRequest, reelPhraseLines } from "../readings.js";
 import { graphicCuesAsk } from "../graphic-cues.js";
 import { probed } from "./fixtures.js";
 import { FOLDER, ID, NAME, episodeAs, reread } from "./episodes.js";
-import { ANSWERED, CLEARED, CLIP, COPY, FINISHED, LEFT, PLAIN, RAW, SESSION, SESSION_MARK, UNANSWERED, WAS_SESSION, atWork, dropbox, on, world } from "./workcopy-world.js";
+import { ANSWERED, CLEARED, CLIP, COPY, FINISHED, LEFT, PLAIN, RAW, SESSION, SESSION_MARK, UNANSWERED, WAS_SESSION, atWork, dropbox, on, owedWithLocal, world } from "./workcopy-world.js";
 
 const WAITING_WORDS = "This video is waiting for its answer: say what it is first.";
 const LEFT_WORDS = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
@@ -242,6 +242,38 @@ describe("workcopy --reel: it runs beside the reading, one copy at a time, and w
     assert.deepEqual([looks, w.guarded.length, existsSync(w.copy.video)], [2, 1, true]);
     assert.equal(r.said[0], `${NAME}: the video for HyperFrames is made once the import has checked its copies.`);
     w.t.done();
+  });
+  it("a Reel's video whose late check is owed is made at once, from the file this Mac holds, keyed by the Dropbox file's size and time", async () => {
+    for (const record of [RAW, FINISHED]) {
+      const w = reelWorld({ record });
+      const { drop } = owedWithLocal(w.t, w.found);
+      const r = await on(w.t.ctx.deps, ...ASK);
+      assert.equal(r.code, 0, `${record.kind}: ${r.text}`);
+      assert.deepEqual(w.t.waits, [], record.kind);
+      assert.ok(!r.text.includes("once the import has checked"), r.text);
+      assert.equal(w.guarded[0].args[w.guarded[0].args.indexOf("-i") + 1], drop, record.kind);
+      assert.deepEqual([existsSync(w.copy.video), existsSync(w.copy.facts)], [true, true], record.kind);
+      assert.equal(existsSync(join(pendingFolder(w.t.home), `${ID}.json`)), true, "the late check is still owed");
+      w.t.done();
+    }
+  });
+  it("a Reel's video waits as before when the file this Mac holds is another file, and ends at once when the late check found a problem", async () => {
+    const w = reelWorld();
+    const { drop } = owedWithLocal(w.t, w.found);
+    writeFileSync(drop, "short");
+    const waited = w.t.ctx.deps.wait;
+    w.t.ctx.deps.wait = async (ms) => {
+      rmSync(join(pendingFolder(w.t.home), `${ID}.json`), { force: true });
+      await waited(ms);
+    };
+    const r = await on(w.t.ctx.deps, ...ASK);
+    assert.deepEqual([r.code, w.t.waits, w.guarded[0].args[w.guarded[0].args.indexOf("-i") + 1]], [0, [READ_LOOK_MS], join(w.found.folder, "Pricing talk.mp4")]);
+    w.t.done();
+    const p = reelWorld();
+    owedWithLocal(p.t, p.found, { over: { problem: "Pricing talk.srt is not whole in Dropbox." } });
+    const stopped = await on(p.t.ctx.deps, ...ASK);
+    assert.deepEqual([stopped.code, p.t.waits, p.guarded.length], [1, [], 0]);
+    p.t.done();
   });
   it("is found again after the wait, and stops, making nothing, when she said it is an iPhone clip while it waited", async () => {
     const w = reelWorld();

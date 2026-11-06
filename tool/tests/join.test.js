@@ -1389,6 +1389,28 @@ describe("the join's late check (PR H5b)", () => {
   });
 });
 
+describe("the joined video's copy starts from the local file (plan R1b)", () => {
+  it("is made with no wait while the join's late check is still owed: the file the join put in from is read, and the check goes on behind", async () => {
+    const t = world({ probes: longTalk("Take 1"), copy: "120.000000" });
+    const folder = await planned(t);
+    const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+    await joinRun(t, [one.record.id]);
+    const [pending] = readPendings(t.home);
+    const waits = [];
+    const wait = async (ms) => waits.push(ms);
+    const r = await on(appDeps(t, { wait }), "workcopy", "--now", FOLDER_NAME(t));
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(waits, []);
+    assert.ok(!r.text.includes("once the import has checked"), r.text);
+    const raw = statSync(join(folder, "Take 1.mov"));
+    const copy = workCopyPaths(t.home, FOLDER_NAME(t), workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
+    assert.deepEqual([existsSync(copy.video), existsSync(copy.facts)], [true, true]);
+    // The late check is still owed, and the file it checks is as it was.
+    assert.deepEqual(readPendings(t.home).map((p) => p.id), [pending.id]);
+    t.done();
+  });
+});
+
 describe("plan … agreed, for a video made from its footage (PR H5b)", () => {
   const TYPED = "Quayle Widgets, 21 October";
   /** `edit.js` with a stand-in for osascript that answers her click on "They agreed". */
