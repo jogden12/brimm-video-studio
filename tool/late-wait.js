@@ -4,7 +4,7 @@
 // owes the check for that video. It is used only when it is the file that came in (the same size as the record's, and the same
 // file as the pending check says by its inode, size and time), and whole on this Mac. Otherwise the run waits as before.
 import { statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { LATE_CHECK_MS } from "./dropbox.js";
 import { dueAt, readPendings, sameFile } from "./filing.js";
 import { importState, readStatuses } from "./importing.js";
@@ -30,6 +30,10 @@ export function localSource(ctx, record) {
   const owed = owedFor(ctx, record);
   const bytes = record.video && record.video.bytes;
   if (!owed || !Number.isFinite(bytes)) return null;
+  // The work copy is keyed by the video in Dropbox, so that must be there, whole and of the record's size: if it is missing or short, it
+  // is the very state the late check repairs, and the run waits for the check as before.
+  const kept = join(String(owed.folder), record.video.file);
+  if (sizeOf(kept) !== bytes || !ctx.isWhole(kept)) return null;
   const usable = (path) => typeof path === "string" && path !== "" && sizeOf(path) === bytes && ctx.isWhole(path);
   if (usable(owed.drop) && sameFile(owed.drop, owed.dropFile)) return { path: owed.drop };
   // A drop file that is there but is not the one imported is never made good by the entry that was put in from it.

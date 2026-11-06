@@ -23,6 +23,8 @@ function setup() {
   for (const dir of [home, folder, work, drop]) mkdirSync(dir, { recursive: true });
   const file = join(drop, "Pricing talk.mp4");
   writeFileSync(file, "x".repeat(40));
+  // The episode's own video in Dropbox, which the work copy's key comes from.
+  writeFileSync(join(folder, "Pricing talk.mp4"), "x".repeat(40));
   const record = { id: ID, video: { file: "Pricing talk.mp4", bytes: 40 } };
   const ctx = { home, root, machine: "Mac Studio", now: () => NOW, isWhole: () => true };
   const pending = (over = {}) => ({
@@ -62,6 +64,19 @@ describe("localSource", () => {
     assert.equal(localSource(s.ctx, s.record), null);
     s.done();
   });
+  it("gives null when the episode's video in Dropbox is missing, short, or not whole: the run waits as before, for the key comes from that file", () => {
+    for (const [what, spoil] of [
+      ["missing", (s) => rmSync(join(s.folder, "Pricing talk.mp4"))],
+      ["short", (s) => writeFileSync(join(s.folder, "Pricing talk.mp4"), "xxx")],
+      ["not whole", (s) => { s.ctx.isWhole = (path) => !path.startsWith(s.folder); }]
+    ]) {
+      const s = setup();
+      writePending(s.home, s.pending());
+      spoil(s);
+      assert.equal(localSource(s.ctx, s.record), null, what);
+      s.done();
+    }
+  });
   it("gives null for a pending check that found a problem, and for none", () => {
     const s = setup();
     assert.equal(localSource(s.ctx, s.record), null);
@@ -83,6 +98,7 @@ describe("localSource", () => {
     const other = join(s.work, "Take 1.words.json");
     writeFileSync(out, "z".repeat(40));
     writeFileSync(other, "{}");
+    writeFileSync(join(s.folder, "Take 1.mov"), "z".repeat(40));
     const entries = [
       { from: other, to: join(s.folder, "Take 1.words.json"), bytes: 2 },
       { from: out, to: join(s.folder, "Take 1.mov"), bytes: 40 }
