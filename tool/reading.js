@@ -332,8 +332,8 @@ export async function readEpisodeNow(ctx, found, deps) {
     if (readingsOff()) return stop(READINGS_OFF);
   }
 
-  // The files it reads: the plan, for a raw video the video, its captions, its words and its cut log, which the rough cut, its
-  // timeline and what is set aside are made of, and for a session the meeting's own transcript, when there is one, and the
+  // The files it reads: the plan, for a raw video the video, its captions, its words and its cut log, which the rough cut
+  // and what is set aside are made of, and for a session the meeting's own transcript, when there is one, and the
   // teachings an earlier reading wrote, which it sets aside. One Dropbox has not brought over yet is read through, so that it
   // does. A session's files are said by what they are, never by name.
   const planRel = `${stem}.cut-plan.json`;
@@ -520,7 +520,7 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     const spans = keptSpans(next.ranges, roughRate(facts));
     const roughSrt = roughCaptions(next.phrases, spans);
     // The plan as the import writes it: it keeps the pauses, and what Claude made of it, its graphic cues among them, which the
-    // timeline marks and the HyperFrames project is given (graphic-cues.js).
+    // notes and the HyperFrames project are given (graphic-cues.js).
     const claude = { decisions: read.decisions, graphicCues: read.graphicCues, ignored: unused, clips: clips.map((clip) => ({ ...clip, files: [] })) };
     const readPlan = { ...plan, phrases: next.phrases, ranges: next.ranges, kept: next.kept, cut: next.cut, by: next.by || plan.by || "rules", ...(next.changes ? { changes: next.changes } : {}), claude };
     text(notesFile, notesText({ notes: read.notes, graphicCues: read.graphicCues, problems: unused }, next, clips));

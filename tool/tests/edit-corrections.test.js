@@ -215,6 +215,31 @@ describe("kind … --again: the earlier reading set aside", () => {
     assert.deepEqual([record.kind, record.reading], ["finished", null]);
     t.done();
   });
+  it("sets an old record's rough-cut timeline aside too: its v0 render entry, edit/main.v0.fcpxml on disk and in files, leaving the render", async () => {
+    const { t, found } = await readOf("raw");
+    const render = join(episodeWork(t.home, FOLDER), "renders", `${NAME} – version 0.mp4`);
+    assert.ok(existsSync(render));
+    // The record as the Final Cut days wrote it: a v0 render entry, and the timeline it was made from.
+    const xml = "<fcpxml>the old timeline</fcpxml>\n";
+    mkdirSync(join(found.folder, "edit"), { recursive: true });
+    writeFileSync(join(found.folder, "edit", "main.v0.fcpxml"), xml);
+    const now = reread(found);
+    writeFileSync(recordFile(found.folder, now.rev + 1), recordText({
+      ...now, rev: now.rev + 1,
+      main: { ...now.main, pushed: [{ v: 0, how: "render", at: AT, on: "Mac Studio", file: "edit/main.v0.fcpxml", opened: AT }] },
+      files: { ...now.files, "edit/main.v0.fcpxml": Buffer.byteLength(xml) }
+    }));
+    assert.equal(reread(found).main.pushed.length, 1);
+    const r = await on(t.ctx.deps, "kind", NAME, "finished", "--private", "no", "--again");
+    assert.equal(r.code, 0, r.text);
+    const record = reread(found);
+    assert.ok(historyOf(found).some(([name, text]) => name === "main.v0.fcpxml" && text === xml), "the timeline is in history/");
+    assert.ok(!existsSync(join(found.folder, "edit", "main.v0.fcpxml")));
+    assert.ok(!("edit/main.v0.fcpxml" in record.files));
+    assert.deepEqual(record.main.pushed, []);
+    assert.ok(existsSync(render));
+    t.done();
+  });
   it("reads a raw video answered raw again from the rules' plan, and keeps that plan in history/ once", async () => {
     const { t, found, asks } = await readOf("raw");
     const r = await on(t.ctx.deps, "kind", NAME, "raw", "--private", "no", "--again");
