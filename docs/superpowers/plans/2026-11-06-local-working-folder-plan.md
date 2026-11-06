@@ -4,11 +4,11 @@
 
 **Goal:** She drops a video into a folder on her Mac, and nothing waits for Dropbox. The recording and everything made from it stay on the Mac that took it in. Only the edited export and the hand-off go to Dropbox, with the records, and a recording goes there only when she says "keep". Dropbox's check of those copies runs behind, and nothing waits for it.
 
-**Architecture:** One setting per Mac (`drop: "local"`) switches it. A local Mac's drop folder is `~/BRIMM Video Work/Drop`, and an episode's own files go in `~/BRIMM Video Work/<episode folder>/video/`. The episode's folder in Dropbox keeps `record/`, `final/`, `kept/` and a plan's three script files. The record gains `local: { on: <Mac> }` (layout 6), and one resolver (`tool/where.js`) says where each listed file is. The late-check machinery Phase 1 built (the pending file, `late-check.lock`, `keepCheckInStep`) is reused for the two things still copied into Dropbox, `final/` and `kept/`; the import's, the reading's, the copy's and the join's checks and waits go.
+**Architecture:** Two settings per Mac, chosen at install, switch it: `dropPath`, its drop folder anywhere (by default `~/BRIMM Video Work/Drop`), and `exportsPath`, where Studio looks for HyperFrames' exports (by default `~/Downloads`). On such a Mac an episode's own files go in `~/BRIMM Video Work/<episode folder>/video/`. The episode's folder in Dropbox keeps `record/`, `final/`, `kept/` and a plan's three script files. The record gains `local: { on: <Mac> }` (layout 6), and one resolver (`tool/where.js`) says where each listed file is. The late-check machinery Phase 1 built (the pending file, `late-check.lock`, `keepCheckInStep`) is reused for the two things still copied into Dropbox, `final/` and `kept/`; the import's, the reading's, the copy's and the join's checks and waits go.
 
 **Tech Stack:** Node 22+ (ESM, `node:test`, no packages); `tool/install.sh` (zsh).
 
-**Spec:** Jason's change list of 5 Nov 2026, Phase 3 (https://claude.ai/artifact/Nrv9VMy8AgX9tGG78YyHf1; copy `CHANGE-LIST.md` in `~/Library/Application Support/Claude/side-session-notes/local_cf396f88-dcff-4c95-91e6-1f77aa69803f/team-review-2026-11-05/`). His answers on https://claude.ai/artifact/5Z8GNkqKe68PcNctRWNnMv: `raw-copy` = "Only videos she marks 'keep'"; `phone` = "AirDrop, or record on the Mac"; `release` = r1, "videos will not be passed from one Mac to the other … This will not happen"; `features` includes "Drop it, and it runs until it needs her" ("fewer cards and no waits"); `pain` (a) "fixed by moving the raw and working folder out of Dropbox". His note of 5 Nov (memory, H7 check 67): "the working folder is local, and the export folder is on dropbox. the video file does not hit dropbox until it is edited and ready to post"; records yes, the hand-off yes, drop folders no. Jason, 6 Nov: Phase 3 does not wait for her laptop's move; all testing and deployment happen on the Mac Studio. The review's design notes: `arch.md` section 5 and finding 2, `flow.md` section 5, `reliability.md` F1-F2, in the notes folder. Phase 1's plan (`docs/superpowers/plans/2026-11-05-review-changes-plan.md`): R1a-R1d and their rulings, and its outline of Phase 3 (line ~993). Phase 2's plan (`docs/superpowers/plans/2026-11-06-final-cut-retired-plan.md`): this plan builds on it.
+**Spec:** Jason's change list of 5 Nov 2026, Phase 3 (https://claude.ai/artifact/Nrv9VMy8AgX9tGG78YyHf1; copy `CHANGE-LIST.md` in `~/Library/Application Support/Claude/side-session-notes/local_cf396f88-dcff-4c95-91e6-1f77aa69803f/team-review-2026-11-05/`). His answers on https://claude.ai/artifact/5Z8GNkqKe68PcNctRWNnMv: `raw-copy` = "Only videos she marks 'keep'"; `phone` = "AirDrop, or record on the Mac"; `release` = r1, "videos will not be passed from one Mac to the other … This will not happen"; `features` includes "Drop it, and it runs until it needs her" ("fewer cards and no waits"); `pain` (a) "fixed by moving the raw and working folder out of Dropbox". His note of 5 Nov (memory, H7 check 67): "the working folder is local, and the export folder is on dropbox. the video file does not hit dropbox until it is edited and ready to post"; records yes, the hand-off yes, drop folders no. Jason, 6 Nov: Phase 3 does not wait for her laptop's move; all testing and deployment happen on the Mac Studio. Jason, 6 Nov, relayed word for word by the Move to Studio app's session, which adds folder pickers once Studio has these options: "the app installer should allow the user to pick or create the Drop folder in a location of their choosing with a warning that creating it in Dropbox or other 'cloud' folders could cause issues. they should also be able to choose which folder exports of edited videos go into. Cloud based folders are fine for this step, especially if they want to share with other users or computers". The review's design notes: `arch.md` section 5 and finding 2, `flow.md` section 5, `reliability.md` F1-F2, in the notes folder. Phase 1's plan (`docs/superpowers/plans/2026-11-05-review-changes-plan.md`): R1a-R1d and their rulings, and its outline of Phase 3 (line ~993). Phase 2's plan (`docs/superpowers/plans/2026-11-06-final-cut-retired-plan.md`): this plan builds on it.
 
 **Not here:**
 - `release`, the hand-over snapshots and the take-over: Phase 2 removes them (its F5 and ruling 1).
@@ -26,7 +26,7 @@ Line numbers are at 6cdf48b (Phase 1's tip). Phase 2 moves them; a builder finds
 These are the design note Phase 1's outline asked for before any code. Each says why, and what it costs if wrong. The three that are Jason's to decide are his questions at the end.
 
 **D1. Where things live on a local Mac.**
-- The drop folder: `~/BRIMM Video Work/Drop/`, one per Mac, with no Mac's name in it.
+- The drop folder: the one each Mac's installer is given (`--drop-folder`), anywhere; by default `~/BRIMM Video Work/Drop/`. One per Mac. A cloud folder is allowed, with a warning (D11).
 - An episode's own files: `~/BRIMM Video Work/<episode folder>/video/`: the recording, its transcript, words, cut plan, notes, Reel suggestions, the rough cut's captions, and `video/history/` for replaced files. A footage part's recording and a joined video go there too.
 - In Dropbox, `Episodes/<episode folder>/` keeps `record/`, `final/` (the export, the final transcript, the hand-off), `kept/` (a recording she keeps) and a plan's `video guide.md`, `shot list.md` and `teleprompter.txt`.
 - The import's status files: `~/Library/Application Support/BRIMM Video/importing/`.
@@ -47,11 +47,19 @@ These are the design note Phase 1's outline asked for before any code. Each says
 
 **D7. How videos reach the drop folder.** A phone clip comes by AirDrop (it lands in Downloads, and she drags it into the drop folder) or is recorded on the Mac. A finished video from her editor is dragged from Dropbox with Option held, so Dropbox keeps its copy. On the Mac Studio, Downloads is a link into Dropbox (`settings.js:56-58`), so an AirDropped clip is in Dropbox until she drags it out; the drag must move it, not copy it. By-hand checks P3-5 and P3-6 confirm what Finder does in both cases before the guide's words are final.
 
-**D8. The switch is per Mac.** `install.sh --drop local` (or `settings.js set --drop local`) switches a Mac, and is refused while its old drop folder in Dropbox holds work (`switch.js` `heldInOld`, unchanged). The Mac Studio switches at deployment, on Jason's yes. Her laptop switches at its move.
+**D8. The switch is per Mac.** `install.sh --drop-folder "<path>" [--exports-folder "<path>"]` on a `--machine` install (or `settings.js set --drop-folder …`) switches a Mac, and is refused while its old drop folder in Dropbox holds work (`switch.js` `heldInOld`, unchanged). The Mac Studio switches at deployment, on Jason's yes. Her laptop switches at its move.
 
 **D9. Episodes from before the switch** (files in Dropbox, layout 5 or below) are Question 2's. The default in this plan, if he says they are all tests: they are listed, and any command that would read or write their files says they came in before the change. Then the old waiting code is deleted (L8).
 
 **D10. The two-Mac rules that still bind,** because her laptop's old brimm-video may still run (Question 1): new records keep `editing` and `released: null`; no stored value is renamed; nothing in Dropbox is written into, renamed or moved but by the rule; her drop folder `Drop/Sallie's laptop` and the Mac Studio's old `Drop/Mac Studio` are never touched by code. Her old tool sees a local episode as one a newer Studio wrote, and leaves it alone.
+
+**D11. The drop folder is chosen, and a cloud one is warned about.** The installer takes `--drop-folder "<path>"` (made when missing, its parent must exist). It is refused inside `Episodes`, inside an episode's folder in BRIMM Video Work, in a folder the transcript tool watches (as today), and when it is the exports folder, inside it, or holds it. A drop folder in Dropbox, iCloud Drive (`~/Library/Mobile Documents`) or anything in `~/Library/CloudStorage` is allowed, and `--print` and the run say: `Warning: this drop folder is in <Dropbox | iCloud Drive | a cloud folder>. A video still syncing there can be imported late, or twice, and Studio copies each video out of it rather than moving it. A folder on this Mac is safer.` From a cloud drop folder, or one on another disk, the import copies the video into `video/` and then deletes the original (never a rename, since Dropbox undid renames on 14 Oct), and keeps reading a placeholder through as today. The chosen drop folder is gated in her folder wherever it is.
+- Why: Jason's words; the drop folder is where an unanswered video, possibly a session, waits.
+- Cost if wrong: a warning's words.
+
+**D12. The exports folder is chosen.** The installer takes `--exports-folder "<path>"` (by default `~/Downloads`, today's place; a cloud folder is fine, with no warning). Studio looks for HyperFrames' exports there, as it looks in Downloads today, and also where the export's own record says it went. Studio never deletes an export from the chosen exports folder: it may be shared with other people or Macs. It still deletes the original it took from Downloads after Dropbox's check, as today, when the exports folder is Downloads.
+- Why: Jason's words ("especially if they want to share with other users or computers").
+- Cost if wrong: an export left in a folder she chose, for her to tidy.
 
 ---
 
@@ -61,7 +69,8 @@ These are the design note Phase 1's outline asked for before any code. Each says
 
 | Task | What | Size | Needs |
 |---|---|---|---|
-| L1 | The local drop folder, its place in the settings, and the switch | M | Phase 2 |
+| L1 | The chosen drop folder, the settings, and the switch | M | Phase 2 |
+| L1b | The exports folder: where Studio looks for HyperFrames' exports | S-M | L1 |
 | L2 | Layout 6: where an episode's files are, and the other Mac | L | L1 |
 | L3 | The import files a video on this Mac | L | L2 |
 | L4 | Readings, copies, joins and footage on a local episode | L | L3 |
@@ -71,13 +80,14 @@ These are the design note Phase 1's outline asked for before any code. Each says
 | L8 | Episodes from before the switch, and the old waiting code | L | L5, L6, L7, Question 2 |
 | L9 | The words and the docs | M | L8 |
 
-**Waves.** L1, L2, L3, L4 one after another. Then L5 and L7 in parallel worktrees (different modules; both touch `edit.js`, in different functions), merged one at a time with the whole suite after each. Then L6, then L8, then L9.
+**Waves.** L1 first. Then L1b beside L2 (different files), then L3, then L4. Then L5 and L7 in parallel worktrees (different modules; both touch `edit.js`, in different functions), merged one at a time with the whole suite after each. Then L6, then L8, then L9.
 
 **Pre-flight: tasks that share files:**
 
 | Pair | Shared | Rule |
 |---|---|---|
-| L1 → L2, L3 | `settings.js` `dropFolderOf`, `episodeFilesFolder`, `isLocal` | L1 first |
+| L1 → L1b, L2, L3 | `settings.js` `dropFolderOf`, `episodeFilesFolder`, `isLocal`, `exportsPath`, `cloudFolder`, `folderWords` | L1 first |
+| L1b → L5 | `exports.js`'s export places; the rule that only an original from Downloads is deleted (D12) | L5 after L1b |
 | L2 → L3, L4, L6, L7 | `where.js` `fileAt`, `onOtherMac`, `ON_OTHER_MAC`; `LOCAL_VERSION` | L2 before them |
 | L3 / L4 | `filing.js` `fileEpisode` (L3's local filing; L4's join re-files a part through it, join.js:496-513) | L4 after L3 |
 | L4 / L5 | `late-wait.js` `keepCheckInStep` (L4 stops calling it for a local reading; L5 moves it to `filing.js` for `final/`) | L5 after L4 |
@@ -108,7 +118,7 @@ These are the design note Phase 1's outline asked for before any code. Each says
 
 ## Review Focus
 
-1. **A session never reaches Dropbox.** Its recording stays in `video/` (the import files no copy in Dropbox), `keep` refuses it, and the local drop folder, `video/` and the local status folder are refused to Claude in her folder (strict and open lock), as `Episodes` is. (L1's, L3's and L6's tests.)
+1. **A session never reaches Dropbox.** Its recording stays in `video/` (the import files no copy in Dropbox), `keep` refuses it, and the chosen drop folder (wherever it is, a cloud one too), `video/` and the local status folder are refused to Claude in her folder (strict and open lock), as `Episodes` is. (L1's, L3's and L6's tests.)
 2. **Nothing is half-filed.** A failed import, a refused record write or a stopped run leaves the recording in the drop folder or in `video/` as it was, and the record as it was. No recording is ever deleted. (L3's and L4's tests.)
 3. **The other Mac changes nothing.** On a Mac that is not `local.on`, no local file is called missing, no card is offered for a video it cannot read, and every command that reads or changes the episode says the one line and writes nothing. (L2's tests.)
 4. **`final/`'s check is never skipped and never puts back over a newer file.** A missing or short copy is put back; a file the record in force lists at another size is left; the originals in Downloads are deleted only when every copy is whole and each is unchanged; a finish killed after its hand-off still has its check made. (L5's tests.)
@@ -122,34 +132,67 @@ As in Phase 2: one Sonnet builder per task, test first, in its own Agent worktre
 
 ## Phase 3
 
-### L1. The local drop folder, its place in the settings, and the switch
+### L1. The chosen drop folder, the settings, and the switch
 
-**Goal:** A Mac whose settings say `drop: "local"` watches `~/BRIMM Video Work/Drop`, says so in Finder's words, and is switched only while its old drop folder in Dropbox holds no work.
+**Goal:** A Mac whose settings hold `dropPath` watches that folder, wherever it is, says where it is in Finder's words, and is switched only while its old drop folder in Dropbox holds no work. The installer takes the drop folder and the exports folder (D11, D12), warns about a cloud drop folder, and shows both with `--print`. The Move to Studio app passes the two paths its folder pickers chose.
 
 **Evidence:** `settings.js` `dropFolder(root, machine, folder)` (44) is always in Dropbox; `drop` is checked at 137 ("Unedited Video" or "Drop"); the switch is `plan()` (404-447) and `set`'s refusal (568-573), with `switch.js` `heldInOld` (66-187); `show` prints the folders (654-657). Callers of `dropFolder`: filing.js:33 (`episodeMode`), switch.js:67, edit.js:901-910 (`dropFolders`, which lists the other Mac's drop folders from Dropbox), :2145, :7568 (`guide drop`), settings.js:411-412 and :655, install.sh:522. install.sh: the drop path (522-528), `WatchPaths` (312-314), the folders made (894, 899), the marker (900), the say-lines (572-582, with Make available offline at 582). guide.js `dropWords` (21). places.js gates `~/BRIMM Video Work` (76) and, for a test home, the real one (113).
 
-**Files:** `tool/settings.js`, `tool/install.sh`, `tool/filing.js` (33), `tool/edit.js` (`dropFolders`, 2145, `guide drop`), `tool/guide.js` (`dropWords`); tests `settings.test.js`, `install.test.js`, `switch.test.js` (or where `heldInOld` is tested), `guide.test.js`, `edit-guide*.test.js`, and the lock's place tests (`places.test.js`, `studio.test.js`, `open-lock*.test.js`: find with `grep -ln "gatedPlaces" tool/tests`).
+**Files:** `tool/settings.js`, `tool/install.sh` (also its refusal of a folder the transcript tool watches, ~394), `tool/filing.js` (33), `tool/edit.js` (`dropFolders`, 2145, `guide drop`), `tool/guide.js` (`dropWords`), `tool/places.js` (`gatedPlaces` 63-100 and `realHomeOnly` 107-: the chosen drop folder, wherever it is), `tool/studio.js` (the Edit deny list, 118-122); tests `settings.test.js`, `install.test.js`, `switch.test.js` (or where `heldInOld` is tested), `guide.test.js`, `edit-guide*.test.js`, and the lock's place tests (`places.test.js`, `studio.test.js`, `open-lock*.test.js`: find with `grep -ln "gatedPlaces" tool/tests`).
 
 **Interfaces.** Produces, in `settings.js`:
-- `isLocal(settings) -> boolean`: `settings.drop === "local"`.
-- `localDropFolder(home) -> path`: `join(workFolder(home), "Drop")`.
-- `dropFolderOf(settings, home, root, machine) -> path`: `localDropFolder(home)` on a local Mac, else `dropFolder(root, machine, settings.drop)`.
+- Two settings fields, each a whole path when present: `dropPath` and `exportsPath`, checked by the settings' own check as `root` is (132). `set --drop-folder "<path>"` and `set --exports-folder "<path>"` write them, by the same rules as the installer.
+- `isLocal(settings) -> boolean`: `typeof settings.dropPath === "string"`.
+- `defaultDropFolder(home) -> path`: `join(workFolder(home), "Drop")`, what the installer uses when it is given no `--drop-folder` with `--switch-local` (below).
+- `dropFolderOf(settings, home, root, machine) -> path`: `settings.dropPath` on a local Mac, else `dropFolder(root, machine, settings.drop)`.
+- `cloudFolder(path, home) -> "Dropbox" | "iCloud Drive" | "a cloud folder" | ""`: under `~/Library/CloudStorage/Dropbox*` or `~/Dropbox`, "Dropbox"; under `~/Library/Mobile Documents`, "iCloud Drive"; anywhere else under `~/Library/CloudStorage`, "a cloud folder"; else "". Real paths, so a link into Dropbox counts (on the Mac Studio, `~/Movies` and `~/Downloads` are such links).
+- `folderWords(path, home) -> string`: a folder in Finder's words: under the home folder, its folders after it and `, in your home folder`; under `~/Library/CloudStorage/<Provider>-<account>/`, `<Provider> › …` (as `dropWords` reads today); else each folder of the path.
+- `tool/install.sh`: on a `--machine` install, `--drop-folder "<path>"` and `--exports-folder "<path>"`, or `--switch-local` alone for both defaults (`~/BRIMM Video Work/Drop`, `~/Downloads`); `--print` shows `Its drop folder, on this Mac: <path>` (with D11's warning when `cloudFolder` names one) and `Exports from HyperFrames, looked for in: <path>`. Refused, with nothing changed, by D11's rules.
 - `episodeFilesFolder(home, folder) -> path`: `join(episodeWork(home, folder), "video")`.
 - `importingFolderOf(settings, home, root) -> path`: `join(home, "Library", "Application Support", "BRIMM Video", "importing")` on a local Mac, else `importingFolder(root)` (L3 uses it).
 
 **Failing tests first:**
-- `settings.test.js`: `set --drop local` writes `"drop": "local"`; `dropFolderOf` gives `~/BRIMM Video Work/Drop` for it and today's folder otherwise; `show` prints `Its drop folder:  <home>/BRIMM Video Work/Drop (on this Mac)`.
-- `set --drop local` while the old Dropbox drop folder holds a video is refused in `heldInOld`'s words, and writes nothing.
-- `install.test.js`: `--print --machine "Mac Studio" --drop local --import light --handoff 2 "<root>"` shows the local drop folder, `WatchPaths` naming it, no `Make available offline` line, no `.importing` folder made; `Nothing was changed.`
+- `settings.test.js`: `set --drop-folder "<test home>/Desktop/Drop"` writes `dropPath`; `dropFolderOf` gives it, and today's folder when there is none; `show` prints `Its drop folder:` with the path and `(on this Mac)`, and `Exports from HyperFrames, looked for in:` with `exportsPath`, or Downloads.
+- `set --drop-folder …` while the old Dropbox drop folder holds a video is refused in `heldInOld`'s words, and writes nothing.
+- `cloudFolder`: a path under `<home>/Library/CloudStorage/Dropbox-X/…` gives "Dropbox", under `<home>/Library/Mobile Documents/…` "iCloud Drive", under `<home>/Library/CloudStorage/GoogleDrive-X/…` "a cloud folder", a link into one of them as its target, and `<home>/BRIMM Video Work/Drop` "".
+- `folderWords`: `<home>/BRIMM Video Work/Drop` gives `BRIMM Video Work › Drop, in your home folder`; `<home>/Library/CloudStorage/Dropbox-X/The BRIMM DB/In` gives `Dropbox › The BRIMM DB › In`.
+- `install.test.js`, each with `--print --machine "Mac Studio" --import light --handoff 2 "<root>"`:
+  - `--switch-local`: shows `Its drop folder, on this Mac:` `<home>/BRIMM Video Work/Drop`, `WatchPaths` naming it, `Exports from HyperFrames, looked for in:` `<home>/Downloads`, no `Make available offline` line, no `.importing` folder made, and `Nothing was changed.`
+  - `--drop-folder "<home>/Library/CloudStorage/Dropbox-X/In"`: the same, with D11's warning naming Dropbox.
+  - refused, with nothing changed: a drop folder inside `<root>/Episodes`; inside `<home>/BRIMM Video Work/<an episode folder>`; the same as the exports folder; inside it; holding it; a relative path.
+  - `--exports-folder` in Dropbox: shown with no warning.
+
+**Ruling for L1:** the old field `drop` stays as it is in a switched Mac's settings (`Drop`), unread once `dropPath` is there, so that going back is one field. Cost: one unread field.
 - `edit-guide*.test.js`: `guide drop` opens the local folder (the `openFolder` stand-in gets it); the overview names it `BRIMM Video Work › Drop, in your home folder`.
 - `edit.js` `dropFolders` on a local Mac lists only its own folder.
-- The lock: in her folder, Read and Edit of a file in `~/BRIMM Video Work/Drop/` and in `~/BRIMM Video Work/<episode>/video/` are refused, strict and open lock, as a file in `<root>/Drop/Mac Studio/` is today; with `BRIMM_VIDEO_HOME` set, the real home's are too.
+- The lock: in her folder, Read and Edit of a file in the chosen drop folder are refused, strict and open lock, whether it is `~/BRIMM Video Work/Drop/`, `~/Desktop/Drop/` or one in Dropbox, as a file in `<root>/Drop/Mac Studio/` is today; so are files in `~/BRIMM Video Work/<episode>/video/`; with `BRIMM_VIDEO_HOME` set, the real home's are too.
 
-**Steps:** tests; fail; `settings.js`; callers; `install.sh`; `guide.js`; whole suite; commit.
+**Steps:** tests; fail; `settings.js`; callers; `install.sh`; `places.js` and `studio.js`; `guide.js`; whole suite; commit. Then tell the Move to Studio app's session the options as built (its own `install` line follows them).
 
-**Words Sallie sees:** her drop folder in Finder's words: `BRIMM Video Work › Drop, in your home folder` (guide.js `dropWords` for a local Mac).
+**Words Sallie sees:** her drop folder in Finder's words (`folderWords`), e.g. `BRIMM Video Work › Drop, in your home folder`. Jason's (the installer's): D11's warning.
 
 **Contract touched:** none. **Size:** M.
+
+---
+
+### L1b. The exports folder: where Studio looks for HyperFrames' exports
+
+**Goal:** Studio looks for HyperFrames' exports in the folder this Mac chose (`exportsPath`, by default Downloads), as well as where an export's own record says it went, and never deletes an export from a chosen folder that is not Downloads (D12).
+
+**Evidence:** `exports.js` looks only in Downloads: `exportsFound` (476-498, `downloadsFolder(home)` at 477) and its listing (466); `lookForExports` (240-366) ends `Looked in Downloads …` (365). The finish deletes an original it took from Downloads after its check (finish.js 1001, 1160-1187). `settings.js` `downloadsFolder` (58) is a link into Dropbox on the Mac Studio. The By-Hand page's `export-places` check ("Where the Export dialog can save") found where the dialog can save.
+
+**Files:** `tool/settings.js` (`exportsFolderOf`), `tool/exports.js`, `tool/finish.js` (which originals it deletes), `tool/guide.js` and `tool/app.js` (the export step's words, when the folder is not Downloads), the skill twins' export rows; tests `exports.test.js`, `exports-words.test.js`, `finish*.test.js`, `guide.test.js`, `app.test.js`, `studio.test.js`.
+
+**Interfaces.** Consumes L1's `exportsPath` and `folderWords`. Produces `settings.js` `exportsFolderOf(settings, home) -> path`: `settings.exportsPath`, else `downloadsFolder(home)`. `exportsFound` lists the exports folder and Downloads (each once, when they are one folder). A file the finish takes keeps its `place`: `"Downloads"` only for a file from `downloadsFolder(home)`, `"the exports folder"` for one from a chosen folder; only the first kind is ever deleted.
+
+**Failing tests first:**
+- `exports.test.js`: with `exportsPath` a test folder holding an export of the project, it is found there; an export in Downloads is still found; the "looked in" line names both, in Finder's words.
+- `finish*.test.js`: an export taken from the chosen folder is still there after the check passes; one taken from Downloads is deleted, as today.
+- `guide.test.js`, `app.test.js`: with a chosen exports folder, the export step says `Export it on This Mac, into <folder words>.`; with none, the words are as today.
+
+**Words Sallie sees:** `Export it on This Mac, into <folder words>.`, only when the exports folder is not Downloads.
+
+**Contract touched:** none. **Size:** S-M.
 
 ---
 
@@ -197,7 +240,7 @@ As in Phase 2: one Sonnet builder per task, test first, in its own Agent worktre
 
 **Interfaces.** Consumes L1's `episodeFilesFolder`, `importingFolderOf`, `isLocal`, L2's `LOCAL_VERSION`. Produces `fileEpisode(…)` on a local Mac: `{ folder, record }` with no `entries`.
 
-**The order of filing on a local Mac:** make `video/` and write each made file there whole (a name of its own, then renamed); check the drop file is unchanged (`sameFile`, as today); rename it into `video/` (refused, with nothing moved, when the two folders are not on one disk); make `Episodes/<folder>/record/` in Dropbox and write `0001.json` by the rule, with `local: { on: machine }`. If the record cannot be written, the video is renamed back into the drop folder, `video/` is removed, and the import ends as one that failed, as today.
+**The order of filing on a local Mac:** make `video/` and write each made file there whole (a name of its own, then renamed); check the drop file is unchanged (`sameFile`, as today); rename it into `video/`, or, from a cloud drop folder or one on another disk (D11), copy it in (a clone on one disk), check its size, and delete the original only once the record is written; make `Episodes/<folder>/record/` in Dropbox and write `0001.json` by the rule, with `local: { on: machine }`. If the record cannot be written, the video is renamed back into the drop folder (or, when it was copied, the copy goes and the original stays), `video/` is removed, and the import ends as one that failed, as today.
 
 **Failing tests first:**
 - `unedited.test.js` / `filing.test.js`, a light import on a local Mac:
@@ -207,6 +250,7 @@ As in Phase 2: one Sonnet builder per task, test first, in its own Agent worktre
   - no pending file is written;
   - its status files are in the local importing folder while it runs, and gone after.
 - "a record that cannot be written leaves the video in the drop folder": the record write fails; the video is back in the drop folder at its size; `video/` is not there; the status says it failed; the next run imports it.
+- "a drop folder in Dropbox: the video is copied into `video/`, never renamed out of it, and deleted from the drop folder only after the record is written" (the test's drop folder made to count as cloud through `cloudFolder`); a placeholder there is read through first, as today.
 - "a Zoom download is held as today", with its status in the local folder.
 - "a video dropped again under the same name and size is held by its episode", as today (`heldBy`).
 - `retry` on a local Mac finds a failed import by its local status.
@@ -271,7 +315,7 @@ As in Phase 2: one Sonnet builder per task, test first, in its own Agent worktre
 
 **Rulings for L5** (the designer writes `L5-task.md` within them):
 1. The finish writes, after its record and hand-off, a pending `{ version: 1, kind: "final", id, name, folder, root, machine, revision, entries, took, lastCopy }` into `pendingFolder(home)`, asks the agent to run (`kickstart`), and ends. Its result is written then. `finish.checking.json` is left while the pending is there, and `checkingNow` believes the pending, not the run's lock.
-2. `finishDue` makes a due `final` pending under `late-check.lock`: it reads the pending again, reads the record in force, and puts a file back only when that record lists it at the entry's bytes (as `ownLateCheck` judges); a file listed at another size, or not listed, is left. When every copy is whole and the record in force holds this revision, it deletes each original the finish took (`took`) that is unchanged since; one changed is kept and said in the log. A problem is flagged as today (`flagProblem`, the notice, `finish.problem.json`).
+2. `finishDue` makes a due `final` pending under `late-check.lock`: it reads the pending again, reads the record in force, and puts a file back only when that record lists it at the entry's bytes (as `ownLateCheck` judges); a file listed at another size, or not listed, is left. When every copy is whole and the record in force holds this revision, it deletes each original the finish took from Downloads (`took`; never one from a chosen exports folder, D12 and L1b) that is unchanged since; one changed is kept and said in the log. A problem is flagged as today (`flagProblem`, the notice, `finish.problem.json`).
 3. A writer into `final/` (a finish, `finish … reels`, the spellings' new hand-off) takes `late-check.lock` around its puts and record write, and takes the entries it replaces out of every pending of this episode (`keepCheckInStep`, moved into `filing.js` as `takeOutOfCheck`). It never waits on a check.
 4. On the other Mac nothing changes: `lateCheckWaits` (the other Mac's finish still checking) goes, since a local episode is never finished there (D3).
 5. The import loop (`importEpisodes`) runs while any pending of this Mac is due, as it does today for imports.
@@ -374,11 +418,12 @@ As in Phase 2: one Sonnet builder per task, test first, in its own Agent worktre
 - The skill twins: the drop folder (`guide drop`), AirDrop (`Send it to this Mac with AirDrop. It lands in Downloads: drag it from there into your drop folder.`), a finished video from Dropbox (`Hold Option while you drag it into your drop folder, so Dropbox keeps its copy.`), keep (L6's row), the other Mac's line, and no "Make available offline" or "online-only" (SKILL.md 248, 250).
 - `tool/guide.js`: `ONLINE_ONLY` (97, appended at 145) goes; the drop step of the overview says the AirDrop sentence for a clip.
 - `tool/install.sh` say-lines (572-582, 950-955).
-- `README.md`: the folders (233-255), the import (257-271), the claim (325-326), the finish's check (461-475).
+- `README.md`: the folders (233-255), the import (257-271), the claim (325-326), "Setting a Mac up" and "Switching a Mac's drop folder" (347-349: `--drop-folder`, `--exports-folder`, `--switch-local`, the cloud warning), the finish's check (461-475).
+- `docs/setup/move-to-studio-app.md` (draft PR #39's), once both have merged: the app's folder pickers pass `--drop-folder` and `--exports-folder`. The app's session owns that change.
 - `CLAUDE.md` (repo): "Experiments never write into the watched Dropbox folder" becomes "into a drop folder"; "Both Macs" says each Mac's drop and working folders are local.
 - `docs/requirements.md`: a dated line under "Decisions".
-- `docs/setup/sallies-laptop.md`: one line: at her move, her laptop switches to the local folder too (`--drop local`).
-- The By-Hand page's laptop checks (44 and 46) change with this, when it merges: her installer line gains `--drop local`, and "about 15 minutes after Ready" goes.
+- `docs/setup/sallies-laptop.md`: one line: at her move, her laptop switches too, with the folders she picks (`--drop-folder`, `--exports-folder`).
+- The By-Hand page's laptop checks (44 and 46) change with this, when it merges: her installer line gains the two folder options (or the Move to Studio app's pickers give them), and "about 15 minutes after Ready" goes.
 - BRIMM Ops, in step (its own repository and branch; no contract change): `docs/guide/brimm-ops-guide.html`'s "drop folder" and "Make online-only" lines.
 - Tests: `plain-words.test.js` gains "Make online-only" and "Make available offline" among the words her lines never hold; `studio.test.js` pins the new skill sentences.
 
@@ -398,8 +443,9 @@ For the Studio By-Hand Checks page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hc
 
 **P3-2. The merge, and Studio brought up to date.** As Phase 2's P2-2: Claude merges on Jason's yes; Jason pulls (`git -C "$HOME/Claude Code/brimm-video-studio" pull --ff-only`); Claude checks the commit and, on his yes, writes her folder again (`node "$HOME/Claude Code/brimm-video-studio/tool/settings.js" studio --node "$(command -v node)"`).
 
-**P3-3. Switch the Mac Studio to the local drop folder.** *(Changes the launch agent: on Jason's yes.)*
-1. Claude: `"$HOME/Claude Code/brimm-video-studio/tool/install.sh" --print --machine "Mac Studio" --drop local --import light --handoff 2 "$BRIMM_DB/BRIMM Video"` (the page's `MS_INSTALL` with `--drop local`). Expect the drop folder `BRIMM Video Work/Drop` in the home folder, `WatchPaths` naming it, and `Nothing was changed.`
+**P3-3. Switch the Mac Studio to its chosen drop folder.** *(Changes the launch agent: on Jason's yes.)*
+0. Jason, in chat: where the Mac Studio's drop folder and exports folder go. By default BRIMM Video Work › Drop, and Downloads as today. Claude writes his two folders into the command.
+1. Claude: `"$HOME/Claude Code/brimm-video-studio/tool/install.sh" --print --machine "Mac Studio" --drop-folder "$HOME/BRIMM Video Work/Drop" --exports-folder "$HOME/Downloads" --import light --handoff 2 "$BRIMM_DB/BRIMM Video"` (the page's `MS_INSTALL` with the two folder options; his folders in place of the defaults). Expect `Its drop folder, on this Mac:` with the folder, `Exports from HyperFrames, looked for in:` with the other, `WatchPaths` naming the drop folder, the cloud warning only if the drop folder is in one, and `Nothing was changed.`
 2. On Jason's yes, the same with `--yes` in place of `--print`.
 3. Claude: `plutil -p "$HOME/Library/LaunchAgents/com.thebrimm.unedited.plist" | grep -A2 WatchPaths` names the home folder's `BRIMM Video Work/Drop`; `node "$HOME/Claude Code/brimm-video-studio/tool/settings.js" show` prints `Its drop folder:` with that folder and `(on this Mac)`.
 - Answers: what the print said would change; the two checks.
@@ -451,6 +497,9 @@ For the Studio By-Hand Checks page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hc
 7. **Phone clips come by AirDrop; her editor's videos are Option-dragged in, so Dropbox keeps its copy** (D7). P3-6 checks it. Cost if wrong: the guide's words.
 8. **"Open it in HyperFrames" said once opens it by itself when its video is ready** (L7). That also makes Phase 1's join notice true (M7). Cost if wrong: HyperFrames opening while she is in another app; she asked for it.
 9. **Phase 1's parked items:** M2 has no local case; M7 is fixed by L7; `reading.js`'s AGAIN words lose their flag (L4). M6 stays parked.
+10. **A drop folder in Dropbox or another cloud folder is allowed, with a warning, and Studio copies each video out of it rather than moving it** (D11; your words of 6 Nov). Cost if wrong: a warning's words.
+11. **Studio never deletes an export from the exports folder you choose** (D12), since it may be shared; it still deletes the export it took from Downloads after Dropbox's check, as today. Cost if wrong: exports left in that folder for her to tidy.
+12. **The drop folder and the exports folder may not be the same, or one inside the other** (D11). An export landing in the drop folder would be imported as a new video. Cost: none.
 
 ## Questions for Jason
 
