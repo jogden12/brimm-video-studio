@@ -53,6 +53,7 @@ import { fileURLToPath } from "node:url";
 import { localDay, stamp } from "./shared/text.js";
 import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount, captionsOf, settled } from "./lib.js";
 import { runProgram, findTools, lockFile, takeLock, isRunning, lastLine, sizeOnDisk } from "./run.js";
+import { closingFrom, withoutClosingWords } from "./closing.js";
 import { probeArgs, factsOf, framesASecond, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, colourOf, streamsOf, soundStream, joinNotes, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipOutputs, clipFiles, waitingToCut } from "./cuts.js";
 import { notesRequest, readNotes, applyDecisions, clipRanges, notesText, pausesOfPlan } from "./notes.js";
 import { cueMarkers } from "./graphic-cues.js";
@@ -299,7 +300,7 @@ const secondsIn = (stretches) => stretches.reduce((sum, s) => sum + (s.end - s.s
 /** The words with their times, the pauses ffmpeg heard and the cut plan the rules make, or `why` there is none. `probe` is what
     ffprobe ended with, `told` is the file the transcriber wrote its times into, `untimed` says why it wrote none, and `silent`
     is the long silences. */
-async function planFor({ facts, probe, told, untimed, silent, wav }, { run, tools }) {
+async function planFor({ facts, probe, told, untimed, silent, wav, edge = null, heard: given = null }, { run, tools }) {
   if (!facts) return { why: `the file's length and picture could not be read (${lastLine(probe.stderr)})` };
   if (untimed) return { why: untimed };
   // A file's clock starts with whichever of its picture and its sound comes first. The transcriber and ffmpeg count from the
@@ -307,14 +308,14 @@ async function planFor({ facts, probe, told, untimed, silent, wav }, { run, tool
   const shift = Math.max(0, facts.soundStart);
   let words = [];
   try {
-    words = wordsOf(JSON.parse(readFileSync(told, "utf8")), { silent, shift });
+    words = withoutClosingWords(wordsOf(JSON.parse(readFileSync(told, "utf8")), { silent, shift }), edge, shift);
   } catch (e) {
     // The file is not there or cannot be read, and that leaves no words.
   }
   if (!words.length) return { why: "the transcriber wrote no times for the words" };
   // Every line of what ffmpeg prints is needed here too. The pauses are looked for to the end of the recording, which may
   // go on after its sound has ended.
-  const heard = await run(tools.ffmpeg, pauseArgs(wav, facts.duration - shift), { keep: 1000000 });
+  const heard = given || await run(tools.ffmpeg, pauseArgs(wav, facts.duration - shift), { keep: 1000000 });
   if (heard.code !== 0) return { why: `the pauses could not be found (${lastLine(heard.stderr)})` };
   const pauses = pausesOf(heard.stderr, shift);
   return { words, pauses, plan: cutPlan(phrasesOf(words, pauses), { duration: facts.duration, pauses }) };
@@ -918,7 +919,13 @@ async function workOn(file, deps) {
     const silent = heard && heard.code === 0 ? silences(heard.stderr) : [];
     const quiet = dropSilent(written, silent);
     if (quiet.dropped) log(`${shown}: left out ${quiet.dropped} caption${quiet.dropped === 1 ? "" : "s"} written where nobody speaks.`);
-    const srt = spellNames(quiet.srt);
+    // And without the ones the transcriber invents after the last thing said (closing.js), which the guard above does not see. The
+    // pauses it needs are the ones the cut plan is made from, so they are asked for here, once, and planFor is given them.
+    const length = facts ? facts.duration - Math.max(0, facts.soundStart) : 0;
+    const heardPauses = facts && !untimed && existsSync(outBase + ".json") && captionCount(quiet.srt) ? await run(tools.ffmpeg, pauseArgs(wav, length), { keep: 1000000 }).catch(() => null) : null;
+    const closed = closingFrom(quiet.srt, heardPauses, length);
+    if (closed.dropped) log(`${shown}: left out ${closed.dropped} caption${closed.dropped === 1 ? "" : "s"} written where nobody speaks.`);
+    const srt = spellNames(closed.srt);
     const captions = captionCount(srt);
     if (!captions) return fail("the transcriber found no speech in it");
     // What an earlier run made of this video goes first, so that nothing stays beside a plan it does not belong to, and
@@ -935,7 +942,7 @@ async function workOn(file, deps) {
     // and filed, and the plan's own text says what is missing. A short clip that could not be cut is the one thing it does
     // not name: the log and the notes for the editor do.
     progress.step("Making the cut plan");
-    const planned = await planFor({ facts, probe, told: outBase + ".json", untimed, silent, wav }, deps).catch((e) => ({ why: `the work on the plan stopped (${e.message})` }));
+    const planned = await planFor({ facts, probe, told: outBase + ".json", untimed, silent, wav, edge: closed.edge, heard: heardPauses }, deps).catch((e) => ({ why: `the work on the plan stopped (${e.message})` }));
     // The plan the rules made. Claude's decisions may change it below, and the plan they give is the plan for all that follows.
     let { plan } = planned;
     // What could not be made, each as the log says it. And of the files made from the plan, the ones that are missing, each

@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount } from "./lib.js";
 import { captionTime, wordArgs, wordsOf } from "./cuts.js";
+import { closingCleaned, withoutClosingWords } from "./closing.js";
 import { lastLine } from "./run.js";
 
 /** Why a program ended badly, in plain words. One that was killed gave no reason of its own. */
@@ -102,7 +103,8 @@ export async function finalTranscript(video, work, { run, tools, model, spelling
   const silent = heard && heard.code === 0 ? silences(heard.stderr) : [];
   const paused = captionCount(written) ? await run(tools.ffmpeg, shortSilenceArgs(wav), { keep: 1000000 }) : null;
   const quiet = paused && paused.code === 0 ? silences(paused.stderr) : [];
-  const srt = spelledCaptions(startedAfterSilence(dropSilent(written, silent).srt, quiet), spellings);
+  const closed = await closingCleaned(dropSilent(written, silent).srt, wav, { run, tools });
+  const srt = spelledCaptions(startedAfterSilence(closed.srt, quiet), spellings);
   if (!captionCount(srt)) return { why: "the transcriber found no speech in it" };
   const timed = join(work, "timed");
   const c = await run(tools.whisper, wordArgs({ model, wav, outBase: timed }));
@@ -111,7 +113,7 @@ export async function finalTranscript(video, work, { run, tools, model, spelling
   if (c.code !== 0) untimed = `the transcriber could not time the words (${reasonOf(c)})`;
   else {
     try {
-      words = wordsStartedAfterSilence(wordsOf(JSON.parse(readFileSync(timed + ".json", "utf8")), { silent }).map((word) => ({ ...word, w: spelled(word.w, spellings) })), quiet);
+      words = wordsStartedAfterSilence(withoutClosingWords(wordsOf(JSON.parse(readFileSync(timed + ".json", "utf8")), { silent }), closed.edge).map((word) => ({ ...word, w: spelled(word.w, spellings) })), quiet);
     } catch (e) {
       words = null;
     }
