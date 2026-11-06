@@ -95,7 +95,7 @@ export const KEPT = "kept for an earlier kind";
 
 /** What she is told, in words that hold no path, no flag and no command name. The three exported ones are said of a Reel's project in
     the same words (app-reel.js, plan PR 5); the other two, which tell her what to say again, have a Reel's own there. */
-export const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason.`;
+export const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Dropbox may still be bringing them: say it again in a few minutes. If it says this again, tell Jason.`;
 const beingMade = (name, ready = "") => `The video for HyperFrames is being made.${ready} Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
 /** When the video for HyperFrames will be ready, as a clock time and in minutes, for the line that says it is being made: from the speed
     this Mac measured of making one (guide.js copyIn, which the guide's "It usually takes" is made of) and the recording's length, as
@@ -116,7 +116,7 @@ function stillReading(ctx, record) {
 }
 /** What is said when the project is not made because a file it reads is not at the size the record lists, while the reading's own
     late check is still to come (plan R1d). */
-export const notWholeYet = (name) => `Some files of ${name} are not whole in Dropbox yet, so its HyperFrames project wasn't made. Say "open ${name} in HyperFrames" again in a few minutes; if it says this again, ask Jason.`;
+export const notWholeYet = (name) => `Some files of ${name} are not whole in Dropbox yet, so its HyperFrames project wasn't made. Say "open ${name} in HyperFrames" again in a few minutes. If it says this again, tell Jason.`;
 export const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
 /** What is said of an explainer's HyperFrames project in a HeyGen voice when its folder is not on this Mac and there is no snapshot to rebuild it from (PR H6):
     it holds no media to make it again from, since the voice was made in it. */
@@ -130,7 +130,7 @@ export const noRecording = (name) => `The recording of ${name} is not in its fol
 export const notTheSame = (name) => `The video made again for ${name} isn't the size or length of the one its HyperFrames project was made with, so it wasn't put back. Ask Jason.`;
 export const notPutBack = (name) => `The video for ${name} was made again, but it could not be put back in its HyperFrames project. Ask Jason.`;
 /** What is said of a project rebuilt from the other Mac's snapshot (plan PR 11), `name` being "Pricing talk" or "Reel 2 of Pricing talk". */
-export const snapshotNotWhole = (name) => `The snapshot of the HyperFrames project for ${name} is not whole on this Mac, so it wasn't rebuilt. Ask Jason.`;
+export const snapshotNotWhole = (name) => `The snapshot of the HyperFrames project for ${name} is not whole on this Mac, so it wasn't rebuilt. Dropbox may still be bringing it: say it again in a few minutes. If it says this again, tell Jason.`;
 export const couldNotRebuild = (name) => `The HyperFrames project for ${name} could not be rebuilt on this Mac. Ask Jason.`;
 export const olderThanSnapshot = (name) => `The HyperFrames project for ${name} on this Mac is older than the one the other Mac handed over, so it isn't opened. Ask Jason.`;
 export const ASSETS_NOT_IN = "Its assets (pictures, music and video) were too big to hand over, so they are not in it.";
@@ -139,7 +139,7 @@ export const ASSETS_NOT_IN = "Its assets (pictures, music and video) were too bi
     handed over from this Mac is in it (the review of PR 18, F2); the next three are why it was not done, each saying the older project is
     where it was (the last, that it is in its set-aside place and nothing was deleted); the video's is said where a rebuilt project's video is. */
 export const setAsideWords = (name) => `The older HyperFrames project for ${name} was set aside on this Mac, and nothing was deleted. Any changes made on this Mac that were not handed over are in the older project: ask Jason if you need them.`;
-export const notWholeAside = (name) => `The snapshot of the HyperFrames project for ${name} is not whole on this Mac, so the older project was left where it was. Ask Jason.`;
+export const notWholeAside = (name) => `The snapshot of the HyperFrames project for ${name} is not whole on this Mac, so the older project was left where it was. Dropbox may still be bringing it: say it again in a few minutes. If it says this again, tell Jason.`;
 export const couldNotAside = (name) => `The HyperFrames project for ${name} could not be rebuilt on this Mac, so the older project was left where it was. Ask Jason.`;
 export const stuckAside = (name) => `The older HyperFrames project for ${name} was set aside on this Mac and nothing was deleted, but the rebuilt one could not be put in its place. Ask Jason.`;
 export const videoKept = (name) => `The video for ${name} was kept from the older project, and it is in the project.`;
@@ -778,9 +778,9 @@ export function keptFits(ctx, { found, kept, copy, was, made, starts = true }) {
     footage comes into it the next time she opens it. */
 export const FOOTAGE_COMING = 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.';
 /** What she is told when a copy of footage that is made could not be moved into the project. */
-export const FOOTAGE_NOT_IN = "Some of its footage could not be put into the project. Ask Jason.";
+export const footageNotInWords = (name) => `Some of its footage could not be put into the project. Say "open ${name} in HyperFrames" again. If it says this again, tell Jason.`;
 /** What she is told when a copy of footage is still missing and the last run that made copies failed for it for a reason that will not pass. */
-export const FOOTAGE_NOT_MADE = "Some of its footage could not be made for HyperFrames. Ask Jason.";
+export const footageNotMadeWords = (name) => `Some of its footage could not be made for HyperFrames. Say "open ${name} in HyperFrames" again in a few minutes. If it says this again, tell Jason.`;
 
 /** Whether the last run of the working copy for this episode failed to make the copy of the footage of `shot` for a reason that will not pass: its
     result holds a line "The footage for shot <n> could not be made: <why>" (workcopy.js makeFootageCopies), in `failed` for a run of the footage alone
@@ -811,10 +811,11 @@ export const footageFailed = (ctx, folder) => footageFailedLines(ctx, folder).le
     { path, from } with `from` the copy made of it, or null while there is none. Each that is not in the project already is moved in from its
     copy (moveIn: a rename on the same disk, nothing copied); one with no copy is asked for, once for all (workcopy.js requestWorkCopy with
     `footage`, which starts nothing while a run is at work), and she is told the footage is being made (FOOTAGE_COMING); a copy that cannot be
-    moved is left where it is and she is told (FOOTAGE_NOT_IN). Nothing here stops the project opening, and a null `kit` does nothing, nor does one with
+    moved is left where it is and she is told (footageNotInWords). Nothing here stops the project opening, and a null `kit` does nothing, nor does one with
     no footage (`footage: null`, an explainer's: it has none, PR H6). */
-function placeFootage(ctx, { found, dir, kit }, { rename }) {
-  if (!kit || !kit.footage) return;
+function placeFootage(ctx, { found, dir, kit, record }, { rename }) {
+  const after = [];
+  if (!kit || !kit.footage) return after;
   let waiting = false;
   let stuck = false;
   let unmade = false;
@@ -829,10 +830,11 @@ function placeFootage(ctx, { found, dir, kit }, { rename }) {
   }
   if (waiting) {
     requestWorkCopy(ctx, { folder: found.name, footage: true });
-    ctx.say(FOOTAGE_COMING);
+    after.push(FOOTAGE_COMING);
   }
-  if (unmade) ctx.say(FOOTAGE_NOT_MADE);
-  if (stuck) ctx.say(FOOTAGE_NOT_IN);
+  if (unmade) after.push(footageNotMadeWords(record.name.text));
+  if (stuck) after.push(footageNotInWords(record.name.text));
+  return after;
 }
 
 /** Open the episode's main video in the HyperFrames app, making its project first when it has none, and resolve the exit code: 0
@@ -962,8 +964,11 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   }
   // The footage of a video made from a plan, at every open (PR H5b): what may go in and is not in media/ is moved in from its copy, and the copies
   // that are not made are asked for. The project opens whatever comes of that: footage is added to it, never needed for it.
-  if (typeof deps.plan === "function" && isFromPlan(record)) placeFootage(ctx, { found, dir: join(work, project.name), kit: deps.plan({ found, record }) }, { rename });
-  return openProjectInApp(ctx, { record, project, dir: join(work, project.name), projects, keeps: (p) => !isMain(p), at, restored }, { save, cli, spawn, env, node, chat: deps.chat });
+  // What it says of the footage comes after "It's open in HyperFrames." (review changes R4c), not before it.
+  const footage = typeof deps.plan === "function" && isFromPlan(record) ? placeFootage(ctx, { found, dir: join(work, project.name), kit: deps.plan({ found, record }), record }, { rename }) : [];
+  const opened = await openProjectInApp(ctx, { record, project, dir: join(work, project.name), projects, keeps: (p) => !isMain(p), at, restored }, { save, cli, spawn, env, node, chat: deps.chat });
+  for (const line of footage) ctx.say(line);
+  return opened;
 }
 
 /** Ask the app to open the project in `dir`, and say what came of it in her words, without writing any record (PR H6: the open half of

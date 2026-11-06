@@ -194,7 +194,7 @@ export function heldWords(part, held, kit) {
     return `${label}${kit.newerWhy(held.record)}`;
   }
   if (held.read) return kit.notRead({ name: part.name, folder: part.folder }, held.read);
-  return `${labelOf(part)}: its record cannot be read now. Ask Jason.`;
+  return `${labelOf(part)}: its record cannot be read now. Dropbox may still be bringing it: ask again in a few minutes. If it says this again, tell Jason.`;
 }
 
 /** What a join of the plan `record` takes, and every reason it cannot be made, in the one place that knows them (the plan's ruling 1 of PR H6: H5b wrote
@@ -518,11 +518,11 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       const pending = pendingFor(filed, { video: part.record.video.file, drop: join(work, "not in a drop folder"), work, planTxt: `${basename(part.record.video.file, extname(part.record.video.file))}.cut-plan.txt`, label: title }, { episode, clock: deps.clock || Date.now });
       try {
         writePending(ctx.home, pending);
-        ctx.say(`${title}: copied into Dropbox. Its late check is made in ${LATE_CHECK_MS / 60000} minutes.`);
+        ctx.say(`${title}: copied into Dropbox. Dropbox's check of its copies is made in ${LATE_CHECK_MS / 60000} minutes.`);
         // The result keeps it too (plan R1a), with no title: "how far is it?" and the guide's tell read the result, not the log.
-        late = `copied into Dropbox, and its late check is made in ${LATE_CHECK_MS / 60000} minutes`;
+        late = `copied into Dropbox, and Dropbox's check of its copies is made in ${LATE_CHECK_MS / 60000} minutes`;
       } catch (e) {
-        ctx.say(`${title}: copied into Dropbox, but its late check could not be kept (${e.code || e.message}), so it is not made.`);
+        ctx.say(`${title}: copied into Dropbox, but the check of its copies could not be kept (${e.code || e.message}), so it is not made.`);
       }
     } else {
       const output = join(work, `${fileSafe(title)}.mov`);
@@ -599,7 +599,7 @@ export function afterJoin(ctx, found, started, notify = banner) {
     try {
       ctx.kickstart();
     } catch (e) {
-      ctx.say(`${title}: the launch agent could not be asked to make its late check (${String(e.message).replace(/\.$/, "")}). It is made when the Mac's import next runs.`);
+      ctx.say(`${title}: the launch agent could not be asked to make the check of its copies (${String(e.message).replace(/\.$/, "")}). It is made when the Mac's import next runs.`);
     }
   }
   notify(started.explainer === true ? `Ready: "${title}" has its voice. In Claude, say "what's next?"` : `Ready: "${title}" is made from its footage.${copyAsked ? opensAt(ctx, wrote.record) : ""} In Claude, say "what's next?"`);

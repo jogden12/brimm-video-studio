@@ -269,7 +269,7 @@ export function heldBy({ root, video, bytes, now = Date.now(), gatedAs }) {
   const failed = held.find((status) => importState(status, now) === "failed");
   if (failed) return `its import failed on ${failed.machine}: ${String(failed.failed).replace(/\.$/, "")}. Say "try it again" to import it again.`;
   const problem = held.find((status) => importState(status, now) === "problem");
-  if (problem) return `copied in, but the late check found a problem: ${String(problem.problem).replace(/\.$/, "")}.`;
+  if (problem) return `copied in, but Dropbox found a problem with a copy of it: ${String(problem.problem).replace(/\.$/, "")}.`;
   const left = held.find((status) => importState(status, now) === "held");
   if (left) return String(left.held);
   const episode = episodeHolding({ root, video, bytes, gatedAs });
@@ -337,7 +337,7 @@ export function episodeHolding({ root, video, bytes, gatedAs = (record) => (gate
   const held = holdingEpisode({ root, video, bytes });
   if (!held || held.unknown) return "";
   const as = gatedAs(held.record);
-  return `already imported as ${as ? withShortId(as, held.record) : held.name}. It stays in the drop folder until its late check passes, or for a person to delete.`;
+  return `already imported as ${as ? withShortId(as, held.record) : held.name}. It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`;
 }
 
 /** Take away the status files this Mac's runs left when they stopped before they were done: a status of this Mac, `machine`,

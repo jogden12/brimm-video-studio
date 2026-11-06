@@ -196,7 +196,7 @@ describe("resolve, for a plan: plain lines and the plan's files", () => {
     const r = await on(deps, "resolve", nameOf(t), "--keep", "B");
     assert.equal(r.code, 1, r.text);
     assert.ok(!r.text.includes("Nothing was written"), r.text);
-    assert.match(r.text, /^The record was not changed \(.*\), but the plan's files may not match it: teleprompter\.txt\. The next "episodes" names any that is wrong\. Say "sort out the conflict" again to put them right; if it still says a file is not whole, ask Jason/, r.text);
+    assert.match(r.text, /^The record was not changed \(.*\), but the plan's files may not match it: teleprompter\.txt\. The next "episodes" names any that is wrong\. Say "sort out the conflict" again to put them right; if it still says a file is not whole, tell Jason the episode's name/, r.text);
     t.done();
   });
 });

@@ -123,7 +123,7 @@ describe("rebuildHere: the project is made and said", () => {
       spoil(join(w.folder, "app-snapshot", T, PROJECT, "index.html"));
       const got = rebuildHere(w.ctx, { found: w.found, record: w.record, snapshot: projectSnapshot(w.record), dir: w.dir, name: NAME }, { cli: CLI });
       assert.deepEqual([got, w.said, existsSync(w.dir)], [{ code: 1 }, [snapshotNotWhole(NAME)], false]);
-      assert.equal(snapshotNotWhole(NAME), `The snapshot of the HyperFrames project for ${NAME} is not whole on this Mac, so it wasn't rebuilt. Ask Jason.`);
+      assert.equal(snapshotNotWhole(NAME), `The snapshot of the HyperFrames project for ${NAME} is not whole on this Mac, so it wasn't rebuilt. Dropbox may still be bringing it: say it again in a few minutes. If it says this again, tell Jason.`);
     }
   });
   it("says it could not be made, leaving no folder, when a step fails", (c) => {
@@ -226,7 +226,7 @@ describe("rebuildHere, given an older folder to set aside (plan PR 18)", () => {
       const w = olderWorld(c);
       spoil(join(w.folder, "app-snapshot", T, PROJECT, "index.html"));
       assert.deepEqual(askFor(w), { code: 1 });
-      assert.deepEqual(w.said, [`The snapshot of the HyperFrames project for ${NAME} is not whole on this Mac, so the older project was left where it was. Ask Jason.`]);
+      assert.deepEqual(w.said, [`The snapshot of the HyperFrames project for ${NAME} is not whole on this Mac, so the older project was left where it was. Dropbox may still be bringing it: say it again in a few minutes. If it says this again, tell Jason.`]);
       assert.equal(lstatSync(w.dir).ino, w.ino);
       assert.equal(readFileSync(join(w.dir, "index.html"), "utf8"), "<html>older");
       assert.equal(existsSync(join(w.base, "work", ASIDE_DIR)), false);

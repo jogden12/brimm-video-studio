@@ -600,7 +600,7 @@ describe("heldBy, for a video whose episode has a conflicted copy of its record"
     };
     writeFileSync(recordFile(folder, 1), recordText(record));
     writeFileSync(join(folder, "record", "0001 (Sallie's laptop's conflicted copy 2026-10-22).json"), recordText(record));
-    assert.equal(heldBy({ root, video: "Coaching call Jane Doe.mp4", bytes: 5 }), "already imported as a client or group session (3fa9c1). It stays in the drop folder until its late check passes, or for a person to delete.");
+    assert.equal(heldBy({ root, video: "Coaching call Jane Doe.mp4", bytes: 5 }), "already imported as a client or group session (3fa9c1). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.");
     rmSync(dirname(root), { recursive: true, force: true });
   });
 });

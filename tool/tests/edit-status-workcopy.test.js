@@ -91,7 +91,7 @@ describe("status: the working copy", () => {
     writePending(t.home, { version: 1, id: ID, name: FOLDER, folder: found.folder, video: "Pricing talk.mp4", bytes: 13, seconds: 23.423, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 20 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt", problem: "Pricing talk.srt is not whole in Dropbox." });
     assert.equal((await on(t.ctx.deps, "workcopy", "--now", FOLDER)).code, 1);
     const r = await howFar(t);
-    assert.deepEqual(r.said, [`${FOLDER}: ${MAKING} ended 0 minutes ago. Not done: The late check of this episode's import found a problem: Pricing talk.srt is not whole in Dropbox. Once it is put right, say "try it again" for Pricing talk.mp4 on Mac Studio, then say this again.`]);
+    assert.deepEqual(r.said, [`${FOLDER}: ${MAKING} ended 0 minutes ago. Not done: Dropbox found a problem with a copy of this episode: Pricing talk.srt is not whole in Dropbox. Once it is put right, say "try it again" for Pricing talk.mp4 on Mac Studio, then say this again.`]);
     t.done();
   });
   it("says what the run left, in its words, once it has ended: what was made, or why it could not be", async () => {
@@ -157,7 +157,7 @@ describe("status: the working copy", () => {
   });
 
   // R6b: a footage copy that failed for a reason that will not pass is said, in plain words and with what she can do first.
-  const NOT_MADE = (name) => `Some of the footage for "${name}" could not be made. Say "open ${name} in HyperFrames" again; if it says so again, ask Jason.`;
+  const NOT_MADE = (name) => `Some of the footage for "${name}" could not be made. Say "open ${name} in HyperFrames" again. If it says this again, tell Jason.`;
   const SHOT_2 = "The footage for shot 2 could not be made: ffmpeg stopped.";
   it("says that some of the footage could not be made, and what to do first, when the last run's result holds a footage copy that failed", async () => {
     const { t } = world();

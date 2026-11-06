@@ -80,7 +80,7 @@ describe("what pins the words about an older project being set aside (plan PR 18
       "\"The video for <name> was kept from the older project, and it is in the project.\"",
       "Otherwise it stays in the set-aside folder and the video is asked for as for any rebuilt project.",
       // What a failure leaves.
-      "\"The snapshot of the HyperFrames project for <name> is not whole on this Mac, so the older project was left where it was. Ask Jason.\"",
+      "\"The snapshot of the HyperFrames project for <name> is not whole on this Mac, so the older project was left where it was. Dropbox may still be bringing it: say it again in a few minutes. If it says this again, tell Jason.\"",
       "\"The HyperFrames project for <name> could not be rebuilt on this Mac, so the older project was left where it was. Ask Jason.\"",
       "\"The older HyperFrames project for <name> was set aside on this Mac and nothing was deleted, but the rebuilt one could not be put in its place. Ask Jason.\"",
       "or `set aside` is a link or a file (a move into a link would follow it out of the episode's work folder, into Dropbox perhaps), the older folder stays where it was:",
@@ -180,7 +180,7 @@ describe("what pins the words about an older project being set aside (plan PR 18
       "\"Assets of the older project (pictures, music and video) could not be moved into the project: 1 file. They are in the older project, set aside on this Mac. Ask Jason.\"",
       "\"The rest of its assets (pictures, music and video) were too big to hand over, so they are not in it.\"",
       "When the snapshot is not whole here, a write fails, or `set aside` is a link or a file, the older folder stays where it was:",
-      "\"The snapshot of the HyperFrames project for `<name>` is not whole on this Mac, so the older project was left where it was. Ask Jason.\"",
+      "\"The snapshot of the HyperFrames project for `<name>` is not whole on this Mac, so the older project was left where it was. Dropbox may still be bringing it: say it again in a few minutes. If it says this again, tell Jason.\"",
       "\"The HyperFrames project for `<name>` could not be rebuilt on this Mac, so the older project was left where it was. Ask Jason.\"",
       "\"The older HyperFrames project for `<name>` was set aside on this Mac and nothing was deleted, but the rebuilt one could not be put in its place. Ask Jason.\"",
       "| ... and the older folder's video passes the checks of any working copy |",

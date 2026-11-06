@@ -1336,7 +1336,7 @@ describe("plan, the footage a plan has, and the guide (PR H5a)", () => {
   it("tells her what footage is in, and what it is waiting for, in the guide; with none, as it did", async () => {
     const t = setup();
     await planned(t);
-    const FILM = "Film it to its shot list, then drop the files in your drop folder. The teleprompter script is in its folder in Episodes.";
+    const FILM = "Film it to its shot list, then drop the files in your drop folder. To read the teleprompter script, say 'show me the script': it opens as a copy to read, and changes come through the chat.";
     assert.deepEqual((await on(light(t), "guide", TITLE)).said, [`${TITLE} (${SHORT}): ${FILM}`]);
     for (const n of [1, 2, 3, 4, 5]) video(t, n, { silent: n > 2 });
     await on(depsOf(t), "footage", labelOf(1), TITLE, "talking", "--client", "no");

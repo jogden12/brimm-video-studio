@@ -106,7 +106,7 @@ describe("the gate walks every command that names an episode", () => {
       t.done();
     }
   });
-  it("refuses a video left alone ('not for BRIMM Video Studio') as it does one waiting, in words that do not say it waits for its answer", async () => {
+  it("refuses a video left alone (the stored state \"not for brimm-video\") as it does one waiting, in words that do not say it waits for its answer", async () => {
     // `footage` (PR H5a) is let through for a video left alone, as for one waiting: it may be footage for a planned video all the same.
     for (const name of SCOPED.filter((n) => !UNANSWERED.includes(n) && !FOOTAGE.includes(n))) {
       const t = setup();

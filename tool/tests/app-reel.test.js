@@ -394,7 +394,7 @@ describe("openReelInApp: a Reel opened in HyperFrames", () => {
     });
   });
   describe("while the reading's own late check is still to come (R1d): the reading is in the record", () => {
-    const NOT_WHOLE = 'Some files of Pricing talk are not whole in Dropbox yet, so the project of Reel 2 wasn\'t made. Say "open Reel 2 of Pricing talk in HyperFrames" again in a few minutes; if it says this again, ask Jason.';
+    const NOT_WHOLE = 'Some files of Pricing talk are not whole in Dropbox yet, so the project of Reel 2 wasn\'t made. Say "open Reel 2 of Pricing talk in HyperFrames" again in a few minutes. If it says this again, tell Jason.';
     const read = (c, options = {}) => {
       const e = episode(c, { plan: [], ...options });
       const size = (name) => statSync(join(e.folder, name)).size;
@@ -502,7 +502,7 @@ describe("openReelInApp: a Reel opened in HyperFrames", () => {
   it("makes nothing without the words of the recording, and says why", async (c) => {
     const e = episode(c, { words: false });
     assert.equal(await run(e), 1);
-    assert.deepEqual(e.said, ["The words of Pricing talk are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason."]);
+    assert.deepEqual(e.said, ["The words of Pricing talk are not on this Mac yet, so there is nothing for HyperFrames to start from. Dropbox may still be bringing them: say it again in a few minutes. If it says this again, tell Jason."]);
     assert.deepEqual([e.started, e.saved, e.runs(), existsSync(e.project)], [[], [], [], false]);
     plain(e.said);
   });
@@ -576,7 +576,7 @@ describe("openReelInApp: a Reel opened in HyperFrames", () => {
   });
   describe("when HyperFrames will not open", () => {
     it("keeps the project, records no time it was opened, leaves it made, still picks the Reel, and says so in her words without the buttons", async (c) => {
-      for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason."]]) {
+      for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more. If it still won't, tell Jason."]]) {
         const e = episode(c, { open });
         assert.equal(await run(e), 1, open);
         assert.deepEqual(e.said, ["Reel 2 is made: the recording from 0:01 to 0:03.", words], open);

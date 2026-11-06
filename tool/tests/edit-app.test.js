@@ -750,7 +750,7 @@ describe("app: Claude's reading is not finished (architecture 4.1)", () => {
     writeFileSync(at, readFileSync(at, "utf8").slice(0, -3));
     const before = reread(found).rev;
     const r = await app(t.ctx.deps, FOLDER);
-    assert.deepEqual([r.code, r.said], [0, [`Some files of ${NAME} are not whole in Dropbox yet, so its HyperFrames project wasn't made. Say "open ${NAME} in HyperFrames" again in a few minutes; if it says this again, ask Jason.`]]);
+    assert.deepEqual([r.code, r.said], [0, [`Some files of ${NAME} are not whole in Dropbox yet, so its HyperFrames project wasn't made. Say "open ${NAME} in HyperFrames" again in a few minutes. If it says this again, tell Jason.`]]);
     assert.deepEqual([reread(found).rev, reread(found).editing === undefined || reread(found).editing === null ? "none" : "claimed", runsOf(t), t.started], [before, "none", [], []]);
     assert.ok(!existsSync(join(work, "Pricing- what to charge- main 3fa9c1")));
     t.done();
@@ -880,7 +880,7 @@ describe("app: the project, and what is said and recorded of it", () => {
     t.done();
   });
   it("keeps the project and says why when HyperFrames will not open, with no time it was opened in the record", async () => {
-    for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason."]]) {
+    for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more. If it still won't, tell Jason."]]) {
       const { t, found, work } = world({ open });
       const r = await app(t.ctx.deps, FOLDER);
       assert.deepEqual([r.code, r.said], [1, [words]], open);

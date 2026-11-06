@@ -134,7 +134,7 @@ describe("the record's layout 3", () => {
     assert.equal(layoutOf(r), 3);
     assert.equal(kindOf(r), null);
   });
-  it("needs a kind once the record is answered, and lets a record that is not for BRIMM Video Studio have none", () => {
+  it("needs a kind once the record is answered, and lets a record that is the stored state \"not for brimm-video\" have none", () => {
     assert.match(episodeFault({ ...made(), kind: null, answer: { state: "answered", guess: null, seen: "", came: "camera" } }), /kind/);
     assert.match(episodeFault({ ...made(), kind: null }), /kind/);
     assert.match(episodeFault({ ...made(), kind: "reel", answer: ANSWER }), /kind/);

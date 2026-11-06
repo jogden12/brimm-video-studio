@@ -679,10 +679,12 @@ export function otherNames(folder, path) {
     .map((n) => (where === "." ? n : `${where}/${n}`));
 }
 
-/** What is wrong with an episode's files against the list in its record, one line for each file, in plain words: missing,
-    short, or not the size listed, with any other name Dropbox may have kept it under. [] when every file is there at its
-    size. `stat` is how a file is measured: a test gives a stand-in. */
-export function filesProblems(folder, record, { stat = statSync } = {}) {
+/** What is wrong with an episode's files against the list in its record, one entry for each file: { file, kind, size, bytes, kept }.
+    `kind` is "missing", "short" (smaller than listed) or "different" (larger than listed); `size` is what it is now (null when it is
+    not there), `bytes` what the record lists, and `kept` any other name Dropbox may have kept it under. [] when every file is there at
+    its size. `stat` is how a file is measured: a test gives a stand-in. (Review changes R4c: a rule about one file reads `file`,
+    never the words.) */
+export function fileProblems(folder, record, { stat = statSync } = {}) {
   const problems = [];
   for (const [path, bytes] of Object.entries(record.files)) {
     if (path.split("/")[0] === RECORD_DIR) continue;
@@ -693,13 +695,28 @@ export function filesProblems(folder, record, { stat = statSync } = {}) {
       // A file that cannot be measured is not there for any command that needs it.
     }
     if (size === bytes) continue;
-    const others = otherNames(folder, path);
-    const kept = others.length ? `, and Dropbox may have kept it as ${others.join(" or ")}` : "";
-    if (size === null) problems.push(`${path} is missing${kept}`);
-    else if (size < bytes) problems.push(`${path} is short: ${size} bytes of ${bytes}${kept}`);
-    else problems.push(`${path} is ${size} bytes, not the ${bytes} the record lists${kept}`);
+    problems.push({ file: path, kind: size === null ? "missing" : size < bytes ? "short" : "different", size, bytes, kept: otherNames(folder, path) });
   }
   return problems;
+}
+
+/** What is wrong with an episode's files, one line for each file, in plain words for a command's refusal: missing, short, or
+    not the size listed, with any other name Dropbox may have kept it under. [] when every file is there at its size. */
+export function filesProblems(folder, record, { stat = statSync } = {}) {
+  return fileProblems(folder, record, { stat }).map(({ file, kind, size, bytes, kept }) => {
+    const as = kept.length ? `, and Dropbox may have kept it as ${kept.join(" or ")}` : "";
+    if (kind === "missing") return `${file} is missing${as}`;
+    if (kind === "short") return `${file} is short: ${size} bytes of ${bytes}${as}`;
+    return `${file} is ${size} bytes, not the ${bytes} the record lists${as}`;
+  });
+}
+
+/** One problem of fileProblems told to her: what happened and what she can try first. */
+export function fileProblemWords({ file, kind, kept }) {
+  const as = kept.length ? ` Dropbox may have kept it as ${kept.join(" or ")}.` : "";
+  if (kind === "missing") return `A file of this video is missing: ${file}. Dropbox may still be bringing it. Wait a few minutes and ask again. If it is still missing, tell Jason.${as}`;
+  if (kind === "short") return `A file of this video is not all here yet: ${file}. Dropbox is still bringing it. Ask again in a few minutes.${as}`;
+  return `A file of this video is not the one Studio saved: ${file}. If you changed it, tell me what you changed. If not, tell Jason.${as}`;
 }
 
 /** Who is editing an episode, when it is a Mac other than `machine`: the record's `editing`. null when nobody is, or this Mac

@@ -542,7 +542,7 @@ describe("read, a raw video", () => {
     assert.deepEqual([asks, snapshot(found), t.waits], [[], before, []]);
     const result = readResult(t.home, FOLDER, "read");
     assert.equal(result.ok, false);
-    assert.match(result.failed[0], /^The late check of this episode's import found a problem: Pricing talk\.srt is not whole in Dropbox\./);
+    assert.match(result.failed[0], /^Dropbox found a problem with a copy of this episode: Pricing talk\.srt is not whole in Dropbox\./);
     t.done();
   });
   it("stops, asking nothing, when the record's kind changed while it waited for the late check", async () => {
@@ -880,7 +880,7 @@ describe("read's result, written once what it read is in (fix 1)", () => {
     const r = await on(t.ctx.deps, "kind", LABEL, "finished", "--private", "no");
     assert.equal(r.code, 0, r.text);
     const said = r.said[r.said.length - 1];
-    assert.match(said, new RegExp(`^${LABEL.replace(/[()]/g, "\\$&")}: read put in what it made [^;]+ ago; the late check of its copies is still to come\\. Made: Reel suggestions 1 to 2, 2 spellings to check\\.`), said);
+    assert.match(said, new RegExp(`^${LABEL.replace(/[()]/g, "\\$&")}: read put in what it made [^;]+ ago; Dropbox's check of its copies is still to come\\. Made: Reel suggestions 1 to 2, 2 spellings to check\\.`), said);
     assert.match(said, /Say "what did Claude find\?"$/);
     assert.deepEqual(notices, [NOTICE]);
     const early = readResult(t.home, FOLDER, "read");
@@ -1102,7 +1102,7 @@ describe("read gives up waiting for an import at work after READ_HOLD_MS (fix 6,
     const r = await on(t.ctx.deps, ...readArgs("raw"));
     assert.equal(r.code, 1);
     assert.deepEqual([looks, asks.length], [READ_HOLD_MS / READ_LOOK_MS, 0]);
-    assert.match(readResult(t.home, FOLDER, "read").failed[0], /^The import of this episode has not finished on Sallie's laptop yet: it is at "Waiting for the late check"\./);
+    assert.match(readResult(t.home, FOLDER, "read").failed[0], /^The import of this episode has not finished on Sallie's laptop yet: it is at "Waiting for Dropbox's check of its copies"\./);
     t.done();
   });
 });
@@ -1331,7 +1331,7 @@ describe("a raw reading starts at once while this Mac's own late check is to com
     assert.deepEqual(snapshot(found), before);
     const result = readResult(t.home, FOLDER, "read");
     assert.deepEqual(result.failed, [
-      `The late check of this episode's import found a problem: ${PROBLEM} Once it is put right, say "try it again" for ${VIDEO} on Mac Studio, then say this again.`,
+      `Dropbox found a problem with a copy of this episode: ${PROBLEM} Once it is put right, say "try it again" for ${VIDEO} on Mac Studio, then say this again.`,
       `The rough cut of ${NAME} is kept on this Mac, in BRIMM Video Work, as "${basename(renderOf(t))}".`
     ]);
     assert.equal(existsSync(lockOfCheck(t)), false);

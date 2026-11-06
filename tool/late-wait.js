@@ -121,7 +121,7 @@ export async function keepCheckInStep(ctx, { name, record, paths }, { wait, log 
     // Under the lock the pending is read again: the check may have been made, or found a problem, while the lock was waited for.
     let fresh = readPendings(ctx.home).find(same);
     if (!fresh) return { none: true };
-    if (fresh.problem) return { why: importHold({ root: ctx.root, home: ctx.home, machine: ctx.machine, record, now: ctx.now() }).why || `The late check of this episode's import found a problem: ${String(fresh.problem).replace(/\.$/, "")}.` };
+    if (fresh.problem) return { why: importHold({ root: ctx.root, home: ctx.home, machine: ctx.machine, record, now: ctx.now() }).why || `Dropbox found a problem with a copy of this episode: ${String(fresh.problem).replace(/\.$/, "")}.` };
     // A mark an earlier reading left (it stopped while it put its files in) is settled first, by the record, as the check settles it.
     if (fresh.reading) {
       const settled = settleReading(fresh, { home: ctx.home, log });

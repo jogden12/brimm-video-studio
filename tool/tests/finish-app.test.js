@@ -619,7 +619,7 @@ describe("E6. the late check, and what is removed from Downloads", () => {
     const result = await finishNow(w.t.ctx, found, { lateCheck: () => [`${MAIN_FILE} is not whole in final (it is missing).`] });
     assert.equal(result.ok, false);
     assert.match(result.failed.join(" "), /is not whole in final/);
-    assert.ok(result.next.includes("The exports it took from Downloads are kept there, because a copy in final/ was not whole at the late check."), result.next);
+    assert.ok(result.next.includes("The exports it took from Downloads are kept there, because a copy in final/ was not whole when its copies were checked."), result.next);
     assert.deepEqual([existsSync(main.path), existsSync(reel.path)], [true, true]);
     w.t.done();
   });

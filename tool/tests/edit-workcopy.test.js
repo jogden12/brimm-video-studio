@@ -457,11 +457,11 @@ describe("workcopy: it waits for the import's late check, as the reading does", 
 
   describe("a hold that does not clear by itself ends the run at once, with the words the reading says it in", () => {
     const CASES = [
-      ["a late check that found a problem", (t, found) => owe(t, found, 20 * 60 * 1000, { problem: "Pricing talk.srt is not whole in Dropbox." }), /^The late check of this episode's import found a problem: Pricing talk\.srt is not whole in Dropbox\. Once it is put right, say "try it again" for Pricing talk\.mp4 on Mac Studio, then say this again\.$/],
-      ["a status of an import whose late check found a problem", (t, found) => importAt(t, found, { problem: "Pricing talk.srt is not whole in Dropbox." }), /^The late check of this episode's import found a problem: Pricing talk\.srt is not whole in Dropbox\. Once it is put right, say "try it again" for Pricing talk\.mp4 on Sallie's laptop, then say this again\.$/],
+      ["a late check that found a problem", (t, found) => owe(t, found, 20 * 60 * 1000, { problem: "Pricing talk.srt is not whole in Dropbox." }), /^Dropbox found a problem with a copy of this episode: Pricing talk\.srt is not whole in Dropbox\. Once it is put right, say "try it again" for Pricing talk\.mp4 on Mac Studio, then say this again\.$/],
+      ["a status of an import whose late check found a problem", (t, found) => importAt(t, found, { problem: "Pricing talk.srt is not whole in Dropbox." }), /^Dropbox found a problem with a copy of this episode: Pricing talk\.srt is not whole in Dropbox\. Once it is put right, say "try it again" for Pricing talk\.mp4 on Sallie's laptop, then say this again\.$/],
       ["an import that failed", (t, found) => importAt(t, found, { failed: "ffprobe could not read it." }), /^The import of this episode failed on Sallie's laptop: ffprobe could not read it\. Say "try it again" to import it again\.$/],
-      ["an import that stopped before its late check", (t, found) => importAt(t, found, { at: "2026-10-20T14:00:00-05:00" }), /^The import of this episode stopped on Sallie's laptop before its late check was made\. On Sallie's laptop, say "try it again" for Pricing talk\.mp4, then say this again\.$/],
-      ["a late check this Mac owes past its time, with no import at work to make it", (t, found) => owe(t, found, 40 * 60 * 1000), /^This Mac has still to make the late check of this episode's import\. Say "try it again" for Pricing talk\.mp4 to have it made now, then say this again\.$/]
+      ["an import that stopped before its late check", (t, found) => importAt(t, found, { at: "2026-10-20T14:00:00-05:00" }), /^The import of this episode stopped on Sallie's laptop before the check of its copies was made\. On Sallie's laptop, say "try it again" for Pricing talk\.mp4, then say this again\.$/],
+      ["a late check this Mac owes past its time, with no import at work to make it", (t, found) => owe(t, found, 40 * 60 * 1000), /^This Mac has still to make the check of this episode's copies\. Say "try it again" for Pricing talk\.mp4 to have it made now, then say this again\.$/]
     ];
     for (const [what, set, words] of CASES) {
       it(what, async () => {
@@ -488,7 +488,7 @@ describe("workcopy: it waits for the import's late check, as the reading does", 
     // A late check this Mac owes, due in two hours: it holds the video, and clears by itself, but not within the wait.
     owe(t, found, LATE_CHECK_MS - 2 * 60 * 60 * 1000);
     const why = holdOf(t, found).why;
-    assert.match(why, /^This Mac has still to make the late check of this episode's import, due at \d\d:\d\d\. Say "try it again" for Pricing talk\.mp4 to have it made then, then say this again\.$/);
+    assert.match(why, /^This Mac has still to make the check of this episode's copies, due at \d\d:\d\d\. Say "try it again" for Pricing talk\.mp4 to have it made then, then say this again\.$/);
     const r = await on(t.ctx.deps, "workcopy", "--now", FOLDER);
     assert.equal(r.code, 1, r.text);
     assert.deepEqual(t.waits, Array(READ_HOLD_MS / READ_LOOK_MS).fill(READ_LOOK_MS));

@@ -16,7 +16,7 @@ const HANDOFF = (over = {}) => ({ id: "e-20261020-3fa9c1", revision: 1, kind: "f
 const NOTE = (over = {}) => ({ kind: "episode", step: "taken", revision: 1, at: AT, ...over });
 const OPS_TEXTS = {
   // The first take: when no episode holds the video yet, the page says it is a new episode and has one button, "Add the episode and take the hand-off", or opens an episode and has "Take the hand-off".
-  taken: 'Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off".',
+  taken: 'Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.',
   // A newer revision: the page's button names the revision of the hand-off and the one the page holds, which is the one her note holds.
   takenAgain: (revision, have) => `Drag the new hand-off onto Episodes, then press "Take revision ${revision} in place of revision ${have}".`,
   // A newer revision of an episode whose note is already at the cascade, the last step: the Reels of a video her editor finished come later, as a newer
@@ -962,7 +962,7 @@ describe("the step of a planned video: film it, then what its footage is (PR H4,
   const NOTES = { version: 1, handoffs: {}, finished: {} };
   const NOW = Date.parse("2026-11-04T12:00:00-05:00");
   const plan = (planned) => ({ name: "Too many SKUs (400000)", id: "e-20261104-400000", kind: null, waiting: false, planned });
-  const FILM = "Film it to its shot list, then drop the files in your drop folder. The teleprompter script is in its folder in Episodes.";
+  const FILM = "Film it to its shot list, then drop the files in your drop folder. To read the teleprompter script, say 'show me the script': it opens as a copy to read, and changes come through the chat.";
   const TOLD = (footage) => `Its footage so far: ${footage}. When it is all in, say "that's all the footage".`;
   it("is film while no footage has come, as it was: a script, with no footage given or none counted", () => {
     for (const planned of [{ route: "script", voice: null }, { route: "script", voice: null, footage: "" }]) {
