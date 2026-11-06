@@ -66,7 +66,7 @@ import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
-import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
+import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
@@ -86,10 +86,8 @@ import { BRINGING, REEL_KEY, exportAgainWords, keepOldWords, nextHandoff, noReel
 import { checkingNow, problemFlagged } from "./finish-check.js";
 import { endedSinceYes, endedWithoutHandoff } from "./finish-ended.js";
 import { handoffIn, videoSeconds } from "./finish-time.js";
-import { DOWNLOADS_UNREADABLE, NEVER_OPENED, RELEASED_FOLDER, downloadsOnce, exportsFound, lookForExports, readRegular } from "./exports.js";
-import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
+import { DOWNLOADS_UNREADABLE, NEVER_OPENED, downloadsOnce, exportsFound, lookForExports, readRegular } from "./exports.js";
 import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
-import { SNAPSHOT_DIR, keptSnapshots, listedBy, notSynced } from "./snapshot.js";
 import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } from "./timeline.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
@@ -119,13 +117,13 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, footageFailed, guidanceOf, isMain as inUse, mediaOf, notWholeYet, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, footageFailed, guidanceOf, isMain as inUse, mediaOf, notWholeYet, openInApp, plainName, projectOnAnotherMac } from "./app.js";
 import { VOICEOVER } from "./project.js";
 import { openVoiceProject, voiceProjectWhy } from "./explainer.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelNotWholeYet, reelStretch, reelWhy } from "./app-reel.js";
 import { historyTail, mainProjectDir, toldTurns, turnTime, versionsOf, whatHappened } from "./app-history.js";
 import { recordingPlacementsIn, timelineTranscript } from "./on-timeline.js";
-import { freeEpisode, hyperFramesRunning } from "./free.js";
+import { freeEpisode } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
 import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeFootageCopies, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 import { lookAt, referencesAsked, sayReferences, useIn } from "./references.js";
@@ -196,29 +194,20 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         change them; with recurring, the principles said more than once
   node edit.js ideas "<session>" [keep <n>… | drop <n>… | edit <n> --<what> "<words>"]
                                         the Reel ideas Claude read in a session: keep, drop or change them
-  node edit.js open "<episode>" [--take-over]
-                                        check its files are here, bring over those that are not, claim it for this
-                                        Mac, and show what is decided for it. Another Mac's claim refuses it, unless
-                                        it is taken over
-  node edit.js app "<episode>" [--take-over]
-                                        open the episode's main video in HyperFrames, making its project first. Its
+  node edit.js open "<episode>"         check its files are here, bring over those that are not, claim it for this
+                                        Mac, and show what is decided for it. Another Mac's claim refuses it
+  node edit.js app "<episode>"          open the episode's main video in HyperFrames, making its project first. Its
                                         files are checked and brought over, and it is claimed for this Mac, as open
-                                        does; another Mac's claim refuses it, unless it is taken over. A project the
-                                        other Mac made is rebuilt here from the snapshot it handed over, and its video
-                                        made again; what HyperFrames kept of its history stays on that Mac. One it has
-                                        not handed over is refused. A project here that the other Mac has worked on
-                                        since, which its marker and the newest snapshot show, is set aside with
-                                        nothing deleted and rebuilt in its place from that snapshot, its video kept
-                                        when it fits; HyperFrames must be quit, which is asked before anything is
-                                        claimed. Only on a Mac that Jason has set up for HyperFrames
-  node edit.js app "<episode>" reel <n> [--take-over]
+                                        does; another Mac's claim refuses it. A project the other Mac made is not made
+                                        again here: it is refused, and she carries on on that Mac. Only on a Mac that
+                                        Jason has set up for HyperFrames
+  node edit.js app "<episode>" reel <n>
                                         make Reel <n>, one of Claude's suggestions, a project of its own in HyperFrames,
                                         open it, and pick it. Its video, the suggestion's stretch of the recording, is
                                         made first: it is asked for, and the Reel is opened when it is said again. Its
                                         files are checked and brought over, and it is claimed for this Mac, as above.
-                                        A Reel project the other Mac made is rebuilt from its snapshot, as above, and
-                                        one here that the other Mac has worked on since is set aside and rebuilt, as
-                                        above. For a finished video too. Reels are made here, never by HyperFrames itself
+                                        A Reel project the other Mac made is refused, as above. For a finished video
+                                        too. Reels are made here, never by HyperFrames itself
   node edit.js app "<episode>" what-happened
                                         what was done in HyperFrames on the episode's main video, newest first, under
                                         the day it happened: what she asked, what the app said, and the files it
@@ -266,7 +255,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js push "<episode>" reel <n> [v<k>] [--no-hand-edits | --hand-edits]
                                         show a picked Reel in Final Cut Pro, upright; with v<k>, its version k as it was
                                         stored
-  node edit.js finish "<episode>" [--yes] [--take "<part>=<file | this Mac | the other Mac>"] [--final "<part>"]
+  node edit.js finish "<episode>" [--yes] [--take "<part>=<file>"] [--final "<part>"]
                      [--no-hand-edits "<part>"] [--without "reel <n>"] [--as-it-is]
                      [--on-screen "<words>"]… [--no-on-screen]
                                         find what HyperFrames exported of each part (in Downloads, or where the export's own
@@ -284,7 +273,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         suggestions that fall in it. --on-screen gives those words, once for each line in
                                         the order they appear, when she changes or drops one, and --no-on-screen says there
                                         are none. A Reel's title, when it has none, is asked with the Reel's first line
-  node edit.js finish "<episode>" reels [--yes] [--take "reel <n>=<file | this Mac | the other Mac>"] [--final "reel <n>"]
+  node edit.js finish "<episode>" reels [--yes] [--take "reel <n>=<file>"] [--final "reel <n>"]
                      [--without "reel <n>"]
                                         for a video her editor finished: find the exports of the Reels made from it in
                                         HyperFrames (app … reel <n>), and ask what it must. With --yes and nothing left to
@@ -305,14 +294,6 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js resolve "<episode>" [--keep A|B]
                                         show the two sides of a conflicted copy Dropbox kept, and keep the one picked:
                                         the other is set aside in the episode's history/
-  node edit.js release "<episode>" [--no-hand-edits | --hand-edits-stay]
-                                        hand the episode over to the other Mac: copy this Mac's Shares and exports of it
-                                        into its folder, and let it go. When this Mac pushed a part last, it asks first
-                                        whether it was changed in Final Cut since: --no-hand-edits says it was not,
-                                        --hand-edits-stay that the changes stay in this Mac's library. For its
-                                        HyperFrames projects it also copies a snapshot of each one's files, so that the
-                                        other Mac can rebuild it (not its video, renders or history), and the newest export
-                                        of each; HyperFrames must be quit, and a project too big for that is refused
   node edit.js free "<episode>"         take away, on this Mac, the video HyperFrames was given for the episode's main
                                         project and what it rendered for every project, to give the room back. Their projects
                                         and everything done in them stay, and app makes the main video again; a Reel's video
@@ -1218,40 +1199,6 @@ function offlineStep(ctx, found) {
   }
 }
 
-/** Her yes to taking an episode over from another Mac, kept in this Mac's folder for the episode: the claim she said it of,
-    { by, since }. A take-over keeps it; a plain open that refuses, which has her asked again, lets it go, since she may say no
-    this time. "How far is it?" says to take it over again only while it is kept (nextOf). */
-const yesFile = (home, folder) => join(episodeWork(home, folder), "take-over.yes.json");
-
-/** Keep her yes to taking over the claim `held`. When it cannot be kept, "how far is it?" says to open the episode, and she is
-    asked again, which is the safe way to go wrong. */
-function keepYes(ctx, folder, held) {
-  try {
-    mkdirSync(episodeWork(ctx.home, folder), { recursive: true });
-    writeFileSync(yesFile(ctx.home, folder), JSON.stringify({ by: held.by, since: held.since }) + "\n");
-  } catch (e) {
-    // She is asked again instead.
-  }
-}
-
-/** Let her yes go: she is being asked again. */
-function forgetYes(ctx, folder) {
-  try {
-    rmSync(yesFile(ctx.home, folder), { force: true });
-  } catch (e) {
-    // It stays, then. The skill still asks her again in any later conversation.
-  }
-}
-
-/** Her yes, { by, since }, or null when none is kept or it cannot be read. */
-function yesOf(ctx, folder) {
-  try {
-    return JSON.parse(readFileSync(yesFile(ctx.home, folder), "utf8"));
-  } catch (e) {
-    return null;
-  }
-}
-
 /** The episode's files that are not whole on this Mac yet, as Dropbox brings them over: by the record's list. */
 const notHere = (ctx, found, record) => Object.keys(record.files).filter((rel) => !ctx.isWhole(join(found.folder, rel)));
 
@@ -1271,26 +1218,12 @@ function claimHeld(ctx, record) {
   return heldText(record, ctx.machine);
 }
 
-/** The files the other Mac handed over that are not here yet: by the record's `released` list, each the record still lists
-    at that size and not here at it, or not whole. A file changed since the release is the record's to judge (filesProblems,
-    notHere), and is not waited for here: the list would otherwise hold open for ever. None when this Mac let it go last. */
-function stillArriving(ctx, found, record) {
-  const released = record.released;
-  if (!released || !released.by || released.by === ctx.machine) return [];
-  return Object.entries(released.files || {}).filter(([rel, bytes]) => {
-    if (record.files[rel] !== bytes) return false;
-    const here = ctx.stat(join(found.folder, rel));
-    return !here || here.size !== bytes || !ctx.isWhole(join(found.folder, rel));
-  }).map(([rel]) => rel);
-}
-
 /** The record claimed for the Mac `machine` at `at`. An answer about hand edits given for a part this Mac pushed last counts
-    no more: its Final Cut may change that version again before it hands the episode over, when it is asked again. A take-over
-    drops every answer: it carries none (ruling 7). */
-function claimFor(record, machine, at, { takeOver = false } = {}) {
+    no more: its Final Cut may change that version again, when it is asked again. */
+function claimFor(record, machine, at) {
   const answers = record.released && record.released.answers;
   if (!answers) return claimed(record, machine, at);
-  return claimed(takeOver ? { ...record, released: { ...record.released, answers: {} } } : withoutOwnAnswers(record, machine), machine, at);
+  return claimed(withoutOwnAnswers(record, machine), machine, at);
 }
 
 /** The record with the answers dropped that were given for parts the Mac `machine` pushed last: its Final Cut may change those
@@ -1323,28 +1256,21 @@ function plainShort(folder, record) {
 /** The claim and the bring that `open` and `app` both begin with: check the episode's files against its record, and that each is
     whole on this Mac, and claim it for this Mac. `record` is the one `found` was read as (episodeFor). Resolves { record }, the
     episode's record with this Mac editing it (read again, when the claim was just written), once every file is here and the
-    episode is this Mac's; or { code }, the code the command ends with, once a line has said why it cannot go on. `takeOver` is
-    the flag `--take-over`. `again` is what she says to try again, as the command that asked has it: `open Talk` for open, `open
-    Talk in HyperFrames` for app. `notYet`, for `app` alone, is a function of whether this is a take-over (`held`) that gives the words of
-    the wait in the window of plan R1d (a wait, with nothing written): a take-over is told to take it over again, as the other waits tell it,
-    since the plain open would meet the other Mac's claim and refuse. `by` is the command that asked when it is not `open`, "app": the bring this starts is given it
-    (`bring … --asked-by app`), so that what that bring says to say next, once it has run, is `again` as well, and not open's.
-    The two give the same answer for the same claim but for that. In order:
+    episode is this Mac's; or { code }, the code the command ends with, once a line has said why it cannot go on. `again` is what
+    she says to try again, as the command that asked has it: `open Talk` for open, `open Talk in HyperFrames` for app. `notYet`, for
+    `app` alone, gives the words of the wait in the window of plan R1d (a wait, with nothing written). `by` is the command that
+    asked when it is not `open`, "app": the bring this starts is given it (`bring … --asked-by app`), so that what that bring says
+    to say next, once it has run, is `again` as well, and not open's. In order:
     - a change Dropbox undid is said, and the record as it is now taken as this Mac's;
-    - another Mac's claim refuses it at once, unless it is taken over (`--take-over`): nothing is looked at or brought over
-      first, since on the Mac that is not editing an episode its files are online-only, and bringing them, raw video and all,
-      would be for nothing until it is taken over. The refusal lets go of any yes she gave before to taking it over, since she
-      is asked again; a take-over keeps her yes (keepYes);
-    - files the other Mac handed over that are still on their way: a detached run brings them over (`bring`), and nothing is
-      claimed until they are here (not on a take-over, which goes by the record's own list);
-    - a file of the record missing or short refuses it; files not whole on this Mac yet are brought over, as above, and on a
-      take-over what it says next is to take it over again, so that she is asked only once; so does the bring's result, but
-      only when every file came, and only while the claim she said to take over stands and her yes is kept (nextOf);
+    - another Mac's claim refuses it at once: nothing is looked at or brought over first, since on the Mac that is not editing an
+      episode its files are online-only, and bringing them, raw video and all, would be for nothing. One Mac edits a video from
+      start to finish, so there is no way to take it over;
+    - a file of the record missing or short refuses it; files not whole on this Mac yet are brought over;
     - the claim: the record is written with this Mac editing it, and after CLAIM_WAIT_MS it is read again: when Dropbox took
       the claim away, this Mac says so and stops; when the other Mac claimed it meanwhile, or both Macs wrote the same record
       and Dropbox kept a conflicted copy, this Mac stops, and it is theirs or for a person to sort out;
     - a warning when this Mac seems offline, since the other Mac then cannot see the claim. */
-async function claimAndBring(ctx, found, record, { takeOver = false, again, by = "", notYet = null }) {
+async function claimAndBring(ctx, found, record, { again, by = "", notYet = null }) {
   const { say } = ctx;
   // The bring it starts is told which command asked (`--asked-by`), when it is not `open`, so that what it says to say next, when
   // it is done, is that command's: a bring started by `app` ends by sending her back to app, and not to open.
@@ -1355,31 +1281,18 @@ async function claimAndBring(ctx, found, record, { takeOver = false, again, by =
     acceptRev(ctx.home, record.id, record.rev);
   }
   const name = record.name.text;
-  // Who has it is said before any file is looked at: the files of an episode another Mac has are not whole here, and a Mac
-  // that handed it over and opened it again still has its `released` list in the record, which is not still arriving.
-  const held = heldElsewhere(record, ctx.machine);
-  if (held && !takeOver) {
-    // She is asked again whether to take it over, and may say no this time: a yes she gave before counts no more.
-    forgetYes(ctx, found.name);
-    say(`${held.by} has ${name} open, since ${shownAt(held.since)}. Say "take it over" to open it here; anything not handed over stays on ${held.by}.`);
+  // Who has it is said before any file is looked at: the files of an episode another Mac has are not whole here.
+  const held = claimHeld(ctx, record);
+  if (held) {
+    say(held);
     return { code: 1 };
-  }
-  if (held) keepYes(ctx, found.name, held);
-  // The files the other Mac handed over are in the record's list too, so they are waited for before the list is checked. A
-  // take-over does not wait: it goes by the record's own list. A take-over of a record nobody else has open is a plain open.
-  const arriving = held ? [] : stillArriving(ctx, found, record);
-  if (arriving.length) {
-    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [...arriving, ...askedBy] });
-    say(`Still arriving from ${record.released.by}: ${arriving.length} file${arriving.length === 1 ? "" : "s"}. Dropbox is bringing them over; say "${again}" again when it is done.`);
-    return { code: 0 };
   }
   const problems = filesProblems(found.folder, record);
   // `app` and `app … reel` while the reading's own late check is still to come (plan R1d): when every problem is a listed file that is
   // missing or not at its listed size, with no other name Dropbox may have kept it under, it is a wait, not a refusal; nothing is
   // claimed or written. Judged by the record's list and the sizes, not by the words of the problems.
   if (problems.length && notYet && projectWaits(ctx, { name: found.name, record }) === "verify" && plainShort(found.folder, record).length === problems.length) {
-    // On a take-over (`held`) she is told to take it over again: the plain open would meet the other Mac's claim and refuse.
-    say(notYet(Boolean(held)));
+    say(notYet());
     return { code: 0 };
   }
   if (problems.length) {
@@ -1388,18 +1301,14 @@ async function claimAndBring(ctx, found, record, { takeOver = false, again, by =
     say(`It is not opened. Say "what's waiting?" to see the episodes.`);
     return { code: 1 };
   }
-  // Past the refusal, another Mac's claim means this is a take-over. What is said next is then to take it over again, by this
-  // command and by the bring it starts: a plain one would refuse, and she would be asked a second time.
-  const sayNext = held ? `Say "take it over" again` : `Say "${again}" again`;
   const coming = notHere(ctx, found, record);
   if (coming.length) {
-    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [...(held ? ["--take-over"] : []), ...askedBy] });
-    say(`Dropbox is bringing ${coming.length} file${coming.length === 1 ? "" : "s"} of ${name} over to this Mac. ${sayNext} when it is done; "how far is it?" shows how far it has got.`);
+    if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: askedBy });
+    say(`Dropbox is bringing ${coming.length} file${coming.length === 1 ? "" : "s"} of ${name} over to this Mac. Say "${again}" again when it is done; "how far is it?" shows how far it has got.`);
     return { code: 0 };
   }
   if (!record.editing || record.editing.by !== ctx.machine) {
-    const took = held ? `Taken over from ${held.by}, who had it since ${shownAt(held.since)}.` : "";
-    if ((await save(ctx, { ...found, record }, claimFor(record, ctx.machine, localStamp(new Date(ctx.now())), { takeOver: Boolean(held) }), took)) !== 0) return { code: 1 };
+    if ((await save(ctx, { ...found, record }, claimFor(record, ctx.machine, localStamp(new Date(ctx.now()))), "")) !== 0) return { code: 1 };
     await (ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))))(CLAIM_WAIT_MS);
     const after = readEpisode(found.folder);
     if (!after.record) {
@@ -1407,20 +1316,15 @@ async function claimAndBring(ctx, found, record, { takeOver = false, again, by =
       return { code: 1 };
     }
     // The record read again is older than the claim this Mac wrote, or has nobody editing it: Dropbox took the claim away.
-    // That is said, not that the other Mac opened it: a claim of theirs in a record older than this Mac's is the one this Mac
-    // took over, not a new one. The record as it is now is taken as this Mac's, so the next try goes through. What is said
-    // next goes by that record: to take it over again only while it still has the claim she said to take over, and otherwise
-    // to try again, which waits for anything handed over meanwhile, or refuses a new claim, and she is asked.
+    // That is said. The record as it is now is taken as this Mac's, so the next try goes through.
     const undid = undone(after.record, ctx.home);
     if (undid || !after.record.editing) {
-      const still = heldElsewhere(after.record, ctx.machine);
-      const same = held && still && still.by === held.by && still.since === held.since;
-      say(`Dropbox undid this Mac's claim on ${name}. ${same ? `Say "take it over" again` : `Say "${again}" again`}.`);
+      say(`Dropbox undid this Mac's claim on ${name}. Say "${again}" again.`);
       if (undid) acceptRev(ctx.home, after.record.id, after.record.rev);
       return { code: 1 };
     }
     if (after.record.editing.by !== ctx.machine) {
-      say(`${after.record.editing.by} opened ${name} at the same time, and it is theirs. Say "take it over" if they are done with it.`);
+      say(`${after.record.editing.by} opened ${name} at the same time, and it is theirs. Carry on there.`);
       return { code: 1 };
     }
     record = after.record;
@@ -1429,17 +1333,22 @@ async function claimAndBring(ctx, found, record, { takeOver = false, again, by =
   return { record };
 }
 
-/** `open "<episode>" [--take-over]`: check its files against its record, and that each is whole on this Mac, claim it for this
+/** `open "<episode>"`: check its files against its record, and that each is whole on this Mac, claim it for this
     Mac (claimAndBring), and show what is decided for it: the name, the title, Claude's notes and the Reel candidates. It says
     nothing of Final Cut. At the first open on this Mac it says how to keep the episode on this Mac. */
 export async function open(ctx, rest) {
   const { words, flags } = flagsOf(rest, []);
+  // No flag is open's: `--take-over` is none, and the help is said with nothing claimed.
+  if (Object.keys(flags).length) {
+    ctx.say(HELP);
+    return 2;
+  }
   const got = episodeFor(ctx, words, { newerEnds: 1 });
   if (!got.found) return got.code;
   const { found } = got;
   const { say } = ctx;
   const name = got.record.name.text;
-  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: `open ${name}` });
+  const claim = await claimAndBring(ctx, found, got.record, { again: `open ${name}` });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
   const kind = record.kind === "short video" ? "a short video" : "an episode";
@@ -1470,41 +1379,10 @@ const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Ja
     words, named as its other lines name the video. */
 const finishedHasNoProject = (name) => `${name} was finished by your editor, so it has no HyperFrames project: a finished video is not edited in HyperFrames.`;
 
-/** What `app` says of an episode whose main project in use was made on another Mac, is not on this one and has no snapshot listed in the
-    record (app.js projectOnAnotherMac, projectSnapshot): everything done in it is on that Mac, so a new project here would drop it from
-    the record, and nothing here can rebuild it until that Mac has handed it over (`release`; plan PR 11). Named as app's other lines
-    name the video. What she is told to do follows the claim as it stands (the review of PR 11, I3): when `on` holds it, or nobody does, `on`
-    can hand it over, and she is told to say so there; when another Mac holds it, which after a take-over is this one, `on`'s release would be
-    refused, so she is told to ask Jason. `holder` is who has the episode open: "" for nobody, "this Mac", or a Mac's name. */
-const projectIsElsewhere = (name, on, of = "", holder = "") => `The HyperFrames project for ${of}${name} is on ${on}, and ${on} has not handed it over yet. ${holder && holder !== on
-  ? `${on} can't hand it over while ${holder} has ${name} open. Ask Jason.`
-  : `On ${on}, say "I'm done with it for now", then say it again here. If that can't be done, ask Jason.`}`;
-/** Who has the episode open, as projectIsElsewhere has it: "" when nobody does. */
-const holderOf = (ctx, record) => (record.editing ? (record.editing.by === ctx.machine ? "this Mac" : String(record.editing.by)) : "");
-
-/** How `app` asks whether HyperFrames is running, before it sets an older project aside (and again where the folder is moved): `ctx.deps.running`
-    when a test says (as `release` and `free` have it), else pgrep (free.js hyperFramesRunning), for which `ctx.deps.pgrep` is a test's stand-in
-    for spawnSync. The one place that default is, so that a test can tell it from no way to ask at all (the review of PR 18, F9). */
-const hyperFramesAsked = (ctx) => ctx.deps.running ?? (() => hyperFramesRunning(ctx.deps.pgrep));
-
-/** The refusal for a project of this Mac that is older than the newest snapshot the record lists of it, or "": decided before anything is
-    claimed, so that the refusal leaves the record, its claim and the folders as they were (the review of PR 11, I2). `key` says which project
-    ("main" or "reel 2"), and `of` how its words name it.
-    - A project whose marker (snapshot.js) names another snapshot than the newest (app.js olderMarked) is set aside, and the project rebuilt in
-      its place (plan PR 18), which needs HyperFrames quit: the only thing decided here is that. Open, or not to be told, it is refused in
-      `release`'s and `free`'s words (app.js quitWords); quit, it goes on to the claim, and openInApp sets it aside. The marker needs no file
-      of the snapshot, so this is told before the files are brought.
-    - A project with no marker is judged by the times of its files when the snapshot is whole here (olderHere), and refused in the words it
-      always had: those can be fooled by a clock or a deletion, so it is not set aside. When the snapshot is not whole yet, openInApp judges it
-      again once the claim has brought the files. */
-async function olderWords(ctx, { found, record }, key, of) {
-  const project = (record.app?.projects ?? []).find((p) => (key === "main" ? inUse(p) : p.key === key));
-  if (!project || !plainName(project.name)) return "";
-  const dir = join(episodeWork(ctx.home, found.name), project.name);
-  if (!existsSync(dir)) return "";
-  if (olderMarked(found, { record, project, dir })) return quitWords(hyperFramesAsked(ctx));
-  return olderHere(found, { record, project, dir }) ? olderThanSnapshot(of) : "";
-}
+/** What `app` says of an episode whose main project in use was made on another Mac and is not on this one (app.js
+    projectOnAnotherMac): everything done in it is on that Mac, so a new project here would drop it from the record. One Mac edits a
+    video from start to finish. Named as app's other lines name the video; `of` is "Reel 2 of " for a Reel's project. */
+const projectIsElsewhere = (name, on, of = "") => `The HyperFrames project of ${of}${name} is on ${on}. Carry on there.`;
 
 /** The refusal for a project of the record that is a session clip's folder on this Mac, however the record spells its name (PR 15's rule, as
     free.js has it; the review of PR 11, I4), or that cannot be told from one, or "": decided before anything is claimed or opened. `key` says
@@ -1531,7 +1409,7 @@ const reelOfAsker = (asker) => Number(/^app reel ([1-9]\d*)$/.exec(asker)?.[1] ?
     or what versions it has kept, instead of opening it (app-history.js). */
 const APP_QUESTIONS = ["what-happened", "versions"];
 
-/** `app "<episode>" [--take-over]`: open the episode's main video in the HyperFrames app, making its project first (app.js
+/** `app "<episode>"`: open the episode's main video in the HyperFrames app, making its project first (app.js
     openInApp; architecture 2026-10-27, 4.1). In order:
     - the gate, as for every command that names an episode (episodeFor): a video not yet answered, a video left alone, a session
       not cleared and a video held beside a session are refused in the gate's own words. `app` is in no gate list. This comes
@@ -1541,33 +1419,32 @@ const APP_QUESTIONS = ["what-happened", "versions"];
       Nothing is claimed or brought, no working copy is asked for, and no record is written;
     - this Mac must be set up for the app (settings.js appOf), and must have the pinned command line (`cliPath`, or the program
       the deps give openInApp), or it says so and ends with 1, having claimed nothing;
-    - an episode whose main project in use was made on another Mac, and is not on this one, is refused when the record lists no
-      snapshot of it (projectIsElsewhere; app.js projectOnAnotherMac, projectSnapshot), with or without `--take-over`: it ends with 1
-      before anything is claimed or brought, nothing is asked for or made, and no record is written, since a new project here would
-      drop the other Mac's from the record. With a snapshot listed (the other Mac released the episode; plan PR 11) it goes on to the
-      claim, and openInApp rebuilds the project from the snapshot. A project of this Mac's own whose folder is gone is rebuilt from its
-      snapshot when there is one, and made again, as before, when there is not;
-    - a project of this Mac's that is older than the newest snapshot the record lists of it (olderWords; the other Mac worked on it since)
-      is dealt with before anything is claimed, so that a refusal leaves the record and its claim as they were: one whose marker says so is
-      set aside and rebuilt (plan PR 18) once HyperFrames is quit, which is all that is asked here, and is refused in `release`'s and
-      `free`'s words while it is open or cannot be told; one with no marker, older by the times of its files, is refused in words as it was;
+    - an episode whose main project in use was made on another Mac, and is not on this one, is refused (projectIsElsewhere; app.js
+      projectOnAnotherMac): it ends with 1 before anything is claimed or brought, nothing is asked for or made, and no record is
+      written, since a new project here would drop the other Mac's from the record. One Mac edits a video from start to finish. A
+      project of this Mac's own whose folder is gone is made again, under its own name;
     - the claim and the bring, as `open` makes them (claimAndBring). What she is told to say again is "open <name> in
       HyperFrames";
     - openInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record its
       project, which is written as every command writes a record (save). Whenever the app opened, the last line it says names the
       app's buttons that Studio cannot control (architecture 3.3 and 5.9); when the app did not open, it does not.
     `ctx.deps.app` holds what a test gives openInApp in place of its defaults (cli, node, guidance, chat, spawn, env).
-    `app "<episode>" reel <n> [--take-over]` opens Reel `n` instead (appReel).
+    `app "<episode>" reel <n>` opens Reel `n` instead (appReel).
     `app "<episode>" what-happened` and `app "<episode>" versions` (plan PR 6) are questions about the project, not an opening of it:
     a word after the episode's, when another word comes before it (`app versions` alone names an episode called "versions"). They
     go through the same gate, the same words for a finished video and the same check that this Mac is set up, and then they are
     app-history.js's: they claim nothing, bring nothing, ask for no working copy and write no record, so no claim of another Mac
-    refuses them, and `--take-over` is not read. `versions` needs the pinned command line (NO_COMMAND_LINE); `what-happened` reads a
+    refuses them. `versions` needs the pinned command line (NO_COMMAND_LINE); `what-happened` reads a
     file in the project and does not. `ctx.deps.app` holds what a test gives them too (cli, node, spawn, tz). */
 export async function app(ctx, rest) {
   const { words, flags } = flagsOf(rest, []);
+  // No flag is app's: `--take-over` is none, and the help is said with nothing claimed.
+  if (Object.keys(flags).length) {
+    ctx.say(HELP);
+    return 2;
+  }
   const reel = reelAsked(words);
-  if (reel) return appReel(ctx, reel, flags);
+  if (reel) return appReel(ctx, reel);
   const question = words.length > 1 && APP_QUESTIONS.includes(words[words.length - 1]) ? words[words.length - 1] : "";
   const got = episodeFor(ctx, question ? words.slice(0, -1) : words, { newerEnds: 1 });
   if (!got.found) return got.code;
@@ -1593,18 +1470,16 @@ export async function app(ctx, rest) {
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
   if (question === "versions") return versionsOf(ctx, { found, record: got.record }, { env: ctx.deps.env, ...ctx.deps.app, cli });
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record });
-  if (elsewhere && !projectSnapshot(got.record)) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere, "", holderOf(ctx, got.record)));
+  if (elsewhere) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere));
   const clip = clipWords(ctx, { found, record: got.record }, "main", got.record.name.text);
   if (clip) return refuse(ctx, clip);
-  const older = await olderWords(ctx, { found, record: got.record }, "main", got.record.name.text);
-  if (older) return refuse(ctx, older);
-  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED, notYet: (over) => notWholeYet(got.record.name.text, over) });
+  const claim = await claimAndBring(ctx, found, got.record, { again: openInAppWords(got.record.name.text), by: APP_ASKED, notYet: () => notWholeYet(got.record.name.text) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
-  return openInApp(ctx, { found, record }, { env: ctx.deps.env, running: hyperFramesAsked(ctx), ...ctx.deps.app, cli, plan: (given) => planProject(ctx, given), save: (next) => save(ctx, { ...found, record }, next) });
+  return openInApp(ctx, { found, record }, { env: ctx.deps.env, ...ctx.deps.app, cli, plan: (given) => planProject(ctx, given), save: (next) => save(ctx, { ...found, record }, next) });
 }
 
-/** `app "<episode>" reel <n> [--take-over]`: open Reel `n` of the episode in the HyperFrames app, making its project first (app-reel.js
+/** `app "<episode>" reel <n>`: open Reel `n` of the episode in the HyperFrames app, making its project first (app-reel.js
     openReelInApp; plan PR 5; architecture 4.1 step 10 and 4.3). A Reel is made by Studio only: the app's agent is told to send her
     here. `reel` with no number after it is the help and 2. In order:
     - the gate, as for every command that names an episode (episodeFor), `app`'s own: a video not yet answered, a video left alone,
@@ -1616,16 +1491,13 @@ export async function app(ctx, rest) {
     - a Reel neither the record's list nor its projects have, and a Reel finished already that has no project, are refused in words
       (app-reel.js reelWhy), before anything is claimed. While Claude's reading is at work and not yet in the record the list is not
       asked, since the reading is making it; once it is in, the record judges;
-    - a Reel project made on another Mac and not on this one is refused when the record lists no snapshot of it (projectOnAnotherMac
-      and projectSnapshot, with the Reel's key), with or without `--take-over`, before anything is claimed, brought or made; with
-      one, openReelInApp rebuilds it from the snapshot;
-    - a Reel project of this Mac's that is older than the newest snapshot of it (olderWords) is dealt with before anything is claimed, as
-      `app` deals with the main project's: set aside and rebuilt once HyperFrames is quit, or refused;
+    - a Reel project made on another Mac and not on this one is refused (projectOnAnotherMac, with the Reel's key), before anything
+      is claimed, brought or made;
     - the claim and the bring, as `open` and `app` make them (claimAndBring). What she is told to say again is "open Reel <n> of
       <name> in HyperFrames", and the bring it starts is told so (`bring … --asked-by "app reel <n>"`);
     - openReelInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record the
       Reel's project and the Reel picked, in one write. */
-async function appReel(ctx, asked, flags) {
+async function appReel(ctx, asked) {
   if (asked.n === null) {
     ctx.say(HELP);
     return 2;
@@ -1643,15 +1515,13 @@ async function appReel(ctx, asked, flags) {
   const why = reelWhy(ctx, found, got.record, n);
   if (why) return refuse(ctx, why);
   const elsewhere = projectOnAnotherMac(ctx, { found, record: got.record }, `reel ${n}`);
-  if (elsewhere && !projectSnapshot(got.record, `reel ${n}`)) return refuse(ctx, projectIsElsewhere(name, elsewhere, `Reel ${n} of `, holderOf(ctx, got.record)));
+  if (elsewhere) return refuse(ctx, projectIsElsewhere(name, elsewhere, `Reel ${n} of `));
   const clip = clipWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
   if (clip) return refuse(ctx, clip);
-  const older = await olderWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
-  if (older) return refuse(ctx, older);
-  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openReelWords(n, name), by: appReelAsked(n), notYet: (over) => reelNotWholeYet(n, name, over) });
+  const claim = await claimAndBring(ctx, found, got.record, { again: openReelWords(n, name), by: appReelAsked(n), notYet: () => reelNotWholeYet(n, name) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
-  return openReelInApp(ctx, { found, record, n }, { env: ctx.deps.env, running: hyperFramesAsked(ctx), ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
+  return openReelInApp(ctx, { found, record, n }, { env: ctx.deps.env, ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
 }
 
 /** Open a file in an app on this Mac, as a double-click would: Final Cut Pro, here, and a timeline handed to it. Throws,
@@ -1890,21 +1760,18 @@ async function pushVersion(ctx, found, part, v, answers) {
   return pushPart(ctx, found, { part, xml: readFileSync(at, "utf8"), told: [`It is v${v} as it was stored, shown again as a new version.`], ...answers });
 }
 
-/** `bring --now "<episode folder>" [--take-over] [--asked-by app | "app reel <n>"]`, the detached run `open` and `app` start: each file
+/** `bring --now "<episode folder>" [--asked-by app | "app reel <n>"]`, the detached run `open` and `app` start: each file
     of the episode that is not whole on this Mac is read to its end, so that Dropbox brings it over, and the result says which are
     whole now, and what to say next: to open it, or, when a file did not come, why, and to open it to try again. `--asked-by app`
     says that `app` started it (claimAndBring), and then what to say next is to open it in HyperFrames, `open <name> in HyperFrames`,
     which runs `app`; `--asked-by "app reel <n>"` that `app … reel <n>` did, and what to say next is to open that Reel, `open Reel
-    <n> of <name> in HyperFrames`; a bring that was told nobody, or any other command, says `open <name>`, as it always did. The bring of a take-over
-    (`--take-over`) that brought every file also keeps whose claim it was for, and that what to say next, while that claim stands
-    and her yes to it is kept, is to take it over again: `status` says so only then (see nextOf). */
+    <n> of <name> in HyperFrames`; a bring that was told nobody, or any other command, says `open <name>`, as it always did. */
 export async function bring(ctx, rest) {
   // Given files after the folder (a Reel's clip, from push reel), only those are brought over.
   const [now, folder, ...after] = rest;
-  const takeOver = after.includes("--take-over");
   const askedAt = after.indexOf("--asked-by");
   const asker = askedAt === -1 ? "" : String(after[askedAt + 1] ?? "");
-  const only = after.filter((word, i) => word !== "--take-over" && !(askedAt !== -1 && (i === askedAt || i === askedAt + 1)));
+  const only = after.filter((word, i) => !(askedAt !== -1 && (i === askedAt || i === askedAt + 1)));
   if (now !== "--now" || !folder) {
     ctx.say(HELP);
     return 2;
@@ -1917,8 +1784,6 @@ export async function bring(ctx, rest) {
   }
   const { record } = found.read;
   const name = record.name.text;
-  // The claim she said to take over, as the record has it when the bring starts: none when nobody else has it by then.
-  const taking = takeOver ? heldElsewhere(record, ctx.machine) : null;
   const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "bring", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
     const wanted = () => (only.length ? only.filter((rel) => !ctx.isWhole(join(found.folder, rel))) : notHere(ctx, found, record));
     const coming = wanted();
@@ -1939,11 +1804,7 @@ export async function bring(ctx, rest) {
     const next = again
       ? (failed.length ? `Some files of ${name} are not here yet. Say "${again}" to try again.` : `Every file of ${name} is here. Say "${again}" again.`)
       : (failed.length ? `Some files of ${name} are not here yet. Say "open ${name}" to try again.` : `Every file of ${name} is here. Say "open ${name}".`);
-    // A bring that failed says why, and to open it, take-over or not: it would most likely fail again the same way (a full
-    // disk, Dropbox paused, the Mac offline), and a take-over is run again without asking her only to finish what she said
-    // yes to, never to try again what failed.
-    if (!taking || failed.length) return { ok: !failed.length, made, failed, next };
-    return { ok: true, made, failed, next, takeOver: { by: taking.by, since: taking.since, next: `Every file of ${name} is here. Say "take it over" again.` } };
+    return { ok: !failed.length, made, failed, next };
   });
   if (result.taking) {
     ctx.say(`Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
@@ -1954,20 +1815,6 @@ export async function bring(ctx, rest) {
     return 1;
   }
   return result.ok ? 0 : 1;
-}
-
-/** What a detached run's result `r`, for the episode in `folder`, says to say next. The bring of a take-over says to take it
-    over again only while the claim she said to take over is still the record's, the same Mac since the same time, and her
-    yes to it is still kept (yesOf): the skill then takes it over without asking her again. Once this Mac has it, or that Mac
-    has let it go or opened it again since, or she has been asked again since, it says to open it, as any bring does: an open
-    goes through, or, when another Mac has it, refuses, and she is asked. A record that cannot be read says to open it too. */
-function nextOf(ctx, folder, r) {
-  if (!r.takeOver) return r.next;
-  const { record } = readEpisode(join(ctx.episodes, folder));
-  const held = record && heldElsewhere(record, ctx.machine);
-  const yes = yesOf(ctx, folder);
-  const same = (claim) => Boolean(claim) && claim.by === r.takeOver.by && claim.since === r.takeOver.since;
-  return same(held) && same(yes) ? r.takeOver.next : r.next;
 }
 
 /** What a detached run's result `r` says of the episode `shown`, in one line: when it ended, what it made, what it could not do,
@@ -2072,7 +1919,7 @@ export async function status(ctx, rest) {
       if (!r || (atWork && !own)) continue;
       // What to say next names the episode as it was then, and says to open it, which the gate refuses now: for a gated one it is
       // left out.
-      lines.push(ranLine(ctx, shown, r, clean, isGated(e) ? "" : nextOf(ctx, folder, r), own, voicing));
+      lines.push(ranLine(ctx, shown, r, clean, isGated(e) ? "" : r.next, own, voicing));
     }
     // A copy of footage the last run could not make (its result; none while a run of the copy is at work) is said once, with what to do first.
     // A gated video is named by its label alone, and is not told to open it, which the gate refuses.
@@ -2646,7 +2493,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   /** What is said of each part, and then of what was passed over, before the stops and the asks. */
   const lines = [];
   if (app) {
-    // HyperFrames' exports, in Downloads and in what the other Mac released (exports.js), for the projects of the record.
+    // HyperFrames' exports, in Downloads (exports.js), for the projects of the record.
     const seen = exportsFound({ home: ctx.home, name: found.name, folder: found.folder, record, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
     if (seen.unreadable) return refuse(ctx, DOWNLOADS_UNREADABLE);
     // A finished video has no main project, so no part is made for the main video and nothing asks for one.
@@ -2805,7 +2652,7 @@ async function runStarted(ctx, found) {
   }
 }
 
-/** `finish "<episode>" [--yes] [--take "<part>=<file | this Mac | the other Mac>"]… [--final "<part>"]…
+/** `finish "<episode>" [--yes] [--take "<part>=<file>"]… [--final "<part>"]…
     [--no-hand-edits "<part>"]… [--without "reel <n>"]… [--as-it-is]`, and the
     detached part it starts, `finish --now "<episode folder>"`, which runs finishNow holding the episode's lock. */
 async function finish(ctx, rest) {
@@ -2899,245 +2746,13 @@ function newestPushes(record) {
   return all.map(({ key, label, pushed }) => ({ key, label, last: (Array.isArray(pushed) ? pushed : []).reduce((best, p) => (!best || p.v > best.v ? p : best), null) }));
 }
 
-/** A name without its ending, composed, as the project names recorded at each push are. */
-const projectOf = (name) => basename(name, extname(name)).normalize("NFC");
+/** Whether a file or folder name is one Dropbox never syncs: one starting with a dot, as Finder's .DS_Store, or Icon\r. */
+const notSynced = (name) => name.startsWith(".") || name === "Icon\r";
 
 /** Every file in a folder, at any depth, as paths from it, but for those Dropbox never syncs: a name starting with a dot, as
     Finder's .DS_Store, or Icon\r. Listed, the other Mac would wait for them for ever. */
 const filesUnder = (dir) => readdirSync(dir, { recursive: true })
   .filter((rel) => !String(rel).split("/").some(notSynced) && statSync(join(dir, rel)).isFile()).sort();
-
-/** Hand an episode this Mac has open over to the other Mac (spec section 1, "Picking an episode up"). In order:
-    - only the Mac that has it open hands it over;
-    - when this Mac made the newest push of any part, it asks whether it was changed in Final Cut since, and goes on only
-      with an answer: `answer` is "no changes" or "changes stay";
-    - finish's rule, here: each such part's newest whole Share in this Mac's From Final Cut must have an export no older
-      than it (or none, when nothing changed), since on the other Mac every copied export looks newer than its Share;
-    - each Share whole (the same size across a few seconds) and the newest export of each of those parts' projects is
-      copied into edit/from-final-cut/ by the rule, the Shares first; a Share still being written is left out and named.
-      Nothing of a part the other Mac pushed last is copied: it is not this Mac's to check, nor to hand over;
-    - the record is let go, with the files it lists now (its own and the copies) and the answers, each earlier answer
-      carried on while its version is still the part's newest. A copy made here at an earlier hand-over that Dropbox has
-      taken away, and that this release has not made again, is listed no more, and named.
-    The HyperFrames side (hand-over.js; plan PR 11) comes after those refusals and before the Final Cut copies: when the record has
-    projects whose folders are on this Mac, HyperFrames must be quit, and a snapshot of each project and the newest export of each go
-    into the episode by the rule (a failure removes what it put in, and hands nothing over). The record lists them, and lists no
-    snapshot but the two newest that are whole (and one newer than the newest of those, which the other Mac is still bringing over, is
-    never dropped): the others, and a copy of its own that Dropbox has taken away, are listed no more, and the older snapshots' files are
-    removed after the record is written, by the names the record gave them (removeSnapshots). A copy the other Mac made that is not here
-    yet is not excused: the release waits for it (who made a copy is who first listed it, snapshot.js listedBy). A folder that is a
-    session clip's on the volume, however the record spells its name, or cannot be told from one, is no project to hand over.
-    Resolves 0 when it was handed over, and 1 when it refused, having said why. */
-export async function releaseEpisode(ctx, found, { answer = "" } = {}) {
-  const { record } = found;
-  if (claimHeld(ctx, record)) return refuse(ctx, claimHeld(ctx, record));
-  const name = shownName(record);
-  const newest = newestPushes(record);
-  // The parts this Mac pushed last: a part whose newest version was rendered was never in Final Cut, and is neither asked about
-  // nor copied (spec 3, "One version model").
-  const mine = newest.filter((p) => p.last && p.last.on === ctx.machine && p.last.how !== "render");
-  // The HyperFrames projects of the record that are on this Mac (hand-over.js): none for an episode that went the Final Cut way.
-  const hand = projectsToHand(ctx, { found, record });
-  const inHyperFrames = hand.projects;
-  // A folder that cannot be told from a session clip's (PR 15's rule; the review of PR 11, I4) hands nothing over.
-  if (hand.bad) return refuse(ctx, `The folder for ${name} on this Mac is not as it was made, so nothing was handed over. Ask Jason.`);
-  // An episode nobody has open may be changed without opening it, so one this Mac pushed last, or has a project of, is handed over as well.
-  if (record.editing ? record.editing.by !== ctx.machine : !(mine.length || inHyperFrames.length)) return refuse(ctx, `This Mac does not have ${name} open, so there is nothing to hand over.`);
-  // A finish still running would go on writing into the episode after the hand-over (the review of PR 21, findings 4 and 7).
-  const running = runningCommand(ctx.home, found.name, ctx.alive);
-  if (running && running !== "bring") return refuse(ctx, stoppedWords(ctx, found, record, { generic: `${running} is running for ${name}. Say "how far is it?", and hand it over when it is done. Nothing was handed over.`, again: "Hand it over then. Nothing was handed over.", of: ` of ${name}` }));
-  // The Shares and exports of the episode in this Mac's From Final Cut, by the project names recorded at its pushes, of the
-  // parts this Mac pushed last alone: those are the ones checked below. A part the other Mac pushed last is not this Mac's to
-  // hand over, and an older Share and export of it copied from here would look newer there than that Mac's own.
-  const here = fromFinalCutFolder(ctx.home);
-  const projects = new Map(newest.flatMap((p) => {
-    const part = p.key === "main" ? record.main : (record.reels || []).find((r) => `reel ${r.n}` === p.key);
-    return (part.pushed || []).filter((q) => q.project).map((q) => [q.project.normalize("NFC"), { key: p.key, v: q.v }]);
-  }));
-  // This Mac's Shares and exports of the episode, of every part: a copy of one in edit/from-final-cut/ was made here.
-  const own = listing(here).filter((f) => kindOf(f.name) && projects.has(projectOf(f.name)));
-  const mineKeys = new Set(mine.map((p) => p.key));
-  const ours = own.filter((f) => mineKeys.has(projects.get(projectOf(f.name)).key));
-  const videos = ours.filter((f) => kindOf(f.name) === "video");
-  // Of one project's exports, the newest alone is checked and copied: an older one copied too would look newest on the other
-  // Mac, where a bundle's folder is made new.
-  const exports = [...ours.filter((f) => kindOf(f.name) === "export").reduce((best, f) => {
-    const was = best.get(projectOf(f.name));
-    if (!was || f.mtimeMs > was.mtimeMs) best.set(projectOf(f.name), f);
-    return best;
-  }, new Map()).values()];
-  // The other Mac waits for the files the record lists: one missing here would be waited for there for ever. A copy of
-  // this Mac's own Shares and newest exports, which this release makes again from From Final Cut, is left out of that check
-  // (the P1 check, T2). So is a copy made here at an earlier hand-over that Dropbox has taken away: one this release does
-  // not make again, of a part the other Mac pushed last, of an older export, or of a Share still being written, is listed no
-  // more when it is handed over. Kept in the list, it would be waited for on the other Mac for ever, and every check of the
-  // files on either Mac would stop at it (the review of the plan, P1 and P7; PR 21's W15). Any other copy is checked as any
-  // other file.
-  const remade = new Set([...videos, ...exports].flatMap((f) => {
-    const from = join(here, f.name);
-    return statSync(from).isDirectory() ? filesUnder(from).map((rel) => `edit/from-final-cut/${f.name}/${rel}`) : [`edit/from-final-cut/${f.name}`];
-  }));
-  const at = (rel) => join(found.folder, rel);
-  const ownNames = new Set(own.map((f) => f.name));
-  /** The name in From Final Cut that a copy in edit/from-final-cut/ was made from: its Share's, or its export bundle's. */
-  const copiedFrom = (rel) => (rel.startsWith("edit/from-final-cut/") ? rel.slice("edit/from-final-cut/".length).split("/")[0] : "");
-  const goneCopy = (rel) => ownNames.has(copiedFrom(rel)) && !existsSync(at(rel));
-  // A snapshot's or an export's copy made here that Dropbox has taken away is no more waited for than a Final Cut one: it is listed no more.
-  // One the other Mac made, that is not here, is on its way: it is checked as any other file is, and the release waits (the review of PR 11,
-  // C1). Who made a copy is who first listed it in the record's own revisions (snapshot.js listedBy).
-  const carried = (rel) => rel.startsWith(`${SNAPSHOT_DIR}/`) || rel.startsWith(`${RELEASED_FOLDER}/`);
-  const missingCarried = Object.keys(record.files).filter((rel) => carried(rel) && !existsSync(at(rel)));
-  const madeBy = missingCarried.length ? listedBy(found.folder, missingCarried) : {};
-  const goneCarried = missingCarried.filter((rel) => madeBy[rel] === ctx.machine);
-  const broken = filesProblems(found.folder, { ...record, files: Object.fromEntries(Object.entries(record.files).filter(([rel]) => !remade.has(rel) && !goneCopy(rel) && !goneCarried.includes(rel))) });
-  if (broken.length) return refuse(ctx, `${calledAs(ctx, found)} is not whole in Dropbox: ${broken.join(" ")}. Nothing was handed over.`);
-  if (mine.length && !answer) return refuse(ctx, `Did you change anything in Final Cut since it was last shown (${listed(mine.map((p) => `${p.key} v${p.last.v}`))})? Say "no changes" to hand it over, or "hand it over anyway" if your changes should stay on this Mac.`);
-  // A Share is whole when it reads whole and its size holds across a few seconds: Final Cut may still be writing it.
-  let notYet = [];
-  if (videos.length) {
-    const before = new Map(videos.map((f) => [f.name, f.bytes]));
-    await (ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))))(5000);
-    notYet = videos.filter((f) => {
-      const now = ctx.stat(join(here, f.name));
-      return !now || now.size !== before.get(f.name) || !ctx.isWhole(join(here, f.name));
-    }).map((f) => f.name);
-  }
-  const whole = videos.filter((f) => !notYet.includes(f.name));
-  for (const part of mine) {
-    const shares = whole.filter((f) => projects.get(projectOf(f.name)).key === part.key);
-    if (!shares.length) continue;
-    const video = shares.reduce((best, f) => {
-      const v = projects.get(projectOf(f.name)).v;
-      const bv = best ? projects.get(projectOf(best.name)).v : -1;
-      return !best || v > bv || (v === bv && f.mtimeMs > best.mtimeMs) ? f : best;
-    }, null);
-    const project = projectOf(video.name);
-    const exported = exports.filter((f) => projectOf(f.name) === project).reduce((best, f) => (!best || f.mtimeMs > best.mtimeMs ? f : best), null);
-    const label = capital(part.label);
-    const tail = " Then hand it over again. Nothing was handed over.";
-    if (exported && exported.mtimeMs < video.mtimeMs) return refuse(ctx, `${label}'s export is older than its Shared video. Once Final Cut says its Share is done, click in its timeline, then File > Export XML… on "${project}", and save it into From Final Cut.${tail}`);
-    if (!exported && answer !== "no changes") return refuse(ctx, `${label} was never exported. If you changed it by hand in Final Cut, then once Final Cut says its Share is done, click in its timeline, then File > Export XML… on "${project}", and save it into From Final Cut. If you made no hand edits since it was shown, say so.${tail}`);
-  }
-  // HyperFrames' side (hand-over.js): a snapshot of each project of this Mac and its newest export, put in by the rule, or nothing and why.
-  // A copy it deleted to replace and could not make again is listed no more.
-  const hf = inHyperFrames.length
-    ? await handOver(ctx, { found, record, own: inHyperFrames }, { running: ctx.deps.running ?? (() => hyperFramesRunning()), opts: ruleOpts(ctx), rm: ctx.deps.rm })
-    : { copies: {}, names: [], notYet: [], assetsLeft: [], time: "", undo() {} };
-  if (hf.refused) {
-    // The record lists what is there now: a copy replaced before the failure at its new size, and one lost no more (the review of PR 11, M9).
-    const relisted = Object.fromEntries(Object.entries({ ...record.files, ...hf.resized }).filter(([rel]) => !(hf.lost ?? []).includes(rel)));
-    if (JSON.stringify(relisted) !== JSON.stringify(record.files)) await save(ctx, found, { ...record, files: relisted }, "");
-    return refuse(ctx, hf.refused);
-  }
-  // The copies, by the rule: each file of each Share and export (a bundle file by file), the Shares first. A copy already
-  // there at the size the record lists, and no older than what it copies, is kept as it is: cp -c keeps a file's time, so
-  // only a Share or an export made again is copied again. Its time may be put to the whole second, as Dropbox keeps it, so
-  // a copy up to 2 seconds older still counts (the P1 check, T13). New copies are made first, and copies made again last.
-  const wanted = [...whole, ...exports].flatMap((f) => {
-    const from = join(here, f.name);
-    return statSync(from).isDirectory() ? filesUnder(from).map((rel) => ({ name: f.name, from: join(from, rel), rel: `edit/from-final-cut/${f.name}/${rel}` })) : [{ name: f.name, from, rel: `edit/from-final-cut/${f.name}` }];
-  });
-  const kept = (c) => {
-    const there = ctx.stat(at(c.rel));
-    const source = statSync(c.from);
-    return Boolean(there) && there.size === source.size && record.files[c.rel] === source.size && there.mtimeMs > source.mtimeMs - 2000;
-  };
-  const fresh = wanted.filter((c) => !existsSync(at(c.rel)));
-  const again = wanted.filter((c) => existsSync(at(c.rel)) && !kept(c));
-  const copies = { ...hf.copies };
-  const copied = [...hf.names];
-  for (const c of [...fresh, ...again]) {
-    try {
-      mkdirSync(dirname(at(c.rel)), { recursive: true });
-      (existsSync(at(c.rel)) ? replaceIn : cloneIn)(c.from, at(c.rel), ruleOpts(ctx));
-    } catch (e) {
-      const why = String(e.message).replace(/ Nothing was copied\.$/, "").replace(/\.$/, "");
-      // The record lists what is there now: each copy made so far at its size, and a copy whose old one replaceIn deleted
-      // before its clone failed no more, so that neither Mac waits for a file that is gone and a release again goes through
-      // (the P1 check, T7 and T14).
-      const gone = c.rel in record.files && !existsSync(at(c.rel));
-      const files = { ...record.files, ...copies };
-      if (gone) delete files[c.rel];
-      const changed = JSON.stringify(files) !== JSON.stringify(record.files);
-      const saved = changed ? (await save(ctx, found, { ...record, files }, "")) === 0 : true;
-      const listedNote = gone ? (saved ? `, and its old copy is gone, so the record lists it no more` : `, and its old copy is gone; the record could not be written to say so`) : "";
-      return refuse(ctx, `${gone ? `${c.rel} could not be copied again${listedNote}` : `${name} could not be handed over`}: ${why}. Nothing was handed over: say hand it over again.`);
-    }
-    copies[c.rel] = statSync(at(c.rel)).size;
-    if (!copied.includes(c.name)) copied.push(c.name);
-  }
-  // Each earlier answer is carried on while its version is still that part's newest; this Mac's own answers come after.
-  const answers = {};
-  for (const [key, a] of Object.entries((record.released && record.released.answers) || {})) {
-    const part = newest.find((p) => p.key === key);
-    if (part && part.last && a && part.last.v === a.v) answers[key] = a;
-  }
-  for (const part of mine) answers[part.key] = { v: part.last.v, said: answer === "no changes" ? "no changes" : `changes stay on ${ctx.machine}` };
-  // The copies made here that are still gone, now that this release has made its own, are listed no more (see above).
-  const unlisted = Object.keys(record.files).filter(goneCopy);
-  const listedNow = Object.fromEntries(Object.entries({ ...record.files, ...copies }).filter(([rel]) => !unlisted.includes(rel)));
-  // Only the two newest snapshots that are whole are kept: the record lists no other, and their folders go once the record is written. A
-  // snapshot with a file gone is not whole, so it is judged before the copies Dropbox took away are left out of the list; a copy of an
-  // export that is gone is listed no more, and one this release made again is there.
-  const { drop } = keptSnapshots(listedNow, (rel, bytes) => ctx.stat(at(rel))?.size === bytes);
-  const files = Object.fromEntries(Object.entries(listedNow).filter(([rel]) => !(rel.startsWith(`${SNAPSHOT_DIR}/`) && drop.includes(rel.split("/")[1])) && !(goneCarried.includes(rel) && !existsSync(at(rel)))));
-  const stillWriting = [...notYet, ...hf.notYet];
-  const later = stillWriting.length ? ` Not copied yet, still being written: ${listed(stillWriting)}.` : "";
-  const lost = unlisted.length ? ` Gone from Dropbox, so no longer listed for the other Mac: ${listed([...new Set(unlisted.map(copiedFrom))])}.` : "";
-  const code = await save(ctx, found, released({ ...record, files }, files, { at: localStamp(new Date(ctx.now())), by: ctx.machine, answers }), `${name} is handed over. Copied for the other Mac: ${copied.length ? listed(copied) : "nothing"}.${later}${lost}${assetsWords(hf.assetsLeft)} Keep this Mac open and online until Dropbox shows the folder is up to date.`);
-  if (code !== 0) {
-    hf.undo();
-    return code;
-  }
-  removeSnapshots(ctx, found, drop, listedNow);
-  return 0;
-}
-
-/** Remove the snapshots the record lists no more (`drop`: their folder names; `listed` the record's files as they were listed before they went),
-    once the record is written, by the names the record gave their files and no other (the review of PR 11, M6; as free.js removes what it
-    names): each file is looked at where it stands, with the real path of its folder being the folder's own path (no link on the way, the
-    episode's folder itself aside) and the file being a file, and looked at again just before it goes; then each folder of the snapshot that is
-    empty then goes, deepest first, and one that holds anything else stays. A snapshot that stays is no longer listed, and a later release takes
-    no notice of it. Nothing is followed, and nothing outside the episode's `app-snapshot/` is named. `ctx.deps.rm` is how a file is removed. */
-function removeSnapshots(ctx, found, drop, listed) {
-  const rm = ctx.deps.rm ?? rmSync;
-  let base;
-  try {
-    base = realpathSync(found.folder);
-  } catch (e) {
-    return;
-  }
-  /** Whether `rel` (a path from the episode's folder) is where it was named, and a file, or a folder. */
-  const stands = (rel, type) => {
-    try {
-      if (realpathSync(dirname(join(found.folder, rel))) !== join(base, dirname(rel))) return false;
-      const there = lstatSync(join(found.folder, rel));
-      return type === "file" ? there.isFile() : there.isDirectory();
-    } catch (e) {
-      return false;
-    }
-  };
-  for (const time of drop) {
-    const root = `${SNAPSHOT_DIR}/${time}`;
-    const named = Object.keys(listed).filter((rel) => rel.startsWith(`${root}/`));
-    const folders = new Set([root]);
-    for (const rel of named) for (let at = dirname(rel); at.length > root.length; at = dirname(at)) folders.add(at);
-    for (const rel of named.filter((one) => stands(one, "file"))) {
-      try {
-        if (stands(rel, "file")) rm(join(found.folder, rel), { force: true });
-      } catch (e) {
-        // A file that stays is no longer listed.
-      }
-    }
-    for (const dir of [...folders].sort((a, b) => b.length - a.length)) {
-      try {
-        if (stands(dir, "folder")) rmdirSync(join(found.folder, dir));
-      } catch (e) {
-        // A folder that holds something else stays.
-      }
-    }
-  }
-}
 
 /** What `show` prints, by the word for it: the file's ending after the video's own name, and what it is called. */
 const SHOWN = { transcript: [".transcript.txt", "transcript"], notes: [".edit-notes.txt", "notes from Claude"], plan: [".cut-plan.txt", "cut plan"] };
@@ -3869,18 +3484,6 @@ async function resolveIn(ctx, found, keep) {
   const step = outOfStep();
   ctx.say(planText ? `Kept ${keep}. The plan's files are written from it. The other is set aside in history/.${caveat}${step}` : `Kept ${keep} of ${of}. The other is set aside in history/.${caveat}${step}`);
   return step ? 1 : 0;
-}
-
-/** `release "<episode>" [--no-hand-edits | --hand-edits-stay]`. */
-async function release(ctx, rest) {
-  const { words, flags } = flagsOf(rest, []);
-  if (flags["no-hand-edits"] && flags["hand-edits-stay"]) {
-    ctx.say(HELP);
-    return 2;
-  }
-  const got = episodeFor(ctx, words, { newerEnds: 1 });
-  if (!got.found) return got.code;
-  return releaseEpisode(ctx, { ...got.found, record: got.record }, { answer: flags["no-hand-edits"] ? "no changes" : flags["hand-edits-stay"] ? "changes stay" : "" });
 }
 
 /** What `free "<episode>" library` says: held back from this version (the lead's ruling, 2026-10-14). Deleting a Final Cut library by
@@ -7100,7 +6703,7 @@ function guideCopy(ctx, e, r, rates) {
     the first time that gives), in words (turnTime, in the zone a test gives as `deps.app.tz`), "" when the app has kept none that can be
     read; `exported` whether it has an export that began after its last change, or two that began in one minute so that `finish` asks
     which is final (exports.js exportsFound and lookForExports, for the main video alone): in Downloads, by the app's own record in the
-    project's renders/, or in what the other Mac released. A Downloads folder this Mac will not let be read, or any trouble in reading, is
+    project's renders/. A Downloads folder this Mac will not let be read, or any trouble in reading, is
     no export seen: the guide only reads, and `finish` tells her what it needs. `downloads` is the pass's one listing of Downloads (guideItems). */
 function guideProject(ctx, e, r, downloads) {
   const main = (r.app?.projects ?? []).find(inUse);
@@ -7352,7 +6955,7 @@ function checkSentence({ due, took }) {
 }
 
 /** What is said after it, in the guide's answers: the check needs nothing of hers, but the commands that would write into the episode are
-    stopped until it is made (stoppedWords): a spelling, handing the video off again and handing it over. */
+    stopped until it is made (stoppedWords): a spelling and handing the video off again. */
 const ON_THE_CHECK = "You do not need to wait for it. A spelling, handing it off again and handing it over wait until then.";
 
 /** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old }. Each item (guide.js Item) is a
@@ -7590,7 +7193,7 @@ export async function guideCommand(ctx, rest) {
 /** The project `refs use` copies a picture into: { dir, who } (its folder on this Mac, and how her words name it: "<episode>" or "Reel 2 of
     <episode>"), or { code } when there is none to copy into, having said why, in app's words and in app's order (the gate has asked
     already): a video her editor finished has no main project; an iPhone clip has no Reels; this Mac must be set up for HyperFrames; a
-    project made on another Mac and not handed over is that Mac's; a project of the record that is a session clip's folder is not used;
+    project made on another Mac is that Mac's; a project of the record that is a session clip's folder is not used;
     and a project whose folder is not on this Mac is to be opened first, or a Reel the episode does not have is said as app says it.
     Nothing is claimed, brought or written, and no record is. */
 function refsProject(ctx, { found, record }, reel) {
@@ -7602,7 +7205,7 @@ function refsProject(ctx, { found, record }, reel) {
   if (reel !== null && recordKind(record) === "short video") return no(NO_REELS);
   if (!appOf(ctx.settings)) return no(APP_NOT_SET_UP);
   const elsewhere = projectOnAnotherMac(ctx, { found, record }, key);
-  if (elsewhere && !projectSnapshot(record, key)) return no(projectIsElsewhere(name, elsewhere, of, holderOf(ctx, record)));
+  if (elsewhere) return no(projectIsElsewhere(name, elsewhere, of));
   const clip = clipWords(ctx, { found, record }, key, `${of}${name}`);
   if (clip) return no(clip);
   const project = (record.app?.projects ?? []).find((p) => (reel === null ? inUse(p) : p.key === key));
@@ -7757,7 +7360,7 @@ async function joinCommand(ctx, rest) {
 
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and so are `workcopy` (`kind` and `app` start it) and `join` (`plan … join` starts it): all three are in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, release, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas, refs, plan, footage };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, push, bring, status, retry, name, title, reel, reels, ask, finish, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, logo, captions, text, graphic, preset, cut, teachings: teachingsCommand, principles, ideas, refs, plan, footage };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

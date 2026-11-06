@@ -77,7 +77,7 @@ const spy = () => {
 const refused = (dir) => {
   throw Object.assign(new Error(`EPERM: operation not permitted, scandir '${dir}'`), { code: "EPERM" });
 };
-const LISTED = (w) => [w.downloads, join(w.found.folder, "edit", "from-hyperframes")];
+const LISTED = (w) => [w.downloads];
 
 describe("B1. the guide says which Reels of a finished video are exported from HyperFrames, and what to say", () => {
   it("says it of one Reel whether the app's record of the export is in the project or only the file's name tells", async () => {
@@ -485,7 +485,7 @@ describe("B6. a video the gate holds", () => {
 });
 
 describe("B7. where the guide reads", () => {
-  it("lists Downloads and what the other Mac released, once, for a finished video with a hand-off and a Reel project here, and no other place", async () => {
+  it("lists Downloads, once, for a finished video with a hand-off and a Reel project here, and no other place", async () => {
     const w = await W();
     exportOf(w, "reel 2");
     const { looked, readdir } = spy();

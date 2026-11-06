@@ -787,9 +787,8 @@ const HYPERFRAMES_JSON = {
 const SCRIPTS = { dev: "hyperframes preview", check: "hyperframes check", render: "hyperframes render" };
 const jsonText = (value) => `${JSON.stringify(value, null, 2)}\n`;
 /** What `.claude/settings.json` holds in a project of that kind ("main", which a Reel's is too, or "clip"): the pin's table of denied commands
-    and the environment (5.5). A project rebuilt from a snapshot makes the file again from it, since a snapshot leaves out names that start
-    with a dot (snapshot.js). */
-export const settingsText = (kind) => jsonText(settingsFor(kind));
+    and the environment (5.5). */
+const settingsText = (kind) => jsonText(settingsFor(kind));
 
 /** The footage a main project is given (PR H5b), [{ path, from }]: the copies with no sound of a plan's b-roll and screen recordings that may go in
     (join.js footageToUse), each `path` the name its cue gives it in media/ (FOOTAGE_PATH) and once, each `from` the whole path of the copy to move

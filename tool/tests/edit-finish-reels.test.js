@@ -157,7 +157,7 @@ describe("3. the refusals: each ends with 1 and claims, writes and starts nothin
   it("says who has the episode open when another Mac does", async () => {
     const w = await W();
     rewrite(w, { editing: { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00" } });
-    await refused(w, [`Sallie's laptop has ${NAME} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.`]);
+    await refused(w, [`Sallie's laptop has ${NAME} open. Carry on there. Nothing was changed.`]);
   });
   it("says the hand-off waits for version 2 on a Mac that hands off version 1", async () => {
     await refused(await W({ handoff: false, handoffVersion: 1 }), [`${NAME}'s hand-off is written from its spellings once this Mac hands off version 2: ask Jason.`]);

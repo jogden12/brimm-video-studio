@@ -241,7 +241,6 @@ const ms = (hours, minutes, seconds = 0) => zone.ms(2026, 10, 20, hours, minutes
 const P_MAIN = MAIN;
 const P_REEL2 = "Pricing- what to charge- reel 2 3fa9c1";
 const DOWNLOADS = "/h/Downloads";
-const RELEASED = "/e/edit/from-hyperframes";
 /** A file as a listing of a folder gives it. */
 const file = (name, over = {}) => ({ name, bytes: 5000, mtimeMs: ms(14, 0), ...over });
 /** A file found by the app's own record of an export: where it is, and when the record says the export began, to the second. */
@@ -249,7 +248,7 @@ const recorded = (name, over = {}) => ({ name, dir: DOWNLOADS, where: "Downloads
 /** A part of the episode as exportsFound gives it: the main project, changed at 13:40, on this Mac. */
 const main = (over = {}) => ({ key: "main", label: "the main video", project: P_MAIN, fromSuggestion: undefined, here: true, mac: "Mac Studio", changed: ms(13, 40), recorded: [], renders: [], ...over });
 const reel2 = (over = {}) => main({ key: "reel 2", label: "Reel 2", reel: 2, project: P_REEL2, fromSuggestion: 2, ...over });
-const found = (parts, downloads = [], released = [], finished = null) => ({ zone, parts, downloads: { dir: DOWNLOADS, files: downloads }, released: { dir: RELEASED, files: released }, finished });
+const found = (parts, downloads = [], finished = null) => ({ zone, parts, downloads: { dir: DOWNLOADS, files: downloads }, finished });
 const NONE = {};
 const named = (project, when, ending = "mp4") => `${project} 2026-10-20 ${when}.${ending}`;
 /** What the last finish made of a part: its export's size and time, and the project it came from. */
@@ -268,7 +267,7 @@ describe("C1. which export: the newest that began after the project's last chang
       `Reel 2: ${named(P_REEL2, "14.03")}, from Downloads, exported 2026-10-20 14:03.`
     ]);
     assert.deepEqual(got.parts[0].video, { name: named(P_MAIN, "13.56"), dir: DOWNLOADS, where: "Downloads", bytes: 5000, mtimeMs: ms(14, 0), began: { ms: ms(13, 56), exact: false } });
-    assert.equal(got.looked, `Looked in Downloads and in what the other Mac released for exports of: ${P_MAIN}, ${P_REEL2}.`);
+    assert.equal(got.looked, `Looked in Downloads for exports of: ${P_MAIN}, ${P_REEL2}.`);
   });
   it("gives a part what the plan needs of it: its project, its Reel's number, the suggestion it came from, no Final Cut export", () => {
     const got = lookForExports(found([main(), reel2()], [file(named(P_MAIN, "13.56")), file(named(P_REEL2, "14.03"))]), NONE);
@@ -277,9 +276,9 @@ describe("C1. which export: the newest that began after the project's last chang
       ["reel 2", "Reel 2", 2, P_REEL2, [P_REEL2], 2, null]
     ]);
   });
-  it("takes of three exports after the change the one that began last, and an export of the other folder as well", () => {
-    const got = lookForExports(found([main()], [file(named(P_MAIN, "13.50")), file(named(P_MAIN, "13.52"))], [file(named(P_MAIN, "13.58"), { bytes: 7000 })]), NONE);
-    assert.deepEqual([got.asks, got.parts[0].video.name, got.parts[0].video.where, got.parts[0].line], [[], named(P_MAIN, "13.58"), "the other Mac", `The main video: ${named(P_MAIN, "13.58")}, from what the other Mac released, exported 2026-10-20 13:58.`]);
+  it("takes of three exports after the change the one that began last", () => {
+    const got = lookForExports(found([main()], [file(named(P_MAIN, "13.50")), file(named(P_MAIN, "13.52")), file(named(P_MAIN, "13.58"), { bytes: 7000 })]), NONE);
+    assert.deepEqual([got.asks, got.parts[0].video.name, got.parts[0].video.where, got.parts[0].line], [[], named(P_MAIN, "13.58"), "Downloads", `The main video: ${named(P_MAIN, "13.58")}, from Downloads, exported 2026-10-20 13:58.`]);
   });
   it("reads a file the system numbered as a copy for an export of the project, and asks when it is beside the original of its minute", () => {
     const alone = lookForExports(found([main()], [file(`${P_MAIN} 2026-10-20 13.56 (1).mp4`)]), NONE);
@@ -369,29 +368,20 @@ describe("C4. two exports of one minute, and a file she names", () => {
     assert.deepEqual(lookForExports(found([main()], []), NONE).tied, []);
     assert.deepEqual(lookForExports(found([main(), reel2()], [file(named(P_MAIN, "13.56")), file(named(P_REEL2, "14.03")), file(named(P_REEL2, "14.03", "mov"))]), NONE).tied, ["reel 2"]);
   });
-  it("says where each is when one name is in both places and the two differ", () => {
-    const name = named(P_MAIN, "13.56");
-    const got = lookForExports(found([main()], [file(name, { bytes: 5000 })], [file(name, { bytes: 6000 })]), NONE);
-    assert.deepEqual(got.asks, [`For the main video there are two exports that began at 2026-10-20 13:56: ${name} on this Mac, ${name} from the other Mac. Which is the final one?`]);
-  });
-  it("takes one file once when the same export is in both places, from Downloads", () => {
-    const name = named(P_MAIN, "13.56");
-    const got = lookForExports(found([main()], [file(name)], [file(name)]), NONE);
-    assert.deepEqual([got.asks, got.parts[0].video.where], [[], "Downloads"]);
-  });
-  it("is answered by a file's name, and by 'this Mac' or 'the other Mac'", () => {
+  it("is answered by a file's name, and 'this Mac' or 'the other Mac' are read as file names, which are not there", () => {
     const name = named(P_MAIN, "13.56");
     const byName = lookForExports(found([main()], [file(named(P_MAIN, "13.56")), file(named(P_MAIN, "13.56", "mov"))]), { take: { main: named(P_MAIN, "13.56", "mov") } });
     assert.deepEqual([byName.asks, byName.parts[0].video.name], [[], named(P_MAIN, "13.56", "mov")]);
-    const places = found([main()], [file(name, { bytes: 5000 })], [file(name, { bytes: 6000 })]);
-    assert.deepEqual([lookForExports(places, { take: { main: "this Mac" } }).parts[0].video.where, lookForExports(places, { take: { main: "the other Mac" } }).parts[0].video.where], ["Downloads", "the other Mac"]);
-    assert.deepEqual(lookForExports(places, { take: { main: name } }).asks, [`${name} is both on this Mac and from the other Mac, and they differ. Say which: this Mac, or the other Mac.`]);
+    const places = found([main()], [file(name, { bytes: 5000 })]);
+    for (const said of ["this Mac", "the other Mac"]) {
+      const asked = lookForExports(places, { take: { main: said } });
+      assert.deepEqual([asked.parts, asked.asks], [[], [`"${said}" is not an export of the main video. The ones there are: ${name}. Which is the final one?`]]);
+    }
   });
   it("takes a file she names whatever it is called and however old, with no check against the project's last change", () => {
-    const got = lookForExports(found([main({ changed: ms(14, 59) })], [file("my final cut.mp4", { mtimeMs: ms(9, 0) }), file(named(P_MAIN, "13.56"))], [file("from the laptop.mov")]), { take: { main: "my final cut.mp4" } });
+    const got = lookForExports(found([main({ changed: ms(14, 59) })], [file("my final cut.mp4", { mtimeMs: ms(9, 0) }), file(named(P_MAIN, "13.56"))]), { take: { main: "my final cut.mp4" } });
     assert.deepEqual([got.asks, got.parts[0].video.name, got.parts[0].video.began], [[], "my final cut.mp4", null]);
     assert.equal(got.parts[0].line, "The main video: my final cut.mp4, from Downloads, the file you named.");
-    assert.equal(lookForExports(found([main()], [], [file("from the laptop.mov")]), { take: { main: "from the laptop.mov" } }).parts[0].line, "The main video: from the laptop.mov, from what the other Mac released, the file you named.");
   });
   it("asks again when the name she gives is none of the files, and lists the exports of the part", () => {
     const got = lookForExports(found([main()], [file(named(P_MAIN, "13.56")), file("holiday.mp4")]), { take: { main: "final.mp4" } });
@@ -419,16 +409,16 @@ describe("C5. a part with no export", () => {
     assert.deepEqual([got.asks, got.parts.map((p) => p.key)], [[], ["main"]]);
   });
   it("keeps a Reel the last finish finished when she says to leave it out, as lookFor keeps one, and the hand-off still holds it", () => {
-    const got = lookForExports(found([main(), reel2()], [file(named(P_MAIN, "13.56"))], [], finishedWith("reel 2")), { without: ["reel 2"] });
+    const got = lookForExports(found([main(), reel2()], [file(named(P_MAIN, "13.56"))], finishedWith("reel 2")), { without: ["reel 2"] });
     assert.deepEqual(got.parts.map((p) => [p.key, p.kept, p.video]), [["main", false, got.parts[0].video], ["reel 2", true, null]]);
     assert.equal(got.parts[1].line, "Reel 2: kept as the last finish made it.");
   });
   it("is never left out for the main video: it stops, saying where it looked", () => {
     const got = lookForExports(found([main(), reel2()], [file(named(P_REEL2, "14.03"))]), { without: ["main"] });
     assert.deepEqual(got.stops, [MAIN_NONE]);
-    assert.equal(got.looked, `Looked in Downloads and in what the other Mac released for exports of: ${P_MAIN}, ${P_REEL2}.`);
+    assert.equal(got.looked, `Looked in Downloads for exports of: ${P_MAIN}, ${P_REEL2}.`);
   });
-  it("says of a main project on the other Mac, with nothing released, that its exports are there", () => {
+  it("says of a main project on the other Mac, with no export, that its exports are there", () => {
     const got = lookForExports(found([main({ here: false, changed: null, mac: "Sallie's laptop" })], []), NONE);
     assert.deepEqual(got.stops, ["The main video's HyperFrames project is on Sallie's laptop, so its exports are there. Finish it on that Mac."]);
   });
@@ -472,67 +462,66 @@ describe("C6. what is passed over, and what is only mentioned", () => {
 describe("C7. a part the last finish took", () => {
   const BEFORE = (key) => finishedWith(key);
   it("is kept when its export is the one the last finish took, the same size and time", () => {
-    const got = lookForExports(found([main({ changed: ms(13, 40) })], [file(named(P_MAIN, "13.56"), { bytes: 5000, mtimeMs: ms(14, 0) })], [], BEFORE("main")), NONE);
+    const got = lookForExports(found([main({ changed: ms(13, 40) })], [file(named(P_MAIN, "13.56"), { bytes: 5000, mtimeMs: ms(14, 0) })], BEFORE("main")), NONE);
     assert.deepEqual([got.asks, got.parts.map((p) => [p.kept, p.video, p.line])], [[], [[true, null, "The main video: kept as the last finish made it."]]]);
   });
   it("is kept when no export is left, since the last finish removed the one it took", () => {
-    const got = lookForExports(found([main({ changed: ms(13, 40) })], [], [], BEFORE("main")), NONE);
+    const got = lookForExports(found([main({ changed: ms(13, 40) })], [], BEFORE("main")), NONE);
     assert.deepEqual([got.asks, got.stops, got.parts.map((p) => p.kept)], [[], [], [true]]);
   });
   it("is made again from an export newer than the one it took, or the same name with other bytes", () => {
-    const newer = lookForExports(found([main()], [file(named(P_MAIN, "14.05"), { bytes: 6000 })], [], BEFORE("main")), NONE);
+    const newer = lookForExports(found([main()], [file(named(P_MAIN, "14.05"), { bytes: 6000 })], BEFORE("main")), NONE);
     assert.deepEqual([newer.parts[0].kept, newer.parts[0].video.name], [false, named(P_MAIN, "14.05")]);
-    const changed = lookForExports(found([main()], [file(named(P_MAIN, "13.56"), { bytes: 5001 })], [], BEFORE("main")), NONE);
+    const changed = lookForExports(found([main()], [file(named(P_MAIN, "13.56"), { bytes: 5001 })], BEFORE("main")), NONE);
     assert.equal(changed.parts[0].kept, false);
   });
   it("asks when the project changed after the last finish and there is no new export, and keeps the part when she says it is final", () => {
     const ask = "The main video's project changed in HyperFrames, at 2026-10-20 14:20, after the last hand-off. Export it again from HyperFrames on This Mac, or say the last hand-off is final.";
-    const asked = lookForExports(found([main({ changed: ms(14, 20) })], [], [], BEFORE("main")), NONE);
+    const asked = lookForExports(found([main({ changed: ms(14, 20) })], [], BEFORE("main")), NONE);
     assert.deepEqual([asked.asks, asked.parts], [[ask], []]);
-    const final = lookForExports(found([main({ changed: ms(14, 20) })], [], [], BEFORE("main")), { final: ["main"] });
+    const final = lookForExports(found([main({ changed: ms(14, 20) })], [], BEFORE("main")), { final: ["main"] });
     assert.deepEqual([final.asks, final.parts.map((p) => p.kept)], [[], [true]]);
   });
   it("asks the same of an export that is no newer than the change, when it is the one the last finish took", () => {
-    const got = lookForExports(found([main({ changed: ms(14, 20) })], [file(named(P_MAIN, "13.56"))], [], BEFORE("main")), NONE);
+    const got = lookForExports(found([main({ changed: ms(14, 20) })], [file(named(P_MAIN, "13.56"))], BEFORE("main")), NONE);
     assert.match(got.asks[0], /^The main video's newest export, .*, began at 2026-10-20 13:56, before you last changed it in HyperFrames, at 2026-10-20 14:20\./);
   });
   // Review I2: finish removes the export it took and no other, so an earlier try (exported at 13:10, before she edited more) stays in
   // Downloads. It is older than the one the last finish took by the time the file ended, and it is passed over: the part is kept.
   it("passes over an export older than the one the last finish took, so that the part is kept, and an answer that it is final keeps it too", () => {
     const leftover = file(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12) });
-    const got = lookForExports(found([main()], [leftover], [], BEFORE("main")), NONE);
+    const got = lookForExports(found([main()], [leftover], BEFORE("main")), NONE);
     assert.deepEqual([got.asks, got.stops, got.parts.map((p) => [p.kept, p.video, p.line])], [[], [], [[true, null, "The main video: kept as the last finish made it."]]]);
-    const final = lookForExports(found([main()], [leftover], [], BEFORE("main")), { final: ["main"] });
+    const final = lookForExports(found([main()], [leftover], BEFORE("main")), { final: ["main"] });
     assert.deepEqual([final.asks, final.parts.map((p) => [p.kept, p.video])], [[], [[true, null]]]);
   });
-  it("passes over such a leftover that the app's own record names, and one in what the other Mac released", () => {
+  it("passes over such a leftover that the app's own record names", () => {
     const old = recorded(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12), began: { ms: ms(13, 10, 0), exact: true } });
-    assert.deepEqual(lookForExports(found([main({ recorded: [old] })], [], [], BEFORE("main")), NONE).parts.map((p) => p.kept), [true]);
-    assert.deepEqual(lookForExports(found([main()], [], [file(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12) })], BEFORE("main")), NONE).parts.map((p) => p.kept), [true]);
+    assert.deepEqual(lookForExports(found([main({ recorded: [old] })], [], BEFORE("main")), NONE).parts.map((p) => p.kept), [true]);
   });
   it("takes the same file the last finish took, beside such a leftover, as the part kept all the same", () => {
-    const got = lookForExports(found([main()], [file(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12) }), file(named(P_MAIN, "13.56"))], [], BEFORE("main")), NONE);
+    const got = lookForExports(found([main()], [file(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12) }), file(named(P_MAIN, "13.56"))], BEFORE("main")), NONE);
     assert.deepEqual([got.asks, got.parts.map((p) => p.kept)], [[], [true]]);
   });
   it("takes a leftover she names herself, whatever its age, and an export that ended later than the one the last finish took", () => {
     const leftover = file(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12) });
-    const named_ = lookForExports(found([main()], [leftover], [], BEFORE("main")), { take: { main: named(P_MAIN, "13.10") } });
+    const named_ = lookForExports(found([main()], [leftover], BEFORE("main")), { take: { main: named(P_MAIN, "13.10") } });
     assert.deepEqual(named_.parts.map((p) => [p.kept, p.video.name]), [[false, named(P_MAIN, "13.10")]]);
-    const later = lookForExports(found([main()], [leftover, file(named(P_MAIN, "14.05"), { mtimeMs: ms(14, 7), bytes: 6000 })], [], BEFORE("main")), NONE);
+    const later = lookForExports(found([main()], [leftover, file(named(P_MAIN, "14.05"), { mtimeMs: ms(14, 7), bytes: 6000 })], BEFORE("main")), NONE);
     assert.deepEqual(later.parts.map((p) => [p.kept, p.video.name]), [[false, named(P_MAIN, "14.05")]]);
   });
   it("applies only to a part the last finish took from the same project, and only when it recorded the time of what it took", () => {
     const leftover = file(named(P_MAIN, "13.10"), { mtimeMs: ms(13, 12) });
     const older = /began at 2026-10-20 13:10, before you last changed it/;
-    const other = lookForExports(found([main()], [leftover], [], finishedWith("main", { project: "Pricing- what to charge- main 2 3fa9c1" })), NONE);
+    const other = lookForExports(found([main()], [leftover], finishedWith("main", { project: "Pricing- what to charge- main 2 3fa9c1" })), NONE);
     assert.match(other.asks[0], older, "the last finish took another project of the episode");
-    const unknown = lookForExports(found([main()], [leftover], [], finishedWith("main", { source: undefined })), NONE);
+    const unknown = lookForExports(found([main()], [leftover], finishedWith("main", { source: undefined })), NONE);
     assert.match(unknown.asks[0], older, "the last finish did not record the time of what it took");
   });
   it("keeps a Reel the last finish finished that has no project in the record, so that it stays in the hand-off", () => {
     const before = BEFORE("main");
     const finished = { ...before, parts: { ...before.parts, "reel 3": { file: "final/r3.mov", bytes: 7, seconds: 7.7, source: { bytes: 7, mtimeMs: ms(13, 0) }, export: "final/r3.fcpxmld" }, "reel 1": { file: "final/r1.mov", bytes: 7, seconds: 7.7, source: { bytes: 7, mtimeMs: ms(13, 0) }, noHandEdits: true } } };
-    const got = lookForExports(found([main()], [file(named(P_MAIN, "13.56"))], [], finished), { without: ["reel 3"] });
+    const got = lookForExports(found([main()], [file(named(P_MAIN, "13.56"))], finished), { without: ["reel 3"] });
     assert.deepEqual(got.parts.map((p) => [p.key, p.label, p.reel, p.kept]), [["main", "the main video", undefined, true], ["reel 1", "Reel 1", 1, true], ["reel 3", "Reel 3", 3, true]]);
     assert.deepEqual(got.parts.slice(1).map((p) => p.line), ["Reel 1: kept as the last finish made it.", "Reel 3: kept as the last finish made it."]);
     assert.deepEqual([got.asks, got.stops], [[], []]);
@@ -540,27 +529,22 @@ describe("C7. a part the last finish took", () => {
   it("leaves a Reel the last finish finished to the Final Cut look when it is told so: the main video went that way, and keeps it once", () => {
     const before = BEFORE("main");
     const finished = { ...before, parts: { ...before.parts, "reel 1": { file: "final/r1.mov", bytes: 7, seconds: 7.7, source: { bytes: 7, mtimeMs: ms(13, 0) }, noHandEdits: true } } };
-    const got = lookForExports(found([reel2()], [file(named(P_REEL2, "14.03"))], [], finished), NONE, { rest: false });
+    const got = lookForExports(found([reel2()], [file(named(P_REEL2, "14.03"))], finished), NONE, { rest: false });
     assert.deepEqual(got.parts.map((p) => p.key), ["reel 2"]);
-    assert.deepEqual(lookForExports(found([reel2()], [file(named(P_REEL2, "14.03"))], [], finished), NONE).parts.map((p) => p.key), ["reel 2", "reel 1"]);
+    assert.deepEqual(lookForExports(found([reel2()], [file(named(P_REEL2, "14.03"))], finished), NONE).parts.map((p) => p.key), ["reel 2", "reel 1"]);
   });
   it("is not kept when it was taken from Final Cut (its record has no project), or from another project of the same episode", () => {
     const fromFinalCut = { revision: 1, at: FINISHED_AT, on: "Mac Studio", handoff: "final/x.brimm-ops.json", parts: { main: { file: "final/x.mp4", bytes: 5000, seconds: 10, source: { bytes: 5000, mtimeMs: ms(14, 0) }, export: "final/x.fcpxmld" } } };
-    assert.equal(lookForExports(found([main()], [], [], fromFinalCut), NONE).stops.length, 1);
-    assert.equal(lookForExports(found([main()], [], [], finishedWith("main", { project: "Pricing- what to charge- main 2 3fa9c1" })), NONE).stops.length, 1);
+    assert.equal(lookForExports(found([main()], [], fromFinalCut), NONE).stops.length, 1);
+    assert.equal(lookForExports(found([main()], [], finishedWith("main", { project: "Pricing- what to charge- main 2 3fa9c1" })), NONE).stops.length, 1);
   });
 });
 
 describe("C8. a project that is on the other Mac", () => {
-  it("takes the newest released export without checking it against the project, and says it could not be checked", () => {
-    const got = lookForExports(found([main({ here: false, changed: null, mac: "Sallie's laptop" })], [], [file(named(P_MAIN, "13.56")), file(named(P_MAIN, "13.20"))]), NONE);
-    assert.deepEqual(got.asks, []);
-    assert.equal(got.parts[0].line, `The main video: ${named(P_MAIN, "13.56")}, from what the other Mac released. Its project is on Sallie's laptop, so the export could not be checked against it.`);
-  });
   // Review, minor 7: Downloads is read for such a project too (an export made on this Mac of a project that came over from the other).
   it("reads Downloads too, and takes the newest export wherever it is", () => {
     const other = { here: false, changed: null, mac: "Sallie's laptop" };
-    const got = lookForExports(found([main(other)], [file(named(P_MAIN, "14.05"))], [file(named(P_MAIN, "13.56"))]), NONE);
+    const got = lookForExports(found([main(other)], [file(named(P_MAIN, "14.05")), file(named(P_MAIN, "13.56"))]), NONE);
     assert.deepEqual([got.asks, got.parts.map((p) => p.video.where)], [[], ["Downloads"]]);
     assert.equal(got.parts[0].line, `The main video: ${named(P_MAIN, "14.05")}, from Downloads. Its project is on Sallie's laptop, so the export could not be checked against it.`);
   });
@@ -720,24 +704,25 @@ describe("C2 (on a disk). exportsFound: the projects of the record, their record
     assert.deepEqual(w.asked(recordOf(entry("main", P_MAIN))).input.parts, without.input.parts);
     w.done();
   });
-  it("lists the videos in Downloads and in what the other Mac released, with their sizes and times, and no other file", () => {
+  it("lists the videos in Downloads, with their sizes and times, and no other file", () => {
     const w = made();
     for (const name of ["a.mp4", "b.MOV", "c.m4v", "d.webm", "e.txt", ".f.mp4", "g.mp4.partial", "h"]) w.put(join(w.downloads, name), 5, "12345");
     mkdirSync(join(w.downloads, "i.mp4"));
+    // A video in what the other Mac once released into the episode is none of the exports now.
     w.put(join(w.folder, "edit", "from-hyperframes", `${P_MAIN} 2026-10-20 13.56.mp4`), 9, "123456");
     const got = w.asked(recordOf(entry("main", P_MAIN))).input;
     assert.deepEqual(got.downloads.files.map((f) => f.name).sort(), ["a.mp4", "b.MOV", "c.m4v", "d.webm"]);
     assert.deepEqual(got.downloads.files.find((f) => f.name === "a.mp4"), { name: "a.mp4", bytes: 5, mtimeMs: ms(14, 0, 5) });
-    assert.deepEqual([got.downloads.dir, got.released.dir], [w.downloads, join(w.folder, "edit", "from-hyperframes")]);
-    assert.deepEqual(got.released.files, [{ name: `${P_MAIN} 2026-10-20 13.56.mp4`, bytes: 6, mtimeMs: ms(14, 0, 9) }]);
+    assert.equal(got.downloads.dir, w.downloads);
+    assert.equal(got.released, undefined);
     w.done();
   });
-  it("takes a Downloads folder that is not there, and a folder of released exports that is not there, for empty", () => {
+  it("takes a Downloads folder that is not there for empty", () => {
     const w = made();
     rmSync(w.downloads, { recursive: true });
     rmSync(join(w.folder, "edit"), { recursive: true });
     const got = w.asked(recordOf(entry("main", P_MAIN)));
-    assert.deepEqual([got.unreadable, got.input.downloads.files, got.input.released.files], [false, [], []]);
+    assert.deepEqual([got.unreadable, got.input.downloads.files], [false, []]);
     w.done();
   });
   it("says so when this Mac will not let the tool look in Downloads", () => {

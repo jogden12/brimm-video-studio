@@ -424,7 +424,7 @@ function videoNext(facts, notes, now) {
   if (facts.planned) return filmStep(facts.planned);
   const raw = facts.kind === "raw";
   const clip = facts.kind === "short video";
-  if (facts.elsewhere && !facts.handoff) return toDo("open-elsewhere", `It is open on ${spokenMac(facts.mac)}. Carry on there, or open it here and take it over.`);
+  if (facts.elsewhere && !facts.handoff) return toDo("open-elsewhere", `It is open on ${spokenMac(facts.mac)}. Carry on there.`);
   // A finish that has written its hand-off and only waits for its late check (`checking`) is not at work as far as she is concerned: the
   // hand-off is ready, and the page's step is hers to do.
   if ((raw || clip) && facts.finishRunning && !facts.checking) return toDo("finish-running", FINISH_RUNNING);

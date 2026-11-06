@@ -65,7 +65,7 @@ const NOT_FOR_SESSION = "This is a client or group session: that is not done for
 const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Jason.";
 const OPEN = "It's open in HyperFrames.";
 const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
-const THEIRS = `Sallie's laptop has ${NAME} open, since 2026-10-20 14:00. Say "take it over" to open it here; anything not handed over stays on Sallie's laptop.`;
+const THEIRS = `Sallie's laptop has ${NAME} open. Carry on there. Nothing was changed.`;
 const REEL_COPY = "the Reel's bytes";
 const PROJECT = "Pricing- what to charge- reel 2 3fa9c1";
 const AGAIN = openReelWords(2, NAME);
@@ -116,9 +116,10 @@ describe("app … reel: the command", () => {
   it("is app's, with its usage in the help beside app's own; with a Reel and no number, or no episode, it says the help and ends with 2, claiming nothing", async () => {
     assert.ok(COMMAND_NAMES.includes("app"));
     const lines = HELP.split("\n");
-    const at = lines.indexOf('  node edit.js app "<episode>" reel <n> [--take-over]');
-    assert.ok(at > lines.indexOf('  node edit.js app "<episode>" [--take-over]'), "the help has the usage line of a Reel");
+    const at = lines.indexOf('  node edit.js app "<episode>" reel <n>');
+    assert.ok(at > lines.findIndex((line) => line.startsWith('  node edit.js app "<episode>" ')), "the help has the usage line of a Reel");
     assert.match(lines[at + 1], /^ {40}make Reel <n>/);
+    assert.doesNotMatch(HELP, /--take-over/);
     for (const argv of [[FOLDER, "reel"], ["reel", "2"], []]) {
       const { t, found } = world();
       const r = await on(t.ctx.deps, "app", ...argv);
@@ -306,16 +307,12 @@ describe("app … reel: the claim and the bring are open's, and she is sent back
     assert.deepEqual(record.app.projects.map((p) => [p.name, p.opened.length, p.state]), [[PROJECT, 2, "opened"]]);
     t.done();
   });
-  it("is refused while the other Mac has the episode, in open's words, and does nothing; a take-over works as app's", async () => {
+  it("is refused while the other Mac has the episode, in open's words, and does nothing", async () => {
     const { t, found } = world({ record: { ...RAW, editing: HERS } });
     const refused = await app(t.ctx.deps, FOLDER, "reel", "2");
     assert.deepEqual([refused.code, refused.said], [1, [THEIRS]]);
     assert.deepEqual((await on(t.ctx.deps, "open", FOLDER)).said, [THEIRS], "open gives the same answer for the same claim");
     assert.deepEqual([reread(found).rev, reread(found).editing.by, reread(found).app, t.waits, t.started, runsOf(t)], [1, "Sallie's laptop", undefined, [], [], []]);
-    const taken = await app(t.ctx.deps, FOLDER, "reel", "2", "--take-over");
-    assert.equal(taken.code, 0, taken.text);
-    assert.equal(taken.said[0], "Taken over from Sallie's laptop, who had it since 2026-10-20 14:00.");
-    assert.deepEqual([reread(found).editing.by, reread(found).app.projects.map((p) => p.state)], ["Mac Studio", ["opened"]]);
     t.done();
   });
   it("brings the files that are not whole here before anything else, and says to say it again with the Reel's words; a bring app starts for the video says its own", async () => {
@@ -328,14 +325,6 @@ describe("app … reel: the claim and the bring are open's, and she is sent back
     assert.deepEqual([reread(found).rev, t.waits, runsOf(t)], [1, [], []]);
     assert.deepEqual((await app(t.ctx.deps, FOLDER)).said, [coming(`open ${NAME} in HyperFrames`)]);
     assert.deepEqual(t.started.map(([, args]) => args.slice(1)).at(-1), ["bring", "--now", FOLDER, "--asked-by", "app"]);
-    t.done();
-  });
-  it("brings the files for a take-over, and says to take it over again, as open does", async () => {
-    const { t } = world({ record: { ...RAW, editing: HERS } });
-    t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
-    const r = await app(t.ctx.deps, FOLDER, "reel", "2", "--take-over");
-    assert.deepEqual([r.code, r.said], [0, [`Dropbox is bringing 1 file of ${NAME} over to this Mac. Say "take it over" again when it is done; "how far is it?" shows how far it has got.`]]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, "--take-over", "--asked-by", "app reel 2"]]);
     t.done();
   });
   it("ends the bring it started by telling her to open that Reel, once every file is here or when one did not come", async () => {
@@ -503,18 +492,6 @@ describe("app … reel: the Reel's video", () => {
         t.done();
       }
     });
-  });
-  it("tells a take-over in the window to take it over again, not to say the plain Reel again (final review R1d-1)", async () => {
-    const reading = { ...RAW, editing: HERS, reading: { kind: "raw", model: "m", at: "2026-10-20T15:00:00-05:00", on: "Mac Studio", account: "a", outcome: "read" } };
-    const { t, found } = world({ record: reading });
-    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
-    assert.equal(takeEpisodeLock(lockOf(t.home, FOLDER), "read", () => true).taken, true);
-    t.ctx.deps.alive = (pid) => pid === process.pid;
-    const at = join(found.folder, "reels.json");
-    writeFileSync(at, readFileSync(at, "utf8").slice(0, -4));
-    const r = await app(t.ctx.deps, FOLDER, "reel", "2", "--take-over");
-    assert.deepEqual([r.code, r.said, t.started, runsOf(t)], [0, [`Some files of ${NAME} are not whole in Dropbox yet, so the project of Reel 2 wasn't made. Say "take it over" again in a few minutes. If it says this again, tell Jason.`], [], []]);
-    t.done();
   });
   it("says the words of the episode are not on this Mac, ending with 1, and makes and asks for nothing", async () => {
     const { t, found } = world();
@@ -762,7 +739,7 @@ describe("app … reel: its graphic cues (PR H2)", () => {
 });
 
 describe("app … reel: a Reel project that is on another Mac, and that Mac has not handed over, is not made again here (plan PR 11: a snapshot makes it possible, edit-take-over-app.test.js)", () => {
-  const THERE = (on) => `The HyperFrames project for Reel 2 of ${NAME} is on ${on}, and ${on} has not handed it over yet. On ${on}, say "I'm done with it for now", then say it again here. If that can't be done, ask Jason.`;
+  const THERE = (on) => `The HyperFrames project of Reel 2 of ${NAME} is on ${on}. Carry on there.`;
   const madeOn = (on) => ({
     ...RAW, version: 4,
     app: { toolchain: PIN.version, projects: [{
@@ -770,8 +747,8 @@ describe("app … reel: a Reel project that is on another Mac, and that Mac has 
       workingCopy: { bytes: REEL_COPY.length, seconds: 7, fps: 30 }, opened: ["2026-10-19T10:05:00-05:00"], handover: false, fromSuggestion: 2, state: "opened"
     }] }
   });
-  it("is refused in words that name the Mac, with or without --take-over, and claims, brings, asks for and makes nothing", async () => {
-    for (const more of [[], ["--take-over"]]) {
+  it("is refused in words that name the Mac, and claims, brings, asks for and makes nothing", async () => {
+    for (const more of [[]]) {
       const { t, found } = world({ record: madeOn("Sallie's laptop"), copy: false });
       const r = await app(t.ctx.deps, FOLDER, "reel", "2", ...more);
       assert.deepEqual([r.code, r.said], [1, [THERE("Sallie's laptop")]], more.join(" "));

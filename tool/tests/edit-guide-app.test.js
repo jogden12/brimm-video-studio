@@ -154,7 +154,7 @@ describe("the guide on a Mac whose settings have the app off (plan PR 17; the re
     assert.equal(await line(w), says(OPEN));
     const asked = await on(depsOf(w, { app: { tz: "America/Chicago", cli } }), "app", FOLDER);
     assert.equal(asked.code, 1, asked.text);
-    assert.match(asked.said[0], /^The HyperFrames project for Pricing: what to charge\? is on Sallie's laptop, and Sallie's laptop has not handed it over yet\./);
+    assert.match(asked.said[0], /^The HyperFrames project of Pricing: what to charge\? is on Sallie's laptop\. Carry on there\./);
     w.t.done();
   });
   it("says it wherever it would say to open the video there: a project here that the app never opened, one whose video is being made again, and an iPhone clip whose project the app opened", async () => {
@@ -432,8 +432,8 @@ describe("the guide once a video is exported from HyperFrames", () => {
     const app = guideWorld();
     exportOf(app, "main");
     assert.equal(await line(app, { readdir }), says(EXPORTED));
-    // Downloads, and what the other Mac released into the episode: the two places an export is looked for in, and no other.
-    assert.deepEqual(looked, [app.downloads, join(app.found.folder, "edit", "from-hyperframes")]);
+    // Downloads: the one place an export is looked for in, and no other.
+    assert.deepEqual(looked, [app.downloads]);
     looked.length = 0;
     const none = guideWorld({ projects: null });
     exportOf(none, "main", { record: false });

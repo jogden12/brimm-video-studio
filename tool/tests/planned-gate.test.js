@@ -242,7 +242,7 @@ describe("a planned episode refused by the gate in a command, in the words of th
     const t = setup();
     try {
       folderWith(t, planned());
-      for (const ask of [["open", TITLE], ["app", TITLE], ["push", TITLE], ["finish", TITLE], ["kind", TITLE, "raw", "--private", "no"], ["release", TITLE], ["show", TITLE, "transcript"], ["free", TITLE], ["reels", TITLE], ["ask", TITLE]]) {
+      for (const ask of [["open", TITLE], ["app", TITLE], ["push", TITLE], ["finish", TITLE], ["kind", TITLE, "raw", "--private", "no"], ["show", TITLE, "transcript"], ["free", TITLE], ["reels", TITLE], ["ask", TITLE]]) {
         const said = [];
         const code = await editMain(ask, { ...t.ctx.deps, say: (line) => said.push(line) });
         assert.deepEqual([code, said], [1, [NOT_PLANNED_YET]], ask.join(" "));

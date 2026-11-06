@@ -256,7 +256,7 @@ describe("free: an episode HyperFrames was opened on", () => {
     writeFileSync(recordFile(w.found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, editing: HERS }));
     const before = treeOf(w.work);
     const r = await plain(w.t.ctx.deps, "free", FOLDER);
-    assert.deepEqual([r.code, r.said, treeOf(w.work)], [1, [`Sallie's laptop has ${NAME} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.`], before]);
+    assert.deepEqual([r.code, r.said, treeOf(w.work)], [1, [`Sallie's laptop has ${NAME} open. Carry on there. Nothing was changed.`], before]);
     w.t.done();
   });
   it("refuses while the working copy is being made, and while any other run is at work, and takes nothing", async () => {

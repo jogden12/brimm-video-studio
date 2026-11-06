@@ -192,7 +192,7 @@ describe("D3. what finish refuses, and Downloads", () => {
     const w = world({ over: { editing: { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00" } } });
     exportOf(w, "main");
     assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1);
-    assert.match(w.t.said(), /^Sallie's laptop has Pricing: what to charge\? open\. Open it here first/);
+    assert.match(w.t.said(), /^Sallie's laptop has Pricing: what to charge\? open\. Carry on there\./);
     assert.deepEqual([w.t.started, existsSync(join(w.work, "finish.asked.json"))], [[], false]);
     w.t.done();
   });
@@ -262,7 +262,7 @@ describe("D3. what finish refuses, and Downloads", () => {
     assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1);
     const lines = w.t.said().split("\n");
     assert.equal(lines[1], 'The main video has no export yet. Export it from HyperFrames on This Mac, as MP4, then say "hand it off" again. If HyperFrames is still exporting it, say it again when the export is done.');
-    assert.equal(lines.at(-1), `Looked in Downloads and in what the other Mac released for exports of: ${MAIN}, ${REEL2}.`);
+    assert.equal(lines.at(-1), `Looked in Downloads for exports of: ${MAIN}, ${REEL2}.`);
     assert.deepEqual(w.t.started, []);
     plain(lines.slice(0, 2));
     w.t.done();
