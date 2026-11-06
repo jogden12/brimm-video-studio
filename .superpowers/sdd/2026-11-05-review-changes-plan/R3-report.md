@@ -22,3 +22,11 @@ Worktree: /Users/jasonogden/Claude Code/brimm-video-studio/.claude/worktrees/age
 ## Concerns
 - Skills are now 264 / 260 lines (cap 270).
 - Step 3 of the HyperFrames section now has the model run `finish` with flags and no `--yes` until the question prints.
+
+## Fix round 1
+
+Change (both skill files): the "Hand it off" table row now reads `finish "<episode>"`. The rest is in the rules for this row, below. The Reels rule now says her answers go back to `finish "<episode>" reels` with one flag each and no `--yes`, and `--yes` comes only after her "Yes" to the question Studio prints.
+
+Tests: new "has no line of ... send --yes with her answers before the Hand-off question" (both skills) in tests/one-yes-hand-off.test.js; the pin in tests/studio.test.js:219 updated. They failed first (3 failures), then passed.
+
+Commands: `cd tool && node --test tests/one-yes-hand-off.test.js tests/studio.test.js tests/guide-reels-pins.test.js` -> pass 139, fail 0. `cd tool && node --test` -> tests 7288, pass 7288, fail 0.

@@ -115,7 +115,7 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 | "Make it Bright" / "Bold captions on Reel 2" / "It's a teaching clip" | `preset "<episode>" --look bright` / `preset "<episode>" reel 2 --captions bold` / `preset "<episode>" reel 2 --job "teaching clip"`. "What styles are there?": `preset "<episode>"`, and tell her the lists in plain words |
 | "Cut the bit where I say …" / "Keep the Hormozi story at 12:30" | `cut "<episode>" remove --words "<her words>"` (or `--at` and `--to`, times on that timeline) / `cut "<episode>" keep --at 12:30` (the cut nearest that time on that timeline) or `cut "<episode>" keep --words "<words>"`. Say a cut on the main video does not change a Reel |
 | "Show me the transcript / Claude's notes / the cut plan" | `show "<episode>" transcript` / `show "<episode>" notes` / `show "<episode>" plan`. Of a session or a video not yet answered it prints nothing: it opens a read-only copy in TextEdit on her Mac, or says why not, which tell her. Never read, quote or ask her to paste such a file, and run nothing else that would print it |
-| "Hand it off" / "Finish the episode" | `finish "<episode>"`; answer its questions with her, then `finish "<episode>" --yes` and the answers it asks for. |
+| "Hand it off" / "Finish the episode" | `finish "<episode>"`. The rest is in the rules for this row, below. |
 | "Hand off the Reels" / "Add the Reels to the hand-off" | `finish "<episode>" reels`, for a video finished by your editor whose Reels she made in HyperFrames and exported there: it tells her what it found for each Reel, in plain words, and it adds them to the hand-off the video has already, as its next revision, and changes nothing else in it. |
 | "How far is it?" | `status` |
 | "Try it again" (an import that stopped) | `retry "<video>"` |
@@ -178,7 +178,7 @@ Each rule starts with the row it belongs to.
 - "Hand off the Reels": When the guide says she has exported a Reel, run `finish "<episode>" reels` at once: it changes nothing.
 - "Hand off the Reels": Tell her in plain words what it found for each Reel, then ask what it prints after `Hand-off question:` on one `AskUserQuestion`, word for word, with the answers "Yes" and "Not yet".
 - "Hand off the Reels": Yes: `finish "<episode>" reels --yes` with the answers it asked for. Not yet: stop. Never ask "Shall I hand off the Reels?" first.
-- "Hand off the Reels": Its questions go back to `finish "<episode>" reels --yes` with one flag each, as in "In HyperFrames, to hand it off" (a part is reel 2).
+- "Hand off the Reels": Her answers go back to `finish "<episode>" reels` with one flag each and no `--yes`, as in "In HyperFrames, to hand it off" (a part is reel 2); `--yes` comes only after her "Yes" to the question it prints.
 - "Hand off the Reels": When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page again.
 - "Hand off the Reels": If it says the hand-off is not written yet, tell her to answer the spellings first ("Show me the spellings"); if it says there is nothing new, tell her to export a Reel from HyperFrames first.
 - "Hand off the Reels": When `--yes` starts it, tell her what it says of when the hand-off will be ready, and go on as "Guide her" says for work in the background.

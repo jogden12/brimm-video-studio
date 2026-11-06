@@ -216,7 +216,7 @@ describe("her folder's settings", () => {
     for (const words of [
       "for a video finished by your editor whose Reels she made in HyperFrames and exported there",
       "it adds them to the hand-off the video has already, as its next revision, and changes nothing else in it",
-      'Its questions go back to `finish "<episode>" reels --yes` with one flag each, as in "In HyperFrames, to hand it off" (a part is reel 2).',
+      'Her answers go back to `finish "<episode>" reels` with one flag each and no `--yes`, as in "In HyperFrames, to hand it off" (a part is reel 2); `--yes` comes only after her "Yes" to the question it prints.',
       "When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page again.",
       'If it says the hand-off is not written yet, tell her to answer the spellings first ("Show me the spellings"); if it says there is nothing new, tell her to export a Reel from HyperFrames first'
     ]) assert.ok(full.includes(words), words);

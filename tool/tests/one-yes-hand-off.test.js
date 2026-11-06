@@ -28,6 +28,17 @@ describe("R3. one yes at hand-off", () => {
       assert.ok(rules.includes('Yes: `finish "<episode>" reels --yes` with the answers it asked for. Not yet: stop.'), rules);
       assert.ok(rules.includes('Never ask "Shall I hand off the Reels?" first.'), rules);
     });
+    it(`has no line of ${which} send --yes with her answers before the Hand-off question`, () => {
+      const row = skill.split("\n").find((line) => line.startsWith('| "Hand it off" / "Finish the episode" |'));
+      assert.ok(row.includes("The rest is in the rules for this row, below.") && !row.includes("--yes"), row);
+      const reels = rulesOf(skill, '"Hand off the Reels"').join("\n");
+      assert.ok(reels.includes('Her answers go back to `finish "<episode>" reels` with one flag each and no `--yes`'), reels);
+      assert.ok(!skill.includes("Its questions go back to `finish \"<episode>\" reels --yes`"));
+      for (const line of skill.split("\n")) {
+        if (!/answers go back|questions go back/.test(line) || !line.includes("--yes")) continue;
+        assert.ok(/no `--yes`|until it prints|"Yes" to/.test(line), line);
+      }
+    });
     it(`keeps in ${which} the old sentence about --yes, and the rows short`, () => {
       assert.ok(skill.includes("Never add `--yes` before she has said yes to what `finish` just said."));
       for (const start of ['| "Hand it off" / "Finish the episode" |', '| "Hand off the Reels" / "Add the Reels to the hand-off" |']) {
