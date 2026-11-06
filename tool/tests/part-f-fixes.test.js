@@ -78,27 +78,6 @@ const LABEL = "Video of 14 Oct, 09:12 (Mac Studio)";
 const LIGHT = { "Pricing talk.mp4": "the video", "Pricing talk.cut-plan.json": "{}", "Pricing talk.srt": "1\n00:00:00,000 --> 00:00:02,000\nHello\n", "Pricing talk.transcript.txt": "[0:00] Hello" };
 
 describe("push of a video that has no timeline in Final Cut, and an error nobody foresaw for a record of the switch (item 20)", () => {
-  it("refuses a finished video, and an iPhone clip she answered, in plain words, before any timeline is read", async () => {
-    for (const [kind, what] of [["finished", "a finished video"], ["short video", "an iPhone clip"]]) {
-      const t = setup();
-      episodeFor(t, { record: { version: 3, kind, answer: ANSWERED, label: LABEL }, files: LIGHT });
-      for (const argv of [["push", "Pricing talk"], ["push", "Pricing talk", "main", "--no-hand-edits"]]) {
-        const r = await on(t.ctx.deps, ...argv);
-        assert.deepEqual([r.code, r.said], [1, [`Pricing talk has no timeline to show in Final Cut: ${what} is not edited here.`]], `${kind}: ${argv.join(" ")}`);
-      }
-      assert.deepEqual(t.opened, []);
-      t.done();
-    }
-  });
-  it("says only that the work stopped for a record of the switch, on a Mac whose import is not the light one: no path, no stack", async () => {
-    // A raw video she answered, whose timeline Dropbox never brought: reading it fails in a way nobody foresaw.
-    const t = setup();
-    episodeFor(t, { record: { version: 3, kind: "raw", answer: ANSWERED, label: LABEL }, files: LIGHT });
-    const r = await on(t.ctx.deps, "push", "Pricing talk");
-    assert.deepEqual([r.code, r.said], [1, ["The work stopped (ENOENT)."]]);
-    assert.equal(reread({ folder: join(t.root, "Episodes", FOLDER) }).rev, 1);
-    t.done();
-  });
 });
 
 /** A session mark, as `kind … session` writes it, with `cleared` as given. */
@@ -475,7 +454,7 @@ describe("a session mark follows the video's other versions: each is held as a s
     assert.deepEqual([shown.code, shown.said], [0, [`Opened ${A}'s transcript in TextEdit on this Mac.`]]);
     const spell = await on(t.ctx.deps, "spell", "a0a0a0", "add", "Jane", "Jayne");
     assert.deepEqual([spell.code, spell.said], [1, [HELD]]);
-    for (const [command, ...rest] of [["finish"], ["push"], ["title"], ["ask"], ["teachings"], ["name", "Another name"]]) {
+    for (const [command, ...rest] of [["finish"], ["title"], ["ask"], ["teachings"], ["name", "Another name"]]) {
       const refused = await on(t.ctx.deps, command, "a0a0a0", ...rest);
       assert.deepEqual([refused.code, refused.said], [1, [HELD]], command);
     }

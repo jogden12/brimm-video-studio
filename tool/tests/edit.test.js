@@ -8,10 +8,9 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { editMain, findEpisode, contextFor, openApp, readPlist } from "../edit.js";
+import { editMain, findEpisode, contextFor, openApp } from "../edit.js";
 import { NEWEST_VERSION, newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
-import { fcpxml, fileUrl, relativeUrl } from "../fcpxml.js";
-import { writeSettings, libraryFor } from "../settings.js";
+import { writeSettings } from "../settings.js";
 import { writePending } from "../filing.js";
 import { OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
 
@@ -158,14 +157,13 @@ describe("node edit.js episodes", () => {
   it("lists each episode with its name, length and kind, newest first, and leaves an archived one out", async () => {
     const t = setup();
     t.episode("2026-10-13 Talk (Mac Studio)");
-    t.episode("2026-10-14 Pricing talk (Mac Studio)", { name: { text: "Pricing with confidence", placeholder: false }, kind: "short video", main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed: [{ v: 2, at: "2026-10-14T11:00:00-05:00", on: "Mac Studio", file: "edit/main.v2.mac-studio.fcpxml", project: "Pricing with confidence main v2 000002" }], base: null } }, { "Talk.mov": 5 });
+    t.episode("2026-10-14 Pricing talk (Mac Studio)", { name: { text: "Pricing with confidence", placeholder: false }, kind: "short video" }, { "Talk.mov": 5 });
     t.episode("2026-10-12 Old (Mac Studio)", { archived: { at: "2026-10-13T10:00:00-05:00" } }, { "Talk.mov": 5 });
     const r = await t.run("episodes");
     assert.equal(r.code, 0);
     assert.ok(r.text.startsWith([
       "Episodes, newest first:",
       "  Pricing with confidence: a short video of 2:00, in 2026-10-14 Pricing talk (Mac Studio), id 000002",
-      "    Shown in Final Cut: v2, on Mac Studio",
       "  Talk (a placeholder name): an episode of 2:00, in 2026-10-13 Talk (Mac Studio), id 000001"
     ].join("\n")), r.text);
     assert.ok(!r.text.includes("Old"), r.text);
@@ -219,11 +217,8 @@ describe("node edit.js episodes", () => {
     ].join("\n")), r.text);
     t.done();
   });
-  it("lists no library, a Final Cut library in BRIMM Video Work included, and shows the free space on the disk", async () => {
+  it("shows the free space on the disk, and lists no library", async () => {
     const t = setup();
-    const library = libraryFor(t.home, "2026-10-13 Talk (Mac Studio)");
-    mkdirSync(join(library, "Event"), { recursive: true });
-    writeFileSync(join(library, "Event", "media"), "x".repeat(3 * 2 ** 20));
     const r = await t.run("episodes");
     assert.ok(r.text.endsWith(["On this Mac:", "  Free on the disk: 300 GB"].join("\n")), r.text);
     assert.doesNotMatch(r.text, /fcpbundle|library/i);
@@ -322,189 +317,6 @@ describe("node edit.js open", () => {
     t.episode("2026-10-14 Pricing talk (Mac Studio)");
     assert.deepEqual(await t.run("open", "talk"), { code: 1, said: ['More than one episode fits "talk": 2026-10-14 Pricing talk (Mac Studio) and 2026-10-13 Talk (Mac Studio). Say which.'], text: 'More than one episode fits "talk": 2026-10-14 Pricing talk (Mac Studio) and 2026-10-13 Talk (Mac Studio). Say which.' });
     assert.equal((await t.run("open")).code, 2);
-    t.done();
-  });
-});
-
-describe("node edit.js push", () => {
-  /** An episode as the import leaves it, of the video `video`, with its timeline edit/main.v0.fcpxml as the import writes it. */
-  const imported = (t, video = "Talk.mov", folder = "2026-10-13 Talk (Mac Studio)") => {
-    const v0 = fcpxml({ video: join(t.episodes, folder, video), facts: { duration: 120, frameRate: "30000/1001", width: 1280, height: 720, hasAudio: true }, ranges: [{ start: 0, end: 10 }], src: relativeUrl(`../${video}`) });
-    const made = t.episode(folder, { video: { file: video, bytes: 5, seconds: 120, recorded: "2026-10-13", recordedFrom: "import" }, name: { text: video.replace(/\.[^.]+$/, ""), placeholder: true } }, { [video]: 5, "edit/main.v0.fcpxml": Buffer.byteLength(v0) });
-    writeFileSync(join(made.path, "edit", "main.v0.fcpxml"), v0);
-    return made;
-  };
-  const record = (t, folder = "2026-10-13 Talk (Mac Studio)") => readEpisode(join(t.episodes, folder)).record;
-  it("pushes v1: the timeline kept in edit/ by the rule, the local copy with this Mac's paths and library, and Final Cut asked to open it", async () => {
-    const t = setup();
-    const { path } = imported(t);
-    const r = await t.run("push", "talk", "main");
-    assert.equal(r.code, 0, r.text);
-    const kept = readFileSync(join(path, "edit", "main.v1.mac-studio.fcpxml"), "utf8");
-    assert.ok(t.clones.includes(join(path, "edit", "main.v1.mac-studio.fcpxml")));
-    assert.deepEqual(tags(kept, "media-rep").map((m) => m.src), ["../Talk.mov"]);
-    assert.doesNotMatch(kept, /import-options/);
-    assert.deepEqual([tags(kept, "project")[0].name, tags(kept, "event")[0].name], ["Talk main v1 000001", "2026-10-13 Talk (Mac Studio)"]);
-    const local = join(t.home, "BRIMM Video Work", "2026-10-13 Talk (Mac Studio)", "pushed", "main.v1.mac-studio.fcpxml");
-    const copy = readFileSync(local, "utf8");
-    assert.deepEqual(tags(copy, "media-rep").map((m) => m.src), [fileUrl(join(path, "Talk.mov"))]);
-    assert.deepEqual(tags(copy, "option"), [
-      { key: "library location", value: fileUrl(libraryFor(t.home, "2026-10-13 Talk (Mac Studio)")) },
-      { key: "copy assets", value: "0" },
-      { key: "suppress warnings", value: "1" }
-    ]);
-    assert.deepEqual(t.opened, [["Final Cut Pro", local]]);
-    assert.ok(r.said.includes('Shown in Final Cut as "Talk main v1 000001", in the library 2026-10-13 Talk (Mac Studio).fcpbundle in BRIMM Video Work.'), r.text);
-    t.done();
-  });
-  it("records the push with its project's name, and lists the kept timeline with its size", async () => {
-    const t = setup();
-    const { path } = imported(t);
-    await t.run("push", "talk");
-    const r = record(t);
-    assert.equal(r.rev, 2);
-    assert.deepEqual(r.main.pushed.map(({ at, asked, ...p }) => p), [{ v: 1, on: "Mac Studio", file: "edit/main.v1.mac-studio.fcpxml", project: "Talk main v1 000001" }]);
-    // And what the session had asked for, as a digest a finish compares (phase 4).
-    assert.match(r.main.pushed[0].asked, /^[0-9a-f]{12}$/);
-    assert.equal(r.files["edit/main.v1.mac-studio.fcpxml"], statSync(join(path, "edit", "main.v1.mac-studio.fcpxml")).size);
-    assert.deepEqual(r.libraries, { "Mac Studio": "2026-10-13 Talk (Mac Studio).fcpbundle" });
-    t.done();
-  });
-  it("names the checkout this code is in as the record's writer, with no commit given and the settings naming a folder that is no checkout", { skip: WITHOUT_COMMIT }, async () => {
-    const t = setup();
-    imported(t);
-    writeSettings(t.home, { checkout: "/elsewhere/BRIMM video" });
-    const r = await t.run("push", "talk");
-    assert.equal(r.code, 0, r.text);
-    assert.deepEqual(record(t).writer, { commit: OWN_COMMIT, on: "Mac Studio" });
-    t.done();
-  });
-  it("refuses a second push with no answer, and asks whether the timeline was changed in Final Cut", async () => {
-    const t = setup();
-    imported(t);
-    await t.run("push", "talk");
-    t.opened.length = 0;
-    const r = await t.run("push", "talk");
-    assert.deepEqual([r.code, r.said, t.opened, record(t).rev], [1, ['Did you change v1 of Talk in Final Cut since it was shown? Say "no changes" to show it again. If you did change it, say so.'], [], 2]);
-    t.done();
-  });
-  it("stops at a yes, and says how to work until BRIMM Video Studio can build on hand edits; nothing is written and Final Cut is not asked", async () => {
-    const t = setup();
-    const { path } = imported(t);
-    await t.run("push", "talk");
-    t.opened.length = 0;
-    const r = await t.run("push", "talk", "--hand-edits");
-    assert.deepEqual([r.code, r.said], [1, ["Your changes stay in v1 in Final Cut. This version of BRIMM Video Studio cannot build on them yet. Until it can: ask for BRIMM Video Studio's changes first and make trims by hand last, or finish that timeline by hand in v1."]]);
-    assert.deepEqual([t.opened, record(t).rev, readdirSync(join(path, "edit")).sort()], [[], 2, ["main.v0.fcpxml", "main.v1.mac-studio.fcpxml"]]);
-    t.done();
-  });
-  it("pushes v2 with --no-hand-edits, and records the answer", async () => {
-    const t = setup();
-    imported(t);
-    await t.run("push", "talk");
-    const r = await t.run("push", "talk", "main", "--no-hand-edits");
-    assert.equal(r.code, 0, r.text);
-    assert.deepEqual(record(t).main.pushed.map((p) => [p.v, p.project, p.answer]), [[1, "Talk main v1 000001", undefined], [2, "Talk main v2 000001", "no hand edits since v1"]]);
-    t.done();
-  });
-  it("refuses when a record was written after the one it read, and does not open Final Cut", async () => {
-    const t = setup();
-    const { path } = imported(t);
-    const clone = t.deps.clone;
-    // The other Mac writes record 2 while this push is putting its timeline into Dropbox.
-    t.deps.clone = (from, to) => {
-      clone(from, to);
-      if (to.endsWith(".fcpxml")) writeFileSync(recordFile(path, 2), "{");
-    };
-    const r = await t.run("push", "talk");
-    assert.deepEqual([r.code, r.said, t.opened], [1, ["This episode changed on the other Mac: open it again."], []]);
-    t.done();
-  });
-  it("pushes again after a refusal that left its timeline in edit/ unlisted, putting a new one in its place", async () => {
-    const t = setup();
-    const { path } = imported(t);
-    const clone = t.deps.clone;
-    t.deps.clone = (from, to) => {
-      clone(from, to);
-      if (to.endsWith(".fcpxml")) writeFileSync(recordFile(path, 2), "{");
-    };
-    await t.run("push", "talk");
-    rmSync(recordFile(path, 2));
-    t.deps.clone = clone;
-    const r = await t.run("push", "talk");
-    assert.equal(r.code, 0, r.text);
-    assert.deepEqual(record(t).main.pushed.map((p) => p.v), [1]);
-    t.done();
-  });
-  it("refuses an episode with a conflicted copy", async () => {
-    const t = setup();
-    const { path } = imported(t);
-    writeFileSync(join(path, "record", "0001 (Sallie Ogden's conflicted copy 2026-10-14).json"), "{}");
-    const r = await t.run("push", "talk");
-    assert.equal(r.code, 1);
-    assert.match(r.text, /^2026-10-13 Talk \(Mac Studio\): Dropbox has kept a conflicted copy in this episode/);
-    t.done();
-  });
-  it("refuses when the video is not whole on this Mac yet", async () => {
-    const t = setup();
-    imported(t);
-    t.deps.isWhole = (path) => !path.endsWith("Talk.mov");
-    const r = await t.run("push", "talk");
-    assert.deepEqual([r.code, r.said, t.opened], [1, ['Dropbox is still bringing Talk.mov over to this Mac. Say "open Talk" first.'], []]);
-    t.done();
-  });
-  it("refuses media outside the episode's folder, naming it", async () => {
-    const t = setup();
-    const { path } = imported(t);
-    const v0 = readFileSync(join(path, "edit", "main.v0.fcpxml"), "utf8").replace('src="../Talk.mov"', 'src="file:///Users/sallie/Movies/b-roll.mov"');
-    writeFileSync(join(path, "edit", "main.v0.fcpxml"), v0);
-    const { record: r } = readEpisode(path);
-    writeFileSync(recordFile(path, 2), recordText({ ...r, rev: 2, files: { ...r.files, "edit/main.v0.fcpxml": Buffer.byteLength(v0) } }));
-    const out = await t.run("push", "talk");
-    assert.deepEqual([out.code, out.said, t.opened], [1, ["/Users/sallie/Movies/b-roll.mov is outside the episode's folder. Copy it into its media folder first."], []]);
-    t.done();
-  });
-  it("names a video with an apostrophe, #, & and % rightly in the kept timeline, the local copy and the project", async () => {
-    const t = setup();
-    const video = "Sallie's talk #1 & 100%.mov";
-    const folder = "2026-10-13 Sallie's talk #1 & 100% (Mac Studio)";
-    const { path } = imported(t, video, folder);
-    const r = await t.run("push", "Sallie's talk");
-    assert.equal(r.code, 0, r.text);
-    const kept = readFileSync(join(path, "edit", "main.v1.mac-studio.fcpxml"), "utf8");
-    assert.deepEqual(tags(kept, "media-rep").map((m) => m.src), ["../Sallie's%20talk%20%231%20%26%20100%25.mov"]);
-    const copy = readFileSync(join(t.home, "BRIMM Video Work", folder, "pushed", "main.v1.mac-studio.fcpxml"), "utf8");
-    assert.deepEqual(tags(copy, "media-rep").map((m) => decodeURIComponent(m.src.replace("file://", ""))), [join(path, video)]);
-    // The name as the file writes it, with & written out.
-    assert.equal(tags(copy, "project")[0].name, "Sallie's talk #1 &amp; 100% main v1 000001");
-    t.done();
-  });
-  it("never hands Final Cut a project name twice, even after Final Cut could not be asked to open one", async () => {
-    // Phase 0, 2026-10-14: Final Cut 12.4 asks before it replaces a project of the same name, and Keep Both renames the new
-    // one "<name> 1", whose Share then no longer has the name the push recorded. So each push's version is used up when its
-    // record is written, before Final Cut is asked.
-    const t = setup();
-    imported(t);
-    t.deps.openApp = () => {
-      throw new Error("Final Cut Pro could not be opened");
-    };
-    const failed = await t.run("push", "talk");
-    assert.equal(failed.code, 1);
-    t.deps.openApp = (app, file) => t.opened.push([app, file]);
-    const second = await t.run("push", "talk", "--no-hand-edits");
-    assert.equal(second.code, 0, second.text);
-    const third = await t.run("push", "talk", "--no-hand-edits");
-    assert.equal(third.code, 0, third.text);
-    const projects = record(t).main.pushed.map((p) => p.project);
-    assert.deepEqual(projects, ["Talk main v1 000001", "Talk main v2 000001", "Talk main v3 000001"]);
-    const handed = t.opened.map(([, file]) => tags(readFileSync(file, "utf8"), "project")[0].name);
-    assert.deepEqual(handed, ["Talk main v2 000001", "Talk main v3 000001"]);
-    t.done();
-  });
-  it("hands \"push … reel <n>\" to the push of a Reel, which refuses a Reel the episode does not have", async () => {
-    const t = setup();
-    imported(t);
-    assert.deepEqual(await t.run("push", "talk", "reel", "1"), { code: 1, said: ["There is no Reel 1."], text: "There is no Reel 1." });
     t.done();
   });
 });
@@ -635,39 +447,10 @@ describe("node edit.js bring, status and retry", () => {
 });
 
 describe("what the final review found in edit.js", () => {
-  const imported = (t) => {
-    const folder = "2026-10-13 Talk (Mac Studio)";
-    const v0 = fcpxml({ video: join(t.episodes, folder, "Talk.mov"), facts: { duration: 120, frameRate: "30000/1001", width: 1280, height: 720, hasAudio: true }, ranges: [{ start: 0, end: 10 }], src: relativeUrl("../Talk.mov") });
-    const made = t.episode(folder, {}, { "Talk.mov": 5, "edit/main.v0.fcpxml": Buffer.byteLength(v0) });
-    writeFileSync(join(made.path, "edit", "main.v0.fcpxml"), v0);
-    return made;
-  };
-  const projects = (t) => t.opened.map(([, file]) => tags(readFileSync(file, "utf8"), "project")[0].name);
-  it("stops a push given both a yes and a no to the guard: a yes always stops it", async () => {
-    const t = setup();
-    imported(t);
-    await t.run("push", "talk");
-    const r = await t.run("push", "talk", "--no-hand-edits", "--hand-edits");
-    assert.equal(r.code, 1);
-    assert.match(r.text, /^Your changes stay in v1 in Final Cut\./);
-    assert.equal(t.opened.length, 1);
-    t.done();
-  });
-  it("pushes again after saying once that Dropbox undid a push, and never hands Final Cut a project name twice", async () => {
-    const t = setup();
-    const { path } = imported(t);
-    await t.run("push", "talk");
-    rmSync(recordFile(path, 2));
-    const said = await t.run("push", "talk", "--no-hand-edits");
-    assert.deepEqual([said.code, said.said], [1, ["Dropbox undid this Mac's last change to Talk. Say it again."]]);
-    const again = await t.run("push", "talk", "--no-hand-edits");
-    assert.equal(again.code, 0, again.text);
-    assert.deepEqual(projects(t), ["Talk main v1 000001", "Talk main v2 000001"]);
-    t.done();
-  });
-  it("says Final Cut Pro could not be opened when open fails, and not that it was shown", () => {
-    assert.throws(() => openApp("Final Cut Pro", "/x.fcpxml", () => ({ status: 1, stderr: "Unable to find application named 'Final Cut Pro'\n" })), { message: "Final Cut Pro could not be opened (Unable to find application named 'Final Cut Pro')" });
-    assert.doesNotThrow(() => openApp("Final Cut Pro", "/x.fcpxml", () => ({ status: 0, stderr: "" })));
+  const imported = (t) => t.episode("2026-10-13 Talk (Mac Studio)");
+  it("says an app could not be opened when open fails", () => {
+    assert.throws(() => openApp("QuickTime Player", "/x.mp4", () => ({ status: 1, stderr: "Unable to find application named 'QuickTime Player'\n" })), { message: "QuickTime Player could not be opened (Unable to find application named 'QuickTime Player')" });
+    assert.doesNotThrow(() => openApp("QuickTime Player", "/x.mp4", () => ({ status: 0, stderr: "" })));
   });
   it("retry has the late check made that this Mac still owes an imported video, whose import stopped (PR 19's re-review, N19)", async () => {
     const t = setup();
@@ -788,26 +571,8 @@ describe("what the final review found in edit.js", () => {
 
 describe("what the lead's review of PR 11 found in edit.js", () => {
   const FOLDER = "2026-10-13 Talk (Mac Studio)";
-  const imported = (t) => {
-    const v0 = fcpxml({ video: join(t.episodes, FOLDER, "Talk.mov"), facts: { duration: 120, frameRate: "30000/1001", width: 1280, height: 720, hasAudio: true }, ranges: [{ start: 0, end: 10 }], src: relativeUrl("../Talk.mov") });
-    const made = t.episode(FOLDER, {}, { "Talk.mov": 5, "edit/main.v0.fcpxml": Buffer.byteLength(v0) });
-    writeFileSync(join(made.path, "edit", "main.v0.fcpxml"), v0);
-    return made;
-  };
+  const imported = (t) => t.episode(FOLDER);
   const OFFLINE = (t, path) => `So that Dropbox keeps this episode on this Mac, Control-click its folder in Finder and choose Make available offline: ${path}`;
-  it("1. lists no library a Final Cut left behind, with its .fcpcache link to itself and its linked media", async () => {
-    const t = setup();
-    const library = libraryFor(t.home, FOLDER);
-    mkdirSync(join(library, "Event", "Original Media"), { recursive: true });
-    writeFileSync(join(library, "Event", "render"), "x".repeat(2 * 2 ** 20));
-    symlinkSync(".", join(library, ".fcpcache"));
-    writeFileSync(join(t.dir, "outside.mov"), "x".repeat(5 * 2 ** 20));
-    symlinkSync(join(t.dir, "outside.mov"), join(library, "Event", "Original Media", "Talk.mov"));
-    const r = await t.run("episodes");
-    assert.equal(r.code, 0, r.text);
-    assert.doesNotMatch(r.text, /fcpbundle/, r.text);
-    t.done();
-  });
   it("5. lists an episode written by a newer BRIMM Video Studio by its short id alone, without reading its fields", async () => {
     const t = setup();
     const { path } = imported(t);
@@ -832,33 +597,6 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
     assert.ok(!again.said.includes(OFFLINE(t, path)), again.text);
     t.done();
   });
-  it("6. says the offline step at a push that comes before any open on this Mac", async () => {
-    const t = setup();
-    const { path } = imported(t);
-    const pushed = await t.run("push", "talk");
-    assert.ok(pushed.said.includes(OFFLINE(t, path)), pushed.text);
-    const opened = await t.run("open", "talk");
-    assert.ok(!opened.said.includes(OFFLINE(t, path)), opened.text);
-    t.done();
-  });
-  it("11. writes a push's record into Dropbox by the rule, as a clone", async () => {
-    const t = setup();
-    const { path } = imported(t);
-    await t.run("push", "talk");
-    assert.ok(t.clones.includes(recordFile(path, 2)), t.clones.join("\n"));
-    t.done();
-  });
-  it("12. still asks about v1 after saying Dropbox undid a push, when the push says nothing of hand edits", async () => {
-    const t = setup();
-    const { path } = imported(t);
-    await t.run("push", "talk");
-    rmSync(recordFile(path, 2));
-    await t.run("push", "talk");
-    const r = await t.run("push", "talk");
-    assert.deepEqual([r.code, r.said], [1, ['Did you change v1 of Talk in Final Cut since it was shown? Say "no changes" to show it again. If you did change it, say so.']]);
-    assert.equal(t.opened.length, 1);
-    t.done();
-  });
   it("19. finds a folder by its exact name however its accents are written, and episodes shows each one's short id", async () => {
     const t = setup();
     t.episode("2026-10-13 Café talk (Mac Studio)", { name: { text: "Café talk", placeholder: true } });
@@ -874,13 +612,6 @@ describe("what the lead's review of PR 11 found in edit.js", () => {
     mkdirSync(join(t.episodes, "2026-10-14 Talk (Mac Studio)"), { recursive: true });
     const ctx = contextFor({ ...t.deps, say: () => {} });
     assert.equal(findEpisode(ctx, "talk").name, FOLDER);
-    t.done();
-  });
-  it("21. ends a push of an episode written by a newer BRIMM Video Studio with 1", async () => {
-    const t = setup();
-    const { path } = imported(t);
-    writeFileSync(recordFile(path, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: "e-20261013-000001", rev: 2 }));
-    assert.equal((await t.run("push", "talk")).code, 1);
     t.done();
   });
 });
@@ -990,77 +721,6 @@ describe("the lead's last check of PR 11, in edit.js", () => {
     const r = await t.run("bring", "--now", "2026-10-13 Talk (Mac Studio)");
     assert.deepEqual([r.code, r.said], [1, ["Another run is taking over the lock of 2026-10-13 Talk (Mac Studio); try again in a few seconds."]]);
     t.done();
-  });
-});
-
-describe("what phase 0 settled about pushing to Final Cut", () => {
-  const FOLDER = "2026-10-13 Talk (Mac Studio)";
-  const imported = (t, more = {}) => {
-    const v0 = fcpxml({ video: join(t.episodes, FOLDER, "Talk.mov"), facts: { duration: 120, frameRate: "30000/1001", width: 1280, height: 720, hasAudio: true }, ranges: [{ start: 0, end: 10 }], src: relativeUrl("../Talk.mov") });
-    const made = t.episode(FOLDER, more, { "Talk.mov": 5, "edit/main.v0.fcpxml": Buffer.byteLength(v0) });
-    writeFileSync(join(made.path, "edit", "main.v0.fcpxml"), v0);
-    return made;
-  };
-  const events = (t) => t.opened.map(([, file]) => tags(readFileSync(file, "utf8"), "event")[0].name);
-  /** A library as Final Cut makes it when it opens a push, with its Settings.plist as `settings` says, read by a stand-in. */
-  const library = (t, settings) => {
-    mkdirSync(libraryFor(t.home, FOLDER), { recursive: true });
-    t.deps.readPlist = (file) => (file === join(libraryFor(t.home, FOLDER), "Settings.plist") ? settings : null);
-  };
-  it("puts every push of an episode in one event, named for the episode folder (A4)", async () => {
-    const t = setup();
-    imported(t);
-    await t.run("push", "talk");
-    await t.run("push", "talk", "--no-hand-edits");
-    assert.deepEqual(events(t), [FOLDER, FOLDER]);
-    t.done();
-  });
-  it("takes a version above any this Mac has handed Final Cut: a record at v2 and a copy of v3 give v4 (A4c)", async () => {
-    const t = setup();
-    const pushes = [1, 2].map((v) => ({ v, at: "2026-10-13T10:00:00-05:00", on: "Mac Studio", file: `edit/main.v${v}.mac-studio.fcpxml`, project: `Talk main v${v} 000001` }));
-    imported(t, { main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed: pushes, base: null } });
-    mkdirSync(join(t.home, "BRIMM Video Work", FOLDER, "pushed"), { recursive: true });
-    writeFileSync(join(t.home, "BRIMM Video Work", FOLDER, "pushed", "main.v3.mac-studio.fcpxml"), "<fcpxml/>");
-    const r = await t.run("push", "talk", "--no-hand-edits");
-    assert.equal(r.code, 0, r.text);
-    assert.deepEqual(t.opened.map(([, file]) => tags(readFileSync(file, "utf8"), "project")[0].name), ["Talk main v4 000001"]);
-    t.done();
-  });
-  it("says nothing about backups at a push or an open of a library left on Final Cut's default, which is where its backups go (B4)", async () => {
-    const t = setup();
-    imported(t);
-    t.deps.readPlist = () => null;
-    const first = await t.run("push", "talk");
-    library(t, { backupsEnabled: true });
-    const pushed = await t.run("push", "talk", "--no-hand-edits");
-    const opened = await t.run("open", "talk");
-    for (const r of [first, pushed, opened]) assert.ok(!/backup/i.test(r.text), r.text);
-    t.done();
-  });
-  it("says nothing of backups once the library names where they go, and nothing at an open before there is a library", async () => {
-    const t = setup();
-    imported(t);
-    const before = await t.run("open", "talk");
-    assert.ok(!before.text.includes("Backups"), before.text);
-    library(t, { backupLocation: "Ym9va21hcms=", backupsEnabled: true });
-    const pushed = await t.run("push", "talk");
-    const opened = await t.run("open", "talk");
-    assert.ok(!pushed.text.includes("Backups") && !opened.text.includes("Backups"), pushed.text + opened.text);
-    t.done();
-  });
-});
-
-describe("reading a library's Settings.plist", () => {
-  it("lists its keys, bookmark data and all, which plutil cannot turn into JSON, and is null with no file", { skip: process.platform !== "darwin" ? "plutil is on a Mac only" : false }, () => {
-    const dir = mkdtempSync(join(tmpdir(), "brimm-plist-"));
-    const file = join(dir, "Settings.plist");
-    writeFileSync(file, `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>backupLocation</key><data>Ym9va21hcms=</data><key>backupsEnabled</key><true/><key>libraryID</key><string>X</string></dict></plist>
-`);
-    assert.deepEqual(readPlist(file), { backupLocation: true, backupsEnabled: true, libraryID: true });
-    assert.equal(readPlist(join(dir, "none.plist")), null);
-    rmSync(dir, { recursive: true, force: true });
   });
 });
 

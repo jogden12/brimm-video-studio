@@ -393,15 +393,3 @@ export function graphicCuesInPlan(cues, plan, words, { older = false } = {}) {
     return { cue, at: { start: list[place.first].start, end: list[place.last].end }, kept: whole };
   });
 }
-
-/** The notes a Final Cut file gets for a cut plan's cues, [{at, text}]: `Graphic idea: <show>` at the moment the first word of
-    each cue starts, worded so that nobody takes it for more than an idea. A note is made only for a cue placed wholly in kept
-    words: today's notes keep only kept phrases, and a note in a cut would land on a join, as if it belonged there (fcpxml.js).
-    An older plan's ideas are placed on their own phrases (graphicCuesInPlan `older`), so they have the notes they always had.
-    `words` are the episode's, as they are said (clock.js heardWords), each {w, start, end} or {text, start, end}. */
-export function cueMarkers(plan, words) {
-  const older = !Array.isArray(plan?.claude?.graphicCues);
-  return graphicCuesInPlan(graphicCuesOfPlan(plan), plan, words, { older })
-    .filter(({ kept }) => kept)
-    .map(({ cue, at }) => ({ at: at.start, text: `Graphic idea: ${oneLine(cue.show)}` }));
-}

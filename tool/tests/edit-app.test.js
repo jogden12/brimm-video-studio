@@ -521,14 +521,14 @@ describe("app: what the bring it starts says when it is done", () => {
       read.push(path);
       brought = true;
     };
-    // A command that gives the bring files (push … reel gives a Reel's clip) has only those brought over.
+    // A command that gives the bring files (a Reel's clip, once) has only those brought over.
     assert.equal((await on(t.ctx.deps, "bring", "--now", FOLDER, share, "--asked-by", "app")).code, 0);
     assert.deepEqual([read, nextOf(t).made], [[join(found.folder, share)], [share]]);
     assert.equal(nextOf(t).next, `Every file of ${NAME} is here. Say "open ${NAME} in HyperFrames" again.`);
     t.done();
   });
   it("takes any other asker, or none, for open: only app has words of its own", async () => {
-    for (const asked of [["--asked-by", "open"], ["--asked-by", "push"], ["--asked-by"], ["--asked-by", ""]]) {
+    for (const asked of [["--asked-by", "open"], ["--asked-by", "reel"], ["--asked-by"], ["--asked-by", ""]]) {
       const { t } = world();
       offline(t);
       assert.equal((await on(t.ctx.deps, "bring", "--now", FOLDER, ...asked)).code, 0, asked.join(" "));

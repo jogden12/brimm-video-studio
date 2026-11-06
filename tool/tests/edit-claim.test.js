@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { editMain, CLAIM_WAIT_MS } from "../edit.js";
 import { claimed, localStamp, recordFile, recordText, shown } from "../episode.js";
 import { setup, episodeFor, reread, otherMac, EDITED, FOLDER, NAME } from "./episodes.js";
+import { episode } from "./phase4.js";
 
 /** Run a command of edit.js on a Mac, by its deps: { code, text }, with what it said. */
 async function on(deps, ...argv) {
@@ -165,12 +166,12 @@ describe("the claim", () => {
     assert.equal(reread(found).editing.by, "Mac Studio");
     t.done();
   });
-  it("name, title, a Reel's title, reel drop, push and finish refuse while the other Mac has it, and write nothing", async () => {
+  it("name, title, a Reel's title, reel drop and finish refuse while the other Mac has it, and write nothing", async () => {
     const t = setup();
     const found = episodeFor(t, { record: { ...EDITED, editing: HERS } });
     const held = `Sallie's laptop has ${NAME} open. Carry on there. Nothing was changed.`;
     for (const argv of [["name", FOLDER, "Pricing"], ["title", FOLDER, "--words", "Price it right", "--approve", "--change"], ["title", FOLDER, "reel", "1", "--words", "Costs first"],
-      ["reel", "drop", FOLDER, "2"], ["push", FOLDER], ["push", FOLDER, "reel", "1", "--no-hand-edits"], ["finish", FOLDER], ["finish", FOLDER, "--yes"]]) {
+      ["reel", "drop", FOLDER, "2"], ["finish", FOLDER], ["finish", FOLDER, "--yes"]]) {
       const r = await on(t.ctx.deps, ...argv);
       assert.deepEqual([r.code, r.text.split("\n").pop()], [1, held], argv.join(" "));
     }
@@ -180,6 +181,15 @@ describe("the claim", () => {
     assert.equal((await on(t.ctx.deps, "title", FOLDER)).code, 0);
     assert.equal((await on(t.ctx.deps, "title", FOLDER, "reel", "1")).code, 0);
     t.done();
+  });
+  it("still lists what there is while the other Mac has it: the spellings and Claude's ideas for graphics", async () => {
+    for (const argv of [["spell", FOLDER], ["graphic", FOLDER, "ideas"]]) {
+      const { t, found } = episode({ editing: HERS });
+      const r = await on(t.ctx.deps, ...argv);
+      assert.equal(r.code, 0, `${argv.join(" ")}: ${r.text}`);
+      assert.equal(reread(found).rev, 1);
+      t.done();
+    }
   });
   it("lets an episode nobody has open be changed without opening it first, as before", async () => {
     const t = setup();
@@ -206,58 +216,6 @@ describe("the claim", () => {
     assert.equal(refused.text, "Mac Studio has Pricing talk open. Carry on there. Nothing was changed.");
     assert.equal(reread(found).editing.by, "Mac Studio");
     assert.ok(!existsSync(join(found.folder, "record", "0003.json")));
-    t.done();
-  });
-});
-
-describe("the guard, with the other Mac's answer", () => {
-  /** The made-up episode as Mac Studio handed it over, with `answers`. */
-  const handedOver = (t, answers) => episodeFor(t, { record: { ...EDITED, released: { at: "2026-10-20T13:00:00-05:00", by: "Mac Studio", files: {}, answers } } });
-  it("on the other Mac, a push asks nothing when the first Mac said no changes at that version", async () => {
-    const t = setup();
-    const found = handedOver(t, { "reel 1": { v: 1, said: "no changes" } });
-    const her = otherMac(t);
-    assert.equal((await on(her.deps, "open", FOLDER)).code, 0);
-    const r = await on(her.deps, "push", FOLDER, "reel", "1");
-    assert.equal(r.code, 0, r.text);
-    const pushed = reread(found).reels[0].pushed;
-    assert.deepEqual([pushed.length, pushed[1].v, pushed[1].on], [2, 2, "Sallie's laptop"]);
-    t.done();
-  });
-  it("on the other Mac, a push refuses when the first Mac said its changes stay there, even with --no-hand-edits", async () => {
-    const t = setup();
-    const found = handedOver(t, { "reel 1": { v: 1, said: "changes stay on Mac Studio" } });
-    const her = otherMac(t);
-    assert.equal((await on(her.deps, "open", FOLDER)).code, 0);
-    const stay = `The changes to v1 of reel 1 stay on Mac Studio, in its Final Cut library: Mac Studio said so when it handed this over. Finish that part on Mac Studio, or start again from v1 without them (say "go ahead without Mac Studio's changes").`;
-    for (const flags of [[], ["--no-hand-edits"]]) {
-      const r = await on(her.deps, "push", FOLDER, "reel", "1", ...flags);
-      assert.deepEqual([r.code, r.text], [1, stay], flags.join(" "));
-    }
-    assert.equal(reread(found).reels[0].pushed.length, 1);
-    const r = await on(her.deps, "push", FOLDER, "reel", "1", "--without-other-macs-changes");
-    assert.equal(r.code, 0, r.text);
-    assert.deepEqual(reread(found).reels[0].pushed.map((p) => [p.v, p.on]), [[1, "Mac Studio"], [2, "Sallie's laptop"]]);
-    t.done();
-  });
-  it("on the other Mac, takes no answer given for an older version", async () => {
-    const t = setup();
-    const v2 = { v: 2, at: "2026-10-20T12:00:00-05:00", on: "Mac Studio", file: "edit/x.v2.mac-studio.fcpxml", project: "Pricing- what to charge- reel 1 v2 3fa9c1" };
-    const found = episodeFor(t, { record: { ...EDITED, reels: [{ ...EDITED.reels[0], pushed: [...EDITED.reels[0].pushed, v2] }, ...EDITED.reels.slice(1)], released: { at: "2026-10-20T13:00:00-05:00", by: "Mac Studio", files: {}, answers: { "reel 1": { v: 1, said: "no changes" } } } } });
-    const her = otherMac(t);
-    assert.equal((await on(her.deps, "open", FOLDER)).code, 0);
-    const r = await on(her.deps, "push", FOLDER, "reel", "1");
-    assert.equal(r.code, 1);
-    assert.match(r.text, /^v2 of reel 1 was shown on Mac Studio, and Mac Studio has not said whether it was changed there\./);
-    assert.equal(reread(found).reels[0].pushed.length, 2);
-    t.done();
-  });
-  it("on the Mac that pushed last, asks as before", async () => {
-    const t = setup();
-    episodeFor(t, { record: { ...EDITED, editing: { by: "Mac Studio", since: "2026-10-20T14:00:00-05:00" } } });
-    const r = await on(t.ctx.deps, "push", FOLDER, "reel", "1");
-    assert.equal(r.code, 1);
-    assert.match(r.text, /^Did you change v1 of /);
     t.done();
   });
 });

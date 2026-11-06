@@ -916,62 +916,6 @@ describe("reels: how to make one", () => {
   });
 });
 
-describe("push and the changes on a Reel: one HyperFrames opened is a project there, not a timeline in Final Cut", () => {
-  const IN_HYPERFRAMES = `Reel 2 is a project in HyperFrames, not in Final Cut: say "${AGAIN}" to work on it there.`;
-  const FINAL_CUT_WORDS = [["push", FOLDER, "reel", "2"], ["captions", FOLDER, "reel", "2", "on"], ["text", FOLDER, "reel", "2"], ["graphic", FOLDER, "reel", "2"], ["preset", FOLDER, "reel", "2", "--look", "bright"], ["cut", FOLDER, "remove", "reel", "2", "--words", "welcome"]];
-  it("says so for `push` and for each change on a Reel, in place of the line for a Reel nobody made, and writes and opens nothing", async () => {
-    const { t, found } = suggested();
-    assert.equal((await app(t.ctx.deps, FOLDER, "reel", "2")).code, 0);
-    const before = [reread(found).rev, listAll(found.folder), t.opened];
-    for (const words of FINAL_CUT_WORDS) {
-      const r = await on(t.ctx.deps, ...words);
-      assert.deepEqual([r.code, r.said], [1, [IN_HYPERFRAMES]], words.join(" "));
-      assert.doesNotMatch(r.text, PLAIN);
-    }
-    assert.deepEqual([reread(found).rev, listAll(found.folder), t.opened], before);
-    t.done();
-  });
-  it("says so of a Reel she has dropped since, which is still a project there", async () => {
-    const { t } = suggested();
-    assert.equal((await app(t.ctx.deps, FOLDER, "reel", "2")).code, 0);
-    assert.equal((await on(t.ctx.deps, "reel", "drop", FOLDER, "2")).code, 0);
-    assert.deepEqual((await on(t.ctx.deps, "push", FOLDER, "reel", "2")).said, [IN_HYPERFRAMES]);
-    t.done();
-  });
-  it("tells her how to make a Reel nobody has opened on a Mac set up for HyperFrames, as `title` and `reels` do, and that BRIMM Video Studio cannot make it on one that is not", async () => {
-    // On a Mac set up for the app the way to make it is to open it; the line that brimm-video cannot make it on this Mac is for a Mac that is not set up.
-    const NOT_MADE_YET = `Reel 2 isn't made yet. Say "${AGAIN}" to make it.`;
-    for (const [set, said] of [[true, NOT_MADE_YET], [false, CANNOT_MAKE("Reel 2")]]) {
-      const { t, found } = suggested({ set });
-      const before = [reread(found).rev, listAll(found.folder)];
-      for (const words of FINAL_CUT_WORDS) {
-        const r = await on(t.ctx.deps, ...words);
-        assert.deepEqual([r.code, r.said], [1, [said]], `${set} ${words.join(" ")}`);
-        assert.doesNotMatch(r.text, set ? /cannot make Reel|on this Mac/ : /isn't made yet/, `${set} ${words.join(" ")}`);
-        assert.doesNotMatch(r.text, PLAIN);
-      }
-      assert.deepEqual([reread(found).rev, listAll(found.folder)], before, "nothing is written");
-      t.done();
-    }
-  });
-});
-
-describe("push and the changes on a Reel not picked: she is told how a Reel is picked now that `reel pick` is gone", () => {
-  const NOT_PICKED = (n) => `Reel ${n} is not picked.`;
-  it("says on a Mac set up for HyperFrames that opening it picks it, and on one that is not that nothing picks a Reel", async () => {
-    // Reel 2 of the made-up episode has crops (the import's candidate), so it is not one nobody has made: it is just not picked.
-    for (const [set, then] of [[true, `Opening it in HyperFrames picks it: say "${AGAIN}".`], [false, "Nothing on this Mac picks a Reel any more: ask Jason."]]) {
-      const { t } = world({ set });
-      for (const words of [["push", FOLDER, "reel", "2"], ["captions", FOLDER, "reel", "2", "on"]]) {
-        const r = await on(t.ctx.deps, ...words);
-        assert.deepEqual([r.code, r.said], [1, [`${NOT_PICKED(2)} ${then}`]], `${set} ${words.join(" ")}`);
-        assert.doesNotMatch(r.text, /Pick it first|reel pick/);
-      }
-      t.done();
-    }
-  });
-});
-
 describe("reel: pick is gone, and drop stays", () => {
   it("is the help and 2 for `reel pick`, whatever it is given, and writes nothing", async () => {
     for (const words of [["pick", FOLDER, "1"], ["pick", FOLDER, "1", "2"], ["pick", FOLDER], ["pick"], ["pick", "14", "--client-agreed"]]) {

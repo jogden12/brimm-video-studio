@@ -40,12 +40,10 @@ import { localDay, stamp } from "./shared/text.js";
 import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount, settled } from "./lib.js";
 import { runProgram, findTools, lockFile, takeLock, isRunning, lastLine, sizeOnDisk } from "./run.js";
 import { closingFrom, withoutClosingWords } from "./closing.js";
-import { probeArgs, factsOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, streamsOf, soundStream, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipFiles, waitingToCut } from "./cuts.js";
+import { probeArgs, factsOf, wordArgs, pauseArgs, wordsOf, pausesOf, phrasesOf, cutPlan, streamsOf, planText, keptSpans, roughRate, roughCutArgs, roughCaptions, cutOutputs, clipFiles, waitingToCut } from "./cuts.js";
 import { notesRequest, readNotes, clipRanges, pausesOfPlan } from "./notes.js";
 import { stillsArgs } from "./reframe.js";
-import { previewSteps, previewLimits } from "./reels.js";
-import { previewPath, reelCandidates, reelsFile, readReels, mergeCandidates, REELS_FILE } from "./reel-candidates.js";
-import { runGuarded } from "./guard.js";
+import { reelCandidates, reelsFile, readReels, mergeCandidates, REELS_FILE } from "./reel-candidates.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, LATE_CHECK_MS } from "./dropbox.js";
 import { episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
@@ -394,70 +392,6 @@ export async function facesIn(file, work, { run, tools, limit = 0 }) {
     // It is not JSON, and the line below says so.
   }
   return { why: "what the face finder printed could not be read" };
-}
-
-/** Make the preview of each of an episode's Reel candidates, in turn: in parts and then joined (previewSteps), each step by an
-    ffmpeg run under the watchdog with a preview's limits (runGuarded and previewLimits, or `deps.runGuarded` for a test), so
-    that no preview can grow without end. Resolves the candidates, each with `preview`, its path in the episode folder, when
-    it was made, or `failed`, why not, in plain words. One that cannot be made does not stop the others. A candidate with no
-    stretch already says why. The parts and their list are deleted once the join is over, whether or not it made the preview.
-    The preview is held in the run's folder, for the episode to be filed with it. `streams` names the picture and the sound
-    to take (streamsOf), as every other ffmpeg of the run is told. Nothing is thrown from here. */
-async function makePreviews(file, given, { facts, streams = null }, deps) {
-  const { progress = noProgress, log = () => {}, files, tools } = deps;
-  const guarded = deps.runGuarded || runGuarded;
-  const made = [];
-  for (const [i, candidate] of given.entries()) {
-    progress.step("Making the Reel previews", `Making the preview of Reel ${candidate.n} (${i + 1} of ${given.length})`);
-    if (!candidate.ranges.length) {
-      made.push(candidate);
-      continue;
-    }
-    const to = join(dirname(file), previewPath(candidate.n));
-    const writing = files.at(to);
-    let steps = null;
-    let why = "";
-    try {
-      steps = previewSteps({ video: file, ranges: candidate.ranges, out: writing, fps: roughRate(facts), duration: facts.duration, work: dirname(writing), size: { width: facts.width, height: facts.height }, streams, n: candidate.n });
-      for (const step of [...steps.parts, null, steps.join]) {
-        // The list of the parts is written just before the join.
-        if (!step) {
-          writeFileSync(steps.list.file, steps.list.text);
-          continue;
-        }
-        const r = await guarded(tools.ffmpeg, step.args, previewLimits(step.seconds));
-        if (r.stopped) why = `ffmpeg was stopped: ${r.stopped}`;
-        else if (r.code !== 0) why = `ffmpeg stopped (${lastLine(r.stderr)})`;
-        if (why) break;
-      }
-      if (!why && !existsSync(writing)) why = "ffmpeg made no file";
-    } catch (e) {
-      why = `the work stopped (${String(e.code || e.message).replace(/\.$/, "")})`;
-    } finally {
-      for (const part of steps ? steps.cleanup : []) rmSync(part, { force: true });
-    }
-    if (why) {
-      rmSync(writing, { force: true });
-      log(`${basename(file)}: the preview of Reel ${candidate.n} could not be made: ${why}.`);
-      made.push({ ...candidate, failed: why });
-    } else {
-      files.done(to);
-      made.push({ ...candidate, preview: previewPath(candidate.n) });
-    }
-  }
-  return made;
-}
-
-/** What ffprobe wrote of the file's sound, as the Final Cut file says it: how many channels it has, and its samples a second.
-    The sound is the one the tool takes (soundStream): of an iPhone's clip, its AAC, and not the APAC listed beside it. Either
-    is left out when ffprobe does not say. */
-export function soundOf(printed) {
-  try {
-    const sound = soundStream(JSON.parse(printed).streams) || {};
-    return { audioChannels: Number(sound.channels) || undefined, audioRate: Number(sound.sample_rate) || undefined };
-  } catch (e) {
-    return {};
-  }
 }
 
 /** The first line of a light import's cut log: its times are the recording's, since no rough cut is made at a drop, and the plan
@@ -898,8 +832,6 @@ export async function importInto(file, into, deps) {
     differently. */
 const SAME_LENGTH = 0.1;
 
-/** A video's facts as they tell one video from another, in plain words, and whether two such are of one video. */
-export const described = (facts) => `${facts.duration} seconds, ${facts.width} by ${facts.height}${facts.fps ? ` at ${facts.fps}` : ""}`;
 export const sameVideo = (a, b) => a.width === b.width && a.height === b.height && a.fps === b.fps && Math.abs(a.duration - b.duration) <= SAME_LENGTH;
 
 /** Whether the first `length` bytes of the files at `a` and `b` are the same, read a megabyte at a time. False when either
@@ -1286,12 +1218,11 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
 
 /** Ask Claude again for an episode's Reel candidates (edit.js ask, detached): with the import's own request and locked-down
     call, of the cut plan the import wrote. Only its clips are taken: the rough cut is made, so its decisions are not applied,
-    and its clips are read on the plan as it is. The faces are found again for the crops, and each new candidate gets its
-    preview, as at the import. Every candidate and Reel already there stays as it is, with its number, its stretch and its
-    preview, and the new candidates are numbered on from the highest number ever given (mergeCandidates). When none is new,
-    nothing is written. Then the previews, reels.json and the
-    record go into the episode by the rule, and the late check is made after its wait. When Claude cannot be asked, or picks
-    nothing, nothing is changed. `found` is {folder, record}; `deps` as the import's, with `home`, `settings` and `wait`.
+    and its clips are read on the plan as it is. The faces are found again for the crops. A new candidate has no preview: only the Final
+    Cut days made them. Every candidate and Reel already there stays as it is, with its number, its stretch and its preview if it has
+    one, and the new candidates are numbered on from the highest number ever given (mergeCandidates). When none is new, nothing is
+    written. Then reels.json and the record go into the episode by the rule, and the late check is made after its wait. When Claude
+    cannot be asked, or picks nothing, nothing is changed. `found` is {folder, record}; `deps` as the import's, with `home`, `settings` and `wait`.
     Resolves the detached run's result: {ok, made, failed, next}. */
 /** Why the import of the episode whose record is `record` still holds its video, in plain words, with what to do: its
     status in Episodes/.importing/ under `root` says, at `now`, that it is at work on either Mac (its own late check to come
@@ -1439,12 +1370,11 @@ export async function askAgain({ folder, record }, deps) {
   const work = join(runsFolder(deps.home || studioHome()), `ask-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
   try {
-    // ffprobe is asked which streams the video has, so that each preview takes the picture and the sound a run takes.
+    // ffprobe is asked whether the video can be read at all.
     const probed = join(work, "facts.json");
     const probe = await deps.run(deps.tools.ffprobe, probeArgs(video, probed));
     const printed = probe.code === 0 && existsSync(probed) ? readFileSync(probed, "utf8") : "";
     if (!printed || !factsOf(printed)) return { ok: false, made: [], failed: [`${name} could not be read (${lastLine(probe.stderr)}).`], next: as };
-    const streams = streamsOf(printed);
     const asked = await askClaude(name, plan, plan.facts, work, deps);
     if (!asked.read) return { ok: false, made: [], failed: [`Claude could not be asked (${asked.why}).`], next: as };
     // Claude is asked what it was asked at the import (askClaude), and of its reply only the clips are used. Its decisions, its notes
@@ -1469,21 +1399,15 @@ export async function askAgain({ folder, record }, deps) {
     const merged = mergeCandidates({ old: read ? read.reels : null, fresh, record });
     if (!merged.added.length) return { ok: true, made: [], failed: [...said, ...merged.ignored], next: `Every clip Claude picked has words of a Reel or a candidate already there. ${as}` };
     const files = filesOf(work, { name, hold: true, log });
-    const made = await makePreviews(video, merged.added, { facts: plan.facts, streams }, { ...deps, files });
-    const candidates = merged.candidates.map((c) => made.find((m) => m.n === c.n) || c);
-    const entries = merged.entries.map((e) => {
-      const m = made.find((c) => c.n === e.n);
-      return m ? { ...e, files: m.preview ? [m.preview] : [] } : e;
-    });
+    const { candidates, entries } = merged;
     files.text(reelsAt, JSON.stringify(reelsFile({ video: name, by: "ask", made: localStamp(deps.now ? new Date(deps.now()) : new Date()), candidates, highest: merged.highest }), null, 2) + "\n");
     // Nothing goes in when the record or the list changed while Claude was asked: the candidates were worked out from them as
     // they were.
     const now = readEpisode(folder);
     const nowListed = existsSync(reelsAt) ? readFileSync(reelsAt, "utf8") : null;
     if (!now.record || now.record.rev !== record.rev || nowListed !== listed) return { ok: false, made: [], failed: [...said, "This episode changed while Claude was asked, so nothing was changed. Ask again."], next: as };
-    const madeAt = [...made.filter((c) => c.preview).map((c) => join(folder, c.preview)), reelsAt];
-    const into = await intoEpisode(video, madeAt, work, { ...deps, files }, { change: (r) => ({ ...r, reels: entries }), expectRev: record.rev });
-    const failed = [...said, ...merged.ignored, ...made.filter((c) => c.failed).map((c) => `The preview of Reel ${c.n} could not be made: ${c.failed}.`), ...into.problems.map((p) => `${p}.`), ...into.notes.map((n) => `${n}.`)];
+    const into = await intoEpisode(video, [reelsAt], work, { ...deps, files }, { change: (r) => ({ ...r, reels: entries }), expectRev: record.rev });
+    const failed = [...said, ...merged.ignored, ...into.problems.map((p) => `${p}.`), ...into.notes.map((n) => `${n}.`)];
     // When the put was undone, no Reel was made; and when reels.json could not be put back, the list is not as it was.
     const kept = into.kept.find((k) => basename(k) === REELS_FILE && basename(dirname(k)) === "put back");
     const oursStays = existsSync(reelsAt) && sameBytes(reelsAt, files.at(reelsAt));
@@ -1491,7 +1415,7 @@ export async function askAgain({ folder, record }, deps) {
       : !into.put && oursStays ? `${REELS_FILE} in the episode is this run's new list, which its record does not list.${kept ? ` The one it lists is kept at ${kept}: ask Jason to put it back.` : ""}` : "";
     if (!into.put) return { ok: false, made: [], failed, next: lostList || as };
     const next = into.problems.length ? lostList || `Not everything is as this Mac put it: what is not done says which${into.kept.length ? ", and where this Mac's copies are kept" : ""}.` : "Say \"show me the Reels\" to see them.";
-    return { ok: !into.problems.length && !made.some((c) => c.failed), made: merged.added.map((c) => `Reel ${c.n}`), failed, next };
+    return { ok: !into.problems.length, made: merged.added.map((c) => `Reel ${c.n}`), failed, next };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

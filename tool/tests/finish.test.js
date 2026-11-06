@@ -2524,12 +2524,11 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
   });
 });
 
-const LEGACY_ADD = '"Sallie" is spelled "Sally" now, in every timeline\'s captions. Say "show it in Final Cut" to see it. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If the main video shows captions on screen, they keep the old spelling until it is shown in Final Cut, Shared and finished again.';
+const LEGACY_ADD = '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If the main video shows captions on screen, they keep the old spelling. Say "open it in HyperFrames" to edit it there, from the recording.';
 // A short video as today's import makes one, whose record is from the Final Cut days (its finished parts name no project): its spell says
-// what every Final Cut video's said, with the way to see it, and what is kept until it is Shared again. (Record words of the spell are
-// F7's to retire; they are read from the old record here.)
+// the HyperFrames words, as every video's does now, and nothing of Final Cut.
 describe("spell, after a finish, for a short video as today's import makes one", () => {
-  it("says what a Final Cut video's spell says: the way to see it in Final Cut, and the hand-off made again", async () => {
+  it("says the HyperFrames words for a part the Final Cut days finished, and the hand-off made again", async () => {
     for (const version of [undefined, 2]) {
       const t = setup();
       if (version) handoffVersion(t, version);
@@ -2544,7 +2543,8 @@ describe("spell, after a finish, for a short video as today's import makes one",
       assert.deepEqual([add.code, add.text], [0, LEGACY_ADD]);
       const drop = await command(t, "spell", FOLDER, "drop", "Sallie");
       assert.equal(drop.code, 0, drop.text);
-      assert.match(drop.text, /^"Sallie" is as the transcriber writes it again\. Say "show it in Final Cut" to see it\. /);
+      assert.match(drop.text, /^"Sallie" is as the transcriber writes it again\. /);
+      assert.doesNotMatch(add.text + drop.text, /Final Cut|timeline|show it/);
       t.done();
     }
   });

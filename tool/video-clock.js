@@ -14,7 +14,7 @@ import { saidWords } from "./project.js";
       (project.js saidWords, as the HyperFrames project's transcript has them) and spelled as the record spells them; `plan` is
       its cut plan as stored, or {} when there is none to read (its ideas for graphics and phrases are in it); `span` for a Reel is
       { from, to } in seconds of the video.
-    - { coming, bring } while Dropbox has not brought a file over yet, the way timeline.js says of a version's file.
+    - { coming, bring } while Dropbox has not brought a file over yet, as edit.js clockRead says it.
     - { why } when the words file is missing or cannot be read, or the Reel is not in reels.json. */
 export function videoClock(found, ctx, part = "main") {
   const { record, folder } = found;

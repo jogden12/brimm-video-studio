@@ -343,7 +343,7 @@ export function lookForExports(input, answers = {}) {
 
 // --- What is read from the disk ---
 
-/** What finish says of a raw video that was never opened in HyperFrames, (architecture 4.1, plan PR 7). `finish` says it on a Mac set up for the app; on any other it says the Mac is not set up (app.js NOT_SET_UP). */
+/** What finish says of a raw video that was never opened in HyperFrames (architecture 4.1, plan PR 7). `finish` says it on a Mac set up for the app; on any other it says the Mac is not set up (app.js NOT_SET_UP). */
 export const NEVER_OPENED = 'The main video was never opened in HyperFrames. Say "open it in HyperFrames" first, edit it there, export it on This Mac, then say "hand it off".';
 /** What finish says when this Mac will not let it look in Downloads: macOS asks once, and keeps the answer. */
 export const DOWNLOADS_UNREADABLE = 'This Mac does not let BRIMM Video Studio look in the Downloads folder, where HyperFrames puts its exports. Allow it in System Settings, under Privacy & Security, Files and Folders, then say "hand it off" again.';
