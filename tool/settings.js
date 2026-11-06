@@ -480,6 +480,13 @@ export function folderWords(path, home) {
   return resolve(path).split("/").filter(Boolean).join(" › ");
 }
 
+/** Whether the folders `a` and `b` are the same, or one is inside the other, by their real paths, letter case folded. */
+function sameOrNested(a, b) {
+  const x = fold(realOf(resolve(a)));
+  const y = fold(realOf(resolve(b)));
+  return underFolded(x, y) || underFolded(y, x);
+}
+
 /** What is wrong with a folder picked as this Mac's drop folder, in plain words: "" when nothing is. It is refused when it is, is
     inside, or holds Episodes, References, Drop or Unedited Video in BRIMM Video (`root`); ~/BRIMM Video Work, but for Drop in it; her
     chat's folder or the workshop; Zoom's recordings folder (`zoom`); Downloads; or the exports folder (`exports`); when it is not a
@@ -491,10 +498,12 @@ export function dropFolderFault(path, { home, root, exports = downloadsFolder(ho
   const holds = (p) => underFolded(real(p), me);
   const inside = (p) => underFolded(me, real(p));
   const cannot = (what) => `the drop folder cannot be ${what}, or inside it, or hold it`;
-  if (holds(root)) return "the drop folder cannot be BRIMM Video, or hold it";
+  if (holds(root)) return "the drop folder cannot be BRIMM Video, or inside it, or hold it";
   for (const name of ["Episodes", "References", "Drop", "Unedited Video"]) {
     if (inside(join(root, name)) || holds(join(root, name))) return cannot(`${name} in BRIMM Video`);
   }
+  // Anything else in BRIMM Video (Assets, which every call may read, or a new folder) is not gated whole: none is a drop folder.
+  if (inside(root)) return "the drop folder cannot be BRIMM Video, or inside it, or hold it";
   const work = workFolder(home);
   if ((inside(work) && !inside(defaultDropFolder(home))) || holds(work)) return "the drop folder cannot be BRIMM Video Work, or inside it but for Drop, or hold it";
   for (const [what, folder] of [["BRIMM Video Studio", studioFolder(home)], ["BRIMM Video Workshop", workshopFolder(home)], ["Zoom's recordings", zoom], ["Downloads", downloadsFolder(home)], ["the exports folder", exports]]) {
@@ -741,6 +750,17 @@ function set(home, rest, say) {
     const option = picked !== undefined ? `--drop-folder "${picked}"` : `--drop ${to === "Drop" ? to : `"${to}"`}${local ? " --switch-back" : ""}`;
     say(`The drop folder is switched by the installer, which makes the new folder, marks it and points the import at it, after it has checked the old one. To see what it would do: ./install.sh --print --machine "${got.settings.machine}" ${option} "${got.settings.root}"`);
     return 1;
+  }
+  // An exports folder may not be, hold or be inside the drop folder: every export would be imported as a new video.
+  const exportsTo = values["--exports-folder"];
+  if (exportsTo !== undefined) {
+    const why = local
+      ? dropFolderFault(got.settings.dropPath, { home, root: got.settings.root, exports: exportsTo, zoom: zoomFolderOf(got.settings, home) })
+      : sameOrNested(exportsTo, dropFolderOf(got.settings, home)) ? "the drop folder cannot be the exports folder, or inside it, or hold it" : "";
+    if (why) {
+      say(`Not changed: ${why}.`);
+      return 1;
+    }
   }
   const changes = {};
   const lines = [];

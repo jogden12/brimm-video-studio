@@ -10,7 +10,7 @@ import { GATED_REFUSED, NEVER_REFUSED, NOT_NAMED, RUN_ALONE, WEB_HELD, WORKSHOP_
 import { LOCK_CHANGED } from "../loosened.js";
 import { HELD_NARROWED, HELD_REFUSED, clearStrictSeen, markChat, noteStrictSeen, untiedMark } from "../held.js";
 import { processTable } from "../chain.js";
-import { settingsFile, settingsMain, writeSettings } from "../settings.js";
+import { settingsFile, settingsMain, writeSettings, dropFolderFault } from "../settings.js";
 import { heldFolder } from "../scan.js";
 import { DRAWING, neverCaught } from "../never.js";
 import { LOCAL_ADDRESS, NUMERIC_ADDRESS } from "../fetchable.js";
@@ -865,6 +865,16 @@ describe("a drop folder this Mac picked is a gated place, strict lock and open l
     }
     const old = ctxOf(places());
     assert.deepEqual(await openDecision(input("Read", join(w.root, "Drop", "Mac Studio", "Talk.mov")), old), { decision: "deny", reason: GATED_REFUSED });
+  });
+  it("is never a folder in BRIMM Video outside its gated three, which the guard leaves open (Assets): dropFolderFault refuses each, so none is picked", async () => {
+    mkdirSync(join(w.root, "Assets", "In"), { recursive: true });
+    const facts = { home: w.home, root: w.root, exports: join(w.home, "Downloads"), zoom: join(w.home, "Documents", "Zoom") };
+    for (const folder of [join(w.root, "Assets"), join(w.root, "Assets", "In"), join(w.root, "Inbox")]) {
+      assert.equal(dropFolderFault(folder, facts), "the drop folder cannot be BRIMM Video, or inside it, or hold it", folder);
+    }
+    // The reason: a file in Assets is open to every call, even with it named as the drop folder.
+    const ctx = ctxOf(places(join(w.root, "Assets", "In")));
+    assert.equal((await openDecision(input("Read", join(w.root, "Assets", "In", "x.png")), ctx)).decision, "allow");
   });
   it("refuses a file in an episode's video folder on this Mac, and in the local status folder, as it does BRIMM Video Work", async () => {
     const ctx = ctxOf(places(join(w.home, "Desktop", "Drop")));

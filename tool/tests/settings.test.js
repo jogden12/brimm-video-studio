@@ -2471,6 +2471,23 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
       assert.equal(fault(join(home, "Downloads")), "the drop folder cannot be Downloads, or inside it, or hold it");
       t.done();
     });
+    it("refuses any folder in BRIMM Video, Assets and a new folder included, by dropFolderFault, write and plan", async () => {
+      const t = mac();
+      const inside = [join(t.root, "Assets"), join(t.root, "Assets", "In"), join(t.root, "Inbox")];
+      mkdirSync(join(t.root, "Assets", "In"), { recursive: true });
+      const facts = { home: t.home, root: t.root, exports: join(t.home, "Downloads"), zoom: join(t.home, "Documents", "Zoom") };
+      const before = t.held();
+      for (const path of inside) {
+        assert.equal(dropFolderFault(path, facts), "the drop folder cannot be BRIMM Video, or inside it, or hold it", path);
+        for (const command of ["plan", "write"]) {
+          t.said.length = 0;
+          assert.equal(await t.run(command, ...t.told, "--drop-folder", path), 1, `${command} ${path}`);
+          assert.deepEqual(t.said, ["Not written: the drop folder cannot be BRIMM Video, or inside it, or hold it."]);
+        }
+      }
+      assert.equal(t.held(), before);
+      t.done();
+    });
     it("takes the real path: a link to Downloads is Downloads", () => {
       const t = mac();
       symlinkSync(join(t.home, "Downloads"), join(t.home, "Desktop", "Get"));
@@ -2639,6 +2656,26 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
           assert.match(t.said[0], /^The drop folder is switched by the installer, which makes the new folder, marks it and points the import at it, after it has checked the old one\. To see what it would do: \.\/install\.sh --print --machine "Mac Studio" /);
           assert.equal(t.held(), before);
         }
+        t.done();
+      }
+    });
+    it("set --exports-folder refuses a folder that is, holds or is inside the drop folder, on a Mac with its own and on one without, and writes nothing", async () => {
+      const own = mac();
+      mkdirSync(own.desktop, { recursive: true });
+      writeSettings(own.home, { dropPath: own.desktop });
+      const plain = mac({ drop: "Drop" });
+      const dropbox = plain.folder("Drop");
+      for (const [t, drop] of [[own, own.desktop], [plain, dropbox]]) {
+        mkdirSync(join(drop, "in"), { recursive: true });
+        const before = t.held();
+        for (const path of [drop, join(drop, "in"), dirname(drop)]) {
+          t.said.length = 0;
+          assert.equal(await t.run("set", "--exports-folder", path), 1, path);
+          assert.deepEqual(t.said, ["Not changed: the drop folder cannot be the exports folder, or inside it, or hold it."], path);
+          assert.equal(t.held(), before);
+        }
+        t.said.length = 0;
+        assert.equal(await t.run("set", "--exports-folder", join(t.home, "Exports")), 0, t.said.join("\n"));
         t.done();
       }
     });

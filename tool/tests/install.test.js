@@ -2052,9 +2052,12 @@ describe("a drop folder of this Mac's own, asked what the installer would do (--
   it("refuses a drop folder it must not watch, with settings.js's plain words, before anything is changed", () => {
     const d = box();
     for (const [pick, why] of [
-      [() => d.root, "the drop folder cannot be BRIMM Video, or hold it"],
+      [() => d.root, "the drop folder cannot be BRIMM Video, or inside it, or hold it"],
       [() => join(d.root, "Drop", "Mac Studio"), "the drop folder cannot be Drop in BRIMM Video, or inside it, or hold it"],
       [() => join(d.root, "Episodes", "x"), "the drop folder cannot be Episodes in BRIMM Video, or inside it, or hold it"],
+      [() => join(d.root, "Assets"), "the drop folder cannot be BRIMM Video, or inside it, or hold it"],
+      [() => join(d.root, "Assets", "In"), "the drop folder cannot be BRIMM Video, or inside it, or hold it"],
+      [() => join(d.root, "Inbox"), "the drop folder cannot be BRIMM Video, or inside it, or hold it"],
       [(home) => `${home}/Downloads`, "the drop folder cannot be Downloads, or inside it, or hold it"],
       [(home) => `${home}/BRIMM Video Work`, "the drop folder cannot be BRIMM Video Work, or inside it but for Drop, or hold it"],
       [(home) => `${home}/BRIMM Video Studio/Drop`, "the drop folder cannot be BRIMM Video Studio, or inside it, or hold it"],
