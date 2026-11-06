@@ -2,8 +2,7 @@
 import { writeFileSync } from "node:fs";
 import { wordsOf, pausesOf, phrasesOf, cutPlan } from "../cuts.js";
 import { readNotes, applyDecisions, clipRanges } from "../notes.js";
-import { previewPath } from "../reels.js";
-import { reelCandidates, reelsFile, reelEntries } from "../reel-candidates.js";
+import { previewPath, reelCandidates, reelsFile, reelEntries } from "../reel-candidates.js";
 import { mainProject } from "../projects.js";
 import { cueMarkers } from "../graphic-cues.js";
 import { heardWords } from "../clock.js";

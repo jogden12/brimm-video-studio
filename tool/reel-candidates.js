@@ -10,7 +10,6 @@ import { gated } from "./gate.js";
 import { suggestionsOnClock, KEPT_IN_100 } from "./handoff-v2.js";
 import { spelled } from "./final-transcript.js";
 import { timelineAt } from "./clock.js";
-import { previewPath } from "./reels.js";
 
 /** A sum to the thousandth of a second: a computer's sums leave 3.136 + 2.068 a hair off 5.204. */
 const ms = (t) => Math.round(t * 1000) / 1000;
@@ -48,6 +47,7 @@ export function reelCandidates({ clips, plan, facts, stills }) {
 
 /** What the candidates' file is called in the episode folder, and where each preview is, relative to that folder. */
 export const REELS_FILE = "reels.json";
+export const previewPath = (n) => `previews/reel-${n}.mp4`;
 
 /** The layout of reels.json. It is raised only when its shape changes, and a reader refuses a higher one. Version 2 (spec
     2026-10-22, section 3, "reels.json version 2") adds the candidate a reading suggests: its stretches have no crops yet,

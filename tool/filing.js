@@ -96,7 +96,7 @@ export const thisCheckout = () => dirname(dirname(fileURLToPath(import.meta.url)
     folder; `made` are the files made of it, each where it belongs, and `at(to)` where its whole copy is in the run's own
     folder `work`; `fcpxml` is which of them is the Final Cut file, which goes into edit/main.v0.fcpxml; `facts` and
     `printed` are what ffprobe said; `kind` is the episode's kind; `read` is Claude's reply as it was read, or null; `reels`
-    are the record's Reels, made of the Reel candidates (reelEntries, in reels.js). A made file goes into the episode folder
+    are the record's Reels, made of the Reel candidates (reelEntries, in reel-candidates.js). A made file goes into the episode folder
     where it sits beside the video, "Talk.srt" or "previews/reel-1.mp4", and a folder it needs there is made. `deps` gives `episode` ({ root, machine, checkout, home }), and `clone`, `sameDisk`, `log`,
     `today`, `now`, `commit` and `rand` when a test gives others. A video the facts say has no sound (`facts.sound` is false; PR H5a)
     is filed with `video.sound` false in its record, and nothing else made of it (`made` is empty).

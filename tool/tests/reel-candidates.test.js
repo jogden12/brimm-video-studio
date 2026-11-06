@@ -6,9 +6,7 @@ import { wordsOf, pausesOf, phrasesOf, cutPlan } from "../cuts.js";
 import { fitReel } from "../reframe.js";
 import { readNotes, applyDecisions, clipRanges } from "../notes.js";
 import { TOLD, PAUSES } from "./fixtures.js";
-import { previewPath } from "../reels.js";
-import { reelCandidates, REELS_FILE, reelsFile, readReels, reelEntries, reelsText, mergeCandidates, notMadeWords } from "../reel-candidates.js";
-import { fcpxml } from "../fcpxml.js";
+import { previewPath, reelCandidates, REELS_FILE, reelsFile, readReels, reelEntries, reelsText, mergeCandidates, notMadeWords } from "../reel-candidates.js";
 
 /** A crop of a 1920x1080 picture, 606 wide, that starts `x` pixels in. */
 const crop = (x, found = true) => ({ x, y: 0, w: 606, h: 1080, found });

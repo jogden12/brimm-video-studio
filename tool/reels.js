@@ -145,9 +145,6 @@ export function previewSteps({ video, ranges, out, fps, duration, work, size, st
     3840x2160 at 771 MB, the slowest step a few seconds. */
 export const previewLimits = (seconds) => ({ most: 2 * 1024 * 1024 * 1024, limit: Math.round((60 + 5 * seconds) * 1000) });
 
-/** Where each preview is, relative to the episode folder. */
-export const previewPath = (n) => `previews/reel-${n}.mp4`;
-
 /** The size of a Reel, in pixels. */
 export const REEL_FRAME = { width: 1080, height: 1920 };
 

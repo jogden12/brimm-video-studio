@@ -3,7 +3,7 @@
 // exported makes this file fail at load. No assertion changes when a name moves: only the module it is imported from.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { REELS_FILE, readReels, reelsFile, reelEntries, mergeCandidates, reelCandidates, reelsText, uncropped, notMadeWords } from "../reel-candidates.js";
+import { REELS_FILE, previewPath, readReels, reelsFile, reelEntries, mergeCandidates, reelCandidates, reelsText, uncropped, notMadeWords } from "../reel-candidates.js";
 import { firstWordsMatch } from "../exports.js";
 import { keptWords, lengthOf, timelineAt, clockText } from "../clock.js";
 import { graphicCuesOf, graphicCuesOfPlan, graphicCuesOfRecord, graphicCuesAsk, graphicCuesInPlan, graphicCuesInReply, graphicCuesJson, reelGraphicCues, placeGraphicCues, keptIndexes, keptPhraseSpans, phraseSpans, cueTokens, GRAPHIC_CUE_KINDS, SHOT_KINDS, REEL_CUES_MOST, CLIP_CUES_MOST, REEL_EDGE_SLACK } from "../graphic-cues.js";
@@ -13,7 +13,8 @@ import { clipArgs, storyCuts, STORY_MAX, REEL_MIN, REEL_MAX, fitReel, storyParts
 describe("reel-candidates.js", () => {
   // The Reel candidates: moved out of reels.js, which keeps the previews and the Reel's project.
   it("still exports what the kept modules import", () => {
-    const names = { REELS_FILE, readReels, reelsFile, reelEntries, mergeCandidates, reelCandidates, reelsText, uncropped, notMadeWords };
+    // previewPath: readReels reads an old reels.json's preview names.
+    const names = { REELS_FILE, previewPath, readReels, reelsFile, reelEntries, mergeCandidates, reelCandidates, reelsText, uncropped, notMadeWords };
     for (const [name, value] of Object.entries(names)) assert.notEqual(value, undefined, `${name} is exported`);
   });
 });

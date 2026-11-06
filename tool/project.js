@@ -379,7 +379,7 @@ export function cutSuggestions(plan, transcript) {
 const middle = (word) => (word.start + word.end) / 2;
 const wordsIn = (transcript, { start, end }) => transcript.filter((word) => middle(word) >= start && middle(word) <= end);
 
-/** brimm/reel-suggestions.json (5.8): each Reel candidate of reels.json (reels.js reelCandidates), {n, title, why, first, last,
+/** brimm/reel-suggestions.json (5.8): each Reel candidate of reels.json (reel-candidates.js reelCandidates), {n, title, why, first, last,
     stretches}: its title and why Claude picked it, its first and last words, and its stretches in seconds of the recording, each
     with the ids of the first and last words it holds (null when it holds none). */
 export function reelSuggestions(candidates, transcript) {
