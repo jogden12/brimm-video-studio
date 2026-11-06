@@ -152,30 +152,58 @@ The last command makes the zip again, with the ticket stapled in.
 
 ### Where it stops, and what to do
 
-Each of these stops the run before it changes anything more.
+Each of these stops the run, says what this run changed, and goes on from there at the next double-click. The words in quotes are the app's own. A `$` word or a name in angle brackets stands for what the app fills in.
 
-- **Not set up as the switch left it.** The import is not "light", the drop folder is not "Drop", the hand-off version is not "2", or the checkout is neither brimm-video's nor Studio's. Tell Jason.
-- **Xcode's tools are not here.** Run `xcode-select --install`, then run the app again.
-- **Homebrew is not here.** Sallie runs Homebrew's install command from the app's message, and types her own password. Then run the app again.
-- **Node is missing or older than 22.** Run `brew install node` (or `brew upgrade node`), then run the app again.
-- **An import is running.** Wait until its window in the top right closes, then run the app again.
-- **Her drop folder holds files still to be imported.** The app says how many, and never names them. Let the import finish, then run the app again.
-- **Claude Code is not on this Mac.** Install it, then run the app again.
-- **Claude Code is still not signed in** after the offered sign-in. Run `claude auth login` in Terminal, then run the app again.
-- **A key exists at Studio's key place with another comment, or only one of its two files is there.** The app does not touch it. Tell Jason.
-- **`~/.ssh/config` already has a `Host github-brimm-video-studio` entry that is not Studio's.** The app does not change it. Tell Jason.
-- **GitHub's key on this Mac is not the one GitHub publishes.** Nothing is trusted. Tell Jason.
-- **`ssh` did not get GitHub's welcome, and did not say "Permission denied".** The app shows what ssh said. Tell Jason.
-- **Studio's code could not be copied.** The lines above say why. A half-made copy is taken away. Run the app again.
-- **GitHub's main does not hold the commit the app was made at.** Tell Jason: the app needs building again.
-- **The folder at Studio's place is not a clean copy of Studio on main at the app's commit.** The app does not touch it. Tell Jason.
-- **Studio's tests did not pass.** The lines from `ℹ tests` on say how many failed. Tell Jason.
-- **The installer's print refused** (a video in her drop folder, for one). Its words are shown. Nothing was run for real. Deal with what it says, then run the app again.
-- **Claude Code is not signed in**, as the installer's print sees it. Run `claude auth login`, then run the app again.
-- **Claude Code is still older than the installer needs** after `claude update`, or the Claude app's own copy is still older after Check for Updates. Tell Jason.
-- **The installer stopped.** Its last lines are shown. Tell Jason. Running the app again goes on from there.
-- **The setup stopped before its check of Claude** (no `From the background job:` line), or **the one-shot check agent is still there**. Tell Jason. The agent file would run at every login if left.
-- **HyperFrames could not be turned on.** The app shows what `settings.js` said. Tell Jason.
+An n (or Return alone, or a line that is not y) at any question also stops the run. So does anything but Return at a "Press Return when that's done" wait.
+
+Step 1, looking:
+
+- **"In Terminal, run: xcode-select --install, then run the app again."** Do that.
+- **Homebrew is not here.** "In Terminal, Sallie runs this (it asks for her password, which she types herself)", then Homebrew's install command. Run it, then run the app again.
+- **"Node is not on this Mac, and Studio needs 22 or later. Run: brew install node, then run the app again."** Do that.
+- **"Node here is <version>, and Studio needs 22 or later. Run: brew upgrade node, then run the app again."** Do that.
+- **"Her settings are not as the switch of 26 October left them"**, naming the import (should be "light"), the drop folder (should be "Drop"), the hand-off version (should be "2"), or the checkout (should be brimm-video's or Studio's). Tell Jason.
+- **"An import is running now. Wait until its window in the top right closes, then double-click Move to Studio again."** Do that.
+- **"Her checkout (<folder>) has no tool/settings.js to say where her drop folder is."** Tell Jason.
+- **"Her drop folder could not be found from her settings (settings.js show)."** Tell Jason.
+- **"Her drop folder holds <n> file(s) still to be imported."** The app never names them. Let the import finish, then run the app again.
+- **"Claude Code is not on this Mac. Install it, then run the app again."** Do that.
+- **"Claude Code is still not signed in."** after the offered sign-in. Run `claude auth login` in Terminal, then run the app again.
+
+Step 2, the key:
+
+- **"There is a file <key> but no <key>.pub beside it, and this app does not touch it."** Tell Jason.
+- **"There is a file <key>.pub but no <key>, and this app does not touch it."** Tell Jason.
+- **"There is already a key at <key> with another comment ("<comment>"), so it is not Studio's. This app does not touch it."** Tell Jason.
+- **"The key could not be made."** Tell Jason.
+- **"~/.ssh/config already has a "Host github-brimm-video-studio" entry that is not the one Studio needs. This app does not change it."** Tell Jason.
+- **"GitHub's key on this Mac isn't the one GitHub publishes (<fingerprint>). Nothing is trusted until that is looked into: tell Jason."** Tell Jason.
+- **"ssh did not get GitHub's welcome for this key. It said: <what ssh said>"** Tell Jason. (A "Permission denied" is not a stop: the app says GitHub does not know the key yet and waits again.)
+
+Step 3, the code:
+
+- **"<folder> is there, but it isn't a copy of Studio's code (it has no origin). This app does not touch it."** Tell Jason.
+- **"<folder> is there, but it comes from <origin>, not from Studio's repository (<url>). This app does not touch it."** Tell Jason.
+- **"<folder> has changes that aren't saved. This app does not touch it; tell Jason."** Tell Jason.
+- **"<folder> isn't on main (it is on <branch>)."** Or "it is not on any branch". The app does not touch it. Tell Jason.
+- **"<folder> is at <commit>, and this app was made at <commit>. This app does not move it; tell Jason."** Tell Jason: the app may need building again.
+- **"Studio's code could not be copied from GitHub (the lines above say why)."** The half-made copy is taken away. Run the app again, or tell Jason if it happens again.
+- **"GitHub's main doesn't hold the commit this app was made at (<commit>). Tell Jason."** The app needs building again.
+- **"Studio's code could not be put at the app's commit (<commit>)."** The half-made copy is taken away. Tell Jason.
+- **"Studio's tests did not pass at <commit>. Tell Jason; the lines above, from ℹ tests on, say how many failed."** Tell Jason.
+
+Step 5, the installer (step 4 only waits, and stops on an n):
+
+- **"<folder>/tool/install.sh is not there."** Tell Jason.
+- **"Studio's installer refused (its words are above), so it was not run for real. Nothing it refused has been changed."** A video in her drop folder is one reason. Deal with what its words say, then run the app again.
+- **"Claude Code is not signed in. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser), then run the app again."** Do that.
+- **"Claude Code is still older than the installer needs after claude update. Tell Jason."** Tell Jason.
+- **"The Claude app's own Claude Code is still older than the installer wants. Tell Jason."** after Check for Updates. Tell Jason.
+- **"The installer stopped (it ended with <n>). Its last lines:"** and the lines. Tell Jason. Running the app again goes on from there.
+- **"The setup stopped before its check of Claude (there is no "From the background job:" line in what it said)."** and its last lines. Tell Jason.
+- **"The one-shot check of Claude (<file>) is still there. Left there, launchd would run it at every login. Tell Jason."** Tell Jason.
+- **"<folder>/tool/settings.js is not there, so the editing app cannot be looked at."** Tell Jason.
+- **"HyperFrames could not be turned on. It said: <what settings.js said>"** Tell Jason.
 
 ## What reaches out
 
