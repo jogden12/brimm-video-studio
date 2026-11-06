@@ -755,6 +755,17 @@ describe("app: Claude's reading is not finished (architecture 4.1)", () => {
     assert.ok(!existsSync(join(work, "Pricing- what to charge- main 3fa9c1")));
     t.done();
   });
+  it("tells a take-over in the window to take it over again, not to say the plain open again (final review R1d-1)", async () => {
+    const { t, found } = world({ record: { ...RAW, reading: READING, editing: HERS } });
+    readingAtWork(t);
+    const at = join(found.folder, "reels.json");
+    writeFileSync(at, readFileSync(at, "utf8").slice(0, -3));
+    const before = reread(found).rev;
+    const r = await app(t.ctx.deps, FOLDER, "--take-over");
+    assert.deepEqual([r.code, r.said], [0, [`Some files of ${NAME} are not whole in Dropbox yet, so its HyperFrames project wasn't made. Say "take it over" again in a few minutes. If it says this again, tell Jason.`]]);
+    assert.deepEqual([reread(found).rev, reread(found).editing.by, runsOf(t), t.started], [before, "Sallie's laptop", [], []]);
+    t.done();
+  });
   it("keeps today's refusal for a short file with a conflicted copy beside it, in the window too", async () => {
     const { t, found } = world({ record: { ...RAW, reading: READING } });
     readingAtWork(t);

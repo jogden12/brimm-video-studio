@@ -2127,7 +2127,7 @@ describe("a footage copy that keeps failing is not asked for again at every open
   const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
   const CUES = ["--cue", "b-roll | 4 | count what you actually sell | Sallie at her desk | shot: 2"];
   const COMING = 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.';
-  const UNMADE = "Some of its footage could not be made for HyperFrames, and opening it again won't change that. Tell Jason.";
+  const UNMADE = "Some of its footage could not be made for HyperFrames, and opening it again won't change that. Ask Jason.";
   const asksFootage = (t) => t.started.filter(([, args]) => args.includes("--footage")).length;
   /** A plan made its video, with a b-roll part for shot 2; the launch agent's late check passed. */
   async function made(script) {

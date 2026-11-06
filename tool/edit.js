@@ -78,7 +78,7 @@ import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
 import { readStatuses, importState, removeStatus, shownStep } from "./importing.js";
 import { localSource, projectWaits, readingCheckAt, readingWaitsUntil, waitFacts } from "./late-wait.js";
-import { heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
+import { fileId, heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
 import { HAND_OFF_ASK, REELS_ASK, finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, matchedSession, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
@@ -1014,6 +1014,12 @@ export function readTrouble(read) {
   return `${capital(why)}. Ask again in a few minutes. If it says this again, tell Jason.`;
 }
 
+/** What is said of an episode with no record in force, named as listedAs names it (`named`, already capitalised): "ask Jason", except
+    for a record that is not there at all, which Dropbox may still be bringing (final review M1). It names nothing of the video. */
+export const unreadWords = (named, read) => (read && read.code === "NONE"
+  ? `${named}: Dropbox may still be bringing its record. Wait a few minutes and ask again. If it says this again, tell Jason.`
+  : `${named}: ask Jason.`);
+
 /** The lines `episodes` says of an episode (episodeAt): its name, what it is, its length, its folder and short id, and below
     them who is editing it, its title, how far it has been shown in Final Cut, its finish, and what is not right with its
     files, as always. A gated one is named by its label (shownName), and the line says what it is: a video waiting for her
@@ -1027,7 +1033,7 @@ function episodeLines(ctx, e, left, all, links) {
   const r = e.read.record;
   if (e.newer) return [`  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
   if (!r && listedAs(ctx, e) === e.name) return [`  ${e.name}`, `    ${readTrouble(e.read)}`];
-  if (!e.inForce) return [`  ${capital(listedAs(ctx, e))}: ask Jason.`];
+  if (!e.inForce) return [`  ${unreadWords(capital(listedAs(ctx, e)), e.read)}`];
   const record = e.inForce;
   const lines = [];
   const clean = cleanFor(ctx, e);
@@ -1319,7 +1325,9 @@ function plainShort(folder, record) {
     episode's record with this Mac editing it (read again, when the claim was just written), once every file is here and the
     episode is this Mac's; or { code }, the code the command ends with, once a line has said why it cannot go on. `takeOver` is
     the flag `--take-over`. `again` is what she says to try again, as the command that asked has it: `open Talk` for open, `open
-    Talk in HyperFrames` for app. `by` is the command that asked when it is not `open`, "app": the bring this starts is given it
+    Talk in HyperFrames` for app. `notYet`, for `app` alone, is a function of whether this is a take-over (`held`) that gives the words of
+    the wait in the window of plan R1d (a wait, with nothing written): a take-over is told to take it over again, as the other waits tell it,
+    since the plain open would meet the other Mac's claim and refuse. `by` is the command that asked when it is not `open`, "app": the bring this starts is given it
     (`bring … --asked-by app`), so that what that bring says to say next, once it has run, is `again` as well, and not open's.
     The two give the same answer for the same claim but for that. In order:
     - a change Dropbox undid is said, and the record as it is now taken as this Mac's;
@@ -1336,7 +1344,7 @@ function plainShort(folder, record) {
       the claim away, this Mac says so and stops; when the other Mac claimed it meanwhile, or both Macs wrote the same record
       and Dropbox kept a conflicted copy, this Mac stops, and it is theirs or for a person to sort out;
     - a warning when this Mac seems offline, since the other Mac then cannot see the claim. */
-async function claimAndBring(ctx, found, record, { takeOver = false, again, by = "", notYet = "" }) {
+async function claimAndBring(ctx, found, record, { takeOver = false, again, by = "", notYet = null }) {
   const { say } = ctx;
   // The bring it starts is told which command asked (`--asked-by`), when it is not `open`, so that what it says to say next, when
   // it is done, is that command's: a bring started by `app` ends by sending her back to app, and not to open.
@@ -1370,7 +1378,8 @@ async function claimAndBring(ctx, found, record, { takeOver = false, again, by =
   // missing or not at its listed size, with no other name Dropbox may have kept it under, it is a wait, not a refusal; nothing is
   // claimed or written. Judged by the record's list and the sizes, not by the words of the problems.
   if (problems.length && notYet && projectWaits(ctx, { name: found.name, record }) === "verify" && plainShort(found.folder, record).length === problems.length) {
-    say(notYet);
+    // On a take-over (`held`) she is told to take it over again: the plain open would meet the other Mac's claim and refuse.
+    say(notYet(Boolean(held)));
     return { code: 0 };
   }
   if (problems.length) {
@@ -1589,7 +1598,7 @@ export async function app(ctx, rest) {
   if (clip) return refuse(ctx, clip);
   const older = await olderWords(ctx, { found, record: got.record }, "main", got.record.name.text);
   if (older) return refuse(ctx, older);
-  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED, notYet: notWholeYet(got.record.name.text) });
+  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openInAppWords(got.record.name.text), by: APP_ASKED, notYet: (over) => notWholeYet(got.record.name.text, over) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
   return openInApp(ctx, { found, record }, { env: ctx.deps.env, running: hyperFramesAsked(ctx), ...ctx.deps.app, cli, plan: (given) => planProject(ctx, given), save: (next) => save(ctx, { ...found, record }, next) });
@@ -1639,7 +1648,7 @@ async function appReel(ctx, asked, flags) {
   if (clip) return refuse(ctx, clip);
   const older = await olderWords(ctx, { found, record: got.record }, `reel ${n}`, `Reel ${n} of ${name}`);
   if (older) return refuse(ctx, older);
-  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openReelWords(n, name), by: appReelAsked(n), notYet: reelNotWholeYet(n, name) });
+  const claim = await claimAndBring(ctx, found, got.record, { takeOver: Boolean(flags["take-over"]), again: openReelWords(n, name), by: appReelAsked(n), notYet: (over) => reelNotWholeYet(n, name, over) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
   return openReelInApp(ctx, { found, record, n }, { env: ctx.deps.env, running: hyperFramesAsked(ctx), ...ctx.deps.app, cli, save: (next) => save(ctx, { ...found, record }, next) });
@@ -2069,7 +2078,7 @@ export async function status(ctx, rest) {
     // A gated video is named by its label alone, and is not told to open it, which the gate refuses.
     if (footageFailed(ctx, folder)) {
       lines.push(isGated(e) ? `Some of the footage for "${gatedName(gatedRecord(e), e.held)}" could not be made. Ask Jason.`
-        : `Some of the footage for "${shown}" could not be made, and opening it again won't change that. Tell Jason.`);
+        : `Some of the footage for "${shown}" could not be made, and opening it again won't change that. Ask Jason.`);
     }
   }
   for (const line of lines.length ? lines : ["Nothing is running, and nothing is waiting."]) say(line);
@@ -3776,6 +3785,17 @@ async function resolveIn(ctx, found, keep) {
   const unsure = (names, why) => `The record was not changed (${why}), but the plan's files may not match it: ${names.join(", ")}. The next "episodes" names any that is wrong. Say "sort out the conflict" again to put them right; if it still says a file is not whole, tell Jason the episode's name.`;
   let written = null;
   if (planNow.length) {
+    // Each plan file that differs is set aside in history/ first, as step 1 sets aside the files it replaces: a script changed by hand lives
+    // only in its file (final review M8). A file that was not there has nothing to set aside.
+    for (const [name] of planNow) {
+      if (planHad[name] === null) continue;
+      try {
+        mkdirSync(join(found.folder, "history"), { recursive: true });
+        cloneIn(at(name), asideOf(name), ruleOpts(ctx));
+      } catch (e) {
+        return refuse(ctx, `${name} could not be set aside in history/ (${basename(plainWhy(e).split(": ").pop())}). Nothing was written, and nothing deleted. Say "sort out the conflict" again in a minute. If it says this again, tell Jason.`);
+      }
+    }
     try {
       putPlan(planNow);
     } catch (e) {
@@ -4256,8 +4276,8 @@ const NOT_RAW_OR_FINISHED = canNotBeUsed("it is not a raw or a finished video");
 const NOT_FROM_PLAN = canNotBeUsed("it is not a video made from its footage");
 
 /** Wait, as a raw reading does (reading.js readEpisodeNow), while the import's late check of the episode's video is still to come
-    (unedited.js importHold): the working copy is made from the raw video as filed, whole and checked (architecture 2026-10-27, 5.7),
-    and that check may put the video in again. `kind` asks for the copy at once; the run does the waiting. Resolves { record }, the
+    (unedited.js importHold): the working copy is made from the raw video as filed, whole and checked (architecture 2026-10-27, 5.7), or,
+    while this Mac owes the check and holds the file the import came from, from that file (plan R1b), and that check may put the video in again. `kind` asks for the copy at once; the run does the waiting. Resolves { record }, the
     episode's record as it is once nothing holds the video, or { why }, in the words the reading uses, when the run must end:
     - a hold that clears by itself, an import of the video at work on either Mac, or this Mac's own late check of it before its time
       with no problem found, is waited for: it is looked at again every READ_LOOK_MS, for READ_HOLD_MS at most. The wait is a step of
@@ -4335,7 +4355,7 @@ async function planFootage(ctx, { found, record, deps }) {
     one a newer brimm-video wrote is named by its short id, and nothing is made or written. Past the gate it runs for a raw video
     and an iPhone clip alone (WORK_COPY_KINDS): a video of any other kind leaves a result that says it can't be used, in words.
     Before it copies, it waits as a raw reading does while the import's late check of the video is still to come (waitForImport),
-    since the copy is made from the video as filed, whole and checked (architecture 5.7): the wait is a step in the progress
+    since the copy is made from the video as filed, whole and checked (architecture 5.7), or from the file this Mac holds of it while it owes the check (plan R1b): the wait is a step in the progress
     panel, and a hold that does not clear by itself ends the run with the reading's words for it.
     The run holds the working copy's own lock (workCopyLockOf), not the episode's, and writes no record, so that it runs beside
     the reading `kind` starts at the same moment. `--4k` makes a copy of 4K. What it needs of this Mac it takes from ctx.deps, as
@@ -4408,38 +4428,63 @@ async function workcopy(ctx, rest) {
     if (!kinds.includes(recordKind(record))) return { ok: false, made: [], failed: [notFor], next: "" };
     // The footage's copies alone (PR H5b): of a video made from a plan, and no wait for the import of its own video, which is not copied.
     if (footageOnly) return isFromPlan(record) ? planFootage(ctx, { found, record, deps }) : { ok: false, made: [], failed: [NOT_FROM_PLAN], next: "" };
-    // `kind` asks for the copy at once; the video it is made from is whole and checked first (waitForImport).
-    const held = await waitForImport(ctx, { found, record, wait, progress: deps.progress, log: deps.log, kinds, notFor });
+    // `kind` asks for the copy at once; the video it is made from is whole and checked first, or is the file this Mac holds of it (plan R1b), which the check still goes on to look at (waitForImport).
+    let held = await waitForImport(ctx, { found, record, wait, progress: deps.progress, log: deps.log, kinds, notFor });
     if (held.why) return { ok: false, made: [], failed: [held.why], next: "" };
-    const video = join(found.folder, held.record.video.file);
-    // The file this Mac holds of the video, when the run did not wait for the late check (waitForImport): read in place of the video, which stays its identity.
-    const fromOf = (h) => (h.from ? { from: h.from } : {});
-    if (!reel) {
-      // An explainer in her voice (PR H6) is a sound alone: its copy is the voice made ready for the page, a copy of no 4K, and no footage is
-      // made for it. An explainer in a HeyGen voice has its voice in its project, so it has nothing to copy.
-      const media = mediaOf(held.record);
-      if (media === null) return { ok: false, made: [], failed: [canNotBeUsed("its voice is made in its HyperFrames project")], next: "" };
-      if (media === VOICEOVER) return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), voice: true, ...fromOf(held) }, deps);
-      const main = await makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), fourK: Boolean(flags["4k"]), ...fromOf(held) }, deps);
-      if (!main.ok || !isFromPlan(held.record)) return main;
-      // A video made from a plan has its footage copied after its own video, in the same run. A copy that fails is in the log and costs nothing.
-      const footage = await planFootage(ctx, { found, record: held.record, deps });
-      return { ...main, made: [...main.made, ...footage.made], ...(footage.failed?.length ? { footageFailed: footage.failed } : {}) };
+    // The copy itself, from the video or from the file this Mac holds of it (`held.from`).
+    const copyOf = async (held, deps) => {
+      const video = join(found.folder, held.record.video.file);
+      // The file this Mac holds of the video, when the run did not wait for the late check (waitForImport): read in place of the video, which stays its identity.
+      const fromOf = (h) => (h.from ? { from: h.from } : {});
+      if (!reel) {
+        // An explainer in her voice (PR H6) is a sound alone: its copy is the voice made ready for the page, a copy of no 4K, and no footage is
+        // made for it. An explainer in a HeyGen voice has its voice in its project, so it has nothing to copy.
+        const media = mediaOf(held.record);
+        if (media === null) return { ok: false, made: [], failed: [canNotBeUsed("its voice is made in its HyperFrames project")], next: "" };
+        if (media === VOICEOVER) return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), voice: true, ...fromOf(held) }, deps);
+        const main = await makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), fourK: Boolean(flags["4k"]), ...fromOf(held) }, deps);
+        if (!main.ok || !isFromPlan(held.record)) return main;
+        // A video made from a plan has its footage copied after its own video, in the same run. A copy that fails is in the log and costs nothing.
+        const footage = await planFootage(ctx, { found, record: held.record, deps });
+        return { ...main, made: [...main.made, ...footage.made], ...(footage.failed?.length ? { footageFailed: footage.failed } : {}) };
+      }
+      // A Reel's video is the suggestion's stretch of the recording; the list is read once the video is whole and checked, or once the file this Mac holds of it is in hand (plan R1b).
+      const got = reelStretch(found.folder, reel);
+      if (!got.stretch) {
+        const why = got.gone ? `Reel ${reel} is not one of the suggestions any more` : got.nothing ? `Reel ${reel} has nothing to show: ${got.nothing}` : "the Reel suggestions cannot be read";
+        deps.log(`${shownName(held.record)}: the video for Reel ${reel} could not be made: ${why}.`);
+        return { ok: false, made: [], failed: [canNotBeUsed(why)], next: "" };
+      }
+      const faces = ctx.deps.faces || ((file, work) => facesIn(file, work, { run: deps.run, tools, limit: REEL_FACES_MS }));
+      // A Reel of a video her editor finished is asked for its graphic cues as a third step (PR H2), and of no other kind: a raw video's
+      // Reel takes the cues of its cut plan, and a session is never read. Only on a Mac whose readings are on, and that has Claude Code.
+      const cues = recordKind(held.record) === "finished" && ctx.settings.readings !== false && tools.claude
+        ? (stretch, work) => askReelCues({ ctx, found, record: held.record, stretch, work }, deps)
+        : null;
+      return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: `${shownName(held.record)}, Reel ${reel}`, reel: got.stretch, ...fromOf(held) }, { ...deps, faces, ...(cues ? { cues } : {}) });
+    };
+    // The import's check may pass, and take the drop file away, in the second between the wait and ffprobe or ffmpeg opening it (final review
+    // M5). That is not a broken recording: the file's identity is taken before the copy, and when the copy fails while the file is not the one
+    // that was taken, or is gone, the run goes round once more, from the episode's own video in Dropbox, which the import has checked by then.
+    const sameId = (a, b) => (a === null || b === null ? a === b : a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs);
+    const again = () => waitForImport(ctx, { found, record: held.record, wait, progress: deps.progress, log: deps.log, kinds, notFor });
+    let before = held.from ? fileId(held.from) : null;
+    if (held.from && before === null) {
+      held = await again();
+      if (held.why) return { ok: false, made: [], failed: [held.why], next: "" };
+      before = held.from ? fileId(held.from) : null;
     }
-    // A Reel's video is the suggestion's stretch of the recording; the list is read once the video is whole and checked.
-    const got = reelStretch(found.folder, reel);
-    if (!got.stretch) {
-      const why = got.gone ? `Reel ${reel} is not one of the suggestions any more` : got.nothing ? `Reel ${reel} has nothing to show: ${got.nothing}` : "the Reel suggestions cannot be read";
-      deps.log(`${shownName(held.record)}: the video for Reel ${reel} could not be made: ${why}.`);
-      return { ok: false, made: [], failed: [canNotBeUsed(why)], next: "" };
+    // What a copy from the local file says in the log is kept back, and said only when the run does not go round again.
+    const said = [];
+    const made = await copyOf(held, held.from ? { ...deps, log: (line) => said.push(line) } : deps);
+    if (held.from && !made.ok && !sameId(before, fileId(held.from))) {
+      deps.log(`${shownName(held.record)}: the file this Mac held of the video went while it was being read, so the video for HyperFrames is made from the video in Dropbox.`);
+      held = await again();
+      if (held.why) return { ok: false, made: [], failed: [held.why], next: "" };
+      return copyOf(held, deps);
     }
-    const faces = ctx.deps.faces || ((file, work) => facesIn(file, work, { run: deps.run, tools, limit: REEL_FACES_MS }));
-    // A Reel of a video her editor finished is asked for its graphic cues as a third step (PR H2), and of no other kind: a raw video's
-    // Reel takes the cues of its cut plan, and a session is never read. Only on a Mac whose readings are on, and that has Claude Code.
-    const cues = recordKind(held.record) === "finished" && ctx.settings.readings !== false && tools.claude
-      ? (stretch, work) => askReelCues({ ctx, found, record: held.record, stretch, work }, deps)
-      : null;
-    return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: `${shownName(held.record)}, Reel ${reel}`, reel: got.stretch, ...fromOf(held) }, { ...deps, faces, ...(cues ? { cues } : {}) });
+    for (const line of said) deps.log(line);
+    return made;
   });
   if (result.taking || result.running) {
     ctx.say(result.running ? `The video for HyperFrames is being made for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);

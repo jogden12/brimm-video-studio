@@ -115,8 +115,8 @@ function stillReading(ctx, record) {
   return `Claude is still reading it.${starts} Say "open ${record.name.text} in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`;
 }
 /** What is said when the project is not made because a file it reads is not at the size the record lists, while the reading's own
-    late check is still to come (plan R1d). */
-export const notWholeYet = (name) => `Some files of ${name} are not whole in Dropbox yet, so its HyperFrames project wasn't made. Say "open ${name} in HyperFrames" again in a few minutes. If it says this again, tell Jason.`;
+    late check is still to come (plan R1d). On a take-over she is told to take it over again, as claimAndBring's other waits tell her. */
+export const notWholeYet = (name, takeOver = false) => `Some files of ${name} are not whole in Dropbox yet, so its HyperFrames project wasn't made. Say "${takeOver ? "take it over" : `open ${name} in HyperFrames`}" again in a few minutes. If it says this again, tell Jason.`;
 export const notWhole = (name) => `The HyperFrames project for ${name} is on this Mac, but part of it can't be read, so it wasn't opened. Ask Jason.`;
 /** What is said of an explainer's HyperFrames project in a HeyGen voice when its folder is not on this Mac and there is no snapshot to rebuild it from (PR H6):
     it holds no media to make it again from, since the voice was made in it. */
@@ -780,7 +780,7 @@ export const FOOTAGE_COMING = 'Its footage is still being made for HyperFrames: 
 /** What she is told when a copy of footage that is made could not be moved into the project. */
 export const footageNotInWords = (name) => `Some of its footage could not be put into the project. Say "open ${name} in HyperFrames" again. If it says this again, tell Jason.`;
 /** What she is told when a copy of footage is still missing and the last run that made copies failed for it for a reason that will not pass. */
-export const footageNotMadeWords = (name) => "Some of its footage could not be made for HyperFrames, and opening it again won't change that. Tell Jason."; // `name` is kept for callers: no retry is promised
+export const footageNotMadeWords = (name) => "Some of its footage could not be made for HyperFrames, and opening it again won't change that. Ask Jason."; // `name` is kept for callers: no retry is promised
 
 /** Whether the last run of the working copy for this episode failed to make the copy of the footage of `shot` for a reason that will not pass: its
     result holds a line "The footage for shot <n> could not be made: <why>" (workcopy.js makeFootageCopies), in `failed` for a run of the footage alone

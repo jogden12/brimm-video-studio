@@ -4,7 +4,7 @@
 // real program: the programs are stand-ins (tests/episodes.js), and each test has a folder of its own.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain } from "../edit.js";
 import { conflictedCopies, readEpisode, recordFile, recordText } from "../episode.js";
@@ -149,6 +149,20 @@ describe("resolve, for a plan: plain lines and the plan's files", () => {
     assert.equal(listed.code, 0, listed.text);
     assert.ok(listed.text.includes(TITLE), listed.text);
     assert.ok(!/not right|not as the record|is short|is missing|not the \d+ the record/i.test(listed.text), listed.text);
+    t.done();
+  });
+  it("sets aside in history/ each plan file it rewrites, a hand-edited script among them (final review M8)", async () => {
+    const t = setup();
+    const folder = await conflictedBy(t, withPlanned({ lines: ["The first line.", "Mine."] }), withPlanned({ lines: ["The first line.", "Hers, a longer line."] }));
+    appendFileSync(join(folder, "teleprompter.txt"), "A line typed by hand.\n");
+    const was = readFileSync(join(folder, "teleprompter.txt"), "utf8");
+    await on(depsOf(t), "resolve", nameOf(t));
+    const kept = await on(depsOf(t), "resolve", nameOf(t), "--keep", "B");
+    assert.equal(kept.code, 0, kept.text);
+    const aside = readdirSync(join(folder, "history")).filter((n) => n.endsWith(" teleprompter.txt"));
+    assert.equal(aside.length, 1, readdirSync(join(folder, "history")).join(", "));
+    assert.equal(readFileSync(join(folder, "history", aside[0]), "utf8"), was);
+    assert.ok(readFileSync(join(folder, "teleprompter.txt"), "utf8").includes("Hers, a longer line."));
     t.done();
   });
   it("--keep A leaves the files that already match A as they are, with no write", async () => {

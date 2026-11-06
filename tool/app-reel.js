@@ -93,7 +93,7 @@ const busyWith = (n, name) => `A video for HyperFrames is being made already, an
 const stillReading = (n, name) => `Claude is still reading it. Say "${openReelWords(n, name)}" again when it has finished; "how far is it?" shows how far it has got.`;
 /** What is said when Reel `n`'s project is not made because a file it reads is not at the size the record lists, while the reading's own
     late check is still to come (plan R1d). */
-export const reelNotWholeYet = (n, name) => `Some files of ${name} are not whole in Dropbox yet, so the project of Reel ${n} wasn't made. Say "${openReelWords(n, name)}" again in a few minutes. If it says this again, tell Jason.`;
+export const reelNotWholeYet = (n, name, takeOver = false) => `Some files of ${name} are not whole in Dropbox yet, so the project of Reel ${n} wasn't made. Say "${takeOver ? "take it over" : openReelWords(n, name)}" again in a few minutes. If it says this again, tell Jason.`;
 const reelMade = ({ start, end }, n) => `Reel ${n} is made: the recording from ${clockText(start)} to ${clockText(end)}.`;
 const unreadable = (name) => `The Reel suggestions of ${name} cannot be read. Ask Jason.`;
 /** What is said when Reel `n` is not among the suggestions `numbers`, as markReels says it. */
