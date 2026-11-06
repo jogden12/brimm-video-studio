@@ -109,8 +109,9 @@ ask_yes() {
   print -rn -- "$prompt"
   [[ -z "$LOGGING" ]] || print -rn -- "$prompt" >> "$LOG"
   IFS= read -r line || true
-  # A line from a pipe has no Return of its own on screen.
-  [[ -t 0 ]] || say ""
+  # A line from a pipe has no Return of its own on screen. The log keeps the answer (a y or an n, never a secret) and ends the line.
+  [[ -t 0 ]] || print -r -- ""
+  [[ -z "$LOGGING" ]] || print -r -- "$line" >> "$LOG"
   [[ "${(L)line}" =~ '^[[:space:]]*(y|yes)[[:space:]]*$' ]]
 }
 ask() { ask_yes "$1" || stop_here; }
@@ -121,7 +122,8 @@ wait_for() {
   print -rn -- "Press Return when that's done, or type n and press Return to stop: "
   [[ -z "$LOGGING" ]] || print -rn -- "Press Return when that's done, or type n and press Return to stop: " >> "$LOG"
   IFS= read -r line || line="${line:-n}"
-  [[ -t 0 ]] || say ""
+  [[ -t 0 ]] || print -r -- ""
+  [[ -z "$LOGGING" ]] || print -r -- "$line" >> "$LOG"
   [[ -z "${line//[[:space:]]/}" ]] || stop_here
 }
 
@@ -628,7 +630,7 @@ find_the_app() {
       return 0
     fi
     open -a Safari "$HF_PAGE" || true
-    wait_for "The HyperFrames page is open in Safari ($HF_PAGE). Download the app there, drag it into Applications, and open it once."
+    wait_for "The HyperFrames page is open in Safari ($HF_PAGE). Download the app there, drag it into Applications, and open it once. Then, as check 43 says, sign in to HeyGen (her HeyGen account) and choose Claude Code as the agent, on Auto."
   done
 }
 
@@ -804,6 +806,8 @@ Tell Jason: Claude may not be reachable from the background job, which is where 
 # way. One heading a check, one line a box (a value of several lines is joined on one). It holds nothing of the Claude account,
 # the key's private half or her drop folder's files. It shows the run's final state, so step 7 writes it again.
 one_line() { local text="${1-}" fallback="${2-nothing was recorded on this run}"; [[ -n "$text" ]] || text="$fallback"; print -r -- "${(j: | :)${(@f)text}}"; }
+# A print checks none of these, and claims nothing of an earlier run: the words for a line a print leaves empty.
+unchecked() { if [[ -n "$PRINT_ONLY" ]]; then print -r -- "not checked: this was a print"; else print -r -- "$1"; fi; }
 compose_report() {
   print -r -- "Studio move report: $MACHINE, $(date '+%Y-%m-%d %H:%M')"
   print -r -- ""
@@ -816,9 +820,9 @@ compose_report() {
   print -r -- ""
   print -r -- "42 Studio's code on her laptop"
   print -r -- "Whether the key is on GitHub, and how: $(one_line "$R42_KEY" "made on an earlier run; the check of the key worked")"
-  print -r -- "What the check of the key printed: $(one_line "$R42_SSH" "GitHub's welcome, as on the earlier run that checked it")"
+  print -r -- "What the check of the key printed: $(one_line "$R42_SSH" "$(unchecked "GitHub's welcome, as on the earlier run that checked it")")"
   print -r -- "The commit: $(one_line "$R42_COMMIT" "${COMMIT[1,7]}")"
-  print -r -- "The tests' last lines: $(one_line "$R42_TESTS" "passed at ${COMMIT[1,7]} on an earlier run")"
+  print -r -- "The tests' last lines: $(one_line "$R42_TESTS" "$(unchecked "passed at ${COMMIT[1,7]} on an earlier run")")"
   print -r -- ""
   print -r -- "43 The HyperFrames app on her laptop"
   print -r -- "The app's version on each Mac: $(one_line "$R43_VERSION" "not read") on $MACHINE (the Mac Studio's is read there)"
@@ -826,7 +830,7 @@ compose_report() {
   print -r -- "44 Studio's installer on her laptop"
   print -r -- "Anything in the print that surprised you, and its HDR line: $(one_line "$R44_PRINT" "not shown on this run (the installer finished on an earlier run)")"
   print -r -- "The installer's last lines: $(one_line "$R44_RAN")"
-  print -r -- "What the look for the one-shot check printed: $(one_line "$R44_AGENT" "the installer finished on an earlier run")"
+  print -r -- "What the look for the one-shot check printed: $(one_line "$R44_AGENT" "$(unchecked "the installer finished on an earlier run")")"
   print -r -- "What turning HyperFrames on printed: $(one_line "$R44_APP" "nothing: turning it on was not needed on this run")"
   print -r -- ""
   print -r -- "48 Afterwards"
@@ -888,6 +892,14 @@ main() {
   trap on_hup HUP
   if [[ -z "$PRINT_ONLY" ]]; then
     mkdir -p "${LOG:h}"
+    # One run at a time: a second one, in another Terminal window, would clone, install and write over the first. The lock is held
+    # by this shell until it ends, and is not passed to the programs it starts. A print takes none.
+    zmodload zsh/system
+    : >> "$LOG.lock"   # zsystem flock locks a file that is there already
+    if ! zsystem flock -t 0 -f LOCK_FD "$LOG.lock" 2>/dev/null; then
+      say "Move to Studio is already running in another Terminal window. Use that one, or close it and double-click again."
+      exit 1
+    fi
     print -r -- "--- $(date '+%Y-%m-%d %H:%M:%S') ---" >> "$LOG"
     LOGGING="yes"
     # The Mac stays awake while this runs (a lid shut in the middle of a clone is the worst way to stop). It ends with this script.

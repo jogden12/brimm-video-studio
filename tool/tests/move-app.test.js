@@ -7,7 +7,7 @@
 // The tests need a Mac (zsh and plutil). Anywhere else they skip themselves and say why.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -93,6 +93,7 @@ if (command === "show") {
     knownHosts text of ~/.ssh/known_hosts (default: GitHub's published ed25519 key), or null for none
     ssh        what `ssh -T` answers, one answer a call: "ok", "denied", "noisy" (a line, then the welcome) or "banner" (a host-key
                warning) or a list of them (default "ok"; the last repeats)
+    firstRunWaiting  a real run is started first and left waiting at its question, holding the lock (use it with a signed-out claude)
     dropMode, desktopMode  the mode her drop folder or her Desktop is given for the run (0o000 and 0o555 test the unreadable and the unwritable)
     checkout   Studio's checkout in the home folder: "at-pin" (default), "absent", "other-commit", "dirty", "other-remote", "detached", "other-branch" or
                "partial-left" (no checkout, a half-made .partial beside where it goes)
@@ -280,7 +281,16 @@ esac
     if (options.noRepo) delete env.BRIMM_STUDIO_REPO;
     if (options.testFail) env.BRIMM_TEST_FAIL = "1";
     const commit = options.commit === undefined ? ["--commit", sha] : options.commit === null ? [] : ["--commit", options.commit];
+    // A first run already open, waiting at its first question (stdin is held open): the one the run under test is a second to.
+    let first = null;
+    if (options.firstRunWaiting) {
+      first = spawn("/bin/zsh", [MOVE, ...commit], { env, stdio: ["pipe", "pipe", "pipe"] });
+      const log = join(home, "Library", "Logs", "brimm-video-studio-move.log");
+      const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+      for (let i = 0; i < 200 && !(existsSync(log) && readFileSync(log, "utf8").includes("Go ahead?")); i++) sleep(50);
+    }
     const r = spawnSync("/bin/zsh", [MOVE, ...commit, ...args], { encoding: "utf8", input: options.answers ?? "", env });
+    if (first) first.kill("SIGKILL");
     if (options.dropMode !== undefined) chmodSync(dropDir, 0o755);
     if (options.desktopMode !== undefined) chmodSync(desktop, 0o755);
     const text = (file) => (existsSync(file) ? readFileSync(file, "utf8") : "");
@@ -463,8 +473,16 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
     assert.equal(r.status, 1);
     assert.match(r.ran, /^caffeinate -i -w \d+$/m);
     const logged = r.log.split("\n");
-    for (const line of r.out.split("\n")) assert.ok(logged.includes(line) || line === "", `in the log: ${JSON.stringify(line)}`);
+    // A question's line in the log goes on with the answer typed to it.
+    for (const line of r.out.split("\n")) assert.ok(line === "" || logged.some((l) => l.startsWith(line)), `in the log: ${JSON.stringify(line)}`);
     assert.ok(r.log.includes("Stopped. This run changed nothing."));
+    assert.ok(logged.includes("Go ahead? Type y and press Return, or n to stop: n"), "the answer is kept, and a newline follows it");
+
+    // A wait for Return keeps what was typed, here nothing, and the next thing said starts a line of its own.
+    const waited = moveOn({ key: null, answers: "y\n\nn\n" });
+    const lines = waited.log.split("\n");
+    assert.ok(lines.includes("Go ahead? Type y and press Return, or n to stop: y"), waited.log);
+    assert.ok(lines.includes("Press Return when that's done, or type n and press Return to stop: "), waited.log);
   });
 
   it("says it was stopped, and what it changed, on Ctrl-C", () => {
@@ -507,6 +525,23 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the move script, one run at a time", { skip: notAMac }, () => {
+  const SIGNED_OUT_OPEN = { claude: { status: SIGNED_OUT }, firstRunWaiting: true };
+  it("stops a second run at once while a first is open, and starts nothing", () => {
+    const r = moveOn({ ...SIGNED_OUT_OPEN, answers: "y\ny\ny\n" });
+    assert.equal(r.status, 1, r.out);
+    assert.equal(r.out, "Move to Studio is already running in another Terminal window. Use that one, or close it and double-click again.\n");
+    assert.equal(r.log.split("\n").filter((l) => l.startsWith("--- ")).length, 1, "only the first run is in the log");
+    assert.ok(!r.out.includes("Stopped."), "the second run changed nothing, and says nothing of the first");
+  });
+
+  it("takes no lock under --print, so a print runs beside an open run", () => {
+    const r = moveOn(SIGNED_OUT_OPEN, "--print");
+    assert.equal(r.status, 0, r.out);
+    assert.ok(r.out.trimEnd().endsWith("Nothing was changed."), r.out);
   });
 });
 
@@ -789,6 +824,8 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     const calls = gone.ran.split("\n");
     assert.ok(calls.includes("open -a Safari https://hyperframes.dev/studio"), gone.ran);
     assert.match(gone.out, /Press Return when that's done/);
+    assert.match(gone.out, /sign in to HeyGen/);
+    assert.match(gone.out, /Claude Code as the agent, on Auto/);
     assert.match(gone.out, /1\.5\.2/, "it looked again after the wait");
 
     const stops = moveOn({ hfApp: null, answers: "n\n" });
@@ -1084,6 +1121,16 @@ describe("the move script, the report and brimm-video's old key (check 48)", { s
       assert.ok(line && line.length > label.length + 1, `${label} has a value: ${line}`);
     }
     assert.match(r.report, /^Whether the key is on GitHub, and how: yes: .*the check of the key worked$/m);
+  });
+
+  it("with --print, says 'not checked: this was a print' for what a print cannot check, and claims nothing of an earlier run", () => {
+    const r = moveOn({ key: null, marks: "" }, "--print");
+    assert.equal(r.status, 0, r.out);
+    const not = "not checked: this was a print";
+    for (const label of ["What the check of the key printed:", "The tests' last lines:", "What the look for the one-shot check printed:"]) {
+      assert.ok(r.out.includes(`${label} ${not}`), `${label}\n${r.out}`);
+    }
+    assert.ok(!r.out.includes("on an earlier run"), r.out.split("\n").filter((l) => l.includes("earlier run")).join("\n"));
   });
 
   it("with --print, shows the report and writes no file", () => {
