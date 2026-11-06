@@ -18,7 +18,7 @@
 #                                    below), which is made, with a marker that names this Mac, and each video dropped there
 #                                    is imported into BRIMM Video/Episodes. This Mac's settings are written in
 #                                    ~/Library/Application Support/BRIMM Video/settings.json. With --print, nothing is made.
-#                                    It says whether Xcode's command line tools, Homebrew, Final Cut Pro (optional now) and
+#                                    It says whether Xcode's command line tools, Homebrew and
 #                                    Claude Code's sign-in are here, what Jason does by hand for any that is not, and whether
 #                                    the HyperFrames command line is here or would be installed, with what would then be done
 #                                    about its Chrome and its doctor check
@@ -69,11 +69,6 @@ TRANSCRIBE_LABEL="com.thebrimm.transcribe"
 AGENT_PATH="${BRIMM_AGENT_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
 # Where programs are looked for after this shell's PATH: Homebrew's two folders. A test names none, for a Mac without Homebrew.
 HOMEBREW_DIRS="${BRIMM_HOMEBREW_DIRS-/opt/homebrew/bin:/usr/local/bin}"
-# Final Cut Pro, which this Mac is checked for. A test names a made-up one.
-FINAL_CUT="${BRIMM_FINAL_CUT:-/Applications/Final Cut Pro.app}"
-# The Final Cut Pro the tool was checked with, and the macOS it needs (its LSMinimumSystemVersion).
-FINAL_CUT_CHECKED="12.4"
-FINAL_CUT_MACOS="26.6"
 # The Claude Code her folder's guard needs: from 2.1.295 a hook that cannot run blocks the call (onFailure) rather than
 # letting it through.
 GUARD_CLAUDE="2.1.295"
@@ -87,7 +82,7 @@ MODEL_DIR="$HOME/Library/Application Support/BRIMM Transcribe"
 MODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"
 MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
 # This Mac's settings for episodes, which settings.js writes and checks (and reads here, to see what a run would change), the
-# folder for its work in Final Cut, and the checkout this runs from.
+# work folder, and the checkout this runs from.
 SETTINGS_FILE="$HOME/Library/Application Support/BRIMM Video/settings.json"
 WORK="$HOME/BRIMM Video Work"
 CHECKOUT="${HERE:h}"
@@ -583,7 +578,6 @@ if [[ -n "$machine" ]]; then
   say "  Episodes, to make in Dropbox:  $root/Episodes"
   say "  The import status files, to make in Dropbox:  $root/Episodes/.importing"
   say "  The reference folder, to make in Dropbox:  $root/References"
-  say "  On this Mac:  $WORK/From Final Cut"
   say "  Once, in Finder:  Control-click $drop and choose Make available offline, so that a video dropped there from another device is brought down at once"
   say "  This Mac's settings, in $SETTINGS_FILE:"
   settings_json
@@ -593,7 +587,7 @@ fi
 # swift finds the speaker's face for the upright version. It comes with Xcode's command line tools, and nothing here installs it.
 say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here, so the upright version is cropped at the centre. To get it: xcode-select --install")"
 # For one of the two Macs, what it has of what the tool needs, and what Jason does by hand when something is not here. Nothing
-# here installs Xcode's command line tools, Homebrew, Final Cut Pro or Claude Code, or signs in to Claude.
+# here installs Xcode's command line tools, Homebrew or Claude Code, or signs in to Claude.
 autoload -Uz is-at-least
 # Why her folder for Claude is not written, when it is not: "" when it is.
 studio_why=""
@@ -610,29 +604,10 @@ if [[ -n "$machine" ]]; then
     say '  Homebrew:  not here. In Terminal, Sallie runs this (it asks for her password, which she types herself): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
   fi
   macos="$(sw_vers -productVersion 2>/dev/null || true)"
-  old_macos=""
-  if [[ -n "$macos" ]] && ! is-at-least "$FINAL_CUT_MACOS" "$macos"; then old_macos="yes"; fi
   if [[ -z "$macos" ]]; then
     say "  macOS:  could not be read"
-  elif [[ -n "$old_macos" ]]; then
-    say "  macOS:  $macos; Final Cut Pro $FINAL_CUT_CHECKED needs macOS $FINAL_CUT_MACOS or later (System Settings > General > Software Update)"
   else
     say "  macOS:  $macos"
-  fi
-  # Final Cut Pro is optional now: HyperFrames is where she edits. It is looked for all the same, and its version said, for a Mac that
-  # uses it, and every line about it says so.
-  final_cut_label="Final Cut Pro, optional now (HyperFrames is where she edits)"
-  if [[ ! -d "$FINAL_CUT" ]]; then
-    say "  $final_cut_label:  not here. To have it, install it from the App Store (on her Apple ID, or shared by Family Sharing) before the first push."
-  else
-    version="$(plutil -extract CFBundleShortVersionString raw -o - "$FINAL_CUT/Contents/Info.plist" 2>/dev/null || true)"
-    update="update it in App Store > Updates"
-    [[ -z "$old_macos" ]] || update="update macOS first, then App Store > Updates"
-    if [[ -n "$version" ]] && is-at-least "$FINAL_CUT_CHECKED" "$version"; then
-      say "  $final_cut_label:  $version, here"
-    else
-      say "  $final_cut_label:  ${version:-of a version that could not be read}, here; phase 0 was checked with $FINAL_CUT_CHECKED: $update"
-    fi
   fi
   # Whether this Mac's ffmpeg can make an HDR video standard, which the working copy of an iPhone's clip needs (an iPhone records HDR by
   # default): tool/workcopy.js has ffmpeg decode it with VideoToolbox (the videotoolbox hwaccel) and size it and make its colour BT.709
@@ -755,7 +730,7 @@ if [[ -n "$machine" ]]; then
   else
     say "  The Claude app's own Claude Code:  $app_newest, the newest copy the app keeps here (her folder's guard needs $GUARD_CLAUDE or later; /status in the Code tab says which copy runs)"
   fi
-  [[ -z "$check_line" ]] || say "  At the end:  one real call to Claude from the background job (a launch agent of its own, $CHECK_LABEL, taken away when it answers or after 90 seconds), to prove its sign-in is seen there"
+  [[ -z "$check_line" ]] || say "  At the end:  one real call to Claude from the background job (a launch agent of its own, $CHECK_LABEL, taken away when it answers or after 90 seconds), to prove that the sign-in her readings use is seen there (the import itself never asks Claude)"
   say "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
 fi
 # Claude reads a video through Claude Code once its person has said what it is. Nothing here installs that or signs in to it. When
@@ -894,15 +869,15 @@ fi
 # Give the Mac the launch agent: write its file, check it, stop the agent of that name if one is running, and start this one.
 mkdir -p "${folders[@]}" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 # For one of the two Macs: Episodes and its status files in Dropbox, the reference folder (References: Studio only reads it), the
-# marker by the rule for writing into Dropbox, this Mac's settings, its folders for Final Cut's work, and the folder for Claude,
+# marker by the rule for writing into Dropbox, this Mac's settings, and the folder for Claude,
 # ~/BRIMM Video Studio.
 if [[ -n "$machine" ]]; then
-  mkdir -p "$root/Episodes/.importing" "$root/References" "$WORK/From Final Cut"
+  mkdir -p "$root/Episodes/.importing" "$root/References"
   "$node" "$HERE/settings.js" marker "$drop" "$machine"
   # It checks the old drop folder once more, and may still refuse: the marker is made, and the settings and the agent are not.
   if ! "$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"; then
     say ""
-    say "The settings were not written, so they and the launch agent are as they were. This run did make $drop and its marker, and the folders for Episodes and its status files, for the reference pictures and for Final Cut's work, which a later run uses. Deal with what is said above, then run this again."
+    say "The settings were not written, so they and the launch agent are as they were. This run did make $drop and its marker, and the folders for Episodes and its status files and for the reference pictures, which a later run uses. Deal with what is said above, then run this again."
     exit 1
   fi
   if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi
@@ -916,8 +891,8 @@ plutil -lint "$AGENT_FILE" >/dev/null
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$AGENT_FILE"
 
-# The check of Claude from the background job: one real call, made by a launch agent of its own, which runs as the import's
-# does, so that a sign-in it cannot see shows now and not at the first import. It is taken away when Claude answers or after
+# The check of Claude from the background job: one real call, made by a launch agent of its own, which runs as the readings'
+# Claude does (the import never asks Claude now; her readings do), so that a sign-in it cannot see shows now and not at the first reading. It is taken away when Claude answers or after
 # 90 seconds. That agent runs whenever it is loaded, at every login too, so it must never be left behind: until the check
 # has taken it away itself, traps take it away however else the setup ends. A failure ends the setup as it would anyway. A
 # Ctrl-C or a kill ends it there too, with 130 or 143 as a shell does: zsh would otherwise go back to the wait once its trap

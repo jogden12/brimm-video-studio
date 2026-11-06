@@ -16,7 +16,6 @@ Studio began as brimm-video: its history up to c666508, which is the tag `brimm-
 - Write a failing test first, then the code.
 - Since 2026-11-03 the Mac Studio's launch agent, `com.thebrimm.unedited`, runs from Studio's main checkout, `~/Claude Code/brimm-video-studio`. Studio's installer kept that label and replaced brimm-video's agent in place, on Jason's yes. That checkout stays on `main`: work in git worktrees. Sallie's laptop runs brimm-video's agent until it is moved to Studio.
 - Experiments never write into the watched Dropbox folder: a new file there starts the tool.
-- Final Cut Pro's library, where Final Cut is still used, is in `~/BRIMM Video Work`, because `~/Movies` on the Mac Studio is a link into Dropbox.
 
 ## The contract with BRIMM Ops (never broken)
 
@@ -79,4 +78,4 @@ cd tool && ./install.sh --print "<folder>"   # what the installer would do. It c
 
 ## Both Macs
 
-Both Macs edit in the HyperFrames app (A0 installs it on the Mac Studio first; Sallie's laptop follows, on Jason's yes). Final Cut Pro stays optional, fed by the app's MOV export; whether Studio still writes Final Cut files is Jason's call. Sallie's laptop is set up by `docs/setup/sallies-laptop.md`, which still describes brimm-video until a later step updates it. Moving it to Studio is checks 40 to 48 on the Studio By-Hand Checks page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT); the Mac Studio's own move, check 40, was done on 2026-11-03. Her guide is the BRIMM Ops guide (https://claude.ai/artifact/Vu5JmADhftiEsPz4KYN4e4). The BRIMM Video Guide it replaced was retired on 2026-11-03: its link points to the BRIMM Ops guide. Her laptop has been on brimm-video's light import since 2026-10-26, with its drop folder at `Drop/Sallie's laptop`.
+Both Macs edit in the HyperFrames app (A0 installs it on the Mac Studio first; Sallie's laptop follows, on Jason's yes). Studio retired Final Cut on 6 November 2026 (Jason: "Retire it now"); Final Cut can still open HyperFrames' MOV export by hand. Sallie's laptop is set up by `docs/setup/sallies-laptop.md`, which still describes brimm-video until a later step updates it. Moving it to Studio is checks 40 to 48 on the Studio By-Hand Checks page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT); the Mac Studio's own move, check 40, was done on 2026-11-03. Her guide is the BRIMM Ops guide (https://claude.ai/artifact/Vu5JmADhftiEsPz4KYN4e4). The BRIMM Video Guide it replaced was retired on 2026-11-03: its link points to the BRIMM Ops guide. Her laptop has been on brimm-video's light import since 2026-10-26, with its drop folder at `Drop/Sallie's laptop`.

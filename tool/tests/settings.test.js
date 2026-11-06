@@ -837,8 +837,9 @@ describe("node settings.js", () => {
       `  Episodes:  ${ROOT}/Episodes`,
       `  References:  ${ROOT}/References`,
       `  BRIMM Video Studio, run from:  ${CHECKOUT}`,
-      `  Work in Final Cut:  ${t.home}/BRIMM Video Work`
+      `  Work folder:  ${t.home}/BRIMM Video Work`
     ]);
+    assert.ok(!t.said.join("\n").includes("Final Cut"), "show names no Final Cut");
     t.done();
   });
   it("says why there are no settings and who sets this Mac up, and ends with 2", () => {
@@ -1155,7 +1156,7 @@ describe("node settings.js set and sessions", () => {
       `  Episodes:  ${ROOT}/Episodes`,
       `  References:  ${ROOT}/References`,
       `  BRIMM Video Studio, run from:  ${CHECKOUT}`,
-      `  Work in Final Cut:  ${t.home}/BRIMM Video Work`,
+      `  Work folder:  ${t.home}/BRIMM Video Work`,
       "  Import:  light",
       "  Readings:  off",
       "  Hand-off version:  2",

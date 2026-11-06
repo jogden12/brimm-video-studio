@@ -668,7 +668,7 @@ function show(home, say, now) {
   say(`  Episodes:  ${episodesFolder(s.root)}`);
   say(`  References:  ${referencesFolder(s.root)}`);
   say(`  BRIMM Video Studio, run from:  ${s.checkout}`);
-  say(`  Work in Final Cut:  ${workFolder(home)}`);
+  say(`  Work folder:  ${workFolder(home)}`);
   if (s.import !== undefined) say(`  Import:  ${s.import}`);
   if (s.readings !== undefined) say(`  Readings:  ${s.readings ? "on" : "off"}`);
   if (s.handoffVersion !== undefined) say(`  Hand-off version:  ${s.handoffVersion}`);
