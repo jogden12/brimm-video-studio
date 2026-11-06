@@ -243,7 +243,10 @@ look_at_import_and_drop() {
 set_up_fresh() {
   local p
   local -a found
-  for p in $HOME/Library/CloudStorage/Dropbox*/"The BRIMM DB/BRIMM Video"(N/) $HOME/Dropbox*/"The BRIMM DB/BRIMM Video"(N/); do
+  # The BRIMM DB is at the top of a Dropbox, or a level deeper, in a team member's folder (as on the Mac Studio:
+  # Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB).
+  for p in $HOME/Library/CloudStorage/Dropbox*/"The BRIMM DB/BRIMM Video"(N/) $HOME/Library/CloudStorage/Dropbox*/*/"The BRIMM DB/BRIMM Video"(N/) \
+      $HOME/Dropbox*/"The BRIMM DB/BRIMM Video"(N/) $HOME/Dropbox*/*/"The BRIMM DB/BRIMM Video"(N/); do
     # Two paths that resolve to the same folder count once, and the first is kept as found.
     local same="" f
     for f in "${found[@]}"; do [[ "${f:A}" != "${p:A}" ]] || same=yes; done
@@ -903,15 +906,23 @@ write_the_report() {
 # from this Mac. Asked only then; a no keeps them and does not stop the run.
 retire_the_old_key() {
   heading "7. brimm-video's old key (check 48)"
+  # A Mac set up fresh moved nothing from brimm-video, so its key, if there is one, is not this app's to take.
+  if [[ -n "$FRESH" ]]; then
+    R48="not asked: this Mac was set up fresh, so it is left as it is"
+    if [[ -n "$PRINT_ONLY" ]]; then
+      would "leave brimm-video's old key as it is, if there is one: this Mac is set up fresh"
+    else
+      say "  Not asked: this Mac was set up fresh, so brimm-video's old key, if there is one, is left as it is."
+      if [[ -n "$REPORT_WRITTEN" ]]; then save_report; fi
+    fi
+    return 0
+  fi
   if [[ "$(mark_of installed)" != "$COMMIT" ]]; then
     R48="not asked: the move is not finished yet"
     if [[ -n "$PRINT_ONLY" ]]; then would "ask about brimm-video's old key only once Studio's installer has finished at this commit"; fi
     return 0
   fi
-  if [[ -n "$FRESH" ]]; then
-    R48="not asked: this Mac was set up fresh, so it is left as it is"
-    say "  Not asked: this Mac was set up fresh, so brimm-video's old key, if there is one, is left as it is."
-  elif [[ ! -e "$OLD_KEY" && ! -e "$OLD_KEY.pub" ]]; then
+  if [[ ! -e "$OLD_KEY" && ! -e "$OLD_KEY.pub" ]]; then
     R48="not on this Mac"
     done_already "brimm-video's old key is not on this Mac"
   elif [[ ! -e "$OLD_KEY" || ! -e "$OLD_KEY.pub" ]]; then

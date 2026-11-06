@@ -85,8 +85,9 @@ if (command === "show") {
     settings   her settings.json (default: as the switch of 26 October left it), or null for none (a Mac with no brimm-video)
     settingsChange  values to change in the default settings
     brimmVideo with no settings, Dropbox's The BRIMM DB/BRIMM Video is still made in ~/Dropbox, unless this is null (none),
-               "two" (a second one in ~/Library/CloudStorage/Dropbox too) or "linked" (only in ~/Library/CloudStorage/Dropbox, with
-               ~/Dropbox a link to that Dropbox folder)
+               "two" (a second one in ~/Library/CloudStorage/Dropbox too), "linked" (only in ~/Library/CloudStorage/Dropbox, with
+               ~/Dropbox a link to that Dropbox folder) or "team" (a level deeper, in a team member's folder, as on the Mac Studio:
+               ~/Library/CloudStorage/Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB/BRIMM Video)
     launchctl  what `launchctl list` prints; launchctlLater: what it prints from its second call on (default: the same)
     dropFiles  names put in her drop folder (it always holds .DS_Store and .brimm-watched-by too)
     claude     { status, version }: what the stand-in prints for `auth status --json` (default signed in, Max), and for --version;
@@ -192,6 +193,8 @@ esac
       if (options.brimmVideo === "linked") {
         mkdirSync(join(cloud, "The BRIMM DB", "BRIMM Video"), { recursive: true });
         symlinkSync(cloud, join(home, "Dropbox"));
+      } else if (options.brimmVideo === "team") {
+        mkdirSync(join(home, "Library", "CloudStorage", "Dropbox-Ogden28.5", "Jason Ogden", "The BRIMM DB", "BRIMM Video"), { recursive: true });
       } else {
         mkdirSync(join(home, "Dropbox", "The BRIMM DB", "BRIMM Video"), { recursive: true });
         if (options.brimmVideo === "two") mkdirSync(join(cloud, "The BRIMM DB", "BRIMM Video"), { recursive: true });
@@ -1274,6 +1277,8 @@ describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook
     assert.equal(r.status, 0, r.out);
     assert.match(r.out, /Would ask to set this Mac up fresh as Jason's MacBook/);
     assert.ok(r.out.includes(rootOf(r.home)), "it says where BRIMM Video is");
+    assert.match(r.out, /Would leave brimm-video's old key as it is, if there is one: this Mac is set up fresh/);
+    assert.ok(!r.out.includes("only once Studio's installer has finished"), "a fresh Mac's step 7 is never asked");
     assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`]);
     assert.deepEqual(r.tree, r.before);
   });
@@ -1319,6 +1324,12 @@ describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook
     const r = moveOn({ ...FRESH, brimmVideo: "linked" }, "--print");
     assert.equal(r.status, 0, r.out);
     assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${r.home}/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video`]);
+  });
+
+  it("finds BRIMM Video a level deeper, in a team Dropbox's member folder, as the Mac Studio has it", () => {
+    const r = moveOn({ ...FRESH, brimmVideo: "team" }, "--print");
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${r.home}/Library/CloudStorage/Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB/BRIMM Video`]);
   });
 
   it("leaves brimm-video's old key alone on a Mac set up fresh", () => {
