@@ -648,11 +648,18 @@ function brimmRules(kind, short = false, crop = null, footage = false, explainer
     ...(kind === "reel" ? [`- **Reels.** ${REELS_ARE_STUDIOS}`, thisReel(crop)] : []),
     ...(episode ? ["- **Spellings.** Spell names in titles and captions as `brimm/spellings.json` says."] : []),
     `- **The brand.** Follow \`brimm/brand.md\`: its colours, Josefin Sans for words and Allison for an accent, from \`assets/fonts/\`${episode ? ", and the logos in `assets/logos/`" : ""}. The name on screen is Sallie Ogden.`,
-    "- **Captions.** A wide main video has no captions drawn on it. Reels have captions, with the top 14% and the bottom 35% of an upright frame kept clear.",
+    kind === "clip" ? CLIP_CAPTIONS_RULE : CAPTIONS_RULE,
     "- **Versions.** When asked what has changed, or to go back, use `npx hyperframes history`.",
     "- **When she is done.** Export on This Mac. Then she says \"hand it off\" in her Claude chat."
   ].join("\n");
 }
+
+/** A session clip's rule about captions, as it was: R8a's style is not given to a client session's clip. */
+const CLIP_CAPTIONS_RULE = "- **Captions.** A wide main video has no captions drawn on it. Reels have captions, with the top 14% and the bottom 35% of an upright frame kept clear.";
+
+/** The rule about captions in a main video's and a Reel's notes (R8a): where there are none, where they stand, and the one style for
+    captions that are drawn, from brand.md: word by word, Josefin Sans (Google Fonts), white with a soft shadow or navy on a mist box. */
+const CAPTIONS_RULE = `${CLIP_CAPTIONS_RULE} Captions that are drawn, a Reel's or any she asks for, show one word at a time, each word as it is said, in Josefin Sans Medium from Google Fonts (\`assets/fonts/\`), as spoken, with BRIMM in capitals. Over the picture the words are white with a soft shadow, or navy on a mist box with rounded corners. Words in sand go only on navy.`;
 
 /** What each of a project's files is, as its notes and its facts say. */
 const ABOUT = {
