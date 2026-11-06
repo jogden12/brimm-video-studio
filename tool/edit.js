@@ -118,7 +118,7 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, guidanceOf, isMain as inUse, mediaOf, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, footageFailed, guidanceOf, isMain as inUse, mediaOf, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
 import { VOICEOVER } from "./project.js";
 import { openVoiceProject, voiceProjectWhy } from "./explainer.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "./app-reel.js";
@@ -1926,16 +1926,19 @@ function nextOf(ctx, folder, r) {
     it waited for. An early result (detached.js runDetached), which a reading writes once what it read is in the episode, says
     when it put that in, and that the late check of its copies is still to come while its run is at work (`live`), or that the
     run stopped before it was made. */
-function ranLine(ctx, shown, r, clean, next, live = false) {
+function ranLine(ctx, shown, r, clean, next, live = false, voicing = false) {
   const done = r.failed.length ? ` Not done: ${clean(r.failed.join(" ")).replace(/([^.])$/, "$1.")}` : "";
   const when = r.early
     ? `put in what it made ${ageText(ctx.now() - r.ended)} ago; ${live ? "the late check of its copies is still to come" : "it stopped before the late check of its copies was made"}`
     : `ended ${ageText(ctx.now() - r.ended)} ago`;
-  return `${shown}: ${Object.hasOwn(RUN_SAID, r.command) ? RUN_SAID[r.command] : r.command} ${when}.${r.made.length ? ` Made: ${r.made.map(clean).join(", ")}.` : ""}${done}${next ? ` ${clean(next)}` : ""}`;
+  return `${shown}: ${r.command === "join" && voicing ? VOICE_RUN_SAID : Object.hasOwn(RUN_SAID, r.command) ? RUN_SAID[r.command] : r.command} ${when}.${r.made.length ? ` Made: ${r.made.map(clean).join(", ")}.` : ""}${done}${next ? ` ${clean(next)}` : ""}`;
 }
 
 /** What `status` says while the working copy of an episode is made, in the words `app` uses for it. */
 const WORK_COPY_RUNNING = "the video for HyperFrames is being made";
+/** What `status` says while an explainer's voice is taken in (join.js), and how a result names that run: an explainer has no footage. */
+const VOICE_RUNNING = "its voice is being taken in";
+const VOICE_RUN_SAID = "taking in its voice";
 /** How a result names the run that left it, where the name of its command is not a word a person says: the working copy's run
     (workcopy.js) is "making the video for HyperFrames", and the join's (join.js; PR H5b) "making the video from its footage". Every other
     command is named by its own word. */
@@ -1998,8 +2001,11 @@ export async function status(ctx, rest) {
     const copying = runningRun(ctx.home, folder, ctx.alive, workCopyLockOf(ctx.home, folder)) !== null;
     // A finish whose hand-off is written and shown only waits for its late check (finish-check.js): that is said in place of that it is
     // running, with when Studio checks Dropbox's copies and then takes away what it took.
+    // An explainer's join run takes its voice in: it has no footage to join.
+    const voicing = Boolean(e.inForce && e.inForce.planned && e.inForce.planned.route === "explainer");
     const checking = command === "finish" && e.inForce ? checkingNow(ctx.home, folder, e.inForce, ctx.alive) : null;
     if (checking) lines.push(`${shown}: the hand-off is written. ${checkSentence(checking)}`);
+    else if (command === "join" && voicing) lines.push(`${shown}: ${VOICE_RUNNING}.`);
     else if (command) lines.push(`${shown}: ${command} is running.`);
     if (copying) lines.push(`${shown}: ${WORK_COPY_RUNNING}.`);
     let results = [];
@@ -2017,8 +2023,10 @@ export async function status(ctx, rest) {
       if (!r || (atWork && !own)) continue;
       // What to say next names the episode as it was then, and says to open it, which the gate refuses now: for a gated one it is
       // left out.
-      lines.push(ranLine(ctx, shown, r, clean, isGated(e) ? "" : nextOf(ctx, folder, r), own));
+      lines.push(ranLine(ctx, shown, r, clean, isGated(e) ? "" : nextOf(ctx, folder, r), own, voicing));
     }
+    // A copy of footage the last run could not make (its result; none while a run of the copy is at work) is said once, with what to do first.
+    if (footageFailed(ctx, folder)) lines.push(`Some of the footage for "${shown}" could not be made. Say "open ${shown} in HyperFrames" again; if it says so again, ask Jason.`);
   }
   for (const line of lines.length ? lines : ["Nothing is running, and nothing is waiting."]) say(line);
   return 0;
