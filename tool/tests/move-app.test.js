@@ -78,7 +78,7 @@ if (command === "show") {
     sshConfig  text of ~/.ssh/config (default: just the Host entry), or null for none
     knownHosts text of ~/.ssh/known_hosts (default: GitHub's published ed25519 key), or null for none
     ssh        what `ssh -T` answers, one answer a call: "ok", "denied" or a list of them (default "ok"; the last repeats)
-    checkout   Studio's checkout in the home folder: "at-pin" (default), "absent", "other-commit", "dirty", "other-remote" or
+    checkout   Studio's checkout in the home folder: "at-pin" (default), "absent", "other-commit", "dirty", "other-remote", "detached", "other-branch" or
                "partial-left" (no checkout, a half-made .partial beside where it goes)
     marks      text of the checkout's .git/move-to-studio (default: the tests passed at the pin, for an at-pin checkout)
     laterCommit  the "GitHub" repo gets a commit after the pin
@@ -135,6 +135,8 @@ function moveOn(options = {}, ...args) {
       git(home, "clone", "-q", "--branch", "main", github, studio);
       git(studio, "reset", "-q", "--hard", sha);
       if (checkout === "other-commit") git(studio, "commit", "-q", "--allow-empty", "-m", "elsewhere");
+      if (checkout === "detached") git(studio, "checkout", "-q", "--detach");
+      if (checkout === "other-branch") git(studio, "checkout", "-q", "-b", "feature");
       if (checkout === "dirty") put(join(studio, "tool", "install.sh"), "changed by hand\n");
       if (checkout === "other-remote") git(studio, "remote", "set-url", "origin", "/somewhere/else");
       const marks = options.marks ?? (checkout === "at-pin" ? `tests=${sha}\n` : null);
@@ -545,6 +547,17 @@ describe("the move script, Studio's code (check 42)", { skip: notAMac }, () => {
     const remote = moveOn({ checkout: "other-remote" });
     assert.equal(remote.status, 1);
     assert.match(remote.out, /comes from \/somewhere\/else, not from Studio's repository/);
+    const detached = moveOn({ checkout: "detached" });
+    const branch = moveOn({ checkout: "other-branch" });
+    for (const r of [detached, branch]) {
+      assert.equal(r.status, 1, r.out);
+      assert.match(r.out, /isn't on main/);
+      assert.ok(!r.out.includes("Already done: Studio's code"), r.out);
+    }
+    assert.match(branch.out, /\(feature\)|"feature"|feature/);
+    assert.equal(moveOn({ checkout: "detached" }, "--print").status, 1);
+    assert.match(moveOn({ checkout: "other-branch" }, "--print").out, /isn't on main/);
+    assert.equal(branch.studioNow.branch, "feature", "left alone");
     // The only thing this run changed is the Desktop copy of the key's public half (the harness has none): the checkout is untouched.
     const inCheckout = (list) => list.filter((f) => f.startsWith("Claude Code/brimm-video-studio"));
     for (const r of [other, dirty, remote]) {

@@ -502,6 +502,10 @@ look_at_the_checkout() {
   if [[ -n "$(GIT_OPTIONAL_LOCKS=0 git -C "$STUDIO" status --porcelain 2>/dev/null || true)" ]]; then
     stop_here "$STUDIO has changes that aren't saved. This app does not touch it; tell Jason."
   fi
+  local branch="$(git -C "$STUDIO" symbolic-ref --short HEAD 2>/dev/null || true)"
+  if [[ "$branch" != main ]]; then
+    stop_here "$STUDIO isn't on main (${branch:+it is on $branch}${branch:-it is not on any branch}). This app does not touch it; tell Jason."
+  fi
   head="$(git -C "$STUDIO" rev-parse HEAD 2>/dev/null || true)"
   if [[ "$head" != "$COMMIT" ]]; then
     stop_here "$STUDIO is at ${head[1,7]}, and this app was made at $short. This app does not move it; tell Jason."
