@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { finalTranscript, shortSilenceArgs, spelled, startedAfterSilence, wordsStartedAfterSilence } from "../final-transcript.js";
 import { silenceArgs, stampedText } from "../lib.js";
-import { wordsOf } from "../cuts.js";
+import { wordsOf, pauseArgs } from "../cuts.js";
 import { SRT, TOLD, told } from "./fixtures.js";
 
 const TOOLS = { ffmpeg: "FFMPEG", whisper: "WHISPER" };
@@ -148,7 +148,9 @@ describe("finalTranscript: a caption or a word does not start in a silence of a 
     const s = lead();
     await finalTranscript("/v/main.mp4", work(), s.deps);
     const filters = s.calls.filter((c) => c.cmd === "FFMPEG" && c.args.includes("-af")).map((c) => c.args);
-    assert.equal(filters.length, 2);
+    // And a third, for the closing pause: the cut plan's own measure, quieter than -35 dB for 0.3 s (closing.js).
+    assert.equal(filters.length, 3);
+    assert.deepEqual(filters[2], pauseArgs(filters[0][4], 0));
     assert.deepEqual(filters[0], silenceArgs(filters[0][4]));
     assert.deepEqual(filters[1], shortSilenceArgs(filters[1][4]));
     assert.equal(filters[0][4], filters[1][4], "both look at the same sound");
