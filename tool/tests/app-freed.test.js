@@ -57,7 +57,7 @@ function episode(c) {
   const started = [];
   const saved = [];
   const ctx = {
-    home, machine: "Mac Studio", now: () => AT, alive: (pid) => pid === process.pid, say: (line) => said.push(line),
+    home, machine: "Mac Studio", root: join(home, "Dropbox", "BRIMM Video"), isWhole: () => true, now: () => AT, alive: (pid) => pid === process.pid, say: (line) => said.push(line),
     start: (cmd, args) => started.push(args.slice(1)), settings: { root: join(home, "Dropbox", "BRIMM Video"), checkout: "/checkout", app: "hyperframes", appHandover: false }
   };
   const record = { id: "e-20261028-3fa9c1", rev: 4, kind: "raw", name: { text: NAME, placeholder: false }, video: { file: "Talk.mov", bytes: stat.size, seconds: 2.6 }, spellings: [] };

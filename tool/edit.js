@@ -77,7 +77,7 @@ import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
 import { readStatuses, importState, removeStatus } from "./importing.js";
-import { lateCheckAt, localSource } from "./late-wait.js";
+import { lateCheckAt, localSource, waitFacts } from "./late-wait.js";
 import { heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
@@ -6896,7 +6896,8 @@ function guideReading(ctx, e, r, kind, running, rates) {
     panel's file for the process says what it can (review I3): `usual` is said of a run that is making a copy of the main video's own shape,
     the step of the copy and it alone (`of` 1: a Reel's has a second step, and a recording's length is not its length), that has begun (it
     does not wait for the import to check its copies, WORK_COPY_WAIT_STEP) and that has told no time of its own that has run out (at its end
-    its time is 0). With no panel file at all, as before the run has begun one, it is said. */
+    its time is 0). With no panel file at all, as before the run has begun one, it is said. `wait` is what the copy must wait for (plan R1a;
+    late-wait.js waitFacts): when Dropbox has checked its copies and when the copy will be ready after that, or null when it waits for nothing. */
 function guideCopy(ctx, e, r, rates) {
   const run = runningRun(ctx.home, e.name, ctx.alive, workCopyLockOf(ctx.home, e.name));
   if (!run) return null;
@@ -6906,7 +6907,7 @@ function guideCopy(ctx, e, r, rates) {
   const left = panel ? readyIn({ left: fresh(panel.left), total: fresh(panel.total), n: panel.n, of: panel.of }) : null;
   const mainCopy = !panel || (panel.step === WORK_COPY_STEP && panel.of === 1);
   const toldTime = Boolean(panel) && (Number.isFinite(panel.left) || Number.isFinite(panel.total));
-  return { left, usual: left === null && mainCopy && !toldTime ? copyIn(rates, r.video && r.video.seconds) : null };
+  return { left, usual: left === null && mainCopy && !toldTime ? copyIn(rates, r.video && r.video.seconds) : null, wait: waitFacts(ctx, r, copyIn(rates, r.video && r.video.seconds)) };
 }
 
 /** The episode's main project in use, for the guide (plan PR 10; guide.js VideoFacts `project`): { opened, last, exported }, or null when

@@ -233,6 +233,11 @@ const STAGE_ROWS = [
   [APP({ copy: { left: 20, usual: null } }), "making-copy", 'The video for HyperFrames is being made, less than a minute left. Say "open it in HyperFrames" when it is done.'],
   [APP({ copy: { left: null, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made. It usually takes about 4 minutes. Say "open it in HyperFrames" when it is done.'],
   [APP({ copy: { left: null, usual: null } }), "making-copy", 'The video for HyperFrames is being made. Say "open it in HyperFrames" when it is done.'],
+  // While it waits for Dropbox's late check (plan R1a): when it will be ready, with the wait in it; or only when the check is made, while no speed is known.
+  [APP({ copy: { left: null, usual: null, wait: { checkAt: "17:15", readyAt: "17:26", inSeconds: 660 } } }), "making-copy", 'The video for HyperFrames is being made. It is ready about 17:26, in 11 minutes, after Dropbox has checked its copies at 17:15. Say "open it in HyperFrames" when it is done.'],
+  [CLIP({ copy: { left: null, usual: 240, wait: { checkAt: "17:15", readyAt: "17:26", inSeconds: 660 } } }), "making-copy", 'The video for HyperFrames is being made. It is ready about 17:26, in 11 minutes, after Dropbox has checked its copies at 17:15. Say "open it in HyperFrames" when it is done.'],
+  [APP({ copy: { left: null, usual: null, wait: { checkAt: "17:15", readyAt: "", inSeconds: null } } }), "making-copy", 'The video for HyperFrames is being made. Dropbox checks its copies at 17:15 first. Say "open it in HyperFrames" when it is done.'],
+  [APP({ copy: { left: 90, usual: null, wait: { checkAt: "17:15", readyAt: "17:26", inSeconds: 660 } } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames" when it is done.'],
   [CLIP({ copy: { left: 120, usual: null } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames" when it is done.'],
   // On a Mac whose settings have the app off nothing opens a project, so a clip is not told to open one.
   [CLIP({ copy: { left: null, usual: null }, app: false, v2: false }), "waits-v2", V1],

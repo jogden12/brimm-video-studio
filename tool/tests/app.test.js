@@ -18,6 +18,10 @@ import { markChat } from "../held.js";
 import { claudeDirName } from "../places.js";
 import { episodeWork } from "../settings.js";
 import { footageCopyPaths, workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
+import { fileId, writePending } from "../filing.js";
+import { COPY_STEP } from "../guide.js";
+import { addRates, progressFolder } from "../progress.js";
+import { clockAt } from "../unedited.js";
 import { psText } from "./open-world.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
@@ -166,7 +170,7 @@ function episode(c, { open = "opened", copy = true, words = true, handover = fal
   const started = [];
   const saved = [];
   const ctx = {
-    home: s.home, machine: "Mac Studio", now: () => AT, alive: (pid) => pid === process.pid, say: (line) => said.push(line),
+    home: s.home, machine: "Mac Studio", root: join(s.home, "Dropbox", "BRIMM Video"), isWhole: () => true, now: () => AT, alive: (pid) => pid === process.pid, say: (line) => said.push(line),
     start: (cmd, args) => started.push(args.slice(1)), settings: { root: join(s.home, "Dropbox", "BRIMM Video"), checkout: "/checkout", app: "hyperframes", appHandover: handover }
   };
   const record = { id: "e-20261028-3fa9c1", rev: 4, kind: "raw", name: { text: "Pricing talk", placeholder: false }, video: { file: "Talk.mov", bytes: stat.size, seconds: 2.6 }, spellings: [["Sally", "Sallie"]], ...over };
@@ -339,6 +343,74 @@ describe("app: opening an episode in HyperFrames", () => {
     assert.equal(await run(e), 0);
     assert.deepEqual(e.started, []);
     assert.match(e.said[0], /^The video for HyperFrames is being made\./);
+  });
+  describe("while the import's late check is still to come (plan R1a): every time it says when it will be ready, it says the wait that is left", () => {
+    /** This Mac owes the late check of the episode's import, due 11 minutes after AT; with `local`, the file the import came from is still in
+        its drop folder, whole and the one that came in, so the copy starts from it and waits for nothing. A speed of 100 seconds of work for
+        each second of the recording's 2.6 makes the copy take 260 seconds. */
+    function owing(e, { local = false, speed = true } = {}) {
+      const drop = join(e.home, "drop", "Talk.mov");
+      mkdirSync(join(e.home, "drop"), { recursive: true });
+      writeFileSync(drop, "the raw video's bytes");
+      writePending(e.home, {
+        version: 1, id: e.record.id, name: FOLDER, folder: e.folder, video: "Talk.mov", bytes: e.record.video.bytes, seconds: 2.6, drop: local ? drop : join(e.home, "drop", "gone.mov"), dropFile: fileId(drop), importId: "x", work: join(e.home, "work"),
+        entries: [], lastCopy: AT - 4 * 60 * 1000, root: e.ctx.root, machine: "Mac Studio", planTxt: "Talk.cut-plan.txt"
+      });
+      if (speed) addRates(progressFolder(e.home), { [COPY_STEP]: 100 });
+      return { due: AT + 11 * 60 * 1000 };
+    }
+    const near = (ms) => clockAt(Math.round(ms / 60000) * 60000);
+    const MADE = (middle) => `The video for HyperFrames is being made.${middle} Say "open Pricing talk in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
+    it("names the clock time the copy will be ready, and when Dropbox has checked its copies, when the copy has to wait for the check", async (c) => {
+      const e = episode(c, { copy: false });
+      const { due } = owing(e);
+      assert.equal(await run(e), 0);
+      // The check is due at AT + 11 minutes; the copy takes 260 seconds after it: ready 15 minutes (14.9) from now.
+      assert.deepEqual(e.said, [MADE(` It is ready about ${near(due + 260 * 1000)}, in 15 minutes, after Dropbox has checked its copies at ${clockAt(due)}.`)]);
+      plain(e.said);
+    });
+    it("says only when Dropbox checks its copies when this Mac has measured no speed of making the copy", async (c) => {
+      const e = episode(c, { copy: false });
+      const { due } = owing(e, { speed: false });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [MADE(` Dropbox checks its copies at ${clockAt(due)} first.`)]);
+    });
+    it("says what it always said when the copy starts from the file this Mac holds: the check goes on behind it, and nothing waits for it", async (c) => {
+      const e = episode(c, { copy: false });
+      owing(e, { local: true });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [MADE(` It is ready about ${clockAt(AT + 260 * 1000)}, in about 4 minutes.`)]);
+    });
+    it("says what it always said when no check is owed", async (c) => {
+      const e = episode(c, { copy: false });
+      addRates(progressFolder(e.home), { [COPY_STEP]: 100 });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [MADE(` It is ready about ${clockAt(AT + 260 * 1000)}, in about 4 minutes.`)]);
+    });
+    it("says when Claude starts, and why, while Claude is still reading a raw video whose reading waits for the check", async (c) => {
+      const e = episode(c);
+      const { due } = owing(e);
+      mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), "read", () => true).taken, true);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [`Claude is still reading it. It starts at ${clockAt(due)}, when Dropbox has checked its copies. Say "open Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`]);
+      plain(e.said);
+      // With no copy yet the same is said, and the copy is asked for.
+      const none = episode(c, { copy: false });
+      owing(none);
+      mkdirSync(episodeWork(none.home, FOLDER), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(none.home, FOLDER), "read", () => true).taken, true);
+      assert.equal(await run(none), 0);
+      assert.match(none.said[0], /^Claude is still reading it\. It starts at \d\d:\d\d, when Dropbox has checked its copies\. Say /);
+    });
+    it("says what it always said of a reading that does not wait for the check: an iPhone clip's", async (c) => {
+      const e = episode(c, { record: { kind: "short video" } });
+      owing(e);
+      mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), "read", () => true).taken, true);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ['Claude is still reading it. Say "open Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.']);
+    });
   });
   describe("while Claude is still reading the episode (a `read` run holds the episode's lock)", () => {
     const STILL = 'Claude is still reading it. Say "open Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.';

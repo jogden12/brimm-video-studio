@@ -8,6 +8,7 @@ import { basename, join, resolve } from "node:path";
 import { LATE_CHECK_MS } from "./dropbox.js";
 import { dueAt, readPendings, sameFile } from "./filing.js";
 import { importState, readStatuses } from "./importing.js";
+import { clockAt } from "./unedited.js";
 
 /** This Mac's pending late check of the episode with `record`, with no problem found: the check it still owes, or undefined. */
 const owedFor = (ctx, record) => readPendings(ctx.home).find((p) => p.id === record.id && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root) && !p.problem);
@@ -54,4 +55,24 @@ export function lateCheckAt(ctx, record) {
   if (owed) return Math.max(dueAt(owed), now);
   const working = readStatuses(ctx.root, now).map((s) => s.status).find((s) => s && s.video === record.video.file && s.bytes === record.video.bytes && importState(s, now) === "running");
   return working ? now + LATE_CHECK_MS : null;
+}
+
+/** When the copy of the episode's video for HyperFrames can begin, in milliseconds, or null when nothing holds it (plan R1a). It
+    waits for the import's late check (`lateCheckAt`) unless it starts from the local file (`localSource`): that one waits for
+    nothing, the check going on behind it. (R1d adds the clause for a reading that replaces files, once it is to run.) */
+export function lateWaitFor(ctx, record) {
+  return localSource(ctx, record) ? null : lateCheckAt(ctx, record);
+}
+
+/** A moment on this Mac's clock to the nearest minute, as a time that is worked out is said (a due time is said as the clock shows it). */
+const clockNear = (ms) => clockAt(Math.round(ms / 60000) * 60000);
+
+/** What is said of a copy that takes `copySeconds` (null while this Mac has measured no speed) and must wait for the late check:
+    { checkAt, readyAt, inSeconds }, "17:15" for when Dropbox has checked its copies, "17:26" for when the copy is ready ("" when
+    `copySeconds` is null) and the seconds from now to then (null); or null when it does not wait. */
+export function waitFacts(ctx, record, copySeconds) {
+  const due = lateWaitFor(ctx, record);
+  if (due === null) return null;
+  const ready = copySeconds === null || copySeconds === undefined ? null : due + copySeconds * 1000;
+  return { checkAt: clockAt(due), readyAt: ready === null ? "" : clockNear(ready), inSeconds: ready === null ? null : Math.max(0, Math.round((ready - ctx.now()) / 1000)) };
 }
