@@ -106,6 +106,8 @@ if (command === "show") {
     gitStandIn a stand-in git that notes its arguments and GIT_SSH_COMMAND, and fails; noRepo leaves BRIMM_STUDIO_REPO unset;
                repoMissing points it at nothing
     commit     the commit to pass: the "GitHub" repo's own by default, null for none
+    oldKey     true puts brimm-video's old key (its two files) in ~/.ssh, beside an unrelated id_ed25519 that must always stay
+    oldReport  text of a report an earlier run left on her Desktop
     answers    stdin, such as "y\ny\n\n"
     Returns { status, out, ran, home, before, tree, log, report }: `before` and `tree` list every file in the home folder before
     and after, and `log` and `report` are those files' text, or "". */
@@ -229,6 +231,12 @@ esac
       // The Desktop copy of its public half, as the key step of an earlier run left it, so that a run that stops changes nothing.
       put(join(home, "Desktop", "Studio key (public half).txt"), `ssh-ed25519 AAAAstandin ${keyComment}\n`);
     }
+    if (options.oldKey) {
+      put(join(ssh, "brimm_video_deploy"), "OLD-PRIVATE-HALF\n", 0o600);
+      put(join(ssh, "brimm_video_deploy.pub"), "ssh-ed25519 AAAAold brimm-video read-only\n");
+      put(join(ssh, "id_ed25519"), "HER-OWN-KEY\n", 0o600);
+    }
+    if (options.oldReport) put(join(home, "Desktop", "Studio move report.txt"), options.oldReport);
     const sshConfig = options.sshConfig === undefined ? HOST_BLOCK : options.sshConfig;
     if (sshConfig !== null) put(join(ssh, "config"), sshConfig, 0o600);
     const knownHosts = options.knownHosts === undefined ? `${GITHUB_HOST_KEY}\n` : options.knownHosts;
@@ -266,6 +274,7 @@ esac
       copied: text(copied), sshConfig: text(join(ssh, "config")), sshConfigMode: mode(join(ssh, "config")), knownHosts: text(join(ssh, "known_hosts")),
       publicCopy: text(join(home, "Desktop", "Studio key (public half).txt")), sshAsked: Number(text(asked).trim() || 0),
       status: r.status, out: r.stdout, err: r.stderr, home, before, tree: readdirSync(home, { recursive: true }).sort(),
+      oldKeyFiles: ["brimm_video_deploy", "brimm_video_deploy.pub"].map((f) => existsSync(join(ssh, f))), ownKeyKept: existsSync(join(ssh, "id_ed25519")),
       ran: text(ran), log: text(join(home, "Library", "Logs", "brimm-video-studio-move.log")), report: text(join(home, "Desktop", "Studio move report.txt"))
     };
   } finally {
@@ -874,5 +883,116 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     assert.equal(r.status, 0, r.out);
     assert.ok(r.tree.includes("Library/LaunchAgents/com.thebrimm.unedited.plist"));
     assert.ok(!r.tree.includes("Library/LaunchAgents/com.thebrimm.claude-check.plist"));
+  });
+});
+
+describe("the move script, the report and brimm-video's old key (check 48)", { skip: notAMac }, () => {
+  const NOT_INSTALLED = "tests=SHA\n";
+  const LABELS = [
+    "Her macOS:", "Free on her disk:", "Anything unexpected in her settings:", "What the count printed:", "Her Claude account's plan:",
+    "Whether the key is on GitHub, and how:", "What the check of the key printed:", "The commit:", "The tests' last lines:",
+    "The app's version on each Mac:", "Anything in the print that surprised you, and its HDR line:", "The installer's last lines:",
+    "What the look for the one-shot check printed:", "What turning HyperFrames on printed:"
+  ];
+  const CHECKS = ["41 Before you start", "42 Studio's code on her laptop", "43 The HyperFrames app on her laptop", "44 Studio's installer on her laptop", "48 Afterwards"];
+
+  it("writes the report on her Desktop, one heading a check and one line a box, as the page labels them, and shows it in Finder", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, install: { moves: true }, oldReport: "STALE REPORT\n", answers: "y\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.ok(r.tree.includes("Desktop/Studio move report.txt"));
+    assert.ok(!r.report.includes("STALE REPORT"), "a run writes it whole again");
+    const lines = r.report.split("\n");
+    let at = -1;
+    for (const heading of [...CHECKS.slice(0, 4)]) {
+      const i = lines.indexOf(heading);
+      assert.ok(i > at, `${heading} comes in order`);
+      at = i;
+    }
+    assert.ok(lines.indexOf("48 Afterwards") > at);
+    let last = -1;
+    for (const label of LABELS) {
+      const found = lines.map((l, i) => (l.startsWith(label + " ") ? i : -1)).filter((i) => i >= 0);
+      assert.equal(found.length, 1, `${label} once`);
+      assert.ok(found[0] > last, `${label} in order`);
+      last = found[0];
+      assert.ok(lines[found[0]].length > label.length + 1, `${label} has a value`);
+    }
+    const known = (l) => l === "" || CHECKS.includes(l) || LABELS.some((x) => l.startsWith(x + " ")) || l.startsWith("Studio move report:") || l.startsWith("brimm-video's old key: ");
+    assert.deepEqual(lines.filter((l) => !known(l)), [], "every line is a heading or a box");
+    assert.match(r.report, /^Her macOS: 15\.1$/m);
+    assert.match(r.report, /^Free on her disk: 429 GB$/m);
+    assert.match(r.report, /^Anything unexpected in her settings: nothing/m);
+    assert.match(r.report, /^What the count printed: 0$/m);
+    assert.match(r.report, /^Her Claude account's plan: max$/m);
+    assert.match(r.report, /^The app's version on each Mac: 1\.4\.0 on Sallie's laptop/m);
+    assert.match(r.report, /^Anything in the print that surprised you, and its HDR line: .*HDR video:/m);
+    assert.match(r.report, /^The installer's last lines: .*Done\./m);
+    assert.match(r.report, new RegExp(`^What the look for the one-shot check printed: ${BACKGROUND}`, "m"));
+    assert.match(r.report, /^What turning HyperFrames on printed: .*it was on already|^What turning HyperFrames on printed: .*on already/m);
+    assert.match(r.report, /^The commit: [0-9a-f]{7} the stand-in Studio/m);
+    assert.ok(r.ran.split("\n").includes(`open -R ${r.home}/Desktop/Studio move report.txt`), r.ran);
+    const heading = r.out.indexOf("6. The report");
+    assert.ok(heading > r.out.indexOf("5. Studio's installer") && heading < r.out.indexOf("7. brimm-video's old key"));
+    for (const secret of [EMAIL, ORG, "PRIVATE-HALF", "OLD-PRIVATE-HALF"]) {
+      assert.ok(!r.report.includes(secret), `the report never holds ${secret}`);
+      assert.ok(!r.out.includes(secret) && !r.log.includes(secret));
+    }
+  });
+
+  it("says what is known when earlier steps were already done, never an empty line", () => {
+    const r = moveOn({});
+    assert.equal(r.status, 0, r.out);
+    for (const label of LABELS) {
+      const line = r.report.split("\n").find((l) => l.startsWith(label + " "));
+      assert.ok(line && line.length > label.length + 1, `${label} has a value: ${line}`);
+    }
+    assert.match(r.report, /^Whether the key is on GitHub, and how: yes: .*the check of the key worked$/m);
+  });
+
+  it("with --print, shows the report and writes no file", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, oldKey: true }, "--print");
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(r.tree, r.before);
+    assert.equal(r.report, "");
+    assert.match(r.out, /Would write this report/);
+    for (const label of LABELS) assert.ok(r.out.includes(label), `${label} is shown`);
+    assert.ok(!r.ran.includes("open -R"), r.ran);
+    assert.ok(!r.out.includes("Has brimm-video's key been deleted"), "a print asks nothing");
+    assert.deepEqual(r.oldKeyFiles, [true, true]);
+  });
+
+  it("offers to delete brimm-video's old key only once the move is done, and deletes exactly its two files on y", () => {
+    const yes = moveOn({ oldKey: true, answers: "y\n" });
+    assert.equal(yes.status, 0, yes.out);
+    assert.match(yes.out, /7\. brimm-video's old key \(check 48\)/);
+    const q = yes.out.slice(yes.out.indexOf("7. brimm-video's old key"));
+    assert.ok(q.indexOf("Has brimm-video's key been deleted on GitHub (jogden12/brimm-video › Settings › Deploy keys)?") >= 0, q);
+    assert.ok(q.indexOf("GitHub") < q.indexOf(".ssh/brimm_video_deploy"), "GitHub is named first");
+    assert.deepEqual(yes.oldKeyFiles, [false, false]);
+    assert.ok(yes.ownKeyKept, "her own key stays");
+    assert.deepEqual(yes.before.filter((f) => !yes.tree.includes(f)).sort(), [".ssh/brimm_video_deploy", ".ssh/brimm_video_deploy.pub"], "nothing else is taken away");
+    assert.ok(yes.tree.includes(".ssh/brimm_video_studio_deploy") && yes.tree.includes(".ssh/config"));
+    assert.match(yes.report, /^brimm-video's old key: deleted from this Mac$/m);
+    assert.ok(yes.out.trimEnd().endsWith("Done. Next on the By-Hand page: checks 45 to 47, on screen."));
+
+    const no = moveOn({ oldKey: true, answers: "n\n" });
+    assert.equal(no.status, 0, no.out);
+    assert.deepEqual(no.oldKeyFiles, [true, true]);
+    assert.ok(no.out.trimEnd().endsWith("Done. Next on the By-Hand page: checks 45 to 47, on screen."), "an n does not stop the run");
+    assert.match(no.report, /^brimm-video's old key: kept for now$/m);
+
+    const eof = moveOn({ oldKey: true, answers: "" });
+    assert.equal(eof.status, 0, eof.out);
+    assert.deepEqual(eof.oldKeyFiles, [true, true], "the end of input keeps them");
+
+    const notYet = moveOn({ oldKey: true, marks: "tests=SHA\n", install: { moves: true }, answers: "n\n" });
+    assert.equal(notYet.status, 1, notYet.out);
+    assert.ok(!notYet.out.includes("Has brimm-video's key been deleted"), "not installed: no question");
+    assert.deepEqual(notYet.oldKeyFiles, [true, true]);
+
+    const gone = moveOn({});
+    assert.equal(gone.status, 0, gone.out);
+    assert.ok(!gone.out.includes("Has brimm-video's key been deleted"), "no old key: no question");
+    assert.match(gone.report, /^brimm-video's old key: not on this Mac$/m);
   });
 });

@@ -54,7 +54,9 @@ LOGGING=""           # set once the run is a real one that has been let through:
 COMMIT=""
 changed=()           # each change this run made, in words, for the stop summary
 made_partial=""      # set when this run made $PARTIAL, so that a Ctrl-C takes it away again
-R41=()               # the report's lines for check 41
+R41=()               # the look's lines, as it says them
+R_MACOS="" R_DISK="" R_SETTINGS="" R_COUNT="" R_PLAN=""   # the report's lines for check 41, in the By-Hand page's own words
+R48="not asked yet"  # the report's line for check 48: what happened to brimm-video's old key
 R42_COMMIT="" R42_TESTS=""   # the report's lines for the code: the commit (short sha and subject), and the tests' ℹ summary lines
 R42_KEY="" R42_SSH=""   # the report's lines for check 42: whether the key is on GitHub and how, and what ssh -T printed
 ROOT="" DROP="" CHECKOUT_NOW="" NODE="" CLAUDE=""
@@ -98,16 +100,18 @@ on_term() { interrupted 143; }
 
 # Asks to go ahead with what $1 says will change. One line is read from the terminal: y or yes, in any case, with spaces round
 # it, goes ahead; anything else, an empty line, or the end of input stops. Under --print nothing is asked.
-ask() {
-  local line=""
+# Succeeds on a yes and fails on anything else, and stops nothing: for a question whose no is not a stop. $2 is the prompt.
+ask_yes() {
+  local line="" prompt="${2-Go ahead? Type y and press Return, or n to stop: }"
   say "$1"
-  print -rn -- "Go ahead? Type y and press Return, or n to stop: "
-  [[ -z "$LOGGING" ]] || print -rn -- "Go ahead? Type y and press Return, or n to stop: " >> "$LOG"
+  print -rn -- "$prompt"
+  [[ -z "$LOGGING" ]] || print -rn -- "$prompt" >> "$LOG"
   IFS= read -r line || true
   # A line from a pipe has no Return of its own on screen.
   [[ -t 0 ]] || say ""
-  [[ "${(L)line}" =~ '^[[:space:]]*(y|yes)[[:space:]]*$' ]] || stop_here
+  [[ "${(L)line}" =~ '^[[:space:]]*(y|yes)[[:space:]]*$' ]]
 }
+ask() { ask_yes "$1" || stop_here; }
 # Waits for something she does by hand: an empty line goes on, anything else stops.
 wait_for() {
   local line=""
@@ -183,6 +187,7 @@ look_at_this_mac() {
   macos="$(sw_vers -productVersion 2>/dev/null || true)"
   say "  macOS:  ${macos:-could not be read}"
   R41+=("macOS: ${macos:-could not be read}")
+  R_MACOS="${macos:-could not be read}"
 
   line="$(df -k / 2>/dev/null | tail -n 1 || true)"
   local -a cols
@@ -196,9 +201,11 @@ look_at_this_mac() {
       say "  Free disk:  $gb GB"
     fi
     R41+=("Free disk: $gb GB")
+    R_DISK="$gb GB"
   else
     say "  Free disk:  could not be read"
     R41+=("Free disk: could not be read")
+    R_DISK="could not be read"
   fi
 
   if ! xcode-select -p >/dev/null 2>&1; then
@@ -245,6 +252,8 @@ look_at_this_mac() {
     stop_here "Her settings are not as the switch of 26 October left them: the checkout is \"$CHECKOUT_NOW\", and it should be brimm-video's ($OLD_CHECKOUT) or Studio's ($STUDIO)."
   fi
 
+  R_SETTINGS="nothing: import $import, hand-off version $handoff, drop folder $drop, checkout as expected"
+
   # No import is running when every com.thebrimm job has no process id ("-") in the first column.
   local job
   for job in "${(@f)$(launchctl list 2>/dev/null | grep com.thebrimm || true)}"; do
@@ -272,6 +281,7 @@ look_at_this_mac() {
   fi
   say "  Her drop folder is empty."
   R41+=("Her drop folder is empty")
+  R_COUNT="${#held[@]}"
 
   # Claude Code: signed in or not, its plan and its version. Its email and its organisation are never read out.
   if ! CLAUDE="$(find_claude)"; then
@@ -299,8 +309,10 @@ look_at_this_mac() {
   if [[ "$signed" == true ]]; then
     say "  Claude Code:  signed in${plan:+ ($plan)}, version ${claude_version:-that could not be read}"
     R41+=("Claude Code: signed in${plan:+ ($plan)}, version ${claude_version:-unreadable}")
+    R_PLAN="${plan:-signed in, plan not shown}"
   else
     R41+=("Claude Code: not signed in, version ${claude_version:-unreadable}")
+    R_PLAN="not signed in"
   fi
 }
 
@@ -770,8 +782,87 @@ $R44_RAN"
   say "  Studio's installer finished."
   turn_on_hyperframes yes
 }
-write_the_report() { heading "6. The report"; }
-retire_the_old_key() { heading "7. brimm-video's old key (check 48)"; }
+# Step 6: the report Jason carries to the Mac Studio, where each line is copied into the box the By-Hand page labels the same
+# way. One heading a check, one line a box (a value of several lines is joined on one). It holds nothing of the Claude account,
+# the key's private half or her drop folder's files. It shows the run's final state, so step 7 writes it again.
+one_line() { local text="${1-}" fallback="${2-nothing was recorded on this run}"; [[ -n "$text" ]] || text="$fallback"; print -r -- "${(j: | :)${(@f)text}}"; }
+compose_report() {
+  print -r -- "Studio move report: $MACHINE, $(date '+%Y-%m-%d %H:%M')"
+  print -r -- ""
+  print -r -- "41 Before you start"
+  print -r -- "Her macOS: ${R_MACOS:-not read}"
+  print -r -- "Free on her disk: ${R_DISK:-not read}"
+  print -r -- "Anything unexpected in her settings: ${R_SETTINGS:-not read}"
+  print -r -- "What the count printed: ${R_COUNT:-not read}"
+  print -r -- "Her Claude account's plan: ${R_PLAN:-not read}"
+  print -r -- ""
+  print -r -- "42 Studio's code on her laptop"
+  print -r -- "Whether the key is on GitHub, and how: $(one_line "$R42_KEY" "made on an earlier run; the check of the key worked")"
+  print -r -- "What the check of the key printed: $(one_line "$R42_SSH" "GitHub's welcome, as on the earlier run that checked it")"
+  print -r -- "The commit: $(one_line "$R42_COMMIT" "${COMMIT[1,7]}")"
+  print -r -- "The tests' last lines: $(one_line "$R42_TESTS" "passed at ${COMMIT[1,7]} on an earlier run")"
+  print -r -- ""
+  print -r -- "43 The HyperFrames app on her laptop"
+  print -r -- "The app's version on each Mac: $(one_line "$R43_VERSION" "not read") on $MACHINE (the Mac Studio's is read there)"
+  print -r -- ""
+  print -r -- "44 Studio's installer on her laptop"
+  print -r -- "Anything in the print that surprised you, and its HDR line: $(one_line "$R44_PRINT" "not shown on this run (the installer finished on an earlier run)")"
+  print -r -- "The installer's last lines: $(one_line "$R44_RAN")"
+  print -r -- "What the look for the one-shot check printed: $(one_line "$R44_AGENT" "the installer finished on an earlier run")"
+  print -r -- "What turning HyperFrames on printed: $(one_line "$R44_APP" "nothing: turning it on was not needed on this run")"
+  print -r -- ""
+  print -r -- "48 Afterwards"
+  print -r -- "brimm-video's old key: $R48"
+}
+REPORT_WRITTEN=""
+save_report() {
+  compose_report > "$REPORT.new"
+  mv "$REPORT.new" "$REPORT"
+}
+write_the_report() {
+  heading "6. The report"
+  if [[ -n "$PRINT_ONLY" ]]; then
+    would "write this report on her Desktop ($REPORT) and show it in Finder:"
+    compose_report | while IFS= read -r line; do say "  $line"; done
+    return 0
+  fi
+  mkdir -p "${REPORT:h}"
+  save_report
+  REPORT_WRITTEN="yes"
+  changed+=("wrote the report ($REPORT)")
+  say "  The report is on her Desktop: Studio move report.txt"
+  open -R "$REPORT" || true
+}
+
+# Step 7, check 48: brimm-video's old key. Once the move is done and Jason has deleted the key on GitHub, its two files can go
+# from this Mac. Asked only then; a no keeps them and does not stop the run.
+retire_the_old_key() {
+  heading "7. brimm-video's old key (check 48)"
+  if [[ "$(mark_of installed)" != "$COMMIT" ]]; then
+    R48="not asked: the move is not finished yet"
+    if [[ -n "$PRINT_ONLY" ]]; then would "ask about brimm-video's old key only once Studio's installer has finished at this commit"; fi
+    return 0
+  fi
+  if [[ ! -e "$OLD_KEY" && ! -e "$OLD_KEY.pub" ]]; then
+    R48="not on this Mac"
+    done_already "brimm-video's old key is not on this Mac"
+  elif [[ ! -e "$OLD_KEY" || ! -e "$OLD_KEY.pub" ]]; then
+    R48="left alone: only one of its two files is here"
+    say "  Only one of brimm-video's old key's two files is here, so they are left alone. Tell Jason."
+  elif [[ -n "$PRINT_ONLY" ]]; then
+    R48="not asked: this was a print"
+    would "ask whether brimm-video's key has been deleted on GitHub (jogden12/brimm-video, Settings, Deploy keys), and on y delete $OLD_KEY and $OLD_KEY.pub"
+  elif ask_yes "Has brimm-video's key been deleted on GitHub (jogden12/brimm-video › Settings › Deploy keys)? If it has, the two files of that key can be deleted from this Mac: $OLD_KEY and $OLD_KEY.pub. Nothing else in ~/.ssh is touched." "Delete them now? Type y and press Return, or n to keep them: "; then
+    rm -f -- "$OLD_KEY" "$OLD_KEY.pub"
+    changed+=("deleted brimm-video's old key from this Mac")
+    R48="deleted from this Mac"
+    say "  brimm-video's old key is deleted from this Mac."
+  else
+    R48="kept for now"
+    say "  brimm-video's old key is kept for now. Double-click Move to Studio again to be asked once more."
+  fi
+  if [[ -n "$REPORT_WRITTEN" ]]; then save_report; fi
+}
 
 main() {
   read_options "$@"
