@@ -3732,7 +3732,7 @@ describe("the videos of an episode's video, made again from its cut plan (--from
     const r = await stopped(t, folder, video);
     assert.deepEqual([r.stopped, r.calls, r.clones, r.rev], [true, 0, 0, 1]);
     // Its closing is the run's own: "Nothing was made." (claim-items-4).
-    assert.equal(r.message, `Sallie's laptop has ${record.name.text} open. Open it here first (say "take it over" if they are done with it)`);
+    assert.equal(r.message, `Sallie's laptop has ${record.name.text} open. Carry on there`);
     t.done();
   });
   it("copies nothing back at its late check once the laptop opened the episode during the wait (fidelity-1)", async () => {

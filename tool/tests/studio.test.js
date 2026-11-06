@@ -190,9 +190,10 @@ describe("her folder's settings", () => {
     const [make] = rowOf('| "Make Reel 2" / "Open Reel 2 in HyperFrames" |').map((row) => withRules(skill, row));
     assert.equal(rowOf('| "Make Reel 2" / "Open Reel 2 in HyperFrames" |').length, 1);
     assert.ok(make.includes('| `app "<episode>" reel 2`: '), make);
-    // Its take-over is app's, with the Reel in it, and the row sends her to the episode's own row for how a take-over goes.
-    assert.deepEqual([...new Set([...make.matchAll(/`(app[^`]*)`/g)].map((m) => m[1]))], ['app "<episode>" reel 2', 'app "<episode>" reel 2 --take-over']);
-    assert.ok(make.includes('go on as for "Open the Pricing episode in HyperFrames", with `app "<episode>" reel 2 --take-over` for the take-over'), make);
+    // There is no take-over: the row sends her to the episode's own row for the files being brought over first.
+    assert.deepEqual([...new Set([...make.matchAll(/`(app[^`]*)`/g)].map((m) => m[1]))], ['app "<episode>" reel 2']);
+    assert.ok(make.includes('If it says files are being brought over first, go on as for "Open the Pricing episode in HyperFrames", with `app "<episode>" reel 2`.'), make);
+    assert.doesNotMatch(make, /take-over|take it over/);
     assert.doesNotMatch(make, /`open /);
     // The video is made first, in the background, and she is told so: "how far is it?" shows how far it has got.
     assert.ok(make.includes('Its video is made first, in the background: tell her so, and when "how far is it?" says it is done, run it again.'), make);
@@ -284,64 +285,32 @@ describe("her folder's settings", () => {
     // The command names in these rows are edit.js's, and the flags and the Reel's number are the usage lines' own.
     for (const span of commandsIn(`${list}\n${use}`)) assert.ok(COMMAND_NAMES.includes(span.split(" ")[0]), span);
   });
-  it("have the skill ask her once about a take-over, and take it over again unasked only in the conversation she said yes in", () => {
-    // A take-over on the Mac without the files brings them first and says to say "take it over" again; so does a take-over
-    // Dropbox undid. Asked a second time, she would be asked the same question twice (the review of the follow-ups plan, P8).
-    // But it is taken over again unasked only for the take-over she said yes to, and for a bring only once it has ended well:
-    // "how far is it?" says to take it over again only while that claim stands and she has not been asked again since (the
-    // fold's check of P8, and review #24-1).
+  it("have the skill say nothing of taking an episode over, or of handing one over: both are gone (Phase 2, F5)", () => {
+    // One Mac edits a video from start to finish. The rows and rules that asked her about a take-over, and the release question, are gone.
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
     const row = withRules(skill, skill.split("\n").find((line) => line.startsWith('| "Open the Pricing episode" |')));
-    assert.match(row, /If it says another Mac has it, ask her whether to take it over; if yes, `open "<episode>" --take-over`\./);
-    assert.match(row, /If that take-over says Dropbox undid the claim and to say "take it over" again, run `open "<episode>" --take-over` again without asking her again\./);
-    assert.match(row, /If it is bringing files over first, wait until "how far is it\?" says the bring has ended; if it then says to say "take it over" again, run `open "<episode>" --take-over` again without asking her again;/);
+    assert.match(row, /If it is bringing files over first, wait until "how far is it\?" says the bring has ended, then run `open "<episode>"` again;/);
     // A bring that failed says why, and to open it: she is told, and nothing is run again until she says so (review #24-2).
-    assert.match(row, /; if it says some files are not here, tell her why, in plain words, and try again only when she says to\./);
-    // Her yes is for that conversation only: in a later one she may have changed her mind, so she is asked again (review #24-1).
-    assert.match(row, /Take it over again unasked only in the conversation in which she said yes, and only if she has not said not to since; in a later one, run `open "<episode>"` and ask her as above\. Never take an episode over unasked otherwise\./);
-    // A no she gives later in that same conversation stops it too (the fold's check of #24-1).
-    assert.doesNotMatch(row, /When it, or "how far is it\?", says/);
-    assert.doesNotMatch(row, /says so only while/);
+    assert.match(row, /; if it says some files are not here, tell her why, in plain words, and try again only when she says to\.$/);
+    assert.doesNotMatch(skill, /--take-over|take it over|take an episode over|`release|The release question|I'm done with it for now|hand-edits-stay|handing it over/);
+    assert.ok(!commandsIn(skill).some((span) => span.split(" ")[0] === "release"), "the skill runs release");
   });
-  it("have the skill open an episode in HyperFrames with app, and take it over by the rules it has for open, with app in open's place", () => {
-    // `app` begins with open's own claim and bring (edit.js claimAndBring): another Mac's claim refuses it in open's words, and a bring
-    // or a claim Dropbox undid ends in open's words too, to say "take it over" again. So her yes is asked for once, and the take-over
-    // is run again unasked only in the conversation she said yes in, exactly as for open (build plan PR 4, "The skill").
+  it("have the skill open an episode in HyperFrames with app, and tell her of another Mac's project in the words app says it in", () => {
+    // `app` begins with open's own claim and bring (edit.js claimAndBring): a bring ends in open's words, to say it again.
     const skill = studioFiles({ checkout: CHECKOUT, node: NODE })[".claude/skills/brimm-edit/SKILL.md"];
     const rowOf = (start) => skill.split("\n").filter((line) => line.startsWith(start));
     const OPEN_HER = '| "Open the Pricing episode in HyperFrames" / "Open it in HyperFrames" |';
     assert.equal(rowOf(OPEN_HER).length, 1, "the skill has not one row for opening an episode in HyperFrames");
     const [bare] = rowOf(OPEN_HER);
-    assert.ok(bare.startsWith(`${OPEN_HER} \`app "<episode>"\`: it opens in HyperFrames on her Mac. If it says another Mac has it, ask her whether to take it over; if yes, \`app "<episode>" --take-over\`.`), bare);
-    // The rest of what the row said is its rules, each a line of its own, under the row's name.
+    assert.equal(bare, `${OPEN_HER} \`app "<episode>"\`: it opens in HyperFrames on her Mac. |`);
     const app = withRules(skill, bare);
-    // Everything open's row says from its take-over on, with app run in open's place.
-    const [openBare] = rowOf('| "Open the Pricing episode" |');
-    assert.ok(openBare, "the skill has no row for opening an episode");
-    const open = withRules(skill, openBare);
-    const takeOver = open.slice(open.indexOf("If it says another Mac has it"));
-    assert.ok(takeOver.includes("Never take an episode over unasked otherwise."), takeOver);
-    const twin = takeOver.replaceAll('`open "<episode>"', '`app "<episode>"');
-    // After the twin, what `app` alone can say (plan PR 11, and PR 18 for the next four): a project the other Mac has not handed over, one
-    // rebuilt from its snapshot (its video is made again, unless it is kept, so she is told to ask again when it is being made), an older
-    // project set aside (and where the changes that were not handed over are), assets of it kept or not, HyperFrames to be quit first, a
-    // recording that has changed so that the older project was left where it was, and one here that is older than the snapshot with no marker
-    // to set it aside on. The row from open's take-over to its end is the twin and those seven, in that order, and nothing else (the review
-    // of PR 11, M10: pinned whole).
-    const ALONE = [
-      'If it says the project is on another Mac and that Mac has not handed it over, tell her so in its words, which are either to say "I\'m done with it for now" there and then ask again here, or, when that Mac cannot hand it over while this one has the episode open, to ask Jason; nothing was claimed.',
-      "If it says the project is rebuilt, tell her so, and that what the app kept of its history stays on the other Mac; if it then says its video is being made, tell her so, and when \"how far is it?\" says it is done, run it again.",
-      "If it says the older project was set aside, tell her so, and that nothing was deleted: the project is now the newest one that was handed over, and any changes made on this Mac that were not handed over are in the older project (she asks Jason if she needs them).",
-      "If it says assets of the older project were kept, tell her so; if it says some could not be moved, tell her they are in the older project and to ask Jason.",
-      'If it says to quit HyperFrames first, tell her so, and run `app "<episode>"` again when she has.',
-      "If it says the recording has changed and the older project was left where it was, tell her so, and to ask Jason.",
-      "If it says the project here is older than the one the other Mac handed over, tell her so, and that nothing was changed, and to ask Jason."
-    ];
-    assert.equal(app.slice(app.indexOf("If it says another Mac has it")), `${twin} ${ALONE.join(" ")}`);
-    // The two rows are twins and neither runs the other's command: this one runs app, in the two forms the help gives it, and never open.
+    assert.equal(app.slice(app.indexOf("If it is bringing files over first")), [
+      'If it is bringing files over first, wait until "how far is it?" says the bring has ended, then run `app "<episode>"` again; if it says some files are not here, tell her why, in plain words, and try again only when she says to.',
+      "If it says the project is on another Mac, tell her so in its words; nothing was claimed."
+    ].join(" "));
+    // The two rows are twins and neither runs the other's command: this one runs app, in its form, and never open.
     assert.doesNotMatch(app, /`open /);
-    assert.doesNotMatch(open, /`app /);
-    assert.deepEqual([...new Set([...app.matchAll(/`(app[^`]*)`/g)].map((m) => m[1]))], ['app "<episode>"', 'app "<episode>" --take-over']);
+    assert.deepEqual([...new Set([...app.matchAll(/`(app[^`]*)`/g)].map((m) => m[1]))], ['app "<episode>"']);
   });
   it("have the skill say what was done in HyperFrames and which versions there are with app, and leave going back to the app's assistant (build plan PR 6)", () => {
     // `app … what-happened` and `app … versions` claim nothing, so there is no take-over to ask about; what they print quotes her and
@@ -591,7 +560,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       }
     }
     // The flags of the fork are among those checked, so that this cannot go blind.
-    for (const used of ["kind --private", "kind --version-of", "kind --not-a-session", "kind --again", "kind --clear-session", "kind --here", "teachings --transcript-only", "reel --client-agreed", "principles --name", "open --take-over", "app --take-over", "title --approve", "text --line", "graphic --at-words", "cut --words", "finish --yes"]) {
+    for (const used of ["kind --private", "kind --version-of", "kind --not-a-session", "kind --again", "kind --clear-session", "kind --here", "teachings --transcript-only", "reel --client-agreed", "principles --name", "title --approve", "text --line", "graphic --at-words", "cut --words", "finish --yes"]) {
       assert.ok(seen.has(used), `the skill's use of ${used} was not checked`);
     }
     // A flag the skill names on its own, in a row's words, is one edit.js's help gives some command (or a field she may change).
@@ -608,8 +577,9 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     assert.ok(!flagsHelpGives("reel", ["drop", '"<episode>"', "1"]).has("--client-agreed"));
     assert.ok(usages.some((u) => u.command === "reel" && u.keys.includes("drop")));
     assert.ok(!usages.some((u) => u.command === "reel" && u.keys.includes("pick")));
-    // app takes --take-over for the Reel's form as it does for the episode's: both usages are app's, under the same key.
-    assert.ok(flagsHelpGives("app", ['"<episode>"', "reel", "2", "--take-over"]).has("--take-over"));
+    // --take-over is no flag of open or app, nor of app's Reel form (Phase 2, F5).
+    assert.equal(flagsHelpGives("app", ['"<episode>"', "reel", "2", "--take-over"]).has("--take-over"), false);
+    assert.equal(flagsHelpGives("open", ['"<episode>"', "--take-over"]).has("--take-over"), false);
     assert.ok(flagsHelpGives("principles", ['"<label>"', "edit", "3"]).has("--name"));
     assert.ok(!flagsHelpGives("principles", ['"<label>"', "recurring", "edit", "1"]).has("--name"));
     assert.ok(flagsHelpGives("principles", ['"<label>"', "recurring", "edit", "1"]).has("--text"));
@@ -634,9 +604,6 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     const KNOWN_INERT = [
       'kind "<label>" finished --private no --not-a-session [--not-a-session]', // a camera video is no Zoom download
       'finish "<video>" --as-it-is [--as-it-is]', // the made-up video is no iPhone clip she answered: the flag is for that clip's hand-off alone
-      'open "<episode>" --take-over [--take-over]', // no other Mac has the episode
-      'app "<episode>" --take-over [--take-over]', // this Mac is not set up for HyperFrames, which app says before it looks at a claim (and no other Mac has the episode)
-      'app "<episode>" reel 2 --take-over [--take-over]', // the same, for a Reel
       'finish "<episode>" --yes [--yes]', // the main video was never shown in Final Cut, which it says first
       'finish "<episode>" reels --yes [--yes]', // the made-up video is a raw one, whose Reels are handed off with its main video, which it says first
       'resolve "<episode>" --keep A [--keep]', // there is no conflict, whatever is kept
@@ -684,7 +651,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       }
     }
     assert.ok(ran.length >= 60, `${ran.length} commands run`);
-    for (const span of ['kind "<label>" <kind> --private no --again --clear-session', 'reel "<label>" 2 --client-agreed', 'teachings "<label>" --transcript-only', 'principles "<label>" edit 3 --name "<words>"', 'app "<episode>"', 'app "<episode>" --take-over', 'app "<episode>" what-happened', 'app "<episode>" versions', 'app "<episode>" reel 2', 'app "<episode>" reel 2 --take-over', 'reel drop "<episode>" 2']) assert.ok(ran.includes(span), span);
+    for (const span of ['kind "<label>" <kind> --private no --again --clear-session', 'reel "<label>" 2 --client-agreed', 'teachings "<label>" --transcript-only', 'principles "<label>" edit 3 --name "<words>"', 'app "<episode>"', 'app "<episode>" what-happened', 'app "<episode>" versions', 'app "<episode>" reel 2', 'reel drop "<episode>" 2']) assert.ok(ran.includes(span), span);
     assert.deepEqual([...inert].sort(), [...KNOWN_INERT].sort(), "the flags that change nothing in these worlds are not the known ones");
   });
   it("has the comment at the top of studio.js name the check behind makes of her folder's lock, which edit.js has", () => {
@@ -747,14 +714,13 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       "isn't set up for the guide yet"
     ]) assert.ok(guide.includes(words), words);
     assert.doesNotMatch(guide, /https?:|claude\.ai/);
-    // Her word that she is done with a video ends its guidance, and nothing she says brings it back: Claude asks first, on its own
-    // words, never those of the release ("I'm done with it for now"), which hands the episode to the other Mac.
+    // Her word that she is done with a video ends its guidance, and nothing she says brings it back: Claude asks first, on its own words.
     const finished = guide.split("\n").find((line) => line.includes('`guide "<video>" finished`'));
     const asked = finished.indexOf('ask on one `AskUserQuestion`: "Stop guiding <video>?": "Yes", "No"');
     assert.ok(asked >= 0 && finished.indexOf('Only on "Yes"') > asked && finished.indexOf("`guide") > asked, finished);
     assert.ok(finished.includes("the guide will no longer bring it up"), finished);
     assert.ok(!guide.includes("I'm done with it"), guide);
-    assert.ok(rowOf(`"Hand it to Jason" / "I'm done with it for now"`).includes('`release "<episode>"`'));
+    assert.ok(!skill.includes(`"Hand it to Jason" / "I'm done with it for now"`), "the release row is gone");
   });
   it("tells her when a video is ready or read, from a wait run in the background, and opens the page once in this chat", () => {
     const guide = sectionOf(skill, "## Guide her");
@@ -1350,7 +1316,7 @@ describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-2
     assert.deepEqual(rowOf(openSkill()), rowOf(strictSkill));
     const apps = (skill) => [...new Set(commandsIn(skill).filter((span) => span.split(" ")[0] === "app"))];
     assert.deepEqual(apps(openSkill()), apps(strictSkill));
-    assert.deepEqual(apps(openSkill()), ['app "<episode>"', 'app "<episode>" --take-over', 'app "<episode>" what-happened', 'app "<episode>" versions', 'app "<episode>" reel 2', 'app "<episode>" reel 2 --take-over']);
+    assert.deepEqual(apps(openSkill()), ['app "<episode>"', 'app "<episode>" what-happened', 'app "<episode>" versions', 'app "<episode>" reel 2']);
   });
   it("has the skill say what was done in HyperFrames and which versions there are in the very rows the strict skill has", () => {
     const rowsOf = (skill, start) => skill.split("\n").filter((line) => line.startsWith(start));
@@ -1360,17 +1326,10 @@ describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-2
     }
     assert.ok(openSkill().split("\n")[2].includes("what was done in HyperFrames and its versions"), "the description names them too");
   });
-  it("has the skill say what to do when release of an episode edited in HyperFrames asks her to quit it or refuses a project, in the very words the strict skill has (plan PR 11)", () => {
-    const sentence = 'An episode she edited in HyperFrames asks no such question: `release` hands over a copy of what she made there and her newest exports. If it says to quit HyperFrames first, tell her so, and run `release "<episode>"` again when she has. If it says a HyperFrames project is too big to hand over, can\'t be read, or is older than the one the other Mac handed over, tell her so in plain words and that nothing was handed over, and to ask Jason. If it says some assets are too big, tell her those stay on this Mac.';
+  it("has neither skill say anything of release or of taking an episode over (Phase 2, F5)", () => {
     for (const skill of [strictSkill, openSkill()]) {
-      // The paragraph is the question and four short rules since R2 (review changes): the sentence is the last three, one space apart.
-      const all = skill.split("\n");
-      const at = all.findIndex((line) => line.startsWith('When `release "<episode>"` asks, ask her:'));
-      assert.equal(all.filter((line) => line.startsWith('When `release "<episode>"` asks, ask her:')).length, 1, "one paragraph of the release question");
-      const rules = all.slice(at + 1, at + 5);
-      assert.ok(rules.every((line) => line.startsWith("- ")), rules.join("\n"));
-      assert.equal(rules.slice(1).map((line) => line.slice(2)).join(" "), sentence);
-      assert.ok(rules[0].includes("Afterwards tell her to keep the laptop open and online until Dropbox shows the folder is up to date."));
+      assert.doesNotMatch(skill, /`release|The release question|--take-over|take it over|handing it over/);
+      assert.ok(!skill.includes('When `release "<episode>"` asks'), "the release question is gone");
     }
   });
   it("has the skill's rule for work in the background in the very section the strict skill has (Jason, 2 November 2026)", () => {

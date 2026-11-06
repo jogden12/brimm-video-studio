@@ -121,7 +121,7 @@ describe("app … what-happened and app … versions: the usages", () => {
     const lines = HELP.split("\n");
     for (const [form, words] of [["what-happened", /^ {40}what was done in HyperFrames on the episode's main video, newest first/], ["versions", /^ {40}the versions HyperFrames has kept of the episode's main video, newest first/]]) {
       const at = lines.indexOf(`  node edit.js app "<episode>" ${form}`);
-      assert.ok(at > lines.indexOf('  node edit.js app "<episode>" [--take-over]'), `${form} comes after app`);
+      assert.ok(at > lines.findIndex((line) => line.startsWith('  node edit.js app "<episode>" ') && line.includes("open the episode's main video")), `${form} comes after app`);
       assert.match(lines[at + 1], words);
       assert.ok(at < lines.findIndex((line) => line.startsWith('  node edit.js push "<episode>" [main]')), `${form} comes before push`);
     }
@@ -251,17 +251,18 @@ describe("app … what-happened and app … versions: this Mac must be set up, a
 });
 
 describe("app … what-happened and app … versions: they claim nothing and write nothing", () => {
-  it("are not refused by the other Mac's claim, which they do not make, and ignore --take-over", async () => {
+  it("are not refused by the other Mac's claim, which they do not make, and --take-over is no flag of theirs", async () => {
     for (const form of FORMS) {
-      for (const more of [[], ["--take-over"]]) {
-        const w = world({ record: { ...RAW, editing: HERS } });
-        const before = state(w);
-        const r = await app(w.t.ctx.deps, FOLDER, form, ...more);
-        assert.deepEqual([r.code, r.said], [0, [form === "versions" ? NO_VERSIONS : NOTHING]], `${form} ${more.join(" ")}`);
-        assert.deepEqual(state(w), before, `${form} ${more.join(" ")}`);
-        assert.equal(reread(w.found).editing.by, "Sallie's laptop");
-        w.t.done();
-      }
+      const w = world({ record: { ...RAW, editing: HERS } });
+      const before = state(w);
+      const r = await app(w.t.ctx.deps, FOLDER, form);
+      assert.deepEqual([r.code, r.said], [0, [form === "versions" ? NO_VERSIONS : NOTHING]], form);
+      assert.deepEqual(state(w), before, form);
+      assert.equal(reread(w.found).editing.by, "Sallie's laptop");
+      const flagged = await on(w.t.ctx.deps, "app", FOLDER, form, "--take-over");
+      assert.deepEqual([flagged.code, flagged.said], [2, [HELP]], form);
+      assert.deepEqual(state(w), before, form);
+      w.t.done();
     }
   });
   it("neither wait for a claim, bring a file, ask for a working copy nor write a record, once the project is there", async () => {
@@ -433,7 +434,7 @@ describe("app … what-happened and app … versions: the README", () => {
     assert.ok(happened && versions, "the README has a row for each");
     assert.deepEqual([more, moreToo], [[], []]);
     for (const [row, words] of [
-      [happened, ["Nothing has been done in HyperFrames on <name> yet.", "claims the episode for no Mac, brings no file, asks for no working copy and writes no record", "`--take-over` is not read", "the last megabyte", "the newest 10 turns", "cut at 200 characters at a word",
+      [happened, ["Nothing has been done in HyperFrames on <name> yet.", "claims the episode for no Mac, brings no file, asks for no working copy and writes no record", "the last megabyte", "the newest 10 turns", "cut at 200 characters at a word",
         "every `--word` token left out whole", "is left out whole", "a single-dash option, or another program's name, stays", "no slash, no `--word` and none of those five names", "Ask Jason."]],
       [versions, ["<name> has no versions in HyperFrames yet.", "I can't list the versions right now; HyperFrames shows its history.", "These are the newest 20; HyperFrames shows any older ones.", "`history --json --limit 20 --dir <project>`", "with no chat's id whatever this Mac's setting", "`.hyperframes/history-id`", "Studio changes no history",
         "every `--word` token left out whole", "told as \"a change\"", "A listing is not read-only, by the command line's own doing and not Studio's", "`.hyperframes/video-state.json` and its lock", "`project.json` and `.last-prune`", "rewrite `history-id` for a folder that is a copy", "gone for more than 14 days", "None of it touches the project's own files"]]
@@ -444,13 +445,13 @@ describe("app … what-happened and app … versions: the README", () => {
     for (const row of [happened, versions]) assert.doesNotMatch(row, /no path, flag or command name|no flag|no command name/);
     // They come right after the row of `app`, which opens the episode.
     const rows = readme.split("\n");
-    const opens = rows.findIndex((line) => line.startsWith('| `app "<episode>" [--take-over]` |'));
+    const opens = rows.findIndex((line) => line.startsWith('| `app "<episode>"` |'));
     assert.deepEqual([rows[opens + 1] === happened, rows[opens + 2] === versions], [true, true]);
   });
 });
 
 describe("app … what-happened and app … versions: a project on another Mac", () => {
-  const THERE = (on) => `The HyperFrames project for ${NAME} is on ${on}, with everything done in it, so there is nothing to look at on this Mac. Ask Jason.`;
+  const THERE = (on) => `The HyperFrames project of ${NAME} is on ${on}. Carry on there.`;
   const madeOn = (on) => ({
     ...RAW, version: 4,
     app: { toolchain: PIN.version, projects: [{

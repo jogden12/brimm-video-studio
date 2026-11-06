@@ -154,7 +154,7 @@ describe("the guide on a Mac whose settings have the app off (plan PR 17; the re
     assert.equal(await line(w), says(OPEN));
     const asked = await on(depsOf(w, { app: { tz: "America/Chicago", cli } }), "app", FOLDER);
     assert.equal(asked.code, 1, asked.text);
-    assert.match(asked.said[0], /^The HyperFrames project for Pricing: what to charge\? is on Sallie's laptop, and Sallie's laptop has not handed it over yet\./);
+    assert.match(asked.said[0], /^The HyperFrames project of Pricing: what to charge\? is on Sallie's laptop\. Carry on there\./);
     w.t.done();
   });
   it("says it wherever it would say to open the video there: a project here that the app never opened, one whose video is being made again, and an iPhone clip whose project the app opened", async () => {
@@ -432,8 +432,8 @@ describe("the guide once a video is exported from HyperFrames", () => {
     const app = guideWorld();
     exportOf(app, "main");
     assert.equal(await line(app, { readdir }), says(EXPORTED));
-    // Downloads, and what the other Mac released into the episode: the two places an export is looked for in, and no other.
-    assert.deepEqual(looked, [app.downloads, join(app.found.folder, "edit", "from-hyperframes")]);
+    // Downloads: the one place an export is looked for in, and no other.
+    assert.deepEqual(looked, [app.downloads]);
     looked.length = 0;
     const none = guideWorld({ projects: null });
     exportOf(none, "main", { record: false });
@@ -619,7 +619,7 @@ describe("what says the guide's new states: the help and the README (the skills'
       "and once it is exported, to hand it off", "A raw video that goes the Final Cut way keeps its Final Cut steps",
       "being imported, being read or having its video for HyperFrames made", "its video for HyperFrames made, its finish's hand-off written, or an import, a reading or a finish that did not finish",
       // While a finish waits for its late check: the page's step, and a line of when Studio checks Dropbox's copies.
-      "Once its finish has written the hand-off it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's copies (a spelling, handing it off again and handing it over wait until then), though the finish goes on checking them for a quarter of an hour"
+      "Once its finish has written the hand-off it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's copies (a spelling and handing it off again wait until then), though the finish goes on checking them for a quarter of an hour"
     ]) assert.ok(guide.replace(/\n {40}/g, " ").includes(words), words);
   });
   it("has the README's rows for guide say the same: the stages, the times and where they come from, the Final Cut way's until wave 4, and that it only reads", () => {

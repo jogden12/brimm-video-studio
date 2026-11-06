@@ -343,7 +343,7 @@ describe("9. the Dropbox rule, and the record", () => {
     const result = await finishNow(w.t.ctx, found);
     assert.equal(result.ok, false);
     assert.match(reasons(result).join("\n"), /^Sallie's laptop took Pricing: what to charge\? over while finish was copying into final\/, so the finish is not in the record\./);
-    assert.match(reasons(result).join("\n"), / The record lists what final\/ holds now, and keeps the hand-off it had: the Reels are taken again from their exports\. Take it over and say "hand off the Reels" again, or finish it there\.$/);
+    assert.match(reasons(result).join("\n"), / The record lists what final\/ holds now, and keeps the hand-off it had: the Reels are taken again from their exports\. Finish it there\.$/);
     assert.deepEqual(readdirSync(w.downloads), [reel.name], "every original stays in Downloads");
     const record = reread(found);
     assert.deepEqual([record.editing.by, record.finished.revision, Object.keys(record.finished.parts)], ["Sallie's laptop", 1, ["main"]], "the other Mac's record is not written over, and says no finish of the Reels");

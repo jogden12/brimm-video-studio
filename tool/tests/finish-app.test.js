@@ -567,11 +567,11 @@ describe("E6. the late check, and what is removed from Downloads", () => {
     assert.ok(result.next.includes(`${REEL_FILE} changed in Downloads after it was taken, so it is kept there.`), result.next);
     w.t.done();
   });
-  it("never removes a file it took from another folder, from what the other Mac released, or from the project's own renders", async () => {
+  it("never removes a file it took from another folder, or from the project's own renders", async () => {
     const w = fw({ projects: ["main", "reel 1", "reel 2"], over: THREE() });
     const elsewhere = join(w.t.home, "Movies", "exports");
     const main = exportOf(w, "main", { folder: elsewhere });
-    const reel = exportOf(w, "reel 2", { folder: join(w.found.folder, "edit", "from-hyperframes"), record: false });
+    const reel = exportOf(w, "reel 2", { folder: join(w.t.home, "Movies", "more") });
     const renders = join(w.dirOf("reel 1"), "renders", "Pricing_2026-10-20_14-00-30.mp4");
     writeFileSync(renders, "a render");
     utimesSync(renders, new Date(+w.t.now() - 3600000), new Date(+w.t.now() - 3600000));

@@ -174,7 +174,7 @@ describe("guide, from the records", () => {
     const away = { by: "Sallie's laptop", since: "2026-10-20T12:05:00-05:00" };
     episodeAs(t, { ...VIDEOS.read, record: { ...VIDEOS.read.record, editing: away } });
     episodeAs(t, { ...VIDEOS.waiting, record: { ...VIDEOS.waiting.record, editing: away } });
-    assert.equal((await on(light(t), "guide", "Pricing talk")).said[0], "Pricing talk (bbbbbb): It is open on Sallie's laptop. Carry on there, or open it here and take it over.");
+    assert.equal((await on(light(t), "guide", "Pricing talk")).said[0], "Pricing talk (bbbbbb): It is open on Sallie's laptop. Carry on there.");
     assert.equal((await on(light(t), "guide", "Video of 20 Oct, 09:00 (Mac Studio)")).said[0], "Video of 20 Oct, 09:00 (Mac Studio) (aaaaaa): It is being answered on Sallie's laptop. Carry on there.");
     const h = handedOff(t);
     writeGuideNotes(t.home, { version: 1, handoffs: { [h.record.id]: { kind: "episode", step: "kit", revision: 1, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });

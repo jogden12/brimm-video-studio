@@ -14,7 +14,6 @@ import { newPlannedEpisode, readEpisode, recordFile, localStamp } from "../episo
 import { holdingEpisode } from "../filing.js";
 import { fileSafe } from "../names.js";
 import { referencesFolder, runsFolder } from "../settings.js";
-import { keptSnapshots, listedBy } from "../snapshot.js";
 import { freeEpisode } from "../free.js";
 import { matchVersion } from "../versions.js";
 import { uneditedFolder } from "../unedited.js";
@@ -897,13 +896,11 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     assert.ok(!/Too many SKUs/.test(refused.text), refused.text);
     t.done();
   });
-  it("has no snapshot and nothing for free to take away: it is passed over by both", async () => {
+  it("has nothing for free to take away: it is passed over", async () => {
     const t = setup();
     const folder = await planned(t);
     await set(t, "--line", "One.");
     const record = recordOf(t);
-    assert.deepEqual(keptSnapshots(record.files, () => true), { keep: [], drop: [] });
-    assert.deepEqual(listedBy(folder, Object.keys(record.files)), Object.fromEntries(Object.keys(record.files).map((path) => [path, "Mac Studio"])));
     const said = [];
     const ctx = { home: t.home, machine: "Mac Studio", root: t.root, alive: () => false, say: (line) => said.push(line), stat: (path) => statSync(path, { throwIfNoEntry: false }) };
     const code = await freeEpisode(ctx, { found: { name: nameOf(t), folder }, record }, { running: async () => false });

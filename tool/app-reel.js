@@ -6,16 +6,11 @@
 // Reel it tells her to say "Open Reel 2 in HyperFrames" in her chat, which runs `app "<episode>" reel 2`, and this module makes it.
 //
 // edit.js finds the episode, asks the gate, refuses a short video, a Mac not set up, a Reel the record does not list and a Reel
-// project of another Mac that has no snapshot listed in the record (reelWhy, projectOnAnotherMac, projectSnapshot), claims the episode
+// project of another Mac (reelWhy, projectOnAnotherMac: one Mac edits a video from start to finish), claims the episode
 // for this Mac as `open` does, and then gives it to openReelInApp, which does the rest, in this order:
-//   - a Reel project whose folder is not on this Mac, and that the record lists a snapshot of (snapshot.js; plan PR 11), is rebuilt from
-//     it, whichever Mac made it, as app.js rebuilds the main project (rebuildHere); a Reel project here whose marker says it is older than
-//     the newest snapshot is set aside and rebuilt in its place, as the main project is (olderMarked, rebuildHere with `older`; plan PR 18),
-//     with HyperFrames quit and its video kept for the new project when it passes the check every working copy does; one with no marker,
-//     older by the times of its files, is neither opened nor set aside (olderHere);
 //   - a Reel project made before, whose folder is on this Mac, is opened again, and nothing is made or started. If the recording has
 //     changed since it was made she is told, and the project is opened as it was (4.8). Unless its video is not in it (a hand took it,
-//     or it was just rebuilt, which leaves the video out): putReelVideoBack puts the Reel's video back as app.js putVideoBack does the
+//     or `free` took it): putReelVideoBack puts the Reel's video back as app.js putVideoBack does the
 //     main video's, from a copy of the Reel made again by the detached run, which it asks for and she is told to say it again;
 //   - a folder at the Reel project's name that the record does not list, as a run whose record was not written leaves, is taken as the
 //     project it is and recorded: nothing is made or started for it, and neither the words nor the Reel's video are needed;
@@ -59,10 +54,9 @@ import { projectCues, projectFiles, projectName, writeProject } from "./project.
 import { refNamesOf, withReferences } from "./references.js";
 import { REELS_FILE, readReels, reelEntries } from "./reel-candidates.js";
 import { episodeWork } from "./settings.js";
-import { snapshotOf } from "./snapshot.js";
 import {
-  asideWords, changedSince, copyFits, copyIn, factsIn, fromOf, guidanceOf, jsonIn, keptFits, logosIn, moveIn, noRecording, noWords, notPutBack, notTheSame, notWhole, nothingAt, olderHere, olderMarked, olderThanSnapshot,
-  openProjectInApp, plainName, readListed, readWords, rebuildHere, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, videoKept, wordsIn, wordsOfText
+  changedSince, copyFits, copyIn, factsIn, fromOf, guidanceOf, jsonIn, logosIn, moveIn, noRecording, noWords, notPutBack, notTheSame, notWhole, nothingAt,
+  openProjectInApp, plainName, readListed, readWords, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, wordsIn, wordsOfText
 } from "./app.js";
 import { reelCopyKey, reelCopyPaths, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 
@@ -93,7 +87,7 @@ const busyWith = (n, name) => `A video for HyperFrames is being made already, an
 const stillReading = (n, name) => `Claude is still reading it. Say "${openReelWords(n, name)}" again when it has finished; "how far is it?" shows how far it has got.`;
 /** What is said when Reel `n`'s project is not made because a file it reads is not at the size the record lists, while the reading's own
     late check is still to come (plan R1d). */
-export const reelNotWholeYet = (n, name, takeOver = false) => `Some files of ${name} are not whole in Dropbox yet, so the project of Reel ${n} wasn't made. Say "${takeOver ? "take it over" : openReelWords(n, name)}" again in a few minutes. If it says this again, tell Jason.`;
+export const reelNotWholeYet = (n, name) => `Some files of ${name} are not whole in Dropbox yet, so the project of Reel ${n} wasn't made. Say "${openReelWords(n, name)}" again in a few minutes. If it says this again, tell Jason.`;
 const reelMade = ({ start, end }, n) => `Reel ${n} is made: the recording from ${clockText(start)} to ${clockText(end)}.`;
 const unreadable = (name) => `The Reel suggestions of ${name} cannot be read. Ask Jason.`;
 /** What is said when Reel `n` is not among the suggestions `numbers`, as markReels says it. */
@@ -272,8 +266,7 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   return { project, stretch, candidate: listed.candidate };
 }
 
-/** Put the video back into a Reel's project whose video is not in it (plan PR 11): `free` could take it, a hand took it, or the project was
-    just rebuilt from the other Mac's snapshot, which leaves the video out. The same as app.js putVideoBack does for the main video, with the
+/** Put the video back into a Reel's project whose video is not in it (plan PR 11): `free` could take it, or a hand took it. The same as app.js putVideoBack does for the main video, with the
     Reel's own copy (workcopy.js reelCopyPaths): { workingCopy }, what the record keeps of the copy put in, or { code }, when nothing was put
     back and a line said why.
     - A recording that is not in the episode, or that has changed since the project was made, cannot be made into that video again (1).
@@ -287,10 +280,8 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
       the Reel starts (`reel.offset`, to half a second: a suggestion that has moved is another video), and be as large as its own facts say; or
       it is left where it is (1). The project's other files are never touched. All of that is app.js copyFits, the check of every working copy.
     - Then it is renamed into media/recording.mp4, on the same disk. `rename` is how a file is moved: a test gives another.
-    - `kept` is the video of the Reel's older project that was just set aside (plan PR 18), when there was one: where no copy is made, it
-      stands for the copy if it passes the same check (app.js keptFits), is moved into the project and she is told it was kept; otherwise it
-      stays where it is and the copy is asked for as above. */
-function putReelVideoBack(ctx, { found, record, n, project, dir, kept = null }, { rename }) {
+     */
+function putReelVideoBack(ctx, { found, record, n, project, dir }, { rename }) {
   const { home } = ctx;
   const name = record.name.text;
   const of = `Reel ${n} of ${name}`;
@@ -324,11 +315,6 @@ function putReelVideoBack(ctx, { found, record, n, project, dir, kept = null }, 
   // Where the Reel starts in the recording, to half a second: a suggestion that has moved is another video.
   const starts = Number.isFinite(was?.reel?.offset) ? Number.isFinite(made?.stretch?.start) && Math.abs(made.stretch.start - was.reel.offset) <= 0.5 : true;
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
-    const keeps = keptFits(ctx, { found, kept, copy, was, made, starts });
-    if (keeps.workingCopy && moveIn(kept, videoIn(dir), rename)) {
-      ctx.say(videoKept(of));
-      return { workingCopy: keeps.workingCopy };
-    }
     const requested = requestWorkCopy(ctx, { folder: found.name, reel: n });
     ctx.say(requested.started ? beingMade(n, name) : busyWith(n, name));
     return { code: 0 };
@@ -366,7 +352,7 @@ const picked = (n, candidate) => (next) => {
     that is made stays, whether or not the app opened.
     `ctx` is what edit.js gives a command, { home, machine, now, alive, say, start, settings }. `found` is { name, folder }, and
     `record` the episode's record. `deps` are as openInApp's: `save(next)`, which writes the next record and resolves 0 when it has
-    (checked first, so that nothing is made without one), `cli`, `node`, `guidance`, `spawn`, `env`, `chat` and `running`.
+    (checked first, so that nothing is made without one), `cli`, `node`, `guidance`, `spawn`, `env` and `chat`.
     The Reel's project in the record's `app` whose folder is on this Mac is opened again, with one more time it was opened, and
     nothing is made or started. A Reel project the record has whose folder is not here is replaced, when this Mac made it: by the
     folder at the project's name when one is there that the record does not know (adoptReel), and otherwise by a new project
@@ -388,45 +374,10 @@ export async function openReelInApp(ctx, { found, record, n }, deps = {}) {
   let project = earlier && plainName(earlier.name) && existsSync(join(work, earlier.name)) ? earlier : null;
   let candidate = null;
   let restored = null;
-  // A Reel project whose folder is not on this Mac, and that the record lists a snapshot of, is rebuilt from it (plan PR 11), whichever Mac
-  // made it. It is then here without its video, which is put back below, as a project `free` took the video from is.
-  let rebuilt = false;
-  // The video of an older Reel project that was set aside (below), where it is now, for putReelVideoBack to keep if it can.
-  let kept = null;
-  if (!project && earlier && plainName(earlier.name)) {
-    const snapshot = snapshotOf(record.files, earlier.name);
-    if (snapshot) {
-      const built = rebuildHere(ctx, { found, record, snapshot, dir: join(work, earlier.name), name: `Reel ${n} of ${record.name.text}` }, { cli, fs: deps.fs });
-      if (built.code !== undefined) return built.code;
-      project = earlier;
-      rebuilt = true;
-    }
-  }
-  // A Reel project here whose marker says it is older than the newest snapshot, because the other Mac worked on it since, is set aside and
-  // rebuilt from the newest snapshot in its place, as the main project is (plan PR 18; app.js openInApp): the recording must not have changed
-  // since (it is looked at before anything is moved), and HyperFrames must be quit, which edit.js asked before the claim and is asked again
-  // here (app.js asideWords). A project with no marker is not set aside: it is refused below.
-  if (project && !rebuilt && olderMarked(found, { record, project, dir: join(work, project.name) })) {
-    const stop = await asideWords(ctx, { found, record, project, running: deps.running });
-    if (stop) {
-      ctx.say(stop);
-      return 1;
-    }
-    const built = rebuildHere(ctx, { found, record, snapshot: snapshotOf(record.files, project.name), dir: join(work, project.name), name: `Reel ${n} of ${record.name.text}`, older: true }, { cli, fs: deps.fs });
-    if (built.code !== undefined) return built.code;
-    rebuilt = true;
-    kept = videoIn(built.aside);
-  }
   if (project) {
     const folder = join(work, project.name);
-    // A project here that is older than the newest snapshot, and has no marker to say so, is not opened: the other Mac worked on it since,
-    // by the times of its files, which are not a word to set a folder aside on.
-    if (!rebuilt && olderHere(found, { record, project, dir: folder })) {
-      ctx.say(olderThanSnapshot(`Reel ${n} of ${record.name.text}`));
-      return 1;
-    }
     if (nothingAt(videoIn(folder))) {
-      const back = putReelVideoBack(ctx, { found, record, n, project, dir: folder, kept }, { rename: deps.rename ?? renameSync });
+      const back = putReelVideoBack(ctx, { found, record, n, project, dir: folder }, { rename: deps.rename ?? renameSync });
       if (back.code !== undefined) return back.code;
       restored = back.workingCopy;
     } else if (changedSince(project, { found, record })) {

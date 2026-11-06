@@ -103,7 +103,6 @@ const TODAY_ASKED = {
   reels: [[FOLDER, "--no-play"], []],
   ask: [[FOLDER], ["--now", FOLDER], []],
   finish: [[FOLDER], ["--now", FOLDER], []],
-  release: [[FOLDER], []],
   show: [[FOLDER, "transcript"], [FOLDER, "plan"], []],
   behind: [[]],
   resolve: [[FOLDER], []],
@@ -347,7 +346,7 @@ const ctxOf = (t, setting = "light") => contextFor({ ...t.ctx.deps, settings: { 
 /** What `say` says of `lines` once a command the gate keeps open (`command`) has found the episode named `said`, with ctx.asked set
     as editMain sets it: the lines through the filter of the names of the video found (findEpisode, hideNames). The settings are
     this Mac's, with the import light and the training gate on. */
-function saidAfterFinding(t, said, lines, command = "release") {
+function saidAfterFinding(t, said, lines, command = "show") {
   const out = [];
   const settings = { ...t.ctx.settings, import: "light", sessionTeachings: TEACHINGS };
   const ctx = { ...contextFor({ ...t.ctx.deps, say: (line) => out.push(line), settings }), asked: { command, words: [said] } };
@@ -425,7 +424,7 @@ describe("findEpisode, for a video named by its label", () => {
 
 describe("a command the gate lets through, for a gated video", () => {
   it("names an episode with a conflicted copy by its label, and its copies without the video's name", async () => {
-    for (const command of [["show", LABEL, "transcript"], ["release", LABEL]]) {
+    for (const command of [["show", LABEL, "transcript"]]) {
       const t = setup();
       writeSettings(t.home, { import: "light" });
       const e = clientEpisode(t);
@@ -445,16 +444,6 @@ describe("a command the gate lets through, for a gated video", () => {
     writeSettings(t.home, { import: "full" });
     assert.match((await on(t.ctx.deps, "show", LIGHT_FOLDER, "transcript")).said[0], new RegExp(`^${LIGHT_FOLDER.replace(/[()]/g, "\\$&")}: the folder ${LIGHT_FOLDER.replace(/[()]/g, "\\$&")} could not be read`));
     t.done();
-  });
-  it("release names it by its label, and so does another Mac's claim on it", async () => {
-    const t = setup();
-    clientEpisode(t);
-    assert.deepEqual((await on(t.ctx.deps, "release", LABEL)).said, [`This Mac does not have ${LABEL} open, so there is nothing to hand over.`]);
-    const u = setup();
-    clientEpisode(u, { over: { editing: { by: "Sallie's laptop", since: AT } } });
-    assert.deepEqual((await on(u.ctx.deps, "release", LABEL)).said, [`Sallie's laptop has ${LABEL} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.`]);
-    t.done();
-    u.done();
   });
   it("resolve names it by its label, and says only that its name, label or video differ, never what they hold", async () => {
     const t = setup();
@@ -1241,7 +1230,6 @@ describe("the walk: every command, for a video imported lightly from a file name
     reels: [[label, "--no-play"], []],
     ask: [[label], ["--now", LIGHT_FOLDER], []],
     finish: [[label], [label, "reels"], ["--now", LIGHT_FOLDER], []],
-    release: [[label], []],
     show: [[label, "transcript"], [label, "notes"], [label, "plan"], []],
     behind: [[]],
     resolve: [[label], [label, "--keep", "B"], []],
@@ -1327,8 +1315,6 @@ describe("the walk: every command, for a video imported lightly from a file name
     assert.ok(/^ {4}Seen: \S/.test(episodes[at + 1]), episodes.join("\n"));
     assert.ok(episodes.includes(`  ${TARGET_LABEL}: a video waiting for your answer, of 2:00, id 0e0e0e`), episodes.join("\n"));
     assert.ok(!episodes.some((line) => line.includes("Maybe a new version of")), episodes.join("\n"));
-    assert.deepEqual(seen[`waiting for its answer: release ${LABEL}`], [`This Mac does not have ${LABEL} open, so there is nothing to hand over.`]);
-    assert.deepEqual(seen[`a session, teachings off: release ${SESSION}`], [`This Mac does not have ${SESSION} open, so there is nothing to hand over.`]);
     assert.ok(seen["a session, teachings off: episodes"].includes(`  ${SESSION}: a client or group session, of 2:00, id ${short}`));
     assert.ok(seen["waiting for its answer: status"].some((line) => line.startsWith(`${LABEL} (${short}): bring ended`)), seen["waiting for its answer: status"].join("\n"));
     rmSync(snap, { recursive: true, force: true });
@@ -1531,7 +1517,7 @@ describe("the names a gated video had before (fix 3)", () => {
     writeFileSync(recordFile(folder, 1), recordText(raw));
     writeFileSync(recordFile(folder, 2), recordText({ ...raw, ...SESSION_OVER, rev: 2 }));
     for (const name of [`${project}.mov`, `${project} 2.mov`]) writeFileSync(join(fromFinalCutFolder(t.home), name), "a finished video");
-    for (const argv of [["finish", SESSION], ["release", SESSION], ["resolve", SESSION]]) {
+    for (const argv of [["finish", SESSION], ["show", SESSION, "transcript"], ["resolve", SESSION]]) {
       const r = await on(t.ctx.deps, ...argv);
       assert.doesNotMatch(r.said.join("\n"), /Jane|pricing/i, `${argv.join(" ")}\n${r.said.join("\n")}`);
     }
@@ -1548,7 +1534,7 @@ describe("the names of a gated video, taken out of every line a command says aft
   const CLIENT_FOLDER = "2026-10-20 Client intake notes (Mac Studio)";
   /** A session (or `over`) in a folder named for none of its other names: its video IMG_4411.MOV, a name she gave it once, and a
       project it was pushed to Final Cut as. Gives back what `say` says of `lines` once `command` has found it. */
-  function saying(lines, { words = SESSION, over = SESSION_OVER, command = "release" } = {}) {
+  function saying(lines, { words = SESSION, over = SESSION_OVER, command = "show" } = {}) {
     const t = setup();
     const folder = join(t.root, "Episodes", CLIENT_FOLDER);
     mkdirSync(join(folder, "record"), { recursive: true });
@@ -1623,8 +1609,8 @@ describe("a gated video is found by its label and ids alone (fix 6)", () => {
     writeSettings(t.home, { import: "light" });
     clientEpisode(t);
     oldResult(t);
-    const release = await on(depsOf(t), "release", "jane");
-    assert.deepEqual(release.said, [`No episode fits "jane". The episodes are: ${LABEL} (a1b2c3).`]);
+    const shown = await on(depsOf(t), "show", "jane", "transcript");
+    assert.deepEqual(shown.said, [`No episode fits "jane". The episodes are: ${LABEL} (a1b2c3).`]);
     failedStatus(t);
     assert.deepEqual((await on(depsOf(t), "status", "jane")).said, ["Nothing is running, and nothing is waiting."]);
     // By its label, status finds both.
@@ -1640,7 +1626,7 @@ describe("the say filter's names (fix 7)", () => {
       writeSettings(t.home, { import: "light" });
       clientEpisode(t, { folder: `2026-10-20 ${stem} (Mac Studio)`, video: `${stem}.mov` });
       assert.deepEqual((await on(t.ctx.deps, "open", LABEL)).said, [WAITING], stem);
-      assert.deepEqual((await on(t.ctx.deps, "release", LABEL)).said, [`This Mac does not have ${LABEL} open, so there is nothing to hand over.`], stem);
+      assert.deepEqual((await on(t.ctx.deps, "which", LABEL)).said, [`Opened ${LABEL} in QuickTime Player on this Mac.`], stem);
       t.done();
       const u = setup();
       clientEpisode(u, { folder: `2026-10-20 ${stem} (Mac Studio)`, video: `${stem}.mov`, over: SESSION_OVER });
@@ -1700,7 +1686,7 @@ describe("the edges of fix round 1 (fix 10)", () => {
     writeSettings(t.home, { import: "light" });
     const e = clientEpisode(t);
     rewrite(e.folder, { label: LABEL });
-    const reads = await readsDuring(() => on({ ...t.ctx.deps, isWhole: (path) => !path.endsWith("/record/0001.json") }, "release", LABEL));
+    const reads = await readsDuring(() => on({ ...t.ctx.deps, isWhole: (path) => !path.endsWith("/record/0001.json") }, "show", LABEL, "transcript"));
     assert.ok(!reads.some((path) => path.endsWith("/record/0001.json")), reads.join("\n"));
     t.done();
   });
