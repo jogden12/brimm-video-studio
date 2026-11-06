@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { wordsOf, pausesOf, phrasesOf } from "../cuts.js";
+import { cutPlan, wordsOf, pausesOf, phrasesOf } from "../cuts.js";
 import { COMMANDS, PIN } from "../hyperframes.js";
 import { wordsOnScreen } from "../on-screen.js";
 import { recordingPlacements } from "../on-timeline.js";
@@ -606,6 +606,76 @@ describe("what the app is given to start from (5.8)", () => {
       ]
     };
     assert.deepEqual(cutSuggestions(plan, transcriptJson(words, [])).suggestions.map((s) => [s.from, s.to, s.by]), [["w1", "w2", "claude"]]);
+  });
+  it("also lists the cuts that hold no words, by time, with null ids: the opening, a shortened pause, and the word cuts, in time order", () => {
+    const words = [{ w: "Here's", start: 0, end: 5.3 }, { w: "the", start: 5.3, end: 5.6 }, { w: "uh", start: 8, end: 8.4 }, { w: "plan.", start: 9, end: 9.5 }];
+    const plan = {
+      by: "rules",
+      phrases: [
+        { id: "p1", start: 5.157, end: 5.6, text: "Here's the", words: words.slice(0, 2), keep: true, kind: "keep", why: "" },
+        { id: "p2", start: 8, end: 8.4, text: "uh", words: words.slice(2, 3), keep: false, kind: "false start", why: "a false start" },
+        { id: "p3", start: 9, end: 9.5, text: "plan.", words: words.slice(3), keep: true, kind: "keep", why: "" }
+      ],
+      ranges: [
+        { start: 0, end: 4.957, keep: false, kind: "pause", why: "silence before the first words", phrases: [], text: "" },
+        { start: 4.957, end: 5.75, keep: true, kind: "keep", why: "", phrases: ["p1"], text: "Here's the" },
+        { start: 5.75, end: 6.2, keep: true, kind: "keep", why: "", phrases: [], text: "" },
+        { start: 6.2, end: 7.8, keep: false, kind: "pause", why: "2.4 seconds of silence, shortened to 0.4", phrases: [], text: "" },
+        { start: 7.8, end: 8.8, keep: false, kind: "false start", why: "a false start", phrases: ["p2"], text: "uh" },
+        { start: 8.8, end: 9.7, keep: true, kind: "keep", why: "", phrases: ["p3"], text: "plan." }
+      ]
+    };
+    const made = cutSuggestions(plan, transcriptJson(words, [])).suggestions;
+    assert.deepEqual(made.map((s) => [s.n, s.from, s.to, s.start, s.end, s.kind, s.why]), [
+      [1, null, null, 0, 4.957, "pause", "silence before the first words"],
+      [2, null, null, 6.2, 7.8, "pause", "2.4 seconds of silence, shortened to 0.4"],
+      [3, "w2", "w2", 8, 8.4, "false start", "a false start"]
+    ]);
+    assert.ok(made.every((s) => s.by === "rules"));
+  });
+  it("lists the opening first and the silence after the last words last, from a plan made of a recording like the live one", () => {
+    // Silent to 2.531, a 0.06 s sound, silent to 5.157; then words, a shortened pause, a cue that is cut, words, and a reach for the phone.
+    const at = (text, from) => {
+      const words = [];
+      let t = from;
+      for (const w of text.split(" ")) { words.push({ w, start: t, end: Math.round((t + 0.2) * 1000) / 1000 }); t = words[words.length - 1].end; }
+      return words;
+    };
+    const one = at("Here's the plan.", 5.157); // to 5.757
+    const two = at("Next point.", 7.757); // pause 5.757 to 7.757
+    const cue = at("Sorry, again.", 8.457);
+    const three = at("Final point here.", 9.357);
+    const words = [...one, ...two, ...cue, ...three];
+    const end = three[three.length - 1].end;
+    const pauses = [[0, 2.531], [2.587, 5.157], [5.757, 7.757], [two[1].end, 8.457], [cue[1].end, 9.357], [end, end + 1], [end + 1.06, end + 4]];
+    const plan = cutPlan(phrasesOf(words, pauses), { duration: end + 4, pauses });
+    const made = cutSuggestions(plan, transcriptJson(words, [])).suggestions;
+    assert.equal(made[0].why, "silence before the first words");
+    assert.equal(made[made.length - 1].why, "silence after the last words");
+    assert.deepEqual([made[0].from, made[0].to, made[0].start], [null, null, 0]);
+    assert.ok(made.some((s) => s.from !== null), "the cue is a word cut");
+    assert.ok(made.some((s) => /shortened/.test(s.why)));
+    assert.deepEqual(made.map((s) => s.n), made.map((_, i) => i + 1));
+    assert.deepEqual(made.map((s) => s.start), [...made.map((s) => s.start)].sort((x, y) => x - y));
+  });
+  it("lists no silence when the plan has no ranges", () => {
+    assert.equal(cutSuggestions(PLAN, transcript).suggestions.length, 1);
+  });
+  it("tells the app's agent to propose word cuts by their ids and silence cuts by their times, the opening first", () => {
+    const rules = projectFiles(main()).get("CLAUDE.md");
+    assert.match(rules, /propose the cuts in `brimm\/cut-suggestions.json` first: those with word ids by their ids, and those with `from` and `to` null \(silence\) by their `start` and `end` times, the opening first/);
+  });
+  it("starts each phrase's first word no earlier than the phrase starts in transcript.json, whatever the transcriber gave it", () => {
+    const stretched = [{ w: "Here's", start: 0, end: 5.3 }, { w: "the", start: 5.3, end: 5.6 }];
+    const plan = { by: "rules", phrases: [{ id: "p1", start: 5.157, end: 5.6, text: "Here's the", words: stretched, keep: true, kind: "keep", why: "" }] };
+    const [first] = json(projectFiles(main({ words: stretched, plan, spellings: [] })), "transcript.json");
+    assert.deepEqual([first.start, first.end], [5.157, 5.3]);
+  });
+  it("does so by counting the plan's words, even when the transcriber's end for the word falls past the phrase's end", () => {
+    const stretched = [{ w: "Here's", start: 0, end: 5.3 }, { w: "the", start: 5.3, end: 5.9 }];
+    const plan = { by: "rules", phrases: [{ id: "p1", start: 5.157, end: 5.25, text: "Here's the", words: stretched, keep: true, kind: "keep", why: "" }] };
+    const [first, second] = json(projectFiles(main({ words: stretched, plan, spellings: [] })), "transcript.json");
+    assert.deepEqual([first.start, first.end, second.start], [5.157, 5.3, 5.6]);
   });
   it("reads a cut plan back from its file the same", () => {
     assert.deepEqual(cutSuggestions(JSON.parse(JSON.stringify(PLAN)), transcript), cutSuggestions(PLAN, transcript));
