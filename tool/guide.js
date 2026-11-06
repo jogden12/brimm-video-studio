@@ -273,7 +273,7 @@ const toDo = (stage, text) => ({ done: false, stage, text, step: "", after: "" }
 
 /** A step as the panel says it ("Writing the transcript"), put in the middle of a sentence: its first letter in lower case, unless
     it opens with Claude's name or a quoted word, as unedited.js clause() keeps them. */
-const midSentence = (step) => (/^(Claude|")/.test(step) ? step : step[0].toLowerCase() + step.slice(1));
+export const midSentence = (step) => (/^(Claude|Dropbox|")/.test(step) ? step : step[0].toLowerCase() + step.slice(1));
 
 /** The step for a file in a drop folder. One in the other Mac's waits on that Mac: its "Ready" notice, or its "try it again". */
 function dropNext(drop, mac) {

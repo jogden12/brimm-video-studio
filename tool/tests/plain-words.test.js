@@ -53,7 +53,7 @@ describe("a status keeps its stored step and is shown in plain words", () => {
 
 describe("what she can try is told", () => {
   it("says, of footage that could not be made, to open it again in a few minutes and to tell Jason if it says so again", () => {
-    assert.equal(footageNotMadeWords("Pricing talk"), 'Some of its footage could not be made for HyperFrames. Say "open Pricing talk in HyperFrames" again in a few minutes. If it says this again, tell Jason.');
+    assert.equal(footageNotMadeWords("Pricing talk"), "Some of its footage could not be made for HyperFrames, and opening it again won't change that. Tell Jason.");
     assert.equal(footageNotInWords("Pricing talk"), 'Some of its footage could not be put into the project. Say "open Pricing talk in HyperFrames" again. If it says this again, tell Jason.');
   });
   it("ends the not-whole-yet lines with tell Jason", () => {
@@ -77,7 +77,9 @@ describe("small words", () => {
 
 describe("no line she is told holds the late check or Not right", () => {
   // The files whose strings are said to her. Log lines (for Jason) are left alone; so are the stored words, which older Macs read.
-  const SAID = ["edit.js", "guide.js", "app.js", "app-reel.js", "late-wait.js", "join.js", "finish.js", "footage.js", "episode.js", "unedited.js", "filing.js", "plan.js", "plan-script.js", "reading.js", "workcopy.js", "importing.js", "app-history.js", "hand-over.js", "free.js", "reels.js", "hyperframes.js"];
+  // Every module, but the two that print only to Jason's own commands (`settings switch`, the drop-folder switch), which still say "late check" to him.
+  const JASON_ONLY = new Set(["switch.js", "settings.js"]);
+  const SAID = readdirSync(TOOL).filter((n) => n.endsWith(".js") && !JASON_ONLY.has(n));
   const STORED = new Set(["Waiting for its late check", "Waiting for the late check", "Late check", "late check", "late-check.lock"]);
   it("holds in the strings the tool says", () => {
     const found = [];

@@ -326,9 +326,9 @@ const writerOf = (ctx) => ({ commit: ctx.deps.commit || commitOf(thisCheckout())
 const workOf = (ctx) => join(runsFolder(ctx.home), `plan-${process.pid}-${ctx.now()}`);
 
 /** Why a record could not be written, in plain words with no path. */
-const notWritten = (e) => {
+export const notWritten = (e) => {
   if (e.code === "CHANGED") return "this plan changed on the other Mac: say it again";
-  if (e.code === "CONFLICTED") return "Dropbox has kept a conflicted copy of it: ask Jason";
+  if (e.code === "CONFLICTED") return "Dropbox has kept a conflicted copy of it: say \"sort out the conflict\".";
   if (e.code === "NEWER") return "Jason has a newer BRIMM Video Studio. Ask him to update this Mac";
   return `it could not be written (${e.code || "an error"})`;
 };

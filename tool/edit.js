@@ -1007,7 +1007,7 @@ const NO_SOUND_WHY = (name) => `${name} has no sound, so Claude can't read it: i
 
 /** What `episodes` says under an episode whose record cannot be read (review changes R4c), by why it cannot: a conflicted copy says
     what to say; a record not whole yet may be Dropbox still bringing it; a folder that cannot be read is tried again. */
-function readTrouble(read) {
+export function readTrouble(read) {
   const why = String(read.why).replace(/\.$/, "");
   if (read.code === "CONFLICTED") return `${why}.`;
   if (read.code === "NONE") return `It is not ready: ${why}. Dropbox may still be bringing its record. Wait a few minutes and ask again. If it says this again, tell Jason.`;
@@ -2069,7 +2069,7 @@ export async function status(ctx, rest) {
     // A gated video is named by its label alone, and is not told to open it, which the gate refuses.
     if (footageFailed(ctx, folder)) {
       lines.push(isGated(e) ? `Some of the footage for "${gatedName(gatedRecord(e), e.held)}" could not be made. Ask Jason.`
-        : `Some of the footage for "${shown}" could not be made. Say "open ${shown} in HyperFrames" again. If it says this again, tell Jason.`);
+        : `Some of the footage for "${shown}" could not be made, and opening it again won't change that. Tell Jason.`);
     }
   }
   for (const line of lines.length ? lines : ["Nothing is running, and nothing is waiting."]) say(line);

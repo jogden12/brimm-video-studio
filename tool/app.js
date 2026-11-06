@@ -780,7 +780,7 @@ export const FOOTAGE_COMING = 'Its footage is still being made for HyperFrames: 
 /** What she is told when a copy of footage that is made could not be moved into the project. */
 export const footageNotInWords = (name) => `Some of its footage could not be put into the project. Say "open ${name} in HyperFrames" again. If it says this again, tell Jason.`;
 /** What she is told when a copy of footage is still missing and the last run that made copies failed for it for a reason that will not pass. */
-export const footageNotMadeWords = (name) => `Some of its footage could not be made for HyperFrames. Say "open ${name} in HyperFrames" again in a few minutes. If it says this again, tell Jason.`;
+export const footageNotMadeWords = (name) => "Some of its footage could not be made for HyperFrames, and opening it again won't change that. Tell Jason."; // `name` is kept for callers: no retry is promised
 
 /** Whether the last run of the working copy for this episode failed to make the copy of the footage of `shot` for a reason that will not pass: its
     result holds a line "The footage for shot <n> could not be made: <why>" (workcopy.js makeFootageCopies), in `failed` for a run of the footage alone

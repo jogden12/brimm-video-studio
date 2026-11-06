@@ -157,7 +157,7 @@ describe("status: the working copy", () => {
   });
 
   // R6b: a footage copy that failed for a reason that will not pass is said, in plain words and with what she can do first.
-  const NOT_MADE = (name) => `Some of the footage for "${name}" could not be made. Say "open ${name} in HyperFrames" again. If it says this again, tell Jason.`;
+  const NOT_MADE = (name) => `Some of the footage for "${name}" could not be made, and opening it again won't change that. Tell Jason.`;
   const SHOT_2 = "The footage for shot 2 could not be made: ffmpeg stopped.";
   it("says that some of the footage could not be made, and what to do first, when the last run's result holds a footage copy that failed", async () => {
     const { t } = world();
