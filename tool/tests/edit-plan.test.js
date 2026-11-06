@@ -788,8 +788,8 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     assert.deepEqual((await on(light(t), "guide")).said.slice(1), ["Nothing is under way. To start, put the video in your drop folder."]);
     t.done();
   });
-  it("leaves every other command as it was: the made-up episode's status, release, free and show say the same with a plan beside it", async () => {
-    const asks = [["status"], ["status", FOLDER], ["release", FOLDER], ["free", FOLDER], ["show", FOLDER, "plan"], ["name", FOLDER, "Another"], ["reels", FOLDER, "--no-play"], ["resolve", FOLDER]];
+  it("leaves every other command as it was: the made-up episode's status, free and show say the same with a plan beside it", async () => {
+    const asks = [["status"], ["status", FOLDER], ["free", FOLDER], ["show", FOLDER, "plan"], ["name", FOLDER, "Another"], ["reels", FOLDER, "--no-play"], ["resolve", FOLDER]];
     const said = async (withPlan) => {
       const { t } = episode();
       if (withPlan) await planned(t);

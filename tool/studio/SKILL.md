@@ -122,8 +122,6 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 | "Try it again" (an import that stopped) | `retry "<video>"` |
 | "Sort out the conflict" | `resolve "<episode>"`; show her the two sides in plain words; then `resolve "<episode>" --keep A` or `resolve "<episode>" --keep B` as she picks. |
 
-
-
 ## More on these rows
 
 Each rule starts with the row it belongs to.

@@ -1,6 +1,6 @@
 // Claude's ideas for graphics as she reads them (Sallie's note 8, 25 Oct: "Add timestamps to graphics suggestions so that they can
 // easily be added"): numbered, each with its start and end on the newest version shown on this Mac, put up by its number, and left
-// out of Claude's notes of a raw video, whose times are the recording's. A finished video and an iPhone clip get none.
+// out of Claude's notes of a raw video, whose times are the recording's. A finished video's main video gets none.
 // Every program is a stand-in, nothing opens, and every name is made up.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -48,12 +48,11 @@ const withIdeas = (graphics) => {
   const plan = JSON.parse(EPISODE.files["Pricing talk.cut-plan.json"]);
   return { ...EPISODE, files: { ...EPISODE.files, "Pricing talk.cut-plan.json": JSON.stringify({ ...plan, claude: { ...plan.claude, graphics } }) } };
 };
-/** A raw video she has answered, whose rough cut, version 0, was rendered and opened on this Mac: the clock she reads. */
+/** A raw video she has answered, whose rough cut, version 0, was rendered and opened on this Mac. */
 const ROUGH = { v: 0, how: "render", at: AT, on: "Mac Studio", file: "edit/main.v0.fcpxml", opened: AT };
 const raw = () => episode({ version: 3, kind: "raw", answer: ANSWERED, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed: [ROUGH], base: null } }, {}, withIdeas(IDEAS));
 /** A finished video's, or an iPhone clip's, files as the light import leaves them. */
 const LIGHT = { "Pricing talk.mp4": "the video", "Pricing talk.cut-plan.json": "{}", "Pricing talk.srt": "1\n00:00:00,000 --> 00:00:02,000\nHello\n" };
-const KINDS = [["finished", "a finished video"], ["short video", "an iPhone clip"]];
 const light = (kind) => {
   const t = setup();
   const found = episodeFor(t, { record: { version: 3, kind, answer: ANSWERED, label: "Video of 14 Oct, 09:12 (Mac Studio)" }, files: LIGHT });
@@ -129,12 +128,10 @@ describe("graphic ideas", () => {
     assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing", "ideas"), { code: 0, text: "Claude gave no ideas for graphics on the main video." });
     t.done();
   });
-  it("says a finished video and an iPhone clip have none", async () => {
-    for (const [kind, what] of KINDS) {
-      const { t } = light(kind);
-      assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing talk", "ideas"), { code: 0, text: `Pricing talk has no ideas for graphics: Claude gives none for ${what}.` }, kind);
-      t.done();
-    }
+  it("says a finished video's main video has none", async () => {
+    const { t } = light("finished");
+    assert.deepEqual(await on(t.ctx.deps, "graphic", "Pricing talk", "ideas"), { code: 0, text: "Pricing talk has no ideas for graphics: Claude gives none for a finished video's main video." });
+    t.done();
   });
   it("says nothing of a newer version the other Mac rendered: their first line names the version", async () => {
     const { t } = renderedThere();
@@ -367,7 +364,7 @@ describe("the README on ideas for graphics", () => {
     const row = readme.split("\n").find((line) => line.startsWith('| `graphic "<episode>"')) || "";
     assert.ok(row.startsWith('| `graphic "<episode>" ideas [main \\| reel <n>]` |'), row);
     assert.doesNotMatch(row, /--idea|--at-words|--place/);
-    for (const words of ["numbered in the order their words are said", "A finished video and an iPhone clip have none.", "printed by `show` and `open` without their ideas for graphics", "An idea on words that are cut is left out of the printed notes too"]) assert.ok(row.includes(words), words);
+    for (const words of ["numbered in the order their words are said", "A finished video's main video has none; an iPhone clip she answered and a short video made from a plan are listed with the cues their projects are given", "printed by `show` and `open` without their ideas for graphics", "An idea on words that are cut is left out of the printed notes too"]) assert.ok(row.includes(words), words);
     assert.doesNotMatch(readme, /nothing reads them back yet/);
   });
 });
@@ -414,11 +411,29 @@ describe("graphic ideas match the project's own cue file", () => {
     assert.deepEqual(printed(r.text), projectList(found, { kind: "main", graphicCues: graphicCuesOf(found.record.planned.cues, { kinds: GRAPHIC_CUE_KINDS }).cues }));
     t.done();
   });
-  it("for an iPhone clip, its words placed with its cut plan's phrases as for any main video", async () => {
+  it("for a short video made from a plan, its guide's cues and not its reading's, as app.js gives the project (the kit first)", async () => {
+    const guide = [
+      { n: 1, words: "Welcome to the show", kind: "words", show: "Her show's name.", seconds: 3, style: null },
+      { n: 2, words: "know your costs", kind: "graphic", show: "A chart of costs.", seconds: 4, style: null }
+    ];
+    const p = newPlannedEpisode({ id: "e-20261104-400000", machine: "Mac Studio", at: AT, title: "Pricing", route: "script", voice: null, writer: { commit: "c709b57", on: "Mac Studio" } }).planned;
+    const planned = { ...p, set: AT, shots: [{ n: 1, kind: "talking", what: "Open." }], cues: guide, lines: ["Welcome to the show."], filmed: { at: AT, parts: [] } };
+    // Its reading kept a cue of its own, which the project is not given: the guide's are.
+    const reading = { kind: "short video", model: "claude-sonnet-4-5", at: AT, on: "Mac Studio", account: "", outcome: "read", about: "A clip.", graphicCues: [{ n: 1, words: "very important", kind: "graphic", show: "Another.", seconds: 4, style: null }] };
+    const { t, found } = episode({ version: 5, kind: "short video", answer: ANSWERED, reading, planned }, {}, withCues([]));
+    const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.text, /^The graphics of its video guide: 2, with times on /);
+    assert.deepEqual(printed(r.text), projectList(found, { kind: "main", graphicCues: graphicCuesOf(found.record.planned.cues, { kinds: GRAPHIC_CUE_KINDS }).cues, short: true }));
+    assert.equal(printed(r.text).length, 2, r.text);
+    t.done();
+  });
+  it("for an iPhone clip she answered, its words placed with its cut plan's phrases as for any main video", async () => {
+    // She answered it (answer.state "answered"), as join.js and the card leave it: the list is still the one the project is given (app.js graphicCuesOfRecord).
     // Both are said just after a pause, where the cut plan's phrases start the words later than the transcriber did: 0:04 and 0:14, not 0:03 and 0:13.
     const cues = [{ n: 1, words: "Let me do that again", kind: "graphic", show: "A chart.", seconds: 4, style: null }, { n: 2, words: "So the first thing", kind: "words", show: "A word.", seconds: 3, style: null }];
     const reading = { kind: "short video", model: "claude-sonnet-4-5", at: AT, on: "Mac Studio", account: "", outcome: "read", about: "A clip.", graphicCues: cues };
-    const { t, found } = episode({ version: 3, kind: "short video", reading }, {}, withCues([]));
+    const { t, found } = episode({ version: 3, kind: "short video", answer: ANSWERED, reading }, {}, withCues([]));
     const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
     assert.equal(r.code, 0, r.text);
     assert.deepEqual(printed(r.text), projectList(found, { kind: "main", graphicCues: graphicCuesOfRecord(found.record), short: true }));

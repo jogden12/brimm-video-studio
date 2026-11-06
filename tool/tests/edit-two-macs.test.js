@@ -149,7 +149,7 @@ describe("the two Macs, as the P1 check found them", () => {
     assert.equal(reread(found).editing, null);
     t.done();
   });
-  it("writes no record over a take-over that lands while the finish copies into final/, and says so (T1)", async () => {
+  it("writes no record over a claim by the other Mac that lands while the finish copies into final/, and says so (T1)", async () => {
     const { t, found } = exported();
     assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
     const her = otherMac(t);

@@ -616,7 +616,7 @@ describe("spell, for a short video as today's import makes one", () => {
     assert.equal(reread(found).rev, found.record.rev + 1, "one record for the two");
     t.done();
   });
-  it("writes no hand-off of its own: it is a Final Cut video, finished by finish", async () => {
+  it("writes no hand-off of its own: finish writes it", async () => {
     const { t, found } = legacy();
     assert.equal((await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden")).code, 0);
     assert.equal(existsSync(join(found.folder, "final")), false);

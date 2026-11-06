@@ -949,7 +949,7 @@ export async function finishNow(ctx, found, deps = {}) {
         put(part.copy, part.name);
         // An export taken from Downloads is removed there only if its name is an export's name for the project (architecture 8.1, the
         // originals): the app's own record, which can be written in a project by the app's agent, or her word, may have led to a file
-        // with another name, and that is left where it is. An export from another folder, from what the other Mac released, or from the
+        // with another name, and that is left where it is. An export from another folder, or from the
         // project's renders is never removed.
         // What finish.asked.json says of the place is not taken on trust for a removal: the file must be in this Mac's Downloads folder.
         if (part.video.where === "Downloads" && resolve(part.video.dir) === resolve(downloadsFolder(ctx.home)) && isExportOf(part.video.name, part.project)) taken.push({ path: part.path, snap: part.snap, name: part.video.name, place: "Downloads" });

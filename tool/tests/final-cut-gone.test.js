@@ -11,6 +11,7 @@ import { episodeWork, writeSettings } from "../settings.js";
 import { workCopyKey, workCopyPaths } from "../workcopy.js";
 import { EPISODE, episode } from "./phase4.js";
 import { FOLDER, NAME, reread } from "./episodes.js";
+import { OFFERS, READ } from "./guide-world.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
 const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
@@ -59,16 +60,21 @@ describe("the seven Final Cut commands are no commands", () => {
 });
 
 describe("an old record with Final Cut layers still reads", () => {
-  const old = () => episode(OLD);
+  // Read by Claude and its spellings answered, as the guide's tests have a video (guide-world.js), so that the guide goes on to say what is next.
+  const old = () => episode({ ...OLD, reading: READ("raw"), offers: OFFERS });
   it("is whole for episodeFault, and episodes, guide, open, spell, graphic ideas and resolve work on it", async () => {
     const { t, found } = old();
     assert.equal(episodeFault({ ...WHOLE, main: OLD_MAIN, brand: OLD.brand }), "");
     for (const argv of [["episodes"], ["guide"], ["guide", FOLDER], ["open", FOLDER], ["spell", FOLDER], ["graphic", FOLDER, "ideas"], ["resolve", FOLDER]]) {
-      const r = await on(t.ctx.deps, ...argv);
+      // The guide is run on a Mac set up as Studio is (the light import, the app on), where it follows an episode through HyperFrames.
+      const deps = argv[0] === "guide" ? { ...t.ctx.deps, settings: { ...t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 2, app: "hyperframes" } } : t.ctx.deps;
+      const r = await on(deps, ...argv);
       assert.ok([0, 1].includes(r.code), `${argv.join(" ")}: ${r.text}`);
       assert.doesNotMatch(r.text, /broken|cannot be read|not understood/i, `${argv.join(" ")}: ${r.text}`);
       // The guide's one line for an episode edited in Final Cut before (F6) is allowed; nothing else names it.
       if (argv[0] !== "guide") assert.doesNotMatch(r.text, /Final Cut|timeline|show it/, `${argv.join(" ")}: ${r.text}`);
+      // And the guide for this episode does say it: the old-episode line, not "isn't set up".
+      if (argv[0] === "guide" && argv.length === 2) assert.match(r.text, /It was edited in Final Cut before\. Studio doesn't use Final Cut now: say "open it in HyperFrames"/, r.text);
     }
     t.done();
   });

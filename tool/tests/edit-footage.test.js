@@ -1192,7 +1192,7 @@ describe("kind, leave and the gate, with a part and a video with no sound", () =
     assert.equal(isPart(reread(found)), true);
     t.done();
   });
-  it("leaves a part to the commands that open a video waiting: which, show, release and resolve run, and every other is refused as waiting", async () => {
+  it("leaves a part to the commands that open a video waiting: which, show and resolve run, and every other is refused as waiting", async () => {
     const t = setup();
     await planned(t);
     video(t, 1);

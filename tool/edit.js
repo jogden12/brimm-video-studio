@@ -227,8 +227,8 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         answers, that the client agreed to a kept Reel idea being cut from it. Who agreed
                                         stays on this Mac
   node edit.js reels "<episode>" [--no-play]
-                                        list the Reel candidates, and play their previews in QuickTime Player; for a
-                                        video she has answered, its Reel suggestions with times on the clock she is
+                                        list the Reel candidates, and play an old preview in QuickTime Player where an
+                                        older import left one; for a video she has answered, its Reel suggestions with times on the clock she is
                                         reading, and nothing opens; then how to make one in HyperFrames, on a Mac
                                         set up for it
   node edit.js ask "<episode>"          ask Claude again for Reel candidates, detached. Picked Reels stay as they are.
@@ -933,7 +933,7 @@ export const unreadWords = (named, read) => (read && read.code === "NONE"
   : `${named}: ask Jason.`);
 
 /** The lines `episodes` says of an episode (episodeAt): its name, what it is, its length, its folder and short id, and below
-    them who is editing it, its title, how far it has been shown in Final Cut, its finish, and what is not right with its
+    them who is editing it, its title, its finish, and what is not right with its
     files, as always. A gated one is named by its label (shownName), and the line says what it is: a video waiting for her
     answer, a client or group session, or a video left alone (`left`), with no folder; its title, which Claude may have made of
     its words, is not said; and no line of it names its video's files (cleanFor). Under the line of a video waiting for her
@@ -983,7 +983,7 @@ const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx,
 const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boolean(gatedRecord(e).answer) && gatedRecord(e).answer.state === "not for brimm-video";
 
 /** `episodes`: each episode, newest first, with what a person needs to pick one up; the videos waiting in each drop folder,
-    and for how long; the imports in Episodes/.importing; and this Mac's libraries, with the free space on its disk. An
+    and for how long; the imports in Episodes/.importing; and the free space on this Mac's disk. An
     archived episode is left out, and one a newer brimm-video wrote is named by its short id alone (newerName). A video not
     yet answered, or a session, is named by its label (episodeLines), with the lines of her card under one not yet answered
     (cardLines), and one she has left alone is listed apart, under a heading of its own. A video waiting in a drop folder that
@@ -2254,7 +2254,7 @@ async function show(ctx, rest) {
   if (printWhy(record) || found.held) return showCopy(ctx, found, record, `${stem}${ending}`, what);
   // The record picks a raw video's transcript (plan PR 7, item 5): with a main HyperFrames project in use, the recording's own, whose times
   // are the project's timeline's where the page leaves the recording at its start; otherwise the rough cut's, which the reading still
-  // makes and an episode going the Final Cut way needs.
+  // makes (Jason kept it, 6 November 2026).
   const projectInUse = (record.app?.projects ?? []).some(inUse);
   const roughCut = kind === "transcript" && isAnswered(record) && recordKind(record) === "raw" && !projectInUse;
   const file = roughCut ? `${stem}.rough-cut.transcript.txt` : `${stem}${ending}`;
@@ -3167,10 +3167,9 @@ async function reels(ctx, rest) {
   const listedSize = record.files ? record.files[REELS_FILE] : undefined;
   const thereSize = statSync(at).size;
   if (Number.isInteger(listedSize) && thereSize !== listedSize) return refuse(ctx, `${REELS_FILE} in this episode is not the one its record lists (it is ${thereSize} bytes, and the record lists ${listedSize}), so its candidates are not shown. ${keptOrWait(ctx, found, record)}`);
-  // A video she has answered the card of is listed with its times on the clock she is reading, or on the recording's own when that
-  // cannot be read now: a file is not whole yet, the read fails, or the version's file holds no clip. Nothing is brought from here,
-  // no preview is made or opened, and asking Claude again is not offered (spec 3, "The Reel suggestions"); when the other Mac has a
-  // newer version rendered there, that is said, as every command that reads a time says it.
+  // A video she has answered the card of is listed with its times on the video's own clock (video-clock.js), or on the recording's
+  // own when that cannot be read now: a file is not whole yet, or the read fails. Nothing is brought from here, no preview is made
+  // or opened, and asking Claude again is not offered (spec 3, "The Reel suggestions").
   if (isAnswered(record)) {
     let now = null;
     try {
@@ -4166,11 +4165,14 @@ function graphicIdeas(read, spellings = []) {
     of its video guide, planned.cues read again as a package's are, every kind of cue among them, since its project is made from those and from the
     reading's none; any other video lists the reading's (graphicIdeas). Each is placed on the words of the recording as the reading's are. */
 function ideasFor(read, record) {
+  // A video made from a plan is tested first, as app.js gives its project the plan's guide before the reading's (a plan's short video too).
+  if (isFromPlan(record)) {
+    const cues = graphicCuesOf(record.planned.cues, { kinds: GRAPHIC_CUE_KINDS }).cues;
+    return graphicIdeas({ ...read, plan: { ...read.plan, claude: { ...(read.plan.claude || {}), graphicCues: cues } } }, record.spellings);
+  }
   // An iPhone clip's are the ones its reading kept in its record (app.js), placed on its words with its cut plan's phrases as any main video's are.
   if (record.kind === "short video") return graphicIdeas({ ...read, plan: { ...read.plan, claude: { graphicCues: graphicCuesOfRecord(record) } } }, record.spellings);
-  if (!isFromPlan(record)) return graphicIdeas(read, record.spellings);
-  const cues = graphicCuesOf(record.planned.cues, { kinds: GRAPHIC_CUE_KINDS }).cues;
-  return graphicIdeas({ ...read, plan: { ...read.plan, claude: { ...(read.plan.claude || {}), graphicCues: cues } } }, record.spellings);
+  return graphicIdeas(read, record.spellings);
 }
 /** Where an idea is on the clock she is reading, as its line says it: "0:04 to 0:07", "cut now", or, when its words are not on that
     clock, "not on <clock> (kept again since)". */
@@ -4182,9 +4184,9 @@ const ideaSaid = (idea) => (/[.!?…]"?$/.test(oneLine(idea)) ? oneLine(idea) : 
 const ideaLine = (idea, on) => (idea.missing
   ? `Idea ${idea.n}: ${ideaSaid(idea.idea)} Its words, "${oneLine(idea.said)}", were not found in the video.`
   : `Idea ${idea.n}, ${ideaWhere(idea, on)}: ${ideaSaid(idea.idea)} Over "${oneLine(idea.said)}"`);
-/** What is said of a finished video's or an iPhone clip's ideas for graphics: Claude gives none (Jason, 22 Oct: "Reel suggestions
-    and spellings, nothing more"). */
-const noIdeas = (record) => `${shownName(record)} has no ideas for graphics: Claude gives none for ${recordKind(record) === "finished" ? "a finished video" : "an iPhone clip"}.`;
+/** What is said of a finished video's ideas for graphics: Claude gives none for its main video (Jason, 22 Oct: "Reel suggestions
+    and spellings, nothing more"). An iPhone clip's, and a plan's short video's, are listed as their projects are given them. */
+const noIdeas = (record) => `${shownName(record)} has no ideas for graphics: Claude gives none for a finished video's main video.`;
 
 /** What is said of a Reel that `graphic … ideas` is asked about, when it cannot be: one the record does not have. "" for any other. A
     Reel is not refused for being a suggestion, or for being made in HyperFrames: its cues are listed on the video's clock, which needs
@@ -4212,7 +4214,7 @@ function ideasList(ctx, words) {
   const { part, words: left } = partFrom(rest);
   if (left.length) return refuse(ctx, `"${left.join(" ")}" is not understood there: name the timeline last, as main or reel 2.`);
   if (part !== "main" && reelPartWhy(found.record, part.reel)) return refuse(ctx, reelPartWhy(found.record, part.reel));
-  if (!hasFinalCut(found.record)) {
+  if (recordKind(found.record) === "finished") {
     ctx.say(noIdeas(found.record));
     return 0;
   }

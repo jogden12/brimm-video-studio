@@ -528,7 +528,7 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     text(`${stem}.rough-cut.transcript.txt`, stampedText(roughSrt));
     text(`${stem}.cut-plan.txt`, planText(next, readPlanNote(changes, notesFile)));
     // The rough cut, rendered as version 0 into BRIMM Video Work from the plan as Claude read it. No Final Cut file is written, and
-    // the record holds no entry for it: it is kept on this Mac, and said.
+    // the record holds no entry for it: it is kept on this Mac, and said only when the reading's files cannot be put in.
     const rendered = await renderRough(ctx, found, deps, { record, plan: next, facts, work, named, name, log, now });
     if (rendered.why) failed.push(`The rough cut could not be made: ${sentence(rendered.why)}`);
     else render = rendered;

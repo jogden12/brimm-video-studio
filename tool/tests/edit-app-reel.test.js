@@ -908,7 +908,7 @@ describe("reels: how to make one", () => {
     assert.doesNotMatch((await on(t.ctx.deps, "reels", FOLDER, "--no-play")).text, /To make|cannot make Reel/);
     t.done();
   });
-  it("says nothing of making one for a video whose Reels are not suggestions, which BRIMM Video Studio still makes in Final Cut", async () => {
+  it("says nothing of making one for a video whose Reels are not suggestions, which Studio makes in HyperFrames", async () => {
     const { t } = world({ set: true });
     const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
     assert.doesNotMatch(r.text, /To make|cannot make Reel/);

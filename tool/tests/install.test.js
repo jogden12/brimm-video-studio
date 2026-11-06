@@ -186,13 +186,13 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
     assert.deepEqual(r.agents.map(held), [agent(r, ["/Volumes/Work/Unedited video", "/Volumes/Work/More of it"])]);
     assert.match(r.agents[0].ProgramArguments[0], /\/node$/);
     assert.ok(existsSync(r.agents[0].ProgramArguments[1]));
-    // swift, which finds the faces for the upright version, is in /usr/bin.
+    // swift, which finds the faces for a Reel's crop, is in /usr/bin.
     assert.ok(r.agents[0].EnvironmentVariables.PATH.split(":").includes("/usr/bin"));
     assert.ok(r.out.includes(`This is what the Mac would be given, at ${r.home}/Library/LaunchAgents/com.thebrimm.unedited.plist:`), r.out);
     assert.ok(r.out.includes("  Folder to watch for unedited video:  /Volumes/Work/Unedited video\n  Folder to watch for unedited video:  /Volumes/Work/More of it\n"), r.out);
     assert.ok(r.out.includes(`  Log:  ${r.home}/Library/Logs/brimm-video.log\n`), r.out);
     // It says whether swift is on this Mac, and installs nothing for it.
-    assert.match(r.out, /\n {2}Swift, to find the speaker's face: {2}(here already|not here, so the upright version is cropped at the centre\. To get it: xcode-select --install)\n/);
+    assert.match(r.out, /\n {2}Swift, to find the speaker's face: {2}(here already|not here, so a Reel is cropped at the centre of the picture\. To get it: xcode-select --install)\n/);
     // Of the transcript tool it gives nothing and says nothing: that tool's installer is in brimm-operations.
     assert.doesNotMatch(said(r), /com\.thebrimm\.transcribe|BRIMM Transcripts|brimm-transcribe\.log|transcribe\.js|for transcripts/);
     changedNothing(r);

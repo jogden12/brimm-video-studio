@@ -63,7 +63,7 @@ LABEL="com.thebrimm.unedited"
 AGENT_FILE="$HOME/Library/LaunchAgents/$LABEL.plist"
 # The transcript tool's launch agent. Its file is only ever read here, for the folders it watches.
 TRANSCRIBE_LABEL="com.thebrimm.transcribe"
-# Where the launch agent looks for the programs. /usr/bin is on it for swift, which finds the faces for the upright version.
+# Where the launch agent looks for the programs. /usr/bin is on it for swift, which finds the faces for a Reel's crop.
 # A test names other folders in BRIMM_AGENT_PATH: on a Mac that has Claude Code where Homebrew puts programs, that is the one
 # way to see where else it is looked for.
 AGENT_PATH="${BRIMM_AGENT_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
@@ -584,8 +584,8 @@ if [[ -n "$machine" ]]; then
 else
   for f in "${folders[@]}"; do say "  Folder to watch for unedited video:  $f"; done
 fi
-# swift finds the speaker's face for the upright version. It comes with Xcode's command line tools, and nothing here installs it.
-say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here, so the upright version is cropped at the centre. To get it: xcode-select --install")"
+# swift finds the speaker's face for a Reel's crop. It comes with Xcode's command line tools, and nothing here installs it.
+say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here, so a Reel is cropped at the centre of the picture. To get it: xcode-select --install")"
 # For one of the two Macs, what it has of what the tool needs, and what Jason does by hand when something is not here. Nothing
 # here installs Xcode's command line tools, Homebrew or Claude Code, or signs in to Claude.
 autoload -Uz is-at-least

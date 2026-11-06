@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { COMMAND_NAMES, HELP, editMain } from "../edit.js";
-import { episodeFault, filesProblems, readEpisode, recordFile, recordText } from "../episode.js";
+import { faultFor, filesProblems, readEpisode, recordFile, recordText } from "../episode.js";
 import { lookForExports, fixedZone } from "../exports.js";
 import { PIN } from "../hyperframes.js";
 import { episodeWork, writeSettings } from "../settings.js";
@@ -143,7 +143,7 @@ describe("an old record from a hand-over still reads", () => {
   it("is listed by episodes, and passes the record's own checks", async () => {
     const { t, found } = handedOver();
     const record = reread(found);
-    assert.equal(episodeFault(record, 4), "");
+    assert.equal(faultFor(4)(record), "");
     assert.deepEqual(filesProblems(found.folder, record), []);
     const r = await on(t.ctx.deps, "episodes");
     assert.equal(r.code, 0, r.text);
@@ -186,7 +186,7 @@ describe("a new record keeps released: null", () => {
     const claimed = reread(found);
     assert.equal(claimed.released, null);
     assert.equal(claimed.editing.by, "Mac Studio");
-    assert.equal(episodeFault(claimed, 4), "");
+    assert.equal(faultFor(4)(claimed), "");
     t.done();
     // The finish's claim (edit-two-macs.test.js's world): the record it writes keeps released: null and has this Mac editing.
     const f = fw();
@@ -196,7 +196,7 @@ describe("a new record keeps released: null", () => {
     assert.equal(finished.code, 0, finished.text);
     assert.equal(reread(f.found).released, null);
     assert.equal(reread(f.found).editing.by, "Mac Studio");
-    assert.equal(episodeFault(reread(f.found), 4), "");
+    assert.equal(faultFor(4)(reread(f.found)), "");
     f.t.done();
     const w = appWorld({ record: { ...RAW, kind: null, answer: { ...ANSWERED, state: "needs your answer", guess: "raw" } } });
     const kind = await on(w.t.ctx.deps, "kind", FOLDER, "raw", "--private", "no");
