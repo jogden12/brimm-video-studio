@@ -785,7 +785,7 @@ These came from the final review of the whole branch on 4 November:
 
 ## Open items
 
-- **How `claude` reads under H7's scratch home.** It is settled on the page before the first check that needs a reading.
+- **How `claude` reads under H7's scratch home.** Settled at check 57: through `BRIMM_VIDEO_HOME`, with HOME left real (d57dd9e, 2a25437, 963601e).
 - **Whether parts' own files could later be freed,** once a planned episode's main video is filed (ruling 12's cost). That is Jason's call, after H5.
-- **Whether taking footage back should void its client's agreement.** Today it does not. The agreement is for that video as footage for that plan, so if she makes it footage for the same plan again, the agreement still counts. Jason's call.
-- **Whether a video she left alone can be made footage.** Today it can. `episodes` shows no card for it, but `footage` asks her both cards, and the client question still holds back footage that shows a client. Jason's call.
+- **Whether taking footage back should void its client's agreement.** Decided by Jason on 5 November: no. The agreement is for that video as footage for that plan, so if she makes it footage for the same plan again, it still counts, as today.
+- **Whether a video she left alone can be made footage.** Decided by Jason on 5 November: yes, as today. `episodes` shows no card for it, but `footage` asks her both cards, and the client question still holds back footage that shows a client. The skill gains a line for it in the next round (the final reviewer's suggestion).
