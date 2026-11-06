@@ -86,7 +86,7 @@ On a Mac with no brimm-video settings, in place of the settings and the drop fol
 - A no keeps the key and does not stop the run. Double-click the app again to be asked once more.
 - The report is written again with this answer.
 
-The last line of a finished run is: `Done. Next on the By-Hand page: checks 45 to 47, on screen.`
+The last line of a finished run is: `Done. Next on the By-Hand page: checks 45 to 47, on screen.` On Jason's MacBook it is: `Done. Next on the By-Hand page: the rest of the check for Jason's MacBook.`
 
 ## What stays by hand
 

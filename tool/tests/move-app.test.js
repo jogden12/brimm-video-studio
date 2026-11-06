@@ -1260,6 +1260,7 @@ describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook
     assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`, `install.sh --yes ${OPTIONS} ${rootOf(r.home)}`]);
     assert.ok(r.ran.split("\n").includes(`open -R ${rootOf(r.home)}/Drop/${JASON}`), r.ran);
     assert.ok(!/set up fresh/.test(r.out), "a Mac with brimm-video is moved, not set up fresh");
+    assert.ok(r.out.trimEnd().endsWith("Done. Next on the By-Hand page: the rest of the check for Jason's MacBook."), r.out.slice(-300));
     assert.match(r.report, /^Studio move report: Jason's MacBook, /);
   });
 
@@ -1294,6 +1295,7 @@ describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook
     assert.match(r.report, /^Studio move report: Jason's MacBook, /);
     assert.match(r.report, /1\.4\.0 on Jason's MacBook/);
     assert.match(r.report, /^Anything unexpected in her settings: .*set up fresh/m);
+    assert.ok(r.out.trimEnd().endsWith("Done. Next on the By-Hand page: the rest of the check for Jason's MacBook."), r.out.slice(-300));
     assert.ok(!/Sallie|[Hh]er (drop folder|settings|Desktop|own Claude|HeyGen|checkout)/.test(r.out), r.out);
     assert.ok(r.tree.includes(join("Claude Code", "BRIMM video", "tool", "settings.js")), "a brimm-video checkout is left as it is");
   });

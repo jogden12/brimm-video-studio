@@ -974,8 +974,11 @@ main() {
   say ""
   if [[ -n "$PRINT_ONLY" ]]; then
     say "Nothing was changed."
-  else
+  elif [[ "$MACHINE" == "Sallie's laptop" ]]; then
+    # Her laptop's checks on screen come next: 45 to 47 are hers.
     say "Done. Next on the By-Hand page: checks 45 to 47, on screen."
+  else
+    say "Done. Next on the By-Hand page: the rest of the check for $MACHINE."
   fi
   exit 0
 }
