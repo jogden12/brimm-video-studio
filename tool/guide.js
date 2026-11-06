@@ -117,7 +117,7 @@ const SAYS = {
       ? `Choose "Principles", drop the ${again ? "new " : ""}hand-off, then press "Take the session".`
       : again
         ? `Drag the new hand-off onto Episodes, then press "Take revision ${revision} in place of revision ${note.revision}".${family === "episode" && note.step === "cascade" ? LATE_REELS : ""}`
-        : 'Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off".',
+        : 'Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.',
   kit: () => 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.',
   posted: (family) =>
     family === "short video"
@@ -273,7 +273,7 @@ const toDo = (stage, text) => ({ done: false, stage, text, step: "", after: "" }
 
 /** A step as the panel says it ("Writing the transcript"), put in the middle of a sentence: its first letter in lower case, unless
     it opens with Claude's name or a quoted word, as unedited.js clause() keeps them. */
-const midSentence = (step) => (/^(Claude|")/.test(step) ? step : step[0].toLowerCase() + step.slice(1));
+export const midSentence = (step) => (/^(Claude|Dropbox|")/.test(step) ? step : step[0].toLowerCase() + step.slice(1));
 
 /** The step for a file in a drop folder. One in the other Mac's waits on that Mac: its "Ready" notice, or its "try it again". */
 function dropNext(drop, mac) {
@@ -409,7 +409,7 @@ function filmStep({ route, voice, footage = "", joining = false, joinFailed = fa
   // A script with footage in (PR H5a) is told what it has: `footage` is the parts counted in words ("2 talking parts, 1 screen recording and 2
   // b-roll clips"), and "" while no part has come, when the step is the one before.
   if (route === "script" && footage) return toDo("footage", `Its footage so far: ${footage}. When it is all in, say "that's all the footage".`);
-  if (route === "script") return toDo("film", "Film it to its shot list, then drop the files in your drop folder. The teleprompter script is in its folder in Episodes.");
+  if (route === "script") return toDo("film", "Film it to its shot list, then drop the files in your drop folder. To read the teleprompter script, say 'show me the script': it opens as a copy to read, and changes come through the chat.");
   // A HeyGen explainer (PR H6): its project is made in HyperFrames first, and the voice there; she says when the voice is done.
   if (voice === "heygen" && project) return toDo("heygen-voice", HEYGEN_VOICE);
   if (voice === "heygen" && set) return toDo("heygen-open", HEYGEN_OPEN);

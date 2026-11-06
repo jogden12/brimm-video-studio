@@ -624,7 +624,7 @@ describe("a waiting video whose import matched a video since marked a session, o
 
 describe("\"it was a session after all\" with a listed file of final/ that is not on this Mac (item 3)", () => {
   const COMING = "Dropbox is still bringing Session, 2026-10-14's earlier files over to this Mac: say your answer again in a minute. Nothing was changed.";
-  const ASK = `${COMING} Ask Jason if it does not come.`;
+  const ASK = `${COMING} If it does not come, tell Jason.`;
   /** The probe's video: finished and handed off, its final/ listing captions that were deleted by hand. */
   function gone(t) {
     const found = handedOff(t);
@@ -669,7 +669,7 @@ describe("\"it was a session after all\" with a listed file of final/ that is no
     gone(t);
     const NOT = "Dropbox is still bringing Pricing talk's earlier files over to this Mac: say your answer again in a minute. Nothing was changed.";
     assert.deepEqual((await on(t.ctx.deps, "kind", "Pricing talk", "raw", "--private", "no", "--again")).said, [NOT]);
-    assert.deepEqual((await on(t.ctx.deps, "kind", "Pricing talk", "raw", "--private", "no", "--again")).said, [`${NOT} Ask Jason if it does not come.`]);
+    assert.deepEqual((await on(t.ctx.deps, "kind", "Pricing talk", "raw", "--private", "no", "--again")).said, [`${NOT} If it does not come, tell Jason.`]);
     t.done();
   });
 });
@@ -785,7 +785,7 @@ describe("a video held as a session, with no label, is listed with its short id 
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, "Talk.mp4"), "v");
     const episodes = await on(t.ctx.deps, "episodes");
-    assert.ok(episodes.said.some((line) => line.endsWith(": already imported as a video (a0a0a0). It stays in the drop folder until its late check passes, or for a person to delete.")), episodes.text);
+    assert.ok(episodes.said.some((line) => line.endsWith(": already imported as a video (a0a0a0). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.")), episodes.text);
     for (const r of [none, episodes]) assert.doesNotMatch(r.text, /\(a0a0a0\) \(a0a0a0\)/);
     // A labelled one keeps its label and its short id, as a gated one is listed.
     const u = setup();

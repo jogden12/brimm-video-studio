@@ -815,13 +815,13 @@ describe("the join run, with one talking part (PR H5b)", () => {
       assert.deepEqual(u.notices, [READY], "a Mac not set up for HyperFrames makes no copy, so it opens nowhere");
       u.done();
     });
-    it("keeps the line about the late check in the result's made text, with no title in it", async () => {
+    it("keeps the line about the check of the copies in the result's made text, with no title in it", async () => {
       const t = world({ probes: longTalk("Take 1") });
       await planned(t);
       const one = part(t, 1, { words: SCRIPT[0].split(" ") });
       const r = await joinRun(t, [one.record.id]);
-      assert.ok(r.text.includes(`${TITLE}: copied into Dropbox. Its late check is made in 15 minutes.`), r.text);
-      assert.deepEqual(resultOf(t).made, ["the video from its footage", "copied into Dropbox, and its late check is made in 15 minutes"]);
+      assert.ok(r.text.includes(`${TITLE}: copied into Dropbox. Dropbox's check of its copies is made in 15 minutes.`), r.text);
+      assert.deepEqual(resultOf(t).made, ["the video from its footage", "copied into Dropbox, and Dropbox's check of its copies is made in 15 minutes"]);
       assert.ok(!resultOf(t).made.join(" ").includes(TITLE));
       t.done();
     });
@@ -1885,7 +1885,7 @@ describe("from the parts to the project: the join, the copies and the open, run 
     // The next open asks for the copy, says it is being made, and opens all the same.
     const again = await on(app(), "app", TITLE);
     assert.equal(again.code, 0, again.text);
-    assert.equal(again.said[0], COMING);
+    assert.ok(again.said.includes(COMING));
     assert.deepEqual(t.started.filter(([, args]) => args.includes("--footage")).map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER_NAME(t), "--footage"]]);
     assert.deepEqual(readdirSync(join(project, "media")).sort(), ["b-roll-2.mp4", "recording.mp4", "screen-4.mp4"]);
     // The run makes it, and the open after that moves it in.
@@ -2127,7 +2127,7 @@ describe("a footage copy that keeps failing is not asked for again at every open
   const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
   const CUES = ["--cue", "b-roll | 4 | count what you actually sell | Sallie at her desk | shot: 2"];
   const COMING = 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.';
-  const UNMADE = "Some of its footage could not be made for HyperFrames. Ask Jason.";
+  const UNMADE = "Some of its footage could not be made for HyperFrames, and opening it again won't change that. Tell Jason.";
   const asksFootage = (t) => t.started.filter(([, args]) => args.includes("--footage")).length;
   /** A plan made its video, with a b-roll part for shot 2; the launch agent's late check passed. */
   async function made(script) {
@@ -2151,6 +2151,7 @@ describe("a footage copy that keeps failing is not asked for again at every open
     const first = await on(app(), "app", TITLE);
     assert.equal(first.code, 0, first.text);
     assert.ok(first.said.includes(UNMADE), first.text);
+    assert.ok(first.said.indexOf("It's open in HyperFrames.") < first.said.indexOf(UNMADE), "it says it is open first: " + first.text);
     assert.ok(!first.said.includes(COMING), first.text);
     assert.equal(asksFootage(t), 0);
     assert.ok(!existsSync(join(project(), "media", "b-roll-2.mp4")));
@@ -2176,7 +2177,7 @@ describe("a footage copy that keeps failing is not asked for again at every open
     assert.ok(resultFootage(t).footageFailed[0].includes("Dropbox is still bringing"), JSON.stringify(resultFootage(t)));
     const opened = await on(app(), "app", TITLE);
     assert.equal(opened.code, 0, opened.text);
-    assert.equal(opened.said[0], COMING);
+    assert.ok(opened.said.includes(COMING));
     assert.ok(!opened.said.includes(UNMADE));
     assert.equal(asksFootage(t), 1);
     assert.ok(!existsSync(join(project(), "media", "b-roll-2.mp4")));
@@ -2190,7 +2191,7 @@ describe("a footage copy that keeps failing is not asked for again at every open
     for (const name of readdirSync(dir).filter((n) => n.startsWith("footage-"))) rmSync(join(dir, name));
     rmSync(join(episodeWork(t.home, FOLDER_NAME(t)), "workcopy.result.json"));
     const opened = await on(app(), "app", TITLE);
-    assert.equal(opened.said[0], COMING);
+    assert.ok(opened.said.includes(COMING));
     assert.ok(!opened.said.includes(UNMADE));
     assert.equal(asksFootage(t), 1);
     t.done();

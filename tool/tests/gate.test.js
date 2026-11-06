@@ -143,7 +143,7 @@ describe("gateFor, a video waiting for its answer", () => {
       assert.equal(gateFor(name, unanswered, OFF), WAITING, name);
     }
   });
-  it("is gated whatever its answer says, a video left alone ('not for BRIMM Video Studio') included, which is refused in words of its own", () => {
+  it("is gated whatever its answer says, a video left alone (the stored state \"not for brimm-video\") included, which is refused in words of its own", () => {
     const left = { kind: null, answer: { state: "not for brimm-video" } };
     for (const name of ["open", "ask", "push", "finish", "reel", "teachings", "somethingNew"]) {
       assert.equal(gateFor(name, left, ON), LEFT, name);

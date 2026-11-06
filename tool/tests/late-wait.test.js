@@ -294,7 +294,7 @@ describe("keepCheckInStep (R1c)", () => {
     writePending(s.home, s.pending({ entries: raw(s), problem: "Pricing talk.srt is not whole in Dropbox." }));
     const before = pendingText(s);
     const got = await keepCheckInStep(ctxOf(s), step(s), waiter());
-    assert.equal(got.why, "The late check of this episode's import found a problem: Pricing talk.srt is not whole in Dropbox. Once it is put right, say \"try it again\" for Pricing talk.mp4 on Mac Studio, then say this again.");
+    assert.equal(got.why, "Dropbox found a problem with a copy of this episode: Pricing talk.srt is not whole in Dropbox. Once it is put right, say \"try it again\" for Pricing talk.mp4 on Mac Studio, then say this again.");
     assert.equal(existsSync(lockFile(s)), false);
     assert.equal(pendingText(s), before);
     s.done();

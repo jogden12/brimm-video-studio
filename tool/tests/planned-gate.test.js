@@ -43,7 +43,7 @@ const CLAIMS = {
   "answer planned, with the video undefined": (() => { const { video, ...rest } = planned(); return rest; })(),
   "a `planned` with the answer \"needs your answer\"": planned({ answer: { state: "needs your answer", guess: "raw", seen: "wide, 2:00", came: "camera" } }),
   "a `planned` with the answer \"answered\"": planned({ answer: { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: "Mac Studio", at: AT, private: "no" } }),
-  "a `planned` with the answer \"not for BRIMM Video Studio\"": planned({ answer: { state: "not for brimm-video", guess: null, seen: "", came: "camera" } }),
+  "a `planned` with the answer the stored state \"not for brimm-video\"": planned({ answer: { state: "not for brimm-video", guess: null, seen: "", came: "camera" } }),
   "a `planned` with no answer": (() => { const { answer, ...rest } = planned(); return rest; })(),
   "a `planned` with an answer that says \"Planned\"": planned({ answer: { ...planned().answer, state: "Planned" } }),
   "answer planned, with a guess": planned({ answer: { ...planned().answer, guess: "raw" } }),

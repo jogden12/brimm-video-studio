@@ -510,7 +510,7 @@ describe("episodes, on a Mac that does the light import", () => {
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Acme/);
     t.done();
   });
-  it("lists a video left alone, not for BRIMM Video Studio, apart, under its own heading", async () => {
+  it("lists a video left alone (the stored state \"not for brimm-video\") apart, under its own heading", async () => {
     const t = setup();
     writeSettings(t.home, { import: "light" });
     clientEpisode(t, { over: { answer: { ...ANSWER, state: "not for brimm-video" } } });
@@ -530,7 +530,7 @@ describe("episodes, on a Mac that does the light import", () => {
     const said = await listing(t);
     assert.equal(said[1], `  ${LABEL}: a video waiting for your answer, of 2:00, id a1b2c3`);
     assert.deepEqual(said.slice(2, 6), ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes", `    Card: ${JSON.stringify(cardFor({ label: LABEL, guess: "raw", maybe: null }))}`]);
-    assert.match(said[6], /^ {4}Not right: Dropbox has kept a conflicted copy in this episode: record\/0001 \(Sallie's laptop's conflicted copy 2026-10-20\)\.json\./);
+    assert.match(said[6], /^ {4}Dropbox has kept a conflicted copy in this episode: record\/0001 \(Sallie's laptop's conflicted copy 2026-10-20\)\.json\./);
     assert.ok(said.includes("  An episode a newer BRIMM Video Studio wrote (0d0d0d): Jason updates this Mac before it is changed here."), said.join("\n"));
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Ann Other/);
     t.done();
@@ -568,7 +568,7 @@ describe("episodes, on a Mac that does the light import", () => {
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, VIDEO), "video");
     const said = await listing(t);
-    assert.ok(said.includes(`  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as ${LABEL} (a1b2c3). It stays in the drop folder until its late check passes, or for a person to delete.`), said.join("\n"));
+    assert.ok(said.includes(`  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as ${LABEL} (a1b2c3). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`), said.join("\n"));
     t.done();
   });
   it("names this Mac's library of a gated episode by its label, an answered one's as today, and one of no episode here by its day and Mac", async () => {
@@ -886,7 +886,7 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     const { said, at } = await cardOf(t);
     assert.deepEqual(said.slice(at, at + 4), [`  ${LABEL}: a video waiting for your answer, of 2:00, id a1b2c3`, "    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes"]);
     assert.match(said[at + 4], /^ {4}Card: \{/);
-    assert.match(said[at + 5], /^ {4}Not right: Dropbox has kept a conflicted copy in this episode/);
+    assert.match(said[at + 5], /^ {4}Dropbox has kept a conflicted copy in this episode/);
     t.done();
   });
   it("is the same on a Mac whose import is not the light one, for a video waiting for its answer", async () => {
@@ -918,7 +918,7 @@ describe("a gated record with no label, named by its short id once", () => {
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, VIDEO), "video");
     const said = (await on(depsOf(t), "episodes")).said;
-    assert.ok(said.includes("  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as a client or group session (a1b2c3). It stays in the drop folder until its late check passes, or for a person to delete."), said.join("\n"));
+    assert.ok(said.includes("  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as a client or group session (a1b2c3). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete."), said.join("\n"));
     assert.doesNotMatch(said.join("\n"), SECRET);
     t.done();
   });
@@ -948,12 +948,12 @@ describe("a video in the drop folder whose episode has a conflicted copy, or can
     const t = setup();
     conflictedRecord(sessionHolding(t).folder);
     const said = (await on(depsOf(t), "episodes")).said;
-    assert.deepEqual(waitingIn(said), ["Waiting in the drop folders:", `  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as ${HELD}. It stays in the drop folder until its late check passes, or for a person to delete.`]);
+    assert.deepEqual(waitingIn(said), ["Waiting in the drop folders:", `  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as ${HELD}. It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`]);
     assert.doesNotMatch(said.join("\n"), SECRET);
     const none = await on(depsOf(t), "retry", "nothing fits this");
     assert.deepEqual(none.said, ['No video in this Mac\'s drop folder fits "nothing fits this". It holds: a video of 5 bytes.']);
     const named = await on(depsOf(t), "retry", VIDEO);
-    assert.deepEqual([named.code, named.said], [1, [`A video of 5 bytes in this Mac's drop folder is already imported as ${HELD}. It stays in the drop folder until its late check passes, or for a person to delete.`]]);
+    assert.deepEqual([named.code, named.said], [1, [`A video of 5 bytes in this Mac's drop folder is already imported as ${HELD}. It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`]]);
     t.done();
   });
   it("episodes and retry name it by what it is and its size when the episode's records, or Episodes, cannot be read", async () => {
@@ -1001,7 +1001,7 @@ describe("a video in the drop folder whose episode has a conflicted copy, or can
     const e = clientEpisode(t, { folder: "2026-10-18 Talk (Mac Studio)", video: "Talk.mov", id: "e-20261018-0d0d0d", label: "", over: { kind: "finished", answer: ANSWERED } });
     conflictedRecord(e.folder);
     const held = (await on(depsOf(t), "episodes")).said;
-    assert.deepEqual(waitingIn(held), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes: already imported as 2026-10-18 Talk (Mac Studio). It stays in the drop folder until its late check passes, or for a person to delete."]);
+    assert.deepEqual(waitingIn(held), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes: already imported as 2026-10-18 Talk (Mac Studio). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete."]);
     t.done();
   });
 });
@@ -1060,10 +1060,10 @@ describe("the import statuses, status and retry, of a light import", () => {
     // Its import stopped on this Mac before its late check: its status, with its label, is still there.
     writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: VIDEO, bytes: 5, seconds: 120, step: "Filing", at: "2026-10-20T13:00:00-05:00", label: LABEL }, writeText);
     const r = await on(depsOf(t), "retry", LABEL);
-    assert.deepEqual([r.code, r.said], [0, [`${LABEL} is imported, as ${LABEL} (a1b2c3). Its import stopped on this Mac, and has no late check left to make here, so the status that held the episode is taken away.`]]);
+    assert.deepEqual([r.code, r.said], [0, [`${LABEL} is imported, as ${LABEL} (a1b2c3). Its import stopped on this Mac, and has no check of its copies left to make here, so the status that held the episode is taken away.`]]);
     // With no status left, the video in the drop folder is named by what it is and its size, and the episode by its label.
     const again = await on(depsOf(t), "retry", VIDEO);
-    assert.deepEqual([again.code, again.said], [1, [`A video of 5 bytes in this Mac's drop folder is already imported as ${LABEL} (a1b2c3). It stays in the drop folder until its late check passes, or for a person to delete.`]]);
+    assert.deepEqual([again.code, again.said], [1, [`A video of 5 bytes in this Mac's drop folder is already imported as ${LABEL} (a1b2c3). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`]]);
     t.done();
   });
 });
@@ -1399,9 +1399,9 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     const at = said.indexOf("Waiting in the drop folders:");
     assert.deepEqual(said.slice(at, at + 5), [
       "Waiting in the drop folders:",
-      "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as Video of 19 Oct, 10:00 (Mac Studio) (0c0c0c). It stays in the drop folder until its late check passes, or for a person to delete.",
+      "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as Video of 19 Oct, 10:00 (Mac Studio) (0c0c0c). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.",
       `  ${SECOND_LABEL}, in the Mac Studio's drop folder, for 0 minutes: its import failed on Mac Studio: the sound could not be read from the file (a file: Invalid data found when processing input). Say "try it again" to import it again.`,
-      `  ${LABEL}, in the Mac Studio's drop folder, for 0 minutes: already imported as ${LABEL} (a1b2c3). It stays in the drop folder until its late check passes, or for a person to delete.`,
+      `  ${LABEL}, in the Mac Studio's drop folder, for 0 minutes: already imported as ${LABEL} (a1b2c3). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`,
       "  Pricing talk again.mov, in Mac Studio's, for 0 minutes"
     ]);
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Bloggs/);

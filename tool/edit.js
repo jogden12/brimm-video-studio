@@ -66,7 +66,7 @@ import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
-import { readEpisode, filesProblems, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
+import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
@@ -76,7 +76,7 @@ import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_
 import { localMedia, retitle, withImportOptions, mediaIn } from "./portable.js";
 import { eventName, fileSafe, projectName, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reels.js";
-import { readStatuses, importState, removeStatus } from "./importing.js";
+import { readStatuses, importState, removeStatus, shownStep } from "./importing.js";
 import { localSource, projectWaits, readingCheckAt, readingWaitsUntil, waitFacts } from "./late-wait.js";
 import { heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
@@ -886,9 +886,9 @@ function importLines(ctx, fits = () => true) {
     const who = status.label || status.video;
     const plain = (text) => (status.label ? withoutNames(text, namesOf(status.video), [status.label]) : text);
     if (state === "failed") return `  ${who}: its import failed on ${status.machine}: ${plain(status.failed)}`;
-    if (state === "problem") return `  ${who}: copied in on ${status.machine}, but the late check found a problem: ${plain(status.problem)}`;
-    if (state === "stopped") return `  ${who}: stopped on ${status.machine} at ${status.step}, ${ageText(ctx.now() - Date.parse(status.at))} ago`;
-    return `  ${who}: being imported on ${status.machine}, at ${status.step}`;
+    if (state === "problem") return `  ${who}: copied in on ${status.machine}. Dropbox found a problem with a copy of it: ${plain(status.problem)}`;
+    if (state === "stopped") return `  ${who}: stopped on ${status.machine} at ${shownStep(status.step)}, ${ageText(ctx.now() - Date.parse(status.at))} ago`;
+    return `  ${who}: being imported on ${status.machine}, at ${shownStep(status.step)}`;
   });
 }
 
@@ -1005,6 +1005,15 @@ const NO_SOUND = "    No sound: it can only be footage for a planned video.";
 /** What `kind` says to a video with no sound, whatever it is answered as and on whatever Mac, before any receipt is looked at (PR H5a). */
 const NO_SOUND_WHY = (name) => `${name} has no sound, so Claude can't read it: it can only be footage for a planned video. Or say "leave it".`;
 
+/** What `episodes` says under an episode whose record cannot be read (review changes R4c), by why it cannot: a conflicted copy says
+    what to say; a record not whole yet may be Dropbox still bringing it; a folder that cannot be read is tried again. */
+export function readTrouble(read) {
+  const why = String(read.why).replace(/\.$/, "");
+  if (read.code === "CONFLICTED") return `${why}.`;
+  if (read.code === "NONE") return `It is not ready: ${why}. Dropbox may still be bringing its record. Wait a few minutes and ask again. If it says this again, tell Jason.`;
+  return `${capital(why)}. Ask again in a few minutes. If it says this again, tell Jason.`;
+}
+
 /** The lines `episodes` says of an episode (episodeAt): its name, what it is, its length, its folder and short id, and below
     them who is editing it, its title, how far it has been shown in Final Cut, its finish, and what is not right with its
     files, as always. A gated one is named by its label (shownName), and the line says what it is: a video waiting for her
@@ -1017,7 +1026,7 @@ const NO_SOUND_WHY = (name) => `${name} has no sound, so Claude can't read it: i
 function episodeLines(ctx, e, left, all, links) {
   const r = e.read.record;
   if (e.newer) return [`  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
-  if (!r && listedAs(ctx, e) === e.name) return [`  ${e.name}`, `    Not right: ${e.read.why}.`];
+  if (!r && listedAs(ctx, e) === e.name) return [`  ${e.name}`, `    ${readTrouble(e.read)}`];
   if (!e.inForce) return [`  ${capital(listedAs(ctx, e))}: ask Jason.`];
   const record = e.inForce;
   const lines = [];
@@ -1030,7 +1039,7 @@ function episodeLines(ctx, e, left, all, links) {
     const long = record.video ? ` ${stamp(record.video.seconds)}` : "";
     lines.push(`  ${gatedName(named, e.held)}: ${long ? what : what.replace(/, of$/, "")}${long}, id ${String(named.id).slice(-6)}`);
     if (!left && recordKind(named) === null) lines.push(...cardLines(named, gatedName(named, e.held), all, links));
-    if (!r) lines.push(`    Not right: ${clean(e.read.why)}.`);
+    if (!r) lines.push(`    ${clean(readTrouble(e.read))}`);
   } else if (isPlannedRecord(record)) {
     // A planned episode (PR H4) has no video to give a length: it is said by its title and what it waits for.
     lines.push(`  ${plannedLine(record)}`);
@@ -1045,7 +1054,7 @@ function episodeLines(ctx, e, left, all, links) {
   if (record.finished) lines.push(`    Finished: revision ${record.finished.revision}, on ${record.finished.on}`);
   // A script file changed outside the chat is said in its own plain line, not as "Not right" (plan-script.js; review changes R5).
   const handEdited = scriptHandEdited(e.folder, record);
-  for (const problem of filesProblems(e.folder, record)) if (!(handEdited && problem.startsWith("teleprompter.txt "))) lines.push(`    Not right: ${clean(problem)}`);
+  for (const problem of fileProblems(e.folder, record)) if (!(handEdited && problem.file === "teleprompter.txt")) lines.push(`    ${clean(fileProblemWords(problem))}`);
   if (handEdited) lines.push(`    ${HAND_EDITED(record)}`);
   return lines;
 }
@@ -1960,7 +1969,7 @@ function nextOf(ctx, folder, r) {
 function ranLine(ctx, shown, r, clean, next, live = false, voicing = false) {
   const done = r.failed.length ? ` Not done: ${clean(r.failed.join(" ")).replace(/([^.])$/, "$1.")}` : "";
   const when = r.early
-    ? `put in what it made ${ageText(ctx.now() - r.ended)} ago; ${live ? "the late check of its copies is still to come" : "it stopped before the late check of its copies was made"}`
+    ? `put in what it made ${ageText(ctx.now() - r.ended)} ago; ${live ? "Dropbox's check of its copies is still to come" : "it stopped before Dropbox's check of its copies was made"}`
     : `ended ${ageText(ctx.now() - r.ended)} ago`;
   return `${shown}: ${r.command === "join" && voicing ? VOICE_RUN_SAID : Object.hasOwn(RUN_SAID, r.command) ? RUN_SAID[r.command] : r.command} ${when}.${r.made.length ? ` Made: ${r.made.map(clean).join(", ")}.` : ""}${done}${next ? ` ${clean(next)}` : ""}`;
 }
@@ -2060,7 +2069,7 @@ export async function status(ctx, rest) {
     // A gated video is named by its label alone, and is not told to open it, which the gate refuses.
     if (footageFailed(ctx, folder)) {
       lines.push(isGated(e) ? `Some of the footage for "${gatedName(gatedRecord(e), e.held)}" could not be made. Ask Jason.`
-        : `Some of the footage for "${shown}" could not be made. Say "open ${shown} in HyperFrames" again; if it says so again, ask Jason.`);
+        : `Some of the footage for "${shown}" could not be made, and opening it again won't change that. Tell Jason.`);
     }
   }
   for (const line of lines.length ? lines : ["Nothing is running, and nothing is waiting."]) say(line);
@@ -2085,7 +2094,7 @@ function lateCheckOwed(ctx, video, held, who = video, plain = (text) => text) {
   }
   if (!owed) {
     for (const { status } of stopped) removeStatus(ctx.root, video, ctx.machine, status.import || "");
-    say(`${who} is imported, as ${name}. Its import stopped on this Mac, and has no late check left to make here, so the status that held the episode is taken away.`);
+    say(`${who} is imported, as ${name}. Its import stopped on this Mac, and has no check of its copies left to make here, so the status that held the episode is taken away.`);
     return 0;
   }
   const problem = owed.problem ? plain(String(owed.problem).replace(/\.$/, "")) : "";
@@ -2094,10 +2103,10 @@ function lateCheckOwed(ctx, video, held, who = video, plain = (text) => text) {
   // A run at work makes a due check within a minute, but makes a check that found a problem only once, at its start.
   if (ctx.agentRunning()) {
     if (problem) {
-      say(`${who} is imported, as ${name}, and its late check found a problem: ${problem}. The import at work now does not make it again: once the problem is put right and the panel shows that import has ended, say "try it again" again.`);
+      say(`${who} is imported, as ${name}. Dropbox found a problem with a copy of it: ${problem}. The import at work now does not check it again: once the problem is put right and the panel shows that import has ended, say "try it again" again.`);
       return 1;
     }
-    say(`${who} is imported, as ${name}, and its late check is still to be made on this Mac: the import at work now makes it ${later ? `${later}, ` : ""}once it has finished any video it is importing. The panel shows how far it is.`);
+    say(`${who} is imported, as ${name}. Dropbox's check of its copies is still to be made on this Mac: the import at work now makes it ${later ? `${later}, ` : ""}once it has finished any video it is importing. The panel shows how far it is.`);
     return 0;
   }
   try {
@@ -2106,8 +2115,8 @@ function lateCheckOwed(ctx, video, held, who = video, plain = (text) => text) {
     say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
     return 1;
   }
-  if (problem) say(`${who} is imported, as ${name}, and its late check found a problem before (${problem}): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is.`);
-  else say(`${who} is imported, as ${name}, and its late check is still to be made on this Mac: the Mac's import of its drop folder is asked to make it ${later || "now"}. The panel shows how far it is.`);
+  if (problem) say(`${who} is imported, as ${name}. Dropbox found a problem with a copy of it before (${problem}): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is.`);
+  else say(`${who} is imported, as ${name}. Dropbox's check of its copies is still to be made on this Mac: the Mac's import of its drop folder is asked to make it ${later || "now"}. The panel shows how far it is.`);
   return 0;
 }
 
@@ -2169,23 +2178,23 @@ export async function retry(ctx, rest) {
   const again = mine.filter((s) => importState(s.status, ctx.now()) !== "running");
   const running = mine.find((s) => importState(s.status, ctx.now()) === "running");
   if (!again.length && running) {
-    say(`${who} is being imported now, at ${running.status.step}. The panel shows how far it is.`);
+    say(`${who} is being imported now, at ${shownStep(running.status.step)}. The panel shows how far it is.`);
     return 1;
   }
   for (const { status } of again) removeStatus(ctx.root, video, ctx.machine, status.import || "");
   const how = (status) => {
     const state = importState(status, ctx.now());
     if (state === "failed") return `which failed: ${plain(String(status.failed).replace(/\.$/, ""))}`;
-    if (state === "problem") return "whose late check found a problem";
+    if (state === "problem") return "whose copies Dropbox found a problem with";
     if (state === "held") return "which was held, as another file";
-    return `which stopped at ${status.step}`;
+    return `which stopped at ${shownStep(status.step)}`;
   };
   const items = again.map(({ status }) => `${status.import || "one with no id"}, ${how(status)}`);
   const which = items.length > 1 ? ` (its imports ${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]})` : "";
   // A run of the launch agent at work now takes the video when it next looks: it looks again each minute while it waits for
   // a late check, and once more before it ends. Asking the agent to start would do nothing while it runs.
   if (ctx.agentRunning()) {
-    say(`${who} is imported again${which} by the import at work now, when it next looks in the drop folder: within a minute while it waits for a late check, or once it has finished the video it is on. The panel shows how far it is.`);
+    say(`${who} is imported again${which} by the import at work now, when it next looks in the drop folder: within a minute while it waits to check the copies, or once it has finished the video it is on. The panel shows how far it is.`);
     return 0;
   }
   // The launch agent is asked to look, and no run of its own is started here: the agent's run has its arguments, such as
@@ -3684,7 +3693,7 @@ async function resolveIn(ctx, found, keep) {
     if (why) return refuse(ctx, why);
   }
   const aHere = existsSync(at(of));
-  if (!isRecord && keep === "A" && !aHere) return refuse(ctx, `A, ${of}, is not there, so it cannot be kept. Say B, or ask Jason.`);
+  if (!isRecord && keep === "A" && !aHere) return refuse(ctx, `A, ${of}, is not there, so it cannot be kept. Say B. If that is not what you want, tell Jason.`);
   // 1. Set aside, by the rule, every file this step replaces or deletes, and see each is whole there. A record copy kept as B,
   // or one in force already, sets the record of its number aside too; a record file itself is never deleted.
   const stamp = localStamp(new Date(ctx.now())).replace(/:/g, "-");
@@ -3694,7 +3703,7 @@ async function resolveIn(ctx, found, keep) {
       mkdirSync(join(found.folder, "history"), { recursive: true });
       cloneIn(at(rel), asideOf(rel), ruleOpts(ctx));
     } catch (e) {
-      return refuse(ctx, `${rel} could not be set aside in history/ (${basename(plainWhy(e).split(": ").pop())}). Nothing was deleted. Say "sort out the conflict" again in a minute, or ask Jason.`);
+      return refuse(ctx, `${rel} could not be set aside in history/ (${basename(plainWhy(e).split(": ").pop())}). Nothing was deleted. Say "sort out the conflict" again in a minute. If it says this again, tell Jason.`);
     }
   }
   // 2. The record, written past the copies still there. Every keep writes one.
@@ -3764,7 +3773,7 @@ async function resolveIn(ctx, found, keep) {
   };
   // The plan's files that are not as they were before this keep, by what is on the disk now.
   const planOff = () => planNow.map(([name]) => name).filter((name) => (existsSync(at(name)) ? readFileSync(at(name), "utf8") : null) !== planHad[name]);
-  const unsure = (names, why) => `The record was not changed (${why}), but the plan's files may not match it: ${names.join(", ")}. The next "episodes" names any that is wrong. Say "sort out the conflict" again to put them right; if it still says a file is not whole, ask Jason and tell him the episode's name.`;
+  const unsure = (names, why) => `The record was not changed (${why}), but the plan's files may not match it: ${names.join(", ")}. The next "episodes" names any that is wrong. Say "sort out the conflict" again to put them right; if it still says a file is not whole, tell Jason the episode's name.`;
   let written = null;
   if (planNow.length) {
     try {
@@ -3772,7 +3781,7 @@ async function resolveIn(ctx, found, keep) {
     } catch (e) {
       const stuck = planOff();
       if (stuck.length) return refuse(ctx, unsure(stuck, `the plan's files could not be written: ${plainWhy(e)}`));
-      return refuse(ctx, `Nothing was written, and nothing deleted: the plan's files could not be written (${plainWhy(e)}). Say "sort out the conflict" again in a minute, or ask Jason.`);
+      return refuse(ctx, `Nothing was written, and nothing deleted: the plan's files could not be written (${plainWhy(e)}). Say "sort out the conflict" again in a minute. If it says this again, tell Jason.`);
     }
   }
   if (!inForce || JSON.stringify(next.files) !== JSON.stringify(record.files)) {
@@ -3813,7 +3822,7 @@ async function resolveIn(ctx, found, keep) {
         recordNote = ` The record could not be set back (${plainWhy(w)}): it lists B's size for ${of}.`;
       }
       if (back) return refuse(ctx, `B could not be put in place of ${of}: ${why}. ${aHere ? "A is back as it was" : "A was not there"}, and nothing was deleted.${recordNote}`);
-      return refuse(ctx, `B could not be put in place of ${of}: ${why}, and A could not be put back either. A is whole in history/${basename(asideOf(of))}, and B is still the copy, ${copy}.${recordNote} Say "sort out the conflict" again in a minute, or ask Jason.`);
+      return refuse(ctx, `B could not be put in place of ${of}: ${why}, and A could not be put back either. A is whole in history/${basename(asideOf(of))}, and B is still the copy, ${copy}.${recordNote} Say "sort out the conflict" again in a minute. If it says this again, tell Jason.`);
     }
   }
   rmSync(shownFile, { force: true });
@@ -6114,7 +6123,7 @@ const comingNote = (ctx, found) => join(episodeWork(ctx.home, found.name), "asid
     never in the episode, and the note goes once a correction or a sweep is written (forgetComing). */
 function comingWhy(ctx, found, name) {
   const note = comingNote(ctx, found);
-  if (existsSync(note)) return `${asideComing(name)} Ask Jason if it does not come.`;
+  if (existsSync(note)) return `${asideComing(name)} If it does not come, tell Jason.`;
   try {
     mkdirSync(dirname(note), { recursive: true });
     writeFileSync(note, "");
@@ -7281,7 +7290,7 @@ function guideDrops(ctx) {
       const fresh = (s) => (Number.isFinite(s) && s - since > 0 ? Math.round(s - since) : null);
       const times = run ? { left: fresh(run.left), total: fresh(run.total), n: run.n, of: run.of } : null;
       const ready = times ? readyIn(times) : null;
-      const drop = { here, state, step: state === "importing" ? running.status.step : "", left: times ? times.left : null, total: times ? times.total : null, readyAt: ready === null ? "" : clockNear(now + ready * 1000) };
+      const drop = { here, state, step: state === "importing" ? shownStep(running.status.step) : "", left: times ? times.left : null, total: times ? times.total : null, readyAt: ready === null ? "" : clockNear(now + ready * 1000) };
       // `source` is for `guide tell` alone, which follows the video by it: never said.
       videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null, source: { mac, file: video, bytes: found.size } });
     }
@@ -7356,7 +7365,7 @@ function openFolder(ctx, folder, what, words, missing) {
   try {
     ctx.openApp("Finder", folder);
   } catch (e) {
-    return refuse(ctx, `Finder could not open ${what}: ask Jason.`);
+    return refuse(ctx, `Finder could not open ${what}. Say it again. If it says this again, tell Jason.`);
   }
   ctx.say(`Opened ${what} in Finder: ${words}.`);
   return 0;
@@ -7365,7 +7374,7 @@ function openFolder(ctx, folder, what, words, missing) {
 /** `guide page`: the BRIMM Ops page (OPS_PAGE), opened in her default browser through this Mac's program runner. */
 async function openPage(ctx) {
   const ran = await (ctx.deps.run || runProgram)("/usr/bin/open", [OPS_PAGE]);
-  if (ran.code !== 0) return refuse(ctx, "The BRIMM Ops page could not be opened: ask Jason.");
+  if (ran.code !== 0) return refuse(ctx, "The BRIMM Ops page could not be opened. Say it again. If it says this again, tell Jason.");
   ctx.say("Opened the BRIMM Ops page in your browser.");
   return 0;
 }
@@ -7404,7 +7413,7 @@ function noteGuide(ctx, change) {
   try {
     writeGuideNotes(ctx.home, change(readGuideNotes(ctx.home)));
   } catch (e) {
-    return refuse(ctx, `Not noted: this Mac's note could not be written (${(e && e.code) || "an error"}). Ask Jason.`);
+    return refuse(ctx, `Not noted: this Mac's note could not be written (${(e && e.code) || "an error"}). Say it again. If it says this again, tell Jason.`);
   }
   return 0;
 }

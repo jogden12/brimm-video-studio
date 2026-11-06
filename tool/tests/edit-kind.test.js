@@ -1266,7 +1266,7 @@ describe("kind --version-of", () => {
 });
 
 describe("leave", () => {
-  it("marks a video not for BRIMM Video Studio, with who, where and when, says so, and asks nothing more", async () => {
+  it("marks a video left alone (the stored state \"not for brimm-video\"), with who, where and when, says so, and asks nothing more", async () => {
     const t = setup();
     const found = waiting(t);
     const r = await on(t.ctx.deps, "leave", LABEL);

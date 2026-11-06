@@ -54,7 +54,7 @@ describe("the HyperFrames stand-in", () => {
     for (const [open, code, words] of [
       ["opened", 0, "It's open in HyperFrames."],
       ["not-installed", 1, "HyperFrames isn't installed on this Mac: ask Jason."],
-      ["open-failed", 1, "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason."]
+      ["open-failed", 1, "HyperFrames wouldn't open. Try once more. If it still won't, tell Jason."]
     ]) {
       const s = standIn(c, { open });
       const r = s.run(["open", s.project, "--json"]);
@@ -424,7 +424,7 @@ describe("app: opening an episode in HyperFrames", () => {
     });
   });
   describe("while the reading's own late check is still to come (R1d)", () => {
-    const NOT_WHOLE = 'Some files of Pricing talk are not whole in Dropbox yet, so its HyperFrames project wasn\'t made. Say "open Pricing talk in HyperFrames" again in a few minutes; if it says this again, ask Jason.';
+    const NOT_WHOLE = 'Some files of Pricing talk are not whole in Dropbox yet, so its HyperFrames project wasn\'t made. Say "open Pricing talk in HyperFrames" again in a few minutes. If it says this again, tell Jason.';
     /** The episode with a current reading in its record and `files` listing the words, reels.json and the plan at their sizes. */
     function read(c, over = {}, options = {}) {
       const e = episode(c, options);
@@ -661,7 +661,7 @@ describe("app: opening an episode in HyperFrames", () => {
     });
   });
   it("keeps the project when HyperFrames will not open, records no time it opened, and says so in her words", async (c) => {
-    for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason."]]) {
+    for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more. If it still won't, tell Jason."]]) {
       const e = episode(c, { open });
       assert.equal(await run(e), 1, open);
       assert.deepEqual(e.said, [words], open);
@@ -909,7 +909,7 @@ describe("app: opening an episode in HyperFrames", () => {
   it("makes nothing without the words of the recording, and says why", async (c) => {
     const e = episode(c, { words: false });
     assert.equal(await run(e), 1);
-    assert.deepEqual(e.said, ["The words of Pricing talk are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason."]);
+    assert.deepEqual(e.said, ["The words of Pricing talk are not on this Mac yet, so there is nothing for HyperFrames to start from. Dropbox may still be bringing them: say it again in a few minutes. If it says this again, tell Jason."]);
     assert.ok(!existsSync(e.project));
     assert.deepEqual([e.saved, e.runs(), e.started], [[], [], []]);
   });
@@ -1155,7 +1155,7 @@ describe("app: a video made from a plan, and its footage (PR H5b)", () => {
     { n: 3, words: "Sally", kind: "screen", show: "Her dashboard.", seconds: 4, style: null, shot: 4 }
   ];
   const COMING = 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.';
-  const NOT_IN = "Some of its footage could not be put into the project. Ask Jason.";
+  const NOT_IN = `Some of its footage could not be put into the project. Say "open Pricing talk in HyperFrames" again. If it says this again, tell Jason.`;
   /** The plan a video was made from, as the join leaves it in the record. */
   const plannedOf = (more = {}) => ({ ...newPlannedEpisode({ id: PLAN_ID, machine: "Mac Studio", at: ON, title: "Pricing talk", route: "script", voice: null, writer: WRITER }).planned, set: ON, shots: SHOTS, cues: GUIDE_CUES, lines: ["Pricing says Sally."], filmed: { at: ON, parts: [] }, ...more });
   /** An episode that is a video made from a plan, with the real choice of what its project is given. */
@@ -1274,7 +1274,7 @@ describe("app: a video made from a plan, and its footage (PR H5b)", () => {
     part(e, 3, "screen", 4);
     assert.equal(await run(e), 0);
     assert.deepEqual(e.started, [["workcopy", "--now", FOLDER, "--footage"]]);
-    assert.deepEqual(e.said, [COMING, "It's open in HyperFrames.", BUTTONS]);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS, COMING]);
     assert.deepEqual(mediaOf(e), ["b-roll-2.mp4", "recording.mp4"]);
     assert.equal(e.saved.length, 1, "the project is recorded, opened");
     assert.equal(COMING, 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.');
@@ -1286,7 +1286,7 @@ describe("app: a video made from a plan, and its footage (PR H5b)", () => {
     assert.equal(takeEpisodeLock(workCopyLockOf(e.home, FOLDER), "workcopy", () => true).taken, true);
     assert.equal(await run(e), 0);
     assert.deepEqual(e.started, []);
-    assert.deepEqual(e.said, [COMING, "It's open in HyperFrames.", BUTTONS]);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS, COMING]);
   });
   it("leaves the footage of a part out when its episode holds a conflicted copy, or a newer BRIMM Video Studio wrote its record, though its record in force shows no client (ruling 1)", async (c) => {
     const e = made(c);
@@ -1321,9 +1321,8 @@ describe("app: a video made from a plan, and its footage (PR H5b)", () => {
     e.said.length = 0;
     const refused = { ...e.deps, rename: () => { throw new Error("EXDEV"); } };
     assert.equal(await openInApp(e.ctx, { found: e.found, record: e.saved[0] }, refused), 0);
-    assert.deepEqual(e.said, [NOT_IN, "It's open in HyperFrames.", BUTTONS]);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS, NOT_IN]);
     assert.deepEqual([mediaOf(e), existsSync(copy.video)], [["recording.mp4"], true]);
-    assert.equal(NOT_IN, "Some of its footage could not be put into the project. Ask Jason.");
   });
   it("is for a video made from a plan alone: any other has its cut plan's cues and no footage, whatever the open is given", async (c) => {
     const cue = { n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null, phrase: "p2" };

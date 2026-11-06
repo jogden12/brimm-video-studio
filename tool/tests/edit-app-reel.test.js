@@ -497,7 +497,7 @@ describe("app … reel: the Reel's video", () => {
         writeFileSync(at, readFileSync(at, "utf8").slice(0, -4));
         const rev = reread(found).rev;
         const r = await app(t.ctx.deps, FOLDER, "reel", "2");
-        assert.deepEqual([r.code, r.said, t.started, runsOf(t)], [0, [`Some files of ${NAME} are not whole in Dropbox yet, so the project of Reel 2 wasn't made. Say "open Reel 2 of ${NAME} in HyperFrames" again in a few minutes; if it says this again, ask Jason.`], [], []]);
+        assert.deepEqual([r.code, r.said, t.started, runsOf(t)], [0, [`Some files of ${NAME} are not whole in Dropbox yet, so the project of Reel 2 wasn't made. Say "open Reel 2 of ${NAME} in HyperFrames" again in a few minutes. If it says this again, tell Jason.`], [], []]);
         assert.equal(reread(found).rev, rev);
         assert.ok(!existsSync(join(work, PROJECT)));
         t.done();
@@ -512,7 +512,7 @@ describe("app … reel: the Reel's video", () => {
     delete files["Pricing talk.words.json"];
     writeFileSync(recordFile(found.folder, 2), recordText({ ...base, rev: 2, files }));
     const r = await app(t.ctx.deps, FOLDER, "reel", "2");
-    assert.deepEqual([r.code, r.said, t.started, runsOf(t)], [1, [`The words of ${NAME} are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason.`], [], []]);
+    assert.deepEqual([r.code, r.said, t.started, runsOf(t)], [1, [`The words of ${NAME} are not on this Mac yet, so there is nothing for HyperFrames to start from. Dropbox may still be bringing them: say it again in a few minutes. If it says this again, tell Jason.`], [], []]);
     t.done();
   });
   it("says a suggestion that is no longer in the list is no Reel, with the Reels there are", async () => {
@@ -570,7 +570,7 @@ describe("app … reel: the project, the record and the app", () => {
     t.done();
   });
   it("keeps the project when HyperFrames will not open, records no time it opened, and still marks the Reel picked", async () => {
-    for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason."]]) {
+    for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more. If it still won't, tell Jason."]]) {
       const { t, found, stretch } = world({ open });
       const r = await app(t.ctx.deps, FOLDER, "reel", "2");
       assert.deepEqual([r.code, r.said], [1, [made(stretch), words]], open);

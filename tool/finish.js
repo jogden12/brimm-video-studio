@@ -1152,7 +1152,7 @@ export async function finishNow(ctx, found, deps = {}) {
     const problems = movedOn
       ? []
       : theirs
-        ? entries.filter((e) => { const s = statSync(e.to, { throwIfNoEntry: false }); return !s || s.size !== e.bytes; }).map((e) => `${basename(e.to)} is not whole in final/ at the late check, and ${theirs.by} has ${record.name.text} open now, so it was not copied in again: say ${finishAgain} again there.`)
+        ? entries.filter((e) => { const s = statSync(e.to, { throwIfNoEntry: false }); return !s || s.size !== e.bytes; }).map((e) => `${basename(e.to)} is not whole in final/ when its copies were checked, and ${theirs.by} has ${record.name.text} open now, so it was not copied in again: say ${finishAgain} again there.`)
         : check(entries, opts);
     // Its record is put back only when it is gone and no later record is there: never over a record the other Mac wrote
     // under its number, or over one written since. Then the episode is read again, and From Final Cut is emptied only
@@ -1175,8 +1175,8 @@ export async function finishNow(ctx, found, deps = {}) {
     }
     if (problems.length) {
       failed.push(...problems);
-      if (parts.some((p) => !p.app && !p.reused)) next.push("The files it took from From Final Cut are kept there, because a copy in final/ was not whole at the late check.");
-      if (taken.some((file) => file.place === "Downloads")) next.push("The exports it took from Downloads are kept there, because a copy in final/ was not whole at the late check.");
+      if (parts.some((p) => !p.app && !p.reused)) next.push("The files it took from From Final Cut are kept there, because a copy in final/ was not whole when its copies were checked.");
+      if (taken.some((file) => file.place === "Downloads")) next.push("The exports it took from Downloads are kept there, because a copy in final/ was not whole when its copies were checked.");
     } else if (written && holds) {
       for (const file of taken) {
         if (unchanged(file.path, file.snap)) rmSync(file.path, { recursive: true, force: true });

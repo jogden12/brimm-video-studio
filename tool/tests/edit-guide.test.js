@@ -51,7 +51,7 @@ function handedOff(t, { id = "e-20261020-a1a1a1", name = "2026-10-20 Launch talk
   return found;
 }
 const DROP_LINE = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
-const TAKE = '  Launch talk (a1a1a1): On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off".';
+const TAKE = '  Launch talk (a1a1a1): On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
 const NO_FIT = 'No video under way fits that. Say "what\'s next?" to see the ones that are.';
 
 describe("guide on a Mac not on the light import", () => {
@@ -384,7 +384,7 @@ describe("guide opens a folder, the page, or a file's place in Finder", () => {
     assert.deepEqual(await on(light(t), "guide", "drop"), { code: 0, said: ["Opened your drop folder in Finder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio."] });
     assert.deepEqual(t.opened, [["Finder", join(t.root, "Drop", "Mac Studio")]]);
     const broken = light(t, { openApp: () => { throw new Error("Finder could not be opened (/x/y)"); } });
-    assert.deepEqual(await on(broken, "guide", "drop"), { code: 1, said: ["Finder could not open your drop folder: ask Jason."] });
+    assert.deepEqual(await on(broken, "guide", "drop"), { code: 1, said: ["Finder could not open your drop folder. Say it again. If it says this again, tell Jason."] });
     t.done();
   });
   it("opens Zoom Video Transfer, beside BRIMM Video, or says to ask Jason", async () => {
@@ -400,7 +400,7 @@ describe("guide opens a folder, the page, or a file's place in Finder", () => {
     const t = setup();
     assert.deepEqual(await on(light(t), "guide", "page"), { code: 0, said: ["Opened the BRIMM Ops page in your browser."] });
     assert.deepEqual(t.calls, [{ cmd: "/usr/bin/open", args: [OPS_PAGE] }]);
-    assert.deepEqual(await on(light(t, { run: async () => ({ code: 1, stderr: "no" }) }), "guide", "page"), { code: 1, said: ["The BRIMM Ops page could not be opened: ask Jason."] });
+    assert.deepEqual(await on(light(t, { run: async () => ({ code: 1, stderr: "no" }) }), "guide", "page"), { code: 1, said: ["The BRIMM Ops page could not be opened. Say it again. If it says this again, tell Jason."] });
     t.done();
   });
   it("shows in Finder what the step needs: the hand-off, then the video to post; and nothing for a step of BRIMM Video Studio's", async () => {
@@ -548,7 +548,7 @@ describe("guide tell", () => {
     const raw = episodeAs(t, { ...VIDEOS.raw, record: { ...VIDEOS.raw.record, reading: null } });
     const stopped = onWait(t, 1, () => {
       mkdirSync(dirname(resultFile(t.home, raw.name, "read")), { recursive: true });
-      writeFileSync(resultFile(t.home, raw.name, "read"), JSON.stringify({ version: 1, command: "read", started: t.now(), ended: t.now(), ok: false, made: [], failed: ["The late check of this episode's import found a problem: a copy did not match."], next: "" }));
+      writeFileSync(resultFile(t.home, raw.name, "read"), JSON.stringify({ version: 1, command: "read", started: t.now(), ended: t.now(), ok: false, made: [], failed: ["Dropbox found a problem with a copy of this episode: a copy did not match."], next: "" }));
     });
     const r = await on(light(t, { wait: stopped }), "guide", "Morning talk", "tell");
     assert.deepEqual(r, { code: 0, said: ['Morning talk (cccccc): Claude\'s reading of it did not finish. Say "how far is it?" to see why.'] });
@@ -576,7 +576,7 @@ describe("guide tell", () => {
   });
 });
 
-const TAKE_TEXT = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off".';
+const TAKE_TEXT = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
 describe("guide notes her word", () => {
   it("notes only the step that comes next, then says the next one", async () => {
     const t = setup();
@@ -609,7 +609,7 @@ describe("guide notes her word", () => {
     writeFileSync(join(guideFile(t.home), "x"), "");
     const r = await on(light(t), "guide", "Launch talk", "done", "taken");
     assert.equal(r.code, 1);
-    assert.match(r.said.join("\n"), /^Not noted: this Mac's note could not be written \([A-Z]+\)\. Ask Jason\.$/);
+    assert.match(r.said.join("\n"), /^Not noted: this Mac's note could not be written \([A-Z]+\)\. Say it again\. If it says this again, tell Jason\.$/);
     t.done();
   });
   it("takes her word that she is done with a video: it is no longer under way", async () => {

@@ -9,7 +9,7 @@
     "Imports:",
     "  Other talk.mov: being imported on Sallie's laptop, at Writing the transcript",
     "  Pricing talk again.mov: its import failed on Mac Studio: the transcriber stopped (Pricing talk again.mov: Invalid data)",
-    "  Third talk.mov: copied in on Mac Studio, but the late check found a problem: Third talk.srt is not whole in Dropbox.",
+    "  Third talk.mov: copied in on Mac Studio. Dropbox found a problem with a copy of it: Third talk.srt is not whole in Dropbox.",
     "On this Mac:",
     "  2026-10-14 Pricing talk (Mac Studio).fcpbundle: 9 bytes",
     "  Free on the disk: 300 GB"
@@ -72,7 +72,7 @@
     "Imports:",
     "  Other talk.mov: being imported on Sallie's laptop, at Writing the transcript",
     "  Pricing talk again.mov: its import failed on Mac Studio: the transcriber stopped (Pricing talk again.mov: Invalid data)",
-    "  Third talk.mov: copied in on Mac Studio, but the late check found a problem: Third talk.srt is not whole in Dropbox.",
+    "  Third talk.mov: copied in on Mac Studio. Dropbox found a problem with a copy of it: Third talk.srt is not whole in Dropbox.",
     "2026-10-14 Pricing talk (Mac Studio): bring ended 2 hours ago. Made: Pricing talk.srt. Not done: Pricing talk.mp4 is still not whole. Some files of Pricing: what to charge? are not here yet. Say \"open Pricing: what to charge?\" to try again."
   ],
   "status 2026-10-14 Pricing talk (Mac Studio)": [

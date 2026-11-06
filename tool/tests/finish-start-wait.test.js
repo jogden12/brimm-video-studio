@@ -21,7 +21,7 @@ const STOPPED = 'The finish stopped as soon as it started, and wrote no hand-off
 const FAILED = `${NAMED}: Its finish did not write a hand-off. Say "how far is it?" to see why.`;
 const OLD_STEP = `${NAMED}: You have exported it. Say "hand it off" and I will check what you exported.`;
 const REELS_STEP = `${NAMED}: You have exported Reel 2 from HyperFrames. Say "hand off the Reels" to add it to the hand-off.`;
-const TAKEN = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off".';
+const TAKEN = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
 const ONLINE = ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".';
 
 /** A raw video with a project for the main video alone, its export in Downloads. */

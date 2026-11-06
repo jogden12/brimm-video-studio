@@ -178,6 +178,14 @@ export function importState(status, now) {
   return isStale(status, now) ? "stopped" : "running";
 }
 
+/** A status's `step` as she is told it. The step is stored as the import wrote it, and both Macs read it back (one may run older code),
+    so its words never change on disk: only the three that name the late check are said in plain words where they are printed. */
+export function shownStep(step) {
+  if (step === "Waiting for its late check" || step === "Waiting for the late check") return "Waiting for Dropbox's check of its copies";
+  if (step === "Late check") return "Dropbox's check of its copies";
+  return step;
+}
+
 /** Whether a status holds its video, so that the import does not take it again: while its import runs, after it failed,
     after its late check found a problem, and while the video is held. A stopped import does not hold it, and nor does a
     status that could not be read (null). */

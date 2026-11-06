@@ -103,13 +103,13 @@ describe("plan … script", () => {
 });
 
 describe("a script file changed by hand", () => {
-  it("is said by episodes in its own plain line, and not as Not right", async () => {
+  it("is said by episodes in its own plain line, and not as a file problem", async () => {
     const t = setup();
     await made(t);
     appendFileSync(join(folderOf(t), "teleprompter.txt"), "More.\n");
     const r = await on(depsOf(t), "episodes");
     assert.ok(r.said.includes(`    ${OUTSIDE}`), r.text);
-    assert.doesNotMatch(r.text, /Not right/);
+    assert.doesNotMatch(r.text, /A file of this video/);
     t.done();
   });
   it("is told by scriptHandEdited, which is false for a file at its size and for a missing one", async () => {
@@ -124,19 +124,19 @@ describe("a script file changed by hand", () => {
     rmSync(join(folder, "teleprompter.txt"));
     assert.equal(scriptHandEdited(folder, recordOf(t)), false);
     const r = await on(depsOf(t), "episodes");
-    assert.ok(r.said.includes("    Not right: teleprompter.txt is missing"), r.text);
+    assert.ok(r.said.includes("    A file of this video is missing: teleprompter.txt. Dropbox may still be bringing it. Wait a few minutes and ask again. If it is still missing, tell Jason."), r.text);
     assert.ok(!r.text.includes("changed outside the chat"));
     t.done();
   });
-  it("leaves another file's problem as Not right", async () => {
+  it("leaves another file's problem as a file problem", async () => {
     const t = setup();
     await made(t);
     appendFileSync(join(folderOf(t), "teleprompter.txt"), "More.\n");
     appendFileSync(join(folderOf(t), "video guide.md"), "More.\n");
     const r = await on(depsOf(t), "episodes");
     assert.ok(r.said.includes(`    ${OUTSIDE}`));
-    assert.equal(r.said.filter((l) => l.includes("Not right")).length, 1, r.text);
-    assert.match(r.text, /Not right: video guide\.md is/);
+    assert.equal(r.said.filter((l) => l.includes("A file of this video")).length, 1, r.text);
+    assert.match(r.text, /A file of this video is not the one Studio saved: video guide\.md\./);
     t.done();
   });
 });

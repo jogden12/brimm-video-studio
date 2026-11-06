@@ -117,7 +117,7 @@ describe("resolve", () => {
     t.ctx.deps.clone = (from, to) => writeFileSync(to, "short");
     const r = await keep(t.ctx.deps, "A");
     assert.equal(r.code, 1);
-    assert.match(r.text, /could not be set aside in history\/ \(.*\)\. Nothing was deleted\. Say "sort out the conflict" again in a minute, or ask Jason\.$/);
+    assert.match(r.text, /could not be set aside in history\/ \(.*\)\. Nothing was deleted\. Say "sort out the conflict" again in a minute\. If it says this again, tell Jason\.$/);
     assert.deepEqual(conflictedCopies(found.folder), [RECORD_COPY]);
     t.done();
   });
@@ -240,7 +240,7 @@ describe("resolve", () => {
     const found = timelineConflict(t);
     rmSync(join(found.folder, TIMELINE));
     const r = await keep(t.ctx.deps, "A");
-    assert.deepEqual([r.code, r.text], [1, `A, ${TIMELINE}, is not there, so it cannot be kept. Say B, or ask Jason.`]);
+    assert.deepEqual([r.code, r.text], [1, `A, ${TIMELINE}, is not there, so it cannot be kept. Say B. If that is not what you want, tell Jason.`]);
     assert.deepEqual(conflictedCopies(found.folder), [TIMELINE_COPY]);
     t.done();
   });
