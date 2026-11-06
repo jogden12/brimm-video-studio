@@ -35,7 +35,7 @@ const edit = (last = "") => `Edit it in HyperFrames.${last ? ` Your last request
 const SHOW = 'Ask for any changes in your own words, then say "show it in Final Cut".';
 const FINISH = 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".';
 const AGAIN = 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".';
-const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
+const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off".';
 const CLIP_NEXT = 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
 const REEL_2 = 'You have exported Reel 2 from HyperFrames. Say "hand off the Reels" to add it to the hand-off.';

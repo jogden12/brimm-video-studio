@@ -15,8 +15,8 @@ const LATER = "2026-10-26T09:00:00-05:00";
 const HANDOFF = (over = {}) => ({ id: "e-20261020-3fa9c1", revision: 1, kind: "finished", emptyAt: null, at: Date.parse("2026-10-20T13:00:00-05:00"), file: "Talk.mp4", ...over });
 const NOTE = (over = {}) => ({ kind: "episode", step: "taken", revision: 1, at: AT, ...over });
 const OPS_TEXTS = {
-  // The first take: when no episode holds the video yet, the page offers "Add it as a new episode" (and its form "Add the episode") before "Take the hand-off".
-  taken: 'Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".',
+  // The first take: when no episode holds the video yet, the page says it is a new episode and has one button, "Add the episode and take the hand-off", or opens an episode and has "Take the hand-off".
+  taken: 'Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off".',
   // A newer revision: the page's button names the revision of the hand-off and the one the page holds, which is the one her note holds.
   takenAgain: (revision, have) => `Drag the new hand-off onto Episodes, then press "Take revision ${revision} in place of revision ${have}".`,
   // A newer revision of an episode whose note is already at the cascade, the last step: the Reels of a video her editor finished come later, as a newer
@@ -28,9 +28,9 @@ const OPS_TEXTS = {
   kit: 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.',
   posted: 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".',
   live: 'Correct the form to what is live, then press "This is what is live".',
-  // The page's Reels card lists the Reels brimm-video handed off ("Reels from brimm-video"), each with "Write its post text". OpusClip is no longer used
+  // The page's Reels card lists the Reels BRIMM Video Studio handed off ("Reels from BRIMM Video Studio"), each with "Write its post text". OpusClip is no longer used
   // (Jason, 2 November 2026), and the page (version 10) stops writing "Clip to cut": the step sends her to neither.
-  cascade: 'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. If the "Reels" card lists "Reels from brimm-video", press "Write its post text" beside each.',
+  cascade: 'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. If the "Reels" card lists "Reels from BRIMM Video Studio", press "Write its post text" beside each.',
   posttext: 'Press "Write what’s next", and pick the hook and the YouTube Short title. Approve and copy the caption, the Short\'s title and description, and the LinkedIn post.',
   postedShort: "Post it on Instagram, and as a YouTube Short.",
   checked: 'Check each principle marked "Check it", then press "Use in drafts".',
@@ -356,7 +356,7 @@ describe("the next step for a video", () => {
     for (const [step, after] of [["taken", OPS_TEXTS.kit], ["kit", OPS_TEXTS.posted], ["posted", OPS_TEXTS.live], ["live", OPS_TEXTS.cascade]]) {
       assert.deepEqual(nextFor({ ...BASE, handoff: newer }, held(step, 1), NOW), { done: false, stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.takenAgain(2, 1)}`, step: "taken", after }, step);
     }
-    assert.ok(OPS_TEXTS.cascade.endsWith('If the "Reels" card lists "Reels from brimm-video", press "Write its post text" beside each.'));
+    assert.ok(OPS_TEXTS.cascade.endsWith('If the "Reels" card lists "Reels from BRIMM Video Studio", press "Write its post text" beside each.'));
     // A short video's and a session's newer revision never has it, though their notes are at their own last step.
     const clip = nextFor({ ...BASE, ...CLIP(), handoff: { ...newer, kind: "short video" } }, held("posted", 1, "short video"), NOW);
     assert.deepEqual([clip.step, clip.text, clip.after], ["taken", `On the BRIMM Ops page: ${OPS_TEXTS.takenAgain(2, 1)}`, ""]);
