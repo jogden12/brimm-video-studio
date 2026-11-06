@@ -91,11 +91,12 @@ import { assetsWords, handOver, projectsToHand } from "./hand-over.js";
 import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
 import { SNAPSHOT_DIR, keptSnapshots, listedBy, notSynced } from "./snapshot.js";
 import { timelineFor, clockFor, piecesOf, askedOf, newestOf, newestIsRender } from "./timeline.js";
+import { videoClock } from "./video-clock.js";
 import { momentOf, cutNear, clockText, timelineAt, wordsAt, secondsOf, rawAt, lengthOf, FRAME_SLACK } from "./clock.js";
 import { pictureNameFault, pictureSize } from "./pictures.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
 import { spelled } from "./final-transcript.js";
-import { GRAPHIC_CUE_KINDS, SHOT_KINDS, graphicCuesOf, keptIndexes, keptPhraseSpans, placeGraphicCues } from "./graphic-cues.js";
+import { GRAPHIC_CUE_KINDS, SHOT_KINDS, graphicCuesOf, graphicCuesOfPlan, graphicCuesOfRecord, keptIndexes, keptPhraseSpans, placeGraphicCues } from "./graphic-cues.js";
 import { handoffText, handoffFault } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, VERSION_2 } from "./handoff-v2.js";
 import { presetOf } from "./layers.js";
@@ -120,7 +121,7 @@ import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, footageFailed, guidanceOf, isMain as inUse, mediaOf, notWholeYet, olderHere, olderMarked, olderThanSnapshot, openInApp, plainName, projectOnAnotherMac, projectSnapshot, quitWords } from "./app.js";
-import { VOICEOVER } from "./project.js";
+import { VOICEOVER, projectCues } from "./project.js";
 import { openVoiceProject, voiceProjectWhy } from "./explainer.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelNotWholeYet, reelStretch, reelWhy } from "./app-reel.js";
 import { historyTail, mainProjectDir, toldTurns, turnTime, versionsOf, whatHappened } from "./app-history.js";
@@ -4107,13 +4108,12 @@ async function reels(ctx, rest) {
   if (isAnswered(record)) {
     let now = null;
     try {
-      now = clockFor({ ...found, record }, "main", ctx);
+      now = videoClock({ ...found, record }, ctx, "main");
     } catch (e) {
       now = null;
     }
     const clock = now && now.clock && now.clock.length ? now : null;
     ctx.say(reelsText(read.reels, record, "", clock));
-    if (clock) sayElsewhere(ctx, clock);
     // She is told last how to make one: on a Mac set up for HyperFrames, `app … reel <n>` makes it (plan PR 5), and on any other
     // nothing makes a Reel from a suggestion, so she is told that brimm-video cannot make Reels on this Mac and to ask Jason, so that
     // no command sends her round in a circle (Sallie's walkthrough, 25 Oct). Not once she has dropped every one. The gate refuses a
@@ -4563,10 +4563,11 @@ function timelineRead(ctx, found, part, flags) {
   return got;
 }
 
-/** The clock she reads on a timeline (clockFor): { read } or { code }. A file Dropbox has not brought over yet is asked for
-    (`bring`, unless one is running), and she is told to say it again when it is here. */
-function clockRead(ctx, found, part) {
-  const read = clockFor(found, part, ctx);
+/** The clock she reads on a timeline: { read } or { code }, `read` being clockFor's, or what `reader` gives (videoClock's, for a list of
+    times on the video's own clock). A file Dropbox has not brought over yet is asked for (`bring`, unless one is running), and she is told
+    to say it again when it is here. */
+function clockRead(ctx, found, part, reader = clockFor) {
+  const read = reader(found, part, ctx);
   if (read.coming) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: read.bring });
     return { code: refuse(ctx, `Dropbox is still bringing ${read.coming} over to this Mac. Say it again when it is done.`) };
@@ -5300,6 +5301,8 @@ function graphicIdeas(read, spellings = []) {
     of its video guide, planned.cues read again as a package's are, every kind of cue among them, since its project is made from those and from the
     reading's none; any other video lists the reading's (graphicIdeas). Each is placed on the words of the recording as the reading's are. */
 function ideasFor(read, record) {
+  // An iPhone clip's are the ones its reading kept in its record (app.js), placed on its words with its cut plan's phrases as any main video's are.
+  if (record.kind === "short video") return graphicIdeas({ ...read, plan: { ...read.plan, claude: { graphicCues: graphicCuesOfRecord(record) } } }, record.spellings);
   if (!isFromPlan(record)) return graphicIdeas(read, record.spellings);
   const cues = graphicCuesOf(record.planned.cues, { kinds: GRAPHIC_CUE_KINDS }).cues;
   return graphicIdeas({ ...read, plan: { ...read.plan, claude: { ...(read.plan.claude || {}), graphicCues: cues } } }, record.spellings);
@@ -5324,6 +5327,53 @@ const noIdeas = (record) => `${shownName(record)} has no ideas for graphics: Cla
 /** What the list of ideas says last, when one of them can be put up: `n`, the first listed that can be, is its example. */
 const ideasAsk = (n) => `To put one up, say its number and a picture from your Pictures folder, as "put idea ${n} up with chart.png".`;
 
+/** What is said of a Reel that `graphic … ideas` is asked about, when it cannot be: one the record does not have. "" for any other. A
+    Reel is not refused for being a suggestion, or for being made in HyperFrames: its cues are listed on the video's clock, which needs
+    only the suggestion's place in reels.json (video-clock.js). */
+// reels.json is not consulted for the refusal: videoClock says if the suggestion is not there.
+const reelPartWhy = (record, n) => ((record.reels || []).some((r) => r.n === n) ? "" : `There is no Reel ${n}.`);
+
+/** The ideas of a Reel: exactly the cues its own project holds, in the project's numbering and on the Reel's clock (project.js projectCues, which
+    takes graphic-cues.js reelGraphicCues: wholly inside the Reel, at most REEL_CUES_MOST), from the cues app-reel.js gives that project.
+    Each is as graphicIdeas gives one, with `at` the second of the recording its words start. */
+function reelIdeas(record, { raw, plan, part, span }) {
+  const graphicCues = isFromPlan(record) ? graphicCuesOf(record.planned.cues, { kinds: SHOT_KINDS }).cues : graphicCuesOfPlan(plan);
+  const cues = projectCues({ kind: "reel", part, stretch: { start: span.from, end: span.to }, words: raw, plan, spellings: record.spellings, graphicCues });
+  return cues.map((c) => (c.at ? { n: c.n, idea: c.show, said: c.words, at: c.at.start + span.from, for: c.seconds, start: c.at.start, end: c.at.end } : { n: c.n, idea: c.show, said: c.words, missing: true, at: null }));
+}
+
+/** `graphic "<episode>" ideas [main | reel <n>]`: Claude's ideas for graphics, each with its times on the video's own clock, the one HyperFrames
+    shows (video-clock.js), so that they are the seconds the project's own cues give. Nothing of Final Cut, a rough cut or a version is read,
+    and nothing is written. `words` are the episode's first word and what names the part. */
+function ideasList(ctx, words) {
+  const [said, ...rest] = words;
+  const got = episodeFor(ctx, said === undefined ? [] : [said], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const found = { ...got.found, record: got.record };
+  const { part, words: left } = partFrom(rest);
+  if (left.length) return refuse(ctx, `"${left.join(" ")}" is not understood there: name the timeline last, as main or reel 2.`);
+  if (part !== "main" && reelPartWhy(found.record, part.reel)) return refuse(ctx, reelPartWhy(found.record, part.reel));
+  if (!hasFinalCut(found.record)) {
+    ctx.say(noIdeas(found.record));
+    return 0;
+  }
+  const reading = clockRead(ctx, found, part, (f, p, c) => videoClock(f, c, p));
+  if (reading.code !== undefined) return reading.code;
+  const { clock, on, words: said2, raw, plan, span } = reading.read;
+  const read = { clock, on, words: said2, plan, pieces: clock.map((p) => ({ start: p.from, end: p.to })), ...(span ? { span } : {}) };
+  const ideas = span ? reelIdeas(found.record, { raw, plan, part, span }) : ideasFor(read, found.record).filter((i) => !i.outside);
+  // A video made from a plan lists its video guide's cues (PR H5b), under a head of their own.
+  const guide = isFromPlan(found.record);
+  if (!ideas.length) {
+    ctx.say(guide ? "The graphics of its video guide: none." : `Claude gave no ideas for graphics on ${partLabel(part)}.`);
+    return 0;
+  }
+  const head = guide ? `The graphics of its video guide: ${ideas.length}, with times on ${on}.` : `Claude's ideas for graphics on ${partLabel(part)}: ${ideas.length}, with times on ${on}.`;
+  const first = ideas.find((i) => i.at !== null);
+  ctx.say([head, ...ideas.map((i) => ideaLine(i, on)), ...(first ? [ideasAsk(first.n)] : [])].join("\n"));
+  return 0;
+}
+
 /** `graphic "<episode>" add "<picture>" [main | reel <n>] (--at <time> | --at-words "<words>" | --idea <n>) [--for <seconds>]
     [--place full|corner|lower]`, `graphic "<episode>" drop <id> [main | reel <n>]`, `graphic "<episode>" ideas
     [main | reel <n>]`, and with none, the list: a picture from her Pictures folder over a timeline (spec section 4). Claude's
@@ -5331,32 +5381,12 @@ const ideasAsk = (n) => `To put one up, say its number and a picture from your P
 async function graphic(ctx, rest) {
   const { words, flags } = flagsOf(rest, ["at", "at-words", "for", "place", "idea"]);
   const [said, verb, nameOrId, ...more] = words;
+  if (verb === "ideas") return ideasList(ctx, [said, nameOrId, ...more].filter((w) => w !== undefined));
   const takes = verb === "add" || verb === "drop";
-  const start = layerStart(ctx, [said, ...(takes ? more : [verb === "ideas" ? undefined : verb, nameOrId, ...more].filter((w) => w !== undefined))], { writes: takes });
+  const start = layerStart(ctx, [said, ...(takes ? more : [verb, nameOrId, ...more].filter((w) => w !== undefined))], { writes: takes });
   if (start.code !== undefined) return start.code;
   const { found, part, target } = start;
   const graphics = target.graphics || [];
-  if (verb === "ideas" && !hasFinalCut(found.record)) {
-    ctx.say(noIdeas(found.record));
-    return 0;
-  }
-  // The other Mac's newer render is not said here (sayElsewhere): the list's first line names the version its times are on.
-  if (verb === "ideas") {
-    const got = clockRead(ctx, found, part);
-    if (got.code !== undefined) return got.code;
-    const { read } = got;
-    const ideas = ideasFor(read, found.record).filter((i) => !i.outside);
-    // A video made from a plan lists its video guide's cues (PR H5b), under a head of their own.
-    const guide = isFromPlan(found.record);
-    if (!ideas.length) {
-      ctx.say(guide ? "The graphics of its video guide: none." : `Claude gave no ideas for graphics on ${partLabel(part)}.`);
-      return 0;
-    }
-    const head = guide ? `The graphics of its video guide: ${ideas.length}, with times on ${read.on}.` : `Claude's ideas for graphics on ${partLabel(part)}: ${ideas.length}, with times on ${read.on}.`;
-    const first = ideas.find((i) => i.at !== null);
-    ctx.say([head, ...ideas.map((i) => ideaLine(i, read.on)), ...(first ? [ideasAsk(first.n)] : [])].join("\n"));
-    return 0;
-  }
   if (!takes) {
     ctx.say(graphics.length ? graphics.map((g) => `${g.id}: ${g.picture.replace(/^media\//, "")}, ${g.place}, at ${g.at} s of the recording, for ${lengthText(g.for)}`).join("\n") : `There are no graphics on ${partLabel(part)}.`);
     return 0;

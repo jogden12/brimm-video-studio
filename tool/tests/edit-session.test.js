@@ -486,8 +486,8 @@ describe("graphic", () => {
   it("offers Claude's ideas for graphics as places on the timeline, numbered, each with its start and end", async () => {
     const { t } = episode();
     assert.equal((await on(t.ctx.deps, "graphic", FOLDER, "ideas")).text, [
-      "Claude's ideas for graphics on the main video: 1, with times on the main video as it is now.",
-      'Idea 1, 0:04 to 0:07: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."',
+      "Claude's ideas for graphics on the main video: 1, with times on the video.",
+      'Idea 1, 0:14 to 0:16: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."',
       'To put one up, say its number and a picture from your Pictures folder, as "put idea 1 up with chart.png".'
     ].join("\n"));
     t.done();
