@@ -13,6 +13,7 @@ The app, its build and the notarizing are all run from that page, each on Jason'
 - `y` and `yes` go ahead, in any case. Return alone is no. So is anything else.
 - Each step looks first and does only what is not done yet. A second run says "Already done" for what is done and goes on.
 - It keeps the Mac awake while it runs. Keep the lid open and the charger in.
+- One run at a time. A second double-click while a first window is open says so and stops at once; use the open window, or close it and double-click again. A `--print` takes no such lock.
 
 The code is in `tool/move-app/`:
 
@@ -30,7 +31,7 @@ It shows:
 - Xcode's command line tools, Homebrew and node (22 or later);
 - brimm-video's settings: the light import, hand-off version 2, the drop folder `Drop`, and a checkout that is brimm-video's or Studio's;
 - that no import is running;
-- that her drop folder is empty. The drop folder is the one brimm-video's `settings.js show` names. Files are counted and never named;
+- that her drop folder is empty. The drop folder is the one brimm-video's `settings.js show` names. Files are counted and never named. A folder that cannot be read is not taken for an empty one: the app stops and says to allow Terminal in Privacy & Security;
 - Claude Code in Terminal: signed in or not, its plan and its version. Never her email.
 
 If Claude Code is not signed in, it asks first, then runs `claude auth login`. That opens the browser, where Sallie signs in to her own Claude account.
@@ -52,8 +53,8 @@ If Claude Code is not signed in, it asks first, then runs `claude auth login`. T
 ### 4. The HyperFrames app (check 43)
 
 - If `/Applications/HyperFrames.app` is there, it notes the version.
-- If not, it opens https://hyperframes.dev/studio in Safari and waits while the app is downloaded, dragged into Applications and opened once.
-- The HeyGen sign-in and the agent on Auto stay by hand, as check 43 says.
+- If not, it opens https://hyperframes.dev/studio in Safari and waits while the app is downloaded, dragged into Applications and opened once. The wait also says to sign in to HeyGen and to choose Claude Code as the agent, on Auto, as check 43 says.
+- The HeyGen sign-in and the agent on Auto stay by hand.
 
 ### 5. Studio's installer (check 44)
 
@@ -62,8 +63,9 @@ If Claude Code is not signed in, it asks first, then runs `claude auth login`. T
 - If Claude Code in Terminal is older than the installer wants, it asks, runs `claude update`, and prints again.
 - If the Claude app's own Claude Code is older, it says to choose Claude, then Check for Updates, and prints again when Return is pressed.
 - Repeats the lines that matter: Claude Code's sign-in and versions, HDR video, her folder's lock.
-- Asks once. On y it runs the same line for real with `--yes`. This can take a few minutes, and ends with one real call to Claude from the background job (up to 90 seconds).
-- Then it checks for the line `From the background job:` and that the one-shot check agent (`com.thebrimm.claude-check.plist`) is gone.
+- Asks once. On y it looks again at her drop folder and the import (the installer does not look at the drop folder here: it does that only when it switches the folder, and her laptop stays on Drop), with the same words and stops as step 1. Then it runs the same line for real with `--yes`. This can take a few minutes, and ends with one real call to Claude from the background job (up to 90 seconds).
+- Then it checks for the line `From the background job: Claude answered from here`. Any other background-job line ("could not be asked", "did not answer within 90 seconds") stops the app with that line shown, and writes no installed mark. It also checks that the one-shot check agent (`com.thebrimm.claude-check.plist`) is gone.
+- The stop summary lists "ran Studio's installer (if it stopped, its last lines say how far it got)" from the moment it starts, and the plain "ran Studio's installer" once it has finished.
 - Asks, then turns HyperFrames on as the editing app (`settings.js set --app hyperframes`).
 - Shows her drop folder in Finder and waits while she does "Make available offline" there.
 
@@ -103,8 +105,8 @@ zsh tool/move-app/build-app.sh --out <folder> --sign
 
 - `--out <folder>` is required. The build writes `Move to Studio.app` and `Move to Studio.zip` there, replacing only those two from an earlier build. Beyond that it writes only a temporary folder, which it takes away.
 - `--sign` signs the app with the one "Developer ID Application" identity in the keychain, found by name. It uses the hardened runtime and a secure timestamp. This copy is the one that goes to Sallie.
-- Without `--sign`, the copy is unsigned and opens on this Mac only. That is for a trial.
-- `--any-commit` builds at a commit that is not yet on origin/main. Without it, the build refuses, so what Sallie gets is what was merged. Use it for a trial only.
+- Without `--sign`, the copy is not signed with the Developer ID. The build still seals the whole bundle with an ad-hoc signature (`codesign --force --sign - --timestamp=none`, then `--verify`), which is local and sends nothing, so that another Mac says "rejected" (the Open Anyway path below) and not "damaged". From AirDrop, macOS asks once; from a USB stick it asks nothing. Use `--sign` for the copy that goes to Sallie.
+- `--any-commit` builds at a commit that is not yet on origin/main. Without it, the build refuses (run `git fetch` first, so it sees what GitHub has), so what Sallie gets is what was merged. Use it for a trial only.
 - The build also refuses if the app's files in `tool/move-app` have changes that are not committed.
 - The commit is written into the app. A new commit on main means building the app again.
 - The build ends by printing what it made, the commit, and (when signed) the three notarizing commands.
@@ -134,20 +136,20 @@ The last command makes the zip again, with the ticket stapled in.
 - AirDrop `Move to Studio.zip` from the Mac Studio to her laptop, or copy it on a USB stick.
 - Open the zip, and double-click the app.
 - A signed and notarized copy from AirDrop opens with one macOS question: "'Move to Studio' is an app downloaded from the Internet. Are you sure you want to open it?" Click Open.
-- An unsigned copy from AirDrop is blocked the first time. Since macOS 15, Control-click then Open no longer gets past it. Click Done, then System Settings, Privacy & Security, Open Anyway (shown for about an hour after the blocked try), her password, Open.
+- A copy that is not signed with the Developer ID, from AirDrop, is blocked the first time. Since macOS 15, Control-click then Open no longer gets past it. Click Done, then System Settings, Privacy & Security, Open Anyway (shown for about an hour after the blocked try), her password, Open.
 - A copy from a USB stick has no quarantine mark and opens with no question.
 - Terminal may ask "Terminal would like to access...". Click Allow.
 
 ## Stopping and running again
 
-- An n, a failure, Control-C or closing the window stops it. It then lists what this run changed (or says it changed nothing), and says: `Double-click Move to Studio again to go on from here.`
+- An n, a failure, Control-C or closing the Terminal window stops it. It then lists what this run changed (or says it changed nothing), and says: `Double-click Move to Studio again to go on from here.`
 - A run stopped in the middle of a clone takes the half-made copy away.
 - It undoes nothing and deletes nothing, except its own half-made clone and, in step 7, brimm-video's old key on her y.
 - A failed install is shown and stopped, never undone. A second run goes on. Going back to brimm-video is Jason's call, by hand, with brimm-video's installer, which stays on disk.
 
 ### The log and the report
 
-- Everything the app says is also kept in `~/Library/Logs/brimm-video-studio-move.log`, a run at a time, each with a dated line.
+- Everything the app says is also kept in `~/Library/Logs/brimm-video-studio-move.log`, a run at a time, each with a dated line. Each question is followed in the log by the answer given to it (a y, an n or a Return, never a secret). The lock that keeps a second run out is the file beside it, `brimm-video-studio-move.log.lock`.
 - The report is `~/Desktop/Studio move report.txt`. The public half of the key is `~/Desktop/Studio key (public half).txt`.
 
 ### Where it stops, and what to do
@@ -166,7 +168,9 @@ Step 1, looking:
 - **"An import is running now. Wait until its window in the top right closes, then double-click Move to Studio again."** Do that.
 - **"Her checkout (<folder>) has no tool/settings.js to say where her drop folder is."** Tell Jason.
 - **"Her drop folder could not be found from her settings (settings.js show)."** Tell Jason.
-- **"Her drop folder holds <n> file(s) still to be imported."** The app never names them. Let the import finish, then run the app again.
+- **"Her drop folder holds <n> file(s) still to be imported."** The app never names them. Let the import finish, then run the app again. Step 5 looks at this again right before the real install and stops with the same words.
+- **"Her drop folder could not be read. macOS may have asked whether Terminal may read Dropbox…"** In System Settings › Privacy & Security › Files and Folders, allow it, then run the app again.
+- **"Move to Studio is already running in another Terminal window. Use that one, or close it and double-click again."** Do that.
 - **"Claude Code is not on this Mac. Install it, then run the app again."** Do that.
 - **"Claude Code is still not signed in."** after the offered sign-in. Run `claude auth login` in Terminal, then run the app again.
 
@@ -178,7 +182,9 @@ Step 2, the key:
 - **"The key could not be made."** Tell Jason.
 - **"~/.ssh/config already has a "Host github-brimm-video-studio" entry that is not the one Studio needs. This app does not change it."** Tell Jason.
 - **"GitHub's key on this Mac isn't the one GitHub publishes (<fingerprint>). Nothing is trusted until that is looked into: tell Jason."** Tell Jason.
-- **"ssh did not get GitHub's welcome for this key. It said: <what ssh said>"** Tell Jason. (A "Permission denied" is not a stop: the app says GitHub does not know the key yet and waits again.)
+- **"ssh did not get GitHub's welcome for this key. It said:"** and all of ssh's lines (a host-key warning comes before the rest). Tell Jason. (A "Permission denied" is not a stop: the app says GitHub does not know the key yet and waits again.)
+
+- **"Her Desktop could not be written to. macOS may have asked whether Terminal may write there…"** (this can come in step 2 or step 6). Allow Terminal in System Settings › Privacy & Security › Files and Folders, then run the app again.
 
 Step 3, the code:
 
@@ -195,11 +201,12 @@ Step 3, the code:
 Step 5, the installer (step 4 only waits, and stops on an n):
 
 - **"<folder>/tool/install.sh is not there."** Tell Jason.
-- **"Studio's installer refused (its words are above), so it was not run for real. Nothing it refused has been changed."** A video in her drop folder is one reason. Deal with what its words say, then run the app again.
+- **"Studio's installer refused (its words are above), so it was not run for real. Nothing it refused has been changed."** Deal with what its words say, then run the app again. (A video in her drop folder is not one of its reasons: the installer looks at that only when it switches the folder, which is why the app looks itself, right before the real install.)
 - **"Claude Code is not signed in. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser), then run the app again."** Do that.
 - **"Claude Code is still older than the installer needs after claude update. Tell Jason."** Tell Jason.
 - **"The Claude app's own Claude Code is still older than the installer wants. Tell Jason."** after Check for Updates. Tell Jason.
 - **"The installer stopped (it ended with <n>). Its last lines:"** and the lines. Tell Jason. Running the app again goes on from there.
+- **"The installer's check of Claude did not get an answer. It said:"** and the background job's line. Tell Jason.
 - **"The setup stopped before its check of Claude (there is no "From the background job:" line in what it said)."** and its last lines. Tell Jason.
 - **"The one-shot check of Claude (<file>) is still there. Left there, launchd would run it at every login. Tell Jason."** Tell Jason.
 - **"<folder>/tool/settings.js is not there, so the editing app cannot be looked at."** Tell Jason.
@@ -207,9 +214,10 @@ Step 5, the installer (step 4 only waits, and stops on an n):
 
 ## What reaches out
 
+- The ad-hoc seal of an unsigned build (`codesign --sign - --timestamp=none`) is local and sends nothing.
 - `codesign --timestamp` asks Apple's timestamp server for the time. That is all it sends. Signing for notarization needs it.
 - Notarizing sends the app to Apple. It is by hand, not in any script.
-- In the move script, only these reach out: the clone from GitHub, `ssh -T` to GitHub, opening the HyperFrames page in Safari, and what Studio's own installer does (Homebrew, npm, the HyperFrames command line and its Chrome, the model).
+- In the move script, only these reach out: the clone from GitHub, `ssh -T` to GitHub, `claude auth login` (it opens the browser, for her to sign in), `claude update` (it fetches Claude Code's newer version), opening the HyperFrames page in Safari, and what Studio's own installer does (Homebrew, npm, the HyperFrames command line and its Chrome, the model).
 - The app never touches brimm-video's checkout, GitHub's settings, the Mac Studio, or Dropbox, except through the installer and the reads above.
 
 ## The tests
