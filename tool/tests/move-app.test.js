@@ -78,6 +78,13 @@ if (command === "show") {
     sshConfig  text of ~/.ssh/config (default: just the Host entry), or null for none
     knownHosts text of ~/.ssh/known_hosts (default: GitHub's published ed25519 key), or null for none
     ssh        what `ssh -T` answers, one answer a call: "ok", "denied" or a list of them (default "ok"; the last repeats)
+    checkout   Studio's checkout in the home folder: "at-pin" (default), "absent", "other-commit", "dirty", "other-remote" or
+               "partial-left" (no checkout, a half-made .partial beside where it goes)
+    marks      text of the checkout's .git/move-to-studio (default: the tests passed at the pin, for an at-pin checkout)
+    laterCommit  the "GitHub" repo gets a commit after the pin
+    testFail   BRIMM_TEST_FAIL=1 for the tests in the checkout
+    gitStandIn a stand-in git that notes its arguments and GIT_SSH_COMMAND, and fails; noRepo leaves BRIMM_STUDIO_REPO unset;
+               repoMissing points it at nothing
     commit     the commit to pass: the "GitHub" repo's own by default, null for none
     answers    stdin, such as "y\ny\n\n"
     Returns { status, out, ran, home, before, tree, log, report }: `before` and `tree` list every file in the home folder before
@@ -101,6 +108,11 @@ function moveOn(options = {}, ...args) {
     git(github, "add", "-A");
     git(github, "commit", "-q", "-m", "the stand-in Studio");
     const sha = git(github, "rev-parse", "HEAD");
+    if (options.laterCommit) {
+      put(join(github, "later.txt"), "after the pin\n");
+      git(github, "add", "-A");
+      git(github, "commit", "-q", "-m", "after the pin");
+    }
 
     // Her laptop: the old checkout (with the fake settings.js), her settings, her drop folder.
     const oldCheckout = join(home, "Claude Code", "BRIMM video");
@@ -115,6 +127,20 @@ function moveOn(options = {}, ...args) {
       put(join(drop, ".brimm-watched-by"), `${settings.machine}\n`);
       for (const name of options.dropFiles ?? []) put(join(drop, name), "made for the test");
     }
+
+    // Studio's checkout, as an earlier run left it.
+    const studio = join(home, "Claude Code", "brimm-video-studio");
+    const checkout = options.checkout ?? "at-pin";
+    if (checkout !== "absent" && checkout !== "partial-left") {
+      git(home, "clone", "-q", "--branch", "main", github, studio);
+      git(studio, "reset", "-q", "--hard", sha);
+      if (checkout === "other-commit") git(studio, "commit", "-q", "--allow-empty", "-m", "elsewhere");
+      if (checkout === "dirty") put(join(studio, "tool", "install.sh"), "changed by hand\n");
+      if (checkout === "other-remote") git(studio, "remote", "set-url", "origin", "/somewhere/else");
+      const marks = options.marks ?? (checkout === "at-pin" ? `tests=${sha}\n` : null);
+      if (marks !== null) writeFileSync(join(studio, ".git", "move-to-studio"), marks);
+    }
+    if (checkout === "partial-left") put(`${studio}.partial/half-made`, "cut short\n");
 
     // The stand-ins: each writes what it was asked into `ran`.
     const stand = (name, body = "") => put(join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${ran}"\n${body}`, 0o755);
@@ -143,6 +169,7 @@ case "$a" in
   denied) echo "git@github.com: Permission denied (publickey)."; exit 255 ;;
 esac
 `);
+    if (options.gitStandIn) stand("git", `echo "GIT_SSH_COMMAND=$GIT_SSH_COMMAND" >> "${ran}"\nexit 1\n`);
     stand("sw_vers", '[ "$1" = "-productVersion" ] && echo 15.1\n');
     stand("df", 'echo "Filesystem 1024-blocks Used Available Capacity iused ifree %iused Mounted on"\necho "/dev/disk3s1s1 971350180 400000000 450000000 47% 400000 4000000000 0% /"\n');
     stand("xcode-select", '[ "$1" = "-p" ] && echo /Library/Developer/CommandLineTools\n');
@@ -171,13 +198,21 @@ esac
     // The environment is built from scratch: the stand-ins first, the node that runs these tests last, no Homebrew.
     const env = {
       HOME: home, PATH: `${bin}:/usr/bin:/bin:${dirname(process.execPath)}`, BRIMM_HOMEBREW_DIRS: "",
-      BRIMM_CLAUDE: join(bin, "claude"), BRIMM_STUDIO_REPO: github, BRIMM_HYPERFRAMES_APP: join(dir, "Applications", "HyperFrames.app")
+      BRIMM_CLAUDE: join(bin, "claude"), BRIMM_STUDIO_REPO: options.repoMissing ? join(dir, "nowhere") : github, BRIMM_HYPERFRAMES_APP: join(dir, "Applications", "HyperFrames.app")
     };
+    if (options.noRepo) delete env.BRIMM_STUDIO_REPO;
+    if (options.testFail) env.BRIMM_TEST_FAIL = "1";
     const commit = options.commit === undefined ? ["--commit", sha] : options.commit === null ? [] : ["--commit", options.commit];
     const r = spawnSync("/bin/zsh", [MOVE, ...commit, ...args], { encoding: "utf8", input: options.answers ?? "", env });
     const text = (file) => (existsSync(file) ? readFileSync(file, "utf8") : "");
     const mode = (file) => (existsSync(file) ? statSync(file).mode & 0o777 : null);
+    const inStudio = (...a) => spawnSync("git", ["-C", studio, ...a], { encoding: "utf8", env: { ...GIT_ENV, HOME: home } }).stdout.trim();
+    const studioNow = existsSync(studio)
+      ? { branch: inStudio("rev-parse", "--abbrev-ref", "HEAD"), head: inStudio("rev-parse", "HEAD"), upstream: inStudio("rev-parse", "--abbrev-ref", "@{u}"),
+          origin: inStudio("remote", "get-url", "origin"), marks: text(join(studio, ".git", "move-to-studio")) }
+      : null;
     return {
+      sha, github, studioNow, partialLeft: existsSync(`${studio}.partial`),
       copied: text(copied), sshConfig: text(join(ssh, "config")), sshConfigMode: mode(join(ssh, "config")), knownHosts: text(join(ssh, "known_hosts")),
       publicCopy: text(join(home, "Desktop", "Studio key (public half).txt")), sshAsked: Number(text(asked).trim() || 0),
       status: r.status, out: r.stdout, err: r.stderr, home, before, tree: readdirSync(home, { recursive: true }).sort(),
@@ -452,5 +487,132 @@ describe("the move script, Studio's key (check 42)", { skip: notAMac }, () => {
     assert.match(known.out, /Already done: .*GitHub/);
     assert.ok(!known.out.includes("Press Return when that's done"));
 
+  });
+});
+
+describe("the move script, Studio's code (check 42)", { skip: notAMac }, () => {
+  it("clones main on y into the partial folder, puts main at the app's commit, then renames it", () => {
+    const r = moveOn({ checkout: "absent", laterCommit: true, answers: "y\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.ok(r.studioNow, "the checkout is there");
+    assert.equal(r.studioNow.branch, "main");
+    assert.equal(r.studioNow.head, r.sha, "at the app's commit, though GitHub's main is further on");
+    assert.equal(r.studioNow.upstream, "origin/main");
+    assert.equal(r.studioNow.origin, r.github);
+    assert.equal(r.partialLeft, false);
+    assert.match(r.out, /3\. Studio's code \(check 42\)/);
+    assert.match(r.out, new RegExp(`${r.sha.slice(0, 7)}`));
+  });
+
+  it("stops, leaving nothing, when GitHub's main doesn't hold the app's commit", () => {
+    const r = moveOn({ checkout: "absent", commit: "1".repeat(40), answers: "y\n" });
+    assert.equal(r.status, 1, r.out);
+    assert.equal(r.studioNow, null);
+    assert.equal(r.partialLeft, false);
+    assert.match(r.out, /doesn't hold the commit this app was made at/);
+    assert.ok(!r.out.includes("copied Studio's code"), r.out);
+  });
+
+  it("takes away a half-made clone an earlier run left, then clones", () => {
+    const r = moveOn({ checkout: "partial-left", answers: "y\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /half-made/);
+    assert.equal(r.partialLeft, false);
+    assert.equal(r.studioNow?.head, r.sha);
+    assert.ok(!r.tree.some((f) => f.includes("half-made")), "the old half-made file is gone");
+  });
+
+  it("a failed clone leaves nothing at the checkout's place", () => {
+    const r = moveOn({ checkout: "absent", repoMissing: true, answers: "y\n" });
+    assert.equal(r.status, 1, r.out);
+    assert.equal(r.studioNow, null);
+    assert.equal(r.partialLeft, false);
+    assert.match(r.out, /could not be copied/);
+    assert.ok(!r.out.includes("copied Studio's code to"), r.out);
+  });
+
+  it("says already done for a clean checkout at the app's commit, and stops on any other, naming what is wrong", () => {
+    const ok = moveOn({ checkout: "at-pin" });
+    assert.equal(ok.status, 0, ok.out);
+    assert.match(ok.out, /Already done: Studio's code is there/);
+
+    const other = moveOn({ checkout: "other-commit" });
+    assert.equal(other.status, 1);
+    assert.match(other.out, /is at [0-9a-f]{7}, and this app was made at [0-9a-f]{7}/);
+    const dirty = moveOn({ checkout: "dirty" });
+    assert.equal(dirty.status, 1);
+    assert.match(dirty.out, /has changes that aren't saved/);
+    const remote = moveOn({ checkout: "other-remote" });
+    assert.equal(remote.status, 1);
+    assert.match(remote.out, /comes from \/somewhere\/else, not from Studio's repository/);
+    // The only thing this run changed is the Desktop copy of the key's public half (the harness has none): the checkout is untouched.
+    const inCheckout = (list) => list.filter((f) => f.startsWith("Claude Code/brimm-video-studio"));
+    for (const r of [other, dirty, remote]) {
+      assert.ok(!r.out.includes("copied Studio's code"), r.out);
+      assert.deepEqual(inCheckout(r.tree), inCheckout(r.before), "the checkout is untouched");
+    }
+    // A print stops in the same words.
+    const printed = moveOn({ checkout: "other-commit" }, "--print");
+    assert.equal(printed.status, 1);
+    assert.match(printed.out, /is at [0-9a-f]{7}, and this app was made at [0-9a-f]{7}/);
+  });
+
+  it("the real clone is from check 42's address, through her own ssh files", () => {
+    const r = moveOn({ checkout: "absent", gitStandIn: true, noRepo: true, answers: "y\n" });
+    assert.equal(r.status, 1, r.out);
+    const calls = r.ran.split("\n");
+    assert.ok(calls.includes(`git clone --branch main git@github-brimm-video-studio:jogden12/brimm-video-studio.git ${r.home}/Claude Code/brimm-video-studio.partial`), r.ran);
+    const via = calls.find((c) => c.startsWith("GIT_SSH_COMMAND="));
+    assert.ok(via, r.ran);
+    for (const part of [`-F ${r.home}/.ssh/config`, `UserKnownHostsFile=${r.home}/.ssh/known_hosts`, "StrictHostKeyChecking=yes", "HostKeyAlgorithms=ssh-ed25519", "BatchMode=yes"]) {
+      assert.ok(via.includes(part), `${part} in ${via}`);
+    }
+    assert.equal(r.partialLeft, false, "the failed clone leaves nothing");
+  });
+
+  it("runs Studio's tests there with the spec reporter, stops when one fails, and doesn't run them again at the same commit", () => {
+    const fail = moveOn({ marks: "", testFail: true });
+    assert.equal(fail.status, 1, fail.out);
+    assert.match(fail.out, /about three minutes/);
+    assert.match(fail.out, /ℹ fail 1/);
+    assert.match(fail.out, /✖|✔|ok/);
+    assert.ok(!/tests=/.test(fail.studioNow.marks), "nothing is marked on a failure");
+
+    const pass = moveOn({ marks: "installed=abc123\n" });
+    assert.equal(pass.status, 0, pass.out);
+    assert.match(pass.out, /ℹ pass 1/);
+    assert.match(pass.out, /ℹ fail 0/);
+    assert.equal(pass.studioNow.marks, `installed=abc123\ntests=${pass.sha}\n`, "only its own line is written, the rest kept");
+    assert.match(pass.log, /ℹ pass 1/, "kept in the log");
+
+    const again = moveOn({});
+    assert.equal(again.status, 0, again.out);
+    assert.match(again.out, /Already done: Studio's tests passed at this commit/);
+    assert.ok(!again.out.includes("ℹ pass"), "not run again");
+
+    // A mark for another commit does not count.
+    const old = moveOn({ marks: `tests=${"0".repeat(40)}\n` });
+    assert.match(old.out, /ℹ pass 1/);
+    assert.equal(old.studioNow.marks, `tests=${old.sha}\n`);
+  });
+
+  it("with --print, says what it would clone and test, and runs and changes nothing", () => {
+    const r = moveOn({ checkout: "absent", gitStandIn: true, noRepo: true, laterCommit: true }, "--print");
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /Would clone Studio's code with: git clone --branch main git@github-brimm-video-studio:jogden12\/brimm-video-studio\.git .*brimm-video-studio\.partial/);
+    assert.match(r.out, /Would put main at [0-9a-f]{7}/);
+    assert.match(r.out, /Would run Studio's tests/);
+    assert.ok(!r.ran.includes("git clone"), r.ran);
+    assert.deepEqual(r.tree, r.before);
+
+    const left = moveOn({ checkout: "partial-left" }, "--print");
+    assert.equal(left.status, 0, left.out);
+    assert.match(left.out, /Would take away the half-made copy/);
+    assert.deepEqual(left.tree, left.before, "a print takes no .partial away");
+
+    const there = moveOn({ marks: "" }, "--print");
+    assert.equal(there.status, 0, there.out);
+    assert.match(there.out, /Would run Studio's tests/);
+    assert.ok(!there.out.includes("ℹ pass"));
   });
 });

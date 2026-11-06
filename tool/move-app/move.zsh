@@ -55,6 +55,7 @@ COMMIT=""
 changed=()           # each change this run made, in words, for the stop summary
 made_partial=""      # set when this run made $PARTIAL, so that a Ctrl-C takes it away again
 R41=()               # the report's lines for check 41
+R42_COMMIT="" R42_TESTS=""   # the report's lines for the code: the commit (short sha and subject), and the tests' ℹ summary lines
 R42_KEY="" R42_SSH=""   # the report's lines for check 42: whether the key is on GitHub and how, and what ssh -T printed
 ROOT="" DROP="" CHECKOUT_NOW="" NODE="" CLAUDE=""
 
@@ -477,7 +478,110 @@ $(local l; for l in "${HOST_BLOCK[@]}"; do print -r -- "    $l"; done)"
 }
 
 # The steps after the key. Each is replaced by its own task; until then it says its heading and does nothing.
-get_the_code() { heading "3. Studio's code (check 42)"; }
+# Step 3, check 42: Studio's code, cloned over the key from GitHub, main put at the commit this app was made at, and Studio's
+# own tests run there. The marks file holds key=value lines (tests=<commit>, and later installed=<commit>).
+# Reads one key from the marks file.
+mark_of() { [[ -f "$MARKS" ]] && sed -n "s/^$1=//p" "$MARKS" | head -n 1 || true; }
+# Writes one key into the marks file: its own line is replaced and every other line is kept.
+write_mark() {
+  local key="$1" value="$2" kept=""
+  [[ ! -f "$MARKS" ]] || kept="$(grep -v "^$key=" "$MARKS" || true)"
+  { [[ -z "$kept" ]] || print -r -- "$kept"; print -r -- "$key=$value"; } > "$MARKS.new"
+  mv "$MARKS.new" "$MARKS"
+}
+# The checkout that is already there: it must be Studio's, clean, and at the app's commit. Anything else stops, in words.
+look_at_the_checkout() {
+  local origin head short="${COMMIT[1,7]}"
+  origin="$(git -C "$STUDIO" remote get-url origin 2>/dev/null || true)"
+  if [[ -z "$origin" ]]; then
+    stop_here "$STUDIO is there, but it isn't a copy of Studio's code (it has no origin). This app does not touch it."
+  fi
+  if [[ "$origin" != "$STUDIO_URL" ]]; then
+    stop_here "$STUDIO is there, but it comes from $origin, not from Studio's repository ($STUDIO_URL). This app does not touch it."
+  fi
+  if [[ -n "$(GIT_OPTIONAL_LOCKS=0 git -C "$STUDIO" status --porcelain 2>/dev/null || true)" ]]; then
+    stop_here "$STUDIO has changes that aren't saved. This app does not touch it; tell Jason."
+  fi
+  head="$(git -C "$STUDIO" rev-parse HEAD 2>/dev/null || true)"
+  if [[ "$head" != "$COMMIT" ]]; then
+    stop_here "$STUDIO is at ${head[1,7]}, and this app was made at $short. This app does not move it; tell Jason."
+  fi
+  done_already "Studio's code is there ($STUDIO), at the app's commit $short"
+}
+# Takes a clone away that did not come out, so that nothing is left at the checkout's place or beside it.
+drop_the_partial() { rm -rf "$PARTIAL"; made_partial=""; }
+copy_the_code() {
+  local short="${COMMIT[1,7]}" told
+  local -a clone
+  clone=(git clone --branch main "$STUDIO_URL" "$PARTIAL")
+  if [[ -n "$PRINT_ONLY" ]]; then
+    [[ ! -e "$PARTIAL" ]] || would "take away the half-made copy an earlier run left at $PARTIAL"
+    would "clone Studio's code with: ${clone[*]}"
+    would "put main at $short, the commit this app was made at, and rename $PARTIAL to $STUDIO"
+    R42_COMMIT="$short (a print: not cloned)"
+    return 0
+  fi
+  local also=""
+  [[ ! -e "$PARTIAL" ]] || also=" A half-made copy from an earlier run, at $PARTIAL, is taken away first."
+  ask "Studio's code is copied from GitHub, over Studio's key, to $STUDIO. It is cloned into $PARTIAL first, main is put at $short (the commit this app was made at), and only then is the folder renamed.$also This takes a minute. It writes only that folder."
+  if [[ -e "$PARTIAL" ]]; then
+    rm -rf "$PARTIAL"
+    changed+=("took away a half-made copy of Studio's code ($PARTIAL)")
+  fi
+  made_partial=yes
+  if ! told="$("${clone[@]}" 2>&1)"; then
+    drop_the_partial
+    say "${told}"
+    stop_here "Studio's code could not be copied from GitHub (the lines above say why)."
+  fi
+  if ! git -C "$PARTIAL" merge-base --is-ancestor "$COMMIT" origin/main >/dev/null 2>&1; then
+    drop_the_partial
+    stop_here "GitHub's main doesn't hold the commit this app was made at ($short). Tell Jason."
+  fi
+  if ! git -C "$PARTIAL" reset --hard "$COMMIT" >/dev/null 2>&1 || ! mv "$PARTIAL" "$STUDIO"; then
+    drop_the_partial
+    stop_here "Studio's code could not be put at the app's commit ($short)."
+  fi
+  made_partial=""
+  changed+=("copied Studio's code to $STUDIO, at the app's commit $short")
+  say "  Studio's code is at $STUDIO, at $short."
+}
+run_the_tests() {
+  local short="${COMMIT[1,7]}" kept rc=0 line
+  if [[ "$(mark_of tests)" == "$COMMIT" ]]; then
+    done_already "Studio's tests passed at this commit ($short), on an earlier run"
+    R42_TESTS="passed at $short on an earlier run"
+    return 0
+  fi
+  if [[ -n "$PRINT_ONLY" ]]; then
+    would "run Studio's tests in $STUDIO/tool (about three minutes; they change nothing), and mark them passed at $short"
+    return 0
+  fi
+  say "  Now Studio's own tests run, in $STUDIO/tool. They take about three minutes and change nothing."
+  kept="$(mktemp)"
+  { (cd "$STUDIO/tool" && "$NODE" --test --test-reporter=spec) 2>&1 | while IFS= read -r line; do
+      say "$line"
+      print -r -- "$line" >> "$kept"
+    done } || rc=$?
+  R42_TESTS="$(grep '^ℹ' "$kept" || true)"
+  rm -f "$kept"
+  if (( rc != 0 )); then
+    stop_here "Studio's tests did not pass at $short. Tell Jason; the lines above, from ℹ tests on, say how many failed."
+  fi
+  write_mark tests "$COMMIT"
+  say "  Studio's tests passed."
+}
+get_the_code() {
+  heading "3. Studio's code (check 42)"
+  if [[ -e "$STUDIO" ]]; then
+    look_at_the_checkout
+    R42_COMMIT="${COMMIT[1,7]} $(git -C "$STUDIO" log -1 --format=%s 2>/dev/null || true)"
+  else
+    copy_the_code
+    [[ -n "$PRINT_ONLY" ]] || R42_COMMIT="${COMMIT[1,7]} $(git -C "$STUDIO" log -1 --format=%s 2>/dev/null || true)"
+  fi
+  run_the_tests
+}
 find_the_app() { heading "4. The HyperFrames app (check 43)"; }
 run_the_installer() { heading "5. Studio's installer (check 44)"; }
 write_the_report() { heading "6. The report"; }
