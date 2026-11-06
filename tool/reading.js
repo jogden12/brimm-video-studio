@@ -185,7 +185,7 @@ function suggestionsText({ name, kind, candidates, problems, at }) {
       `${c.n}. ${stamp(c.start)} to ${stamp(c.end)}, ${seconds} second${seconds === 1 ? "" : "s"}${c.ranges.length > 1 ? ", without what is cut in between" : ""}.`,
       c.first && `   Opens with: ${c.first}`,
       c.last && `   Closes with: ${c.last}`,
-      c.reason && `   Why: ${c.reason}`,
+      c.reason && `   Why it holds attention: ${c.reason}`,
       c.point && `   Its point: ${c.point}`,
       c.hook && `   Words for the screen: ${c.hook}`,
       !c.fits.fits && `   It does not fit a Reel. ${c.fits.why}`,

@@ -89,7 +89,7 @@ describe("the request to Claude", () => {
     assert.match(asked("clips"), /at most five \{"from", "to", "hook", "why"\}/);
     assert.match(asked("clips"), /a short vertical clip of 15 to 90 seconds/);
     assert.match(asked("clips"), /from the phrase "from" to a later phrase "to", and is made of what is kept between them/);
-    assert.match(asked("clips"), /"hook" is at most eight words to put on screen\. "why" is one sentence\. An empty list when nothing stands alone\./);
+    assert.match(asked("clips"), /"hook" is at most eight words to put on screen\. "why" is one sentence on why a viewer keeps watching: the hook, the turn or the promise that holds them\. An empty list when nothing stands alone\./);
   });
   it("has the line that asks for graphic cues as the brief writes it, and no line that asks for ideas for graphics", () => {
     assert.equal(ASK.graphicCues, '- "graphicCues": at most twelve {"id", "words", "kind", "show", "seconds"}, in the order they are said. Each makes one of her points visible with a short animated graphic or words on screen. "id" is the kept phrase it goes with; "words" are the words it goes with, copied exactly from that phrase; "kind" is "graphic" or "words"; "show" says what it shows, in one or two plain sentences, with things and words and never people; "seconds" is how long it stays, from 2 to 8 and usually 3 or 4.');
