@@ -1469,7 +1469,7 @@ describe("her skill asks Studio's cards as Studio printed them, in short rules, 
   // in a sentence of its own, and keeps its lines short. Both skills are read from their files; the twin holds the same rules.
   const SKILLS = Object.fromEntries(["SKILL.md", "SKILL-open.md"].map((name) => [name, readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8")]));
   const RULES = {
-    declined: "If she declines or leaves a card, ask the same card again exactly as Studio printed it; never ask a card of your own, and never ask whether that is her answer.",
+    declined: "If she dismisses a card without answering it, ask the same card again exactly as Studio printed it; never ask a card of your own, and never ask whether that is her answer.",
     oneLine: "Put each command on one line; never break it with a line break or a backslash.",
     dropTime: "A video's label is when she dropped it. Never say when she filmed it.",
     spelling: "Show a spelling as Studio printed it, letters and capitals as they are.",
@@ -1491,7 +1491,7 @@ describe("her skill asks Studio's cards as Studio printed them, in short rules, 
         assert.ok(rule.includes("before any other command"), rule);
         const first = rule.indexOf('run `footage "<label>" "<title>" voiceover`');
         const asks = rule.indexOf("ask the card it prints");
-        const then = rule.indexOf("only then run `footage` again with the flag");
+        const then = rule.indexOf("only then run `footage` again with `--not-a-session`");
         assert.ok(first >= 0 && first < asks && asks < then, rule);
         assert.ok(rule.indexOf("before any other command") < first, "the order is said before the command");
         assert.ok(rule.includes('"It is not a session"'), rule);

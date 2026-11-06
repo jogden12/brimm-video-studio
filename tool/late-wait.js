@@ -10,7 +10,7 @@
 // record, `projectWaits` says to verify the files the project reads against the sizes the record lists (app.js readListed), and
 // `readingCheckAt` says when the read run's own check is made, for the words of the commands it stops.
 import { statSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { LATE_CHECK_MS } from "./dropbox.js";
 import { dueAt, readPendings, releaseLateCheckLock, sameFile, settleReading, takeLateCheckLock, writePending } from "./filing.js";
 import { holdsVideo, importState, readStatuses } from "./importing.js";
@@ -47,8 +47,8 @@ export function localSource(ctx, record) {
   const usable = (path) => typeof path === "string" && path !== "" && sizeOf(path) === bytes && ctx.isWhole(path);
   if (usable(owed.drop) && sameFile(owed.drop, owed.dropFile)) return { path: owed.drop };
   // A drop file that is there but is not the one imported is never made good by the entry that was put in from it.
-  const name = record.video.file;
-  const entry = owed.entries.find((e) => e && basename(String(e.to)) === name && e.from !== owed.drop && usable(e.from));
+  // Its entry is the one put in under the video's own name in the check's own folder: a file of that size and name put in elsewhere is no match.
+  const entry = owed.entries.find((e) => e && String(e.to) === kept && e.from !== owed.drop && usable(e.from));
   return entry ? { path: entry.from } : null;
 }
 

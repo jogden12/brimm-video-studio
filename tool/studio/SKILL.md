@@ -17,7 +17,7 @@ Run `behind`. If it says "This folder's lock is changed on this Mac", tell her: 
 
 The card's words are a proposal, for Jason and Sallie to settle.
 
-- If she declines or leaves a card, ask the same card again exactly as Studio printed it; never ask a card of your own, and never ask whether that is her answer.
+- If she dismisses a card without answering it, ask the same card again exactly as Studio printed it; never ask a card of your own, and never ask whether that is her answer.
 - Put each command on one line; never break it with a line break or a backslash.
 - A video's label is when she dropped it. Never say when she filmed it.
 - Show a spelling as Studio printed it, letters and capitals as they are.
@@ -55,7 +55,7 @@ Run `kind` only with both answers, and only when they agree: "Client or group se
 When she answered anything but "Client or group session", and the Came line says it came as a Zoom download or as sound alone, or `kind` says to ask first whether it is a client or group session, ask her on one `AskUserQuestion`: "It came from Zoom (or: it is sound alone), which is often a client or group session. Which is it?", or, when no Came line says either, "It may be a Zoom download or sound alone, which is often a client or group session. Which is it?", with the answers "It is a client or group session", "It is not a session".
 A bare yes or no in the chat is unclear: ask again. Only on "It is not a session", run the same `kind` with `--not-a-session` added, as `kind "<label>" finished --private no --not-a-session`; on "It is a client or group session", `kind "<label>" session --private yes`.
 
-On an answer that starts "The voiceover for", ask the card for a video of sound alone right after the planned card, before any other command: run `footage "<label>" "<title>" voiceover`, ask the card it prints, as given, and only then run `footage` again with the flag, added only on "It is not a session".
+On an answer that starts "The voiceover for", ask the card for a video of sound alone right after the planned card, before any other command: run `footage "<label>" "<title>" voiceover`, ask the card it prints, as given, and only then run `footage` again with `--not-a-session`, added only on "It is not a session".
 
 Then tell her what `kind` says, in plain words: when Claude reads it, or that a notice will come, and tell her here when Claude has read it, as "Guide her" says for work in the background. When it says what Claude made, go on as for "What did Claude find?". When it says a raw video is not on this Mac yet, ask her on one `AskUserQuestion`, with its size: "Read it here", "Leave it for the Mac Studio" (or the Mac it names), and run nothing until she answers.
 

@@ -116,6 +116,17 @@ describe("localSource", () => {
     assert.equal(localSource(s.ctx, record), null);
     s.done();
   });
+  it("does not take a same-size, same-name file put in to another folder for the video's entry (final review R1b-3)", () => {
+    const s = setup();
+    const out = join(s.work, "Take 1.mov");
+    writeFileSync(out, "z".repeat(40));
+    writeFileSync(join(s.folder, "Take 1.mov"), "z".repeat(40));
+    const elsewhere = join(s.base, "Another episode");
+    mkdirSync(elsewhere);
+    writePending(s.home, s.pending({ video: "Take 1.mov", drop: join(s.work, "not in a drop folder"), dropFile: null, entries: [{ from: out, to: join(elsewhere, "Take 1.mov"), bytes: 40 }] }));
+    assert.equal(localSource(s.ctx, { id: ID, video: { file: "Take 1.mov", bytes: 40 } }), null);
+    s.done();
+  });
 });
 
 describe("lateCheckAt", () => {
