@@ -7,7 +7,7 @@ import { REELS_FILE, previewPath, readReels, reelsFile, reelEntries, mergeCandid
 import { firstWordsMatch } from "../exports.js";
 import { keptWords, lengthOf, timelineAt, clockText } from "../clock.js";
 import { graphicCuesOf, graphicCuesOfPlan, graphicCuesOfRecord, graphicCuesAsk, graphicCuesInPlan, graphicCuesInReply, graphicCuesJson, reelGraphicCues, placeGraphicCues, keptIndexes, keptPhraseSpans, phraseSpans, cueTokens, GRAPHIC_CUE_KINDS, SHOT_KINDS, REEL_CUES_MOST, CLIP_CUES_MOST, REEL_EDGE_SLACK } from "../graphic-cues.js";
-import { createdOf, waitingToCut, captionTime, wordArgs, wordsOf, probeArgs, factsOf, colourOf, pauseArgs, pausesOf, framesASecond, streamsOf, soundStream, rangesOf, KEPT, KEPT_SIDE, keptSpans, roughRate, roughCaptions, planText, encodeArgs, QUALITY, phrasesOf, cutPlan, joinNotes, roughCutArgs, cutOutputs, clipOutputs, clipFiles } from "../cuts.js";
+import { createdOf, waitingToCut, captionTime, wordArgs, wordsOf, probeArgs, factsOf, colourOf, pauseArgs, pausesOf, framesASecond, streamsOf, soundStream, rangesOf, KEPT, KEPT_SIDE, keptSpans, roughRate, roughCaptions, planText, encodeArgs, QUALITY, phrasesOf, cutPlan, roughCutArgs, cutOutputs, clipOutputs, clipFiles } from "../cuts.js";
 import { clipArgs, storyCuts, STORY_MAX, REEL_MIN, REEL_MAX, fitReel, storyParts, stretchesOf, cropsFor, stillsArgs, verticalArgs, UPRIGHT, shownWidth, speakerPlace, uprightPosition, STILL_EVERY } from "../reframe.js";
 
 describe("reel-candidates.js", () => {
@@ -46,7 +46,7 @@ describe("graphic-cues.js", () => {
 describe("cuts.js", () => {
   // The cuts: every name filing, final-transcript, finish, join, on-timeline, notes, reading, reframe, workcopy, unedited and closing import.
   it("still exports what the kept modules import", () => {
-    const names = { createdOf, waitingToCut, captionTime, wordArgs, wordsOf, probeArgs, factsOf, colourOf, pauseArgs, pausesOf, framesASecond, streamsOf, soundStream, rangesOf, KEPT, KEPT_SIDE, keptSpans, roughRate, roughCaptions, planText, encodeArgs, QUALITY, phrasesOf, cutPlan, joinNotes, roughCutArgs, cutOutputs, clipOutputs, clipFiles };
+    const names = { createdOf, waitingToCut, captionTime, wordArgs, wordsOf, probeArgs, factsOf, colourOf, pauseArgs, pausesOf, framesASecond, streamsOf, soundStream, rangesOf, KEPT, KEPT_SIDE, keptSpans, roughRate, roughCaptions, planText, encodeArgs, QUALITY, phrasesOf, cutPlan, roughCutArgs, cutOutputs, clipOutputs, clipFiles };
     for (const [name, value] of Object.entries(names)) assert.notEqual(value, undefined, `${name} is exported`);
   });
 });

@@ -679,9 +679,9 @@ describe("plan, the plan in plain words", () => {
 describe("a planned episode in Episodes, and the commands that are not plan", () => {
   /** A command's words for each command that is not in the gate's lists for a plan, by the words that name the plan. */
   const ASKED = {
-    kind: [TITLE, "raw", "--private", "no"], leave: [TITLE], which: [TITLE], read: ["--now", TITLE, "--kind", "raw", "--rev", "1"], workcopy: ["--now", TITLE], open: [TITLE], app: [TITLE], push: [TITLE],
+    kind: [TITLE, "raw", "--private", "no"], leave: [TITLE], which: [TITLE], read: ["--now", TITLE, "--kind", "raw", "--rev", "1"], workcopy: ["--now", TITLE], open: [TITLE], app: [TITLE],
     bring: ["--now", TITLE], title: [TITLE], reel: ["drop", TITLE, "1"], reels: [TITLE, "--no-play"], ask: [TITLE], finish: [TITLE], release: [TITLE], show: [TITLE, "transcript"], resolve: [TITLE], free: [TITLE],
-    spell: [TITLE], logo: [TITLE, "on"], captions: [TITLE, "reel", "1", "on"], text: [TITLE], graphic: [TITLE], preset: [TITLE], cut: [TITLE, "remove", "--words", "x"], teachings: [TITLE], principles: [TITLE], ideas: [TITLE],
+    spell: [TITLE], graphic: [TITLE, "ideas"], teachings: [TITLE], principles: [TITLE], ideas: [TITLE],
     refs: ["use", TITLE, "blue carousel"],
     // A plan is no video, so it is no footage for a plan (PR H5a): the gate says it isn't made from its footage yet.
     footage: [TITLE, "Another plan", "talking", "--client", "no"]

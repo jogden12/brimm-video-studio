@@ -634,9 +634,9 @@ describe("Studio never writes into the reference folder", () => {
   /** What each command is given, as Claude runs it, for the made-up episode (every command is here, so that one added later is walked). */
   const WALK = {
     episodes: [[]], guide: [[]], kind: [[FOLDER, "finished", "--private", "no"]], leave: [[FOLDER]], which: [[FOLDER]], read: [["--now", FOLDER, "--kind", "finished", "--rev", "1"]], workcopy: [["--now", FOLDER], ["--now", FOLDER, "--footage"]], join: [["--now", FOLDER, "--parts", "e-20261020-aaaaaa"], []],
-    open: [[FOLDER]], app: [[FOLDER], [FOLDER, "reel", "2"]], push: [[FOLDER]], bring: [["--now", FOLDER]], status: [[]], retry: [["nothing"]], name: [[FOLDER, "A new name"]], title: [[FOLDER]],
+    open: [[FOLDER]], app: [[FOLDER], [FOLDER, "reel", "2"]], bring: [["--now", FOLDER]], status: [[]], retry: [["nothing"]], name: [[FOLDER, "A new name"]], title: [[FOLDER]],
     reel: [["drop", FOLDER, "1"]], reels: [[FOLDER, "--no-play"]], ask: [[FOLDER]], finish: [[FOLDER]], show: [[FOLDER, "transcript"]], behind: [[]], resolve: [[FOLDER]], free: [[FOLDER]],
-    spell: [[FOLDER]], logo: [[FOLDER, "on"]], captions: [[FOLDER, "reel", "1", "on"]], text: [[FOLDER]], graphic: [[FOLDER]], preset: [[FOLDER]], cut: [[FOLDER, "remove", "--words", "x"]],
+    spell: [[FOLDER]], graphic: [[FOLDER, "ideas"]],
     teachings: [[FOLDER]], principles: [[FOLDER]], ideas: [[FOLDER]],
     refs: [[], ["look", "blue carousel"], ["look", "title style"], ["look", "launch"], ["look", "nothing like it"], ["use", FOLDER, "blue carousel"], ["use", FOLDER, "title style", "reel", "2"], ["use", FOLDER, "launch"], ["use", FOLDER, "nothing like it"]],
     // The planned episode (PR H4) reads the folder for a cue's ref (`plan … set`): the made-up episode is no plan, so this world only walks its forms; tests/edit-plan.test.js

@@ -560,7 +560,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       }
     }
     // The flags of the fork are among those checked, so that this cannot go blind.
-    for (const used of ["kind --private", "kind --version-of", "kind --not-a-session", "kind --again", "kind --clear-session", "kind --here", "teachings --transcript-only", "reel --client-agreed", "principles --name", "title --approve", "text --line", "graphic --at-words", "cut --words", "finish --yes"]) {
+    for (const used of ["kind --private", "kind --version-of", "kind --not-a-session", "kind --again", "kind --clear-session", "kind --here", "teachings --transcript-only", "reel --client-agreed", "principles --name", "title --approve", "finish --yes"]) {
       assert.ok(seen.has(used), `the skill's use of ${used} was not checked`);
     }
     // A flag the skill names on its own, in a row's words, is one edit.js's help gives some command (or a field she may change).

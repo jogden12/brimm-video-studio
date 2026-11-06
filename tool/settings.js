@@ -59,10 +59,6 @@ export const downloadsFolder = (home) => join(home, "Downloads");
 export const runsFolder = (home) => join(workFolder(home), ".runs");
 /** This Mac's folder for one episode: the copies handed to Final Cut, and the episode's library. */
 export const episodeWork = (home, folder) => join(workFolder(home), folder);
-/** Where the copies of an episode's timelines handed to Final Cut on this Mac are written. */
-export const pushedFolder = (home, folder) => join(episodeWork(home, folder), "pushed");
-/** This Mac's Final Cut library for one episode, named for the episode's folder. */
-export const libraryFor = (home, folder) => join(episodeWork(home, folder), `${folder}.fcpbundle`);
 /** Where this Mac notes the last rev it wrote of each episode's record, so it can tell when Dropbox undid one. */
 export const writtenFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "written.json");
 /** Where this Mac notes when it first saw each video in its drop folder, so that how long one has waited is known whatever

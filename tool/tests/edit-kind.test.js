@@ -1409,7 +1409,7 @@ describe("a video left alone, in the gate's own words", () => {
   it("is refused by ask and by open in words that do not say it is waiting for its answer", async () => {
     const t = setup();
     const found = waiting(t, { answer: { ...ANSWER, state: "not for brimm-video" } });
-    for (const name of ["ask", "open", "reels", "push", "finish", "name"]) {
+    for (const name of ["ask", "open", "reels", "spell", "finish", "name"]) {
       const words = name === "name" ? [LABEL, "A name"] : [LABEL];
       const r = await on(t.ctx.deps, name, ...words);
       assert.deepEqual([r.code, r.said], [1, [LEFT]], name);

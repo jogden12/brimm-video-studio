@@ -123,7 +123,7 @@ describe("app … what-happened and app … versions: the usages", () => {
       const at = lines.indexOf(`  node edit.js app "<episode>" ${form}`);
       assert.ok(at > lines.findIndex((line) => line.startsWith('  node edit.js app "<episode>" ') && line.includes("open the episode's main video")), `${form} comes after app`);
       assert.match(lines[at + 1], words);
-      assert.ok(at < lines.findIndex((line) => line.startsWith('  node edit.js push "<episode>" [main]')), `${form} comes before push`);
+      assert.ok(at < lines.findIndex((line) => line.startsWith('  node edit.js status ')), `${form} comes before status`);
     }
     assert.ok(!COMMAND_NAMES.includes("what-happened") && !COMMAND_NAMES.includes("versions"));
     assert.ok(COMMAND_NAMES.includes("app"));

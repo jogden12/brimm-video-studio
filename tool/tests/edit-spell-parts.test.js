@@ -258,28 +258,28 @@ describe("spell, on a raw video edited in HyperFrames and not finished yet", () 
     assert.equal(r.text, '"Sallie" is spelled "Sally" now. The final transcripts take the spellings when you hand it off. Ask the assistant in HyperFrames to fix any caption already drawn.');
     w.t.done();
   });
-  it("keeps Final Cut's words for the same video once the main video was shown in Final Cut, and then names its Reel project, which is not handed off yet", async () => {
+  it("is edited in the app too when its main video was shown in Final Cut once: the same words, and nothing of Final Cut", async () => {
     const w = rawExported();
     shownInFinalCut(w.found);
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every timeline\'s captions. Say "show it in Final Cut" to see it. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now. The final transcripts take the spellings when you hand it off. Ask the assistant in HyperFrames to fix any caption already drawn.');
     const drop = await on(w.t.ctx.deps, "spell", FOLDER, "drop", "Sallie");
-    assert.equal(drop.text, '"Sallie" is as the transcriber writes it again. Say "show it in Final Cut" to see it. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
+    assert.equal(drop.text, '"Sallie" is as the transcriber writes it again. The final transcripts take the spellings when you hand it off. Ask the assistant in HyperFrames to fix any caption already drawn.');
     w.t.done();
   });
-  it("keeps Final Cut's words for a raw video with a project for a Reel alone, and names that Reel: the record does not say the video is edited in the app", async () => {
+  it("says the plain words for a raw video with a project for a Reel alone, and names that Reel: the record does not say the video is edited in the app", async () => {
     const w = fw({ projects: ["reel 2"] });
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every timeline\'s captions. Say "show it in Final Cut" to see it. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every caption. Reel 2 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
     w.t.done();
   });
-  it("keeps Final Cut's words for a raw video with no project at all", async () => {
+  it("says the plain words for a raw video with no project at all", async () => {
     const w = fw({ projects: [] });
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every timeline\'s captions. Say "show it in Final Cut" to see it.');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every caption.');
     w.t.done();
   });
 });
@@ -364,66 +364,6 @@ describe("spell, after a finish of a video her editor finished", () => {
     assert.equal(drop.code, 0, drop.text);
     assert.equal(drop.text, '"Hormozy" is as the transcriber writes it again. The final transcripts and the hand-off are as they were.');
     w.t.done();
-  });
-});
-
-describe("spell, after a finish through Final Cut", () => {
-  it("keeps the words it always had: each part is shown in Final Cut, Shared and finished again", async () => {
-    const { t } = await finalCutFinished();
-    const add = await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
-    assert.equal(add.code, 0, add.text);
-    assert.equal(add.text, '"Sallie" is spelled "Sally" now, in every timeline\'s captions. Say "show it in Final Cut" to see it. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If Reel 1 and Reel 2 show captions on screen, they keep the old spelling until each is shown in Final Cut, Shared and finished again.');
-    const drop = await on(t.ctx.deps, "spell", FOLDER, "drop", "Sallie");
-    assert.equal(drop.code, 0, drop.text);
-    assert.equal(drop.text, '"Sallie" is as the transcriber writes it again. Say "show it in Final Cut" to see it. The final transcripts keep "Sallie" as "Sally" until each part is shown in Final Cut, Shared and finished again.');
-    t.done();
-  });
-  it("tells a part whose entry holds none of project, export, no hand edits or import in those words too, as every part was told before", async () => {
-    const { t, found } = await finalCutFinished();
-    remake(found, (parts) => Object.fromEntries(Object.entries(parts).map(([key, { export: _export, noHandEdits: _no, ...rest }]) => [key, rest])));
-    assert.deepEqual(madeOf(found), { main: [], "reel 1": [], "reel 2": [] });
-    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally")).code, 0);
-    const drop = await on(t.ctx.deps, "spell", FOLDER, "drop", "Sallie");
-    assert.equal(drop.text, '"Sallie" is as the transcriber writes it again. Say "show it in Final Cut" to see it. The final transcripts keep "Sallie" as "Sally" until each part is shown in Final Cut, Shared and finished again.');
-    t.done();
-  });
-});
-
-describe("spell, after a finish that took parts both ways", () => {
-  /** The made-up edit finished through Final Cut, with Reel 1 then made from a HyperFrames export: its part says its project. */
-  async function mixed() {
-    const made = await finalCutFinished();
-    remake(made.found, (parts) => {
-      const { v: _v, export: _export, ...reel } = parts["reel 1"];
-      return { ...parts, "reel 1": { ...reel, project: REEL1 } };
-    });
-    assert.deepEqual(madeOf(made.found), { main: ["export"], "reel 1": ["project"], "reel 2": ["noHandEdits"] });
-    return made;
-  }
-  it("says each Reel's captions on screen by the way it was made, the HyperFrames one first", async () => {
-    const { t } = await mixed();
-    const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
-    assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every timeline\'s captions. Say "show it in Final Cut" to see it. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If Reel 1 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand it off". If Reel 2 shows captions on screen, they keep the old spelling until it is shown in Final Cut, Shared and finished again.');
-    t.done();
-  });
-  it("says the final transcripts of the parts that keep a spelling by the way each was made, and not of a part that keeps none", async () => {
-    const { t } = await mixed();
-    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally")).code, 0);
-    const r = await on(t.ctx.deps, "spell", FOLDER, "drop", "Sallie");
-    assert.equal(r.code, 0, r.text);
-    // The main video (Final Cut's) and Reel 1 (HyperFrames') hold the spelling; Reel 2's words do not have it.
-    assert.equal(r.text, '"Sallie" is as the transcriber writes it again. Say "show it in Final Cut" to see it. The final transcripts of Reel 1 keep "Sallie" as "Sally" until you export it again from HyperFrames and say "hand it off". Those of the main video keep "Sallie" as "Sally" until it is shown in Final Cut, Shared and finished again.');
-    t.done();
-  });
-  it("says Final Cut's words of a part made there when the others, which keep none, were made in HyperFrames", async () => {
-    const { t } = await mixed();
-    // "talk" is in the main video's words (Final Cut's) alone: Reel 1 (HyperFrames') and Reel 2 do not have it.
-    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "add", "talk", "chat")).code, 0);
-    const r = await on(t.ctx.deps, "spell", FOLDER, "drop", "talk");
-    assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"talk" is as the transcriber writes it again. Say "show it in Final Cut" to see it. The final transcripts of the main video keep "talk" as "chat" until it is shown in Final Cut, Shared and finished again.');
-    t.done();
   });
 });
 
@@ -661,39 +601,5 @@ describe("spell, with a Reel project that is not handed off yet: a raw video", (
     assert.equal(r.code, 0, r.text);
     assert.equal(r.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. Ask the assistant in HyperFrames to fix any caption already drawn.');
     w.t.done();
-  });
-});
-
-describe("spell, with a Reel project that is not handed off yet: a raw video finished through Final Cut", () => {
-  /** The made-up edit finished through Final Cut, with a project for Reel 3 made in HyperFrames since. */
-  async function withReel3() {
-    const made = await finalCutFinished();
-    addReelProjects(made.found, ["reel 3"]);
-    return made;
-  }
-  it("names it after the sentences about the parts, where the hand-off is made again", async () => {
-    const { t } = await withReel3();
-    const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
-    assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now, in every timeline\'s captions. Say "show it in Final Cut" to see it. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If Reel 1 and Reel 2 show captions on screen, they keep the old spelling until each is shown in Final Cut, Shared and finished again. Reel 3 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
-    t.done();
-  });
-  it("names it after the sentence about the final transcripts that keep a spelling taken back, where there is nothing to apply", async () => {
-    const { t } = await withReel3();
-    assert.equal((await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally")).code, 0);
-    const r = await on(t.ctx.deps, "spell", FOLDER, "drop", "Sallie");
-    assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Sallie" is as the transcriber writes it again. Say "show it in Final Cut" to see it. The final transcripts keep "Sallie" as "Sally" until each part is shown in Final Cut, Shared and finished again. Reel 3 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
-    t.done();
-  });
-  it("names it where the final transcripts do not have the word, and where a spelling no part holds is dropped", async () => {
-    const { t } = await withReel3();
-    const add = await on(t.ctx.deps, "spell", FOLDER, "add", "Hormozy", "Hormozi");
-    assert.equal(add.code, 0, add.text);
-    assert.equal(add.text, '"Hormozy" is spelled "Hormozi" now, in every timeline\'s captions. Say "show it in Final Cut" to see it. The final transcripts do not have "Hormozy", so they are as they were. Reel 3 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
-    const drop = await on(t.ctx.deps, "spell", FOLDER, "drop", "Hormozy");
-    assert.equal(drop.code, 0, drop.text);
-    assert.equal(drop.text, '"Hormozy" is as the transcriber writes it again. Say "show it in Final Cut" to see it. Reel 3 is not handed off yet. If it shows captions on screen, they keep the old spelling: ask the assistant in HyperFrames to fix them, then export it.');
-    t.done();
   });
 });

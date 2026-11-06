@@ -31,14 +31,6 @@ const STILL = {
   finish: 'finish is running for this episode. Say "how far is it?"',
   kind: "finish is running for 2026-10-14 Pricing talk (Mac Studio) already. Say it again when it has finished."
 };
-/** The layer commands, each with words that take it as far as the stop. */
-const LAYERS = {
-  captions: ["captions", FOLDER, "off"],
-  text: ["text", FOLDER, "add", "lower-third", "--at", "0:01", "--line", "Sallie Ogden"],
-  graphic: ["graphic", FOLDER, "add", "chart.png", "--at", "0:01"],
-  preset: ["preset", FOLDER, "--look", "bright"],
-  cut: ["cut", FOLDER, "remove", "--words", "know your costs"]
-};
 const SPELL = ["spell", FOLDER, "add", "Pricing", "Prycing"];
 const KIND = ["kind", FOLDER, "raw", "--private", "no", "--again", "--not-a-session"];
 
@@ -88,25 +80,6 @@ describe("handing the video off again, while a finish waits for its late check",
     }, 5000);
     assert.equal(await editMain(["finish", "--now", FOLDER], w.t.ctx.deps), 0, w.t.said());
     assert.ok(copying.said.includes(STILL.finish), copying.text);
-    w.t.done();
-  });
-});
-
-describe("a change to the timeline's layers, while a finish waits for its late check", () => {
-  it("is stopped with the hand-off written and when Studio checks, to try again then, for each of the layer commands", async () => {
-    const w = await exported();
-    const heard = await whileChecking(w, LAYERS);
-    for (const name of Object.keys(LAYERS)) assert.deepEqual([heard[name].code, heard[name].text], [1, `${written(heard.due)} Try again then.`], name);
-    w.t.done();
-  });
-  it("is stopped in the words it had while the finish still copies", async () => {
-    const w = await exported();
-    let copying = null;
-    atWait(w.t, async () => {
-      copying = await on(seeing(w), ...LAYERS.captions);
-    }, 5000);
-    assert.equal(await editMain(["finish", "--now", FOLDER], w.t.ctx.deps), 0, w.t.said());
-    assert.equal(copying.text, STILL.spell);
     w.t.done();
   });
 });

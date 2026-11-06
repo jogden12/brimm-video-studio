@@ -357,13 +357,6 @@ describe("F3. a clip edited in HyperFrames, and a clip handed off already", () =
 });
 
 describe("F4. what does not change", () => {
-  it("still says an answered clip has no timeline to show in Final Cut", async () => {
-    const { t } = clip({ answer: ["Ogdin"] });
-    const r = await on(t.ctx.deps, "push", FOLDER);
-    assert.equal(r.code, 1);
-    assert.equal(r.text, `${NAME} has no timeline to show in Final Cut: an iPhone clip is not edited here.`);
-    t.done();
-  });
   it("tells a short video from before the switch, with no answer, on a Mac not set up, that this Mac is not set up for HyperFrames, and says nothing of Final Cut", async () => {
     const t = setup();
     episodeFor(t, { record: { kind: "short video", name: { text: "Hello clip", placeholder: false } } });

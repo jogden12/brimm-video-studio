@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { nameEpisode, titleEpisode, pickReels, dropReels, editMain } from "../edit.js";
+import { nameEpisode, titleEpisode, dropReels, editMain } from "../edit.js";
 import { NEWEST_VERSION, recordFile, recordText } from "../episode.js";
 import { writtenFile } from "../settings.js";
 import { setup, episodeFor, reread, EDITED, FOLDER } from "./episodes.js";
@@ -49,7 +49,7 @@ describe("what every record command does first", () => {
     t.done();
   });
   it("names the checkout this code is in as the record's writer, with no commit given and the settings naming a folder that is no checkout", { skip: WITHOUT_COMMIT }, async () => {
-    const commands = [(t, found) => nameEpisode(t.ctx, found, "Pricing"), (t, found) => titleEpisode(t.ctx, found, { words: "Hello", approve: true }), (t, found) => pickReels(t.ctx, found, [1])];
+    const commands = [(t, found) => nameEpisode(t.ctx, found, "Pricing"), (t, found) => titleEpisode(t.ctx, found, { words: "Hello", approve: true }), (t, found) => dropReels(t.ctx, found, [1])];
     for (const command of commands) {
       const t = setup();
       t.ctx.deps.commit = undefined;
@@ -61,7 +61,7 @@ describe("what every record command does first", () => {
     }
   });
   it("says what Dropbox took away, and writes nothing, when this Mac's last change was undone; once, as 1a's commands do", async () => {
-    const commands = [(t, found) => nameEpisode(t.ctx, found, "Pricing"), (t, found) => titleEpisode(t.ctx, found, { words: "Hello", approve: true }), (t, found) => pickReels(t.ctx, found, [1])];
+    const commands = [(t, found) => nameEpisode(t.ctx, found, "Pricing"), (t, found) => titleEpisode(t.ctx, found, { words: "Hello", approve: true }), (t, found) => dropReels(t.ctx, found, [1])];
     for (const command of commands) {
       const t = setup();
       const found = episodeFor(t, { record: { reels: EDITED.reels } });
@@ -171,40 +171,36 @@ describe("title", () => {
   });
 });
 
-// No command picks a Reel by this any more (plan PR 5): `app … reel <n>` marks the Reel it opens picked (tests/edit-app-reel.test.js).
-// `pickReels` stays, with `markReels` it shares with `reel drop`, for the Final Cut Reel path and these tests until the retirement's
-// wave 5 takes that path away.
-describe("pickReels and reel drop", () => {
-  it("picks and drops Reels by number, and says how to show a picked one in Final Cut", async () => {
+// No command picks a Reel any more (plan PR 5): `app … reel <n>` marks the Reel it opens picked (tests/edit-app-reel.test.js). `reel drop`
+// is `dropReels`.
+describe("reel drop", () => {
+  it("drops Reels by number", async () => {
     const t = setup();
-    const found = episodeFor(t, { record: { reels: EDITED.reels.map((r) => ({ ...r, status: "candidate" })) } });
-    assert.equal(await pickReels(t.ctx, found, [1, 3]), 0);
-    assert.deepEqual(reread(found).reels.map((r) => r.status), ["picked", "candidate", "picked"]);
-    assert.match(t.said(), /Reel 1 is picked\. Say "show reel 1 in Final Cut" to have it pushed\. Reel 3 is picked\./);
-    assert.equal(await dropReels(t.ctx, { ...found, record: reread(found) }, [3]), 0);
-    assert.deepEqual(reread(found).reels.map((r) => r.status), ["picked", "candidate", "dropped"]);
-    assert.match(t.said(), /Reel 3 is dropped\./);
+    const found = episodeFor(t, { record: { reels: EDITED.reels.map((r) => ({ ...r, status: "picked" })) } });
+    assert.equal(await dropReels(t.ctx, found, [1, 3]), 0);
+    assert.deepEqual(reread(found).reels.map((r) => r.status), ["dropped", "picked", "dropped"]);
+    assert.match(t.said(), /Reel 1 is dropped\. Reel 3 is dropped\./);
     t.done();
   });
   it("keeps every other field of a Reel as it was", async () => {
     const t = setup();
     const found = episodeFor(t, { record: { reels: [{ ...EDITED.reels[2], later: { x: 1 } }] } });
-    await pickReels(t.ctx, found, [3]);
-    assert.deepEqual(reread(found).reels[0], { ...EDITED.reels[2], later: { x: 1 }, status: "picked" });
+    await dropReels(t.ctx, found, [3]);
+    assert.deepEqual(reread(found).reels[0], { ...EDITED.reels[2], later: { x: 1 }, status: "dropped" });
     t.done();
   });
   it("refuses a Reel that is not there, a finished one, none named, and any Reel of a short video; and writes nothing", async () => {
     const t = setup();
     const found = episodeFor(t, { record: { reels: [{ ...EDITED.reels[0], status: "finished" }, EDITED.reels[2]] } });
-    assert.equal(await pickReels(t.ctx, found, [9]), 1);
+    assert.equal(await dropReels(t.ctx, found, [9]), 1);
     assert.match(t.said(), /There is no Reel 9\. The Reels are 1, 3\./);
     assert.equal(await dropReels(t.ctx, found, [1]), 1);
     assert.match(t.said(), /Reel 1 is finished: it is in the hand-off already\./);
-    assert.equal(await pickReels(t.ctx, found, []), 1);
+    assert.equal(await dropReels(t.ctx, found, []), 1);
     assert.match(t.said(), /Say which Reels, by their numbers\./);
     const short = setup();
     const video = episodeFor(short, { record: { kind: "short video", reels: [] } });
-    assert.equal(await pickReels(short.ctx, video, [1]), 1);
+    assert.equal(await dropReels(short.ctx, video, [1]), 1);
     assert.match(short.said(), /A short video has no Reels\./);
     assert.equal(reread(found).rev, found.record.rev);
     t.done();
