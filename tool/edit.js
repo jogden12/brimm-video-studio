@@ -81,8 +81,8 @@ import { lateCheckAt, localSource } from "./late-wait.js";
 import { heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
 import { reelTimeline } from "./reel.js";
 import { partsOf, lookFor, unkeptParts, kindOf } from "./parts.js";
-import { finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, matchedSession, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
-import { BRINGING, REEL_KEY, START as REELS_START, exportAgainWords, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
+import { HAND_OFF_ASK, REELS_ASK, finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, expectedWords, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, matchedSession, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
+import { BRINGING, REEL_KEY, exportAgainWords, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
 import { checkingNow, problemFlagged } from "./finish-check.js";
 import { endedSinceYes, endedWithoutHandoff } from "./finish-ended.js";
 import { handoffIn, videoSeconds } from "./finish-time.js";
@@ -2670,7 +2670,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // may take an export).
   if (forReels && !looked.asks.length && !looked.parts.some((part) => !part.kept)) return refuse(ctx, nothingNewWords(shownName(record), based.base.revision, retitledReels(based.onFile.reels, record.reels)));
   if (looked.asks.length || !answers.yes || showing) {
-    if (!looked.asks.length) ctx.say(forReels ? REELS_START : app ? 'Say "yes, hand it off" to start.' : 'Say "yes, finish it" to start.');
+    if (!looked.asks.length) ctx.say(forReels ? `Hand-off question: ${REELS_ASK}` : app ? `Hand-off question: ${HAND_OFF_ASK}` : 'Say "yes, finish it" to start.');
     return 0;
   }
   // The finish holds the episode while it runs: an episode nobody has open is claimed for this Mac first, so the other Mac's

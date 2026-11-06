@@ -354,7 +354,7 @@ function copyStep({ left, usual }) {
     have it open by hand, and `finish` needs no setting. */
 function appStep(facts) {
   const project = facts.project;
-  if (project && project.exported) return toDo("exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.');
+  if (project && project.exported) return toDo("exported", 'You have exported it. Say "hand it off" and I will check what you exported.');
   if (project && project.opened) return toDo("in-app", `Edit it in HyperFrames.${project.last ? ` Your last request there was ${project.last}.` : ""} When you are done, export it on This Mac, as MP4, then say "hand it off".`);
   if (!facts.app) return toDo("app-off", APP_NOT_SET_UP);
   if (!project && facts.copy) return copyStep(facts.copy);

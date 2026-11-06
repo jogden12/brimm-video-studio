@@ -19,6 +19,7 @@ import { FOLDER, ID, reread } from "./episodes.js";
 import { episode, EPISODE } from "./phase4.js";
 import { ZONE, exportOf, ms, named, probeFor } from "./exports-world.js";
 import { HANDOFF_REL, REEL2_OPENING, finishedFiles, whisper } from "./reels-world.js";
+const REELS_LINE = "Hand-off question: I found your Reels' exports. Hand off the Reels?";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
 const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
@@ -87,7 +88,7 @@ describe("finish … reels from the project `app … reel N` makes of a finished
     const before = JSON.parse(readFileSync(join(w.found.folder, HANDOFF_REL), "utf8"));
     const reel = exportOf(w, "reel 2");
     const first = await on(w.t.ctx.deps, "finish", FOLDER, "reels");
-    assert.deepEqual([first.code, first.said], [0, [`Reel 2: ${named(w.names["reel 2"], "14.03")}, from Downloads, exported 2026-10-20 14:03.`, 'Say "yes, hand off the Reels" to start.']]);
+    assert.deepEqual([first.code, first.said], [0, [`Reel 2: ${named(w.names["reel 2"], "14.03")}, from Downloads, exported 2026-10-20 14:03.`, REELS_LINE]]);
     const started = await on(w.t.ctx.deps, "finish", FOLDER, "reels", "--yes");
     assert.deepEqual([started.code, started.said.at(-1)], [0, "Started. This Mac has not timed a hand-off yet, so there is no time to give. You can carry on meanwhile; the panel shows how far it is."]);
     assert.deepEqual(w.asked().parts.map((p) => [p.key, p.project, p.fromSuggestion, p.expected]), [["reel 2", w.names["reel 2"], 2, REEL2_OPENING]]);

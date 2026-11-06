@@ -133,6 +133,11 @@ async function whole(file, work, my, { app = false, again = "hand it off" } = {}
   return { why: app ? `${basename(file)} is still being written. Say "${again}" again when HyperFrames has finished exporting it.` : `${basename(file)} is still being written by Final Cut. Say finish again when its Share is done.` };
 }
 
+/** The one question the chat asks her when her exports are found and nothing is left to ask (after "Hand-off question:" in what
+    `finish` prints): her yes starts the hand-off (review changes R3). The Reels' version is for a finished video's Reels. */
+export const HAND_OFF_ASK = "I found your export. Hand it off?";
+export const REELS_ASK = "I found your Reels' exports. Hand off the Reels?";
+
 /** The words a part is expected to start with: the first phrase kept, as the cut plan and the part's own cuts leave it (phase
     4), for a Reel the first from where it starts. */
 export function expectedWords(part, record, plan) {

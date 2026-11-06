@@ -216,7 +216,7 @@ describe("her folder's settings", () => {
     for (const words of [
       "for a video finished by your editor whose Reels she made in HyperFrames and exported there",
       "it adds them to the hand-off the video has already, as its next revision, and changes nothing else in it",
-      'Its questions go back to `finish "<episode>" reels --yes` with one flag each, as in "In HyperFrames, to hand it off" (a part is reel 2).',
+      'Her answers go back to `finish "<episode>" reels` with one flag each and no `--yes`, as in "In HyperFrames, to hand it off" (a part is reel 2); `--yes` comes only after her "Yes" to the question it prints.',
       "When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page again.",
       'If it says the hand-off is not written yet, tell her to answer the spellings first ("Show me the spellings"); if it says there is nothing new, tell her to export a Reel from HyperFrames first'
     ]) assert.ok(full.includes(words), words);
@@ -810,8 +810,9 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     // Its second half is the bullet that follows (R2, review changes): the two are read together.
     const next = guide.split("\n").slice(nextAt, nextAt + 2).join(" ");
     for (const words of [
-      '"Shall I open it in HyperFrames?" when it says to open it there', '"Shall I hand it off?" once she has exported it', '"Shall I show it in Final Cut?" for a raw video edited there',
+      '"Shall I open it in HyperFrames?" when it says to open it there', '"Shall I show it in Final Cut?" for a raw video edited there',
       "and run it only on her yes, as the table below says",
+      'Once it says she has exported it, or a Reel of a finished video, do not offer: run `finish` at once, as the "Hand it off" and "Hand off the Reels" rules say.',
       "While it says the video for HyperFrames is being made, offer to tell her here when it is done (`guide \"<video>\" tell`, as above)",
       'say only "I\'ll tell you here": no notice is posted for it',
       "When it gives the time of her last request in HyperFrames, say it"

@@ -22,6 +22,7 @@ import { ANSWERED, REEL2, exportOf } from "./exports-world.js";
 import { OFFERS, READ, depsOf } from "./guide-world.js";
 import { HANDOFF_REL, finishedWorld } from "./reels-world.js";
 import { PLAIN, on } from "./workcopy-world.js";
+const REELS_LINE = "Hand-off question: I found your Reels' exports. Hand off the Reels?";
 
 const NAMED = "Pricing: what to charge? (3fa9c1)";
 const DROP_LINE = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
@@ -619,7 +620,7 @@ describe("B8. the other forms of the guide, at this stage", () => {
     assert.deepEqual((await on(depsOf(w), "guide", "3fa9c1")).said, [`${NAMED} is done: nothing is left to do for it.`]);
     // Her note is the guide's: `finish` does not look at it.
     const asked = await on(depsOf(w), "finish", FOLDER, "reels");
-    assert.deepEqual([asked.code, asked.said.at(-1)], [0, 'Say "yes, hand off the Reels" to start.']);
+    assert.deepEqual([asked.code, asked.said.at(-1)], [0, REELS_LINE]);
   });
 });
 

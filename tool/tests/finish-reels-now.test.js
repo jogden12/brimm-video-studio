@@ -20,6 +20,7 @@ import { episodeAs, listAll, reread, FOLDER, ID, NAME } from "./episodes.js";
 import { REEL1, REEL2, entry, exportOf, named, probeFor } from "./exports-world.js";
 import { HANDOFF, HANDOFF_REL, finishedWorld, handoffIn } from "./reels-world.js";
 import { deadlock, watched } from "./watched-fs.js";
+const REELS_LINE = "Hand-off question: I found your Reels' exports. Hand off the Reels?";
 
 const FIXTURE = JSON.parse(readFileSync(new URL("./fixtures/handoff-v2-finished.json", import.meta.url), "utf8"));
 const stem = (file) => file.replace(/\.[^.]+$/, "");
@@ -213,7 +214,7 @@ describe("8. again: the Reels taken before stay as they were", () => {
     // Reel 2's title is changed meanwhile, in the record: the Reel stays in the hand-off as it was, and is not made again.
     rewrite(w, (now) => ({ reels: now.reels.map((r) => (r.n === 2 ? { ...r, title: "A new title" } : r)) }));
     const one = exportOf(w, "reel 1");
-    assert.deepEqual(await lines(w), [`Reel 1: ${one.name}, from Downloads, exported 2026-10-20 14:00.`, "Reel 2: kept as the last finish made it.", 'Say "yes, hand off the Reels" to start.']);
+    assert.deepEqual(await lines(w), [`Reel 1: ${one.name}, from Downloads, exported 2026-10-20 14:00.`, "Reel 2: kept as the last finish made it.", REELS_LINE]);
     const { found } = await finished(w);
     const three = handoffIn(found);
     assert.deepEqual([three.revision, three.video.id], [3, ID]);
@@ -233,7 +234,7 @@ describe("8. again: the Reels taken before stay as they were", () => {
     const second = (await finished(w)).found;
     const two = handoffIn(second);
     const again = exportOf(w, "reel 2", { start: [14, 10, 0], text: "the Reel exported again" });
-    assert.deepEqual(await lines(w), [`Reel 1: kept as the last finish made it.`, `Reel 2: ${again.name}, from Downloads, exported 2026-10-20 14:10.`, 'Say "yes, hand off the Reels" to start.']);
+    assert.deepEqual(await lines(w), [`Reel 1: kept as the last finish made it.`, `Reel 2: ${again.name}, from Downloads, exported 2026-10-20 14:10.`, REELS_LINE]);
     const { found } = await finished(w);
     const three = handoffIn(found);
     assert.deepEqual(three.reels.map((r) => r.n), [1, 2], "each number once");

@@ -11,6 +11,7 @@ import { finishNow } from "../finish.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
 import { EDITED, FOLDER, PROJECT, reread } from "./episodes.js";
 import { FIXTURE_MAIN, MAIN_WORDS, exportOf, fw, screen } from "./exports-world.js";
+const HAND_OFF_LINE = "Hand-off question: I found your export. Hand it off?";
 
 const HANDOFF = "Pricing- what to charge-.brimm-ops.json";
 const RAW_FIXTURE = JSON.parse(readFileSync(new URL("./fixtures/handoff-v2-raw.json", import.meta.url), "utf8"));
@@ -109,7 +110,7 @@ describe("D3. a second finish", () => {
     const { w, found, again } = await once();
     const had = w.t.said().split("\n").length;
     assert.equal(await finishEpisode(w.t.ctx, again(), {}), 0);
-    assert.deepEqual(w.t.said().split("\n").slice(had), ["The main video: kept as the last finish made it.", "Reel 2: kept as the last finish made it.", 'Say "yes, hand it off" to start.']);
+    assert.deepEqual(w.t.said().split("\n").slice(had), ["The main video: kept as the last finish made it.", "Reel 2: kept as the last finish made it.", HAND_OFF_LINE]);
     assert.equal(await finishEpisode(w.t.ctx, again(), { yes: true }), 0);
     const result = await finishNow(w.t.ctx, again());
     assert.equal(result.ok, true, result.failed.join(" "));
