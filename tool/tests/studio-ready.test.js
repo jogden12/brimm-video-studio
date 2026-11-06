@@ -11,12 +11,12 @@ const LANDED = ["captions", "spelling", "words on screen", "lower third", "graph
 
 describe("her skill's Not ready yet", () => {
   const skill = studioFiles({ checkout: "/c", node: "/n" })[".claude/skills/brimm-edit/SKILL.md"];
-  const notReady = skill.slice(skill.indexOf("## Not ready yet"), skill.indexOf("## By hand in Final Cut")).replace(/Final Cut/g, "");
+  const notReady = skill.slice(skill.indexOf("## Not ready yet"), skill.indexOf("## In HyperFrames, to hand it off"));
   it("names nothing that is ready", () => {
     for (const word of LANDED) assert.doesNotMatch(notReady, new RegExp(`\\b${word}\\b`, "i"), word);
   });
-  it("says what is not, and what to do meanwhile: a logo or a look on a Reel, and bringing in her hand edits", () => {
-    assert.ok(skill.includes('- A logo or a look on a Reel: "That comes with the brand templates, later. For now, do it by hand in Final Cut."'), notReady);
-    assert.ok(skill.includes('- Bringing in her hand edits: "That part of BRIMM Video Studio isn\'t ready yet. Make your changes by hand last, after BRIMM Video Studio\'s, or finish that timeline by hand in Final Cut."'), notReady);
+  it("says what is not ready, and no longer a logo, a look or her hand edits, which were Final Cut's (Phase 2)", () => {
+    assert.doesNotMatch(skill, /A logo or a look on a Reel|Bringing in her hand edits|Final Cut/);
+    assert.ok(notReady.includes('- Archiving, checking the setup, freeing space: "That isn\'t ready yet; ask Jason."'), notReady);
   });
 });

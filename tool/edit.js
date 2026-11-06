@@ -140,7 +140,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         where it would say to open the video there or that its video is being made. A
                                         finished video whose hand-off is written is told to hand off the Reels once a Reel
                                         is exported from HyperFrames that the hand-off does not hold. A raw video that
-                                        was edited in Final Cut before is told so, and to open it in HyperFrames, from the
+                                        was edited by hand before is told so, and to open it in HyperFrames, from the
                                         recording. A planned video (plan) is told
                                         to film it to its shot list, or for an explainer to record or choose its voice;
                                         once footage is in, what it has so far, and which part is waiting for a client's

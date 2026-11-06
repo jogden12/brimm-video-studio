@@ -15,7 +15,7 @@ Studio began as brimm-video: its history up to c666508, which is the tag `brimm-
 - Nothing is installed on a Mac, and no launch agent is added or changed, without Jason's yes in chat first.
 - Write a failing test first, then the code.
 - Since 2026-11-03 the Mac Studio's launch agent, `com.thebrimm.unedited`, runs from Studio's main checkout, `~/Claude Code/brimm-video-studio`. Studio's installer kept that label and replaced brimm-video's agent in place, on Jason's yes. That checkout stays on `main`: work in git worktrees. Sallie's laptop runs brimm-video's agent until it is moved to Studio.
-- Experiments never write into the watched Dropbox folder: a new file there starts the tool.
+- Experiments never write into the watched Dropbox folder: a new file there starts the tool (and `~/Movies` on the Mac Studio is a link into Dropbox).
 
 ## The contract with BRIMM Ops (never broken)
 

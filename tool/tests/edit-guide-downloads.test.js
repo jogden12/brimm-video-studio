@@ -1,5 +1,5 @@
 // Where the guide reads, and how often (plan PR 17; the review of PR 10, M5, and the rule of the review of PR 16, F6, for a raw video): what the guide looks in for
-// an export of a video in HyperFrames is its project, Downloads and what the other Mac released into the episode. A video she set aside is looked in for none
+// an export of a video in HyperFrames is its project, Downloads and an older hand-over's folder in the episode. A video she set aside is looked in for none
 // of them, and Downloads is listed once for a pass, however many videos look in it: a pass is one reading of every video, as `guide` makes one, `guide wait`'s
 // every 5 seconds and `guide … tell`'s every 15 another, and each video that looked in Downloads used to list it by itself, 20 to 50 ms each. The file system's
 // own functions are watched while the guide runs, in made-up worlds with a home of their own: no test touches the real home, Downloads, Dropbox or a program,
@@ -75,7 +75,7 @@ function rewrite(w, change) {
   writeFileSync(recordFile(w.found.folder, now.rev + 1), recordText({ ...now, rev: now.rev + 1, ...change }));
 }
 const sorted = (lines) => [...lines].sort();
-/** What a guide run makes of the file system: how many times Downloads was listed, and each episode's folder of what the other Mac released that was. */
+/** What a guide run makes of the file system: how many times Downloads was listed, and each episode's older hand-over folder that was. */
 async function listings(w, run) {
   const { result, calls } = await watched(run, { names: ["readdirSync"] });
   return { result, downloads: calls.filter((call) => call.path === w.downloads).length, released: calls.map((call) => call.path).filter((path) => path.endsWith(join("edit", "from-hyperframes"))).sort() };
@@ -89,7 +89,7 @@ describe("a raw video or an iPhone clip she set aside is read for nothing of its
   const inside = (dir) => (path) => path === dir || path.startsWith(`${dir}${sep}`);
   // The rule is the same for both kinds, and each is tried: a clip's project is read by the same fact as a raw video's, and a rule that left a clip out would leave a test of the raw video green.
   for (const kind of ["raw", "short video"]) {
-    it(`looks in the project of ${kind === "raw" ? "a raw video" : "an iPhone clip"}, in Downloads and in what the other Mac released for none of the forms that read, once she said it was finished: the overview, the video, wait and tell`, async () => {
+    it(`looks in the project of ${kind === "raw" ? "a raw video" : "an iPhone clip"}, in Downloads and in an older hand-over's folder for none of the forms that read, once she said it was finished: the overview, the video, wait and tell`, async () => {
       const w = raw({ kind });
       const places = [w.dirOf("main"), w.downloads, join(w.found.folder, "edit")].map(inside);
       const reads = async () => {
@@ -119,7 +119,7 @@ describe("the guide lists Downloads once for a pass, however many videos look in
     const { result, downloads, released } = await listings(w, () => on(depsOf(w), "guide"));
     assert.equal(result.code, 0, result.text);
     assert.equal(downloads, 1, "Downloads is listed once");
-    assert.deepEqual(released, [], "no folder of what the other Mac released is looked in any more");
+    assert.deepEqual(released, [], "no older hand-over folder is looked in any more");
     assert.deepEqual(sorted(result.said), sorted([DROP_LINE, "Under way:", `  ${NAMED}: ${EXPORTED}`, `  ${b.line(EXPORTED)}`]));
   });
   it("tells each video the export that is its own, though every export is in the one listing: a video with none is told it is in HyperFrames", async () => {

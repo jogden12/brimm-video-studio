@@ -2,7 +2,7 @@
 // own), and where its checkout of brimm-video is. The Claude model is not among them: it is named in unedited.js, so that both
 // Macs read a plan with the same one. And
 // the folders found from them: in BRIMM Video, this Mac's drop folder, the episodes and the status files of imports; on this
-// Mac's own disk, BRIMM Video Work, where Final Cut's work is kept, never in Dropbox.
+// Mac's own disk, BRIMM Video Work, where each episode's work on this Mac is kept, never in Dropbox.
 // The settings are kept in Application Support, on this Mac's own disk. install.sh --machine writes them, through this
 // file's command line, and edit.js and the import read them. A write keeps every setting it does not write. Besides those three,
 // the switch to the light import has settings of its own, all optional: what is absent is the default (import "light", readings
@@ -49,7 +49,7 @@ export const episodesFolder = (root) => join(root, "Episodes");
 export const referencesFolder = (root) => join(root, "References");
 /** The folder of the small status files that say how far each import has got, in Episodes. */
 export const importingFolder = (root) => join(episodesFolder(root), ".importing");
-/** Where this Mac keeps its work in Final Cut: on its own disk, never in Dropbox. */
+/** Where this Mac keeps each episode's work: its projects, renders and copies, on its own disk, never in Dropbox. */
 export const workFolder = (home) => join(home, "BRIMM Video Work");
 /** Where the HyperFrames app saves an export unless the Export dialog is given another folder (architecture 8.1). On the Mac Studio it is a
     link into Dropbox, so a file in it can be a Dropbox placeholder. exports.js is the one module that looks in it. */
@@ -57,7 +57,7 @@ export const downloadsFolder = (home) => join(home, "Downloads");
 /** Where an import keeps its own folder while it works and until its late check: on the same disk as Dropbox, so its files
     can be cloned in, and not in the temp folder, which macOS may clear before a late check left by a restart is made. */
 export const runsFolder = (home) => join(workFolder(home), ".runs");
-/** This Mac's folder for one episode: the copies handed to Final Cut, and the episode's library. */
+/** This Mac's folder for one episode: its projects, renders and copies, and what detached runs left. */
 export const episodeWork = (home, folder) => join(workFolder(home), folder);
 /** Where this Mac notes the last rev it wrote of each episode's record, so it can tell when Dropbox undid one. */
 export const writtenFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "written.json");

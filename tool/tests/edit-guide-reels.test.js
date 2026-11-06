@@ -546,7 +546,7 @@ describe("B7b. a video she set aside is read for nothing of its Reels (review F6
     return [...paths];
   }
   const inside = (dir) => (path) => path === dir || path.startsWith(`${dir}${sep}`);
-  /** The places the Reels are looked for: the Reel projects, Downloads and what the other Mac released. (The episode's lock, in the work folder, is
+  /** The places the Reels are looked for: the Reel projects, Downloads and an older hand-over's folder. (The episode's lock, in the work folder, is
       looked at for every video: whether a run is at work is the guide's own business.) */
   const placesOf = (w) => [w.dirOf("reel 1"), w.dirOf("reel 2"), w.downloads, join(w.found.folder, "edit")].map(inside);
   it("looks in no Reel project and no Downloads when a first look says the stage would not be said: no hand-off written, a run at work, a gap in the chain of versions, Dropbox's undo, the other Mac having the episode open, the gate holding the video (reads nothing more once a look says no)", async () => {
@@ -569,7 +569,7 @@ describe("B7b. a video she set aside is read for nothing of its Reels (review F6
       assert.deepEqual(paths.filter((path) => placesOf(w).some((is) => is(path))), [], what);
     }
   });
-  it("looks in no Reel project and no Downloads, nor in what the other Mac released, for a video she said was finished, in every form that reads: the overview, the video, wait and tell", async () => {
+  it("looks in no Reel project and no Downloads, nor in an older hand-over's folder, for a video she said was finished, in every form that reads: the overview, the video, wait and tell", async () => {
     const w = await W({ projects: ["reel 1", "reel 2"] });
     exportOf(w, "reel 2");
     const places = placesOf(w);

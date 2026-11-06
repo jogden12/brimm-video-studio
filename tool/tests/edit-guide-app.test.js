@@ -616,7 +616,7 @@ describe("what says the guide's new states: the help and the README (the skills'
     const guide = HELP.slice(HELP.indexOf('node edit.js guide ["<video>"]'), HELP.indexOf('node edit.js kind "<video>"'));
     for (const words of [
       "A raw video and an iPhone clip are followed through HyperFrames", "while its video is made, how long is left", "then to open it there", "when she last asked the app for something",
-      "and once it is exported, to hand it off", "A raw video that was edited in Final Cut before is told so, and to open it in HyperFrames, from the recording",
+      "and once it is exported, to hand it off", "A raw video that was edited by hand before is told so, and to open it in HyperFrames, from the recording",
       "being imported, being read or having its video for HyperFrames made", "its video for HyperFrames made, its finish's hand-off written, or an import, a reading or a finish that did not finish",
       // While a finish waits for its late check: the page's step, and a line of when Studio checks Dropbox's copies.
       "Once its finish has written the hand-off it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's copies (a spelling and handing it off again wait until then), though the finish goes on checking them for a quarter of an hour"
@@ -627,7 +627,7 @@ describe("what says the guide's new states: the help and the README (the skills'
     for (const words of [
       "followed through HyperFrames (plan PR 10)", "Making the video for HyperFrames", "how long is left", "usually takes", ".hyperframes/app-history.jsonl", "the time of her last request there",
       "export on This Mac", "an export that began after its last change", "is on the HyperFrames way always", "from the recording", "These only read, and write nothing",
-      "is told to clear the mark, and nothing of HyperFrames or Final Cut is said or read for it",
+      "is told to clear the mark, and nothing of HyperFrames is said or read for it",
       // The ways, as finish picks them: a raw video is always on the HyperFrames way, and one edited in Final Cut before has its one line.
       "that it was edited there before, that Studio does not use Final Cut now, and to open it in HyperFrames"
     ]) assert.ok(first.includes(words), words);

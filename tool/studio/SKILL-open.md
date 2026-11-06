@@ -1,6 +1,6 @@
 ---
 name: brimm-edit
-description: Use for anything about The BRIMM's videos and episodes: what is waiting, what to do with a new video and what comes next, step by step, what a new video is, what Claude found in it, client or group sessions and their teachings, opening an episode, what was done in HyperFrames and its versions, its name and title, Reels, showing it in Final Cut, finishing it, the reference folder of post styles, a script she has and the plan made from it, the footage dropped for it, conflicts, and how far something has got.
+description: Use for anything about The BRIMM's videos and episodes: what is waiting, what to do with a new video and what comes next, step by step, what a new video is, what Claude found in it, client or group sessions and their teachings, opening an episode, what was done in HyperFrames and its versions, its name and title, Reels, finishing it, the reference folder of post styles, a script she has and the plan made from it, the footage dropped for it, conflicts, and how far something has got.
 ---
 
 # brimm-edit
@@ -67,7 +67,7 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 - Then, without asking her, run `guide "<video>" tell` in the background (the Bash tool's run_in_background), once per video, never Monitor, and say "I'll tell you here when it is done." When it ends, tell her its one line in plain words, and its next step. For a finish that is that the hand-off is ready, which is shown in Finder, and then the BRIMM Ops page's step; the finish goes on checking Dropbox's copies for a quarter of an hour, which she need not wait for.
 - If it says the finish wrote no hand-off, or that Claude's reading did not finish, tell her so, and offer to run `status` to see why. Making a Reel ("Make Reel 2") is the exception: the guide does not see a Reel's video being made, so tell her what it says, and that "how far is it?" says when it is done.
 - A video waiting for her answer: the card, as above. If she said "Yes" to the first question in this chat, tell her to choose "Client or group session" and "Yes".
-- Any other next step: say it in one or two sentences, offer to do the BRIMM Video Studio part ("Shall I open it in HyperFrames?" when it says to open it there, "Shall I show it in Final Cut?" for a raw video edited there), and run it only on her yes, as the table below says. Once it says she has exported it, or a Reel of a finished video, do not offer: run `finish` at once, as the "Hand it off" and "Hand off the Reels" rules say.
+- Any other next step: say it in one or two sentences, offer to do the BRIMM Video Studio part ("Shall I open it in HyperFrames?" when it says to open it there, also for a video it says was edited by hand before), and run it only on her yes, as the table below says. Once it says she has exported it, or a Reel of a finished video, do not offer: run `finish` at once, as the "Hand it off" and "Hand off the Reels" rules say.
 - While it says the video for HyperFrames is being made, offer to tell her here when it is done (`guide "<video>" tell`, as above), and say only "I'll tell you here": no notice is posted for it. When it gives the time of her last request in HyperFrames, say it.
 - A step on the BRIMM Ops page: `guide page` the first time in this chat, then `guide "<video>"`, and say its step. Offer to show what it needs in Finder: `guide "<video>" show`. Then ask on one `AskUserQuestion`: "Done?": "Done", "Not yet", "Something's different". Done: `guide "<video>" done <step>`, with the word its Step line gives, and say the next step it prints. Something's different: ask what she sees; if it is not in the walkthrough, tell her to ask Jason.
 - "I posted it" / "I've done that": `guide "<video>"` for the video she means (`guide` first, and ask which, if that is unclear); say what is left of its step (such as ticking "Posted"), then ask "Done?" as above.
@@ -194,16 +194,8 @@ More on these rows. Each rule starts with the row it belongs to:
 
 ## Not ready yet: say so, and what to do by hand
 
-- A logo or a look on a Reel: "That comes with the brand templates, later. For now, do it by hand in Final Cut."
 - A Reel from Claude's suggestions, when it says this Mac isn't set up for HyperFrames: say BRIMM Video Studio can't make it on this Mac, and that Jason sets the Mac up for HyperFrames, as "Show me the Reels" says. Never offer to make one here. A Reel of a private video with a client or a group, even once the client agreed: "That isn't ready yet; ask Jason."
-- Bringing in her hand edits: "That part of BRIMM Video Studio isn't ready yet. Make your changes by hand last, after BRIMM Video Studio's, or finish that timeline by hand in Final Cut."
-- Archiving, checking the setup, freeing space: "That isn't ready yet; ask Jason." (For space: Final Cut's File > Delete Generated Library Files.)
-
-## By hand in Final Cut, in this order (tell her at the right moment)
-
-1. At the first open of an episode on this Mac: in Finder, Control-click the episode's folder and choose Make available offline (`open` says where).
-2. To finish: for each part, Share it with Command-E (check the save dialog says From Final Cut), wait for Final Cut's notice that it is done, then click in that project's timeline and choose File > Export XML…, into From Final Cut, keeping the version it offers. Then say "finish".
-3. When the finish is done: drop the hand-off file it shows in Finder onto the BRIMM Ops page. Once it is on the page and Dropbox shows the folder is up to date: in Finder, Control-click the episode's folder and choose Make online-only, to free space on her laptop.
+- Archiving, checking the setup, freeing space: "That isn't ready yet; ask Jason."
 
 ## In HyperFrames, to hand it off
 

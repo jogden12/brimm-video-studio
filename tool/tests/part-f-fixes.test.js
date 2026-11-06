@@ -109,7 +109,7 @@ describe("one rule for a session not cleared: the gate's (item 9)", () => {
   });
 });
 
-describe("the Final Cut finish of a kind a version 1 hand-off cannot hold (item 4)", () => {
+describe("the finish of a kind a version 1 hand-off cannot hold (item 4)", () => {
   it("refuses a finished video at once on a Mac that hands off version 1, before any part is looked for or anything is run", async () => {
     for (const settings of [{ handoffVersion: 1 }, {}]) {
       const t = setup();

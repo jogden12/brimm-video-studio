@@ -170,7 +170,7 @@ describe("her folder's settings", () => {
     const row = (start) => skill.split("\n").find((line) => line.startsWith(start));
     assert.match(row('| "Show me the Reels" |'), /When it ends by saying how to make one, tell her so, in plain words: she says "Open Reel 2 in HyperFrames"\. When it says BRIMM Video Studio cannot make a Reel on this Mac, say so, and that Jason sets the Mac up for HyperFrames\. \|$/);
     assert.match(rowWithRules(skill, '| "Make Reel 2" / "Open Reel 2 in HyperFrames" |'), /If it says this Mac isn't set up for HyperFrames, say so, and that Jason sets the Mac up for HyperFrames, as for "Show me the Reels": never offer to make one here\.$/);
-    const notReady = skill.slice(skill.indexOf("## Not ready yet"), skill.indexOf("## By hand in Final Cut"));
+    const notReady = skill.slice(skill.indexOf("## Not ready yet"), skill.indexOf("## In HyperFrames, to hand it off"));
     assert.ok(notReady.includes(`- A Reel from Claude's suggestions, when it says this Mac isn't set up for HyperFrames: say BRIMM Video Studio can't make it on this Mac, and that Jason sets the Mac up for HyperFrames, as "Show me the Reels" says. Never offer to make one here. A Reel of a private video with a client or a group, even once the client agreed: "That isn't ready yet; ask Jason."\n`), notReady);
     assert.doesNotMatch(skill, /make Reel \d|make it first/);
     assert.doesNotMatch(skill, /OpusClip/i);
@@ -768,7 +768,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     assert.ok(step.includes('Once `--yes` has started it, tell her what it says of when the hand-off will be ready and that she can carry on, and go on as "Guide her" says for work in the background: `guide "<episode>" tell` tells her here when the hand-off is ready, and the finish goes on checking Dropbox\'s copies a quarter of an hour longer, which she need not wait for.'), step);
     assert.ok(step.includes("When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page."), "the old sentence stays");
   });
-  it("tells her what to offer at the guide's HyperFrames steps, that the video for HyperFrames posts no notice, and keeps the Final Cut offer for a raw video edited there (plan PR 10)", () => {
+  it("tells her what to offer at the guide's HyperFrames steps, that the video for HyperFrames posts no notice, and offers HyperFrames for a raw video edited by hand before (plan PR 10, Phase 2)", () => {
     const guide = sectionOf(skill, "## Guide her");
     assert.ok(guide.trimEnd().split("\n").length <= 30, `${guide.split("\n").length} lines`);
     const nextAt = guide.split("\n").findIndex((line) => line.startsWith("- Any other next step:"));
@@ -776,7 +776,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     // Its second half is the bullet that follows (R2, review changes): the two are read together.
     const next = guide.split("\n").slice(nextAt, nextAt + 2).join(" ");
     for (const words of [
-      '"Shall I open it in HyperFrames?" when it says to open it there', '"Shall I show it in Final Cut?" for a raw video edited there',
+      '"Shall I open it in HyperFrames?" when it says to open it there', 'also for a video it says was edited by hand before',
       "and run it only on her yes, as the table below says",
       'Once it says she has exported it, or a Reel of a finished video, do not offer: run `finish` at once, as the "Hand it off" and "Hand off the Reels" rules say.',
       "While it says the video for HyperFrames is being made, offer to tell her here when it is done (`guide \"<video>\" tell`, as above)",
@@ -785,6 +785,14 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     ]) assert.ok(next.includes(words), words);
     // The tell row's own words are for the import and the reading, which post a notice, and stay as they were.
     assert.ok(guide.includes("I'll tell you here; the Mac doing the work shows a notice too"));
+  });
+  it("says nothing of Final Cut in either skill, and the two keep the same sections for what is not ready and how to hand it off (Phase 2, F8)", () => {
+    const [strict, open] = ["SKILL.md", "SKILL-open.md"].map((name) => readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8"));
+    for (const text of [strict, open]) {
+      assert.doesNotMatch(text, /Final Cut|Share it|Export XML|## By hand in/);
+      assert.ok(text.includes('"Shall I open it in HyperFrames?" when it says to open it there, also for a video it says was edited by hand before'));
+    }
+    for (const head of ["## Not ready yet", "## In HyperFrames, to hand it off"]) assert.equal(sectionOf(open, head), sectionOf(strict, head), head);
   });
   it("asks the card's second question again before a correction, and corrects only a video she has answered (Ruling 24)", () => {
     const row = rowOf(`"It's actually raw" (or finished, or an iPhone clip)`);
