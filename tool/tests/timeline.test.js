@@ -655,22 +655,21 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
   };
   const rough = { v: 0, how: "render", at: AT, on: "Mac Studio", file: "edit/main.v0.fcpxml", opened: AT };
   const raw = (pushed) => ({ ...LAYOUT_3.raw, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed, base: null } });
-  it("gives each suggestion's times on the rough cut she is watching, not the raw video's", async () => {
+  it("gives each suggestion's times on the video's own clock, though a rough cut was rendered", async () => {
     const { t } = episode(raw([rough]), {}, suggested());
     const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
     assert.equal(r.code, 0, r.text);
-    // The rough cut leaves out what comes before 0:05.9 and the retakes and the pauses between its pieces: the first suggestion, at
-    // 0:05 to 0:09 of the raw video, is at 0:00 to 0:03 of it, and the second, at 0:13 to 0:21, is at 0:04 to 0:08.
+    // The rough cut is not read: the times are the recording's own, where HyperFrames shows them.
     assert.equal(r.text, [
-      "Reel suggestions of Pricing: what to charge?: 2, with times on main v0.",
+      "Reel suggestions of Pricing: what to charge?: 2, with times on the video.",
       "",
-      "1. 0:00 to 0:03, 4 seconds. A candidate.",
+      "1. 0:06 to 0:09, 4 seconds. A candidate.",
       "   Opens with: Welcome to the show.",
       "   Closes with: talk about pricing.",
       "   Why it holds attention: It says what the talk is about.",
       "   It does not fit a Reel. It is 3.971 seconds long, and a Reel clip is at least 15 seconds.",
       "",
-      "2. 0:04 to 0:08, 5 seconds. Picked.",
+      "2. 0:13 to 0:20, 5 seconds. Picked.",
       "   Opens with: So the first thing",
       "   Closes with: so much, Sallie.",
       "   Why it holds attention: It makes one point and stands alone.",
@@ -681,21 +680,19 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
     ].join("\n"));
     t.done();
   });
-  it("says that BRIMM Video Studio cannot make them last, after the line on the other Mac's newer version, which belongs with the list's times", async () => {
+  it("says that BRIMM Video Studio cannot make them last, with no line on the other Mac's newer version", async () => {
     const later = { v: 1, how: "render", at: AT, on: "Sallie's laptop", file: "edit/main.v1.fcpxml", opened: AT };
     const { t, found } = episode({ ...raw([rough, later]), editing: { by: "Mac Studio", since: AT } }, {}, suggested());
     writeFileSync(join(found.folder, later.file), EPISODE.files["edit/main.v0.fcpxml"]);
     const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
     assert.equal(r.code, 0, r.text);
-    assert.deepEqual(r.text.split("\n").slice(-2), [
-      'The other Mac has a newer version (v1, on Sallie\'s laptop): say "render it here" to see it.',
-      "BRIMM Video Studio cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason."
-    ]);
+    assert.doesNotMatch(r.text, /other Mac/);
+    assert.equal(r.text.split("\n").at(-1), "BRIMM Video Studio cannot make Reels on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.");
     t.done();
   });
-  it("gives the recording's own times while the rough cut's file is not whole on this Mac, and starts no bringing", async () => {
+  it("gives the recording's own times while the words file is not whole on this Mac, and starts no bringing", async () => {
     const { t } = episode(raw([rough]), {}, suggested());
-    t.ctx.deps.isWhole = (path) => !path.endsWith("main.v0.fcpxml");
+    t.ctx.deps.isWhole = (path) => !path.endsWith(".words.json");
     const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
     assert.equal(r.code, 0, r.text);
     assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the recording's own clock\.\n\n1\. 0:05 to 0:09, 4 seconds\. A candidate\.\n/);
@@ -703,10 +700,11 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
     assert.deepEqual(t.started, []);
     t.done();
   });
-  it("gives the times on the main video as it is now for a raw video no version of which has been shown yet", async () => {
+  it("gives the times on the video for a raw video no version of which has been shown, with no line about another Mac's version", async () => {
     const { t } = episode(raw([]), {}, suggested());
     const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
-    assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the main video as it is now\.\n\n1\. 0:00 to 0:03, 4 seconds\. A candidate\.\n/);
+    assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the video\.\n\n1\. 0:06 to 0:09, 4 seconds\. A candidate\.\n/);
+    assert.doesNotMatch(r.text, /other Mac/);
     t.done();
   });
   it("gives a finished video's times on the video's own clock", async () => {
@@ -718,13 +716,13 @@ describe("reels, the list of a raw video's suggestions, through the command", ()
     assert.match(r.text, /\n2\. 0:13 to 0:20, 5 seconds\. Picked\.\n/);
     t.done();
   });
-  it("gives the recording's own times when the rough cut's file holds no timeline, or cannot be opened, and does not call every suggestion cut", async () => {
+  it("gives the same times when the rough cut's file holds no timeline, or cannot be opened: it is not read", async () => {
     for (const spoil of [(file) => writeFileSync(file, "not a timeline"), (file) => { rmSync(file); mkdirSync(file); }]) {
       const { t, found } = episode(raw([rough]), {}, suggested());
       spoil(join(found.folder, "edit", "main.v0.fcpxml"));
       const r = await on(t.ctx.deps, "reels", "Pricing", "--no-play");
       assert.equal(r.code, 0, r.text);
-      assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the recording's own clock\.\n\n1\. 0:05 to 0:09, 4 seconds\. A candidate\.\n/);
+      assert.match(r.text, /^Reel suggestions of Pricing: what to charge\?: 2, with times on the video\.\n\n1\. 0:06 to 0:09, 4 seconds\. A candidate\.\n/);
       assert.ok(!r.text.includes("Cut now"), r.text);
       t.done();
     }
@@ -796,7 +794,7 @@ describe("edit.js on the one version model: a render is a version, and only a pu
     assert.equal(r.code, 0, r.text);
     assert.equal(r.text.split("\n")[0], ELSEWHERE(1, LAPTOP));
     const reels = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
-    assert.ok(reels.text.split("\n").includes(ELSEWHERE(1, LAPTOP)), reels.text);
+    assert.ok(!reels.text.includes("The other Mac has a newer version"), reels.text);
     t.done();
   });
   it("hands Final Cut a version's own stored timeline with push v<n>, not the timeline as the record makes it now", async () => {
