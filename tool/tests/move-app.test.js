@@ -46,7 +46,7 @@ const PRINT_LINES = {
 };
 const printText = (...lines) => ["  Its drop folder, to make in Dropbox and watch:  /somewhere", "  Swift, to find the speaker's face:  here already", ...lines, "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)", ""].join("\n");
 const DEFAULT_PRINT = printText(PRINT_LINES.signed, PRINT_LINES.version, PRINT_LINES.hdr, PRINT_LINES.lock, PRINT_LINES.app);
-const BACKGROUND = "From the background job: Claude answered, so its sign-in is seen there.";
+const BACKGROUND = "From the background job: Claude answered from here, so its sign-in is seen there.";
 const DEFAULT_RAN = `Setting up Studio...\n  The launch agent is in place.\nAsking Claude once from the background job (up to 90 seconds)...\n${BACKGROUND}\nDone.\n`;
 const GIT_ENV = { PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
 
@@ -84,10 +84,10 @@ if (command === "show") {
 /** Runs the move script on a Mac made for the test. `options`, all optional:
     settings   her settings.json (default: as the switch of 26 October left it), or null for none
     settingsChange  values to change in the default settings
-    launchctl  what `launchctl list` prints
+    launchctl  what `launchctl list` prints; launchctlLater: what it prints from its second call on (default: the same)
     dropFiles  names put in her drop folder (it always holds .DS_Store and .brimm-watched-by too)
     claude     { status, version }: what the stand-in prints for `auth status --json` (default signed in, Max), and for --version;
-               `auth login` flips it to signed in
+               `auth login` flips it to signed in unless loginFails
     key        the comment of a key already in ~/.ssh (default: KEY_COMMENT, so a key made earlier), or null for none
     sshConfig  text of ~/.ssh/config (default: just the Host entry), or null for none
     knownHosts text of ~/.ssh/known_hosts (default: GitHub's published ed25519 key), or null for none
@@ -99,7 +99,7 @@ if (command === "show") {
     hfApp      the version of the HyperFrames app (default "1.4.0"), or null for none; hfAppAfterOpen: the version the app has once
                `open -a Safari` has been run (the stand-in puts it there)
     install    what the stand-in tool/install.sh in the "GitHub" repo does: { print, printExit, ran, ranExit, moves, checkLeft }.
-               `print` is the text of --print (a list: one text a call, the last repeating), `ran` the text of --yes; `moves`
+               `print` is the text of --print (a list: one text a call, the last repeating), `ran` the text of --yes; `printDrops` (a file name put in her drop folder by every --print), `moves`
                rewrites settings.json's checkout to Studio and writes the agent's plist; `checkLeft` leaves the one-shot plist
     laterCommit  the "GitHub" repo gets a commit after the pin
     testFail   BRIMM_TEST_FAIL=1 for the tests in the checkout
@@ -135,6 +135,7 @@ echo "install.sh $*" >> "${ranFile}"
 case "$1" in
   --print)
     n=$(cat "${dir}/install-prints" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${dir}/install-prints"
+    ${inst.printDrops ? `touch "${join(home, "Dropbox", "The BRIMM DB", "BRIMM Video", "Drop", "Sallie's laptop", inst.printDrops)}"` : ""}
     f="${dir}/install-print-$n"; [ -f "$f" ] || f="${dir}/install-print-${prints.length}"
     cat "$f"; exit ${inst.printExit ?? 0} ;;
   --yes)
@@ -188,7 +189,13 @@ esac
 
     // The stand-ins: each writes what it was asked into `ran`.
     const stand = (name, body = "") => put(join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${ran}"\n${body}`, 0o755);
-    stand("launchctl", `[ "$1" = "list" ] && printf '%b\\n' '${options.launchctl ?? "-\\t0\\tcom.thebrimm.unedited"}'\nexit 0\n`);
+    // `launchctl list` answers `launchctl` the first time and `launchctlLater` from the second time on.
+    const idle = "-\\t0\\tcom.thebrimm.unedited";
+    stand("launchctl", `if [ "$1" = list ]; then n=$(cat "${dir}/launchctl-n" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${dir}/launchctl-n"
+  if [ $n -gt 1 ]; then printf '%b\\n' '${options.launchctlLater ?? options.launchctl ?? idle}'; else printf '%b\\n' '${options.launchctl ?? idle}'; fi
+fi
+exit 0
+`);
     const hfApp = join(dir, "Applications", "HyperFrames.app");
     const appPlist = (version) => `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>\n`;
     const hfVersion = options.hfApp === undefined ? "1.4.0" : options.hfApp;
@@ -247,7 +254,7 @@ esac
   "auth status --json")
     if [ "$(cat "${state}")" = in ]; then printf '%s' '${SIGNED_IN}'; exit 0; fi
     printf '%s' '${options.claude?.status ?? SIGNED_OUT}'; exit 1 ;;
-  "auth login") echo in > "${state}" ;;
+  "auth login") ${options.claude?.loginFails ? ":" : `echo in > "${state}"`} ;;
   --version) echo '${options.claude?.version ?? "2.1.300 (Claude Code)"}' ;;
 esac
 `);
@@ -348,6 +355,18 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
     // It looked again after the sign-in, and went on.
     assert.ok(yes.ran.indexOf("claude auth login") < yes.ran.lastIndexOf("claude auth status --json"));
     assert.match(yes.out, /Claude Code:  signed in \(max\)/);
+  });
+
+  it("lists the sign-in as a change only once Claude Code is signed in", () => {
+    const worked = moveOn({ claude: { status: SIGNED_OUT }, key: null, answers: "y\nn\n" });
+    assert.equal(worked.status, 1, worked.out);
+    assert.ok(worked.out.includes("  - signed Claude Code in\n"), worked.out);
+
+    const failed = moveOn({ claude: { status: SIGNED_OUT, loginFails: true }, answers: "y\n" });
+    assert.equal(failed.status, 1, failed.out);
+    assert.match(failed.out, /Claude Code is still not signed in\./);
+    assert.ok(failed.out.endsWith(STOPPED_NOTHING), failed.out);
+    assert.ok(!failed.out.includes("signed Claude Code in"), failed.out);
   });
 
   it("never shows the Claude account's email", () => {
@@ -826,6 +845,9 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     assert.equal(declined.status, 1, declined.out);
     assert.ok(!declined.out.includes("is now hyperframes"));
     assert.match(declined.studioNow.marks, /installed=/, "the install itself was finished");
+    const after = declined.out.slice(declined.out.lastIndexOf("Stopped."));
+    assert.ok(after.includes("  - ran Studio's installer\n"), "a finished install is listed plainly");
+    assert.ok(!after.includes("if it stopped"), after);
 
     // A print turns nothing on and opens nothing.
     const printed = moveOn({ marks: NOT_INSTALLED, settingsChange: { app: undefined } }, "--print");
@@ -876,6 +898,42 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     assert.ok(tail.includes("step 12 of the install"));
     assert.ok(!tail.includes("step 1 of the install"), "only the last lines");
     assert.ok(!/installed=/.test(r.studioNow.marks));
+    // The summary lists the installer, worded to be true however far it got.
+    const summary = r.out.slice(r.out.lastIndexOf("Stopped."));
+    assert.ok(summary.includes("  - ran Studio's installer (if it stopped, its last lines say how far it got)\n"), summary);
+  });
+
+  it("looks again at her drop folder and the import right before the real install, and stops, naming no file, if one came since", () => {
+    const dropped = moveOn({ marks: NOT_INSTALLED, install: { printDrops: "Client Name Session.mov" }, answers: "y\ny\n" });
+    assert.equal(dropped.status, 1, dropped.out);
+    assert.ok(!dropped.ran.includes("install.sh --yes"), dropped.ran);
+    assert.match(dropped.out, /Her drop folder holds 1 file still to be imported\./);
+    assert.equal((dropped.out.match(/Her drop folder is empty\./g) ?? []).length, 1, "step 1 found it empty; the second look found a file");
+    for (const text of [dropped.out, dropped.log, dropped.report, dropped.err]) assert.ok(!text.includes("Client Name"), "no file's name anywhere");
+    assert.ok(dropped.out.endsWith(STOPPED_NOTHING), dropped.out);
+
+    const running = moveOn({ marks: NOT_INSTALLED, launchctlLater: "1234\\t0\\tcom.thebrimm.unedited", answers: "y\ny\n" });
+    assert.equal(running.status, 1, running.out);
+    assert.ok(!running.ran.includes("install.sh --yes"), running.ran);
+    assert.match(running.out, /An import is running now\. Wait until its window in the top right closes, then double-click Move to Studio again\./);
+    assert.ok(running.out.endsWith(STOPPED_NOTHING), running.out);
+
+    // Nothing new in her drop folder and no import: it goes on, and says so a second time.
+    const clear = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n" });
+    assert.equal(clear.status, 0, clear.out);
+    assert.equal((clear.out.match(/Her drop folder is empty\./g) ?? []).length, 2);
+    assert.equal((clear.out.match(/No import is running\./g) ?? []).length, 2);
+  });
+
+  it("sees a line of the print that comes after 64 KiB", () => {
+    const filler = Array.from({ length: 1000 }, (_, i) => `  a line of the print, number ${i}, made long enough to fill the pipe ${"x".repeat(60)}`).join("\n");
+    assert.ok(filler.length > 70000);
+    const late = moveOn({ marks: NOT_INSTALLED, install: { print: [`${filler}\n${printText(PRINT_LINES.signed, PRINT_LINES.older)}`, DEFAULT_PRINT] }, answers: "y\ny\n\n" });
+    assert.equal(late.status, 0, late.out.slice(-600));
+    assert.ok(late.ran.split("\n").includes("claude update"), "the older line was seen");
+    const early = moveOn({ marks: NOT_INSTALLED, install: { print: [`${printText(PRINT_LINES.signed, PRINT_LINES.older)}\n${filler}`, DEFAULT_PRINT] }, answers: "y\ny\n\n" });
+    assert.equal(early.status, 0, early.out.slice(-600));
+    assert.ok(early.ran.split("\n").includes("claude update"), "the older line was seen, with more than 64 KiB after it");
   });
 
   it("when the install moves her settings and agent to Studio, goes on and marks it", () => {

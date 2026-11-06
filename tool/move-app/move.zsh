@@ -54,7 +54,6 @@ LOGGING=""           # set once the run is a real one that has been let through:
 COMMIT=""
 changed=()           # each change this run made, in words, for the stop summary
 made_partial=""      # set when this run made $PARTIAL, so that a Ctrl-C takes it away again
-R41=()               # the look's lines, as it says them
 R_MACOS="" R_DISK="" R_SETTINGS="" R_COUNT="" R_PLAN=""   # the report's lines for check 41, in the By-Hand page's own words
 R48="not asked yet"  # the report's line for check 48: what happened to brimm-video's old key
 R42_COMMIT="" R42_TESTS=""   # the report's lines for the code: the commit (short sha and subject), and the tests' ℹ summary lines
@@ -178,82 +177,10 @@ refuse_unless_her_laptop() {
   fi
 }
 
-# Step 1, check 41: what this Mac has, and whether it is as the switch of 26 October left it. It changes nothing, except that
-# Claude Code's sign-in is offered, and only on her y.
-look_at_this_mac() {
-  heading "1. Looking at this Mac (check 41). This changes nothing."
-  local macos kb gb line brew version plan signed told claude_version
-
-  macos="$(sw_vers -productVersion 2>/dev/null || true)"
-  say "  macOS:  ${macos:-could not be read}"
-  R41+=("macOS: ${macos:-could not be read}")
-  R_MACOS="${macos:-could not be read}"
-
-  line="$(df -k / 2>/dev/null | tail -n 1 || true)"
-  local -a cols
-  cols=(${=line})
-  kb="${cols[4]-}"
-  if [[ "$kb" == <-> ]]; then
-    gb=$(( kb / 1024 / 1024 ))
-    if (( gb < 100 )); then
-      say "  Free disk:  $gb GB, which is less than the 100 GB that video wants. This does not stop the move."
-    else
-      say "  Free disk:  $gb GB"
-    fi
-    R41+=("Free disk: $gb GB")
-    R_DISK="$gb GB"
-  else
-    say "  Free disk:  could not be read"
-    R41+=("Free disk: could not be read")
-    R_DISK="could not be read"
-  fi
-
-  if ! xcode-select -p >/dev/null 2>&1; then
-    say "  Xcode's command line tools:  not here."
-    stop_here "In Terminal, run: xcode-select --install, then run the app again."
-  fi
-  say "  Xcode's command line tools:  here"
-  R41+=("Xcode's command line tools: here")
-
-  brew="$(find_program brew || true)"
-  if [[ -z "$brew" ]]; then
-    say "  Homebrew:  not here."
-    stop_here 'In Terminal, Sallie runs this (it asks for her password, which she types herself): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-  fi
-  version="$("$brew" --version 2>/dev/null || true)"
-  local -a said
-  said=("${(@f)version}")
-  version="${said[1]-}"
-  say "  Homebrew:  ${version:-here}"
-  R41+=("Homebrew: ${version:-here}")
-
-  NODE="$(find_program node || true)"
-  if [[ -z "$NODE" ]]; then
-    say "  Node:  not here."
-    stop_here "Node is not on this Mac, and Studio needs 22 or later. Run: brew install node, then run the app again."
-  fi
-  version="$("$NODE" --version)"
-  if ! "$NODE" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)'; then
-    stop_here "Node here is $version, and Studio needs 22 or later. Run: brew upgrade node, then run the app again."
-  fi
-  say "  Node:  $version"
-  R41+=("Node: $version")
-
-  # Her settings, as the switch of 26 October left them. A checkout that is Studio's is as good as brimm-video's: a later run.
-  ROOT="$(setting root)"
-  CHECKOUT_NOW="$(setting checkout)"
-  local import="$(setting import)" handoff="$(setting handoffVersion)" drop="$(setting drop)"
-  say "  brimm-video's settings:  import $import, hand-off version $handoff, drop folder $drop"
-  R41+=("brimm-video's settings: $MACHINE, import $import, hand-off version $handoff, drop folder $drop")
-  [[ "$import" == light ]] || stop_here "Her settings are not as the switch of 26 October left them: the import is \"$import\", and it should be \"light\"."
-  [[ "$drop" == Drop ]] || stop_here "Her settings are not as the switch of 26 October left them: the drop folder is \"$drop\", and it should be \"Drop\"."
-  [[ "$handoff" == 2 ]] || stop_here "Her settings are not as the switch of 26 October left them: the hand-off version is \"$handoff\", and it should be \"2\"."
-  if [[ "$CHECKOUT_NOW" != "$OLD_CHECKOUT" && "$CHECKOUT_NOW" != "$STUDIO" ]]; then
-    stop_here "Her settings are not as the switch of 26 October left them: the checkout is \"$CHECKOUT_NOW\", and it should be brimm-video's ($OLD_CHECKOUT) or Studio's ($STUDIO)."
-  fi
-
-  R_SETTINGS="nothing: import $import, hand-off version $handoff, drop folder $drop, checkout as expected"
-
+# The two looks that must hold when anything is changed: no import is running, and her drop folder holds nothing to import. Step 1
+# looks, and step 5 looks again right before the real install, because the installer checks the drop folder only when it switches
+# the folder, and her laptop stays on Drop, so it would not look again itself. Same words, same stops each time.
+look_at_import_and_drop() {
   # No import is running when every com.thebrimm job has no process id ("-") in the first column.
   local job
   for job in "${(@f)$(launchctl list 2>/dev/null | grep com.thebrimm || true)}"; do
@@ -263,7 +190,6 @@ look_at_this_mac() {
     fi
   done
   say "  No import is running."
-  R41+=("No import running")
 
   # Her drop folder is the one her own brimm-video names. It is counted and never listed: a file's name can be a client's.
   if [[ ! -f "$CHECKOUT_NOW/tool/settings.js" ]]; then
@@ -280,8 +206,79 @@ look_at_this_mac() {
     stop_here "Her drop folder holds ${#held[@]} file$([[ ${#held[@]} -eq 1 ]] || print -rn s) still to be imported."
   fi
   say "  Her drop folder is empty."
-  R41+=("Her drop folder is empty")
   R_COUNT="${#held[@]}"
+}
+
+# Step 1, check 41: what this Mac has, and whether it is as the switch of 26 October left it. It changes nothing, except that
+# Claude Code's sign-in is offered, and only on her y.
+look_at_this_mac() {
+  heading "1. Looking at this Mac (check 41). This changes nothing."
+  local macos kb gb line brew version plan signed told claude_version
+
+  macos="$(sw_vers -productVersion 2>/dev/null || true)"
+  say "  macOS:  ${macos:-could not be read}"
+  R_MACOS="${macos:-could not be read}"
+
+  line="$(df -k / 2>/dev/null | tail -n 1 || true)"
+  local -a cols
+  cols=(${=line})
+  kb="${cols[4]-}"
+  if [[ "$kb" == <-> ]]; then
+    gb=$(( kb / 1024 / 1024 ))
+    if (( gb < 100 )); then
+      say "  Free disk:  $gb GB, which is less than the 100 GB that video wants. This does not stop the move."
+    else
+      say "  Free disk:  $gb GB"
+    fi
+    R_DISK="$gb GB"
+  else
+    say "  Free disk:  could not be read"
+    R_DISK="could not be read"
+  fi
+
+  if ! xcode-select -p >/dev/null 2>&1; then
+    say "  Xcode's command line tools:  not here."
+    stop_here "In Terminal, run: xcode-select --install, then run the app again."
+  fi
+  say "  Xcode's command line tools:  here"
+
+  brew="$(find_program brew || true)"
+  if [[ -z "$brew" ]]; then
+    say "  Homebrew:  not here."
+    stop_here 'In Terminal, Sallie runs this (it asks for her password, which she types herself): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+  fi
+  version="$("$brew" --version 2>/dev/null || true)"
+  local -a said
+  said=("${(@f)version}")
+  version="${said[1]-}"
+  say "  Homebrew:  ${version:-here}"
+
+  NODE="$(find_program node || true)"
+  if [[ -z "$NODE" ]]; then
+    say "  Node:  not here."
+    stop_here "Node is not on this Mac, and Studio needs 22 or later. Run: brew install node, then run the app again."
+  fi
+  version="$("$NODE" --version)"
+  if ! "$NODE" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)'; then
+    stop_here "Node here is $version, and Studio needs 22 or later. Run: brew upgrade node, then run the app again."
+  fi
+  say "  Node:  $version"
+
+  # Her settings, as the switch of 26 October left them. A checkout that is Studio's is as good as brimm-video's: a later run.
+  ROOT="$(setting root)"
+  CHECKOUT_NOW="$(setting checkout)"
+  local import="$(setting import)" handoff="$(setting handoffVersion)" drop="$(setting drop)"
+  say "  brimm-video's settings:  import $import, hand-off version $handoff, drop folder $drop"
+  [[ "$import" == light ]] || stop_here "Her settings are not as the switch of 26 October left them: the import is \"$import\", and it should be \"light\"."
+  [[ "$drop" == Drop ]] || stop_here "Her settings are not as the switch of 26 October left them: the drop folder is \"$drop\", and it should be \"Drop\"."
+  [[ "$handoff" == 2 ]] || stop_here "Her settings are not as the switch of 26 October left them: the hand-off version is \"$handoff\", and it should be \"2\"."
+  if [[ "$CHECKOUT_NOW" != "$OLD_CHECKOUT" && "$CHECKOUT_NOW" != "$STUDIO" ]]; then
+    stop_here "Her settings are not as the switch of 26 October left them: the checkout is \"$CHECKOUT_NOW\", and it should be brimm-video's ($OLD_CHECKOUT) or Studio's ($STUDIO)."
+  fi
+
+  R_SETTINGS="nothing: import $import, hand-off version $handoff, drop folder $drop, checkout as expected"
+
+  look_at_import_and_drop
 
   # Claude Code: signed in or not, its plan and its version. Its email and its organisation are never read out.
   if ! CLAUDE="$(find_claude)"; then
@@ -297,10 +294,10 @@ look_at_this_mac() {
     else
       ask "Claude Code is not signed in. This will run claude auth login, which opens the browser; Sallie signs in to her own Claude account there (signing in to the Claude app does not sign in this command)."
       "$CLAUDE" auth login || true
-      changed+=("signed Claude Code in")
       told="$("$CLAUDE" auth status --json 2>/dev/null || true)"
       signed="$(print -rn -- "$told" | plutil -extract loggedIn raw -o - - 2>/dev/null || true)"
       [[ "$signed" == true ]] || stop_here "Claude Code is still not signed in."
+      changed+=("signed Claude Code in")
     fi
   fi
   plan="$(print -rn -- "$told" | plutil -extract subscriptionType raw -o - - 2>/dev/null || true)"
@@ -308,10 +305,8 @@ look_at_this_mac() {
   claude_version="${version%%[[:space:]]*}"
   if [[ "$signed" == true ]]; then
     say "  Claude Code:  signed in${plan:+ ($plan)}, version ${claude_version:-that could not be read}"
-    R41+=("Claude Code: signed in${plan:+ ($plan)}, version ${claude_version:-unreadable}")
     R_PLAN="${plan:-signed in, plan not shown}"
   else
-    R41+=("Claude Code: not signed in, version ${claude_version:-unreadable}")
     R_PLAN="not signed in"
   fi
 }
@@ -641,7 +636,7 @@ installer_print() {
   PRINT_TOLD="$(zsh "$STUDIO/tool/install.sh" --print "${INSTALL_OPTIONS[@]}" "$ROOT" 2>&1)" || PRINT_RC=$?
   say "$PRINT_TOLD"
 }
-print_has() { print -r -- "$PRINT_TOLD" | grep -q -- "$1"; }
+print_has() { grep -q -- "$1" <<< "$PRINT_TOLD"; }
 # The last lines of what the installer said, for a stop and for the report.
 last_lines() { print -r -- "$1" | tail -n "${2:-8}"; }
 
@@ -752,8 +747,12 @@ run_the_installer() {
   fi
 
   ask "Studio's installer now runs for real, with the same options as its print above. It sets Studio up on this Mac, changes this Mac's brimm-video settings to run from Studio, and ends with one real call to Claude from the background job (up to 90 seconds). It can take a few minutes."
+  look_at_import_and_drop
   local kept rc
   kept="$(mktemp)"
+  # Written before the installer runs, in words that are true however far it gets; made plain once it has finished.
+  changed+=("ran Studio's installer (if it stopped, its last lines say how far it got)")
+  local installer_at=${#changed[@]}
   set +e
   zsh "$STUDIO/tool/install.sh" --yes "${INSTALL_OPTIONS[@]}" "$ROOT" 2>&1 | while IFS= read -r line; do
     say "$line"
@@ -769,7 +768,7 @@ $R44_RAN"
   fi
   line="$(grep '^From the background job:' "$kept" | tail -n 1 || true)"
   rm -f "$kept"
-  changed+=("ran Studio's installer")
+  changed[installer_at]="ran Studio's installer"
   if [[ -z "$line" ]]; then
     stop_here "The setup stopped before its check of Claude (there is no \"From the background job:\" line in what it said). Its last lines:
 $R44_RAN"
