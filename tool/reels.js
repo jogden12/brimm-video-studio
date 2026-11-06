@@ -356,7 +356,7 @@ function suggestionsText(reels, record, now) {
     const where = on ? placedOn(c, on) : { start: c.start, end: c.end, seconds: c.seconds };
     // Where it is cut now, or where only its time places it, the words it had are the ones it was suggested with.
     const { first = spell(c.first), last = spell(c.last) } = where || {};
-    const about = [first && `   Opens with: ${first}`, last && `   Closes with: ${last}`, c.reason && `   Why: ${c.reason}`];
+    const about = [first && `   Opens with: ${first}`, last && `   Closes with: ${last}`, c.reason && `   Why it holds attention: ${c.reason}`];
     if (!where) return [`${c.n}. Cut now: its words were cut from ${on.on}. ${state}.`, ...about].filter(Boolean).join("\n");
     const seconds = Math.round(where.seconds);
     return [
@@ -398,7 +398,7 @@ export function reelsText(reels, record, whyNot = "", now = null) {
     return [
       `${c.n}. ${stamp(c.start)} to ${stamp(c.end)}, ${seconds} second${seconds === 1 ? "" : "s"}. ${NOW[status.get(c.n)] || NOW.candidate}.`,
       c.title && `   On screen: ${c.title}`,
-      c.reason && `   Why: ${c.reason}`,
+      c.reason && `   Why it holds attention: ${c.reason}`,
       !c.fits.fits && `   It does not fit a Reel. ${c.fits.why}`,
       c.preview ? `   Preview: ${c.preview}` : `   No preview: ${c.failed || "none was made"}.`,
       c.check && `   ${c.check}`

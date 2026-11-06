@@ -31,11 +31,13 @@ describe("notes.js, which the requests are made from", () => {
   it("gives the text of a raw video's request as it was before the requests for the other kinds were made from it, but for the one line that asks for graphic cues", () => {
     // The hash of notesRequest(PLAN, ABOUT) as it was at commit 0294dcb was 943c87c4…218d, 3854 characters. It asked for "graphics",
     // at most six ideas; it asks for "graphicCues" now (PR H1), and nothing else of it has changed: with the old line put back in
-    // the place of the new one, it hashes to that again. This is its hash now: 4166 characters.
+    // the place of the new one, it hashes to that again. R8b then reworded the sense of the clips' "why" (442ecd9f…956b, 4166 characters, before it). This is its hash now.
     const text = notesRequest(PLAN, ABOUT);
-    assert.equal(createHash("sha256").update(text).digest("hex"), "442ecd9f20dd3b99482061b75626ad091a41e36001f01ee9198cf219ddf2956b");
+    assert.equal(createHash("sha256").update(text).digest("hex"), "2d5e5df2de16daad8dcd713e9e1d9ebd9ab882f452519d7ee761645b904e6b80");
     const was = '- "graphics": at most six {"id", "idea"}. "id" is a kept phrase where words on screen, a graphic or a cutaway shot would help, and "idea" says what it would show, in one sentence.';
-    assert.equal(createHash("sha256").update(text.replace(ASK.graphicCues, was)).digest("hex"), "943c87c418a8843682324d333faa9aaa920864fab97b06009b6c94623e31218d");
+    // The clips' line is put back as it was too: R8b reworded the sense of its "why".
+    const wasClips = ASK.clips.replace('"why" is one sentence on why a viewer keeps watching: the hook, the turn or the promise that holds them.', '"why" is one sentence.');
+    assert.equal(createHash("sha256").update(text.replace(ASK.graphicCues, was).replace(ASK.clips, wasClips)).digest("hex"), "943c87c418a8843682324d333faa9aaa920864fab97b06009b6c94623e31218d");
   });
   it("takes the task as a third thing, and with two things gives the task it always did", () => {
     const task = ["Say hello.", "Say goodbye."].join("\n");
@@ -142,7 +144,7 @@ describe("the request for each kind of video", () => {
       assert.match(asked, /Each is a stretch that would stand alone as a short vertical clip of 15 to 90 seconds\./);
       assert.match(asked, /It runs from the phrase "from" to a later phrase "to", and is all of the video between them\./);
       assert.match(asked, /Start it on a phrase that is not marked "straight on from", and end it on a phrase that the one after it is not straight on from\./);
-      assert.match(asked, /"first" is its first few words and "last" its last few, as the phrases have them\. "why" is one sentence on why it stands alone, and "point" one sentence on the point it makes\. An empty list when nothing stands alone\.$/);
+      assert.match(asked, /"first" is its first few words and "last" its last few, as the phrases have them\. "why" is one sentence on why a viewer keeps watching: the hook, the turn or the promise that holds them\. "point" is one sentence on the point it makes\. An empty list when nothing stands alone\.$/);
     });
   });
 
@@ -161,6 +163,7 @@ describe("the request for each kind of video", () => {
     it("asks for what it did, less the title, and for the spellings and the point each clip makes", () => {
       assert.deepEqual(keysOf(request), ["decisions", "notes", "graphicCues", "clips", "spellings"]);
       assert.ok(!request.includes('- "title"'));
+      assert.ok(request.includes('"why" is one sentence on why a viewer keeps watching: the hook, the turn or the promise that holds them.'));
       const [now, before] = [taskOf(request).split("\n"), taskOf(was).split("\n")];
       assert.deepEqual(now.slice(0, 4), before.slice(0, 4));
       assert.equal(now[4], `${before[4]} Each clip has a "point" too: one sentence on the point it makes.`);
