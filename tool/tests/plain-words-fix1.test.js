@@ -16,7 +16,7 @@ const has = (file, text) => stringsOf(readFileSync(join(TOOL, file), "utf8")).so
 
 describe("R4c fix 1", () => {
   it("footage that could not be made promises no retry", () => {
-    assert.equal(footageNotMadeWords("Pricing talk"), "Some of its footage could not be made for HyperFrames, and opening it again won't change that. Tell Jason.");
+    assert.equal(footageNotMadeWords("Pricing talk"), "Some of its footage could not be made for HyperFrames, and opening it again won't change that. Ask Jason.");
   });
   it("readTrouble says what to do for a record not here whole, and a folder that cannot be read", () => {
     assert.equal(readTrouble({ why: "it has no whole record, so its import has not finished, or it is not an episode", code: "NONE" }),

@@ -504,6 +504,18 @@ describe("app … reel: the Reel's video", () => {
       }
     });
   });
+  it("tells a take-over in the window to take it over again, not to say the plain Reel again (final review R1d-1)", async () => {
+    const reading = { ...RAW, editing: HERS, reading: { kind: "raw", model: "m", at: "2026-10-20T15:00:00-05:00", on: "Mac Studio", account: "a", outcome: "read" } };
+    const { t, found } = world({ record: reading });
+    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+    assert.equal(takeEpisodeLock(lockOf(t.home, FOLDER), "read", () => true).taken, true);
+    t.ctx.deps.alive = (pid) => pid === process.pid;
+    const at = join(found.folder, "reels.json");
+    writeFileSync(at, readFileSync(at, "utf8").slice(0, -4));
+    const r = await app(t.ctx.deps, FOLDER, "reel", "2", "--take-over");
+    assert.deepEqual([r.code, r.said, t.started, runsOf(t)], [0, [`Some files of ${NAME} are not whole in Dropbox yet, so the project of Reel 2 wasn't made. Say "take it over" again in a few minutes. If it says this again, tell Jason.`], [], []]);
+    t.done();
+  });
   it("says the words of the episode are not on this Mac, ending with 1, and makes and asks for nothing", async () => {
     const { t, found } = world();
     rmSync(join(found.folder, "Pricing talk.words.json"));

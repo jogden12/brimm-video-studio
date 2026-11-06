@@ -5,14 +5,17 @@
 // dropped, not made yet or no plan.
 import { statSync } from "node:fs";
 import { join } from "node:path";
-import { shownName } from "./episode.js";
+import { isFromPlan, shownName } from "./episode.js";
 import { teleprompterText } from "./sentences.js";
 
 /** The script's file in a plan's folder, as plan.js puts it there. */
 const SCRIPT_FILE = "teleprompter.txt";
 
 /** What episodes says when the script file is not the size the record lists: it was changed outside the chat. */
-export const HAND_EDITED = (record) => `The script file of "${shownName(record)}" was changed outside the chat. Tell me the changes you want and I will save them to the plan.`;
+export const HAND_EDITED = (record) => isFromPlan(record)
+  // A plan made from its footage can't be changed (`plan … set` refuses), so nothing is promised (final review M3).
+  ? `A file of this video is not the one Studio saved: ${SCRIPT_FILE}. It is made from its footage now, so its script can't be changed. Ask Jason.`
+  : `The script file of "${shownName(record)}" was changed outside the chat. Tell me the changes you want and I will save them to the plan.`;
 
 /** Whether the script file in `folder` is there but not at the size the record lists for it. A file that is missing is another problem, and keeps its own
     line (filesProblems), so it is false here; so is a record that lists no size for it. */
