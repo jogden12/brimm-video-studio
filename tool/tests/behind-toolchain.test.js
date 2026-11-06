@@ -13,8 +13,8 @@ import { writeStudio } from "../studio.js";
 import { setup } from "./episodes.js";
 import { OTHER_INTEGRITY, putToolchain } from "./toolchain-world.js";
 
-const NEWEST = "This Mac has the newest brimm-video.";
-const OFFLINE = "Could not check for a newer brimm-video. Is this Mac offline?";
+const NEWEST = "This Mac has the newest BRIMM Video Studio.";
+const OFFLINE = "Could not check for a newer BRIMM Video Studio. Is this Mac offline?";
 const NODE = "/opt/homebrew/bin/node";
 /** The line `behind` says of a toolchain that is not the pin, by what this Mac has. */
 const line = (what) => `HyperFrames' command line on this Mac is not the one Studio needs. Ask Jason to update it when it suits. (Jason: Studio is pinned to version ${PIN.version}, and this Mac has ${what}; the installer puts the pinned one in place.)`;
@@ -101,12 +101,12 @@ describe("behind: on a Mac whose app is on, it says when the toolchain is not th
     assert.match(said[0], /^HyperFrames' command line on this Mac is not the one Studio needs\. Ask Jason to update it when it suits\. \(Jason: /);
     t.done();
   });
-  it("says it whatever git answers: when it is offline, and when Jason has a newer brimm-video", async () => {
+  it("says it whatever git answers: when it is offline, and when Jason has a newer BRIMM Video Studio", async () => {
     const t = mac();
     const offline = await on(t.ctx.deps, unreachable);
     assert.deepEqual([offline.code, offline.said], [0, [OFFLINE, line("none")]]);
     const newer = await on(t.ctx.deps, behindBy(3));
-    assert.deepEqual([newer.code, newer.said], [0, ["Jason has a newer brimm-video (3 changes). Ask him to update this Mac when it suits.", line("none")]]);
+    assert.deepEqual([newer.code, newer.said], [0, ["Jason has a newer BRIMM Video Studio (3 changes). Ask him to update this Mac when it suits.", line("none")]]);
     t.done();
   });
   it("is read again each time: a toolchain the installer put in place since is no longer said", async () => {
@@ -121,7 +121,7 @@ describe("behind: on a Mac whose app is on, it says when the toolchain is not th
     const folder = writeStudio(t.home, { checkout: "/checkout", node: NODE });
     const skill = join(folder, ".claude", "skills", "brimm-edit", "SKILL.md");
     writeFileSync(skill, readFileSync(skill, "utf8").replace(/\| "Show me the Reels".*\n/, ""));
-    const stale = `Her folder for Claude is out of date: an older brimm-video wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${NODE}, then start a new session in her Claude folder)`;
+    const stale = `Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${NODE}, then start a new session in her Claude folder)`;
     const r = await on(t.ctx.deps, upToDate);
     assert.deepEqual([r.code, r.said], [0, [NEWEST, stale, line("none")]]);
     const offline = await on(t.ctx.deps, unreachable);

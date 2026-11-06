@@ -14,7 +14,8 @@ import { finishFinished, finishNow } from "../finish.js";
 import { HELD, LEFT } from "../gate.js";
 import { DOWNLOADS_UNREADABLE } from "../exports.js";
 import { recordFile, recordText } from "../episode.js";
-import { BRINGING, START, missingWords, noHandoffWords, noReelWords, nothingNewWords, otherKindWords, rawWords, unusableWords } from "../finish-reels.js";
+import { BRINGING, missingWords, noHandoffWords, noReelWords, nothingNewWords, otherKindWords, rawWords, unusableWords } from "../finish-reels.js";
+const START = "Hand-off question: I found your Reels' exports. Hand off the Reels?";
 import { FOLDER, NAME, episodeAs, episodeFor, listAll, reread, setup } from "./episodes.js";
 import { PIN } from "../hyperframes.js";
 import { REEL1, REEL2, changeAt, entry, exportOf, named } from "./exports-world.js";
@@ -117,7 +118,7 @@ describe("2. the gate", () => {
     const found = episodeFor(t, { record: { version: 3, kind: "session", answer: ANSWERED, label: "Session, 2026-10-20", session: SESSION } });
     const before = listAll(found.folder);
     const r = await on(taught(t), "finish", FOLDER, "reels");
-    assert.deepEqual([r.code, r.said], [1, ["Session, 2026-10-20 is a client or group session: brimm-video cannot finish a session yet. Nothing was written."]]);
+    assert.deepEqual([r.code, r.said], [1, ["Session, 2026-10-20 is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written."]]);
     assert.deepEqual([t.started, t.calls, listAll(found.folder)], [[], [], before]);
     t.done();
   });

@@ -112,7 +112,7 @@ describe("her folder's settings under the open lock", () => {
     assert.deepEqual(aboutIt, inner);
     for (const place of [s.sandbox.filesystem.denyWrite, s.sandbox.filesystem.denyRead]) assert.ok(!place.some((path) => bothSpellings(w.workshop).includes(path)), "the sandbox's lists do not hold the workshop");
   });
-  it("denies Write and Edit in her folder, the checkout, BRIMM Video, the app's data and every place only brimm-video writes, and the workshop's CLAUDE.md, CLAUDE.local.md, .mcp.json and .claude", () => {
+  it("denies Write and Edit in her folder, the checkout, BRIMM Video, the app's data and every place only BRIMM Video Studio writes, and the workshop's CLAUDE.md, CLAUDE.local.md, .mcp.json and .claude", () => {
     const s = open();
     for (const path of [w.folder, w.checkout, w.root, join(dirname(realOf(w.root)), "BRIMM VIDEO Transfer"), join(w.home, "BRIMM Video Work"), join(AS(), "BRIMM Video"), join(AS(), "BRIMM Video Words"), join(AS(), "Claude"), join(w.home, "Library", "LaunchAgents"), join(w.home, ".claude"), join(w.home, ".ssh")]) {
       for (const spelling of both(path)) assert.ok(s.permissions.deny.includes(`Edit(/${spelling}/**)`), spelling);

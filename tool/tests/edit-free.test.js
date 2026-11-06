@@ -46,7 +46,7 @@ const LEFT_RECORD = { ...UNANSWERED_RECORD, answer: { ...ANSWER, state: "not for
 const SESSION_RECORD = { version: 3, kind: "session", answer: { ...ANSWERED, private: "yes" }, label: "Session, 2026-10-20", session: SESSION_MARK };
 const CLEARED_RECORD = { ...SESSION_RECORD, session: { ...SESSION_MARK, cleared: { at: AT, on: "Mac Studio", to: "Sallie Ogden", confirmed: "dialog" } } };
 const WAITING = "This video is waiting for its answer: say what it is first.";
-const LEFT_ALONE = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+const LEFT_ALONE = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const HERS = { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00" };
 const WORKING_COPY = "the working copy's bytes";
@@ -195,7 +195,7 @@ describe("free: the gate asks first, in its own words", () => {
     const { t, found } = world();
     writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: found.record.id, rev: 2, kind: "podcast" }));
     const r = await on(t.ctx.deps, "free", FOLDER);
-    assert.deepEqual([r.code, r.said], [1, [`That is an episode a newer brimm-video wrote (${found.record.id.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`]]);
+    assert.deepEqual([r.code, r.said], [1, [`That is an episode a newer BRIMM Video Studio wrote (${found.record.id.slice(-6)}). Jason has a newer BRIMM Video Studio. Ask him to update this Mac.`]]);
     t.done();
   });
 });

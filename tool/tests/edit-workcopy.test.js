@@ -7,7 +7,7 @@
 // "how far is it?" says it is edit-status-workcopy.test.js's, and what `kind` starts is edit-kind.test.js's.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { COMMAND_NAMES, HELP } from "../edit.js";
 import { HELD } from "../gate.js";
@@ -21,10 +21,10 @@ import { pendingFolder } from "../settings.js";
 import { importHold } from "../unedited.js";
 import { WORK_COPY_STEPS, workCopyKey, workCopyLimits, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 import { FOLDER, ID, NAME, episodeAs, reread } from "./episodes.js";
-import { ANSWERED, AT, CLEARED, CLIP, COPY, FINISHED, LEFT, PLAIN, RAW, SESSION, SESSION_MARK, UNANSWERED, WAS_SESSION, atWork, dropbox, on, world } from "./workcopy-world.js";
+import { ANSWERED, AT, CLEARED, CLIP, COPY, FINISHED, LEFT, PLAIN, RAW, SESSION, SESSION_MARK, UNANSWERED, WAS_SESSION, atWork, dropbox, on, owedWithLocal, world } from "./workcopy-world.js";
 
 const WAITING_WORDS = "This video is waiting for its answer: say what it is first.";
-const LEFT_WORDS = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+const LEFT_WORDS = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const NOT_RAW_OR_CLIP = "It can't be used: it is not a raw video or an iPhone clip.";
 
@@ -248,11 +248,11 @@ describe("workcopy: an episode that cannot be gone on with", () => {
     assert.deepEqual([readResult(t.home, FOLDER, "workcopy"), t.calls], [null, []]);
     t.done();
   });
-  it("names a record a newer brimm-video wrote by its short id alone, as the gate does, and makes nothing", async () => {
+  it("names a record a newer BRIMM Video Studio wrote by its short id alone, as the gate does, and makes nothing", async () => {
     const { t, found, guarded } = world();
     writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
     const r = await on(t.ctx.deps, "workcopy", "--now", FOLDER);
-    assert.deepEqual([r.code, r.said, guarded], [1, [`That is an episode a newer brimm-video wrote (${ID.slice(-6)}). Jason has a newer brimm-video. Ask him to update this Mac.`], []]);
+    assert.deepEqual([r.code, r.said, guarded], [1, [`That is an episode a newer BRIMM Video Studio wrote (${ID.slice(-6)}). Jason has a newer BRIMM Video Studio. Ask him to update this Mac.`], []]);
     t.done();
   });
 });
@@ -338,6 +338,77 @@ describe("workcopy: it waits for the import's late check, as the reading does", 
     assert.deepEqual([t.waits, guarded.length, existsSync(paths.video)], [[READ_LOOK_MS], 1, true]);
     t.done();
   });
+  it("a raw video whose late check is owed is copied at once, from the file this Mac holds, and keyed by the Dropbox file's size and time", async () => {
+    const { t, found, raw, paths, guarded, events } = world();
+    const { drop } = owedWithLocal(t, found);
+    const before = dropbox(found);
+    const r = await on(t.ctx.deps, "workcopy", "--now", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    // No wait, no wait step in the panel, and the line that says it is made from the copy this Mac holds.
+    assert.deepEqual([t.waits, events.map(([e]) => e)], [[], ["begin", "steps", "step", "length", "encoding", "stop", "end"]]);
+    assert.ok(!r.text.includes("once the import has checked"), r.text);
+    assert.ok(r.said.includes(`${NAME}: the video for HyperFrames is made from the copy this Mac holds, while Dropbox's check of its copies goes on.`), r.text);
+    // ffmpeg read the drop file, and the copy is where the Dropbox file's key puts it, not where the drop file's time would.
+    assert.equal(guarded[0].args[guarded[0].args.indexOf("-i") + 1], drop);
+    assert.equal(readFileSync(paths.video, "utf8"), COPY);
+    assert.deepEqual(readdirSync(paths.dir).sort(), [`${raw.size}-${Math.floor(raw.mtimeMs)}.json`, `${raw.size}-${Math.floor(raw.mtimeMs)}.mp4`]);
+    // The late check is still owed: its pending check is as it was, and nothing was written in Dropbox.
+    assert.equal(existsSync(join(pendingFolder(t.home), `${ID}.json`)), true);
+    assert.deepEqual(dropbox(found), before);
+    t.done();
+  });
+  it("the late check passing while the copy runs does not stop it: the open file is read to its end", async () => {
+    const { t, found, paths, guarded } = world();
+    const { drop } = owedWithLocal(t, found);
+    let seen = "";
+    const ran = t.ctx.deps.runGuarded;
+    t.ctx.deps.runGuarded = async (cmd, args, limits) => {
+      const ended = await ran(cmd, args, limits);
+      // The import's late check takes the drop file away, and its pending check with it.
+      rmSync(drop);
+      checkMade(t);
+      seen = existsSync(drop) ? "there" : "gone";
+      return ended;
+    };
+    const r = await on(t.ctx.deps, "workcopy", "--now", FOLDER);
+    assert.deepEqual([r.code, seen, guarded.length, existsSync(paths.video)], [0, "gone", 1, true]);
+    t.done();
+  });
+  it("without a file this Mac holds it waits as before: the drop file is another size, is another file, or is gone", async () => {
+    const CASES = [
+      ["another size", (t, found, drop) => writeFileSync(drop, "short")],
+      ["another file", (t, found, drop) => utimesSync(drop, new Date(1_600_000_000_000), new Date(1_600_000_000_000))],
+      ["gone", (t, found, drop) => rmSync(drop)]
+    ];
+    for (const [what, spoil] of CASES) {
+      const { t, found, paths, guarded } = world();
+      const { drop } = owedWithLocal(t, found);
+      spoil(t, found, drop);
+      onWaits(t, READ_LOOK_MS, () => checkMade(t));
+      const r = await on(t.ctx.deps, "workcopy", "--now", FOLDER);
+      assert.equal(r.code, 0, `${what}: ${r.text}`);
+      assert.deepEqual([t.waits, guarded[0].args[guarded[0].args.indexOf("-i") + 1]], [[READ_LOOK_MS], join(found.folder, "Pricing talk.mp4")], what);
+      assert.equal(existsSync(paths.video), true, what);
+      t.done();
+    }
+  });
+  it("a hold that does not wait (a failed import, a problem found) still ends the run, local source or not", async () => {
+    const CASES = [
+      ["a late check that found a problem", (t, found) => owedWithLocal(t, found, { over: { problem: "Pricing talk.srt is not whole in Dropbox." } })],
+      ["an import that failed", (t, found) => {
+        owedWithLocal(t, found);
+        writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: VIDEO, bytes: found.record.video.bytes, seconds: 23.423, step: "Waiting for its late check", at: AT, label: "x", failed: "ffprobe could not read it." }, (to, text) => writeFileSync(to, text));
+      }]
+    ];
+    for (const [what, set] of CASES) {
+      const { t, found, paths, guarded, events } = world();
+      set(t, found);
+      const r = await on(t.ctx.deps, "workcopy", "--now", FOLDER);
+      assert.equal(r.code, 1, `${what}: ${r.text}`);
+      assert.deepEqual([t.waits, t.calls, events, guarded.length, existsSync(paths.video)], [[], [], [], 0, false], what);
+      t.done();
+    }
+  });
   it("waits for nothing when nothing holds the video: no late check owed, or only another episode's", async () => {
     for (const [what, set] of [["none", () => {}], ["another episode's", (t, found) => owe(t, found, 5 * 60 * 1000, { id: "e-20261001-aaaaaa" })]]) {
       const { t, found, guarded, events } = world();
@@ -386,11 +457,11 @@ describe("workcopy: it waits for the import's late check, as the reading does", 
 
   describe("a hold that does not clear by itself ends the run at once, with the words the reading says it in", () => {
     const CASES = [
-      ["a late check that found a problem", (t, found) => owe(t, found, 20 * 60 * 1000, { problem: "Pricing talk.srt is not whole in Dropbox." }), /^The late check of this episode's import found a problem: Pricing talk\.srt is not whole in Dropbox\. Once it is put right, say "try it again" for Pricing talk\.mp4 on Mac Studio, then say this again\.$/],
-      ["a status of an import whose late check found a problem", (t, found) => importAt(t, found, { problem: "Pricing talk.srt is not whole in Dropbox." }), /^The late check of this episode's import found a problem: Pricing talk\.srt is not whole in Dropbox\. Once it is put right, say "try it again" for Pricing talk\.mp4 on Sallie's laptop, then say this again\.$/],
+      ["a late check that found a problem", (t, found) => owe(t, found, 20 * 60 * 1000, { problem: "Pricing talk.srt is not whole in Dropbox." }), /^Dropbox found a problem with a copy of this episode: Pricing talk\.srt is not whole in Dropbox\. Once it is put right, say "try it again" for Pricing talk\.mp4 on Mac Studio, then say this again\.$/],
+      ["a status of an import whose late check found a problem", (t, found) => importAt(t, found, { problem: "Pricing talk.srt is not whole in Dropbox." }), /^Dropbox found a problem with a copy of this episode: Pricing talk\.srt is not whole in Dropbox\. Once it is put right, say "try it again" for Pricing talk\.mp4 on Sallie's laptop, then say this again\.$/],
       ["an import that failed", (t, found) => importAt(t, found, { failed: "ffprobe could not read it." }), /^The import of this episode failed on Sallie's laptop: ffprobe could not read it\. Say "try it again" to import it again\.$/],
-      ["an import that stopped before its late check", (t, found) => importAt(t, found, { at: "2026-10-20T14:00:00-05:00" }), /^The import of this episode stopped on Sallie's laptop before its late check was made\. On Sallie's laptop, say "try it again" for Pricing talk\.mp4, then say this again\.$/],
-      ["a late check this Mac owes past its time, with no import at work to make it", (t, found) => owe(t, found, 40 * 60 * 1000), /^This Mac has still to make the late check of this episode's import\. Say "try it again" for Pricing talk\.mp4 to have it made now, then say this again\.$/]
+      ["an import that stopped before its late check", (t, found) => importAt(t, found, { at: "2026-10-20T14:00:00-05:00" }), /^The import of this episode stopped on Sallie's laptop before the check of its copies was made\. On Sallie's laptop, say "try it again" for Pricing talk\.mp4, then say this again\.$/],
+      ["a late check this Mac owes past its time, with no import at work to make it", (t, found) => owe(t, found, 40 * 60 * 1000), /^This Mac has still to make the check of this episode's copies\. Say "try it again" for Pricing talk\.mp4 to have it made now, then say this again\.$/]
     ];
     for (const [what, set, words] of CASES) {
       it(what, async () => {
@@ -417,7 +488,7 @@ describe("workcopy: it waits for the import's late check, as the reading does", 
     // A late check this Mac owes, due in two hours: it holds the video, and clears by itself, but not within the wait.
     owe(t, found, LATE_CHECK_MS - 2 * 60 * 60 * 1000);
     const why = holdOf(t, found).why;
-    assert.match(why, /^This Mac has still to make the late check of this episode's import, due at \d\d:\d\d\. Say "try it again" for Pricing talk\.mp4 to have it made then, then say this again\.$/);
+    assert.match(why, /^This Mac has still to make the check of this episode's copies, due at \d\d:\d\d\. Say "try it again" for Pricing talk\.mp4 to have it made then, then say this again\.$/);
     const r = await on(t.ctx.deps, "workcopy", "--now", FOLDER);
     assert.equal(r.code, 1, r.text);
     assert.deepEqual(t.waits, Array(READ_HOLD_MS / READ_LOOK_MS).fill(READ_LOOK_MS));

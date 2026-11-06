@@ -69,7 +69,7 @@ function problemsIn(lines, names) {
       [/\.(mp4|mov|m4v|webm|json|srt|txt|fcpxmld?|xml)\b/i, "a file name that is no project's or export's"]
     ];
     for (const [pattern, what] of checks) if (pattern.test(rest)) problems.push(`${what} in: ${line}`);
-    if (/\bStudio\b/.test(rest.replace(/Mac Studio/g, ""))) problems.push(`the word Studio in: ${line}`);
+    if (/\bStudio\b/.test(rest.replace(/Mac Studio|BRIMM Video Studio/g, ""))) problems.push(`the word Studio in: ${line}`);
   }
   return problems;
 }

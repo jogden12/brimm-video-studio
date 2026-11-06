@@ -129,7 +129,7 @@ const TODAY_ASKED = {
   refs: [[], ["look", "blue carousel"], ["use", FOLDER, "blue carousel"], ["use", NAME, "blue carousel", "reel", "2"], ["use"]],
   // The planned episode, new with the HyperFrames-led path (PR H4): tests/edit-plan.test.js pins its words. Today's Mac has no plan, so here it makes one,
   // says today's episode is none, and finds nothing; the walk below runs `plan` for a video waiting for its answer and for a session, where the gate answers.
-  plan: [[], ["new"], ["new", "Too many SKUs"], ["new", "Why SKUs", "--explainer", "--voice", "heygen"], [FOLDER], [NAME], [FOLDER, "drop"], [FOLDER, "set", "--line", "x"], ["Pricing"], ["nothing fits this"]],
+  plan: [[], ["new"], ["new", "Too many SKUs"], ["new", "Why SKUs", "--explainer", "--voice", "heygen"], [FOLDER], [NAME], [FOLDER, "drop"], [FOLDER, "set", "--line", "x"], [FOLDER, "script"], ["Pricing"], ["nothing fits this"]],
   // Footage for a planned video, new with the HyperFrames-led path (PR H5a): there is no output of today's to pin, and tests/edit-footage.test.js pins its words. The walk
   // below runs it for a video waiting for its answer and for a session, where the gate answers.
   footage: []
@@ -399,7 +399,7 @@ describe("findEpisode, for a video named by its label", () => {
     assert.equal(findEpisode(ctx, "2026").name, "2026-10-18 Pricing talk (Mac Studio)");
     t.done();
   });
-  it("names a conflicted episode by the label of a gated record, read past the copies or a copy's own, and one a newer brimm-video wrote by its short id", () => {
+  it("names a conflicted episode by the label of a gated record, read past the copies or a copy's own, and one a newer BRIMM Video Studio wrote by its short id", () => {
     const t = setup();
     const e = clientEpisode(t);
     conflictedRecord(e.folder, { label: "Video B" });
@@ -409,7 +409,7 @@ describe("findEpisode, for a video named by its label", () => {
     const newer = clientEpisode(t, { folder: "2026-10-18 Call with Ann Other (Mac Studio)", video: "Call with Ann Other.mov", id: "e-20261018-0d0d0d", over: { version: 9 } });
     conflictedRecord(newer.folder);
     const why = findEpisode(ctxOf(t), "nothing fits this").why;
-    assert.equal(why, `No episode fits "nothing fits this". The episodes are: ${LABEL} (a1b2c3), ${SESSION} (0c0c0c) and an episode a newer brimm-video wrote (0d0d0d).`);
+    assert.equal(why, `No episode fits "nothing fits this". The episodes are: ${LABEL} (a1b2c3), ${SESSION} (0c0c0c) and an episode a newer BRIMM Video Studio wrote (0d0d0d).`);
     assert.doesNotMatch(why, /Bloggs \(Mac|Ann Other|2026-10-1/);
     t.done();
   });
@@ -480,7 +480,7 @@ describe("a command the gate lets through, for a gated video", () => {
     writeSettings(u.home, { import: "light", sessionTeachings: TEACHINGS });
     clientEpisode(u, { over: MARKED_OVER });
     const r = await on(u.ctx.deps, "finish", LABEL);
-    assert.deepEqual([r.code, r.said], [1, [`${LABEL} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`]]);
+    assert.deepEqual([r.code, r.said], [1, [`${LABEL} is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written.`]]);
     assert.doesNotMatch(r.said.join("\n"), SECRET);
     t.done();
     u.done();
@@ -510,12 +510,12 @@ describe("episodes, on a Mac that does the light import", () => {
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Acme/);
     t.done();
   });
-  it("lists a video left alone, not for brimm-video, apart, under its own heading", async () => {
+  it("lists a video left alone (the stored state \"not for brimm-video\") apart, under its own heading", async () => {
     const t = setup();
     writeSettings(t.home, { import: "light" });
     clientEpisode(t, { over: { answer: { ...ANSWER, state: "not for brimm-video" } } });
     const said = await listing(t);
-    assert.deepEqual(said.slice(0, 3), ["Left alone, not for brimm-video:", `  ${LABEL}: a video of 2:00, id a1b2c3`, "On this Mac:"]);
+    assert.deepEqual(said.slice(0, 3), ["Left alone, not for BRIMM Video Studio:", `  ${LABEL}: a video of 2:00, id a1b2c3`, "On this Mac:"]);
     t.done();
   });
   it("names a gated episode with a conflicted copy by its label, and its files that are not right without the video's name; a newer one by its id", async () => {
@@ -530,8 +530,8 @@ describe("episodes, on a Mac that does the light import", () => {
     const said = await listing(t);
     assert.equal(said[1], `  ${LABEL}: a video waiting for your answer, of 2:00, id a1b2c3`);
     assert.deepEqual(said.slice(2, 6), ["    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes", `    Card: ${JSON.stringify(cardFor({ label: LABEL, guess: "raw", maybe: null }))}`]);
-    assert.match(said[6], /^ {4}Not right: Dropbox has kept a conflicted copy in this episode: record\/0001 \(Sallie's laptop's conflicted copy 2026-10-20\)\.json\./);
-    assert.ok(said.includes("  An episode a newer brimm-video wrote (0d0d0d): Jason updates this Mac before it is changed here."), said.join("\n"));
+    assert.match(said[6], /^ {4}Dropbox has kept a conflicted copy in this episode: record\/0001 \(Sallie's laptop's conflicted copy 2026-10-20\)\.json\./);
+    assert.ok(said.includes("  An episode a newer BRIMM Video Studio wrote (0d0d0d): Jason updates this Mac before it is changed here."), said.join("\n"));
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Ann Other/);
     t.done();
   });
@@ -568,7 +568,7 @@ describe("episodes, on a Mac that does the light import", () => {
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, VIDEO), "video");
     const said = await listing(t);
-    assert.ok(said.includes(`  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as ${LABEL} (a1b2c3). It stays in the drop folder until its late check passes, or for a person to delete.`), said.join("\n"));
+    assert.ok(said.includes(`  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as ${LABEL} (a1b2c3). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`), said.join("\n"));
     t.done();
   });
   it("names this Mac's library of a gated episode by its label, an answered one's as today, and one of no episode here by its day and Mac", async () => {
@@ -736,7 +736,7 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
       ["a session, its mark cleared", { kind: "session", answer: ANSWERED, session: cleared, ...asSession }, true, false, TARGET],
       ["a finished video marked a session, not cleared", { kind: "finished", answer: ANSWERED, session: sessionMark, name: stem }, true, true],
       ["an archived video", { kind: "finished", answer: ANSWERED, archived: { at: AT }, name: stem }, false, false],
-      ["a video a newer brimm-video wrote", { kind: "finished", answer: ANSWERED, version: 9, name: stem }, true, false]
+      ["a video a newer BRIMM Video Studio wrote", { kind: "finished", answer: ANSWERED, version: 9, name: stem }, true, false]
     ];
     const SESSIONS_LINE = "    Maybe a new version of a client or group session.";
     const noMaybe = (said, what, base, session = false) => {
@@ -874,7 +874,7 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     clientEpisode(t, { folder: "2026-10-17 Left alone (Mac Studio)", video: "Left alone.mov", id: "e-20261017-0b0b0b", label: "Video of 17 Oct, 10:00 (Mac Studio)", over: { answer: { ...ANSWER, state: "not for brimm-video" } } });
     const said = (await on(depsOf(t), "episodes")).said;
     assert.ok(!said.some((line) => /^ {4}(Seen|Came|Guess|Maybe a new version of):/.test(line)), said.join("\n"));
-    assert.ok(said.includes("Left alone, not for brimm-video:"), said.join("\n"));
+    assert.ok(said.includes("Left alone, not for BRIMM Video Studio:"), said.join("\n"));
     t.done();
   });
   it("puts the card's lines before anything else under the video's line, and the video's other lines stay", async () => {
@@ -886,7 +886,7 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     const { said, at } = await cardOf(t);
     assert.deepEqual(said.slice(at, at + 4), [`  ${LABEL}: a video waiting for your answer, of 2:00, id a1b2c3`, "    Seen: wide, 2:00, 3 retakes", "    Came: from a camera", "    Guess: raw with retakes"]);
     assert.match(said[at + 4], /^ {4}Card: \{/);
-    assert.match(said[at + 5], /^ {4}Not right: Dropbox has kept a conflicted copy in this episode/);
+    assert.match(said[at + 5], /^ {4}Dropbox has kept a conflicted copy in this episode/);
     t.done();
   });
   it("is the same on a Mac whose import is not the light one, for a video waiting for its answer", async () => {
@@ -918,7 +918,7 @@ describe("a gated record with no label, named by its short id once", () => {
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, VIDEO), "video");
     const said = (await on(depsOf(t), "episodes")).said;
-    assert.ok(said.includes("  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as a client or group session (a1b2c3). It stays in the drop folder until its late check passes, or for a person to delete."), said.join("\n"));
+    assert.ok(said.includes("  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as a client or group session (a1b2c3). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete."), said.join("\n"));
     assert.doesNotMatch(said.join("\n"), SECRET);
     t.done();
   });
@@ -948,12 +948,12 @@ describe("a video in the drop folder whose episode has a conflicted copy, or can
     const t = setup();
     conflictedRecord(sessionHolding(t).folder);
     const said = (await on(depsOf(t), "episodes")).said;
-    assert.deepEqual(waitingIn(said), ["Waiting in the drop folders:", `  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as ${HELD}. It stays in the drop folder until its late check passes, or for a person to delete.`]);
+    assert.deepEqual(waitingIn(said), ["Waiting in the drop folders:", `  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as ${HELD}. It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`]);
     assert.doesNotMatch(said.join("\n"), SECRET);
     const none = await on(depsOf(t), "retry", "nothing fits this");
     assert.deepEqual(none.said, ['No video in this Mac\'s drop folder fits "nothing fits this". It holds: a video of 5 bytes.']);
     const named = await on(depsOf(t), "retry", VIDEO);
-    assert.deepEqual([named.code, named.said], [1, [`A video of 5 bytes in this Mac's drop folder is already imported as ${HELD}. It stays in the drop folder until its late check passes, or for a person to delete.`]]);
+    assert.deepEqual([named.code, named.said], [1, [`A video of 5 bytes in this Mac's drop folder is already imported as ${HELD}. It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`]]);
     t.done();
   });
   it("episodes and retry name it by what it is and its size when the episode's records, or Episodes, cannot be read", async () => {
@@ -1001,7 +1001,7 @@ describe("a video in the drop folder whose episode has a conflicted copy, or can
     const e = clientEpisode(t, { folder: "2026-10-18 Talk (Mac Studio)", video: "Talk.mov", id: "e-20261018-0d0d0d", label: "", over: { kind: "finished", answer: ANSWERED } });
     conflictedRecord(e.folder);
     const held = (await on(depsOf(t), "episodes")).said;
-    assert.deepEqual(waitingIn(held), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes: already imported as 2026-10-18 Talk (Mac Studio). It stays in the drop folder until its late check passes, or for a person to delete."]);
+    assert.deepEqual(waitingIn(held), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes: already imported as 2026-10-18 Talk (Mac Studio). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete."]);
     t.done();
   });
 });
@@ -1060,10 +1060,10 @@ describe("the import statuses, status and retry, of a light import", () => {
     // Its import stopped on this Mac before its late check: its status, with its label, is still there.
     writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: VIDEO, bytes: 5, seconds: 120, step: "Filing", at: "2026-10-20T13:00:00-05:00", label: LABEL }, writeText);
     const r = await on(depsOf(t), "retry", LABEL);
-    assert.deepEqual([r.code, r.said], [0, [`${LABEL} is imported, as ${LABEL} (a1b2c3). Its import stopped on this Mac, and has no late check left to make here, so the status that held the episode is taken away.`]]);
+    assert.deepEqual([r.code, r.said], [0, [`${LABEL} is imported, as ${LABEL} (a1b2c3). Its import stopped on this Mac, and has no check of its copies left to make here, so the status that held the episode is taken away.`]]);
     // With no status left, the video in the drop folder is named by what it is and its size, and the episode by its label.
     const again = await on(depsOf(t), "retry", VIDEO);
-    assert.deepEqual([again.code, again.said], [1, [`A video of 5 bytes in this Mac's drop folder is already imported as ${LABEL} (a1b2c3). It stays in the drop folder until its late check passes, or for a person to delete.`]]);
+    assert.deepEqual([again.code, again.said], [1, [`A video of 5 bytes in this Mac's drop folder is already imported as ${LABEL} (a1b2c3). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`]]);
     t.done();
   });
 });
@@ -1104,7 +1104,7 @@ describe("status, and the result files of detached runs, for a gated video", () 
     await on({ ...depsOf(t), clone }, "finish", "--now", LIGHT_FOLDER);
     const result = readResult(t.home, LIGHT_FOLDER, "finish");
     assert.ok(result && result.failed.length === 2, JSON.stringify(result));
-    assert.equal(result.failed[0], `${SESSION} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`);
+    assert.equal(result.failed[0], `${SESSION} is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written.`);
     assert.match(result.failed[1], /^This Mac still has the episode open: it could not be let go \(/);
     assert.match(result.failed[1], /the video/, "the folder's name in the error was put as the video");
     assert.doesNotMatch(readFileSync(resultFile(t.home, LIGHT_FOLDER, "finish"), "utf8"), SECRET);
@@ -1259,7 +1259,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     guide: [[], [label], [label, "show"], [label, "done", "taken"], [label, "finished"], [label, "tell"], ["drop"], ["drop", "zoom"], ["page"], ["wait"]],
     app: [[label], [label, "what-happened"], [label, "versions"], [label, "reel", "1"], [], ["2026"], ["nothing fits this"]],
     refs: [[], ["look", "blue carousel"], ["use", label, "blue carousel"], ["use", label, "blue carousel", "reel", "1"], ["use", "nothing fits this", "blue carousel"], ["use"]],
-    plan: [["new", label], ["new", "Why", "--explainer"], [label], [label, "drop"], [label, "set", "--line", "x"], [label, "agreed", label], [label, "join"], [label, "join", label], ["nothing fits this"], []],
+    plan: [["new", label], ["new", "Why", "--explainer"], [label], [label, "drop"], [label, "set", "--line", "x"], [label, "script"], [label, "agreed", label], [label, "join"], [label, "join", label], ["nothing fits this"], []],
     // Footage for a planned video (PR H5a): no plan is there, so it says so for a video waiting; the gate refuses a session.
     footage: [[label, "Too many SKUs", "talking", "--client", "no"], [label, "Too many SKUs", "b-roll", "--client", "yes", "--shot", "2"], [label, "none"], []]
   });
@@ -1399,9 +1399,9 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     const at = said.indexOf("Waiting in the drop folders:");
     assert.deepEqual(said.slice(at, at + 5), [
       "Waiting in the drop folders:",
-      "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as Video of 19 Oct, 10:00 (Mac Studio) (0c0c0c). It stays in the drop folder until its late check passes, or for a person to delete.",
+      "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as Video of 19 Oct, 10:00 (Mac Studio) (0c0c0c). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.",
       `  ${SECOND_LABEL}, in the Mac Studio's drop folder, for 0 minutes: its import failed on Mac Studio: the sound could not be read from the file (a file: Invalid data found when processing input). Say "try it again" to import it again.`,
-      `  ${LABEL}, in the Mac Studio's drop folder, for 0 minutes: already imported as ${LABEL} (a1b2c3). It stays in the drop folder until its late check passes, or for a person to delete.`,
+      `  ${LABEL}, in the Mac Studio's drop folder, for 0 minutes: already imported as ${LABEL} (a1b2c3). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`,
       "  Pricing talk again.mov, in Mac Studio's, for 0 minutes"
     ]);
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Bloggs/);

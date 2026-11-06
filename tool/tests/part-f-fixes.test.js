@@ -230,7 +230,7 @@ describe("behind takes away only what show and which put in shown/, by their mar
     mkdirSync(join(work, "2026-10-16 Third (Mac Studio)", "renders"), { recursive: true });
     writeFileSync(join(work, "2026-10-16 Third (Mac Studio)", "renders", "v0.mp4"), "a render");
     const r = await behind(t);
-    assert.deepEqual([r.code, r.text], [0, "This Mac has the newest brimm-video."]);
+    assert.deepEqual([r.code, r.text], [0, "This Mac has the newest BRIMM Video Studio."]);
     assert.ok(!existsSync(join(marked, "a copy.txt")));
     assert.deepEqual(treeOf(marked).filter((n) => n !== SHOWN_MARKER), ["hers.txt", "sub", "sub/c.txt"]);
     assert.deepEqual(treeOf(unmarked), ["x.txt"]);
@@ -624,7 +624,7 @@ describe("a waiting video whose import matched a video since marked a session, o
 
 describe("\"it was a session after all\" with a listed file of final/ that is not on this Mac (item 3)", () => {
   const COMING = "Dropbox is still bringing Session, 2026-10-14's earlier files over to this Mac: say your answer again in a minute. Nothing was changed.";
-  const ASK = `${COMING} Ask Jason if it does not come.`;
+  const ASK = `${COMING} If it does not come, tell Jason.`;
   /** The probe's video: finished and handed off, its final/ listing captions that were deleted by hand. */
   function gone(t) {
     const found = handedOff(t);
@@ -669,7 +669,7 @@ describe("\"it was a session after all\" with a listed file of final/ that is no
     gone(t);
     const NOT = "Dropbox is still bringing Pricing talk's earlier files over to this Mac: say your answer again in a minute. Nothing was changed.";
     assert.deepEqual((await on(t.ctx.deps, "kind", "Pricing talk", "raw", "--private", "no", "--again")).said, [NOT]);
-    assert.deepEqual((await on(t.ctx.deps, "kind", "Pricing talk", "raw", "--private", "no", "--again")).said, [`${NOT} Ask Jason if it does not come.`]);
+    assert.deepEqual((await on(t.ctx.deps, "kind", "Pricing talk", "raw", "--private", "no", "--again")).said, [`${NOT} If it does not come, tell Jason.`]);
     t.done();
   });
 });
@@ -688,7 +688,7 @@ describe("the README's rows for the commands of the fork (item 7)", () => {
   it("gives kind every flag of its usage, and the rows of leave, which, a client's agreement and retry's label", () => {
     const [kind] = rowsOf("kind");
     for (const flag of ["--private yes\\|no", "--version-of <id>\\|none", "--not-a-session", "--again", "--clear-session", "--here"]) assert.ok(kind.includes(flag), flag);
-    assert.match(rowsOf("leave")[0], /not for brimm-video/);
+    assert.match(rowsOf("leave")[0], /not for BRIMM Video Studio/);
     assert.match(rowsOf("which")[0], /clone/);
     assert.ok(rowsOf("reel").some((row) => row.startsWith('| `reel "<label>" <n> --client-agreed` |')));
     assert.match(rowsOf("retry")[0], /by the label a light import's status gives it/);
@@ -785,7 +785,7 @@ describe("a video held as a session, with no label, is listed with its short id 
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, "Talk.mp4"), "v");
     const episodes = await on(t.ctx.deps, "episodes");
-    assert.ok(episodes.said.some((line) => line.endsWith(": already imported as a video (a0a0a0). It stays in the drop folder until its late check passes, or for a person to delete.")), episodes.text);
+    assert.ok(episodes.said.some((line) => line.endsWith(": already imported as a video (a0a0a0). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.")), episodes.text);
     for (const r of [none, episodes]) assert.doesNotMatch(r.text, /\(a0a0a0\) \(a0a0a0\)/);
     // A labelled one keeps its label and its short id, as a gated one is listed.
     const u = setup();

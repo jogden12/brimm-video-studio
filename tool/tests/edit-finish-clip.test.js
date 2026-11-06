@@ -13,6 +13,7 @@ import { finishFinished, finishNow, madeFromImport } from "../finish.js";
 import { episodeWork } from "../settings.js";
 import { FOLDER, ID, episodeFor, reread, setup, listAll } from "./episodes.js";
 import { AT, FOUND, MAIN, MAIN_WORDS, READING, SPELLINGS, TAKEN, VIDEO, clipWorld as clip, entry, exportOf, world } from "./exports-world.js";
+const HAND_OFF_LINE = "Hand-off question: I found your export. Hand it off?";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -235,7 +236,7 @@ describe("F3. a clip edited in HyperFrames, and a clip handed off already", () =
   it("goes the HyperFrames way once the app has opened its project, with no question, and its hand-off is from the export", async () => {
     const w = edited();
     const main = exportOf(w, "main");
-    assert.equal((await on(w.t.ctx.deps, "finish", FOLDER)).text.split("\n").at(-1), 'Say "yes, hand it off" to start.');
+    assert.equal((await on(w.t.ctx.deps, "finish", FOLDER)).text.split("\n").at(-1), HAND_OFF_LINE);
     const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
     assert.equal(r.code, 0, r.text);
     assert.equal(w.asked().source, "hyperframes");
@@ -255,7 +256,7 @@ describe("F3. a clip edited in HyperFrames, and a clip handed off already", () =
     const w = edited();
     exportOf(w, "main");
     const asked = await on(w.t.ctx.deps, "finish", FOLDER);
-    assert.deepEqual(asked.said.slice(-2), [FOUND, 'Say "yes, hand it off" to start.']);
+    assert.deepEqual(asked.said.slice(-2), [FOUND, HAND_OFF_LINE]);
     assert.deepEqual(w.t.started, []);
     const r = await on(w.t.ctx.deps, "finish", FOLDER, "--yes");
     assert.equal(r.code, 0, r.text);

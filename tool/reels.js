@@ -210,7 +210,7 @@ export const uncropped = (candidate) => Array.isArray(candidate.ranges) && candi
 export const notMadeWords = (n) => {
   const ns = n === undefined ? [] : [].concat(n);
   const them = ns.length === 0 ? "Reels" : ns.length === 1 ? `Reel ${ns[0]}` : `Reels ${ns.slice(0, -1).join(", ")} and ${ns[ns.length - 1]}`;
-  return `brimm-video cannot make ${them} on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.`;
+  return `BRIMM Video Studio cannot make ${them} on this Mac: Reels are made in HyperFrames, and this Mac isn't set up for HyperFrames yet. Ask Jason.`;
 };
 
 /** reels.json, as it is written: the candidates of `video`, made by the import, by `ask` or by a reading (`by`) at the moment
@@ -241,7 +241,7 @@ export function readReels(text, { known = REELS_VERSION } = {}) {
   }
   const not = { why: "it is not a list of Reel candidates this tool wrote" };
   if (!reels || reels.format !== "brimm-video reels" || !Number.isInteger(reels.version)) return not;
-  if (reels.version > known) return { why: "it was written by a newer brimm-video. Ask Jason to update this Mac." };
+  if (reels.version > known) return { why: "it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac." };
   if (typeof reels.video !== "string" || !Array.isArray(reels.candidates)) return not;
   if (reels.highest !== undefined && !(Number.isInteger(reels.highest) && reels.highest >= 0)) return not;
   const isCrop = (c) => Boolean(c) && [c.x, c.y, c.w, c.h].every(Number.isFinite);
@@ -356,7 +356,7 @@ function suggestionsText(reels, record, now) {
     const where = on ? placedOn(c, on) : { start: c.start, end: c.end, seconds: c.seconds };
     // Where it is cut now, or where only its time places it, the words it had are the ones it was suggested with.
     const { first = spell(c.first), last = spell(c.last) } = where || {};
-    const about = [first && `   Opens with: ${first}`, last && `   Closes with: ${last}`, c.reason && `   Why: ${c.reason}`];
+    const about = [first && `   Opens with: ${first}`, last && `   Closes with: ${last}`, c.reason && `   Why it holds attention: ${c.reason}`];
     if (!where) return [`${c.n}. Cut now: its words were cut from ${on.on}. ${state}.`, ...about].filter(Boolean).join("\n");
     const seconds = Math.round(where.seconds);
     return [
@@ -398,7 +398,7 @@ export function reelsText(reels, record, whyNot = "", now = null) {
     return [
       `${c.n}. ${stamp(c.start)} to ${stamp(c.end)}, ${seconds} second${seconds === 1 ? "" : "s"}. ${NOW[status.get(c.n)] || NOW.candidate}.`,
       c.title && `   On screen: ${c.title}`,
-      c.reason && `   Why: ${c.reason}`,
+      c.reason && `   Why it holds attention: ${c.reason}`,
       !c.fits.fits && `   It does not fit a Reel. ${c.fits.why}`,
       c.preview ? `   Preview: ${c.preview}` : `   No preview: ${c.failed || "none was made"}.`,
       c.check && `   ${c.check}`

@@ -24,7 +24,7 @@ describe("a time as a person gives it", () => {
 });
 
 describe("the clock of a timeline", () => {
-  it("is read off a Final Cut file brimm-video wrote, each clip's place on the timeline and its stretch of the video", () => {
+  it("is read off a Final Cut file BRIMM Video Studio wrote, each clip's place on the timeline and its stretch of the video", () => {
     const clock = clockOf(fcpxml({ video: "/v/a.mp4", facts: FACTS, ranges: MAIN }));
     assert.equal(clock.length, 3);
     assert.ok(Math.abs(clock[1].at - 3.971) < 0.001 && Math.abs(clock[1].from - 13.38) < 0.001, JSON.stringify(clock));

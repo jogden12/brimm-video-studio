@@ -102,12 +102,12 @@ const REPLY = {
 };
 /** What the name check takes out of REPLY, as the result and her chat say it. */
 const TAKEN_OUT = [
-  "Principle 1's steps, entry 2: it held a name brimm-video can see.",
-  "Principle 2's example_application: it held a name brimm-video can see.",
-  "Principle 2's source_context: it held a name brimm-video can see.",
-  "Principle 3's name: it held a name brimm-video can see.",
-  "Recurring principle 2's text: it held a name brimm-video can see.",
-  "Reel idea 3's words: it held a name brimm-video can see."
+  "Principle 1's steps, entry 2: it held a name BRIMM Video Studio can see.",
+  "Principle 2's example_application: it held a name BRIMM Video Studio can see.",
+  "Principle 2's source_context: it held a name BRIMM Video Studio can see.",
+  "Principle 3's name: it held a name BRIMM Video Studio can see.",
+  "Recurring principle 2's text: it held a name BRIMM Video Studio can see.",
+  "Reel idea 3's words: it held a name BRIMM Video Studio can see."
 ];
 
 /** What `claude auth status` prints on this Mac, and the account Jason checked. */
@@ -121,11 +121,11 @@ const TEACHINGS_OFF = "Teachings from sessions are not turned on for this Mac ye
 const LAPSED = "Teachings from sessions were turned on more than 90 days ago on this Mac: ask Jason to check the training setting again.";
 const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
 const TRANSCRIPT_ONLY = `${LABEL}: its transcript stays on this Mac. Nothing goes to Claude.`;
-const CHECK = "brimm-video took out the names it could see. Check these for anything about the client.";
+const CHECK = "BRIMM Video Studio took out the names it could see. Check these for anything about the client.";
 const FOR_HER = "(for you only: not sent to the page)";
 const V1_WAITS = "A session's hand-off is written once this Mac hands off version 2: ask Jason.";
 /** What `name` says of a session name holding `word`, a name brimm-video can see (fix round 2: the word that tripped it). */
-const NAME_HOLDS = (word) => `That name holds "${word}", a name brimm-video can see in this session: give it another.`;
+const NAME_HOLDS = (word) => `That name holds "${word}", a name BRIMM Video Studio can see in this session: give it another.`;
 const STILL = `Claude is still reading ${LABEL}. A notice will come on this Mac when it is done: then say "what did Claude find?"`;
 
 const ANSWER = { state: "answered", guess: null, seen: "wide, 0:26", came: "camera", match: null, by: "Mac Studio", on: "Mac Studio", at: MARKED, private: "yes" };
@@ -433,7 +433,7 @@ describe("read --kind session: the session's one reading", () => {
     assert.ok(kept.dropped.some((d) => d.field === "Principle 1's verbatim_key_phrases, entry 2"));
     // A speaker's name in a principle's example takes that field out, and the result says so, by the field alone.
     assert.equal("example_application" in kept.principles[0], false);
-    assert.ok(readResult(t.home, FOLDER, "read").failed.includes("Principle 1's example_application: it held a name brimm-video can see."));
+    assert.ok(readResult(t.home, FOLDER, "read").failed.includes("Principle 1's example_application: it held a name BRIMM Video Studio can see."));
     for (const rel of listAll(found.folder).filter((r) => !r.startsWith("record/") && r !== VTT_FILE && !r.startsWith(STEM))) assert.doesNotMatch(fileOf(found, rel), SECRET, rel);
     t.done();
   });
@@ -465,7 +465,7 @@ describe("read --kind session: the session's one reading", () => {
     mac.t.done();
   });
   it("says so when the transcriber capitalised the recording throughout, so its capitalised words were not checked", async () => {
-    const SKIPPED = "The transcriber wrote this recording with capitals throughout, so brimm-video did not check its capitalised words for names: only the speakers' names and the file's name were checked.";
+    const SKIPPED = "The transcriber wrote this recording with capitals throughout, so BRIMM Video Studio did not check its capitalised words for names: only the speakers' names and the file's name were checked.";
     const shouted = { ...PLAN, phrases: [{ id: "p1", start: 0, end: 9, keep: true, text: "Welcome Back Everyone To The Group Call Where We Talk About Pricing For Your Business And How To Set It Right Every Single Time." }, ...PHRASES.slice(1)] };
     const { t } = await readSession({ files: { ...FILES, [`${STEM}.cut-plan.json`]: JSON.stringify(shouted) } });
     assert.ok(readResult(t.home, FOLDER, "read").failed.includes(SKIPPED));
@@ -597,7 +597,7 @@ describe("principles and ideas: what Claude read, for her to decide", () => {
     assert.equal(r.code, 0, r.text);
     assert.equal(r.said[0], `${LABEL}: 3 Reel ideas, from Claude's reading of 2026-10-20.`);
     assert.equal(r.said[1], CHECK);
-    assert.ok(r.said.includes("Taken out: Reel idea 3's words: it held a name brimm-video can see."), r.text);
+    assert.ok(r.said.includes("Taken out: Reel idea 3's words: it held a name BRIMM Video Studio can see."), r.text);
     assert.ok(r.said.includes("Reel idea 1: Why price is a message. To film again; it shows principle 1. Not decided yet."), r.text);
     assert.ok(r.said.includes("Reel idea 2: Say it first. To cut from the session, once the client agrees; it shows principle 2. Not decided yet."), r.text);
     assert.ok(r.said.includes("  Words: Your price has already told them how much to expect."), r.text);
@@ -702,9 +702,9 @@ describe("finish, for a session: its own hand-off of what she approved", () => {
     const r = await on(t.ctx.deps, "finish", LABEL);
     assert.equal(r.code, 1);
     assert.deepEqual(r.said, [
-      "Principle 3's name held a name brimm-video took out: give it another name, or drop it.",
-      "Recurring principle 2's text held a name brimm-video took out: say it another way, or drop it.",
-      "Reel idea 3's words held a name brimm-video took out: say it another way, or drop it."
+      "Principle 3's name held a name BRIMM Video Studio took out: give it another name, or drop it.",
+      "Recurring principle 2's text held a name BRIMM Video Studio took out: say it another way, or drop it.",
+      "Reel idea 3's words held a name BRIMM Video Studio took out: say it another way, or drop it."
     ]);
     assert.deepEqual(snapshot(found), before);
     await on(t.ctx.deps, "principles", LABEL, "edit", "3", "--name", "Check one number");
@@ -770,7 +770,7 @@ describe("finish, for a session: its own hand-off of what she approved", () => {
     writeFileSync(recordFile(found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, session: { ...record.session, edits: { principles: { 1: { description: "Ask Quillon what the work is worth to him." } } } } }));
     const r = await on(t.ctx.deps, "finish", LABEL);
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.said[0], "Taken out of the hand-off: Principle 1's description: it held a name brimm-video can see.");
+    assert.equal(r.said[0], "Taken out of the hand-off: Principle 1's description: it held a name BRIMM Video Studio can see.");
     const handoff = JSON.parse(fileOf(found, HANDOFF));
     assert.equal(handoff.session.principles[0].description, "");
     assert.doesNotMatch(JSON.stringify(handoff) + r.text, SECRET);
@@ -825,7 +825,7 @@ describe("finish, for a session: its own hand-off of what she approved", () => {
   });
 });
 
-describe("name, for a session: checked against the names brimm-video can see", () => {
+describe("name, for a session: checked against the names BRIMM Video Studio can see", () => {
   it("refuses a name that holds one, from the file, the words or a speaker, with the gate off too, and writes nothing", async () => {
     const mac = sessionMac({ taught: null, files: { ...FILES, [VTT_FILE]: VTT } });
     const before = snapshot(mac.found);
@@ -869,9 +869,9 @@ const writeOver = (found, over) => {
   writeFileSync(recordFile(found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, ...over }));
 };
 const FILES_NAME = "That is the name of the video's file: give the session another name.";
-const EDIT_HOLDS = (word) => `Those words hold "${word}", a name brimm-video can see in this session: say it another way.`;
+const EDIT_HOLDS = (word) => `Those words hold "${word}", a name BRIMM Video Studio can see in this session: say it another way.`;
 const NAME_FILES_AT_FINISH = "This session's name is the name of its video's file: give it another name first. Nothing was written.";
-const NAME_HOLDS_AT_FINISH = (word) => `This session's name holds "${word}", a name brimm-video can see in it: give it another name first. Nothing was written.`;
+const NAME_HOLDS_AT_FINISH = (word) => `This session's name holds "${word}", a name BRIMM Video Studio can see in it: give it another name first. Nothing was written.`;
 /** The client's names in her own words: in lowercase, as a plural, a possessive, and joined by a dot; each with the word a
     refusal names. */
 const HER_FORMS = [["quillon's way", "quillon"], ["Quillons way", "Quillon"], ["the brandvale way", "brandvale"], ["brandvale’s way", "brandvale"], ["ask.quillon", "quillon"], ["MARSH first", "MARSH"]];
@@ -954,7 +954,7 @@ describe("fix 2: her own words are checked whatever their case", () => {
     writeOver(mac.found, { session: { ...session, edits: { principles: { 1: { description: "ask quillon what it is worth" } } } } });
     const before = snapshot(mac.found);
     const r = await on(mac.t.ctx.deps, "finish", LABEL);
-    assert.deepEqual([r.code, r.said], [1, ["Principle 1's description, as you changed it, holds \"quillon\", a name brimm-video can see: say it another way, or drop it."]]);
+    assert.deepEqual([r.code, r.said], [1, ["Principle 1's description, as you changed it, holds \"quillon\", a name BRIMM Video Studio can see: say it another way, or drop it."]]);
     assert.deepEqual(snapshot(mac.found), before);
     mac.t.done();
   });
@@ -963,7 +963,7 @@ describe("fix 2: her own words are checked whatever their case", () => {
     const session = reread(mac.found).session;
     writeOver(mac.found, { session: { ...session, edits: { principles: { 2: { name: "Quillon's way" } } } } });
     const r = await on(mac.t.ctx.deps, "finish", LABEL);
-    assert.deepEqual([r.code, r.said], [1, ["Principle 2's name held a name brimm-video took out: give it another name, or drop it."]]);
+    assert.deepEqual([r.code, r.said], [1, ["Principle 2's name held a name BRIMM Video Studio took out: give it another name, or drop it."]]);
     assert.equal(existsSync(join(mac.found.folder, "final")), false);
     mac.t.done();
   });
@@ -1008,7 +1008,7 @@ describe("fix 5: the organisation Jason recorded", () => {
   });
 });
 
-describe("fix 6: a name she spelled is a name brimm-video can see", () => {
+describe("fix 6: a name she spelled is a name BRIMM Video Studio can see", () => {
   it("takes out what Claude wrote of it, and refuses her words holding it; the show's own spellings are no one's", async () => {
     const reply = { ...REPLY, frameworks: [{ ...REPLY.frameworks[0], example_application: "As Kestrell does with her shop, and as Sallie says." }, ...REPLY.frameworks.slice(1)] };
     const { t, found } = await readSession({ reply, over: { spellings: [["kestrel", "Kestrell"], ["Sally", "Sallie"]] } });

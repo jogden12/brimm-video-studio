@@ -581,7 +581,7 @@ describe("finish, the detached part", () => {
 
 // A finish is written by the code that runs it, so its records and its hand-off name the checkout this code is in (filing.js
 // thisCheckout), not the one this Mac's settings name: those may be another brimm-video's. No commit is given, as none is on a Mac.
-describe("which brimm-video a finish names as the one that wrote", () => {
+describe("which BRIMM Video Studio a finish names as the one that wrote", () => {
   /** No commit is given, and the settings name a folder that is no checkout. */
   const elsewhere = (t) => {
     t.ctx.deps.commit = undefined;
@@ -1595,7 +1595,7 @@ describe("finish, for a video of any kind marked a session, not cleared", () => 
   const MARK = { marked: "2026-10-22T10:00:00-05:00", on: "Mac Studio", teachings: null, cleared: null };
   const CLEARED = { ...MARK, cleared: { at: "2026-10-22T11:00:00-05:00", on: "Mac Studio", to: "finished", confirmed: "dialog" } };
   const TEACHINGS = { on: true, at: "2026-10-15T09:00:00-05:00", accounts: { cli: "sallie@example.com (BRIMM)", app: "sallie@example.com (BRIMM)" } };
-  const sessionWords = (who) => `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`;
+  const sessionWords = (who) => `${who} is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written.`;
   const record = (over) => ({ id: ID, label: LABEL, name: { text: NAME, placeholder: false }, ...over });
   it("cannotFinish refuses every kind with a mark that is not cleared, by the gate's predicate, in a session's words, named by its label", () => {
     const marks = [["no cleared at all", MARK], ["cleared: true", { ...MARK, cleared: true }], ["cleared by something but her click", { ...MARK, cleared: { at: "x", on: "Mac Studio", to: "finished", confirmed: "typed" } }], ["a mark that is not an object", "yes"]];
@@ -1961,7 +1961,7 @@ describe("a hand-off of a video one of whose versions is a client or group sessi
   });
   it("names the video by its label, as edit.js names it, when it is itself marked a session, not cleared: cannotFinish refuses it first, as a session", async () => {
     const MARKED = { kind: "finished", session: MARK };
-    const sessionWords = (who) => `${who} is a client or group session: brimm-video cannot finish a session yet. Nothing was written.`;
+    const sessionWords = (who) => `${who} is a client or group session: BRIMM Video Studio cannot finish a session yet. Nothing was written.`;
     for (const [label, who] of [[LABEL, LABEL], [null, `a client or group session (${ID.slice(-6)})`]]) {
       const t = setup();
       handoffVersion(t, 2);

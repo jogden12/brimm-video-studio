@@ -48,7 +48,7 @@ const LEFT_RECORD = { ...UNANSWERED_RECORD, answer: { ...ANSWER, state: "not for
 const SESSION_RECORD = { version: 3, kind: "session", answer: { ...ANSWERED, private: "yes" }, label: "Session, 2026-10-20", session: SESSION_MARK };
 
 const WAITING = "This video is waiting for its answer: say what it is first.";
-const LEFT_ALONE = "You said to leave this video: it is not for brimm-video. To have it read, say what it is.";
+const LEFT_ALONE = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 const NO_FOLDER = "There's no reference folder on this Mac yet: ask Jason.";
 const EMPTY = "The reference folder is empty. Add screenshots or pictures to References, in the BRIMM Video folder in Dropbox.";

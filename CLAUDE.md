@@ -10,7 +10,7 @@ Studio began as brimm-video: its history up to c666508, which is the tag `brimm-
 
 ## Rules that are never broken
 
-- The tool drafts. It never posts, sends or publishes anything, and nothing in this repo may add that.
+- The tools draft, and post only what Sallie has approved. Studio itself never posts, sends or publishes anything. BRIMM Ops may hand an episode's approved set to her scheduler, through a connector in her own Claude, each piece at its planned time. Nothing goes out that she hasn't approved, and a post drawn from a session carries only approved principles, with no client names. HyperFrames still never publishes or renders in the cloud. (Jason, 5 November 2026; see the requirements' "Decisions".)
 - Never read a `.env` file. The project's one secret is a read-only deploy key on Sallie's laptop, kept only in her `~/.ssh` (never in the repo or Dropbox); Jason revokes it in the repo's GitHub settings when it is no longer needed. Until her laptop is switched to Studio, the key there is brimm-video's; Studio gets its own then.
 - Nothing is installed on a Mac, and no launch agent is added or changed, without Jason's yes in chat first.
 - Write a failing test first, then the code.
@@ -26,7 +26,7 @@ BRIMM Ops takes Studio's hand-off file. These carry over exactly. Change any of 
 - The tool's name inside the hand-off stays `brimm-video <commit>` (`madeBy`): the contract names it. Renaming it is a contract change, so this project's new name appears in documents and package names, not there.
 - The copies from brimm-operations, each named in its first line and kept in step by hand: `tool/shared/`, `tool/lib.js` and `tool/run.js`.
 - The guide (`tool/guide.js`, `tool/guide-note.js`): Sallie's next step for each video, as far as the BRIMM Ops page's steps.
-- What goes in a hand-off: the final transcript (`.srt`), made on the Mac; the kind; each Reel's words and its on-screen title; a session's approved principles, with no client names, and never its transcript. The page writes the post text from these. Nothing is posted.
+- What goes in a hand-off: the final transcript (`.srt`), made on the Mac; the kind; each Reel's words and its on-screen title; a session's approved principles, with no client names, and never its transcript. The page writes the post text from these, and posts only the set she approves, through her scheduler.
 
 ## Sessions (clients and groups)
 

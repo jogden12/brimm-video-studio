@@ -1,6 +1,6 @@
 # From her script to a plan
 
-Read this when she says she has a script, wants a video made from it, or wants an explainer made from it. Run brimm-video's commands as SKILL.md says, and never show her a command, a path or a flag: say what was done, in plain words. Nothing here is posted, sent or published: a plan is saved for her to film from, and the video is made in HyperFrames after.
+Read this when she says she has a script, wants a video made from it, or wants an explainer made from it. Run BRIMM Video Studio's commands as SKILL.md says, and never show her a command, a path or a flag: say what was done, in plain words. Nothing here is posted, sent or published: a plan is saved for her to film from, and the video is made in HyperFrames after.
 
 1. Take the script. She pastes it in the chat, or puts it in the `Scripts` folder of her BRIMM Video Studio folder and tells you its name, and you Read it there. A file anywhere else can't be read, so ask her to move it into `Scripts` or to paste it.
 2. Ask about the content and the direction, one question at a time, in the chat: who it is for, what she wants them to do, how it should feel, what she will film and what she would rather show.
@@ -9,6 +9,6 @@ Read this when she says she has a script, wants a video made from it, or wants a
    - The shot list: each shot she has to film, as "talking" (to the camera), "screen" (a recording of work on her computer) or "b-roll" (of her working, or in a coaching session). A "b-roll" or "screen" cue names the shot it shows.
    - The teleprompter lines: her words, ready to read aloud, one paragraph a line, with no directions and no cues in them.
 4. On her yes, run `plan new "<title>"`, then one `plan "<title>" set` holding every cue, shot and line, as `--cue "<kind> | <seconds> | <words> | <what to show>"`, `--shot "<kind> | <what>"` and `--line "<paragraph>"`, each given once for each. A cue may end with `| shot: <number>`, `| ref: <file>`, `| inspiration: <name>` or `| link: <https link>`: at most one style. A double quote, a dollar sign, a percent sign, a backslash, a backtick or a pipe in her words or yours is written `%22`, `%24`, `%25`, `%5C`, `%60` or `%7C`, so "100% sure" is written `100%25 sure`, and only the pipes that split a cue's parts are bare. An apostrophe is written as it is.
-5. Run `plan "<title>"`, tell her what it says, and tell her where the teleprompter script is: in the plan's folder in Episodes, in her BRIMM Video folder in Dropbox.
+5. Run `plan "<title>"`, tell her what it says, and open the teleprompter script for her with `plan "<title>" script`: it opens a copy to read. Never ask her to edit the script file; take her changes here and save them with plan … set.
 6. For a style she names, run `refs look "<name>"`, look at the picture, and put "ref: <file>" on the cues it styles.
 7. For an explainer, run `plan new "<title>" --explainer`, and give only "graphic" and "words" cues, and no shots. The voice is hers, which she records from the teleprompter script, or a stock HeyGen voice she picks in HyperFrames, never a voice made from her own. Add `--voice sallie` or `--voice heygen` once she says which.

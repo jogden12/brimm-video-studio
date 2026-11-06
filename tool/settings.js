@@ -13,9 +13,9 @@
 // importing.js and filing.js import this file, and a static import here would make the three a cycle. `set` changes the
 // settings of the switch later, but never the drop folder: it says to switch that with the installer, and changes nothing.
 //
-//   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
+//   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
 //                          [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
-//   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
+//   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
 //                         [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
 //   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
 //   node settings.js sessions --teachings on --cli-account <email> --app-account <email>
@@ -126,11 +126,11 @@ const isSet = (value) => value !== undefined && value !== null;
     and userDeny, the note that `user-deny` added her user settings' deny rules) need not be there, and are checked when they are;
     one of the lock's that is null is not set. */
 export function settingsFault(s) {
-  if (!s || typeof s !== "object" || Array.isArray(s) || s.version !== 1) return "they are not version 1 of brimm-video's settings";
+  if (!s || typeof s !== "object" || Array.isArray(s) || s.version !== 1) return "they are not version 1 of BRIMM Video Studio's settings";
   const fault = machineFault(s.machine);
   if (fault) return fault;
   if (typeof s.root !== "string" || !isAbsolute(s.root)) return "the path to BRIMM Video is not a whole path";
-  if (typeof s.checkout !== "string" || !isAbsolute(s.checkout)) return "the path to the checkout of brimm-video is not a whole path";
+  if (typeof s.checkout !== "string" || !isAbsolute(s.checkout)) return "the path to the checkout of BRIMM Video Studio is not a whole path";
   if (s.import !== undefined && s.import !== "full" && s.import !== "light") return 'the import must be "full" or "light"';
   if (s.readings !== undefined && typeof s.readings !== "boolean") return "readings must be true or false";
   if (s.handoffVersion !== undefined && s.handoffVersion !== 1 && s.handoffVersion !== 2) return "the version of the hand-off must be 1 or 2";
@@ -285,7 +285,7 @@ export function writeSettings(home, fields) {
 
 const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Support/BRIMM Video/settings.json.
 
-  node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
+  node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
                                [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
                                write them, as install.sh --machine does, and say where. The settings of the switch that it
                                is told are written with them, read as set reads them, and any setting it is not told is
@@ -296,7 +296,7 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                of it). A video held by an episode not yet answered, a session not cleared, or another
                                version of such a session is named by the episode's label or, with none, by what it is and
                                its short id ("a client or group session (3fa9c1)"), never by its own file
-  node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to brimm-video>"
+  node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
                                [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the
                                teachings from sessions, shown as (not shown), and then the import it will be, the drop
@@ -328,10 +328,10 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                lock lets Claude run only edit.js. The open lock lets it do more, inside Claude Code's
                                sandbox, and makes the workshop, ~/BRIMM Video Workshop; the web tools stay held until told
                                --web open. The open lock is refused, and nothing is written, until the Claude Code it was
-                               checked on by hand is named in brimm-video, and until then a Mac whose settings say open is
+                               checked on by hand is named in BRIMM Video Studio, and until then a Mac whose settings say open is
                                written the strict lock. --print says the settings her folder would get, as JSON, and
                                writes nothing
-  node settings.js user-deny   add the Read deny rules of the places only brimm-video reads (her folder's open lock keeps
+  node settings.js user-deny   add the Read deny rules of the places only BRIMM Video Studio reads (her folder's open lock keeps
                                them from Claude) to her user settings, ~/.claude/settings.json, once each, keeping all else
                                there, so that every Claude Code session on this Mac takes them: they hold Claude's file
                                tools, not a script. It notes that it did in this Mac's settings, and the lock check then
@@ -655,7 +655,7 @@ function show(home, say, now) {
   say(`  Its drop folder:  ${dropFolder(s.root, s.machine, s.drop)}`);
   say(`  Episodes:  ${episodesFolder(s.root)}`);
   say(`  References:  ${referencesFolder(s.root)}`);
-  say(`  brimm-video, run from:  ${s.checkout}`);
+  say(`  BRIMM Video Studio, run from:  ${s.checkout}`);
   say(`  Work in Final Cut:  ${workFolder(home)}`);
   say(`  From Final Cut:  ${fromFinalCutFolder(home)}`);
   if (s.import !== undefined) say(`  Import:  ${s.import}`);
@@ -912,7 +912,7 @@ function userDeny(home, rest, say, { tmp, uid, openMinimum, env }) {
     say(`Her user settings could not be written (${e.code || "an error"}), so the deny rules were not added.`);
     return 1;
   }
-  say(`Written: ~/.claude/settings.json (${new Set(rules).size} deny rules for the places only brimm-video reads)`);
+  say(`Written: ~/.claude/settings.json (${new Set(rules).size} deny rules for the places only BRIMM Video Studio reads)`);
   return 0;
 }
 

@@ -29,7 +29,7 @@ const PRINTED = { status: 0, stdout: "  321\n", stderr: "" };
 
 describe("edit.js inside Claude Code's sandbox", () => {
   it("says it was run inside the sandbox in the design's words", () => {
-    assert.equal(SANDBOXED, "brimm-video was run inside Claude Code's sandbox: ask Jason.");
+    assert.equal(SANDBOXED, "BRIMM Video Studio was run inside Claude Code's sandbox: ask Jason.");
   });
 
   it("refuses under SANDBOX_RUNTIME=1 without asking ps", () => {

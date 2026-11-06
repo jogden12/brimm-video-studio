@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { childEnv, PIN, readHistory, readOpen } from "../hyperframes.js";
-import { openInApp, projectOnAnotherMac, NOT_SET_UP } from "../app.js";
+import { openInApp, projectOnAnotherMac, readListed, readWords, NOT_SET_UP } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { processTable } from "../chain.js";
 import { episodeFault, layoutOf, localStamp, newEpisode, newPlannedEpisode, recordFile, recordText } from "../episode.js";
@@ -18,6 +18,11 @@ import { markChat } from "../held.js";
 import { claudeDirName } from "../places.js";
 import { episodeWork } from "../settings.js";
 import { footageCopyPaths, workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
+import { fileId, writePending } from "../filing.js";
+import { writeStatus } from "../importing.js";
+import { COPY_STEP } from "../guide.js";
+import { addRates, progressFolder } from "../progress.js";
+import { clockAt } from "../unedited.js";
 import { psText } from "./open-world.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
@@ -49,7 +54,7 @@ describe("the HyperFrames stand-in", () => {
     for (const [open, code, words] of [
       ["opened", 0, "It's open in HyperFrames."],
       ["not-installed", 1, "HyperFrames isn't installed on this Mac: ask Jason."],
-      ["open-failed", 1, "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason."]
+      ["open-failed", 1, "HyperFrames wouldn't open. Try once more. If it still won't, tell Jason."]
     ]) {
       const s = standIn(c, { open });
       const r = s.run(["open", s.project, "--json"]);
@@ -166,7 +171,7 @@ function episode(c, { open = "opened", copy = true, words = true, handover = fal
   const started = [];
   const saved = [];
   const ctx = {
-    home: s.home, machine: "Mac Studio", now: () => AT, alive: (pid) => pid === process.pid, say: (line) => said.push(line),
+    home: s.home, machine: "Mac Studio", root: join(s.home, "Dropbox", "BRIMM Video"), isWhole: () => true, now: () => AT, alive: (pid) => pid === process.pid, say: (line) => said.push(line),
     start: (cmd, args) => started.push(args.slice(1)), settings: { root: join(s.home, "Dropbox", "BRIMM Video"), checkout: "/checkout", app: "hyperframes", appHandover: handover }
   };
   const record = { id: "e-20261028-3fa9c1", rev: 4, kind: "raw", name: { text: "Pricing talk", placeholder: false }, video: { file: "Talk.mov", bytes: stat.size, seconds: 2.6 }, spellings: [["Sally", "Sallie"]], ...over };
@@ -340,6 +345,177 @@ describe("app: opening an episode in HyperFrames", () => {
     assert.deepEqual(e.started, []);
     assert.match(e.said[0], /^The video for HyperFrames is being made\./);
   });
+  describe("while the import's late check is still to come (plan R1a): every time it says when it will be ready, it says the wait that is left", () => {
+    /** This Mac owes the late check of the episode's import, due 11 minutes after AT; with `local`, the file the import came from is still in
+        its drop folder, whole and the one that came in, so the copy starts from it and waits for nothing. A speed of 100 seconds of work for
+        each second of the recording's 2.6 makes the copy take 260 seconds. */
+    function owing(e, { local = false, speed = true } = {}) {
+      const drop = join(e.home, "drop", "Talk.mov");
+      mkdirSync(join(e.home, "drop"), { recursive: true });
+      writeFileSync(drop, "the raw video's bytes");
+      writePending(e.home, {
+        version: 1, id: e.record.id, name: FOLDER, folder: e.folder, video: "Talk.mov", bytes: e.record.video.bytes, seconds: 2.6, drop: local ? drop : join(e.home, "drop", "gone.mov"), dropFile: fileId(drop), importId: "x", work: join(e.home, "work"),
+        entries: [], lastCopy: AT - 4 * 60 * 1000, root: e.ctx.root, machine: "Mac Studio", planTxt: "Talk.cut-plan.txt"
+      });
+      if (speed) addRates(progressFolder(e.home), { [COPY_STEP]: 100 });
+      return { due: AT + 11 * 60 * 1000 };
+    }
+    const near = (ms) => clockAt(Math.round(ms / 60000) * 60000);
+    const MADE = (middle) => `The video for HyperFrames is being made.${middle} Say "open Pricing talk in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
+    it("names the clock time the copy will be ready, and when Dropbox has checked its copies, when the copy has to wait for the check", async (c) => {
+      const e = episode(c, { copy: false });
+      const { due } = owing(e);
+      assert.equal(await run(e), 0);
+      // The check is due at AT + 11 minutes; the copy takes 260 seconds after it: ready 15 minutes (14.9) from now.
+      assert.deepEqual(e.said, [MADE(` It is ready about ${near(due + 260 * 1000)}, in 15 minutes, after Dropbox has checked its copies at ${clockAt(due)}.`)]);
+      plain(e.said);
+    });
+    it("says only when Dropbox checks its copies when this Mac has measured no speed of making the copy", async (c) => {
+      const e = episode(c, { copy: false });
+      const { due } = owing(e, { speed: false });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [MADE(` Dropbox checks its copies at ${clockAt(due)} first.`)]);
+    });
+    it("says what it always said when the copy starts from the file this Mac holds: the check goes on behind it, and nothing waits for it", async (c) => {
+      const e = episode(c, { copy: false });
+      owing(e, { local: true });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [MADE(` It is ready about ${clockAt(AT + 260 * 1000)}, in about 4 minutes.`)]);
+    });
+    it("says what it always said when no check is owed", async (c) => {
+      const e = episode(c, { copy: false });
+      addRates(progressFolder(e.home), { [COPY_STEP]: 100 });
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [MADE(` It is ready about ${clockAt(AT + 260 * 1000)}, in about 4 minutes.`)]);
+    });
+    it("says when Claude starts, and why, while Claude is still reading a raw video whose reading waits for the check: the other Mac's import is at work (R1c)", async (c) => {
+      const e = episode(c);
+      const { due } = owing(e);
+      writeStatus(e.ctx.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "z9", video: "Talk.mov", bytes: e.record.video.bytes, seconds: 2.6, step: "Importing", at: new Date(AT).toISOString() }, (to, text) => writeFileSync(to, text));
+      mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), "read", () => true).taken, true);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [`Claude is still reading it. It starts at ${clockAt(due)}, when Dropbox has checked its copies. Say "open Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.`]);
+      plain(e.said);
+      // With no copy yet the same is said, and the copy is asked for.
+      const none = episode(c, { copy: false });
+      owing(none);
+      writeStatus(none.ctx.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "z9", video: "Talk.mov", bytes: none.record.video.bytes, seconds: 2.6, step: "Importing", at: new Date(AT).toISOString() }, (to, text) => writeFileSync(to, text));
+      mkdirSync(episodeWork(none.home, FOLDER), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(none.home, FOLDER), "read", () => true).taken, true);
+      assert.equal(await run(none), 0);
+      assert.match(none.said[0], /^Claude is still reading it\. It starts at \d\d:\d\d, when Dropbox has checked its copies\. Say /);
+    });
+    it("says Claude is still reading it, with no start time, while only this Mac's own late check is to come: the reading started at once (R1c)", async (c) => {
+      const e = episode(c);
+      owing(e);
+      mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), "read", () => true).taken, true);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ['Claude is still reading it. Say "open Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.']);
+    });
+    it("says what it always said of a reading that does not wait for the check: an iPhone clip's", async (c) => {
+      const e = episode(c, { record: { kind: "short video" } });
+      owing(e);
+      mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), "read", () => true).taken, true);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ['Claude is still reading it. Say "open Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.']);
+    });
+  });
+  describe("while the reading's own late check is still to come (R1d)", () => {
+    const NOT_WHOLE = 'Some files of Pricing talk are not whole in Dropbox yet, so its HyperFrames project wasn\'t made. Say "open Pricing talk in HyperFrames" again in a few minutes. If it says this again, tell Jason.';
+    /** The episode with a current reading in its record and `files` listing the words, reels.json and the plan at their sizes. */
+    function read(c, over = {}, options = {}) {
+      const e = episode(c, options);
+      const size = (name) => statSync(join(e.folder, name)).size;
+      e.record = { ...e.record, answer: { at: "2026-10-28T12:00:00-04:00" }, reading: { at: "2026-10-28T13:00:00-04:00", kind: "raw" }, files: { "Talk.words.json": size("Talk.words.json"), "reels.json": size("reels.json"), "Talk.cut-plan.json": size("Talk.cut-plan.json") }, ...over };
+      return e;
+    }
+    const hold = (e) => {
+      mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), "read", () => true).taken, true);
+      return readFileSync(lockOf(e.home, FOLDER), "utf8");
+    };
+    it("makes the project once the reading is in the record and the files are at the sizes it lists, and leaves the read lock alone", async (c) => {
+      const e = read(c);
+      const lock = hold(e);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
+      assert.ok(existsSync(join(e.project, "index.html")));
+      assert.equal(readFileSync(lockOf(e.home, FOLDER), "utf8"), lock);
+    });
+    it("makes the project from the reading's plan and reels.json as they are: a cue of the plan and a candidate of the list are in it", async (c) => {
+      const cue = { n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null, phrase: "p2" };
+      const e = read(c, {}, { plan: { ...PLAN, claude: { graphicCues: [cue] } } });
+      const candidate = { n: 1, title: "A title", reason: "Why", ranges: [{ start: 1.2, end: 2.5 }] };
+      writeFileSync(join(e.folder, "reels.json"), JSON.stringify({ format: "brimm-video reels", version: 1, candidates: [candidate] }));
+      e.record.files["reels.json"] = statSync(join(e.folder, "reels.json")).size;
+      hold(e);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(JSON.parse(readFileSync(join(e.project, "brimm", "graphic-cues.json"), "utf8")).cues.map((c2) => c2.words), ["says Sally"]);
+      assert.deepEqual(JSON.parse(readFileSync(join(e.project, "brimm", "reel-suggestions.json"), "utf8")).reels.map((r) => [r.n, r.title]), [[1, "A title"]]);
+    });
+    it("reads a words file that cannot be read as not there: the words are not on this Mac yet, not an error", (c) => {
+      const e = read(c);
+      mkdirSync(join(e.folder, "odd.words.json"));
+      assert.deepEqual(readWords(e.folder, { files: {} }, "odd.words.json"), { absent: true });
+      assert.deepEqual(readWords(e.folder, e.record, "Talk.words.json"), readListed(e.folder, e.record, "Talk.words.json"));
+    });
+    it("checks no sizes outside the window: with no read run and no check owed, a short listed file is read as it is", async (c) => {
+      const e = read(c);
+      const whole = readFileSync(join(e.folder, "Talk.cut-plan.json"), "utf8");
+      e.record.files["Talk.cut-plan.json"] = whole.length + 5;
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
+    });
+    it("makes nothing while a file it reads is not the size the record lists, and makes the project when it is put right", async (c) => {
+      const e = read(c);
+      hold(e);
+      const whole = readFileSync(join(e.folder, "reels.json"), "utf8");
+      writeFileSync(join(e.folder, "reels.json"), whole.slice(0, -5));
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [NOT_WHOLE]);
+      assert.ok(!existsSync(e.project));
+      assert.deepEqual([e.saved, e.runs()], [[], []]);
+      writeFileSync(join(e.folder, "reels.json"), whole);
+      e.said.splice(0);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS]);
+      plain([NOT_WHOLE]);
+    });
+    it("judges the bytes it read: the plan listed at one byte more than the file holds is not whole", async (c) => {
+      const e = read(c);
+      hold(e);
+      e.record.files["Talk.cut-plan.json"] += 1;
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [NOT_WHOLE]);
+      assert.ok(!existsSync(e.project));
+      assert.deepEqual(e.saved, []);
+    });
+    it("readListed compares the byte length of what it read with the listed size, and reads an unlisted file as before", (c) => {
+      const e = read(c);
+      const text = readFileSync(join(e.folder, "Talk.words.json"), "utf8");
+      assert.deepEqual(readListed(e.folder, e.record, "Talk.words.json"), { text });
+      assert.deepEqual(readListed(e.folder, { files: { "Talk.words.json": Buffer.byteLength(text) + 1 } }, "Talk.words.json"), { notWhole: "Talk.words.json" });
+      assert.deepEqual(readListed(e.folder, { files: { "gone.json": 3 } }, "gone.json"), { notWhole: "gone.json" });
+      assert.deepEqual(readListed(e.folder, { files: {} }, "gone.json"), { absent: true });
+      assert.deepEqual(readListed(e.folder, { files: {} }, "Talk.words.json"), { text });
+      writeFileSync(join(e.folder, "n.json"), "é");
+      assert.deepEqual(readListed(e.folder, { files: { "n.json": 2 } }, "n.json"), { text: "é" });
+      assert.deepEqual(readListed(e.folder, { files: { "n.json": 1 } }, "n.json"), { notWhole: "n.json" });
+    });
+    it("checks the files the same way with this Mac's late check of the import still owed and no read run", async (c) => {
+      const e = read(c);
+      const file = join(e.home, "drop.mov");
+      writeFileSync(file, "x");
+      writePending(e.home, { version: 1, id: e.record.id, name: "n", folder: e.folder, video: "Talk.mov", bytes: 1, seconds: 1, drop: file, dropFile: fileId(file), importId: "x", work: e.home, entries: [], lastCopy: AT, root: e.ctx.root, machine: "Mac Studio", planTxt: "x" });
+      writeFileSync(join(e.folder, "Talk.words.json"), "[]");
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, [NOT_WHOLE]);
+      assert.ok(!existsSync(e.project));
+    });
+  });
   describe("while Claude is still reading the episode (a `read` run holds the episode's lock)", () => {
     const STILL = 'Claude is still reading it. Say "open Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.';
     /** A run of `command` at work on the episode now, as a live process holds it: the lock is the episode's own, and this very
@@ -485,7 +661,7 @@ describe("app: opening an episode in HyperFrames", () => {
     });
   });
   it("keeps the project when HyperFrames will not open, records no time it opened, and says so in her words", async (c) => {
-    for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason."]]) {
+    for (const [open, words] of [["not-installed", "HyperFrames isn't installed on this Mac: ask Jason."], ["open-failed", "HyperFrames wouldn't open. Try once more. If it still won't, tell Jason."]]) {
       const e = episode(c, { open });
       assert.equal(await run(e), 1, open);
       assert.deepEqual(e.said, [words], open);
@@ -733,7 +909,7 @@ describe("app: opening an episode in HyperFrames", () => {
   it("makes nothing without the words of the recording, and says why", async (c) => {
     const e = episode(c, { words: false });
     assert.equal(await run(e), 1);
-    assert.deepEqual(e.said, ["The words of Pricing talk are not on this Mac yet, so there is nothing for HyperFrames to start from. Ask Jason."]);
+    assert.deepEqual(e.said, ["The words of Pricing talk are not on this Mac yet, so there is nothing for HyperFrames to start from. Dropbox may still be bringing them: say it again in a few minutes. If it says this again, tell Jason."]);
     assert.ok(!existsSync(e.project));
     assert.deepEqual([e.saved, e.runs(), e.started], [[], [], []]);
   });
@@ -979,7 +1155,7 @@ describe("app: a video made from a plan, and its footage (PR H5b)", () => {
     { n: 3, words: "Sally", kind: "screen", show: "Her dashboard.", seconds: 4, style: null, shot: 4 }
   ];
   const COMING = 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.';
-  const NOT_IN = "Some of its footage could not be put into the project. Ask Jason.";
+  const NOT_IN = `Some of its footage could not be put into the project. Say "open Pricing talk in HyperFrames" again. If it says this again, tell Jason.`;
   /** The plan a video was made from, as the join leaves it in the record. */
   const plannedOf = (more = {}) => ({ ...newPlannedEpisode({ id: PLAN_ID, machine: "Mac Studio", at: ON, title: "Pricing talk", route: "script", voice: null, writer: WRITER }).planned, set: ON, shots: SHOTS, cues: GUIDE_CUES, lines: ["Pricing says Sally."], filmed: { at: ON, parts: [] }, ...more });
   /** An episode that is a video made from a plan, with the real choice of what its project is given. */
@@ -1098,7 +1274,7 @@ describe("app: a video made from a plan, and its footage (PR H5b)", () => {
     part(e, 3, "screen", 4);
     assert.equal(await run(e), 0);
     assert.deepEqual(e.started, [["workcopy", "--now", FOLDER, "--footage"]]);
-    assert.deepEqual(e.said, [COMING, "It's open in HyperFrames.", BUTTONS]);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS, COMING]);
     assert.deepEqual(mediaOf(e), ["b-roll-2.mp4", "recording.mp4"]);
     assert.equal(e.saved.length, 1, "the project is recorded, opened");
     assert.equal(COMING, 'Its footage is still being made for HyperFrames: say "open it in HyperFrames" again when it is done.');
@@ -1110,9 +1286,9 @@ describe("app: a video made from a plan, and its footage (PR H5b)", () => {
     assert.equal(takeEpisodeLock(workCopyLockOf(e.home, FOLDER), "workcopy", () => true).taken, true);
     assert.equal(await run(e), 0);
     assert.deepEqual(e.started, []);
-    assert.deepEqual(e.said, [COMING, "It's open in HyperFrames.", BUTTONS]);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS, COMING]);
   });
-  it("leaves the footage of a part out when its episode holds a conflicted copy, or a newer brimm-video wrote its record, though its record in force shows no client (ruling 1)", async (c) => {
+  it("leaves the footage of a part out when its episode holds a conflicted copy, or a newer BRIMM Video Studio wrote its record, though its record in force shows no client (ruling 1)", async (c) => {
     const e = made(c);
     const conflicted = part(e, 2, "b-roll", 2, { made: true });
     const newer = part(e, 3, "screen", 4, { made: true });
@@ -1145,9 +1321,8 @@ describe("app: a video made from a plan, and its footage (PR H5b)", () => {
     e.said.length = 0;
     const refused = { ...e.deps, rename: () => { throw new Error("EXDEV"); } };
     assert.equal(await openInApp(e.ctx, { found: e.found, record: e.saved[0] }, refused), 0);
-    assert.deepEqual(e.said, [NOT_IN, "It's open in HyperFrames.", BUTTONS]);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS, NOT_IN]);
     assert.deepEqual([mediaOf(e), existsSync(copy.video)], [["recording.mp4"], true]);
-    assert.equal(NOT_IN, "Some of its footage could not be put into the project. Ask Jason.");
   });
   it("is for a video made from a plan alone: any other has its cut plan's cues and no footage, whatever the open is given", async (c) => {
     const cue = { n: 1, words: "says Sally", kind: "words", show: "Her name.", seconds: 3, style: null, phrase: "p2" };

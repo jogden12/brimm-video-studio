@@ -30,7 +30,7 @@ async function on(deps, ...argv) {
 const REEL2_OPENING = "So the first thing you need to do is know your costs.";
 const MAIN_LINE = `The main video: ${named(MAIN, "13.56")}, from Downloads, exported 2026-10-20 13:56.`;
 const REEL_LINE = `Reel 2: ${named(REEL2, "14.03")}, from Downloads, exported 2026-10-20 14:03.`;
-const START = 'Say "yes, hand it off" to start.';
+const START = "Hand-off question: I found your export. Hand it off?";
 /** The made-up recording's Reels, with Reel 2's title changed. */
 const reelsWith = (title) => EPISODE.record.reels.map((r) => (r.n === 2 ? { ...r, title } : r));
 
@@ -41,6 +41,7 @@ describe("D1. finish goes the way the record says", () => {
     exportOf(w, "reel 2");
     assert.equal(await finishEpisode(w.t.ctx, w.found, {}), 0);
     assert.deepEqual(w.t.said().split("\n"), [MAIN_LINE, REEL_LINE, FOUND, START]);
+    assert.ok(!w.t.said().includes("yes, hand it off"), "no more Say yes to start");
     plain(w.t.said().split("\n"));
     w.t.done();
   });

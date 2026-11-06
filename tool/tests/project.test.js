@@ -481,6 +481,28 @@ describe("a Reel's page: upright, 1080 by 1920, and cropped on the speaker (Jaso
       assert.match(rules, /Reels have captions, with the top 14% and the bottom 35% of an upright frame kept clear\./);
       assert.match(rules, /- \*\*When she is done\.\*\* Export on This Mac\. Then she says "hand it off" in her Claude chat\./);
     });
+    it("give captions that are drawn one style: one word at a time, Josefin Sans, white or navy on mist, sand only on navy, BRIMM in capitals", () => {
+      const captionsOf = (files) => rulesOf(files).split("\n").find((line) => line.startsWith("- **Captions.**"));
+      for (const files of [projectFiles(reel({ faces: seen([0.25]) })), projectFiles(main())]) {
+        const rule = captionsOf(files);
+        assert.match(rule, /A wide main video has no captions drawn on it\./);
+        assert.match(rule, /Reels have captions, with the top 14% and the bottom 35% of an upright frame kept clear\./);
+        assert.match(rule, /one word at a time/);
+        assert.match(rule, /Josefin Sans/);
+        assert.match(rule, /Google Fonts/);
+        assert.match(rule, /white/);
+        assert.match(rule, /navy/);
+        assert.match(rule, /mist/);
+        assert.match(rule, /sand/);
+        assert.match(rule, /BRIMM/);
+        assert.doesNotMatch(rule, /\bBrimm\b/);
+        assert.equal(files.get("AGENTS.md"), files.get("CLAUDE.md"));
+      }
+    });
+    it("leave a session clip's caption rule as it was", () => {
+      const rule = rulesOf(projectFiles(clip())).split("\n").find((line) => line.startsWith("- **Captions.**"));
+      assert.equal(rule, "- **Captions.** A wide main video has no captions drawn on it. Reels have captions, with the top 14% and the bottom 35% of an upright frame kept clear.");
+    });
     it("are the same text in CLAUDE.md and AGENTS.md, and name the object-position the page has", () => {
       const files = projectFiles(reel({ faces: seen([0.25]) }));
       assert.equal(files.get("AGENTS.md"), files.get("CLAUDE.md"));

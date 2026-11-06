@@ -15,8 +15,8 @@ const LATER = "2026-10-26T09:00:00-05:00";
 const HANDOFF = (over = {}) => ({ id: "e-20261020-3fa9c1", revision: 1, kind: "finished", emptyAt: null, at: Date.parse("2026-10-20T13:00:00-05:00"), file: "Talk.mp4", ...over });
 const NOTE = (over = {}) => ({ kind: "episode", step: "taken", revision: 1, at: AT, ...over });
 const OPS_TEXTS = {
-  // The first take: when no episode holds the video yet, the page offers "Add it as a new episode" (and its form "Add the episode") before "Take the hand-off".
-  taken: 'Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".',
+  // The first take: when no episode holds the video yet, the page says it is a new episode and has one button, "Add the episode and take the hand-off", or opens an episode and has "Take the hand-off".
+  taken: 'Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.',
   // A newer revision: the page's button names the revision of the hand-off and the one the page holds, which is the one her note holds.
   takenAgain: (revision, have) => `Drag the new hand-off onto Episodes, then press "Take revision ${revision} in place of revision ${have}".`,
   // A newer revision of an episode whose note is already at the cascade, the last step: the Reels of a video her editor finished come later, as a newer
@@ -28,9 +28,9 @@ const OPS_TEXTS = {
   kit: 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.',
   posted: 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".',
   live: 'Correct the form to what is live, then press "This is what is live".',
-  // The page's Reels card lists the Reels brimm-video handed off ("Reels from brimm-video"), each with "Write its post text". OpusClip is no longer used
+  // The page's Reels card lists the Reels BRIMM Video Studio handed off ("Reels from BRIMM Video Studio"), each with "Write its post text". OpusClip is no longer used
   // (Jason, 2 November 2026), and the page (version 10) stops writing "Clip to cut": the step sends her to neither.
-  cascade: 'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. If the "Reels" card lists "Reels from brimm-video", press "Write its post text" beside each.',
+  cascade: 'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. If the "Reels" card lists "Reels from BRIMM Video Studio", press "Write its post text" beside each.',
   posttext: 'Press "Write what’s next", and pick the hook and the YouTube Short title. Approve and copy the caption, the Short\'s title and description, and the LinkedIn post.',
   postedShort: "Post it on Instagram, and as a YouTube Short.",
   checked: 'Check each principle marked "Check it", then press "Use in drafts".',
@@ -233,6 +233,11 @@ const STAGE_ROWS = [
   [APP({ copy: { left: 20, usual: null } }), "making-copy", 'The video for HyperFrames is being made, less than a minute left. Say "open it in HyperFrames" when it is done.'],
   [APP({ copy: { left: null, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made. It usually takes about 4 minutes. Say "open it in HyperFrames" when it is done.'],
   [APP({ copy: { left: null, usual: null } }), "making-copy", 'The video for HyperFrames is being made. Say "open it in HyperFrames" when it is done.'],
+  // While it waits for Dropbox's late check (plan R1a): when it will be ready, with the wait in it; or only when the check is made, while no speed is known.
+  [APP({ copy: { left: null, usual: null, wait: { checkAt: "17:15", readyAt: "17:26", inSeconds: 660 } } }), "making-copy", 'The video for HyperFrames is being made. It is ready about 17:26, in 11 minutes, after Dropbox has checked its copies at 17:15. Say "open it in HyperFrames" when it is done.'],
+  [CLIP({ copy: { left: null, usual: 240, wait: { checkAt: "17:15", readyAt: "17:26", inSeconds: 660 } } }), "making-copy", 'The video for HyperFrames is being made. It is ready about 17:26, in 11 minutes, after Dropbox has checked its copies at 17:15. Say "open it in HyperFrames" when it is done.'],
+  [APP({ copy: { left: null, usual: null, wait: { checkAt: "17:15", readyAt: "", inSeconds: null } } }), "making-copy", 'The video for HyperFrames is being made. Dropbox checks its copies at 17:15 first. Say "open it in HyperFrames" when it is done.'],
+  [APP({ copy: { left: 90, usual: null, wait: { checkAt: "17:15", readyAt: "17:26", inSeconds: 660 } } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames" when it is done.'],
   [CLIP({ copy: { left: 120, usual: null } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames" when it is done.'],
   // On a Mac whose settings have the app off nothing opens a project, so a clip is not told to open one.
   [CLIP({ copy: { left: null, usual: null }, app: false, v2: false }), "waits-v2", V1],
@@ -256,7 +261,7 @@ const STAGE_ROWS = [
   [APP({ way: "hyperframes", app: false, elsewhere: true, mac: "Mac Studio" }), "open-elsewhere", "It is open on the Mac Studio. Carry on there, or open it here and take it over."],
   [APP({ way: "hyperframes", app: false, finishRunning: true }), "finish-running", "Its finish is running. The panel shows how far it is."],
   [APP({ way: "hyperframes", app: false, project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
-  [APP({ way: "hyperframes", app: false, project: PROJECT({ exported: true }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
+  [APP({ way: "hyperframes", app: false, project: PROJECT({ exported: true }) }), "exported", 'You have exported it. Say "hand it off" and I will check what you exported.'],
   // In HyperFrames: the time of the last turn in the app's history when there is one.
   [APP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
   [APP({ way: "hyperframes", project: PROJECT({ last: "yesterday at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was yesterday at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
@@ -264,11 +269,11 @@ const STAGE_ROWS = [
   [APP({ way: "hyperframes", project: PROJECT() }), "in-app", 'Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
   [APP({ way: "hyperframes", project: PROJECT(), copy: { left: 30, usual: null } }), "in-app", 'Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
   // Exported: before in-app, whether or not the record lists a time the app opened it.
-  [APP({ way: "hyperframes", project: PROJECT({ exported: true, last: "today at 3:41 pm" }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
-  [APP({ way: "hyperframes", project: PROJECT({ opened: false, exported: true }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
+  [APP({ way: "hyperframes", project: PROJECT({ exported: true, last: "today at 3:41 pm" }) }), "exported", 'You have exported it. Say "hand it off" and I will check what you exported.'],
+  [APP({ way: "hyperframes", project: PROJECT({ opened: false, exported: true }) }), "exported", 'You have exported it. Say "hand it off" and I will check what you exported.'],
   // An iPhone clip: in HyperFrames only once the app has opened its project; before, the offer of PR 7's F5 stands.
   [CLIP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm" }) }), "in-app", 'Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, then say "hand it off".'],
-  [CLIP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "exported", 'You have exported it from HyperFrames. Say "hand it off" to write its hand-off.'],
+  [CLIP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "exported", 'You have exported it. Say "hand it off" and I will check what you exported.'],
   [CLIP({ project: PROJECT({ opened: false }) }), "clip-next", 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.'],
   // With its video being made again beside the project (a video at work beside a project here is not the main video's: a Reel's holds the same lock), it is offered
   // the same, as a raw video in the same state is told to open it, and not that its video is being made (plan PR 17; the review of PR 10, M3).
@@ -351,7 +356,7 @@ describe("the next step for a video", () => {
     for (const [step, after] of [["taken", OPS_TEXTS.kit], ["kit", OPS_TEXTS.posted], ["posted", OPS_TEXTS.live], ["live", OPS_TEXTS.cascade]]) {
       assert.deepEqual(nextFor({ ...BASE, handoff: newer }, held(step, 1), NOW), { done: false, stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.takenAgain(2, 1)}`, step: "taken", after }, step);
     }
-    assert.ok(OPS_TEXTS.cascade.endsWith('If the "Reels" card lists "Reels from brimm-video", press "Write its post text" beside each.'));
+    assert.ok(OPS_TEXTS.cascade.endsWith('If the "Reels" card lists "Reels from BRIMM Video Studio", press "Write its post text" beside each.'));
     // A short video's and a session's newer revision never has it, though their notes are at their own last step.
     const clip = nextFor({ ...BASE, ...CLIP(), handoff: { ...newer, kind: "short video" } }, held("posted", 1, "short video"), NOW);
     assert.deepEqual([clip.step, clip.text, clip.after], ["taken", `On the BRIMM Ops page: ${OPS_TEXTS.takenAgain(2, 1)}`, ""]);
@@ -957,7 +962,7 @@ describe("the step of a planned video: film it, then what its footage is (PR H4,
   const NOTES = { version: 1, handoffs: {}, finished: {} };
   const NOW = Date.parse("2026-11-04T12:00:00-05:00");
   const plan = (planned) => ({ name: "Too many SKUs (400000)", id: "e-20261104-400000", kind: null, waiting: false, planned });
-  const FILM = "Film it to its shot list, then drop the files in your drop folder. The teleprompter script is in its folder in Episodes.";
+  const FILM = "Film it to its shot list, then drop the files in your drop folder. To read the teleprompter script, say 'show me the script': it opens as a copy to read, and changes come through the chat.";
   const TOLD = (footage) => `Its footage so far: ${footage}. When it is all in, say "that's all the footage".`;
   it("is film while no footage has come, as it was: a script, with no footage given or none counted", () => {
     for (const planned of [{ route: "script", voice: null }, { route: "script", voice: null, footage: "" }]) {

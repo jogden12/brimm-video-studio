@@ -22,6 +22,7 @@ import { ANSWERED, REEL2, exportOf } from "./exports-world.js";
 import { OFFERS, READ, depsOf } from "./guide-world.js";
 import { HANDOFF_REL, finishedWorld } from "./reels-world.js";
 import { PLAIN, on } from "./workcopy-world.js";
+const REELS_LINE = "Hand-off question: I found your Reels' exports. Hand off the Reels?";
 
 const NAMED = "Pricing: what to charge? (3fa9c1)";
 const DROP_LINE = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
@@ -29,7 +30,7 @@ const says = (text) => `${NAMED}: ${text}`;
 /** What the guide says of Reels exported and not in the hand-off: `names` are the Reels, said together, and `them` is true for more than one. */
 const reelLine = (names, them = false) => `You have exported ${names} from HyperFrames. Say "hand off the Reels" to add ${them ? "them" : "it"} to the hand-off.`;
 const REEL_2 = reelLine("Reel 2");
-const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page offers "Add it as a new episode", press it, then "Add the episode". Then press "Take the hand-off".';
+const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
 const TAKE_AGAIN = 'On the BRIMM Ops page: Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".';
 /** The same, when her note is already at the cascade, the last step: the Reels came after it, and the words go on to the page's "Reels" card. */
 const TAKE_AGAIN_LATE = 'On the BRIMM Ops page: Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.';
@@ -619,7 +620,7 @@ describe("B8. the other forms of the guide, at this stage", () => {
     assert.deepEqual((await on(depsOf(w), "guide", "3fa9c1")).said, [`${NAMED} is done: nothing is left to do for it.`]);
     // Her note is the guide's: `finish` does not look at it.
     const asked = await on(depsOf(w), "finish", FOLDER, "reels");
-    assert.deepEqual([asked.code, asked.said.at(-1)], [0, 'Say "yes, hand off the Reels" to start.']);
+    assert.deepEqual([asked.code, asked.said.at(-1)], [0, REELS_LINE]);
   });
 });
 

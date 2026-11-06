@@ -3345,7 +3345,7 @@ describe("the videos of an episode's video, made again from its cut plan (--from
     writeStatus(t.deps.settings.root, { version: 1, machine: "Laptop", pid: 4242, import: "k3x9", video: "Talk.mov", bytes: record.video.bytes, seconds: 120, step: "Waiting for its late check", at: new Date(t.deps.clock()).toISOString() }, writeFileSync);
     const r = await stopped(t, folder, video);
     assert.deepEqual([r.stopped, r.calls, r.clones, r.rev], [true, 0, 0, 1]);
-    assert.equal(r.message, 'The import of this episode has not finished on Laptop yet: it is at "Waiting for its late check". Say it again when it has');
+    assert.equal(r.message, `The import of this episode has not finished on Laptop yet: it is at "Waiting for Dropbox's check of its copies". Say it again when it has`);
     t.done();
   });
   it("stops, and makes nothing, on a Mac with no settings for episodes", async () => {
@@ -3374,13 +3374,13 @@ describe("the videos of an episode's video, made again from its cut plan (--from
     assert.equal(existsSync(lock), false);
     t.done();
   });
-  it("stops, and makes nothing, when a newer brimm-video wrote the episode's record (PR 19's review)", async () => {
+  it("stops, and makes nothing, when a newer BRIMM Video Studio wrote the episode's record (PR 19's review)", async () => {
     const { t, folder, video } = await imported();
     const { record } = readEpisode(folder);
     writeFileSync(join(folder, "record", "0002.json"), JSON.stringify({ ...record, version: NEWEST_VERSION + 1, rev: 2 }, null, 2) + "\n");
     const r = await stopped(t, folder, video);
     assert.deepEqual([r.stopped, r.calls, r.clones], [true, 0, 0]);
-    assert.equal(r.message, "its episode was written by a newer brimm-video. Ask Jason to update this Mac");
+    assert.equal(r.message, "its episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac");
     t.done();
   });
   it("stops, and makes nothing, while this Mac has the late check of the episode's import still to make", async () => {
@@ -3389,7 +3389,7 @@ describe("the videos of an episode's video, made again from its cut plan (--from
     writePending(t.deps.home, { version: 1, id: record.id, name: FOLDER, folder, video: "Talk.mov", bytes: record.video.bytes, seconds: 120, drop: "/nowhere/Talk.mov", work: "/nowhere", entries: [], lastCopy: t.deps.clock() - 20 * 60 * 1000, root: t.deps.settings.root, machine: "Mac Studio", planTxt: "Talk.cut-plan.txt" });
     const r = await stopped(t, folder, video);
     assert.deepEqual([r.stopped, r.calls, r.clones, r.rev], [true, 0, 0, 1]);
-    assert.equal(r.message, 'This Mac has still to make the late check of this episode\'s import. Say "try it again" for Talk.mov to have it made now, then say this again');
+    assert.equal(r.message, 'This Mac has still to make the check of this episode\'s copies. Say "try it again" for Talk.mov to have it made now, then say this again');
     t.done();
   });
   it("stops, and makes nothing, while an import that stopped on the other Mac has its late check still to make", async () => {
@@ -3398,7 +3398,7 @@ describe("the videos of an episode's video, made again from its cut plan (--from
     writeStatus(t.deps.settings.root, { version: 1, machine: "Laptop", pid: 4242, import: "k3x9", video: "Talk.mov", bytes: record.video.bytes, seconds: 120, step: "Waiting for its late check", at: new Date(t.deps.clock() - 11 * 60 * 1000).toISOString() }, writeFileSync);
     const r = await stopped(t, folder, video);
     assert.deepEqual([r.stopped, r.calls, r.clones, r.rev], [true, 0, 0, 1]);
-    assert.equal(r.message, 'The import of this episode stopped on Laptop before its late check was made. On Laptop, say "try it again" for Talk.mov, then say this again');
+    assert.equal(r.message, 'The import of this episode stopped on Laptop before the check of its copies was made. On Laptop, say "try it again" for Talk.mov, then say this again');
     t.done();
   });
   /** Have every video made from here on differ from the one made before by its words, not its size: the same text in
@@ -3579,7 +3579,7 @@ describe("the videos of an episode's video, made again from its cut plan (--from
     }
     assert.equal(readFileSync(rough, "utf8"), ours, "the rough cut is still this run's");
     const kept = join(t.deps.home, "BRIMM Video Work", FOLDER, "put back", "Talk.rough-cut.mp4");
-    assert.ok(r.message.includes(`Talk.rough-cut.mp4 could not be put back as it was at its late check. The one that was there is kept at ${kept}`), r.message);
+    assert.ok(r.message.includes(`Talk.rough-cut.mp4 could not be put back as it was when its copies were checked. The one that was there is kept at ${kept}`), r.message);
     assert.ok(!r.message.endsWith("Nothing was changed in the episode"), r.message);
     assert.equal(readFileSync(kept, "utf8"), before);
     t.done();
@@ -3750,7 +3750,7 @@ describe("the videos of an episode's video, made again from its cut plan (--from
     assert.equal(r.ok, false);
     for (const f of gone) {
       assert.ok(!existsSync(join(folder, f)), f);
-      assert.ok(r.message.includes(`${f} is not as this Mac put it at the late check, and Sallie's laptop has ${readEpisode(folder).record.name.text} open now, so it was not copied in again`), r.message);
+      assert.ok(r.message.includes(`${f} is not as this Mac put it when its copies were checked, and Sallie's laptop has ${readEpisode(folder).record.name.text} open now, so it was not copied in again`), r.message);
     }
     t.done();
   });
@@ -3850,7 +3850,7 @@ describe("the status of an episode's import, and a video never imported twice", 
     t.put("Talk.mov");
     const results = await uneditedFolder(t.drop, t.deps);
     assert.deepEqual([results.map((r) => r.ok), t.calls.length], [[true], calls]);
-    assert.ok(t.logs.includes(`Talk.mov: already imported as ${FOLDER}. It stays in the drop folder until its late check passes, or for a person to delete.`), t.logs.join("\n"));
+    assert.ok(t.logs.includes(`Talk.mov: already imported as ${FOLDER}. It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`), t.logs.join("\n"));
     assert.deepEqual(t.folders(), [FOLDER]);
     t.done();
   });
@@ -3981,7 +3981,7 @@ describe("the late check of an episode's import", () => {
     t.logs.length = 0;
     await uneditedFolder(t.drop, t.deps);
     assert.equal(t.calls.length, calls);
-    assert.ok(t.logs.some((line) => line.startsWith("Talk.mov: copied in, but the late check found a problem: ")), t.logs.join("\n"));
+    assert.ok(t.logs.some((line) => line.startsWith("Talk.mov: copied in, but Dropbox found a problem with a copy of it: ")), t.logs.join("\n"));
     t.done();
   });
   it("imports a video that arrives while it waits for a late check, and checks both", async () => {
@@ -5144,8 +5144,8 @@ describe("the light import", () => {
     assert.equal(r.message, "This episode was imported lightly: its videos are made when it is read, not from the plan.");
     t.done();
   });
-  it("says a newer brimm-video wrote the record, and not that it was imported lightly, when it did, with or without --out", async () => {
-    const NEWER = "its episode was written by a newer brimm-video. Ask Jason to update this Mac";
+  it("says a newer BRIMM Video Studio wrote the record, and not that it was imported lightly, when it did, with or without --out", async () => {
+    const NEWER = "its episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac";
     const t = episodeImport();
     await uneditedFolder(t.drop, t.deps);
     const folder = t.episodeFolder();
@@ -5162,13 +5162,13 @@ describe("the light import", () => {
     assert.deepEqual([t.calls, t.guarded, listAll(folder), existsSync(out)], [[], [], before, false]);
     t.done();
   });
-  it("is said in the README: --from-plan refuses, with or without --out, an episode a newer brimm-video wrote and one imported lightly", () => {
+  it("is said in the README: --from-plan refuses, with or without --out, an episode a newer BRIMM Video Studio wrote and one imported lightly", () => {
     const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
     const part = /\n\*\*`--from-plan` of an episode's video\*\*([^\n]*)\n/.exec(readme);
     assert.ok(part, "the README's paragraph on --from-plan of an episode's video");
     // One sentence says both refusals, and that --out changes neither.
     const said = part[1].split(/(?<=\.) /).find((sentence) => sentence.includes("with or without `--out`")) || "";
-    assert.ok(said.includes("a newer brimm-video wrote") && said.includes("imported lightly"), part[1]);
+    assert.ok(said.includes("a newer BRIMM Video Studio wrote") && said.includes("imported lightly"), part[1]);
   });
   it("still makes the videos again of an episode the heavy import made, whatever the setting says now", async () => {
     const t = episodeImport({ light: false });
@@ -5243,10 +5243,10 @@ describe("importHold's state", () => {
     assert.deepEqual(hold, want);
     rmSync(f.dir, { recursive: true, force: true });
   };
-  const RUNNING = (on) => `The import of this episode has not finished on ${on} yet: it is at "Waiting for its late check". Say it again when it has.`;
-  const NOT_YET = (at) => `This Mac has still to make the late check of this episode's import, due at ${clockAt(at)}. Say "try it again" for ${VIDEO} to have it made then, then say this again.`;
-  const OWED = `This Mac has still to make the late check of this episode's import. Say "try it again" for ${VIDEO} to have it made now, then say this again.`;
-  const PROBLEM = (on) => `The late check of this episode's import found a problem: x.srt is not whole in Dropbox. Once it is put right, say "try it again" for ${VIDEO} on ${on}, then say this again.`;
+  const RUNNING = (on) => `The import of this episode has not finished on ${on} yet: it is at "Waiting for Dropbox's check of its copies". Say it again when it has.`;
+  const NOT_YET = (at) => `This Mac has still to make the check of this episode's copies, due at ${clockAt(at)}. Say "try it again" for ${VIDEO} to have it made then, then say this again.`;
+  const OWED = `This Mac has still to make the check of this episode's copies. Say "try it again" for ${VIDEO} to have it made now, then say this again.`;
+  const PROBLEM = (on) => `Dropbox found a problem with a copy of this episode: x.srt is not whole in Dropbox. Once it is put right, say "try it again" for ${VIDEO} on ${on}, then say this again.`;
 
   it("is running while the import of the video is at work on the Mac Studio", () => {
     const f = folders();
@@ -5281,7 +5281,7 @@ describe("importHold's state", () => {
   it("is stopped when the status of the import was written 11 minutes ago", () => {
     const f = folders();
     statusOf(f, {}, 11 * MIN);
-    check(f, false, { why: `The import of this episode stopped on Mac Studio before its late check was made. On Mac Studio, say "try it again" for ${VIDEO}, then say this again.`, waits: false, state: "stopped" });
+    check(f, false, { why: `The import of this episode stopped on Mac Studio before the check of its copies was made. On Mac Studio, say "try it again" for ${VIDEO}, then say this again.`, waits: false, state: "stopped" });
   });
   it("is failed when the status of the import says why it failed", () => {
     const f = folders();
@@ -5307,7 +5307,7 @@ describe("importHold's state", () => {
       [(f) => statusOf(f), { why: RUNNING("Mac Studio"), waits: true, state: "running" }],
       [(f) => statusOf(f, { failed: "ffmpeg stopped" }), { why: 'The import of this episode failed on Mac Studio: ffmpeg stopped. Say "try it again" to import it again.', waits: false, state: "failed" }],
       [(f) => statusOf(f, { problem: "x.srt is not whole in Dropbox." }), { why: PROBLEM("Mac Studio"), waits: false, state: "problem" }],
-      [(f) => statusOf(f, {}, 11 * MIN), { why: `The import of this episode stopped on Mac Studio before its late check was made. On Mac Studio, say "try it again" for ${VIDEO}, then say this again.`, waits: false, state: "stopped" }]
+      [(f) => statusOf(f, {}, 11 * MIN), { why: `The import of this episode stopped on Mac Studio before the check of its copies was made. On Mac Studio, say "try it again" for ${VIDEO}, then say this again.`, waits: false, state: "stopped" }]
     ];
     for (const [set, want] of rows) {
       for (const importing of [false, true]) {

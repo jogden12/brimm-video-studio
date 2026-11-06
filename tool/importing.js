@@ -76,7 +76,7 @@ function namesIn(root) {
     unreadable, and `dueOf` reads it only when it is a finite number. */
 export function statusFault(s) {
   if (s === null || typeof s !== "object" || Array.isArray(s)) return "it is not an import's status";
-  if (s.version !== 1) return `it is version ${JSON.stringify(s.version)}, and this brimm-video reads version 1`;
+  if (s.version !== 1) return `it is version ${JSON.stringify(s.version)}, and this BRIMM Video Studio reads version 1`;
   const faults = [
     [typeof s.machine === "string" && s.machine !== "", "it names no Mac"],
     [Number.isInteger(s.pid) && s.pid > 0, "the run that wrote it cannot be read"],
@@ -176,6 +176,14 @@ export function importState(status, now) {
   if (status.problem) return "problem";
   if (status.held) return "held";
   return isStale(status, now) ? "stopped" : "running";
+}
+
+/** A status's `step` as she is told it. The step is stored as the import wrote it, and both Macs read it back (one may run older code),
+    so its words never change on disk: only the three that name the late check are said in plain words where they are printed. */
+export function shownStep(step) {
+  if (step === "Waiting for its late check" || step === "Waiting for the late check") return "Waiting for Dropbox's check of its copies";
+  if (step === "Late check") return "Dropbox's check of its copies";
+  return step;
 }
 
 /** Whether a status holds its video, so that the import does not take it again: while its import runs, after it failed,

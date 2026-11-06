@@ -308,7 +308,7 @@ const PICKS_UP = "It's open in HyperFrames, and it picks up this conversation.";
 // A handover that was wanted and not made is refused for several reasons (handoverAllowed), so these words say none of them: the
 // caller adds the one that is true.
 const NEW_CONVERSATION = "It's open in HyperFrames. It starts a new conversation.";
-const WOULD_NOT = "HyperFrames wouldn't open. Try once more; if it still won't, ask Jason.";
+const WOULD_NOT = "HyperFrames wouldn't open. Try once more. If it still won't, tell Jason.";
 const CANNOT = "HyperFrames can't be opened from here: ask Jason.";
 /** The reasons `open` gives for not opening (dist/open-*.js, WHY_NOT), and her words for each. */
 const NOT_OPENED = {

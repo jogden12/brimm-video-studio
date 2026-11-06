@@ -8,7 +8,7 @@
 // once, at start, and a detached run outlives the edit.js that started it (startDetached), so `ps` of that id would fail at random.
 import { spawnSync } from "node:child_process";
 
-export const SANDBOXED = "brimm-video was run inside Claude Code's sandbox: ask Jason.";
+export const SANDBOXED = "BRIMM Video Studio was run inside Claude Code's sandbox: ask Jason.";
 
 /** SANDBOXED when edit.js is run inside Claude Code's sandbox, else "": `env` is its environment, `pid` its own process's id, and
     `spawn` spawnSync or a test's stand-in. A spawn that throws, gives an error of any kind, ends with anything but 0, or prints

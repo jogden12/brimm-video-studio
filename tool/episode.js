@@ -266,6 +266,16 @@ export function kindOf(r) {
   return KINDS.includes(kind) ? kind : null;
 }
 
+/** The reading the record holds when it is the current one, or null: one made after her answer (not before it), as the kind the
+    video is now. `kind … --again` keeps the reading and its offers in the record while the new one is made, and a video answered
+    again as another kind holds the old kind's: neither is a reading of this answer (the inverse of reading.js notAsAnswered). A
+    time that cannot be read is not after. */
+export function currentReading(record) {
+  const reading = record.reading;
+  if (reading === null || typeof reading !== "object" || record.answer === null || typeof record.answer !== "object") return null;
+  return Date.parse(reading.at) >= Date.parse(record.answer.at) && reading.kind === kindOf(record) ? reading : null;
+}
+
 /** How a record is named in all that edit.js prints, which goes into Sallie's chat (spec 2026-10-22, section 1, "Unanswered and
     session videos are named by a neutral label"): a video not yet answered, or left alone, by its label, as the import made it
     and the record keeps it (it is never made again from when the record says it was imported: the label's moment is its
@@ -418,7 +428,7 @@ export function newPlannedEpisode({ id, machine, at, title, route, voice = null,
     `known` stands in for a Mac on older code, in a test. */
 export const faultFor = (known) => (r) => {
   if (!isObject(r)) return "it is not an episode's record";
-  if (!Number.isInteger(r.version) || r.version < 1 || r.version > known) return `it is version ${JSON.stringify(r.version)}, and this brimm-video reads versions 1 to ${known}`;
+  if (!Number.isInteger(r.version) || r.version < 1 || r.version > known) return `it is version ${JSON.stringify(r.version)}, and this BRIMM Video Studio reads versions 1 to ${known}`;
   const v = r.video;
   const m = r.main;
   // A record with no video, and a record with no kind but the answer "planned", are whole only as a planned episode is: a planned
@@ -635,7 +645,7 @@ export function undone(record, home) {
     was. `pastCopies`, which `resolve` alone gives, writes past the conflicted copies, as it sorts them out one at a time. */
 export function writeEpisode(folder, record, { expectRev, writeText, writer, home, pastCopies = false }) {
   if (!Number.isInteger(expectRev) || expectRev < 0) throw new Error("the episode's record was not written, because the rev it was read at was not given");
-  if (isObject(record) && Number.isInteger(record.version) && record.version > NEWEST_VERSION) throw Object.assign(new Error("Jason has a newer brimm-video. Ask him to update this Mac."), { code: "NEWER" });
+  if (isObject(record) && Number.isInteger(record.version) && record.version > NEWEST_VERSION) throw Object.assign(new Error("Jason has a newer BRIMM Video Studio. Ask him to update this Mac."), { code: "NEWER" });
   const copies = conflictedCopies(folder);
   if (copies.length && !pastCopies) throw Object.assign(new Error(conflictWhy(copies)), { code: "CONFLICTED" });
   if (recordNumbers(folder).some((n) => n > expectRev)) throw Object.assign(new Error("this episode changed on the other Mac: open it again"), { code: "CHANGED" });
@@ -652,7 +662,7 @@ export function writeEpisode(folder, record, { expectRev, writeText, writer, hom
 
 /** Other names Dropbox may have kept a file under, beside it: with ".writing" after its name, or with "(1)", or a conflicted
     copy's words, before its ending. Each as a path from the episode's folder. */
-function otherNames(folder, path) {
+export function otherNames(folder, path) {
   const where = dirname(path);
   const name = basename(path);
   const ending = extname(name);
@@ -669,10 +679,12 @@ function otherNames(folder, path) {
     .map((n) => (where === "." ? n : `${where}/${n}`));
 }
 
-/** What is wrong with an episode's files against the list in its record, one line for each file, in plain words: missing,
-    short, or not the size listed, with any other name Dropbox may have kept it under. [] when every file is there at its
-    size. `stat` is how a file is measured: a test gives a stand-in. */
-export function filesProblems(folder, record, { stat = statSync } = {}) {
+/** What is wrong with an episode's files against the list in its record, one entry for each file: { file, kind, size, bytes, kept }.
+    `kind` is "missing", "short" (smaller than listed) or "different" (larger than listed); `size` is what it is now (null when it is
+    not there), `bytes` what the record lists, and `kept` any other name Dropbox may have kept it under. [] when every file is there at
+    its size. `stat` is how a file is measured: a test gives a stand-in. (Review changes R4c: a rule about one file reads `file`,
+    never the words.) */
+export function fileProblems(folder, record, { stat = statSync } = {}) {
   const problems = [];
   for (const [path, bytes] of Object.entries(record.files)) {
     if (path.split("/")[0] === RECORD_DIR) continue;
@@ -683,13 +695,28 @@ export function filesProblems(folder, record, { stat = statSync } = {}) {
       // A file that cannot be measured is not there for any command that needs it.
     }
     if (size === bytes) continue;
-    const others = otherNames(folder, path);
-    const kept = others.length ? `, and Dropbox may have kept it as ${others.join(" or ")}` : "";
-    if (size === null) problems.push(`${path} is missing${kept}`);
-    else if (size < bytes) problems.push(`${path} is short: ${size} bytes of ${bytes}${kept}`);
-    else problems.push(`${path} is ${size} bytes, not the ${bytes} the record lists${kept}`);
+    problems.push({ file: path, kind: size === null ? "missing" : size < bytes ? "short" : "different", size, bytes, kept: otherNames(folder, path) });
   }
   return problems;
+}
+
+/** What is wrong with an episode's files, one line for each file, in plain words for a command's refusal: missing, short, or
+    not the size listed, with any other name Dropbox may have kept it under. [] when every file is there at its size. */
+export function filesProblems(folder, record, { stat = statSync } = {}) {
+  return fileProblems(folder, record, { stat }).map(({ file, kind, size, bytes, kept }) => {
+    const as = kept.length ? `, and Dropbox may have kept it as ${kept.join(" or ")}` : "";
+    if (kind === "missing") return `${file} is missing${as}`;
+    if (kind === "short") return `${file} is short: ${size} bytes of ${bytes}${as}`;
+    return `${file} is ${size} bytes, not the ${bytes} the record lists${as}`;
+  });
+}
+
+/** One problem of fileProblems told to her: what happened and what she can try first. */
+export function fileProblemWords({ file, kind, kept }) {
+  const as = kept.length ? ` Dropbox may have kept it as ${kept.join(" or ")}.` : "";
+  if (kind === "missing") return `A file of this video is missing: ${file}. Dropbox may still be bringing it. Wait a few minutes and ask again. If it is still missing, tell Jason.${as}`;
+  if (kind === "short") return `A file of this video is not all here yet: ${file}. Dropbox is still bringing it. Ask again in a few minutes.${as}`;
+  return `A file of this video is not the one Studio saved: ${file}. If you changed it, tell me what you changed. If not, tell Jason.${as}`;
 }
 
 /** Who is editing an episode, when it is a Mac other than `machine`: the record's `editing`. null when nobody is, or this Mac

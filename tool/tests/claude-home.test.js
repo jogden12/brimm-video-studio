@@ -14,7 +14,7 @@ import { guardAnswer, openDecision } from "../open-lock.js";
 import { addedWhy, agentsWhy, beyondWhy, skillFolders, transcriptOf, trustWhy } from "../loosened.js";
 import { openWorld, openDeps, chatChain, APP_ARGS, CHAT_ENV, MINIMUM, SESSION, transcript } from "./open-world.js";
 
-const NEWEST = "This Mac has the newest brimm-video.";
+const NEWEST = "This Mac has the newest BRIMM Video Studio.";
 const SECRET = "SECRET-WORDS-OF-A-FILE";
 
 /** The made-up Mac `openWorld` makes, with Claude Code's files (~/.claude, ~/.claude.json) moved to a real home of their own, and the

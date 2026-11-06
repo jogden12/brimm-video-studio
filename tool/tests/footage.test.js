@@ -166,7 +166,7 @@ describe("partsOf, the parts of a plan", () => {
     assert.deepEqual(partsOf(t.root, "e-20261104-000000"), []);
     t.done();
   });
-  it("passes over a record that is not whole, one a newer brimm-video wrote, and a folder that cannot be read, and says [] for no Episodes", () => {
+  it("passes over a record that is not whole, one a newer BRIMM Video Studio wrote, and a folder that cannot be read, and says [] for no Episodes", () => {
     const t = setup();
     put(t, "2026-11-04 Whole (Mac Studio)", part({ id: "e-20261104-aa1111" }));
     // A part with no shot is not a whole record, so it is not a part of anything.
@@ -192,7 +192,7 @@ describe("partsOf, the parts of a plan", () => {
     assert.deepEqual(partsOf(t.root, PLAN_ID).map((p) => p.record.id), ["e-20261104-aa1111"]);
     t.done();
   });
-  it("lists a part a newer brimm-video wrote only when it is asked to (newer: true): flagged, after the others, by the plan its record names (PR H5b)", () => {
+  it("lists a part a newer BRIMM Video Studio wrote only when it is asked to (newer: true): flagged, after the others, by the plan its record names (PR H5b)", () => {
     const t = setup();
     put(t, "2026-11-04 Whole (Mac Studio)", part({ id: "e-20261104-aa1111" }));
     put(t, "2026-11-04 Newer (Mac Studio)", { ...part({ id: "e-20261104-cc3333", at: "2026-11-04T08:00:00-05:00" }), version: 6 });
@@ -231,7 +231,7 @@ describe("partHeld and mayBeUsed, whether a part may be used to make anything (P
       t.done();
     }
   });
-  it("holds back a part whose newest record a newer brimm-video wrote, listed as newer or found so when it is looked at", () => {
+  it("holds back a part whose newest record a newer BRIMM Video Studio wrote, listed as newer or found so when it is looked at", () => {
     const t = setup();
     const folder = put(t, "2026-11-04 One (Mac Studio)", part({ id: "e-20261104-aa1111" }));
     const [listed] = partsOf(t.root, PLAN_ID);

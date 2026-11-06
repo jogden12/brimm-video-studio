@@ -4,6 +4,7 @@
 // asked to type. A text is never run as AppleScript: each goes into the script inside a string literal and nowhere else. Nothing
 // osascript printed is passed on in a message, since it can quote the script, and so the dialog's text.
 import { runProgram, lastLine } from "./run.js";
+import { STUDIO_NAME } from "./name.js";
 
 /** How much of what osascript prints is read. An answer is a button, and one line she typed. */
 const OUT = 100000;
@@ -27,7 +28,7 @@ export const appleText = (s) => `"${shown(s).replace(/\\/g, "\\\\").replace(/"/g
 export function dialogScript(text, { buttons, answer }) {
   const names = buttons.map(shown);
   const cancel = names.indexOf("Cancel");
-  return `display dialog ${appleText(text)}${answer ? ' default answer ""' : ""} buttons {${names.map(appleText).join(", ")}} default button ${cancel < 0 ? 1 : cancel + 1} with title "brimm-video" with icon caution`;
+  return `display dialog ${appleText(text)}${answer ? ' default answer ""' : ""} buttons {${names.map(appleText).join(", ")}} default button ${cancel < 0 ? 1 : cancel + 1} with title ${appleText(STUDIO_NAME)} with icon caution`;
 }
 
 /** What `done`, the end of osascript, says she answered, for the `buttons` she was shown. */

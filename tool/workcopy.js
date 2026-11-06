@@ -695,6 +695,8 @@ async function keepCues({ cues, stretch, paths, work, shown, write, rename, log 
     - its key is its own video's size and time (never 4K), and its files are `footage-<shot>-<key>.mp4` and `.json`, in the folder of the
       working copies (footageCopyPaths), so that it replaces the same shot's copies of other keys alone;
     - its step in the progress panel is its own (FOOTAGE_STEP), and the log says it is the footage that is made.
+    `from` (plan R1b) is the file this Mac holds of `video`, read in its place while Dropbox's late check of `video` is still to come:
+    ffprobe and ffmpeg read it, and `video` stays the identity, so the key, the places and the room needed are the video's.
     The copy of a voice (`voice` true, PR H6: an explainer in her own voice, whose video is its voiceover, a sound alone) is made by this very job
     too, and differs in what is of a sound and not of a picture: it needs a sound this Mac's ffmpeg can read and no picture; ffmpeg is given
     voiceCopyArgs (the sound alone, AAC at 48 kHz, on the file's clock); the copy is `<key>.m4a` (voiceCopyPaths), never of 4K; it is checked to be a
@@ -703,7 +705,7 @@ async function keepCues({ cues, stretch, paths, work, shown, write, rename, log 
     (an HDR video's alone), `runGuarded`, `tools` ({ ffmpeg, ffprobe }), `probe` (a function from a file to what ffprobe printed
     of it, or "": read through `run` when none is given), `freeBytes`, `stat`, `mkdir`, `rename`, `rm`, `readDir`, `write`,
     `progress`, `log`, `now`, `pid`, which names the run's own folder, `faces` and `cues`. */
-export async function makeWorkCopy({ home, folder, video, name, fourK = false, reel = null, footage = null, voice = false }, deps = {}) {
+export async function makeWorkCopy({ home, folder, video, name, fourK = false, reel = null, footage = null, voice = false, from = null }, deps = {}) {
   const {
     run = runProgram, runGuarded: guarded = runGuarded, tools = {}, probe: given, freeBytes = freeOn, stat = statOf, mkdir = mkdirSync,
     rename = renameSync, rm = rmSync, readDir = readdirSync, write = writeFileSync, progress = noProgress, log = () => {}, now = Date.now, pid = process.pid,
@@ -726,6 +728,8 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
     if (reel !== null && reel !== undefined && !(typeof reel === "object" && Number.isInteger(reel.n) && reel.n >= 1 && isStretch(reel))) return refuse("it is not a stretch of the video", "it is not a Reel with a stretch of the video");
     if (!tools.ffmpeg || !tools.ffprobe) return refuse("this Mac has no program to make it with: ask Jason", "ffmpeg or ffprobe is not installed");
     const raw = stat(video);
+    // `video` is the identity (the key, the places, the size); `from`, when given, is the file this Mac holds of it, which is read instead (plan R1b).
+    const source = typeof from === "string" && from ? from : video;
     if (!raw) return refuse("it isn't on this Mac", "the video is not there");
     const key = reel ? reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, reel) : workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs, fourK: footage || voice ? false : fourK });
     if (!key) return refuse(voice ? "it could not be read as a sound" : "it could not be read as a video", "the video's size and time cannot be read");
@@ -758,7 +762,7 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
         return "";
       }
     });
-    const printed = await probe(video);
+    const printed = await probe(source);
     const facts = factsOf(printed);
     const streams = streamsOf(printed);
     const colour = colourOf(printed);
@@ -801,8 +805,8 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
     // How the picture is stored (`stored`) is the Reel's as much as the video's: an HDR picture is turned by hand, from the note the
     // recording is stored with, whichever stretch of it is cut.
     const args = voice
-      ? voiceCopyArgs(video, writing, { streams })
-      : workCopyArgs(video, writing, { facts, streams, colour, rate, fourK: reel || footage ? false : fourK, stored, ...(stretch ? { stretch } : {}), ...(footage ? { mute: true } : {}) });
+      ? voiceCopyArgs(source, writing, { streams })
+      : workCopyArgs(source, writing, { facts, streams, colour, rate, fourK: reel || footage ? false : fourK, stored, ...(stretch ? { stretch } : {}), ...(footage ? { mute: true } : {}) });
     if (!args) return refuse(voice ? "it could not be read as a sound" : "it could not be read as a video");
     // ffmpeg says how far it has got, for the progress panel. Without a panel it is given nothing more.
     const watch = progress.encoding(seconds);

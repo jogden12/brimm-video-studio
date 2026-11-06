@@ -97,7 +97,7 @@ describe("the script that shows the dialog", () => {
   it("shows the text and the buttons, makes the default button the first, and gives the title and the icon", () => {
     assert.equal(
       dialogScript("Clear it?", { buttons: ["Cancel", "Clear it"], answer: false }),
-      'display dialog "Clear it?" buttons {"Cancel", "Clear it"} default button 1 with title "brimm-video" with icon caution'
+      'display dialog "Clear it?" buttons {"Cancel", "Clear it"} default button 1 with title "BRIMM Video Studio" with icon caution'
     );
   });
   it("makes Cancel the default button when there is one, by its place counted from 1, so that a stray Return presses it", () => {
@@ -118,12 +118,12 @@ describe("the script that shows the dialog", () => {
   it("holds no NUL character, from the text or from a button", () => {
     const script = dialogScript("Clear\0 it?", { buttons: ["Can\0cel", "Clear\0 it"], answer: true });
     assert.ok(!script.includes("\0"));
-    assert.equal(script, 'display dialog "Clear it?" default answer "" buttons {"Cancel", "Clear it"} default button 1 with title "brimm-video" with icon caution');
+    assert.equal(script, 'display dialog "Clear it?" default answer "" buttons {"Cancel", "Clear it"} default button 1 with title "BRIMM Video Studio" with icon caution');
   });
   it("asks for a typed answer, with nothing in the field, when it is asked to", () => {
     assert.equal(
       dialogScript("Who agreed, and when?", { buttons: ["Cancel", "Noted"], answer: true }),
-      'display dialog "Who agreed, and when?" default answer "" buttons {"Cancel", "Noted"} default button 1 with title "brimm-video" with icon caution'
+      'display dialog "Who agreed, and when?" default answer "" buttons {"Cancel", "Noted"} default button 1 with title "BRIMM Video Studio" with icon caution'
     );
   });
   it("holds every text, the dialog's and the buttons', only inside its own literal", () => {
@@ -132,7 +132,7 @@ describe("the script that shows the dialog", () => {
         const { rest, values } = readScript(dialogScript(s, { buttons: [s, "Cancel", "Say \"hi\""], answer }));
         const wanted = `display dialog <text>${answer ? " default answer <text>" : ""} buttons {<text>, <text>, <text>} default button 2 with title <text> with icon caution`;
         assert.equal(rest, wanted, s);
-        assert.deepEqual(values, [s, ...(answer ? [""] : []), s, "Cancel", 'Say "hi"', "brimm-video"], s);
+        assert.deepEqual(values, [s, ...(answer ? [""] : []), s, "Cancel", 'Say "hi"', "BRIMM Video Studio"], s);
       }
     }
   });
@@ -144,14 +144,14 @@ describe("asking her", () => {
     await askDialog(CLEAR, { run });
     assert.deepEqual(calls, [{
       cmd: "/usr/bin/osascript",
-      args: ["-e", `display dialog "${CLEAR}" buttons {"Cancel", "Clear it"} default button 1 with title "brimm-video" with icon caution`],
+      args: ["-e", `display dialog "${CLEAR}" buttons {"Cancel", "Clear it"} default button 1 with title "BRIMM Video Studio" with icon caution`],
       options: { out: 100000 }
     }]);
   });
   it("asks for a typed answer when it is asked to, and for the buttons it is given", async () => {
     const { run, calls } = standIn(typed("Noted", "Jane Doe"));
     await askDialog("Who agreed, and when?", { buttons: ["Cancel", "Noted"], answer: true, run });
-    assert.deepEqual(calls[0].args, ["-e", 'display dialog "Who agreed, and when?" default answer "" buttons {"Cancel", "Noted"} default button 1 with title "brimm-video" with icon caution']);
+    assert.deepEqual(calls[0].args, ["-e", 'display dialog "Who agreed, and when?" default answer "" buttons {"Cancel", "Noted"} default button 1 with title "BRIMM Video Studio" with icon caution']);
   });
   it("quotes a dialog text with quotes and backslashes inside its one literal", async () => {
     const { run, calls } = standIn(clicked("Clear it"));
@@ -159,7 +159,7 @@ describe("asking her", () => {
     await askDialog(text, { run });
     const { rest, values } = readScript(calls[0].args[1]);
     assert.equal(rest, "display dialog <text> buttons {<text>, <text>} default button 1 with title <text> with icon caution");
-    assert.deepEqual(values, [text, "Cancel", "Clear it", "brimm-video"]);
+    assert.deepEqual(values, [text, "Cancel", "Clear it", "BRIMM Video Studio"]);
   });
 
   describe("answers with the button she clicked", () => {
@@ -296,7 +296,7 @@ describe("asking her", () => {
       assert.deepEqual(await askDialog("Clear\0 this\0?", { buttons: ["Can\0cel", "Clear\0 it"], run }), { button: "Clear it" });
       assert.equal(calls.length, 1);
       assert.ok(calls[0].args.every((arg) => !arg.includes("\0")));
-      assert.equal(calls[0].args[1], 'display dialog "Clear this?" buttons {"Cancel", "Clear it"} default button 1 with title "brimm-video" with icon caution');
+      assert.equal(calls[0].args[1], 'display dialog "Clear this?" buttons {"Cancel", "Clear it"} default button 1 with title "BRIMM Video Studio" with icon caution');
     });
     it("and still answers Cancel for a Cancel with one in it", async () => {
       assert.deepEqual(await askDialog("Sure?", { buttons: ["Can\0cel", "Yes"], run: standIn(CANCELED).run }), { button: "Cancel" });
