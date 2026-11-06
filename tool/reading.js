@@ -612,7 +612,11 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   const kept = render ? [`The rough cut of ${name} is kept on this Mac, in BRIMM Video Work, as "${basename(render.to)}".`] : [];
   // This Mac's own late check of the import takes the files it is about to put in out of its list as they go in, under a lock it also
   // takes (plan R1c), so that it never puts the import's older file back over one the reading wrote.
-  const step = await keepCheckInStep(ctx, { name: found.name, record, paths: madeAt }, { wait: deps.wait || ((ms_) => new Promise((done) => setTimeout(done, ms_))), log: (line) => log(`${named}: ${line}`) });
+  const step = await keepCheckInStep(ctx, { name: found.name, record, paths: madeAt }, { wait: deps.wait || ((ms_) => new Promise((done) => setTimeout(done, ms_))), log: (line) => log(`${named}: ${line}`) }).catch((e) => {
+    // Nothing is locked or marked when it throws (keepCheckInStep lets its lock go on every path). The code goes to the log alone.
+    log(`${named}: the import's late check could not be kept in step (${(e && e.code) || "an error"}).`);
+    return { why: `Something went wrong on this Mac before Claude's reading of ${name} could be put in, so nothing it read was put in.` };
+  });
   if (step.why) return { ok: false, made: [], failed: [...failed, step.why, ...kept], next: AGAIN };
   let into;
   try {

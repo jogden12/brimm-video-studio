@@ -380,6 +380,34 @@ describe("the wait for late checks", () => {
     assert.deepEqual(logs.filter((line) => line.includes("cannot be read now")), ["X.mov: its late check waits for the next run: a reading stopped while it put its files in, and the episode's record cannot be read now."]);
     w.done();
   });
+  it("15. while a check is put off for a long hold, keeps looking in the drop folder and rewriting the waiting status each LOOK_AGAIN_MS of the clock", async () => {
+    const w = world([]);
+    const L = Date.parse("2026-10-27T10:00:00");
+    const { X } = readingWorld(w, L, { listedA: 23 });
+    writeStatus(w.root, { version: 1, machine: "Mac Studio", pid: process.pid, import: "k3j9x", video: "X.mov", bytes: X.bytes, seconds: 120, step: "Waiting for its late check", at: new Date().toISOString(), due: dueAt(X) }, (to, text) => writeFileSync(to, text));
+    const held = takeLateCheckLock(w.home, X.name, "read", mine);
+    assert.ok(held);
+    let now = dueAt(X) + 1;
+    let waits = 0;
+    const imported = [];
+    const numbers = [];
+    const wait = async (ms) => {
+      waits += 1;
+      now += ms;
+      numbers.push(readStatuses(w.root).find(({ status }) => status && status.video === "X.mov")?.n);
+      // A video is dropped at the first wait; the hold lasts 90 waits (15 minutes) of LOCK_AGAIN_MS.
+      if (waits === 1) writeFileSync(join(w.folder, "B.mov"), "the bytes of B.mov");
+      if (waits === 90) releaseLateCheckLock(held);
+    };
+    await importEpisodes(w.folder, runs(w, 0, { clock: () => now, wait }), async (name) => {
+      imported.push([name, waits]);
+      return { ok: true, name };
+    });
+    assert.ok(imported.length === 1 && imported[0][1] <= 8, `B.mov imported at wait ${imported[0] && imported[0][1]}`);
+    // The status was written again every minute or so while the check was put off (a new number each time), so it never went stale.
+    assert.ok(new Set(numbers.filter((n) => n !== undefined)).size >= 10, `status numbers: ${[...new Set(numbers)].join(",")}`);
+    w.done();
+  });
   it("14. puts off, at the per-minute timer, a check whose lock a reading holds, and throws nothing", async () => {
     const w = world(["B.mov"]);
     const L = Date.parse("2026-10-27T10:00:00");

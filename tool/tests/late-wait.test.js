@@ -311,6 +311,26 @@ describe("keepCheckInStep (R1c)", () => {
     assert.equal(existsSync(lockFile(s)), false);
     s.done();
   });
+  it("finds the entries however the paths are spelled: a /./ part, or an accent in NFD", async () => {
+    const s = setup();
+    const entries = raw(s);
+    // The pending spells the episode's folder in NFD with a /./ part; the reading's paths are NFC and plain.
+    const odd = (p) => p.replace(s.folder, `${s.folder}/.`).replace("Pricing talk", "Pricing talk".normalize("NFD"));
+    writePending(s.home, s.pending({ entries: entries.map((e) => ({ ...e, to: odd(e.to) })) }));
+    const got = await keepCheckInStep(ctxOf(s), step(s, { paths: REPLACED.map((n) => join(s.folder, n).normalize("NFC")) }), waiter());
+    assert.equal(typeof got.end, "function");
+    got.end({ put: true });
+    assert.equal(readPendings(s.home)[0].entries.length, entries.length - 4);
+    // An accented name: the same file spelled in NFC and in NFD is one file.
+    const t = setup();
+    const accented = join(t.folder, "Café talk.srt");
+    writePending(t.home, t.pending({ entries: [{ from: t.file, to: accented.normalize("NFD"), bytes: 1 }] }));
+    const again = await keepCheckInStep(ctxOf(t), { name: NAME, record: { ...t.record, kind: "raw", name: { text: "Café", placeholder: false } }, paths: [accented.normalize("NFC")] }, waiter());
+    assert.equal(typeof again.end, "function");
+    again.end({ put: false });
+    s.done();
+    t.done();
+  });
   it("settles a mark an earlier reading left (it died) before it marks its own", async () => {
     const s = setup();
     const entries = raw(s);

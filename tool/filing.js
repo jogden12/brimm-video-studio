@@ -439,8 +439,9 @@ export const releaseLateCheckLock = (held) => releaseEpisodeLock(held.file, held
 
 /** Settle the mark a reading left on a pending late check, under the check's lock (plan R1c): a reading that stopped while it put its
     files in. `pending` is read fresh. With no mark it comes back as it is: { pending }. With one, the record in force says which files
-    are the reading's: an entry the mark names whose file the record lists at the entry's bytes is the reading's, and is left out of the
-    check; every other entry is kept, so the import's file is put back over one that is not listed. The pending is written whole
+    are the reading's: an entry the mark names whose file the record lists at any other size than the entry's bytes is the reading's, and
+    is left out of the check; every other entry is kept (one the mark names that the record still lists at the entry's bytes too), so
+    the import's file is put back when the reading's put did not get as far as its record. The pending is written whole
     without the mark. { later: true } when no record can be trusted to say (none that reads, one a newer brimm-video wrote, or a record
     file above it still coming): nothing is written then, and the check waits for the next run. */
 export function settleReading(pending, { home, log = () => {} }) {
@@ -786,6 +787,8 @@ export async function importEpisodes(dir, deps, importOne) {
     changed = false;
     await importWaiting(false);
   }
+  // When the drop folder was last looked in and the waiting statuses last written, by the clock.
+  let lastLook = clock();
   for (;;) {
     const open = mine().filter((p) => !p.problem);
     if (!open.length) {
@@ -809,9 +812,22 @@ export async function importEpisodes(dir, deps, importOne) {
         changed = false;
         await importWaiting(false);
       }
+      lastLook = clock();
     }
-    // A check put off because a reading holds its lock is looked at again in a moment: the loop never goes round with no wait.
-    if (finishDue(false)) await wait(LOCK_AGAIN_MS);
+    // A check put off because a reading holds its lock is looked at again in a moment: the loop never goes round with no wait. A long
+    // hold must not stop the rest: each LOOK_AGAIN_MS the waiting statuses are written again and the drop folder is looked in, as above.
+    if (finishDue(false)) {
+      await wait(LOCK_AGAIN_MS);
+      if (clock() - lastLook >= LOOK_AGAIN_MS) {
+        for (const pending of mine().filter((p) => !p.problem)) waitingStatus(pending, deps, "Waiting for its late check");
+        await importWaiting(false);
+        while (changed) {
+          changed = false;
+          await importWaiting(false);
+        }
+        lastLook = clock();
+      }
+    }
   }
   return results;
 }

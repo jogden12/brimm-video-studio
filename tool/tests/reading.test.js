@@ -9,7 +9,7 @@
 // QuickTime Player and the notice are stand-ins.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { editMain, pickReels } from "../edit.js";
 import { episodeFault, isFromPlan, localStamp, newPlannedEpisode, recordFile, recordText } from "../episode.js";
@@ -1311,6 +1311,32 @@ describe("a raw reading starts at once while this Mac's own late check is to com
     assert.deepEqual(readPendingsOf(t).entries, entries);
     assert.equal("reading" in readPendingsOf(t), false);
     assert.equal(existsSync(lockOfCheck(t)), false);
+    t.done();
+  });
+  it("22. says something went wrong, with the kept rough cut and the way to ask again, when the mark cannot be written; nothing is put in, no lock, no mark", async () => {
+    const { t, found } = reading("raw");
+    lightPending(t, found);
+    const before = snapshot(found);
+    const logs = [];
+    t.ctx.deps.log = (line) => logs.push(line);
+    chmodSync(pendingFolder(t.home), 0o555);
+    let r;
+    try {
+      r = await on(t.ctx.deps, ...readArgs("raw"));
+    } finally {
+      chmodSync(pendingFolder(t.home), 0o755);
+    }
+    assert.equal(r.code, 1);
+    assert.deepEqual(snapshot(found), before);
+    assert.deepEqual(readResult(t.home, FOLDER, "read").failed, [
+      `Something went wrong on this Mac before Claude's reading of ${NAME} could be put in, so nothing it read was put in.`,
+      `The rough cut of ${NAME} is kept on this Mac, in BRIMM Video Work, as "${basename(renderOf(t))}".`
+    ]);
+    assert.equal(readResult(t.home, FOLDER, "read").next, "Nothing was changed. Say what it is again, with --again, to have Claude read it.");
+    assert.equal(existsSync(lockOfCheck(t)), false);
+    assert.equal("reading" in readPendingsOf(t), false);
+    assert.ok(logs.some((l) => l.includes("EACCES")) || r.text.includes("EACCES"), "the code is in the log");
+    assert.ok(!JSON.stringify(readResult(t.home, FOLDER, "read")).includes("EACCES"));
     t.done();
   });
   it("21. waits as today when a file is not as the import filed it, and reads once it is", async () => {

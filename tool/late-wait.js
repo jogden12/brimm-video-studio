@@ -96,7 +96,10 @@ export function readingWaitsUntil(ctx, record) {
     The lock is held from here to `end`. */
 export async function keepCheckInStep(ctx, { name, record, paths }, { wait, log = () => {} }) {
   const same = (p) => p.id === record.id && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root);
-  const among = (p) => p.entries.filter((e) => e && paths.includes(e.to)).map((e) => e.to);
+  // Both sides are spelled by two sources (the reading's folder, the pending's own), so they are compared resolved and in NFC.
+  const spelled = (path) => resolve(String(path)).normalize("NFC");
+  const wanted = new Set(paths.map(spelled));
+  const among = (p) => p.entries.filter((e) => e && wanted.has(spelled(e.to))).map((e) => e.to);
   const first = readPendings(ctx.home).find(same);
   if (!first || !among(first).length) return { none: true };
   const shown = shownName(record);
