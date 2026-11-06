@@ -994,7 +994,7 @@ describe("node settings.js set and sessions", () => {
     // Part F took its refusal away: the card she answers in her chat (her skill, F10).
     const t = mac();
     assert.equal(t.run("set", "--import", "light"), 0);
-    assert.deepEqual(t.said, ["The import is now light (it was full).", `Written: ${settingsFile(t.home)}`]);
+    assert.deepEqual(t.said, ["The import is now light.", `Written: ${settingsFile(t.home)}`]);
     assert.deepEqual(readSettings(t.home).settings, { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "light" });
     assert.equal(lightImport(readSettings(t.home).settings), true);
     t.said.length = 0;
@@ -1363,7 +1363,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     const told = ["--machine", "Mac Studio", "--root", ROOT, "--checkout", CHECKOUT];
     assert.equal(await run("plan", ...told), 0);
     assert.equal(t.said[0], JSON.stringify({ version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT }, null, 2));
-    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video"]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video"]);
     t.said.length = 0;
     assert.equal(await run("plan", ...told, "--readings", "off", "--handoff", "2", "--import", "light", "--drop", "Unedited Video"), 0);
     assert.deepEqual(JSON.parse(t.said[0]), { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, readings: false, handoffVersion: 2, import: "light", drop: "Unedited Video" });
@@ -1374,12 +1374,12 @@ describe("node settings.js write and plan, with the settings of the switch", () 
   it("plan says the drop folder the file names as the one it is now, and as it will be, so that a Mac on Drop run again stays on it", async () => {
     const t = mac({ drop: "Drop", later: "\u0000" });
     assert.equal(await t.run("plan", ...t.told), 0);
-    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Drop", "The drop folder will be: Drop"]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Drop", "The drop folder will be: Drop"]);
     assert.equal(JSON.parse(t.said[0]).later, "\u0000");
     t.said.length = 0;
     // Told the other, it says both, and the old folder's whole path, which the installer names as the one left.
     assert.equal(await t.run("plan", ...t.told, "--drop", "Unedited Video"), 0);
-    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Drop", "The drop folder will be: Unedited Video", `The old drop folder: ${dropFolder(t.root, "Mac Studio", "Drop")}`]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Drop", "The drop folder will be: Unedited Video", `The old drop folder: ${dropFolder(t.root, "Mac Studio", "Drop")}`]);
     t.done();
   });
   it("write writes the settings of the switch it is told, keeps every other setting, says so, and leaves a setting it is not told as it was", async () => {
@@ -2147,9 +2147,8 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       one.done();
       t.done();
     });
-    it("names a video that has no label the same when this run puts the light import on, and when it only did before", async () => {
-      // The videos came under the light import whatever this run says of it, so they are not named: told the light import over a
-      // file of today's import, and told today's over a file of the light one.
+    it("names a video that has no label the same whether the file says full or light", async () => {
+      // Every import is light, whatever the file says of it, so no video is named: over a file that still says "full", and over one that says "light".
       for (const [held, told] of [[{ import: "full" }, "light"], [{ import: "light" }, "light"]]) {
         const t = mac(held);
         put(t.folder(), "Coaching call Jane Doe.mp4");

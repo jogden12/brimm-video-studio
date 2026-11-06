@@ -5,7 +5,7 @@
 #   ./install.sh "/path/to/folder" "/path/to/another"
 #                                    watch more than one folder. Name every folder each time: the list replaces the last one
 #   ./install.sh "/path/to/folder" --rules-only
-#                                    the same, and Claude is never asked to read a cut plan: each plan is the rules' alone
+#                                    the same, and her readings ask Claude nothing (the import never does: each cut plan is the rules' alone)
 #   ./install.sh --print "/path/to/folder"
 #                                    show what would be done and change nothing. With --remove, show what would be stopped
 #   ./install.sh --yes "/path/to/folder"
@@ -52,11 +52,10 @@
 # folder that the transcript tool's launch agent watches already is refused: whichever of the two tools looked first would
 # file the video away. The launch agent is com.thebrimm.unedited, so a run replaces the one an earlier installer gave this Mac
 # under that name, and what it does is in ~/Library/Logs/brimm-video.log.
-# Nothing here needs a password or a key. No video and no sound ever leaves the Mac. Claude is asked to read each cut plan:
-# the words of the transcript with their times and the rules' plan are then sent to Claude through Claude Code, on the
-# Claude account signed in on this Mac, with the video's file name and its length. With --rules-only nothing leaves the Mac.
-# Under the light import (--import light, or settings that say so) nothing is sent when a video is dropped: Claude reads a
-# video only once its person has said what it is, and never a session's file name.
+# Nothing here needs a password or a key. No video and no sound ever leaves the Mac. The import is always the light one: nothing is
+# sent to Claude when a video is dropped. Claude reads a video only once its person has said what it is, and never a session's file
+# name; what is sent then is the words of the transcript with their times and the rules' plan, through Claude Code, on the Claude
+# account signed in on this Mac. With --rules-only nothing leaves the Mac.
 set -euo pipefail
 
 LABEL="com.thebrimm.unedited"
@@ -130,8 +129,6 @@ machine_option=""
 # said for settings.js to read and check. An option with no value after it is named in switch_missing, refused below.
 switch_options=()
 switch_missing=""
-# Set, with --machine, when the settings settings.js would write say the light import: what is sent to Claude is said for it.
-light_import=""
 # --user-deny: her user settings are given the Read deny rules of the places her folder's open lock keeps from Claude.
 user_deny=""
 # Set, with --machine, when her folder gets the open lock: the settings say open and a Claude Code is named for it.
@@ -160,7 +157,7 @@ done
 if [[ -n "$switch_missing" ]]; then
   case "$switch_missing" in
     --drop) say 'Say which folder after --drop, as --drop Drop or --drop "Unedited Video".' ;;
-    --import) say "Say which import after --import, as --import light or --import full." ;;
+    --import) say "Say which import after --import, as --import light." ;;
     --handoff) say "Say which version after --handoff, as --handoff 1 or --handoff 2." ;;
   esac
   exit 2
@@ -494,7 +491,6 @@ if [[ "$machined" == "yes" ]]; then
       say "Nothing was changed."
       exit 2
     fi
-    [[ "$import_name" != light ]] || light_import=1
     planned="${(F)plan_lines[1,-4]}"
   fi
   # Her folder's lock, as the settings settings.js would write say it: open only when they say open and a Claude Code is named for the
@@ -761,20 +757,16 @@ if [[ -n "$machine" ]]; then
   [[ -z "$check_line" ]] || say "  At the end:  one real call to Claude from the background job (a launch agent of its own, $CHECK_LABEL, taken away when it answers or after 90 seconds), to prove its sign-in is seen there"
   say "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
 fi
-# Claude reads each cut plan, through Claude Code. Nothing here installs that or signs in to it. When Claude is going to be
-# asked, this says what is sent to it, before anything is changed.
+# Claude reads a video through Claude Code once its person has said what it is. Nothing here installs that or signs in to it. When
+# Claude is going to be asked, this says what is sent to it, before anything is changed. The import itself sends nothing.
 if [[ -n "$rules_only" ]]; then
-  say "  Claude, to read each cut plan:  not asked (--rules-only), so each cut plan is the rules' alone and nothing leaves this Mac"
+  say "  Claude, to read a video once its person has said what it is:  not asked (--rules-only), so nothing leaves this Mac"
 elif claude="$(find_claude)"; then
-  say "  Claude Code, to read each cut plan:  here already, at $claude"
-  if [[ -n "$light_import" ]]; then
-    say "  Sent to Claude:  nothing when a video is dropped, since this Mac's import is the light one. Claude reads a video only once its person has said what it is, on the Claude account signed in on this Mac, and never a session's file name. The video and its sound never leave it. To send nothing: --rules-only"
-  else
-    say "  Sent to Claude for each cut plan:  the words of the transcript with their times, the rules' plan, and the video's file name and length, on the Claude account signed in on this Mac. The video and its sound never leave it. To send nothing: --rules-only"
-  fi
+  say "  Claude Code, to read a video once its person has said what it is:  here already, at $claude"
+  say "  Sent to Claude:  nothing when a video is dropped, since this Mac's import is the light one. Claude reads a video only once its person has said what it is, on the Claude account signed in on this Mac, and never a session's file name. The video and its sound never leave it. To send nothing: --rules-only"
   say "  Claude model, named in unedited.js:  $(sed -n 's/^export const CLAUDE_MODEL = "\(.*\)";$/\1/p' "$HERE/unedited.js")"
 else
-  say "  Claude Code, to read each cut plan:  not here, so each cut plan is the rules' alone and nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac"
+  say "  Claude Code, to read a video once its person has said what it is:  not here, so nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac"
 fi
 say "  Programs to install with Homebrew:  ${need[*]:-none, they are all here}"
 say "  Model:  $([[ -f "$MODEL" ]] && echo "here already" || echo "to download, about 1.6 GB, to $MODEL")"
@@ -961,11 +953,7 @@ if [[ -n "$machine" ]]; then
   say "another device is brought down at once. Dropbox offers no command for it."
   say "It is imported into $root/Episodes, in a folder of its own named for the day, the video and this Mac. Its files are"
   say "copied into Dropbox and checked again 15 minutes later, and only then is the video taken out of the drop folder. Then,"
-  if [[ -n "$light_import" ]]; then
-    say "in Claude, say \"what's waiting?\". What the tool did is in $LOG"
-  else
-    say "in Claude, say \"open\" and the video's name. What the tool did is in $LOG"
-  fi
+  say "in Claude, say \"what's waiting?\". What the tool did is in $LOG"
   if [[ -n "$old_folder" && -d "$old_folder" ]]; then
     say "The old drop folder, $old_folder, is no longer watched. Jason checks it is still empty, then deletes it by hand, so that no video is dropped there by habit: a video there is never imported."
   fi
@@ -983,13 +971,5 @@ say ""
 say "Done. Put an unedited video in:"
 for f in "${folders[@]}"; do say "  $f"; done
 say "It is moved, with what is made of it, into a new folder there named for the day: its transcript, <name>.cut-plan.txt,"
-say "which says what is suggested to cut, <name>.rough-cut.mp4 to watch, <name>.rough-cut.vertical.mp4 for Instagram when"
-say "the video is wider than it is tall, and <name>.fcpxml to open in Final Cut Pro. Final Cut Pro keeps that project in the"
-say "library BRIMM rough cuts, in the folder BRIMM Video Work in your home folder. The first lines of <name>.cut-plan.txt"
-say "say what could not be made. What the tool did is in $LOG"
-if [[ -z "$rules_only" ]]; then
-  say "When Claude has read the cut plan there are also <name>.edit-notes.txt, its notes for the editor, and the short clips"
-  say "it picked: <name>.reel-1.mp4 and so on, each with its captions. A clip that could not be cut is named in the log and"
-  say "at the end of the notes, and not in <name>.cut-plan.txt. When Claude cannot be asked the plan is the rules' alone,"
-  say "and its first lines say so."
-fi
+say "which says what is suggested to cut, and <name>.rough-cut.srt, the captions of the video as it would be cut. No video is"
+say "made, and Claude is not asked. What the tool did is in $LOG"

@@ -5,7 +5,7 @@
 // Mac's own disk, BRIMM Video Work, where Final Cut's work is kept, never in Dropbox.
 // The settings are kept in Application Support, on this Mac's own disk. install.sh --machine writes them, through this
 // file's command line, and edit.js and the import read them. A write keeps every setting it does not write. Besides those three,
-// the switch to the light import has settings of its own, all optional: what is absent is today's way (import "full", readings
+// the switch to the light import has settings of its own, all optional: what is absent is the default (import "light", readings
 // on, hand-off version 1, the drop folder Unedited Video, no teachings from sessions). install.sh --machine writes them as it is
 // told (--import, --handoff, --drop, and --rules-only as readings off): `plan` says what `write` would write, and refuses what
 // `write` would, before the installer changes anything. A switch of the drop folder is refused while the old folder still holds
@@ -494,7 +494,7 @@ function plan(home, rest, say, now) {
     say(JSON.stringify(shown, null, 2));
     // The import it would be, and the drop folder as it is and as it would be, each on a line of its own, for install.sh, which
     // reads them without parsing JSON.
-    say(`The import will be: ${lightImport(result.settings) ? "light" : "full"}`);
+    say(`The import will be: ${result.settings.import === "full" ? "full" : "light"}`);
     say(`The drop folder is now: ${result.from}`);
     say(`The drop folder will be: ${result.to}`);
     // And when the folder watched changes, the whole path of the old one, which was checked: the installer names it as the one left.
@@ -508,7 +508,7 @@ function plan(home, rest, say, now) {
 export const SETTABLE = {
   "--import": {
     field: "import", takes: "light", read: (v) => (v === "light" || v === "full" ? v : undefined), said: String,
-    otherwise: "full", subject: "The import", be: "is", was: "it was"
+    otherwise: "light", subject: "The import", be: "is", was: "it was"
   },
   "--readings": {
     field: "readings", takes: "on or off", read: (v) => (v === "on" ? true : v === "off" ? false : undefined), said: (v) => (v ? "on" : "off"),
@@ -587,7 +587,12 @@ function set(home, rest, say) {
   for (const [option, value] of Object.entries(values)) {
     const { field, said, otherwise, subject, be, was } = SETTABLE[option];
     const before = got.settings[field] ?? otherwise;
-    if (before === value) {
+    // The import that is not in the file is light all the same, but the file must say it for this Mac to be set up for her chat's
+    // questions (lightImport), so it is written once.
+    if (field === "import" && got.settings.import === undefined) {
+      changes[field] = value;
+      lines.push(`${subject} ${be} now ${said(value)}.`);
+    } else if (before === value) {
       lines.push(`${subject} ${be} ${said(value)} already.`);
     } else {
       changes[field] = value;

@@ -237,7 +237,7 @@ function oldClips(out) {
 const reasonOf = (ended) => (ended.signal ? `it was killed by ${ended.signal}` : lastLine(ended.stderr));
 
 /** A sentence as a part of another: without its full stop, and without its capital, unless it opens with Claude's name or
-    with a quoted word. And a part made a sentence of its own. */
+    with a quoted word. */
 const clause = (whole) => {
   const said = String(whole).replace(/\.$/, "");
   return !said || /^(Claude|")/.test(said) ? said : said[0].toLowerCase() + said.slice(1);
@@ -246,6 +246,8 @@ const clause = (whole) => {
 /** The steps of the work on one video, as the progress panel counts them: the import reads, transcribes, plans and files, and
     nothing more. */
 const LIGHT_STEPS = ["Reading the sound", "Writing the transcript", "Making the cut plan", "Filing"];
+/** The steps a video is told: "Filing" only when the video is filed away after, in a watched folder or into a plan's episode. */
+const stepsOf = (filing) => (filing ? [...LIGHT_STEPS] : LIGHT_STEPS.slice(0, -1));
 /** The steps of the light import of a video with a picture and no sound (PR H5a): there is nothing to hear, so it is looked at and filed. */
 const SILENT_STEPS = ["Reading the sound", "Filing"];
 
@@ -372,8 +374,8 @@ const limitText = (ms) => (ms % 60000 === 0 ? `${ms / 60000} minute${ms === 6000
     `limit` is how long each of its two programs, the ffmpeg that cuts the stills and the finder that looks in them, may run, in
     milliseconds (run.js runProgram kills one still running then); one stopped for it is said so. A Reel's video is looked in by the
     working copy's run, which holds the working copy's lock for as long as it works, so that a finder that hangs would hold it for
-    good (workcopy.js REEL_FACES_MS). Given none, a program has all the time it takes, as the import's upright version always gave
-    it: the stills of a long recording take as long as they take. */
+    good (workcopy.js REEL_FACES_MS). Given none, a program has all the time it takes, as the upright version of the import (now gone)
+    always gave it: the stills of a long recording take as long as they take. */
 export async function facesIn(file, work, { run, tools, limit = 0 }) {
   if (!tools.swift) return { why: "swift, which finds the faces, is not installed" };
   const folder = join(work, "stills");
@@ -656,7 +658,7 @@ async function workOn(file, deps) {
   };
   // The progress panel is told each step as it begins.
   progress.begin(shown);
-  progress.steps([...LIGHT_STEPS]);
+  progress.steps(stepsOf(Boolean(deps.watched) || Boolean(into)));
   // Whether the work on the video finished with every file made: only then is what its steps took kept as a measure.
   let finished = false;
   try {
@@ -702,7 +704,10 @@ async function workOn(file, deps) {
     if (facts && streams.audio === null && streams.unreadable.length) return fail(`its sound is in a form this Mac's ffmpeg cannot read (${streams.unreadable.join(", ")})`);
     // An episode of a recording that is upright, square or short is a short video.
     const kind = episode && facts ? episodeKind(facts) : "";
-    if (facts) progress.length(facts.duration);
+    if (facts) {
+      progress.length(facts.duration);
+      progress.steps(stepsOf(Boolean(deps.watched) || Boolean(into)));
+    }
     const wav = join(work, "sound.wav");
     const a = await run(tools.ffmpeg, ffmpegArgs(file, wav, streams.audio));
     if (a.code !== 0 || !existsSync(wav)) return fail(`the sound could not be read from the file (${lastLine(a.stderr)})`);
@@ -781,7 +786,7 @@ async function workOn(file, deps) {
         files.text(out.planTxt, planText(plan, LIGHT_PLAN_NOTE));
         files.text(out.plan, planJson(plan));
       } catch (e) {
-        // A video that is not an episode's stops the run with the error, and is done again the next time (uneditedFile logs it).
+        // A video that is not an episode's ends that video's run with the error, and is done again the next time (uneditedFile logs it); the others go on.
         if (!episode) throw e;
         return fail(`the work stopped (${e.code || e.message})`);
       }
@@ -1576,7 +1581,7 @@ export async function uneditedFolders(folders, deps) {
     } catch (e) {
       // In a light import, why says nothing of the file of any video in the folder, nor any path: it may be a client's.
       const why = String(e.code || e.message);
-      log(`The work on this folder stopped (${deps.light ? withoutNames(why, namesOf(...namesIn(folder))) : why}).`);
+      log(`The work on this folder stopped (${withoutNames(why, namesOf(...namesIn(folder)))}).`);
       if (!code) code = 1;
     }
   }
@@ -1644,7 +1649,7 @@ export function depsFor(found, log, env = process.env, args = {}) {
   const home = studioHome(env);
   // This Mac's settings for episodes, when it has them: with them, the import of its own drop folder makes episodes.
   const settings = readSettings(home).settings || null;
-  return { run: runProgram, tools: found, model: found.model, home, settings, light: true, rulesOnly: Boolean(args.rulesOnly), log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)), progress: reporter({ folder: progressFolder(home), swift: found.swift, log }) };
+  return { run: runProgram, tools: found, model: found.model, home, settings, log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)), progress: reporter({ folder: progressFolder(home), swift: found.swift, log }) };
 }
 
 /** Do what a run was asked to do, with what it was given: the watched folders, or the one video. Resolves what the run ends
@@ -1725,6 +1730,11 @@ export async function main(argv) {
   }
   if (args.checkClaude) return checkClaude({ run: runProgram, tools: findPrograms(), say: (line) => process.stdout.write(`${line}\n`), until: args.until, job: process.env.XPC_SERVICE_NAME });
   const log = (line) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
+  // Said even on a Mac that lacks a program: nothing is made, so nothing is needed.
+  if (args.fromPlan) {
+    log("--from-plan is gone: the import makes no videos now.");
+    return 2;
+  }
   const refused = homeRefusal();
   if (refused) {
     log(refused);
@@ -1740,9 +1750,7 @@ export async function main(argv) {
   try {
     return await doAsked(args, deps);
   } catch (e) {
-    // A light import's error may name a video's file, as a path does: only its code is logged, and the run ends with 1. Any
-    // other is thrown as it always was.
-    if (!deps.light) throw e;
+    // An error may name a video's file, as a path does: only its code is logged, and the run ends with 1.
     log(`The work stopped (${(e && e.code) || "an error"}).`);
     return 1;
   }

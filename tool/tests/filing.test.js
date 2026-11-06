@@ -452,9 +452,8 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
   const ZOOM = ["GMT20261013-142933_Recording_gvo_1280x720.mp4", "audio1449382767.m4a", "video1449382767.mp4"];
   const bytesOf = (name) => Buffer.byteLength(`the bytes of ${name}`);
   /** A test's own BRIMM Video, with this Mac's drop folder holding `names`, and one run of the import of it: `run()`. The
-      import "imports" each video it takes by noting its name in `imported`, and leaves it where it is. `light` is what the run
-      is told (`deps.light`): true, false, or null for nothing. */
-  function drop(names, { light = true } = {}) {
+      import "imports" each video it takes by noting its name in `imported`, and leaves it where it is. */
+  function drop(names) {
     const dir = mkdtempSync(join(tmpdir(), "brimm-filing-"));
     const home = join(dir, "home");
     const root = join(dir, "BRIMM Video");
@@ -463,7 +462,7 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
     for (const name of names) writeFileSync(join(folder, name), `the bytes of ${name}`);
     const logs = [];
     const imported = [];
-    const deps = { episode: { root, machine: "Mac Studio", home }, ...(light === null ? {} : { light }), clock: () => Date.parse("2026-10-23T10:00:00"), wait: async () => {}, keepAwake: () => {}, log: (line) => logs.push(line), clone: (from, to) => copyFileSync(from, to), sameDisk: () => true };
+    const deps = { episode: { root, machine: "Mac Studio", home }, clock: () => Date.parse("2026-10-23T10:00:00"), wait: async () => {}, keepAwake: () => {}, log: (line) => logs.push(line), clone: (from, to) => copyFileSync(from, to), sameDisk: () => true };
     const run = () => importEpisodes(folder, deps, async (name) => {
       imported.push(name);
       return { ok: true, name };
@@ -530,16 +529,7 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
     assert.deepEqual(t.statuses(), []);
     t.done();
   });
-  it("are imported as any video is when the setting is off or absent, and nothing is written about them", async () => {
-    for (const light of [false, null]) {
-      const t = drop(ZOOM, { light });
-      const results = await t.run();
-      assert.deepEqual(t.imported.sort(), [...ZOOM].sort(), String(light));
-      assert.deepEqual([results.filter((r) => r.held), t.statuses(), existsSync(join(t.root, "Episodes", ".importing"))], [[], [], false], String(light));
-      t.done();
-    }
-  });
-  it("lose their status when the file leaves the folder or is another file, or when the setting is turned off", async () => {
+  it("lose their status when the file leaves the folder or is another file", async () => {
     const t = drop([ZOOM[0]]);
     await t.run();
     assert.equal(t.statuses().length, 1);
@@ -557,10 +547,6 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
     await t.run();
     assert.deepEqual(t.statuses().map((s) => s.bytes), [31]);
     assert.ok(t.logs.includes(`${zoomTimeOf(ZOOM[0])}: ${HELD}`), t.logs.join("\n"));
-    // Taken lightly no more, it is imported as before, and the status that held it is gone.
-    t.deps.light = false;
-    await t.run();
-    assert.deepEqual([t.statuses(), t.imported], [[], [ZOOM[0]]]);
     t.done();
   });
   it("keep their status through the next run of this Mac, which is no crash's to take away", async () => {

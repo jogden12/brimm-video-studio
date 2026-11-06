@@ -492,6 +492,14 @@ describe("one unedited video", () => {
     assert.deepEqual(t.logs, ["huge.mov: Dropbox has not brought it down to this Mac yet, so it is asked for.", "huge.mov: still arriving. It is taken the next time the folder changes."]);
     t.done();
   });
+  it("imports a sound file with no picture lightly: its transcript, words, plan and the rough cut's captions, and no video", async () => {
+    const t = setup({ probed: probed({ picture: null }) });
+    const r = await uneditedFile(t.video("voice.m4a"), t.deps);
+    assert.deepEqual([r.ok, r.message], [true, ""]);
+    assert.deepEqual(t.names(), ["voice.cut-plan.json", "voice.cut-plan.txt", "voice.m4a", "voice.rough-cut.srt", "voice.rough-cut.transcript.txt", "voice.srt", "voice.transcript.txt", "voice.words.json"]);
+    assert.ok(!t.calls.some((c) => c.args.includes("-vf") || c.args.includes("-filter_complex") || c.cmd === "SWIFT"));
+    t.done();
+  });
   it("is done again when it is asked for by name, though it has a plan already", async () => {
     const t = setup();
     const file = t.video("talk.mov");
@@ -886,6 +894,7 @@ describe("what the progress panel is told", () => {
   };
   const steps = (told) => told.filter(([what]) => what === "step").map(([, shown]) => shown);
   const LIGHT_STEPS = ["Reading the sound", "Writing the transcript", "Making the cut plan", "Filing"];
+  const ALONE = LIGHT_STEPS.slice(0, -1);
   it("is told each step of a video as it begins, the steps to come, the video's length, and the end", async () => {
     const t = setup({ claude: [answers(REPLY)] });
     const told = watching(t);
@@ -894,7 +903,7 @@ describe("what the progress panel is told", () => {
     assert.deepEqual(told[told.length - 1], ["end", true]);
     assert.deepEqual(steps(told), ["Reading the sound", "Writing the transcript", "Making the cut plan"]);
     assert.deepEqual(told.find(([what]) => what === "length"), ["length", 23.423]);
-    assert.deepEqual(told.filter(([what]) => what === "steps").map(([, names]) => names), [LIGHT_STEPS]);
+    assert.deepEqual(told.filter(([what]) => what === "steps").map(([, names]) => names), [ALONE, ALONE]);
     t.done();
   });
   it("is told the same steps of a video upright already, and of filing it in a folder", async () => {
@@ -902,7 +911,7 @@ describe("what the progress panel is told", () => {
     const told = watching(t);
     t.video("a.mov");
     await uneditedFolder(t.dir, t.deps);
-    assert.deepEqual(told.filter(([what]) => what === "steps").map(([, names]) => names).slice(-1), [LIGHT_STEPS]);
+    assert.deepEqual(told.filter(([what]) => what === "steps").map(([, names]) => names), [LIGHT_STEPS, LIGHT_STEPS]);
     assert.deepEqual(steps(told), LIGHT_STEPS);
     t.done();
   });
@@ -1021,8 +1030,7 @@ describe("before it starts", () => {
     const programs = found(["/opt/homebrew/bin/ffmpeg", "/opt/homebrew/bin/ffprobe", "/opt/homebrew/bin/whisper-cli", MODEL, "/usr/bin/swift"], "/usr/bin");
     const log = () => {};
     const deps = depsFor(programs, log, { HOME });
-    assert.deepEqual(Object.keys(deps).sort(), ["home", "light", "log", "model", "notify", "progress", "rulesOnly", "run", "settings", "tools", "wait"]);
-    assert.equal(deps.light, true);
+    assert.deepEqual(Object.keys(deps).sort(), ["home", "log", "model", "notify", "progress", "run", "settings", "tools", "wait"]);
     assert.deepEqual([deps.home, deps.tools, deps.model, deps.log, deps.run, deps.settings], [HOME, programs, MODEL, log, runProgram, null]);
     assert.equal(depsFor(programs, log, {}).home, homedir());
   });
@@ -1032,12 +1040,6 @@ describe("before it starts", () => {
     writeSettings(home, { machine: "Mac Studio", root: "/Dropbox/BRIMM Video", checkout: "/checkout" });
     assert.deepEqual(depsFor(programs, () => {}, { HOME: home }).settings, { version: 1, machine: "Mac Studio", root: "/Dropbox/BRIMM Video", checkout: "/checkout" });
     rmSync(home, { recursive: true, force: true });
-  });
-  it("gives a run from the command line the word that Claude is not to be asked, only when --rules-only was given", () => {
-    const programs = found(["/opt/homebrew/bin/ffmpeg", "/opt/homebrew/bin/ffprobe", "/opt/homebrew/bin/whisper-cli", MODEL], "/usr/bin");
-    assert.equal(depsFor(programs, () => {}, { HOME }).rulesOnly, false);
-    assert.equal(depsFor(programs, () => {}, { HOME }, parseArgs(["/in/a.mov"])).rulesOnly, false);
-    assert.equal(depsFor(programs, () => {}, { HOME }, parseArgs(["--rules-only", "/in/a.mov"])).rulesOnly, true);
   });
   it("reads what it is asked to do", () => {
     assert.deepEqual(parseArgs(["/in/a.mov"]), { file: "/in/a.mov", folders: [], out: "", rulesOnly: false, fromPlan: false, help: false });
@@ -1278,8 +1280,6 @@ function episodic({ start = "2026-10-13T10:00:00", ...script } = {}) {
     copyFileSync(from, to);
   };
   t.deps.commit = "abc1234";
-  // Every import is the light import, and a run from the command line is told so (depsFor).
-  t.deps.light = true;
   t.deps.now = () => new Date(start);
   // A clock of the test's own, which each wait moves on, so that the wait for a late check takes no time; and a Mac kept
   // awake by nothing.
@@ -2041,6 +2041,11 @@ describe("the end of a run from the command line", () => {
     const ran = spawnSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 10000 });
     assert.deepEqual([ran.status, ran.stdout], [3, "done\n"]);
   });
+  it("says --from-plan is gone and ends with 2 before it looks for a program or a home folder", () => {
+    const ran = spawnSync(process.execPath, [fileURLToPath(new URL("../unedited.js", import.meta.url)), "--from-plan", "/in/a.mov"], { encoding: "utf8", timeout: 10000, env: { ...process.env, PATH: "/nonexistent" } });
+    assert.equal(ran.status, 2);
+    assert.match(ran.stdout, /^\S+ --from-plan is gone: the import makes no videos now\.\n$/);
+  });
   it("2. is how the command line ends", () => {
     const text = readFileSync(fileURLToPath(new URL("../unedited.js", import.meta.url)), "utf8");
     assert.match(text, /main\(process\.argv\.slice\(2\)\)\.then\(\(code\) => finish\(code\)\);/);
@@ -2207,7 +2212,7 @@ const listAll = (folder, under = "") => readdirSync(join(folder, under), { withF
   .flatMap((entry) => (entry.isDirectory() ? listAll(folder, join(under, entry.name)) : [join(under, entry.name)])).sort();
 
 /** A test of the light import (spec 2026-10-22, section 1): the episode import's test (episodic), with this Mac's settings saying
-    `import: "light"`, as depsFor makes `deps.light` of every run. Claude Code is on the Mac and would answer, so that a test sees
+    `import: "light"`. Claude Code is on the Mac and would answer, so that a test sees
     it is not asked. The clock says 15:00 on 20 Oct, the progress panel's stand-in keeps what it is told (`told`), and `video` is
     put in the drop folder of `machine`. */
 function episodeImport({ video = "Talk.mov", machine = "Mac Studio", ...script } = {}) {
@@ -2215,7 +2220,6 @@ function episodeImport({ video = "Talk.mov", machine = "Mac Studio", ...script }
   const drop = join(t.root, "Unedited Video", machine);
   mkdirSync(drop, { recursive: true });
   t.deps.settings = { ...t.deps.settings, machine, import: "light" };
-  t.deps.light = true;
   t.deps.today = () => "2026-10-20";
   const told = [];
   t.deps.progress = {
@@ -2391,7 +2395,7 @@ describe("the light import", () => {
   it("tells the progress panel the light import's four steps, and no others", async () => {
     const t = episodeImport();
     await uneditedFolder(t.drop, t.deps);
-    assert.deepEqual(t.told.filter(([what]) => what === "steps").map(([, names]) => names), [LIGHT_STEPS]);
+    assert.deepEqual(t.told.filter(([what]) => what === "steps").map(([, names]) => names), [LIGHT_STEPS, LIGHT_STEPS]);
     assert.deepEqual(t.told.filter(([what]) => what === "step").map(([, name]) => name), LIGHT_STEPS);
     assert.deepEqual(t.told[t.told.length - 1], ["end", true]);
     t.done();
@@ -2514,7 +2518,6 @@ describe("the light import", () => {
   });
   it("fails a video with no sound given alone, or in a folder that is not this Mac's drop folder, as it always did: only an episode's import files one (PR H5a)", async () => {
     const u = setup({ probed: SILENT });
-    u.deps.light = true;
     u.deps.settings = { version: 1, machine: "Mac Studio", root: join(u.dir, "BRIMM Video"), checkout: "/checkout", import: "light" };
     const one = await uneditedFile(u.video("mute.mov"), u.deps);
     assert.deepEqual([one.ok, one.message], [false, "there is no sound in the file"]);
@@ -2579,7 +2582,6 @@ describe("the light import", () => {
   });
   it("imports a Zoom download given alone, or in a folder that is not this Mac's drop folder, lightly as any video, whatever the setting", async () => {
     const t = setup({ claude: [answers(REPLY)] });
-    t.deps.light = true;
     t.deps.settings = { version: 1, machine: "Mac Studio", root: join(t.dir, "BRIMM Video"), checkout: "/checkout", import: "light" };
     const one = await uneditedFile(t.video(ZOOM), t.deps);
     t.video("audio1449382767.m4a");
@@ -2590,18 +2592,6 @@ describe("the light import", () => {
     assert.ok(!existsSync(join(t.dir, "BRIMM Video")), "no status was written");
     assert.ok(!t.logs.some((line) => line.includes(ZOOM_HELD)));
     t.done();
-  });
-  it("is what a run from the command line is given, whatever this Mac's settings say of the import", () => {
-    const home = mkdtempSync(join(tmpdir(), "brimm-home-"));
-    const programs = { ffmpeg: "/f", ffprobe: "/p", whisper: "/w", swift: "", claude: "", model: "/m", missing: [] };
-    writeSettings(home, { machine: "Mac Studio", root: "/Dropbox/BRIMM Video", checkout: "/checkout", import: "light" });
-    assert.equal(depsFor(programs, () => {}, { HOME: home }).light, true);
-    writeSettings(home, { import: "full" });
-    assert.equal(depsFor(programs, () => {}, { HOME: home }).light, true);
-    rmSync(home, { recursive: true, force: true });
-    const bare = mkdtempSync(join(tmpdir(), "brimm-home-"));
-    assert.equal(depsFor(programs, () => {}, { HOME: bare }).light, true);
-    rmSync(bare, { recursive: true, force: true });
   });
 });
 
