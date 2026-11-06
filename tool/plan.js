@@ -27,6 +27,7 @@ import { commitOf, thisCheckout } from "./filing.js";
 import { agreedFor, labelOf, partLine, partsOf as footageParts } from "./footage.js";
 import { joinFor } from "./join.js";
 import { voiceFor } from "./explainer.js";
+import { openScriptCopy } from "./plan-script.js";
 import { SHOT_SAID, counted, dayText, joined, number, plainly, sentence, teleprompterText, textArg } from "./sentences.js";
 
 // The helpers that say things in her chat stand in sentences.js, where footage.js reads them too; they are said from here as they always were.
@@ -285,7 +286,7 @@ export function plannedLine(record) {
 // --- The command ---
 
 /** What `plan` is told, from the words after the command and its flags (edit.js flagsOf gives them, with --cue, --shot, --line and --voice
-    taking a value each time they are given): { form: "new", title, explainer, voice }, { form: "show", episode }, { form: "set", episode, cues,
+    taking a value each time they are given): { form: "new", title, explainer, voice }, { form: "show", episode }, (review changes R5) { form: "script", episode } (her script, as a copy to read), { form: "set", episode, cues,
     shots, lines }, { form: "drop", episode }, (PR H6) { form: "voice", episode } (a HeyGen voice is done; no more words, no flag), (PR H5a) { form: "agreed", episode, video } or (PR H5b) { form: "join", episode, videos }; or null for
     anything else, which is the help. `new` is followed by the title, one word in quotes. A flag no form has is none. The episode is one word, as every
     command has it. A `set` gives at least one cue, shot or line. `agreed` is followed by the video, one word, and takes no flag. `join` is followed by
@@ -304,6 +305,7 @@ export function planAsked(words, flags) {
   if (!said(first) || more.length) return null;
   if (second === undefined) return only() ? { form: "show", episode: first } : null;
   if (second === "drop") return only() ? { form: "drop", episode: first } : null;
+  if (second === "script") return only() ? { form: "script", episode: first } : null;
   if (second !== "set" || !only("cue", "shot", "line")) return null;
   const [cues, shots, lines] = ["cue", "shot", "line"].map((flag) => flags[flag] ?? []);
   return cues.length + shots.length + lines.length ? { form: "set", episode: first, cues, shots, lines } : null;
@@ -448,11 +450,14 @@ function setPlan(ctx, { found, record }, { cues, shots, lines }) {
 
 /** `plan "<planned>"`: the plan in plain words. A plan whose package is not set yet says what is still to be made. Its footage (PR H5a) is said
     after it, a line for each part, in the order they were answered (footage.js partLine); a plan with none says what it always did. */
+/** What is said of a plan whose package is not made yet. */
+const notMadeYet = (record) => `"${shownName(record)}" is planned, and ${madeOf(record.planned.route === "explainer")} aren't made yet.`;
+
 function showPlan(ctx, { record }) {
   const { planned } = record;
   const explainer = planned.route === "explainer";
   const title = shownName(record);
-  if (planned.set === null) ctx.say(`"${title}" is planned, and ${madeOf(explainer)} aren't made yet.`);
+  if (planned.set === null) ctx.say(notMadeYet(record));
   else for (const line of planLines(title, planned, { explainer, voice: planned.voice })) ctx.say(line);
   for (const part of footageParts(ctx.root, record.id)) ctx.say(partLine(part, planned));
   return 0;
@@ -482,6 +487,7 @@ export function planFor(ctx, got, asked, kit) {
   if (!isPlannedRecord(record) && !made) return refuse(ctx, `"${shownName(record)}" is not a planned video.`);
   if (record.archived) return refuse(ctx, `The plan for "${shownName(record)}" was dropped.`);
   if (asked.form === "voice") return voiceFor(ctx, got, kit);
+  if (asked.form === "script") return record.planned.set === null ? refuse(ctx, notMadeYet(record)) : openScriptCopy(ctx, got.found, record, kit);
   if (made && asked.form === "join") return refuse(ctx, `"${shownName(record)}" is made from its footage already.`);
   if (made && (asked.form === "set" || asked.form === "drop")) return refuse(ctx, `"${shownName(record)}" is made from its footage already: its plan can't be changed.`);
   if (asked.form === "set") return setPlan(ctx, got, asked);

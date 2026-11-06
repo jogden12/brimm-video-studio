@@ -1235,10 +1235,18 @@ describe("a script she has, and the plan made from it: the skill's rows and scri
       "An apostrophe is written as it is."
     ]) assert.ok(step.includes(words), words);
   });
-  it("shows her the plan after, and tells her where the teleprompter script is, with no path", () => {
+  it("shows her the plan after, and opens the teleprompter script for her as a copy to read, with no path (review changes R5)", () => {
     const step = stepOf(5);
-    for (const words of ['Run `plan "<title>"`, tell her what it says, and tell her where the teleprompter script is', "in the plan's folder in Episodes, in her BRIMM Video folder in Dropbox"]) assert.ok(step.includes(words), words);
-    assert.doesNotMatch(step, /\/Users|~\//);
+    for (const words of ['Run `plan "<title>"`, tell her what it says, and open the teleprompter script for her with `plan "<title>" script`', "Never ask her to edit the script file; take her changes here and save them with plan … set."]) assert.ok(step.includes(words), words);
+    assert.doesNotMatch(step, /\/Users|~\/|in the plan's folder in Episodes/);
+  });
+  it("has a row for her script to read, in both skills, that opens the copy and never asks her to edit the file (review changes R5)", () => {
+    for (const skill of [strict[SKILL], openFiles()[SKILL]]) {
+      const row = skill.split("\n").find((line) => line.startsWith('| "Show me the script for <title>"'));
+      assert.ok(row, "no row for her script");
+      for (const words of ['`plan "<title>" script`', "a copy to read", "Never ask her to edit the script file; take her changes here and save them with plan … set."]) assert.ok(row.includes(words), words);
+      for (const span of commandsIn(row)) assert.ok(COMMAND_NAMES.includes(span.split(" ")[0]), span);
+    }
   });
   it("looks at the picture of a style she names, and puts it on the cues it styles", () => {
     assert.equal(stepOf(6), '6. For a style she names, run `refs look "<name>"`, look at the picture, and put "ref: <file>" on the cues it styles.');

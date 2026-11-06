@@ -130,6 +130,7 @@ import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyper
 import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeFootageCopies, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 import { lookAt, referencesAsked, sayReferences, useIn } from "./references.js";
 import { PLAN_FILE_NAMES, newPlan, planAsked, planFilesFrom, planFor, plannedLine, textArg } from "./plan.js";
+import { HAND_EDITED, scriptHandEdited } from "./plan-script.js";
 import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
@@ -384,6 +385,8 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         by the rule and the record last
   node edit.js plan "<planned>"         say a planned video's package in plain words: each cue, each shot and how long
                                         the teleprompter script is, and a line for each part of its footage
+  node edit.js plan "<planned>" script  open the plan's teleprompter script in TextEdit as a copy to read, made on this
+                                        Mac and read-only: changes to the script are told in the chat and saved with set
   node edit.js plan "<planned>" drop    drop a plan: it is archived, so that episodes and the guide no longer show it. A plan
                                         that has footage is dropped only once each piece is taken back, and one made from
                                         its footage already is not dropped
@@ -1040,7 +1043,10 @@ function episodeLines(ctx, e, left, all, links) {
   const pushed = record.main && Array.isArray(record.main.pushed) ? record.main.pushed : [];
   if (pushed.length) lines.push(`    ${shownLine(pushed)}`);
   if (record.finished) lines.push(`    Finished: revision ${record.finished.revision}, on ${record.finished.on}`);
-  for (const problem of filesProblems(e.folder, record)) lines.push(`    Not right: ${clean(problem)}`);
+  // A script file changed outside the chat is said in its own plain line, not as "Not right" (plan-script.js; review changes R5).
+  const handEdited = scriptHandEdited(e.folder, record);
+  for (const problem of filesProblems(e.folder, record)) if (!(handEdited && problem.startsWith("teleprompter.txt "))) lines.push(`    Not right: ${clean(problem)}`);
+  if (handEdited) lines.push(`    ${HAND_EDITED(record)}`);
   return lines;
 }
 
@@ -3178,6 +3184,20 @@ function madeShownDir(ctx, found, record) {
   return dir;
 }
 
+/** A read-only copy of `what` of the episode `found`, made in its shown folder (madeShownDir) by `fill(copy)`, which writes its content: the earlier copies
+    `show` made go first, the copy is named by the video's name and listed by the folder's marker, and it is made read-only. Returns its path; throws when
+    it cannot be made. `show` copies a file this way (showCopy), and `plan … script` (plan-script.js; review changes R5) writes the plan's own text. */
+function madeShown(ctx, found, record, what, fill) {
+  clearShownIn(madeShownDir(ctx, found, record), (listed) => listed.endsWith(".txt"));
+  const dir = madeShownDir(ctx, found, record);
+  const named = freeShownName(dir, `${fileSafe(namedAs(found, record))} ${what}`, ".txt");
+  const copy = join(dir, named);
+  addShown(dir, named);
+  fill(copy);
+  chmodSync(copy, 0o444);
+  return copy;
+}
+
 /** Open the file `rel` of the episode `found` (whose record is `record`, one the gate holds: a video not yet answered, left alone,
     or a session not cleared) on this Mac, and print nothing of it (spec 2, "What else the mark stops"): it is copied into
     ~/BRIMM Video Work/<folder>/shown/ (on an open-lock Mac, ~/BRIMM Video Work/shown/<its id>/: madeShownDir), made read-only
@@ -3192,13 +3212,7 @@ function showCopy(ctx, found, record, rel, what) {
   if (!existsSync(from)) return refuse(ctx, `${name} has no ${what} yet.`);
   let copy = "";
   try {
-    clearShownIn(madeShownDir(ctx, found, record), (listed) => listed.endsWith(".txt"));
-    const dir = madeShownDir(ctx, found, record);
-    const named = freeShownName(dir, `${fileSafe(name)} ${what}`, ".txt");
-    copy = join(dir, named);
-    addShown(dir, named);
-    copyFileSync(from, copy);
-    chmodSync(copy, 0o444);
+    copy = madeShown(ctx, found, record, what, (to) => copyFileSync(from, to));
   } catch (e) {
     return refuse(ctx, `${name}'s ${what} could not be copied on this Mac (${e.code || "an error"}).`);
   }
@@ -7574,6 +7588,8 @@ function editKit(ctx) {
     newerWhy,
     pending: PENDING_WHY,
     hide: (name) => hideNames(ctx, episodeAt(ctx, name)),
+    // A read-only copy of text in the episode's shown folder on this Mac, which `plan … script` opens (plan-script.js).
+    shownCopy: (found, record, what, text) => madeShown(ctx, found, record, what, (to) => writeFileSync(to, text)),
     calledAs: (found) => calledAs(ctx, found),
     // What `kind` says of a recording that may be a session, before she has answered the not-a-session card: its words and its card (PR H6: the voiceover).
     askIfSession: (name, record) => refuseAnswer(ctx, name, record, ASK_IF_SESSION)
