@@ -12,12 +12,15 @@
 // work. That look is switch.js's, which reads the status files and the episodes, and this file reaches it by a dynamic import:
 // importing.js and filing.js import this file, and a static import here would make the three a cycle. `set` changes the
 // settings of the switch later, but never the drop folder: it says to switch that with the installer, and changes nothing.
+// A Mac may also watch a drop folder of its own, picked on it (dropPath, with the light import): --drop-folder, checked by
+// dropFolderFault, the exports folder it looks in besides Downloads (exportsPath, --exports-folder), and --switch-back to go back
+// to a drop folder in Dropbox. Where it is, in Finder's words, and whether it is in a cloud folder are found here too.
 //
 //   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-//                          [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+//                          [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off]
 //   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-//                         [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
-//   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+//                         [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off]
+//   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--exports-folder "<whole path>"] [--app hyperframes|off] [--app-handover on|off]
 //   node settings.js sessions --teachings on --cli-account <email> --app-account <email>
 //   node settings.js sessions --teachings off
 //   node settings.js show
@@ -32,9 +35,9 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { textWriter } from "./dropbox.js";
 import { homeRefusal, programHome, studioHome } from "./home.js";
-import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, gatedReadRules, studioFiles, studioFolder, writeStudio } from "./studio.js";
+import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, gatedReadRules, studioFiles, studioFolder, workshopFolder, writeStudio } from "./studio.js";
 import { isConnector, neverCaught } from "./never.js";
-import { claudeDirName, realOf } from "./places.js";
+import { claudeDirName, fold, realOf } from "./places.js";
 import { clearStrictSeen, strictSeen, untiedMark } from "./held.js";
 
 /** Where this Mac's settings are kept: in Application Support, on its own disk. */
@@ -72,6 +75,29 @@ export const writtenFile = (home) => join(home, "Library", "Application Support"
 export const seenFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "seen.json");
 /** Where this Mac keeps the late checks it has still to make, so a run that is stopped leaves them for the next. */
 export const pendingFolder = (home) => join(home, "Library", "Application Support", "BRIMM Video", "pending");
+
+/** What a drop folder of this Mac's own needs of the import (a picked folder is for the light import alone), as settingsFault says it. */
+const LOCAL_NEEDS_LIGHT = "a drop folder of this Mac's own takes the light import";
+
+/** Whether this Mac's drop folder is its own, picked on this Mac, and not one in BRIMM Video in Dropbox: its settings hold a
+    dropPath. Every new path of Phase 3 branches on this; `drop` stays in the settings, unread while dropPath is there. */
+export const isLocal = (s) => typeof s?.dropPath === "string";
+/** Where a Mac's own drop folder is unless another is picked: Drop, in the work folder. */
+export const defaultDropFolder = (home) => join(workFolder(home), "Drop");
+/** The folder this Mac watches for videos: its dropPath on a Mac with its own, else its folder in BRIMM Video (dropFolder). */
+export const dropFolderOf = (s, home) => (isLocal(s) ? s.dropPath : dropFolder(s.root, s.machine, s.drop));
+/** The folder of an episode's own files on this Mac, in its work folder: the recording, its transcript and the rest. */
+export const episodeFilesFolder = (home, folder) => join(episodeWork(home, folder), "video");
+/** Where this Mac writes the status files of its imports: its own folder on a Mac with a drop folder of its own, else Episodes/.importing. */
+export const importingFolderOf = (s, home) => (isLocal(s) ? join(home, "Library", "Application Support", "BRIMM Video", "importing") : importingFolder(s.root));
+/** Where every status is read: where this Mac writes its own, and Episodes/.importing, where another Mac may still write; once each. */
+export function statusFoldersOf(s, home) {
+  const own = importingFolderOf(s, home);
+  const shared = importingFolder(s.root);
+  return sameFolder(own, shared) ? [own] : [own, shared];
+}
+/** Where HyperFrames' exports are looked for besides Downloads: the settings' exportsPath, else Downloads. */
+export const exportsFolderOf = (s, home) => (typeof s?.exportsPath === "string" ? s.exportsPath : downloadsFolder(home));
 
 /** What is wrong with a name for a Mac, in plain words: "" when nothing is. The name is the name of the Mac's drop folder, and
     goes into the names of episode folders, so it is a name of 40 characters at most that a folder in Dropbox can carry. */
@@ -135,6 +161,9 @@ export function settingsFault(s) {
   if (s.readings !== undefined && typeof s.readings !== "boolean") return "readings must be true or false";
   if (s.handoffVersion !== undefined && s.handoffVersion !== 1 && s.handoffVersion !== 2) return "the version of the hand-off must be 1 or 2";
   if (s.drop !== undefined && s.drop !== "Unedited Video" && s.drop !== "Drop") return 'the drop folder must be "Unedited Video" or "Drop"';
+  if (isSet(s.dropPath) && (typeof s.dropPath !== "string" || !isAbsolute(s.dropPath))) return "the path to the drop folder is not a whole path";
+  if (isSet(s.exportsPath) && (typeof s.exportsPath !== "string" || !isAbsolute(s.exportsPath))) return "the path to the exports folder is not a whole path";
+  if (isLocal(s) && s.import !== "light") return LOCAL_NEEDS_LIGHT;
   if (s.sessionTeachings !== undefined && s.sessionTeachings !== null && s.sessionTeachings !== false && !teachingsWhole(s.sessionTeachings)) {
     return "the setting for teachings from sessions is neither off (null or false) nor what node settings.js sessions --teachings on writes";
   }
@@ -180,7 +209,7 @@ export const effectiveLock = (s, minimum = OPEN_LOCK_CLAUDE) => (lockOf(s) === "
     gives a temp folder and a uid of its own, so that this Mac's own temp folder is never looked at. `claudeHome` is there only when
     Claude Code's own files are in another home than Studio's (BRIMM_VIDEO_HOME, in `env`; home.js programHome). */
 export function factsOf(home, s, { tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp", uid = process.getuid(), env = process.env } = {}) {
-  return { home, ...(programHome(home, env) !== home ? { claudeHome: programHome(home, env) } : {}), root: s.root, uid, tmp: realOf(tmp), zoomFolder: zoomFolderOf(s, home), port: proxyPortOf(s), web: webOf(s), allow: [...ALLOW_DEFAULT, ...studioAllowOf(s)] };
+  return { home, ...(programHome(home, env) !== home ? { claudeHome: programHome(home, env) } : {}), root: s.root, uid, tmp: realOf(tmp), zoomFolder: zoomFolderOf(s, home), dropFolder: dropFolderOf(s, home), port: proxyPortOf(s), web: webOf(s), allow: [...ALLOW_DEFAULT, ...studioAllowOf(s)] };
 }
 
 /** Whether this Mac does the light import, which asks Claude nothing about a video until its person answers. Anything but
@@ -252,9 +281,10 @@ function heldIn(file) {
 
 /** The settings after a write of `fields` over `held`, what the file holds: { settings, fault }, where `fault` is what is wrong
     with them, in plain words, "" when nothing is. A field given as undefined is not given. */
-function afterWrite(held, fields) {
+function afterWrite(held, fields, remove = []) {
   const given = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
   const merged = { ...held, ...given };
+  for (const field of remove) delete merged[field];
   // The first four in their place, whatever order they were given in; everything else after them.
   const settings = { version: 1, machine: merged.machine, root: merged.root, checkout: merged.checkout, ...merged };
   return { settings, fault: settingsFault(settings) };
@@ -267,8 +297,8 @@ function afterWrite(held, fields) {
     the switch's settings with them. It throws, in plain words, and the file is left as it is. They are written under another
     name first, then under their own: they are on this Mac's own disk, not in Dropbox, so the rename is safe. Gives back the
     file's path. A value that will not do throws, in plain words, and nothing is written. */
-export function writeSettings(home, fields) {
-  const { settings: s, fault } = afterWrite(heldIn(settingsFile(home)), fields);
+export function writeSettings(home, fields, remove = []) {
+  const { settings: s, fault } = afterWrite(heldIn(settingsFile(home)), fields, remove);
   if (fault) throw new Error(fault);
   const file = settingsFile(home);
   const writing = `${file}.writing`;
@@ -286,7 +316,7 @@ export function writeSettings(home, fields) {
 const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Support/BRIMM Video/settings.json.
 
   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off]
                                write them, as install.sh --machine does, and say where. The settings of the switch that it
                                is told are written with them, read as set reads them, and any setting it is not told is
                                kept. It refuses a value that will not do. Unlike set it changes the drop folder watched
@@ -295,15 +325,22 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                first (a video this Mac still owes a late check is one to wait for, before a failed import
                                of it). A video held by an episode not yet answered, a session not cleared, or another
                                version of such a session is named by the episode's label or, with none, by what it is and
-                               its short id ("a client or group session (3fa9c1)"), never by its own file
+                               its short id ("a client or group session (3fa9c1)"), never by its own file.
+                               --drop-folder picks a drop folder of this Mac's own instead (a whole path, made when missing,
+                               whose parent is there, and only with the light import): not BRIMM Video's folders, BRIMM Video
+                               Work (but for Drop in it), her chat's folders, Zoom's, Downloads or the exports folder.
+                               --exports-folder says where HyperFrames' exports are looked for besides Downloads. On a Mac
+                               with a drop folder of its own, --drop goes back to one in Dropbox only with --switch-back
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the
                                teachings from sessions, shown as (not shown), and then the import it will be, the drop
                                folder as it is now and as it will be, and, when the folder watched changes, the old one's
-                               whole path, a line each, or why it would refuse it. Nothing is written. install.sh asks this
-                               before it changes anything
-  node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+                               whole path, a line each, or why it would refuse it. The exports folder it will be, whether the
+                               drop folder is in a cloud folder (and which), and whether macOS asks once about reading it
+                               come before the old folder's line, each only when it applies. Nothing is written. install.sh
+                               asks this before it changes anything
+  node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--exports-folder "<whole path>"] [--app hyperframes|off] [--app-handover on|off]
                                change the settings of the switch to the light import, and say what changed. Any other
                                setting is kept. It does not change the drop folder: it is switched by the installer, which
                                makes the new folder, marks it and points the import at it, after it has checked the old one.
@@ -356,10 +393,22 @@ function pairsOf(rest, options) {
 /** Each option of SETTABLE as `set` has it, by the name `pairsOf` gives what it is told. */
 const OF_SET = () => Object.fromEntries(Object.keys(SETTABLE).map((option) => [option, option]));
 
-/** What `write` and `plan` are told, as the fields of the settings: { fields }, or { code, said } when it is asked wrongly (2),
+/** What `write` and `plan` are told, as the fields of the settings: { fields, dropFolder, switchBack } (the drop folder picked, if
+    one was, and whether --switch-back was given), or { code, said } when it is asked wrongly (2),
     or refused (1): a value that will not do, by the same readers `set` has. */
 function fieldsToldBy(rest) {
-  const told = pairsOf(rest, { ...WRITTEN, ...OF_SET() });
+  // --switch-back is the one option with no value after it.
+  const switchBack = rest.includes("--switch-back");
+  const pairs = [];
+  for (let i = 0; i < rest.length; ) {
+    if (rest[i] === "--switch-back") {
+      i += 1;
+    } else {
+      pairs.push(rest[i], rest[i + 1]);
+      i += 2;
+    }
+  }
+  const told = pairs.length % 2 === 0 && !pairs.includes(undefined) ? pairsOf(pairs, { ...WRITTEN, ...OF_SET(), "--drop-folder": "dropFolder" }) : null;
   if (!told || told.machine === undefined || told.root === undefined || told.checkout === undefined) return { code: 2, said: HELP };
   const values = {};
   for (const option of Object.keys(SETTABLE).filter((o) => told[o] !== undefined)) {
@@ -370,7 +419,7 @@ function fieldsToldBy(rest) {
   const fault = settingsFault({ version: 1, ...fields });
   if (fault) return { code: 1, said: `Not written: ${fault}.` };
   for (const [option, value] of Object.entries(values)) fields[SETTABLE[option].field] = value;
-  return { fields };
+  return { fields, dropFolder: told.dropFolder, switchBack };
 }
 
 /** Whether two folders are the same: by their real paths when both are there, so that one reached by a link is the same as the
@@ -381,6 +430,90 @@ export function sameFolder(a, b) {
   } catch (e) {
     return resolve(a) === resolve(b);
   }
+}
+
+/** Whether the real path `real` (folded) is `dir` (folded) or inside it. */
+const underFolded = (real, dir) => real === dir || real.startsWith(`${dir}/`);
+
+/** The cloud folder a path is in, by its real path (a link into one is the target's): "Dropbox" under ~/Library/CloudStorage/Dropbox*
+    or ~/Dropbox; "iCloud Drive" under ~/Library/Mobile Documents; "iCloud Drive, if it keeps Desktop & Documents" under ~/Desktop or
+    ~/Documents, which a path cannot tell is kept; "a cloud folder" elsewhere under ~/Library/CloudStorage; "" otherwise. */
+export function cloudFolder(path, home) {
+  const real = fold(realOf(path));
+  const h = realOf(home);
+  const storage = fold(join(h, "Library", "CloudStorage"));
+  if (underFolded(real, fold(join(h, "Dropbox"))) || (underFolded(real, storage) && real.slice(storage.length + 1).startsWith("dropbox"))) return "Dropbox";
+  if (underFolded(real, fold(join(h, "Library", "Mobile Documents")))) return "iCloud Drive";
+  if (underFolded(real, fold(join(h, "Desktop"))) || underFolded(real, fold(join(h, "Documents")))) return "iCloud Drive, if it keeps Desktop & Documents";
+  if (real.startsWith(`${storage}/`)) return "a cloud folder";
+  return "";
+}
+
+/** Whether macOS asks once whether node may read the folder `path`: it is under Desktop or Documents, or on another disk. */
+export function needsFilesAccess(path, home) {
+  const h = realOf(home);
+  const real = fold(realOf(path));
+  if (underFolded(real, fold(join(h, "Desktop"))) || underFolded(real, fold(join(h, "Documents"))) || underFolded(real, "/volumes")) return true;
+  const deviceOf = (p) => {
+    for (let at = p; ; at = dirname(at)) {
+      try {
+        return statSync(at).dev;
+      } catch {
+        if (dirname(at) === at) return undefined;
+      }
+    }
+  };
+  const there = deviceOf(realOf(path));
+  return there !== undefined && there !== deviceOf(h);
+}
+
+/** A folder in Finder's words: under the home folder, the folders after it and ", in your home folder"; under
+    ~/Library/CloudStorage/<Provider>-<account>/, the provider and the folders after it; else each folder of the path. */
+export function folderWords(path, home) {
+  const cut = (p, dir) => (p === dir || p.startsWith(`${dir}/`) ? p.slice(dir.length).split("/").filter(Boolean) : null);
+  for (const [p, h] of [[resolve(path), resolve(home)], [realOf(path), realOf(home)]]) {
+    const cloud = cut(p, join(h, "Library", "CloudStorage"));
+    if (cloud && cloud.length) return [cloud[0].split("-")[0], ...cloud.slice(1)].join(" › ");
+    const inHome = cut(p, h);
+    if (inHome) return inHome.length ? `${inHome.join(" › ")}, in your home folder` : "your home folder";
+  }
+  return resolve(path).split("/").filter(Boolean).join(" › ");
+}
+
+/** What is wrong with a folder picked as this Mac's drop folder, in plain words: "" when nothing is. It is refused when it is, is
+    inside, or holds Episodes, References, Drop or Unedited Video in BRIMM Video (`root`); ~/BRIMM Video Work, but for Drop in it; her
+    chat's folder or the workshop; Zoom's recordings folder (`zoom`); Downloads; or the exports folder (`exports`); when it is not a
+    whole path; and when the folder that is to hold it is not there. Compared by real paths, letter case folded. */
+export function dropFolderFault(path, { home, root, exports = downloadsFolder(home), zoom = join(home, "Documents", "Zoom") }) {
+  if (typeof path !== "string" || !isAbsolute(path)) return "the drop folder must be a whole path";
+  const me = fold(realOf(resolve(path)));
+  const real = (p) => fold(realOf(p));
+  const holds = (p) => underFolded(real(p), me);
+  const inside = (p) => underFolded(me, real(p));
+  const cannot = (what) => `the drop folder cannot be ${what}, or inside it, or hold it`;
+  if (holds(root)) return "the drop folder cannot be BRIMM Video, or hold it";
+  for (const name of ["Episodes", "References", "Drop", "Unedited Video"]) {
+    if (inside(join(root, name)) || holds(join(root, name))) return cannot(`${name} in BRIMM Video`);
+  }
+  const work = workFolder(home);
+  if ((inside(work) && !inside(defaultDropFolder(home))) || holds(work)) return "the drop folder cannot be BRIMM Video Work, or inside it but for Drop, or hold it";
+  for (const [what, folder] of [["BRIMM Video Studio", studioFolder(home)], ["BRIMM Video Workshop", workshopFolder(home)], ["Zoom's recordings", zoom], ["Downloads", downloadsFolder(home)], ["the exports folder", exports]]) {
+    if (inside(folder) || holds(folder)) return cannot(what);
+  }
+  // The default, Drop in BRIMM Video Work, may be the first folder made in Work: the installer makes it with the drop folder.
+  if (resolve(path) !== defaultDropFolder(home)) {
+    try {
+      if (!statSync(dirname(resolve(path))).isDirectory()) return "the folder that is to hold the drop folder is not there";
+    } catch {
+      return "the folder that is to hold the drop folder is not there";
+    }
+  }
+  try {
+    if (!statSync(path).isDirectory()) return "the drop folder is not a folder";
+  } catch {
+    // Not there yet: the installer makes it.
+  }
+  return "";
 }
 
 /** The settings `write` would write, checked: { settings, fields } (the fields it was told), or { code, said } with the lines it
@@ -399,28 +532,48 @@ function planned(home, rest, now) {
   } catch (e) {
     return { code: 1, said: [`This Mac's settings could not be written (${e.code || e.message}).`] };
   }
-  const { settings, fault } = afterWrite(held, told.fields);
+  const { dropFolder: picked, switchBack } = told;
+  const wasLocal = isLocal(held);
+  // A drop folder is named by --drop-folder or by --drop, and a Mac with a drop folder of its own goes back to one in Dropbox only
+  // when it is told so.
+  if (picked !== undefined && told.fields.drop !== undefined) return { code: 1, said: ["Not written: name the drop folder by --drop-folder or by --drop, not both."] };
+  if (switchBack && (picked !== undefined || told.fields.drop === undefined)) return { code: 1, said: ['Not written: --switch-back goes with --drop Drop or --drop "Unedited Video".'] };
+  if (wasLocal && told.fields.drop !== undefined && !switchBack) {
+    return { code: 1, said: [`Not written: this Mac's drop folder is ${held.dropPath}, on this Mac. To go back to a drop folder in Dropbox, give --switch-back as well.`] };
+  }
+  const remove = switchBack && wasLocal ? ["dropPath"] : [];
+  const fields = picked !== undefined ? { ...told.fields, dropPath: picked } : told.fields;
+  // The folder picked, or the one this Mac has when the exports folder changes under it, must be one a drop folder may be.
+  const toCheck = picked ?? (wasLocal && !remove.length && told.fields.exportsPath !== undefined ? held.dropPath : undefined);
+  if (toCheck !== undefined) {
+    const why = dropFolderFault(toCheck, { home, root: told.fields.root, exports: exportsFolderOf({ ...held, ...told.fields }, home), zoom: zoomFolderOf(held, home) });
+    if (why) return { code: 1, said: [`Not written: ${why}.`] };
+  }
+  const { settings, fault } = afterWrite(held, fields, remove);
+  if (fault === LOCAL_NEEDS_LIGHT) return { code: 1, said: [`Not written: ${fault}.`] };
   if (fault) return { code: 1, said: [`This Mac's settings could not be written (${fault}). ${MEND_SETTING}`] };
-  // The drop folder is Unedited Video until the file says Drop.
-  const from = held.drop === "Drop" ? "Drop" : "Unedited Video";
-  const to = settings.drop === "Drop" ? "Drop" : "Unedited Video";
+  // The drop folder is Unedited Video until the file says Drop; or a whole path, on a Mac with one of its own.
+  const dropWord = (s) => (isLocal(s) ? s.dropPath : s.drop === "Drop" ? "Drop" : "Unedited Video");
+  const from = dropWord(held);
+  const to = dropWord(settings);
   // The old folder is the file's: of the Mac it names, in the BRIMM Video it names, when they will do; a Mac with no settings yet
   // has the one it is told.
   const oldRoot = typeof held.root === "string" && isAbsolute(held.root) ? held.root : settings.root;
   const oldMachine = typeof held.machine === "string" && !machineFault(held.machine) ? held.machine : settings.machine;
-  const oldFolder = dropFolder(oldRoot, oldMachine, from);
-  const newFolder = dropFolder(settings.root, settings.machine, to);
+  const oldFolder = wasLocal ? held.dropPath : dropFolder(oldRoot, oldMachine, from);
+  const newFolder = dropFolderOf(settings, home);
   // The same folder is the same BRIMM Video (by its real path: it is there, as a drop folder may not be yet), the same Mac and the
-  // same drop folder's name.
+  // same drop folder's name. A Mac with a drop folder of its own, before or after, is judged by the folders themselves.
   const moved = !sameFolder(oldRoot, settings.root) || oldMachine !== settings.machine;
-  if (!moved && from === to) return { settings, fields: told.fields, from, to };
+  const either = wasLocal || isLocal(settings);
+  if (either ? sameFolder(oldFolder, newFolder) : !moved && from === to) return { settings, fields, remove, from, to };
   // Named by the folder alone when only the drop folder changes, and by its whole path when the Mac or BRIMM Video do.
   const light = lightImport(held) || lightImport(settings);
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")
     .then(({ heldInOld }) => {
-      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable, lateChecks } = heldInOld({ root: oldRoot, machine: oldMachine, old: from, light, home, now: Number(now) });
-      if (![work, running, problem, imported, kept, unreadable, lateChecks].some((lines) => lines.length)) return { settings, fields: told.fields, from, to, old: oldFolder };
+      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable, lateChecks } = heldInOld({ root: oldRoot, machine: oldMachine, folder: oldFolder, light, home, now: Number(now) });
+      if (![work, running, problem, imported, kept, unreadable, lateChecks].some((lines) => lines.length)) return { settings, fields, remove, from, to, old: oldFolder };
       // What it is not done for: work in the old folder; else that folder, or its status files, could not be looked at; else this
       // Mac's own late checks could not be read, the old folder having been.
       const working = [work, running, problem, imported, kept].some((lines) => lines.length);
@@ -441,7 +594,7 @@ function planned(home, rest, now) {
       ];
       return {
         code: 1,
-        said: [`Not written: the drop folder would change from ${moved ? oldFolder : from} to ${moved ? newFolder : to}, ${head}`, ...kinds.flatMap(([lines, advice]) => (lines.length ? [...lines, ...advice] : []))]
+        said: [`Not written: the drop folder would change from ${moved && !either ? oldFolder : from} to ${moved && !either ? newFolder : to}, ${head}`, ...kinds.flatMap(([lines, advice]) => (lines.length ? [...lines, ...advice] : []))]
       };
     })
     .catch((e) => ({ code: 1, said: [`The old drop folder could not be looked at (${(e && e.code) || "an error"}), so nothing was written.`] }));
@@ -460,7 +613,7 @@ function write(home, rest, say, now) {
       return result.code;
     }
     try {
-      say(`Written: ${writeSettings(home, result.fields)}`);
+      say(`Written: ${writeSettings(home, result.fields, result.remove)}`);
       return 0;
     } catch (e) {
       say(`This Mac's settings could not be written (${e.code || e.message}).`);
@@ -492,6 +645,13 @@ function plan(home, rest, say, now) {
     say(`The import will be: ${lightImport(result.settings) ? "light" : "full"}`);
     say(`The drop folder is now: ${result.from}`);
     say(`The drop folder will be: ${result.to}`);
+    say(`The exports folder will be: ${exportsFolderOf(result.settings, home)}`);
+    // A drop folder of this Mac's own: whether it is in a cloud folder, and whether macOS asks once about reading it.
+    if (isLocal(result.settings)) {
+      const cloud = cloudFolder(result.settings.dropPath, home);
+      if (cloud) say(`The drop folder is in a cloud folder: ${cloud}`);
+      if (needsFilesAccess(result.settings.dropPath, home)) say("The drop folder needs Files and Folders access");
+    }
     // And when the folder watched changes, the whole path of the old one, which was checked: the installer names it as the one left.
     if (result.old) say(`The old drop folder: ${result.old}`);
     return 0;
@@ -516,6 +676,10 @@ export const SETTABLE = {
   "--drop": {
     field: "drop", takes: 'Drop or "Unedited Video"', read: (v) => (v === "Drop" || v === "Unedited Video" ? v : undefined), said: String,
     otherwise: "Unedited Video", subject: "The drop folder", be: "is", was: "it was"
+  },
+  "--exports-folder": {
+    field: "exportsPath", takes: '"<whole path>"', read: (v) => (isAbsolute(v) ? v : undefined), said: String,
+    otherwise: "Downloads", subject: "The exports folder", be: "is", was: "it was"
   },
   "--app": {
     field: "app", takes: "hyperframes or off", read: (v) => (v === "hyperframes" || v === "off" ? v : undefined), said: String,
@@ -547,13 +711,14 @@ function localTime(d) {
 /** `set`: the settings of the switch it is told, changed and checked, each change said. A setting that is as it is told is
     left, and said to be. A change of the drop folder is refused, since the installer makes it: nothing is changed. */
 function set(home, rest, say) {
-  const told = pairsOf(rest, OF_SET());
+  const told = pairsOf(rest, { ...OF_SET(), "--drop-folder": "--drop-folder" });
   if (!told || !Object.keys(told).length) {
     say(HELP);
     return 2;
   }
   const values = {};
   for (const [option, said] of Object.entries(told)) {
+    if (option === "--drop-folder") continue;
     values[option] = SETTABLE[option].read(said);
     if (values[option] === undefined) {
       say(`Not changed: ${option} takes ${SETTABLE[option].takes}.`);
@@ -569,8 +734,12 @@ function set(home, rest, say) {
   // and the old folder looked at first. Written alone, the setting left the agent watching the old folder, and the import then
   // skipped every video found there. So a change of it is the installer's, and nothing here is changed.
   const to = values["--drop"];
-  if (to !== undefined && to !== (got.settings.drop ?? SETTABLE["--drop"].otherwise)) {
-    say(`The drop folder is switched by the installer, which makes the new folder, marks it and points the import at it, after it has checked the old one. To see what it would do: ./install.sh --print --machine "${got.settings.machine}" --drop ${to === "Drop" ? to : `"${to}"`} "${got.settings.root}"`);
+  const picked = told["--drop-folder"];
+  const local = isLocal(got.settings);
+  if (picked !== undefined || (to !== undefined && (local || to !== (got.settings.drop ?? SETTABLE["--drop"].otherwise)))) {
+    // A Mac with a drop folder of its own goes back to one in Dropbox only with --switch-back.
+    const option = picked !== undefined ? `--drop-folder "${picked}"` : `--drop ${to === "Drop" ? to : `"${to}"`}${local ? " --switch-back" : ""}`;
+    say(`The drop folder is switched by the installer, which makes the new folder, marks it and points the import at it, after it has checked the old one. To see what it would do: ./install.sh --print --machine "${got.settings.machine}" ${option} "${got.settings.root}"`);
     return 1;
   }
   const changes = {};
@@ -652,7 +821,8 @@ function show(home, say, now) {
   say(`This Mac's settings, in ${settingsFile(home)}:`);
   say(`  This Mac:  ${s.machine}`);
   say(`  BRIMM Video:  ${s.root}`);
-  say(`  Its drop folder:  ${dropFolder(s.root, s.machine, s.drop)}`);
+  say(`  Its drop folder:  ${dropFolderOf(s, home)}`);
+  say(`  Exports from HyperFrames, looked for in:  ${exportsFolderOf(s, home)}`);
   say(`  Episodes:  ${episodesFolder(s.root)}`);
   say(`  References:  ${referencesFolder(s.root)}`);
   say(`  BRIMM Video Studio, run from:  ${s.checkout}`);
@@ -919,10 +1089,23 @@ function userDeny(home, rest, say, { tmp, uid, openMinimum, env }) {
 /** The name of the marker in a drop folder, which holds the name of the Mac that watches it. */
 export const MARKER = ".brimm-watched-by";
 
-/** `marker`: mark the drop folder `drop` as this Mac's, `machine`. The marker is written by the rule for writing into Dropbox
-    (dropbox.js): whole outside it, then cloned in, a marker of this Mac's own replaced by a new file. A folder another Mac
-    has marked is refused: two Macs watching one folder would import every video twice. */
-function mark(rest, say, clone) {
+/** Whether the folder `drop` is in a cloud folder (cloudFolder), or in BRIMM Video in Dropbox (the folder this Mac's settings name, or
+    one with Dropbox's cache above it): where a file is written by the rule for writing into Dropbox. */
+function inCloud(drop, home) {
+  if (cloudFolder(drop, home)) return true;
+  const root = readSettings(home).settings?.root;
+  if (typeof root === "string" && underFolded(fold(realOf(drop)), fold(realOf(root)))) return true;
+  for (let at = dirname(resolve(drop)); ; at = dirname(at)) {
+    if (existsSync(join(at, ".dropbox.cache"))) return true;
+    if (dirname(at) === at) return false;
+  }
+}
+
+/** `marker`: mark the drop folder `drop` as this Mac's, `machine`. In a cloud folder the marker is written by the rule for writing
+    into Dropbox (dropbox.js): whole outside it, then cloned in, a marker of this Mac's own replaced by a new file. Anywhere else it
+    is written whole and renamed into place. A folder another Mac has marked is refused: two Macs watching one folder would import
+    every video twice. */
+function mark(rest, say, clone, home) {
   if (rest.length !== 2) {
     say(HELP);
     return 2;
@@ -940,7 +1123,19 @@ function mark(rest, say, clone) {
     return 1;
   }
   try {
-    textWriter({ work: join(tmpdir(), `brimm-marker-${process.pid}`), ...(clone ? { clone } : {}) })(file, `${machine}\n`, { replace: Boolean(owner) });
+    if (inCloud(drop, home)) {
+      textWriter({ work: join(tmpdir(), `brimm-marker-${process.pid}`), ...(clone ? { clone } : {}) })(file, `${machine}\n`, { replace: Boolean(owner) });
+    } else {
+      // Not in a cloud folder: written whole, then renamed into place. This also works on another disk, where a clone cannot.
+      const writing = `${file}.writing`;
+      try {
+        writeFileSync(writing, `${machine}\n`);
+        renameSync(writing, file);
+      } catch (e) {
+        rmSync(writing, { force: true });
+        throw e;
+      }
+    }
     say(`Marked: ${file}`);
     return 0;
   } catch (e) {
@@ -975,7 +1170,7 @@ export function settingsMain(argv, { home, say = (line) => process.stdout.write(
   if (command === "set") return set(home, rest, say);
   if (command === "sessions") return sessions(home, rest, say, now);
   if (command === "show" && !rest.length) return show(home, say, now);
-  if (command === "marker") return mark(rest, say, clone);
+  if (command === "marker") return mark(rest, say, clone, home);
   if (command === "studio") return studio(home, rest, say, { openMinimum, freePort, tmp, uid, now });
   if (command === "user-deny") return userDeny(home, rest, say, { tmp, uid, openMinimum, env });
   say(HELP);

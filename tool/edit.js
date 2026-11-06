@@ -67,7 +67,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, released, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
-import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, fromFinalCutFolder, studioAllowOf } from "./settings.js";
+import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, pushedFolder, libraryFor, runsFolder, dropFolder, dropFolderOf, isLocal, fromFinalCutFolder, studioAllowOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
@@ -897,8 +897,10 @@ function importLines(ctx, fits = () => true) {
     Mac, so which of its folders it watches is not known here, and both are listed, Drop/<Mac> and Unedited Video/<Mac>, whichever
     there are: a video is never hidden, though one left in a folder that Mac no longer watches shows as waiting. (A marker in
     Drop/<Mac> is no sign that it watches it: it stays after a switch back, and after a run that was refused once it was made.)
-    The Macs are the folders in either parent. */
+    The Macs are the folders in either parent. A Mac with a drop folder of its own (settings.js isLocal) lists only that folder. */
 function dropFolders(ctx) {
+  // A Mac with a drop folder of its own watches that one alone, which is on this Mac: another Mac's is not looked for here.
+  if (isLocal(ctx.settings)) return [{ mac: ctx.machine, folder: dropFolderOf(ctx.settings, ctx.home) }];
   const inRoot = (parent) => {
     try {
       return readdirSync(join(ctx.root, parent)).filter((n) => !n.startsWith("."));
@@ -2142,7 +2144,7 @@ export async function retry(ctx, rest) {
     say(HELP);
     return 2;
   }
-  const drop = dropFolder(ctx.root, ctx.machine, ctx.settings.drop);
+  const drop = dropFolderOf(ctx.settings, ctx.home);
   let videos = [];
   try {
     videos = readdirSync(drop).filter(isMedia).sort();
@@ -7500,7 +7502,7 @@ function noteFinished(ctx, { facts }) {
 /** The guide's overview of what guideItems read: this Mac's drop folder in Finder's words, each video under way with its one next
     step, and how many videos from before the switch it does not guide. */
 function sayOverview(ctx, { items, old }) {
-  for (const line of overviewLines({ drop: dropWords(ctx.settings.drop, ctx.machine), items, old })) ctx.say(line);
+  for (const line of overviewLines({ drop: dropWords(ctx.settings, ctx.machine, ctx.home), items, old })) ctx.say(line);
   return 0;
 }
 
@@ -7565,7 +7567,7 @@ async function tellWhen(ctx, item) {
 export async function guideCommand(ctx, rest) {
   if (!lightImport(ctx.settings)) return refuse(ctx, NOT_SET_UP);
   const is = (...words) => rest.length === words.length && words.every((word, i) => rest[i] === word);
-  if (is("drop")) return openFolder(ctx, dropFolder(ctx.root, ctx.machine, ctx.settings.drop), "your drop folder", dropWords(ctx.settings.drop, ctx.machine), "Your drop folder is not there: ask Jason.");
+  if (is("drop")) return openFolder(ctx, dropFolderOf(ctx.settings, ctx.home), "your drop folder", dropWords(ctx.settings, ctx.machine, ctx.home), "Your drop folder is not there: ask Jason.");
   if (is("drop", "zoom")) return openFolder(ctx, join(dirname(ctx.root), "BRIMM VIDEO Transfer", "Zoom Video Transfer"), "Zoom Video Transfer", ZOOM_WORDS, "Zoom Video Transfer is not on this Mac: ask Jason.");
   if (is("page")) return openPage(ctx);
   if (is("wait")) return waitForChange(ctx);

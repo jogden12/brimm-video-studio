@@ -12,7 +12,7 @@ import { studioFolder, studioFiles, openSettingsOf, workshopFolder, ALLOW_DEFAUL
 import { claudeDirName, realOf } from "../places.js";
 import { chatHeld } from "../held.js";
 import { heldFolder } from "../scan.js";
-import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, appOf, appHandoverOn, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf, effectiveLock, factsOf } from "../settings.js";
+import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, fromFinalCutFolder, runsFolder, episodeWork, pushedFolder, libraryFor, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, appOf, appHandoverOn, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf, effectiveLock, factsOf, isLocal, defaultDropFolder, dropFolderOf, episodeFilesFolder, importingFolderOf, statusFoldersOf, exportsFolderOf, cloudFolder, folderWords, dropFolderFault } from "../settings.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
 
@@ -432,7 +432,7 @@ describe("node settings.js studio, for both locks (the open lock, K1)", () => {
     assert.equal(t.run(MINIMUM, "studio", "--node", NODE, "--lock", "open"), 0);
     assert.deepEqual(t.said, [`Written: ${t.folder()} (the open lock)`]);
     assert.deepEqual([t.settings().lock, t.settings().proxyPort, t.settings().studioNode], ["open", 47123, NODE]);
-    assert.deepEqual(t.facts(), { home: t.home, root: t.root, uid: 502, tmp: realOf(t.tmp), zoomFolder: join(t.home, "Documents", "Zoom"), port: 47123, web: "held", allow: ALLOW_DEFAULT });
+    assert.deepEqual(t.facts(), { home: t.home, root: t.root, uid: 502, tmp: realOf(t.tmp), zoomFolder: join(t.home, "Documents", "Zoom"), dropFolder: join(t.root, "Unedited Video", "Mac Studio"), port: 47123, web: "held", allow: ALLOW_DEFAULT });
     const files = studioFiles({ checkout: CHECKOUT, node: NODE, folder: t.folder(), lock: "open", facts: t.facts() });
     for (const [name, text] of Object.entries(files)) assert.equal(readFileSync(join(t.folder(), name), "utf8"), text, name);
     assert.equal(statSync(workshopFolder(t.home)).mode & 0o777, 0o700);
@@ -835,6 +835,7 @@ describe("node settings.js", () => {
       "  This Mac:  Mac Studio",
       `  BRIMM Video:  ${ROOT}`,
       `  Its drop folder:  ${ROOT}/Unedited Video/Mac Studio`,
+      `  Exports from HyperFrames, looked for in:  ${t.home}/Downloads`,
       `  Episodes:  ${ROOT}/Episodes`,
       `  References:  ${ROOT}/References`,
       `  BRIMM Video Studio, run from:  ${CHECKOUT}`,
@@ -1153,6 +1154,7 @@ describe("node settings.js set and sessions", () => {
       "  This Mac:  Mac Studio",
       `  BRIMM Video:  ${ROOT}`,
       `  Its drop folder:  ${ROOT}/Drop/Mac Studio`,
+      `  Exports from HyperFrames, looked for in:  ${t.home}/Downloads`,
       `  Episodes:  ${ROOT}/Episodes`,
       `  References:  ${ROOT}/References`,
       `  BRIMM Video Studio, run from:  ${CHECKOUT}`,
@@ -1229,7 +1231,7 @@ describe("node settings.js marker", () => {
   /** A drop folder made for one test, and a clone that copies, as a stand-in for /bin/cp -c. */
   function dropped() {
     const t = setup();
-    const drop = join(t.home, "BRIMM Video", "Unedited Video", "Mac Studio");
+    const drop = join(t.home, "Library", "CloudStorage", "Dropbox-X", "The BRIMM DB", "BRIMM Video", "Unedited Video", "Mac Studio");
     mkdirSync(drop, { recursive: true });
     const clones = [];
     const clone = (from, to) => {
@@ -1320,7 +1322,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     assert.equal(await t.run("plan", ...t.told, "--drop", "Drop"), 0);
     // The settings, then, each on a line of its own for the installer to read without parsing JSON, the import it would be, and the
     // drop folder as it is and as it would be.
-    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", `The old drop folder: ${dropFolder(t.root, "Mac Studio")}`]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", `The exports folder will be: ${t.home}/Downloads`, `The old drop folder: ${dropFolder(t.root, "Mac Studio")}`]);
     assert.deepEqual(JSON.parse(t.said[0]), { version: 1, machine: "Mac Studio", root: t.root, checkout: CHECKOUT, import: "light", readings: false, handoffVersion: 2, later: { x: 1 }, drop: "Drop" });
     assert.equal(t.held(), before);
     // It is what write then writes, to the letter.
@@ -1362,23 +1364,23 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     const told = ["--machine", "Mac Studio", "--root", ROOT, "--checkout", CHECKOUT];
     assert.equal(await run("plan", ...told), 0);
     assert.equal(t.said[0], JSON.stringify({ version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT }, null, 2));
-    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video"]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video", `The exports folder will be: ${t.home}/Downloads`]);
     t.said.length = 0;
     assert.equal(await run("plan", ...told, "--readings", "off", "--handoff", "2", "--import", "full", "--drop", "Unedited Video"), 0);
     assert.deepEqual(JSON.parse(t.said[0]), { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, readings: false, handoffVersion: 2, import: "full", drop: "Unedited Video" });
-    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video"]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video", `The exports folder will be: ${t.home}/Downloads`]);
     assert.equal(existsSync(settingsFile(t.home)), false);
     t.done();
   });
   it("plan says the drop folder the file names as the one it is now, and as it will be, so that a Mac on Drop run again stays on it", async () => {
     const t = mac({ drop: "Drop", later: "\u0000" });
     assert.equal(await t.run("plan", ...t.told), 0);
-    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Drop", "The drop folder will be: Drop"]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Drop", "The drop folder will be: Drop", `The exports folder will be: ${t.home}/Downloads`]);
     assert.equal(JSON.parse(t.said[0]).later, "\u0000");
     t.said.length = 0;
     // Told the other, it says both, and the old folder's whole path, which the installer names as the one left.
     assert.equal(await t.run("plan", ...t.told, "--drop", "Unedited Video"), 0);
-    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Drop", "The drop folder will be: Unedited Video", `The old drop folder: ${dropFolder(t.root, "Mac Studio", "Drop")}`]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: full", "The drop folder is now: Drop", "The drop folder will be: Unedited Video", `The exports folder will be: ${t.home}/Downloads`, `The old drop folder: ${dropFolder(t.root, "Mac Studio", "Drop")}`]);
     t.done();
   });
   it("write writes the settings of the switch it is told, keeps every other setting, says so, and leaves a setting it is not told as it was", async () => {
@@ -1405,7 +1407,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       assert.equal(JSON.parse(t.said[0]).import, "light", `plan ${more.join(" ")}`);
       assert.equal(t.held(), before);
     }
-    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", `The old drop folder: ${dropFolder(t.root, "Mac Studio")}`]);
+    assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", `The exports folder will be: ${t.home}/Downloads`, `The old drop folder: ${dropFolder(t.root, "Mac Studio")}`]);
     // write writes what plan printed, to the letter, with the drop folder and readings told with it.
     const planned = t.said[0];
     t.said.length = 0;
@@ -1520,7 +1522,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       put(t.folder(), "Talk.mov");
       // Not told, told what it is already, and told Unedited Video when the file says none: it stays as it is.
       await t.run("plan", ...t.told);
-      assert.equal(JSON.parse(t.said.at(-4)).drop, undefined);
+      assert.equal(JSON.parse(t.said.at(-5)).drop, undefined);
       t.said.length = 0;
       assert.equal(await t.run("write", ...t.told, "--drop", "Unedited Video"), 0);
       assert.deepEqual(t.said, [`Written: ${t.file}`]);
@@ -2327,7 +2329,7 @@ describe("what --help says of write, plan and set", () => {
   };
   it("names each option set takes, and each that write and plan take, and no option that none of them takes", () => {
     const options = (text) => [...new Set(text.match(/--[a-z-]+/g) || [])].sort();
-    const written = [...Object.keys(WRITTEN), ...Object.keys(SETTABLE)].sort();
+    const written = [...Object.keys(WRITTEN), ...Object.keys(SETTABLE), "--drop-folder", "--switch-back"].sort();
     assert.deepEqual(options(HELP_OF("set")), Object.keys(SETTABLE).sort());
     assert.deepEqual(options(HELP_OF("write")), written);
     assert.deepEqual(options(HELP_OF("plan")), written);
@@ -2369,5 +2371,310 @@ describe("what --help says of write, plan and set", () => {
       const help = HELP_OF(command).split("\n")[0];
       assert.ok(top.includes(help), `${help}\n---\n${top.join("\n")}`);
     }
+  });
+});
+
+describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
+  const AT = new Date("2026-11-06T10:00:00-05:00");
+  const NEEDS_LIGHT = "Not written: a drop folder of this Mac's own takes the light import.";
+  const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  /** A Mac whose BRIMM Video is in a made-up Dropbox in its home folder, with the folders a drop folder may be picked in. */
+  function mac(held = {}) {
+    const t = setup();
+    const home = realpathSync(t.home);
+    const root = join(home, "Library", "CloudStorage", "Dropbox-X", "The BRIMM DB", "BRIMM Video");
+    for (const d of [join(root, "Episodes", ".importing"), join(home, "Desktop"), join(home, "Documents", "Zoom"), join(home, "Downloads"), join(home, "BRIMM Video Work")]) mkdirSync(d, { recursive: true });
+    writeSettings(home, { machine: "Mac Studio", root, checkout: CHECKOUT, import: "light", ...held });
+    const clones = [];
+    const run = async (...argv) => settingsMain(argv, { home, say: (line) => t.said.push(line), now: AT, clone: (from, to) => { clones.push(to); writeFileSync(to, readFileSync(from)); } });
+    const told = ["--machine", "Mac Studio", "--root", root, "--checkout", CHECKOUT];
+    const folder = (parent, machine = "Mac Studio") => {
+      mkdirSync(join(root, parent, machine), { recursive: true });
+      return join(root, parent, machine);
+    };
+    return { ...t, home, root, run, told, folder, clones, file: settingsFile(home), held: () => readFileSync(settingsFile(home), "utf8"), read: () => readSettings(home).settings, desktop: join(home, "Desktop", "Drop") };
+  }
+
+  describe("the settings and the helpers", () => {
+    it("takes dropPath and exportsPath as whole paths, and dropPath only with the light import", () => {
+      const base = { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "light" };
+      assert.equal(settingsFault({ ...base, dropPath: "/Users/s/Desktop/Drop", exportsPath: "/Users/s/Exports" }), "");
+      assert.equal(settingsFault({ ...base, dropPath: "Desktop/Drop" }), "the path to the drop folder is not a whole path");
+      assert.equal(settingsFault({ ...base, exportsPath: "Exports" }), "the path to the exports folder is not a whole path");
+      assert.equal(settingsFault({ ...base, dropPath: "/Users/s/Drop", import: "full" }), "a drop folder of this Mac's own takes the light import");
+      assert.equal(settingsFault({ ...base, dropPath: "/Users/s/Drop", import: undefined }), "a drop folder of this Mac's own takes the light import");
+      assert.equal(settingsFault({ ...base, dropPath: null, exportsPath: null, import: "full" }), "");
+    });
+    it("is local when the settings hold a dropPath, and finds the folders from them", () => {
+      const home = "/Users/s";
+      const plain = { version: 1, machine: "Mac Studio", root: "/r", checkout: "/c", drop: "Drop" };
+      const local = { ...plain, import: "light", dropPath: "/Users/s/Desktop/Drop" };
+      assert.deepEqual([isLocal(plain), isLocal(local), isLocal({ ...plain, dropPath: null })], [false, true, false]);
+      assert.equal(defaultDropFolder(home), "/Users/s/BRIMM Video Work/Drop");
+      assert.equal(dropFolderOf(local, home), "/Users/s/Desktop/Drop");
+      assert.equal(dropFolderOf(plain, home), "/r/Drop/Mac Studio");
+      assert.equal(dropFolderOf({ ...plain, drop: undefined }, home), "/r/Unedited Video/Mac Studio");
+      assert.equal(episodeFilesFolder(home, "2026-11-06 Talk (Mac Studio)"), "/Users/s/BRIMM Video Work/2026-11-06 Talk (Mac Studio)/video");
+      assert.equal(importingFolderOf(local, home), "/Users/s/Library/Application Support/BRIMM Video/importing");
+      assert.equal(importingFolderOf(plain, home), "/r/Episodes/.importing");
+      assert.deepEqual(statusFoldersOf(local, home), ["/Users/s/Library/Application Support/BRIMM Video/importing", "/r/Episodes/.importing"]);
+      assert.deepEqual(statusFoldersOf(plain, home), ["/r/Episodes/.importing"]);
+      assert.equal(exportsFolderOf(plain, home), "/Users/s/Downloads");
+      assert.equal(exportsFolderOf({ ...plain, exportsPath: "/Users/s/Exports" }, home), "/Users/s/Exports");
+    });
+    it("names the cloud folder a path is in, by its real path", () => {
+      const t = mac();
+      const lib = join(t.home, "Library");
+      for (const d of [join(lib, "CloudStorage", "Dropbox-X", "In"), join(lib, "CloudStorage", "GoogleDrive-X", "In"), join(lib, "Mobile Documents", "com~apple~CloudDocs", "In"), join(t.home, "Dropbox", "In"), join(t.home, "Documents", "In"), join(t.home, "BRIMM Video Work", "Drop")]) mkdirSync(d, { recursive: true });
+      assert.equal(cloudFolder(join(lib, "CloudStorage", "Dropbox-X", "In"), t.home), "Dropbox");
+      assert.equal(cloudFolder(join(t.home, "Dropbox", "In"), t.home), "Dropbox");
+      assert.equal(cloudFolder(join(lib, "Mobile Documents", "com~apple~CloudDocs", "In"), t.home), "iCloud Drive");
+      assert.equal(cloudFolder(join(t.home, "Desktop", "Drop"), t.home), "iCloud Drive, if it keeps Desktop & Documents");
+      assert.equal(cloudFolder(join(t.home, "Documents", "In"), t.home), "iCloud Drive, if it keeps Desktop & Documents");
+      assert.equal(cloudFolder(join(lib, "CloudStorage", "GoogleDrive-X", "In"), t.home), "a cloud folder");
+      assert.equal(cloudFolder(join(t.home, "BRIMM Video Work", "Drop"), t.home), "");
+      // A link into one is the target's.
+      symlinkSync(join(lib, "CloudStorage", "Dropbox-X", "In"), join(t.home, "BRIMM Video Work", "link"));
+      assert.equal(cloudFolder(join(t.home, "BRIMM Video Work", "link"), t.home), "Dropbox");
+      t.done();
+    });
+    it("says a folder in Finder's words", () => {
+      assert.equal(folderWords("/Users/s/BRIMM Video Work/Drop", "/Users/s"), "BRIMM Video Work › Drop, in your home folder");
+      assert.equal(folderWords("/Users/s/Library/CloudStorage/Dropbox-X/The BRIMM DB/In", "/Users/s"), "Dropbox › The BRIMM DB › In");
+      assert.equal(folderWords("/Volumes/Big/Drop", "/Users/s"), "Volumes › Big › Drop");
+    });
+  });
+
+  describe("dropFolderFault", () => {
+    it("refuses the folders of BRIMM Video, of Work, of her chat, of Zoom, Downloads and the exports folder, and what is not whole or has no parent", () => {
+      const t = mac();
+      const { home, root } = t;
+      const exports = join(home, "Exports", "HF");
+      for (const d of [join(exports, "in"), join(root, "Drop", "Mac Studio"), join(root, "Unedited Video"), join(root, "References"), join(root, "Drop", "Sallie's laptop"), join(root, "Drop", "Jason's MacBook"), join(home, "BRIMM Video Work", "2026-11-06 Talk (Mac Studio)"), join(home, "BRIMM Video Studio", "Drop"), join(home, "BRIMM Video Workshop"), join(home, "Library", "CloudStorage", "Dropbox-X", "The BRIMM DB", "In")]) mkdirSync(d, { recursive: true });
+      const facts = { home, root, exports, zoom: join(home, "Documents", "Zoom") };
+      const fault = (path) => dropFolderFault(path, facts);
+      for (const [what, path] of [
+        ["BRIMM Video itself", root], ["a folder in Episodes", join(root, "Episodes", "x")], ["Mac Studio's old drop folder", join(root, "Drop", "Mac Studio")],
+        ["her laptop's drop folder", join(root, "Drop", "Sallie's laptop")], ["Jason's MacBook's", join(root, "Drop", "Jason's MacBook")], ["Unedited Video", join(root, "Unedited Video")],
+        ["References", join(root, "References")], ["Work", join(home, "BRIMM Video Work")], ["an episode's folder", join(home, "BRIMM Video Work", "2026-11-06 Talk (Mac Studio)")],
+        ["her chat's folder", join(home, "BRIMM Video Studio", "Drop")], ["the workshop", join(home, "BRIMM Video Workshop")], ["Zoom's folder", join(home, "Documents", "Zoom")], ["Zoom's parent", join(home, "Documents")],
+        ["Downloads", join(home, "Downloads")], ["the exports folder", exports], ["a folder in it", join(exports, "in")], ["its parent", join(home, "Exports")],
+        ["a relative path", "Desktop/Drop"], ["one whose parent is not there", join(home, "Nowhere", "Drop")], ["her home folder", home], ["a folder that holds BRIMM Video", join(home, "Library", "CloudStorage", "Dropbox-X", "The BRIMM DB")]
+      ]) assert.notEqual(fault(path), "", what);
+      assert.equal(fault(join(home, "Desktop", "Drop")), "");
+      assert.equal(fault(join(home, "BRIMM Video Work", "Drop")), "");
+      assert.equal(fault(join(home, "Library", "CloudStorage", "Dropbox-X", "The BRIMM DB", "In")), "");
+      // Said in plain words, naming what it is, and with no path.
+      assert.equal(fault("Desktop/Drop"), "the drop folder must be a whole path");
+      assert.equal(fault(join(home, "Nowhere", "Drop")), "the folder that is to hold the drop folder is not there");
+      assert.equal(fault(join(root, "Episodes", "x")), "the drop folder cannot be Episodes in BRIMM Video, or inside it, or hold it");
+      assert.equal(fault(join(home, "Downloads")), "the drop folder cannot be Downloads, or inside it, or hold it");
+      t.done();
+    });
+    it("takes the real path: a link to Downloads is Downloads", () => {
+      const t = mac();
+      symlinkSync(join(t.home, "Downloads"), join(t.home, "Desktop", "Get"));
+      assert.equal(dropFolderFault(join(t.home, "Desktop", "Get"), { home: t.home, root: t.root, exports: join(t.home, "Downloads"), zoom: join(t.home, "Documents", "Zoom") }), "the drop folder cannot be Downloads, or inside it, or hold it");
+      t.done();
+    });
+  });
+
+  describe("write and plan", () => {
+    it("write --drop-folder writes dropPath, and leaves drop as it was", async () => {
+      const t = mac({ drop: "Drop" });
+      assert.equal(await t.run("write", ...t.told, "--import", "light", "--drop-folder", t.desktop), 0, t.said.join("\n"));
+      assert.deepEqual(t.said, [`Written: ${t.file}`]);
+      assert.equal(t.read().dropPath, t.desktop);
+      assert.equal(t.read().drop, "Drop");
+      t.done();
+    });
+    it("write --exports-folder writes exportsPath, and takes only a whole path", async () => {
+      const t = mac();
+      assert.equal(await t.run("write", ...t.told, "--exports-folder", join(t.home, "Desktop")), 0);
+      assert.equal(t.read().exportsPath, join(t.home, "Desktop"));
+      t.said.length = 0;
+      assert.equal(await t.run("write", ...t.told, "--exports-folder", "Exports"), 1);
+      assert.deepEqual(t.said, ['Not written: --exports-folder takes "<whole path>".']);
+      t.done();
+    });
+    it("refuses a drop folder while the Dropbox one holds a video, in the words of heldInOld, and writes nothing", async () => {
+      const t = mac({ drop: "Drop" });
+      const old = t.folder("Drop");
+      writeFileSync(join(old, "Talk.mov"), "video");
+      const before = t.held();
+      for (const command of ["plan", "write"]) {
+        t.said.length = 0;
+        assert.equal(await t.run(command, ...t.told, "--drop-folder", t.desktop), 1, command);
+        assert.equal(t.said[0], `Not written: the drop folder would change from Drop to ${t.desktop}, and work is not finished in the old one:`);
+        assert.equal(t.said[1], `  A video of 5 bytes: waits in ${old}.`);
+        assert.equal(t.held(), before);
+      }
+      t.done();
+    });
+    it("refuses a drop folder of its own with the full import, saying so", async () => {
+      const t = mac({ import: "full" });
+      const before = t.held();
+      assert.equal(await t.run("write", ...t.told, "--import", "full", "--drop-folder", t.desktop), 1);
+      assert.deepEqual(t.said, [NEEDS_LIGHT]);
+      t.said.length = 0;
+      assert.equal(await t.run("write", ...t.told, "--drop-folder", t.desktop), 1);
+      assert.deepEqual(t.said, [NEEDS_LIGHT]);
+      assert.equal(t.held(), before);
+      const local = mac({ dropPath: join(t.home, "Desktop", "Drop") });
+      assert.equal(await local.run("write", ...local.told, "--import", "full"), 1);
+      assert.deepEqual(local.said, [NEEDS_LIGHT]);
+      local.done();
+      t.done();
+    });
+    it("refuses a drop folder the faults refuse, and the two ways of naming one together", async () => {
+      const t = mac();
+      const before = t.held();
+      assert.equal(await t.run("write", ...t.told, "--drop-folder", join(t.home, "Downloads")), 1);
+      assert.deepEqual(t.said, ["Not written: the drop folder cannot be Downloads, or inside it, or hold it."]);
+      t.said.length = 0;
+      assert.equal(await t.run("write", ...t.told, "--drop-folder", t.desktop, "--drop", "Drop"), 1);
+      assert.deepEqual(t.said, ["Not written: name the drop folder by --drop-folder or by --drop, not both."]);
+      t.said.length = 0;
+      assert.equal(await t.run("write", ...t.told, "--switch-back"), 1);
+      assert.deepEqual(t.said, ['Not written: --switch-back goes with --drop Drop or --drop "Unedited Video".']);
+      assert.equal(t.held(), before);
+      t.done();
+    });
+    it("on a Mac with a drop folder of its own, --drop is refused without --switch-back, and takes dropPath away with it", async () => {
+      const t = mac({ drop: "Drop" });
+      mkdirSync(t.desktop, { recursive: true });
+      writeSettings(t.home, { dropPath: t.desktop });
+      const before = t.held();
+      for (const command of ["plan", "write"]) {
+        for (const drop of ["Drop", "Unedited Video"]) {
+          t.said.length = 0;
+          assert.equal(await t.run(command, ...t.told, "--drop", drop), 1, command);
+          assert.deepEqual(t.said, [`Not written: this Mac's drop folder is ${t.desktop}, on this Mac. To go back to a drop folder in Dropbox, give --switch-back as well.`]);
+          assert.equal(t.held(), before);
+        }
+      }
+      // While the picked folder holds a video, going back is refused.
+      writeFileSync(join(t.desktop, "Talk.mov"), "video");
+      t.said.length = 0;
+      assert.equal(await t.run("write", ...t.told, "--drop", "Drop", "--switch-back"), 1);
+      assert.equal(t.said[0], `Not written: the drop folder would change from ${t.desktop} to Drop, and work is not finished in the old one:`);
+      assert.equal(t.said[1], `  A video of 5 bytes: waits in ${t.desktop}.`);
+      assert.equal(t.held(), before);
+      rmSync(join(t.desktop, "Talk.mov"));
+      t.said.length = 0;
+      assert.equal(await t.run("write", ...t.told, "--drop", "Drop", "--switch-back"), 0, t.said.join("\n"));
+      const after = t.read();
+      assert.equal(Object.hasOwn(after, "dropPath"), false);
+      assert.equal(after.drop, "Drop");
+      t.done();
+    });
+    it("leaves a run with no drop option on a Mac with a drop folder of its own as it is, whatever the folder holds", async () => {
+      const t = mac();
+      mkdirSync(t.desktop, { recursive: true });
+      writeSettings(t.home, { dropPath: t.desktop });
+      writeFileSync(join(t.desktop, "Talk.mov"), "video");
+      assert.equal(await t.run("write", ...t.told), 0, t.said.join("\n"));
+      assert.equal(t.read().dropPath, t.desktop);
+      t.done();
+    });
+    it("plan says its lines after the JSON, in order, each optional line only when it applies", async () => {
+      const t = mac({ drop: "Drop" });
+      const old = t.folder("Drop");
+      assert.equal(await t.run("plan", ...t.told, "--drop-folder", t.desktop), 0, t.said.join("\n"));
+      assert.equal(JSON.parse(t.said[0]).dropPath, t.desktop);
+      assert.deepEqual(t.said.slice(1), [
+        "The import will be: light", "The drop folder is now: Drop", `The drop folder will be: ${t.desktop}`, `The exports folder will be: ${t.home}/Downloads`,
+        "The drop folder is in a cloud folder: iCloud Drive, if it keeps Desktop & Documents", "The drop folder needs Files and Folders access", `The old drop folder: ${old}`
+      ]);
+      // A drop folder in no cloud folder, not under Desktop or Documents: no cloud line and no access line.
+      t.said.length = 0;
+      const work = join(t.home, "BRIMM Video Work", "Drop");
+      assert.equal(await t.run("plan", ...t.told, "--drop-folder", work, "--exports-folder", join(t.home, "Desktop")), 0, t.said.join("\n"));
+      assert.deepEqual(t.said.slice(1), ["The import will be: light", "The drop folder is now: Drop", `The drop folder will be: ${work}`, `The exports folder will be: ${t.home}/Desktop`, `The old drop folder: ${old}`]);
+      // A Mac not switched says the four.
+      const plain = mac();
+      assert.equal(await plain.run("plan", ...plain.told), 0);
+      assert.deepEqual(plain.said.slice(1), ["The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Unedited Video", `The exports folder will be: ${plain.home}/Downloads`]);
+      plain.done();
+      t.done();
+    });
+    it("plan names a drop folder in Dropbox", async () => {
+      const t = mac();
+      const dropbox = join(t.home, "Library", "CloudStorage", "Dropbox-X", "The BRIMM DB", "In");
+      mkdirSync(dirname(dropbox), { recursive: true });
+      assert.equal(await t.run("plan", ...t.told, "--drop-folder", dropbox), 0, t.said.join("\n"));
+      assert.ok(t.said.includes("The drop folder is in a cloud folder: Dropbox"), t.said.join("\n"));
+      assert.ok(!t.said.includes("The drop folder needs Files and Folders access"));
+      t.done();
+    });
+  });
+
+  describe("set, show and mark", () => {
+    it("show says the drop folder as a path alone, and where the exports are looked for", async () => {
+      const t = mac();
+      writeSettings(t.home, { dropPath: t.desktop });
+      t.said.length = 0;
+      assert.equal(await t.run("show"), 0);
+      assert.ok(t.said.includes(`  Its drop folder:  ${t.home}/Desktop/Drop`), t.said.join("\n"));
+      assert.ok(t.said.includes(`  Exports from HyperFrames, looked for in:  ${t.home}/Downloads`));
+      writeSettings(t.home, { exportsPath: join(t.home, "Desktop") });
+      t.said.length = 0;
+      await t.run("show");
+      assert.ok(t.said.includes(`  Exports from HyperFrames, looked for in:  ${t.home}/Desktop`));
+      const plain = mac({ drop: "Drop" });
+      await plain.run("show");
+      assert.ok(plain.said.includes(`  Its drop folder:  ${plain.root}/Drop/Mac Studio`));
+      plain.done();
+      t.done();
+    });
+    it("set refuses --drop-folder on every Mac, and --drop on one with a drop folder of its own, with the installer's line and nothing written", async () => {
+      for (const local of [false, true]) {
+        const t = mac();
+        if (local) writeSettings(t.home, { dropPath: t.desktop });
+        const before = t.held();
+        for (const argv of [["--drop-folder", t.desktop], ...(local ? [["--drop", "Drop"]] : [])]) {
+          t.said.length = 0;
+          assert.equal(await t.run("set", ...argv), 1, argv.join(" "));
+          assert.equal(t.said.length, 1);
+          assert.match(t.said[0], /^The drop folder is switched by the installer, which makes the new folder, marks it and points the import at it, after it has checked the old one\. To see what it would do: \.\/install\.sh --print --machine "Mac Studio" /);
+          assert.equal(t.held(), before);
+        }
+        t.done();
+      }
+    });
+    it("set --exports-folder writes exportsPath", async () => {
+      const t = mac();
+      assert.equal(await t.run("set", "--exports-folder", join(t.home, "Desktop")), 0, t.said.join("\n"));
+      assert.deepEqual(t.said, [`The exports folder is now ${t.home}/Desktop (it was Downloads).`, `Written: ${t.file}`]);
+      assert.equal(t.read().exportsPath, join(t.home, "Desktop"));
+      t.said.length = 0;
+      assert.equal(await t.run("set", "--exports-folder", "Exports"), 1);
+      assert.deepEqual(t.said, ['Not changed: --exports-folder takes "<whole path>".']);
+      t.done();
+    });
+    it("marks a folder in a cloud folder by the rule, and any other plainly, whole and then renamed", async () => {
+      const t = mac();
+      const other = join(t.home, "BRIMM Video Work", "Drop");
+      const cloud = join(t.home, "Library", "CloudStorage", "Dropbox-X", "In");
+      mkdirSync(other, { recursive: true });
+      mkdirSync(cloud, { recursive: true });
+      assert.equal(await t.run("marker", other, "Mac Studio"), 0);
+      assert.deepEqual([t.clones, readFileSync(join(other, ".brimm-watched-by"), "utf8"), readdirSync(other)], [[], "Mac Studio\n", [".brimm-watched-by"]]);
+      assert.equal(await t.run("marker", other, "Mac Studio"), 0);
+      assert.deepEqual(t.clones, []);
+      assert.equal(await t.run("marker", cloud, "Mac Studio"), 0);
+      assert.deepEqual(t.clones, [join(cloud, ".brimm-watched-by")]);
+      // Another Mac's marker is still refused.
+      writeFileSync(join(other, ".brimm-watched-by"), "Sallie's laptop\n");
+      t.said.length = 0;
+      assert.equal(await t.run("marker", other, "Mac Studio"), 1);
+      assert.match(t.said[0], new RegExp(escaped("watched by Sallie's laptop already")));
+      t.done();
+    });
+    it("gives the facts of a Mac its drop folder, for the gated places", () => {
+      const s = { version: 1, machine: "Mac Studio", root: "/r", checkout: "/c", import: "light", dropPath: "/Users/s/Desktop/Drop" };
+      assert.equal(factsOf("/Users/s", s, { tmp: "/tmp", uid: 1 }).dropFolder, "/Users/s/Desktop/Drop");
+      assert.equal(factsOf("/Users/s", { ...s, dropPath: undefined }, { tmp: "/tmp", uid: 1 }).dropFolder, "/r/Unedited Video/Mac Studio");
+    });
   });
 });

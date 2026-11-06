@@ -14,7 +14,7 @@ import { linksOf } from "./finish.js";
 import { gatedAsOf, gatedName } from "./gate.js";
 import { unlabelled } from "./kinds.js";
 import { importState, readStatuses } from "./importing.js";
-import { dropFolder, importingFolder, pendingFolder, sameFolder } from "./settings.js";
+import { importingFolder, pendingFolder, sameFolder } from "./settings.js";
 
 /** The code of an error, as the only thing said of it: its message may hold a path, and a path may hold a client's file name. */
 const codeOf = (e) => (e && e.code) || "an error";
@@ -32,7 +32,7 @@ function namesIn(folder) {
   }
 }
 
-/** What the old drop folder `old` ("Unedited Video" or "Drop") of the Mac `machine`, in BRIMM Video at `root`, still holds that
+/** What the old drop folder `folder`, a whole path (a Mac's in BRIMM Video, or one picked on the Mac), of the Mac `machine`, in BRIMM Video at `root`, still holds that
     stops the switch, in plain words: { work, running, problem, imported, kept, unreadable, lateChecks }, each a list of lines,
     all [] when it holds nothing of the kind. `work` is a video in the folder (the marker, the files Finder keeps and the parts of a file still
     arriving are none), and an import of this Mac, in Episodes/.importing, that failed. `running` is a video that no episode holds
@@ -63,8 +63,7 @@ function namesIn(folder) {
     and two alike are both said; a failed, problem, owed or running one is counted, apart by whether its video is still in the
     old folder. Under today's import it is named by its video's file name. A status is never named by its own file's name; and
     what it says of why it failed is left out, as it may hold a file's name. */
-export function heldInOld({ root, machine, old, light, home, now = Date.now() }) {
-  const folder = dropFolder(root, machine, old);
+export function heldInOld({ root, machine, folder, light, home, now = Date.now() }) {
   // How a video the episode `holding` (holdingEpisode's) holds is named where edit.js would not name it by its file: "" when no
   // episode holds it, or edit.js would name it by its file. The versions of a video are read once, when first asked for.
   const namedAs = gatedAsOf(linksOf(root));

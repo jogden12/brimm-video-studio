@@ -15,7 +15,7 @@ import { isMedia } from "./lib.js";
 import { LATE_CHECK_MS, cloneIn, lateCheck, replaceIn, textWriter } from "./dropbox.js";
 import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, recordCopies, recordNumbers, writeEpisode, shownName } from "./episode.js";
 import { episodeFolderName, fileSafe, timelineFile } from "./names.js";
-import { dropFolder, episodeWork, episodesFolder, pendingFolder, runsFolder, seenFile } from "./settings.js";
+import { dropFolderOf, episodeWork, episodesFolder, pendingFolder, runsFolder, seenFile } from "./settings.js";
 // detached.js takes caffeinate and thisCheckout from here: each is used only when called, as kinds.js's are, so the cycle costs nothing at load.
 import { releaseEpisodeLock, takeEpisodeLock } from "./detached.js";
 import { holdsVideo, importState, leftByCrash, readStatuses, removeStatus, writeStatus } from "./importing.js";
@@ -28,9 +28,9 @@ import { gated, withShortId } from "./gate.js";
 const SHORT_UNDER = 90;
 
 /** Whether the import of the watched folder `dir` makes episodes: when this Mac has `settings` and `dir` is its own drop
-    folder, the one its `drop` setting names (Unedited Video when it names none). Otherwise the import does what it did before
+    folder: the one picked on this Mac (dropPath), else the one its `drop` setting names (Unedited Video when it names none). Otherwise the import does what it did before
     episodes, filing each video into a folder for the day. */
-export const episodeMode = (dir, settings) => Boolean(settings) && resolve(dir) === resolve(dropFolder(settings.root, settings.machine, settings.drop));
+export const episodeMode = (dir, settings, home) => Boolean(settings) && resolve(dir) === resolve(dropFolderOf(settings, home));
 
 /** What kind of episode a video makes, by its facts: a short video when its picture is upright or square, or it is shorter
     than 90 seconds, and an episode otherwise. A short video gets no upright version and no Reels. A recording of sound alone

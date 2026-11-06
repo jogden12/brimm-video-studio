@@ -4152,6 +4152,25 @@ describe("what the final review found in the episode import", () => {
     assert.deepEqual(readdirSync(drop), []);
     t.done();
   });
+  it("imports a drop folder this Mac picked as episodes, and still does nothing in Drop/<this Mac> that no settings name (Phase 3, L1)", async () => {
+    const t = episodic();
+    const picked = join(t.home, "Desktop", "Drop");
+    const old = join(t.root, "Drop", "Mac Studio");
+    mkdirSync(picked, { recursive: true });
+    mkdirSync(old, { recursive: true });
+    writeFileSync(join(picked, "Talk.mov"), "video");
+    writeFileSync(join(old, "Old.mov"), "video");
+    t.deps.settings = { ...t.deps.settings, import: "light", drop: "Drop", dropPath: picked };
+    assert.deepEqual(await uneditedFolder(old, t.deps), []);
+    assert.deepEqual([readdirSync(old), t.calls], [["Old.mov"], []]);
+    assert.deepEqual(t.logs, ["This is a drop folder for episodes (it is in BRIMM Video/Drop), and this Mac has no settings for episodes that name it, so nothing is done here. Jason runs install.sh --machine on this Mac."]);
+    t.logs.length = 0;
+    const [r] = await uneditedFolder(picked, t.deps);
+    assert.deepEqual([r.ok, r.folder], [true, "2026-10-13 Talk (Mac Studio)"]);
+    assert.deepEqual(t.folders(), ["2026-10-13 Talk (Mac Studio)"]);
+    assert.deepEqual(readdirSync(picked), []);
+    t.done();
+  });
 });
 
 describe("what the lead's review of PR 11 found in the import", () => {

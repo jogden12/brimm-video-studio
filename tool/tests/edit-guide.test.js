@@ -387,6 +387,25 @@ describe("guide opens a folder, the page, or a file's place in Finder", () => {
     assert.deepEqual(await on(broken, "guide", "drop"), { code: 1, said: ["Finder could not open your drop folder. Say it again. If it says this again, tell Jason."] });
     t.done();
   });
+  it("opens a drop folder this Mac picked, says it in Finder's words in the overview, and looks in that folder alone (Phase 3, L1)", async () => {
+    const t = setup();
+    const picked = join(t.home, "BRIMM Video Work", "Drop");
+    const own = () => ({ ...t.ctx.deps, settings: { ...t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 2, dropPath: picked } });
+    const WORDS = "BRIMM Video Work › Drop, in your home folder";
+    assert.deepEqual(await on(own(), "guide", "drop"), { code: 1, said: ["Your drop folder is not there: ask Jason."] });
+    mkdirSync(picked, { recursive: true });
+    assert.deepEqual(await on(own(), "guide", "drop"), { code: 0, said: [`Opened your drop folder in Finder: ${WORDS}.`] });
+    assert.deepEqual(t.opened, [["Finder", picked]]);
+    // A video in her laptop's folder in Dropbox is not looked for here; one in the picked folder is.
+    mkdirSync(join(t.root, "Drop", "Sallie's laptop"), { recursive: true });
+    writeFileSync(join(t.root, "Drop", "Sallie's laptop", "Theirs.mov"), "video");
+    assert.deepEqual((await on(own(), "guide")).said, [`Your drop folder: ${WORDS}`, "Nothing is under way. To start, put the video in your drop folder."]);
+    writeFileSync(join(picked, "Mine.mov"), "video");
+    const r = await on(own(), "guide");
+    assert.equal(r.said[0], `Your drop folder: ${WORDS}`);
+    assert.deepEqual(r.said.slice(2), ['  A video of 5 bytes: It is coming into your drop folder. Wait for the "Ready" notice.']);
+    t.done();
+  });
   it("opens Zoom Video Transfer, beside BRIMM Video, or says to ask Jason", async () => {
     const t = setup();
     assert.deepEqual(await on(light(t), "guide", "drop", "zoom"), { code: 1, said: ["Zoom Video Transfer is not on this Mac: ask Jason."] });

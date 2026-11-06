@@ -4,6 +4,7 @@
 // Everything here is pure: it reads and writes nothing, and edit.js gives it what it read.
 import { spokenMac } from "./kinds.js";
 import { aboutLeft } from "./progress.js";
+import { folderWords, isLocal } from "./settings.js";
 
 /** The BRIMM Ops page, which `guide page` opens in her browser. */
 export const OPS_PAGE = "https://claude.ai/artifact/GCUQPLnSFWZe3VghyaKNtX";
@@ -15,10 +16,13 @@ export const NOT_SET_UP = "This Mac isn't set up for the guide yet: ask Jason.";
 /** A folder as she finds it in Finder: each folder on the way to it, after the one it is in. */
 const finderWords = (...folders) => folders.join(" › ");
 
-/** This Mac's drop folder in Finder words, from the drop folder its settings name (settings.drop) and the Mac's name:
-    "Dropbox › The BRIMM DB › BRIMM Video › Drop › Sallie's laptop". On a Mac whose settings name none, it is still the old
-    folder, Unedited Video. */
-export const dropWords = (drop, machine) => finderWords("Dropbox", "The BRIMM DB", "BRIMM Video", drop || "Unedited Video", machine);
+/** This Mac's drop folder in Finder words, from its settings and the Mac's name: on a Mac with a drop folder of its own (settings.js
+    isLocal), the picked folder's words, "BRIMM Video Work › Drop, in your home folder" (`home` is that Mac's home folder); else, from
+    the drop folder its settings name (settings.drop), "Dropbox › The BRIMM DB › BRIMM Video › Drop › Sallie's laptop". On a Mac
+    whose settings name none, it is still the old folder, Unedited Video. */
+export const dropWords = (settings, machine, home) => (isLocal(settings)
+  ? folderWords(settings.dropPath, home)
+  : finderWords("Dropbox", "The BRIMM DB", "BRIMM Video", settings?.drop || "Unedited Video", machine));
 
 /** Where a Zoom download goes, in Finder words: Zoom Video Transfer, in BRIMM VIDEO Transfer, beside BRIMM Video. */
 export const ZOOM_WORDS = finderWords("Dropbox", "The BRIMM DB", "BRIMM VIDEO Transfer", "Zoom Video Transfer");

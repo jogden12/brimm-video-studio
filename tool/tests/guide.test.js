@@ -42,8 +42,11 @@ describe("the guide's constants and Finder words", () => {
   it("are the design's", () => {
     assert.equal(OPS_PAGE, "https://claude.ai/artifact/GCUQPLnSFWZe3VghyaKNtX");
     assert.equal(NOT_SET_UP, "This Mac isn't set up for the guide yet: ask Jason.");
-    assert.equal(dropWords("Drop", "Sallie's laptop"), "Dropbox › The BRIMM DB › BRIMM Video › Drop › Sallie's laptop");
-    assert.equal(dropWords(undefined, "Sallie's laptop"), "Dropbox › The BRIMM DB › BRIMM Video › Unedited Video › Sallie's laptop");
+    assert.equal(dropWords({ drop: "Drop" }, "Sallie's laptop", "/Users/s"), "Dropbox › The BRIMM DB › BRIMM Video › Drop › Sallie's laptop");
+    assert.equal(dropWords({}, "Sallie's laptop", "/Users/s"), "Dropbox › The BRIMM DB › BRIMM Video › Unedited Video › Sallie's laptop");
+    // A Mac with a drop folder of its own says it in Finder's words (Phase 3, L1).
+    assert.equal(dropWords({ drop: "Drop", dropPath: "/Users/s/BRIMM Video Work/Drop" }, "Mac Studio", "/Users/s"), "BRIMM Video Work › Drop, in your home folder");
+    assert.equal(dropWords({ dropPath: "/Users/s/Library/CloudStorage/Dropbox-X/The BRIMM DB/In" }, "Mac Studio", "/Users/s"), "Dropbox › The BRIMM DB › In");
     assert.equal(ZOOM_WORDS, "Dropbox › The BRIMM DB › BRIMM VIDEO Transfer › Zoom Video Transfer");
   });
 });

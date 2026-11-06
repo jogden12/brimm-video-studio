@@ -59,8 +59,9 @@ function dropboxRoot(root) {
 
 /** Every gated place of this Mac, by its real path: { path, readRules, kind, carve? }. `tmp` is Claude Code's temp folder
     (CLAUDE_CODE_TMPDIR, or /tmp, by its real path), `uid` this Mac user's id, and `zoomFolder` where Zoom keeps its recordings,
-    by default Documents/Zoom in the home folder. */
-export function gatedPlaces({ home, claudeHome = home, root, uid, tmp = "/private/tmp", zoomFolder = join(home, "Documents", "Zoom") }) {
+    by default Documents/Zoom in the home folder. `dropFolder`, when given, is this Mac's drop folder (settings.js dropFolderOf), which is
+    gated wherever it is: one a person picked can be anywhere. One inside BRIMM Video is held already, and adds no place. */
+export function gatedPlaces({ home, claudeHome = home, root, uid, tmp = "/private/tmp", zoomFolder = join(home, "Documents", "Zoom"), dropFolder }) {
   const AS = join(home, "Library", "Application Support");
   const claudeAS = join(claudeHome, "Library", "Application Support");
   const BV = realOf(root);
@@ -72,6 +73,7 @@ export function gatedPlaces({ home, claudeHome = home, root, uid, tmp = "/privat
     { path: BV, readRules: ["Drop", "Episodes", "Unedited Video"].map((name) => join(BV, name)), kind: "folder" },
     itself(join(dirname(BV), "BRIMM VIDEO Transfer")),
     itself(zoomFolder),
+    ...(dropFolder && !(realOf(dropFolder) === BV || realOf(dropFolder).startsWith(`${BV}/`)) ? [itself(dropFolder)] : []),
     itself(join(home, "Movies", "Final Cut Backups")),
     itself(join(home, "BRIMM Video Work")),
     itself(join(AS, "BRIMM Video")),

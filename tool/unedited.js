@@ -2137,7 +2137,8 @@ export async function uneditedFolder(dir, deps) {
   // The placeholders this run has read through, so that each is read once in the run.
   deps = { ...deps, broughtDown: deps.broughtDown || new Set() };
   const { settings } = deps;
-  const episodic = episodeMode(dir, settings);
+  const home = deps.home || studioHome();
+  const episodic = episodeMode(dir, settings, home);
   // A drop folder for episodes is never worked the old way, which renames the video into a folder for the day in Dropbox:
   // when this Mac's settings cannot be used for it, nothing is done there, and the log says why.
   const marker = join(dir, ".brimm-watched-by");
@@ -2152,7 +2153,6 @@ export async function uneditedFolder(dir, deps) {
   }
   // The lock of this Mac's drop folder is kept in BRIMM Video Work, so that a run started by hand and the launch agent's,
   // whose temp folders differ, share it.
-  const home = deps.home || studioHome();
   const lockDir = deps.lockDir || (episodic ? runsFolder(home) : undefined);
   if (lockDir) mkdirSync(lockDir, { recursive: true });
   const lock = lockFile(dir, lockDir);

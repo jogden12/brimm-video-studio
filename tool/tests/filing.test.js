@@ -47,6 +47,16 @@ describe("whether a watched folder is this Mac's drop folder", () => {
   });
 });
 
+describe("whether a watched folder is the drop folder this Mac picked (Phase 3, L1)", () => {
+  const local = { ...SETTINGS, import: "light", drop: "Drop", dropPath: "/Users/sallie/BRIMM Video Work/Drop" };
+  it("is the picked folder, however it is written, and no longer the one in BRIMM Video", () => {
+    assert.equal(episodeMode("/Users/sallie/BRIMM Video Work/Drop", local, "/Users/sallie"), true);
+    assert.equal(episodeMode("/Users/sallie/BRIMM Video Work/Drop/", local, "/Users/sallie"), true);
+    assert.equal(episodeMode(`${ROOT}/Drop/Mac Studio`, local, "/Users/sallie"), false);
+    assert.equal(episodeMode("/Users/sallie/BRIMM Video Work", local, "/Users/sallie"), false);
+  });
+});
+
 describe("the kind of episode a video makes", () => {
   const facts = (width, height, duration) => ({ width, height, duration });
   it("is an episode when its picture is wider than it is tall and it lasts 90 seconds or more", () => {
