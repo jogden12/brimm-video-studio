@@ -4,14 +4,19 @@
 // -35 dB for 0.3 s), the captions that lie in it are left out, and so are the words that start after the last caption kept.
 // Captions and words elsewhere in a recording are left to today's rules. lib.js is a copy and is not changed.
 import { statSync } from "node:fs";
-import { captionCount, captionsOf } from "./lib.js";
-import { captionTime, pauseArgs, pausesOf } from "./cuts.js";
+import { captionCount } from "./lib.js";
+import { pauseArgs, pausesOf } from "./cuts.js";
 
 /** How long the closing pause has to be, and how near the end of the recording its end has to lie (seconds). */
 const LONG_ENOUGH = 1;
 const AT_THE_END = 0.05;
 /** How much of a caption has to lie in the closing pause before it is taken for words nobody said. */
 const SHARE = 0.75;
+/** A caption this much in the pause or more is words nobody said whatever else is heard; between SHARE and this it is kept when a
+    sound starts for it (a pause ends up to SOUND_BEFORE seconds before it starts, or after), because the transcriber pads a
+    real last caption's end into the silence. */
+const WHOLLY = 0.99;
+const SOUND_BEFORE = 0.5;
 const CAPTION_TIMES = /(\d{1,2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[.,](\d{3})/;
 const secondsOf = (h, m, s, ms) => Number(h) * 3600 + Number(m) * 60 + Number(s) + Number(ms) / 1000;
 
@@ -26,10 +31,11 @@ export function closingPause(pauses, length = 0) {
 }
 
 /** The captions without the ones that lie in the closing pause: {srt, dropped, edge}. A caption with 75% or more of its time in
-    it is left out, and one with no length when its moment lies in it. The captions that are left are numbered again. `edge` is
-    the second the last caption kept ends, or null when nothing is to be done (no pause, no captions). With none left out the
-    captions come back as they were. */
-export function dropClosing(srt, pause) {
+    it is left out, unless it is not wholly in it (under 99%) and a sound starts for it: one of `pauses` (all of them, [start,
+    end]) ends from half a second before the caption starts to where the closing pause starts. A caption with no length is left
+    out when its moment lies in the pause. The captions that are left are numbered again. `edge` is the second the last caption
+    kept ends, and only when a caption was left out; otherwise null. With none left out the captions come back as they were. */
+export function dropClosing(srt, pause, pauses = []) {
   if (!pause || !captionCount(srt)) return { srt, dropped: 0, edge: null };
   const [from, to] = pause;
   const kept = [];
@@ -42,14 +48,16 @@ export function dropClosing(srt, pause) {
     const t = CAPTION_TIMES.exec(lines[at]);
     const start = secondsOf(t[1], t[2], t[3], t[4]);
     const end = secondsOf(t[5], t[6], t[7], t[8]);
-    const inside = end > start ? Math.max(0, Math.min(end, to) - Math.max(start, from)) / (end - start) >= SHARE : start >= from && start < to;
+    const share = end > start ? Math.max(0, Math.min(end, to) - Math.max(start, from)) / (end - start) : null;
+    const spoken = pauses.some(([, b]) => b >= start - SOUND_BEFORE && b < from);
+    const inside = share === null ? start >= from && start < to : share >= WHOLLY || (share >= SHARE && !spoken);
     if (inside) dropped += 1;
     else {
       kept.push(lines.slice(at).join("\n"));
       edge = Math.max(edge === null ? 0 : edge, end);
     }
   }
-  return { srt: dropped ? kept.map((caption, i) => `${i + 1}\n${caption}\n`).join("\n") : srt, dropped, edge };
+  return dropped ? { srt: kept.map((caption, i) => `${i + 1}\n${caption}\n`).join("\n"), dropped, edge } : { srt, dropped: 0, edge: null };
 }
 
 /** The words without the ones that start at or after `edge` (plus `shift`, for a file whose sound starts after its picture).
@@ -78,5 +86,6 @@ export async function closingCleaned(srt, wav, { run, tools }, length = wavSecon
     null when it could not be run. Nothing is changed when it did not end well. */
 export function closingFrom(srt, heard, length) {
   if (!heard || heard.code !== 0 || !captionCount(srt)) return { srt, dropped: 0, edge: null };
-  return dropClosing(srt, closingPause(pausesOf(heard.stderr), length));
+  const pauses = pausesOf(heard.stderr);
+  return dropClosing(srt, closingPause(pauses, length), pauses);
 }

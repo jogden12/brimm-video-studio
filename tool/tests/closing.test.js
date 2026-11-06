@@ -19,7 +19,7 @@ const LIVE = [
   cap(22, "00:01:17,000", "00:01:19,000", "See you next week."),
   cap(23, "00:01:19,000", "00:01:20,000", "See you next week.")
 ].join("\n");
-const LIVE_PAUSES = [[10, 11], [60, 61.5], [77.298, 84.167]];
+const LIVE_PAUSES = [[10, 11], [60, 61.5], [74.439, 74.766], [77.298, 84.167]];
 const w = (text, start, end) => ({ w: text, start, end });
 const LIVE_WORDS = [w("it", 76.3, 76.5), w("this", 76.76, 76.98), w("week?", 76.98, 76.98), w("See", 77, 77.3), w("you", 77.3, 77.3), w("next", 77.3, 77.3), w("week.", 77.3, 77.3), w("See", 79, 79.68), w("you", 79.68, 79.76), w("next", 79.76, 79.84), w("week.", 79.84, 79.84)];
 
@@ -45,7 +45,7 @@ describe("closingPause", () => {
 
 describe("dropClosing", () => {
   it("keeps caption 21 and leaves out 22 and 23 of the live recording", () => {
-    const r = dropClosing(LIVE, [77.298, 84.167]);
+    const r = dropClosing(LIVE, [77.298, 84.167], LIVE_PAUSES);
     assert.equal(r.dropped, 2);
     assert.deepEqual(captionsOf(r.srt).map((c) => c.text), ["and then what.", "would it take to make it this week?"]);
     assert.match(r.srt, /^1\n/);
@@ -53,10 +53,10 @@ describe("dropClosing", () => {
   });
   it("keeps a real short last caption that only begins in the pause", () => {
     const srt = [cap(1, "00:01:14,610", "00:01:17,000", "this week?"), cap(2, "00:01:17,000", "00:01:17,600", "Bye.")].join("\n");
-    const r = dropClosing(srt, [77.298, 84.167]);
+    const r = dropClosing(srt, [77.298, 84.167], LIVE_PAUSES);
     assert.equal(r.dropped, 0);
     assert.equal(r.srt, srt);
-    assert.equal(r.edge, 77.6);
+    assert.equal(r.edge, null);
   });
   it("takes a caption with 75% of its time in the pause and keeps one with less", () => {
     const srt = [cap(1, "00:00:50,000", "00:00:60,000", "talk"), cap(2, "00:01:00,000", "00:01:04,000", "three quarters")].join("\n");
@@ -69,6 +69,13 @@ describe("dropClosing", () => {
     assert.deepEqual(captionsOf(r.srt).map((c) => c.text), ["kept"]);
     assert.equal(r.dropped, 1);
   });
+  it("gives no edge when no caption was left out, so a real last word after the last caption is kept", () => {
+    const srt = cap(1, "00:01:14,610", "00:01:17,000", "this week?");
+    const r = dropClosing(srt, [77.298, 84.167], LIVE_PAUSES);
+    assert.equal(r.edge, null);
+    const words = [w("week?", 76.5, 76.9), w("Bye.", 77.1, 77.4)];
+    assert.deepEqual(withoutClosingWords(words, r.edge), words);
+  });
   it("changes nothing without a closing pause, or without captions", () => {
     assert.deepEqual(dropClosing(LIVE, null), { srt: LIVE, dropped: 0, edge: null });
     assert.deepEqual(dropClosing("", [77, 84]), { srt: "", dropped: 0, edge: null });
@@ -76,6 +83,20 @@ describe("dropClosing", () => {
   it("leaves captions elsewhere in the recording to today's rule", () => {
     const srt = [cap(1, "00:00:10,000", "00:00:12,000", "Thank you."), cap(2, "00:01:00,000", "00:01:05,000", "end")].join("\n");
     assert.equal(dropClosing(srt, [80, 84]).dropped, 0);
+  });
+});
+
+describe("dropClosing, by the sound", () => {
+  it("keeps a real short caption whose end the transcriber padded into the silence, when a sound starts for it", () => {
+    const srt = [cap(1, "00:01:10,000", "00:01:15,000", "talk"), cap(2, "00:01:17,000", "00:01:19,000", "Thanks.")].join("\n");
+    const r = dropClosing(srt, [77.2, 84.167], [[76, 76.9], [77.2, 84.167]]);
+    assert.equal(r.dropped, 0);
+    assert.equal(r.srt, srt);
+  });
+  it("takes the same caption when no sound starts for it, and one wholly in the pause either way", () => {
+    const srt = [cap(1, "00:01:10,000", "00:01:15,000", "talk"), cap(2, "00:01:17,000", "00:01:19,000", "Thanks."), cap(3, "00:01:19,000", "00:01:20,000", "Thanks.")].join("\n");
+    assert.equal(dropClosing(srt, [77.2, 84.167], [[70, 71], [77.2, 84.167]]).dropped, 2);
+    assert.equal(dropClosing(srt, [77.2, 84.167], [[76, 76.9], [77.2, 84.167]]).dropped, 1);
   });
 });
 
