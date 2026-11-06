@@ -13,9 +13,11 @@ import { localDay } from "./shared/text.js";
 import { createdOf, waitingToCut } from "./cuts.js";
 import { isMedia } from "./lib.js";
 import { LATE_CHECK_MS, cloneIn, lateCheck, replaceIn, textWriter } from "./dropbox.js";
-import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, recordCopies, writeEpisode, shownName } from "./episode.js";
+import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, recordCopies, recordNumbers, writeEpisode, shownName } from "./episode.js";
 import { episodeFolderName, fileSafe, timelineFile } from "./names.js";
-import { dropFolder, episodesFolder, pendingFolder, runsFolder, seenFile } from "./settings.js";
+import { dropFolder, episodeWork, episodesFolder, pendingFolder, runsFolder, seenFile } from "./settings.js";
+// detached.js takes caffeinate and thisCheckout from here: each is used only when called, as kinds.js's are, so the cycle costs nothing at load.
+import { releaseEpisodeLock, takeEpisodeLock } from "./detached.js";
 import { holdsVideo, importState, leftByCrash, readStatuses, removeStatus, writeStatus } from "./importing.js";
 import { isRunning } from "./run.js";
 // kinds.js takes episodeKind from here: each is used only when called, so neither needs the other to have been read first.
@@ -412,6 +414,53 @@ export const importIdOf = (id) => (id ? Number(id.ino).toString(36) : "");
 /** When a late check is due, in milliseconds. */
 export const dueAt = (pending) => pending.lastCopy + LATE_CHECK_MS;
 
+/** How long the wait for late checks waits before it looks again, when it put a check off because a reading held its lock (plan R1c). */
+export const LOCK_AGAIN_MS = 10 * 1000;
+
+/** The lock of an episode's late check, on this Mac's own disk: beside the episode's own lock, in its folder in BRIMM Video Work. The
+    import's check takes it for as long as it looks at the episode's files, and a reading takes it for as long as it puts its files in
+    and takes them out of the check (late-wait.js keepCheckInStep), so that the check never puts an older file back over the reading's.
+    `name` is the pending check's `name`, the episode's folder. */
+export const lateCheckLockOf = (home, name) => join(episodeWork(home, name), "late-check.lock");
+
+/** Take the late check's lock of the episode `name` for `command` ("late check" or "read"): { file, text } to give back to
+    `releaseLateCheckLock`, or null while a live run holds it, or another run is taking it over from a dead one. A lock a dead run left
+    is taken over (detached.js takeEpisodeLock). Throws when the folder or the lock cannot be made: that is an error of the check, as a
+    file that cannot be looked at is. */
+export function takeLateCheckLock(home, name, command, alive) {
+  mkdirSync(episodeWork(home, name), { recursive: true });
+  const file = lateCheckLockOf(home, name);
+  const took = takeEpisodeLock(file, command, alive);
+  return took.taken ? { file, text: took.text } : null;
+}
+
+/** Let a late check's lock go, when it is still the one `held` took (detached.js releaseEpisodeLock). */
+export const releaseLateCheckLock = (held) => releaseEpisodeLock(held.file, held.text);
+
+/** Settle the mark a reading left on a pending late check, under the check's lock (plan R1c): a reading that stopped while it put its
+    files in. `pending` is read fresh. With no mark it comes back as it is: { pending }. With one, the record in force says which files
+    are the reading's: an entry the mark names whose file the record lists at any other size than the entry's bytes is the reading's, and
+    is left out of the check; every other entry is kept (one the mark names that the record still lists at the entry's bytes too), so
+    the import's file is put back when the reading's put did not get as far as its record. The pending is written whole
+    without the mark. { later: true } when no record can be trusted to say (none that reads, one a newer brimm-video wrote, or a record
+    file above it still coming): nothing is written then, and the check waits for the next run. */
+export function settleReading(pending, { home, log = () => {} }) {
+  if (!pending.reading) return { pending };
+  const read = readEpisode(pending.folder);
+  if (!read.record || read.newer || (recordNumbers(pending.folder)[0] || 0) > read.record.rev) return { later: true };
+  const marked = new Set(Array.isArray(pending.reading.to) ? pending.reading.to : []);
+  const listed = read.record.files || {};
+  // An entry the mark names stays in the check only while the record still lists its file at the import's size: then the reading's put
+  // did not get as far as its record, and the import's file is to be put back. Any other size is the reading's own.
+  const stays = (e) => !marked.has(e.to) || listed[relative(pending.folder, e.to).split(sep).join("/")] === e.bytes;
+  const { reading, ...rest } = pending;
+  const next = { ...rest, entries: pending.entries.filter(stays) };
+  const left = pending.entries.length - next.entries.length;
+  writePending(home, next);
+  log(`${pending.label || pending.video}: a reading stopped while it put its files in. Its late check leaves out ${left} file${left === 1 ? "" : "s"} the record says ${left === 1 ? "is" : "are"} the reading's.`);
+  return { pending: next };
+}
+
 /** A time of day as a person reads it, "10:15". */
 export const clockTime = (ms) => new Date(ms).toTimeString().slice(0, 5);
 
@@ -601,14 +650,50 @@ export async function importEpisodes(dir, deps, importOne) {
     awake = true;
   };
   const mine = () => readPendings(episode.home).filter((p) => p.machine === episode.machine && resolve(p.root) === resolve(episode.root) && !checked.has(p.id));
+  // What a check that is put off, or cannot be settled, says in the log: once in a run for each.
+  const saidOnce = new Set();
+  const sayOnce = (key, line) => {
+    if (saidOnce.has(key)) return;
+    saidOnce.add(key);
+    log(line);
+  };
+  /** Make each late check that is due, under the lock of its episode's check (plan R1c): the lock a reading takes while it puts its
+      files in and takes them out of the check. A check whose lock a reading holds is put off, not skipped: it is made on a later look.
+      Under the lock the pending is read again, so that what a reading took out of it is out of the check, and the check is made of
+      that. Gives back how many checks it put off. */
   const finishDue = (problems) => {
+    let putOff = 0;
     for (const pending of mine()) {
-      if ((problems || !pending.problem) && clock() >= dueAt(pending)) {
-        wake();
+      if (!((problems || !pending.problem) && clock() >= dueAt(pending))) continue;
+      wake();
+      const who = pending.label || pending.video;
+      const held = takeLateCheckLock(episode.home, pending.name, "late check", deps.alive || isRunning);
+      if (!held) {
+        putOff += 1;
+        sayOnce(`off:${pending.id}`, `${who}: its late check waits a moment: a reading is putting its files in.`);
+        continue;
+      }
+      try {
+        // The pending as it is now: a reading may have taken files out of it, or the check may have been made meanwhile.
+        const fresh = readPendings(episode.home).find((p) => p.id === pending.id && p.machine === episode.machine && resolve(p.root) === resolve(episode.root));
+        if (!fresh) continue;
+        let now = fresh;
+        if (fresh.reading) {
+          const settled = settleReading(fresh, { home: episode.home, log: (line) => log(line) });
+          if (settled.later) {
+            checked.add(pending.id);
+            sayOnce(`later:${pending.id}`, `${who}: its late check waits for the next run: a reading stopped while it put its files in, and the episode's record cannot be read now.`);
+            continue;
+          }
+          now = settled.pending;
+        }
         checked.add(pending.id);
-        finishLate(pending, deps);
+        finishLate(now, deps);
+      } finally {
+        releaseLateCheckLock(held);
       }
     }
+    return putOff;
   };
   // Whether an import was stopped because its video was replaced meanwhile: the new file is then looked for at once.
   let changed = false;
@@ -702,6 +787,8 @@ export async function importEpisodes(dir, deps, importOne) {
     changed = false;
     await importWaiting(false);
   }
+  // When the drop folder was last looked in and the waiting statuses last written, by the clock.
+  let lastLook = clock();
   for (;;) {
     const open = mine().filter((p) => !p.problem);
     if (!open.length) {
@@ -725,8 +812,22 @@ export async function importEpisodes(dir, deps, importOne) {
         changed = false;
         await importWaiting(false);
       }
+      lastLook = clock();
     }
-    finishDue(false);
+    // A check put off because a reading holds its lock is looked at again in a moment: the loop never goes round with no wait. A long
+    // hold must not stop the rest: each LOOK_AGAIN_MS the waiting statuses are written again and the drop folder is looked in, as above.
+    if (finishDue(false)) {
+      await wait(LOCK_AGAIN_MS);
+      if (clock() - lastLook >= LOOK_AGAIN_MS) {
+        for (const pending of mine().filter((p) => !p.problem)) waitingStatus(pending, deps, "Waiting for its late check");
+        await importWaiting(false);
+        while (changed) {
+          changed = false;
+          await importWaiting(false);
+        }
+        lastLook = clock();
+      }
+    }
   }
   return results;
 }

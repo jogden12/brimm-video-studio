@@ -19,6 +19,7 @@ import { claudeDirName } from "../places.js";
 import { episodeWork } from "../settings.js";
 import { footageCopyPaths, workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 import { fileId, writePending } from "../filing.js";
+import { writeStatus } from "../importing.js";
 import { COPY_STEP } from "../guide.js";
 import { addRates, progressFolder } from "../progress.js";
 import { clockAt } from "../unedited.js";
@@ -387,9 +388,10 @@ describe("app: opening an episode in HyperFrames", () => {
       assert.equal(await run(e), 0);
       assert.deepEqual(e.said, [MADE(` It is ready about ${clockAt(AT + 260 * 1000)}, in about 4 minutes.`)]);
     });
-    it("says when Claude starts, and why, while Claude is still reading a raw video whose reading waits for the check", async (c) => {
+    it("says when Claude starts, and why, while Claude is still reading a raw video whose reading waits for the check: the other Mac's import is at work (R1c)", async (c) => {
       const e = episode(c);
       const { due } = owing(e);
+      writeStatus(e.ctx.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "z9", video: "Talk.mov", bytes: e.record.video.bytes, seconds: 2.6, step: "Importing", at: new Date(AT).toISOString() }, (to, text) => writeFileSync(to, text));
       mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
       assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), "read", () => true).taken, true);
       assert.equal(await run(e), 0);
@@ -398,10 +400,19 @@ describe("app: opening an episode in HyperFrames", () => {
       // With no copy yet the same is said, and the copy is asked for.
       const none = episode(c, { copy: false });
       owing(none);
+      writeStatus(none.ctx.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "z9", video: "Talk.mov", bytes: none.record.video.bytes, seconds: 2.6, step: "Importing", at: new Date(AT).toISOString() }, (to, text) => writeFileSync(to, text));
       mkdirSync(episodeWork(none.home, FOLDER), { recursive: true });
       assert.equal(takeEpisodeLock(lockOf(none.home, FOLDER), "read", () => true).taken, true);
       assert.equal(await run(none), 0);
       assert.match(none.said[0], /^Claude is still reading it\. It starts at \d\d:\d\d, when Dropbox has checked its copies\. Say /);
+    });
+    it("says Claude is still reading it, with no start time, while only this Mac's own late check is to come: the reading started at once (R1c)", async (c) => {
+      const e = episode(c);
+      owing(e);
+      mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), "read", () => true).taken, true);
+      assert.equal(await run(e), 0);
+      assert.deepEqual(e.said, ['Claude is still reading it. Say "open Pricing talk in HyperFrames" again when it has finished; "how far is it?" shows how far it has got.']);
     });
     it("says what it always said of a reading that does not wait for the check: an iPhone clip's", async (c) => {
       const e = episode(c, { record: { kind: "short video" } });

@@ -9,13 +9,13 @@
 // QuickTime Player and the notice are stand-ins.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { editMain, pickReels } from "../edit.js";
 import { episodeFault, isFromPlan, localStamp, newPlannedEpisode, recordFile, recordText } from "../episode.js";
 import { episodeWork, pendingFolder, writeSettings } from "../settings.js";
 import { readResult, resultFile } from "../detached.js";
-import { writePending } from "../filing.js";
+import { finishLate, lateCheckLockOf, readPendings, takeLateCheckLock, writePending } from "../filing.js";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, roughCaptions, keptSpans, roughCutArgs, streamsOf } from "../cuts.js";
 import { applyDecisions } from "../notes.js";
 import { graphicCuesAsk } from "../graphic-cues.js";
@@ -25,7 +25,7 @@ import { CLAUDE_MODEL, AGAIN_MS } from "../unedited.js";
 import { readReels, reelsFile, previewSteps, REELS_VERSION } from "../reels.js";
 import { READ_LOOK_MS, READ_HOLD_MS } from "../reading.js";
 import { LATE_CHECK_MS, lateCheck } from "../dropbox.js";
-import { writeStatus } from "../importing.js";
+import { removeStatus, writeStatus } from "../importing.js";
 import { READ_POLL_MS } from "../edit.js";
 import { sessionLabel } from "../kinds.js";
 import { TOLD, PAUSES, SRT, probed } from "./fixtures.js";
@@ -511,9 +511,10 @@ describe("read, a raw video", () => {
     assert.ok(result.failed.some((f) => /^The rough cut could not be made: ffmpeg stopped \(Conversion failed!\)\.$/.test(f)), result.failed.join(" | "));
     t.done();
   });
-  it("waits, asking and replacing nothing, while the import's late check still holds the video, and reads it once the check is made", async () => {
+  it("waits, asking and replacing nothing, while the other Mac's import of the video is at work (its late check is not this Mac's to keep in step), and reads it once the check is made", async () => {
     const { t, found, asks } = reading("raw");
     writePending(t.home, { version: 1, id: ID, name: FOLDER, folder: found.folder, video: VIDEO, bytes: 13, seconds: 23.423, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "Pricing talk.cut-plan.txt" });
+    elsewhereAtWork(t);
     const before = snapshot(found);
     let looks = 0;
     onWaits(t, READ_LOOK_MS, () => {
@@ -521,7 +522,7 @@ describe("read, a raw video", () => {
       assert.deepEqual(snapshot(found), before, `look ${looks}: nothing is replaced while the late check holds it`);
       assert.deepEqual(asks, [], `look ${looks}: Claude is not asked yet`);
       // The import makes its late check at the third look, and takes its pending check away.
-      if (looks === 3) rmSync(join(pendingFolder(t.home), `${ID}.json`));
+      if (looks === 3) checkMade(t);
     });
     const r = await on(t.ctx.deps, ...readArgs("raw"));
     assert.equal(r.code, 0, r.text);
@@ -545,10 +546,11 @@ describe("read, a raw video", () => {
   it("stops, asking nothing, when the record's kind changed while it waited for the late check", async () => {
     const { t, found, asks } = reading("raw");
     writePending(t.home, { version: 1, id: ID, name: FOLDER, folder: found.folder, video: VIDEO, bytes: 13, seconds: 23.423, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "Pricing talk.cut-plan.txt" });
+    elsewhereAtWork(t);
     onWaits(t, READ_LOOK_MS, () => {
       // She said it is finished after all, on this Mac, and the import made its late check.
       writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), rev: 2, kind: "finished" }));
-      rmSync(join(pendingFolder(t.home), `${ID}.json`), { force: true });
+      checkMade(t);
     });
     const r = await on(t.ctx.deps, ...readArgs("raw"));
     assert.equal(r.code, 1);
@@ -823,8 +825,14 @@ describe("the Reel suggestions of a video she has answered, which brimm-video ca
 
 /** A pending late check of this Mac's for the made-up episode, due 10 minutes from now, with `over` laid on it. */
 const pendingFor = (t, found, over = {}) => writePending(t.home, { version: 1, id: ID, name: FOLDER, folder: found.folder, video: VIDEO, bytes: 13, seconds: 23.423, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "Pricing talk.cut-plan.txt", ...over });
-/** The pending late check made, as the import makes it: taken away. */
-const checkMade = (t) => rmSync(join(pendingFolder(t.home), `${ID}.json`), { force: true });
+/** The other Mac's import of the made-up video, at work: a hold the late check of this Mac's own does not make the reading's to keep in
+    step (plan R1c), so the reading waits for it as it always did. */
+const elsewhereAtWork = (t) => writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 4242, import: "z9", video: VIDEO, bytes: 13, seconds: 23.423, step: "Importing", at: new Date(t.now()).toISOString() }, (to, text) => writeFileSync(to, text));
+/** The late check made, as the import makes it: the pending check taken away, and the status of an import at work with it. */
+const checkMade = (t) => {
+  rmSync(join(pendingFolder(t.home), `${ID}.json`), { force: true });
+  removeStatus(t.root, VIDEO, "Sallie's laptop", "z9");
+};
 /** What the record says once the other Mac took the video over and answered it a client or group session. */
 const sessionOver = (rev, by = "Sallie's laptop") => ({ rev, kind: "session", name: { text: sessionLabel("2026-10-14"), placeholder: false }, session: { marked: AT, on: by, teachings: null, cleared: null }, editing: { by, since: AT } });
 /** Claude Code as a stand-in whose call does `then(n)` on its nth call before it replies, and whose `auth status` does
@@ -920,6 +928,7 @@ describe("read reads the record again right before every call to Claude (fix 2, 
   it("and refuses a newer record Dropbox is still bringing over, while a raw reading waited for the late check", async () => {
     const { t, found, asks } = reading("raw");
     pendingFor(t, found);
+    elsewhereAtWork(t);
     onWaits(t, READ_LOOK_MS, () => {
       // The other Mac's session answer after a take-over: only the start of record 2 is here yet.
       writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), ...sessionOver(2) }).slice(0, 40));
@@ -946,13 +955,20 @@ describe("read reads the record again right before every call to Claude (fix 2, 
 });
 
 describe("read waits for the import's late check whenever it would replace a file that check looks at (fix 3)", () => {
-  it("a finished reading of a video the full import filed, whose reels.json the late check still watches", async () => {
-    const IMPORT_REELS = JSON.stringify(reelsFile({ video: VIDEO, by: "import", made: AT, candidates: [{ n: 1, start: 6.07, end: 21.097, ranges: [{ start: 6.07, end: 21.097, crop: { x: 0, y: 0, w: 405, h: 720, found: true } }], seconds: 15.027, fits: { fits: true }, title: "Know your costs", reason: "r", point: "", words: "", phrases: [], preview: null }] }), null, 2) + "\n";
-    const { t, found, asks } = reading("finished", { over: { version: 2, kind: "finished" }, files: { ...LIGHT_FILES, "reels.json": IMPORT_REELS } });
+  /** A finished video the full import filed, with its late check to come on this Mac: reels.json is an entry of the check. */
+  const fullImport = () => {
+    const IMPORT_REELS =JSON.stringify(reelsFile({ video: VIDEO, by: "import", made: AT, candidates: [{ n: 1, start: 6.07, end: 21.097, ranges: [{ start: 6.07, end: 21.097, crop: { x: 0, y: 0, w: 405, h: 720, found: true } }], seconds: 15.027, fits: { fits: true }, title: "Know your costs", reason: "r", point: "", words: "", phrases: [], preview: null }] }), null, 2) + "\n";
+    const world = reading("finished", { over: { version: 2, kind: "finished" }, files: { ...LIGHT_FILES, "reels.json": IMPORT_REELS } });
+    const { t, found } = world;
     const workCopy = join(t.work, "reels.json");
     writeFileSync(workCopy, IMPORT_REELS);
     const entries = [{ from: workCopy, to: join(found.folder, "reels.json"), bytes: Buffer.byteLength(IMPORT_REELS) }];
     pendingFor(t, found, { work: t.work, entries, lastCopy: t.now() - 60000 });
+    return { ...world, IMPORT_REELS, entries };
+  };
+  it("a finished reading of a video the full import filed waits, while the other Mac's import is at work, for the late check that still watches its reels.json", async () => {
+    const { t, found, asks, IMPORT_REELS, entries } = fullImport();
+    elsewhereAtWork(t);
     let looks = 0;
     onWaits(t, READ_LOOK_MS, () => {
       looks += 1;
@@ -970,6 +986,15 @@ describe("read waits for the import's late check whenever it would replace a fil
     const now = readFileSync(join(found.folder, "reels.json"), "utf8");
     assert.equal(JSON.parse(now).by, "read");
     assert.equal(reread(found).files["reels.json"], Buffer.byteLength(now));
+    t.done();
+  });
+  it("a finished reading of a video the full import filed reads at once while this Mac's own check is to come, and reels.json leaves the check", async () => {
+    const { t, found, asks } = fullImport();
+    const r = await on(t.ctx.deps, ...readArgs("finished"));
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual([asks.length, t.waits.includes(READ_LOOK_MS)], [1, false]);
+    assert.equal(JSON.parse(readFileSync(join(found.folder, "reels.json"), "utf8")).by, "read");
+    assert.deepEqual(readPendingsOf(t).entries, []);
     t.done();
   });
 });
@@ -1150,6 +1175,7 @@ describe("fix 10 and fix 11", () => {
   it("checks again, after the late check, that readings are on", async () => {
     const { t, found, asks } = reading("raw");
     pendingFor(t, found);
+    elsewhereAtWork(t);
     onWaits(t, READ_LOOK_MS, () => {
       writeSettings(t.home, { readings: false });
       checkMade(t);
@@ -1182,6 +1208,152 @@ describe("fix 10 and fix 11", () => {
     const r = await on(t.ctx.deps, ...readArgs("session"));
     assert.equal(r.code, 1);
     assert.deepEqual([asks.length, readResult(t.home, FOLDER, "read").failed], [0, [`${NAME} is no longer answered as a client or group session, so Claude did not read it. Nothing was changed.`]]);
+    t.done();
+  });
+});
+
+// --- Plan R1c: a raw reading starts at once when this Mac's own late check of the import is still to come, and takes the files it
+// replaces out of that check, under the lock the check also takes ---
+
+const mineAlive = (pid) => pid === process.pid;
+/** What the light import's late check names for the made-up episode: the video, its captions, its transcript, its words and the four
+    files a raw reading replaces, and its first record, each with a work copy in `t.work` as the import made it. Writes this Mac's
+    pending check (over: `over`), and gives back its entries. */
+function lightPending(t, found, over = {}) {
+  const names = [VIDEO, "Pricing talk.srt", "Pricing talk.transcript.txt", "Pricing talk.words.json", "Pricing talk.cut-plan.json", "Pricing talk.cut-plan.txt", "Pricing talk.rough-cut.srt", "Pricing talk.rough-cut.transcript.txt", "record/0001.json"];
+  const entries = names.map((rel) => {
+    const from = join(t.work, rel.replace("/", "~"));
+    writeFileSync(from, readFileSync(join(found.folder, rel)));
+    return { from, to: join(found.folder, rel), bytes: statSync(from).size };
+  });
+  pendingFor(t, found, { work: t.work, drop: join(t.work, "drop.mp4"), entries, ...over });
+  return entries;
+}
+const REPLACED_BY_RAW = ["Pricing talk.cut-plan.json", "Pricing talk.cut-plan.txt", "Pricing talk.rough-cut.srt", "Pricing talk.rough-cut.transcript.txt"];
+const readPendingsOf = (t) => readPendings(t.home).find((p) => p.id === ID);
+const lockOfCheck = (t) => lateCheckLockOf(t.home, FOLDER);
+
+describe("a raw reading starts at once while this Mac's own late check is to come (R1c)", () => {
+  it("16. reads at once, with no look at the import, and takes the files it replaced out of the check, which then passes and leaves the reading's files as they are", async () => {
+    const { t, found, asks } = reading("raw");
+    const entries = lightPending(t, found);
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 0, r.text);
+    assert.equal(asks.length, 1);
+    assert.ok(!t.waits.includes(READ_LOOK_MS), "no look at the import");
+    const pending = readPendingsOf(t);
+    assert.deepEqual(pending.entries, entries.filter((e) => !REPLACED_BY_RAW.some((n) => e.to.endsWith(n))));
+    assert.deepEqual(pending.entries.map((e) => basename(e.to)).sort(), ["0001.json", "Pricing talk.mp4", "Pricing talk.srt", "Pricing talk.transcript.txt", "Pricing talk.words.json"]);
+    assert.equal("reading" in pending, false);
+    assert.equal(existsSync(lockOfCheck(t)), false);
+    const reads = snapshot(found);
+    const done = finishLate(pending, { episode: { root: t.root, machine: "Mac Studio", home: t.home }, clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, log: () => {} });
+    assert.equal(done.ok, true, done.problems.join(" | "));
+    assert.deepEqual(snapshot(found), reads, "each file the reading put in is still the reading's, byte for byte");
+    t.done();
+  });
+  it("17. holds the late check's lock while it puts its files in", async () => {
+    const { t, found } = reading("raw");
+    lightPending(t, found);
+    t.ctx.deps.alive = mineAlive;
+    const clone = t.ctx.deps.clone;
+    const asked = [];
+    t.ctx.deps.clone = (from, to) => {
+      if (to.startsWith(found.folder) && !asked.length) asked.push(takeLateCheckLock(t.home, FOLDER, "late check", mineAlive));
+      clone(from, to);
+    };
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(asked, [null]);
+    t.done();
+  });
+  it("18. puts its files in as before, with no lock and no mark, when the import's check is made while Claude reads", async () => {
+    const { t, found, asks } = reading("raw");
+    lightPending(t, found);
+    claudeDoing(t, RAW_REPLY, asks, { then: () => checkMade(t) });
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 0, r.text);
+    assert.equal(reread(found).rev, 2);
+    assert.equal(readPendingsOf(t), undefined);
+    assert.equal(existsSync(lockOfCheck(t)), false);
+    t.done();
+  });
+  it("19. puts nothing in, and says the problem and the kept rough cut, when the import's check finds a problem while Claude reads", async () => {
+    const { t, found, asks } = reading("raw");
+    const entries = lightPending(t, found);
+    const PROBLEM = "Pricing talk.srt is not whole in Dropbox.";
+    claudeDoing(t, RAW_REPLY, asks, { then: () => pendingFor(t, found, { work: t.work, entries, problem: PROBLEM }) });
+    const before = snapshot(found);
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 1);
+    assert.deepEqual(snapshot(found), before);
+    const result = readResult(t.home, FOLDER, "read");
+    assert.deepEqual(result.failed, [
+      `The late check of this episode's import found a problem: ${PROBLEM} Once it is put right, say "try it again" for ${VIDEO} on Mac Studio, then say this again.`,
+      `The rough cut of ${NAME} is kept on this Mac, in BRIMM Video Work, as "${basename(renderOf(t))}".`
+    ]);
+    assert.equal(existsSync(lockOfCheck(t)), false);
+    assert.equal("reading" in readPendingsOf(t), false);
+    t.done();
+  });
+  it("20. leaves the import's check as it was when a put fails half-way", async () => {
+    const { t, found } = reading("raw");
+    const entries = lightPending(t, found);
+    const clone = t.ctx.deps.clone;
+    let n = 0;
+    t.ctx.deps.clone = (from, to) => {
+      if (to.startsWith(found.folder) && (n += 1) === 3) throw new Error("the disk said no");
+      clone(from, to);
+    };
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 1);
+    assert.equal(reread(found).rev, 1);
+    assert.deepEqual(readPendingsOf(t).entries, entries);
+    assert.equal("reading" in readPendingsOf(t), false);
+    assert.equal(existsSync(lockOfCheck(t)), false);
+    t.done();
+  });
+  it("22. says something went wrong, with the kept rough cut and the way to ask again, when the mark cannot be written; nothing is put in, no lock, no mark", async () => {
+    const { t, found } = reading("raw");
+    lightPending(t, found);
+    const before = snapshot(found);
+    const logs = [];
+    t.ctx.deps.log = (line) => logs.push(line);
+    chmodSync(pendingFolder(t.home), 0o555);
+    let r;
+    try {
+      r = await on(t.ctx.deps, ...readArgs("raw"));
+    } finally {
+      chmodSync(pendingFolder(t.home), 0o755);
+    }
+    assert.equal(r.code, 1);
+    assert.deepEqual(snapshot(found), before);
+    assert.deepEqual(readResult(t.home, FOLDER, "read").failed, [
+      `Something went wrong on this Mac before Claude's reading of ${NAME} could be put in, so nothing it read was put in.`,
+      `The rough cut of ${NAME} is kept on this Mac, in BRIMM Video Work, as "${basename(renderOf(t))}".`
+    ]);
+    assert.equal(readResult(t.home, FOLDER, "read").next, "Nothing was changed. Say what it is again, with --again, to have Claude read it.");
+    assert.equal(existsSync(lockOfCheck(t)), false);
+    assert.equal("reading" in readPendingsOf(t), false);
+    assert.ok(logs.some((l) => l.includes("EACCES")) || r.text.includes("EACCES"), "the code is in the log");
+    assert.ok(!JSON.stringify(readResult(t.home, FOLDER, "read")).includes("EACCES"));
+    t.done();
+  });
+  it("21. waits as today when a file is not as the import filed it, and reads once it is", async () => {
+    const { t, found, asks } = reading("raw");
+    lightPending(t, found);
+    const srt = join(found.folder, "Pricing talk.srt");
+    writeFileSync(srt, "short");
+    let looks = 0;
+    onWaits(t, READ_LOOK_MS, () => {
+      looks += 1;
+      assert.equal(asks.length, 0);
+      writeFileSync(srt, LIGHT_FILES["Pricing talk.srt"]);
+      checkMade(t);
+    });
+    const r = await on(t.ctx.deps, ...readArgs("raw"));
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual([looks, asks.length], [1, 1]);
     t.done();
   });
 });
