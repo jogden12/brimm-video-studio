@@ -49,7 +49,7 @@ BRIMM Ops takes Studio's hand-off file. These carry over exactly. Change any of 
 ## HyperFrames
 
 - Projects Studio makes live in `~/BRIMM Video Work`, never in Dropbox or a watched folder.
-- On the Mac Studio the app's own projects folder is `HyperFrames`, in `BRIMM Video`, in The BRIMM DB in Dropbox (Jason, 2026-11-05; set in `~/Library/Application Support/HyperFrames/projects-folder.json`, which has the full path). It is not a watched folder. Projects started in the app live there. The app's old folder, `~/.hyperframes-studio`, now holds only links to Studio's projects.
+- On the Mac Studio the app's own projects folder is `HyperFrames`, in `BRIMM Video`, in The BRIMM DB in Dropbox (Jason, 2026-11-05; set in `~/Library/Application Support/HyperFrames/projects-folder.json`, which has the full path). It is not a watched folder. Projects started in the app live there. When Studio opens one of its projects in the app, the app puts a link to it in that folder, and the project's files stay in `~/BRIMM Video Work`. The app's old folder, `~/.hyperframes-studio`, keeps the links it held before the change.
 - Telemetry is off.
 - Never `publish`, `cloud`, `lambda` or `cloudrun`.
 - Each project carries BRIMM's rules for the agent (`docs/phase-a0/brief.md`, `settings.json`).
