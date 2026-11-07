@@ -1479,6 +1479,8 @@ export async function app(ctx, rest) {
 
 /** How often `app --when-ready` looks at whether the video for HyperFrames is made, in milliseconds. */
 const WHEN_READY_LOOK_MS = 2000;
+/** How long before `app --when-ready` began a failed copy's end still counts as the answer to the request that started it, in milliseconds. */
+const WHEN_READY_JUST_BEFORE_MS = 15000;
 /** The notice posted when the video for HyperFrames of a video kept on this Mac could not be made, so that nothing opened by itself. */
 const couldntBeMade = (name) => `The video for HyperFrames of ${name} couldn't be made. Say "open ${name} in HyperFrames" to try again; if it says this again, ask Jason.`;
 
@@ -1526,7 +1528,9 @@ async function appWhenReady(ctx, rest) {
       busyWith = runningCommand(ctx.home, found.name, ctx.alive);
       if (copying) seen = true;
       const ended = readResult(ctx.home, found.name, WORK_COPY_COMMAND);
-      const decided = seen || copyIsMade(ctx, ownRecord() ?? { found, record: found.read.record }) || (ended && ended.early !== true && ended.ended >= began);
+      // A copy that failed at once may have ended just before this run began (the copy is asked for a moment before this run is started): that result is the answer too.
+      const justEnded = ended && ended.early !== true && ended.ok === false && ended.ended >= began - WHEN_READY_JUST_BEFORE_MS;
+      const decided = seen || copyIsMade(ctx, ownRecord() ?? { found, record: found.read.record }) || (ended && ended.early !== true && ended.ended >= began) || Boolean(justEnded);
       if (!copying && !busyWith && decided) break;
       if (ctx.now() - began >= limit) break;
       await wait(WHEN_READY_LOOK_MS);

@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CLAIM_WAIT_MS, editMain } from "../edit.js";
-import { lockOf, readResult, takeEpisodeLock } from "../detached.js";
+import { lockOf, readResult, resultFile, takeEpisodeLock } from "../detached.js";
 import { whenReadyLockOf } from "../app.js";
 // The buttons line is said in her chat when HyperFrames is to open by itself: the detached run that opens it speaks to the log alone (B0-F8).
 const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
@@ -182,6 +182,16 @@ describe("app --when-ready", () => {
     await run(t);
     assert.equal(freed.code, 0, freed.text);
     assert.doesNotMatch(freed.text, /running|being made|isn't|not /i);
+    t.done();
+  });
+  it("B0-F27 a copy that failed and ended just before this run began is taken as decided at once, not waited for the copy's whole limit", async () => {
+    const { t } = kept();
+    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+    writeFileSync(resultFile(t.home, FOLDER, "workcopy"), JSON.stringify({ version: 1, command: "workcopy", started: t.now() - 3000, ended: t.now() - 1000, ok: false, made: [], failed: ["no room"], next: "" }));
+    const r = await run(t);
+    assert.equal(r.code, 1);
+    assert.ok(t.waits.length < 5, `${t.waits.length} waits`);
+    assert.equal(t.notices.length, 1);
     t.done();
   });
   it("started just after the copy was asked for, it waits for the copy's run to be seen rather than posting the notice at once", async () => {
