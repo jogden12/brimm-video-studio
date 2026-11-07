@@ -31,7 +31,7 @@
 // one file given on the command line, are imported the same way, and name the video by its file.
 // What Claude is still asked from here: askClaude and askAgain (Reel candidates, asked for in her chat) and the readings (reading.js).
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
@@ -45,7 +45,7 @@ import { notesRequest, readNotes, clipRanges, pausesOfPlan } from "./notes.js";
 import { stillsArgs } from "./reframe.js";
 import { reelCandidates, reelsFile, readReels, mergeCandidates, REELS_FILE } from "./reel-candidates.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
-import { isWhole, readThrough, textWriter, replaceIn, LATE_CHECK_MS } from "./dropbox.js";
+import { isWhole, readThrough, textWriter, replaceIn, sameBytes, startsAlike, LATE_CHECK_MS } from "./dropbox.js";
 import { episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, statusWriteFolder, statusReadFolders, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
 import { readSettings, runsFolder, episodeWork, episodesFolder, importingFolder, importingFolderOf, statusFoldersOf, isLocal, episodeFilesFolder } from "./settings.js";
 import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf } from "./episode.js";
@@ -862,37 +862,6 @@ export async function importInto(file, into, deps) {
 const SAME_LENGTH = 0.1;
 
 export const sameVideo = (a, b) => a.width === b.width && a.height === b.height && a.fps === b.fps && Math.abs(a.duration - b.duration) <= SAME_LENGTH;
-
-/** Whether the first `length` bytes of the files at `a` and `b` are the same, read a megabyte at a time. False when either
-    cannot be read. */
-function startsAlike(a, b, length) {
-  let fa;
-  let fb;
-  try {
-    fa = openSync(a, "r");
-    fb = openSync(b, "r");
-    const size = 1024 * 1024;
-    const ba = Buffer.alloc(size);
-    const bb = Buffer.alloc(size);
-    for (let at = 0; at < length; at += size) {
-      const n = Math.min(size, length - at);
-      if (readSync(fa, ba, 0, n, at) !== n || readSync(fb, bb, 0, n, at) !== n || !ba.subarray(0, n).equals(bb.subarray(0, n))) return false;
-    }
-    return true;
-  } catch (e) {
-    return false;
-  } finally {
-    if (fa !== undefined) closeSync(fa);
-    if (fb !== undefined) closeSync(fb);
-  }
-}
-
-/** Whether the files at `a` and `b` hold the same bytes. */
-function sameBytes(a, b) {
-  const sa = statSync(a, { throwIfNoEntry: false });
-  const sb = statSync(b, { throwIfNoEntry: false });
-  return Boolean(sa && sb) && sa.size === sb.size && startsAlike(a, b, sa.size);
-}
 
 /** Put the files made again of an episode's video into its folder, by the rule: each made whole in the run's folder `work`,
     the one before deleted, the new one cloned in (replaceIn), never moved. Then the episode's record is written again, with

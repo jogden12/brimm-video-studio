@@ -415,3 +415,50 @@ describe("reading a file through, so that Dropbox brings it down", () => {
     }
   });
 });
+
+describe("textWriter's onCopy, and sameBytes (L5)", () => {
+  it("D1: onCopy is called with the whole work copy, before it is put in", () => {
+    const s = setup();
+    try {
+      let seen = null;
+      const write = textWriter({ work: s.work, ...s.opts, onCopy: ({ from, to }) => { seen = { text: readFileSync(from, "utf8"), there: existsSync(to) }; } });
+      const got = write(join(s.dest, "r.json"), "TEXT");
+      assert.deepEqual(seen, { text: "TEXT", there: false });
+      assert.equal(readFileSync(join(s.dest, "r.json"), "utf8"), "TEXT");
+      assert.equal(got.bytes, 4);
+    } finally {
+      s.done();
+    }
+  });
+
+  it("D2: a throw from onCopy puts nothing in, and is thrown on", () => {
+    const s = setup();
+    try {
+      const boom = new Error("boom");
+      const hook = () => { throw boom; };
+      assert.throws(() => textWriter({ work: s.work, ...s.opts, onCopy: hook })(join(s.dest, "r.json"), "T"), (e) => e === boom);
+      assert.equal(existsSync(join(s.dest, "r.json")), false);
+      assert.deepEqual(readdirSync(s.work), []);
+      assert.throws(() => textWriter({ work: s.work, keep: true, ...s.opts, onCopy: hook })(join(s.dest, "r.json"), "T"), (e) => e === boom);
+      assert.equal(readdirSync(s.work).length, 1);
+    } finally {
+      s.done();
+    }
+  });
+
+  it("D3: sameBytes and startsAlike are dropbox.js's", async () => {
+    const dropbox = await import("../dropbox.js");
+    const s = setup();
+    try {
+      writeFileSync(join(s.dest, "a"), "hello world");
+      writeFileSync(join(s.dest, "b"), "hello world");
+      writeFileSync(join(s.dest, "c"), "hello worle");
+      assert.equal(dropbox.sameBytes(join(s.dest, "a"), join(s.dest, "b")), true);
+      assert.equal(dropbox.sameBytes(join(s.dest, "a"), join(s.dest, "c")), false);
+      assert.equal(dropbox.sameBytes(join(s.dest, "a"), join(s.dest, "none")), false);
+      assert.equal(dropbox.startsAlike(join(s.dest, "a"), join(s.dest, "c"), 10), true);
+    } finally {
+      s.done();
+    }
+  });
+});
