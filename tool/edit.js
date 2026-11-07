@@ -121,7 +121,7 @@ import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
-import { ON_OTHER_MAC, fileAt, filePlace, folderAt, onOtherMac } from "./where.js";
+import { ON_OTHER_MAC, fileAt, filePlace, folderAt, onOtherMac, roleOf } from "./where.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -1177,13 +1177,6 @@ function offlineStep(ctx, found) {
 
 /** What fileProblems and filesProblems are given to look for a record's own files where they are (episode.js): this Mac, and the folder of its own files here. */
 const lookedFor = (ctx, found, record) => ({ machine: ctx.machine, localFolder: folderAt(ctx, { folder: found.folder, record }, "local") });
-
-/** What a file of an episode's own, kept on this Mac, is called in what is said of it: by its role, never by its path. */
-function roleOf(file) {
-  const roles = [[/\.(mov|mp4|m4v)$/i, "recording"], [/\.rough-cut\.srt$/, "rough cut's captions"], [/\.srt$/, "captions"], [/\.transcript\.txt$/, "transcript"], [/\.words\.json$/, "words"], [/\.cut-plan\.json$/, "cut plan"], [/\.edit-notes\.txt$/, "notes"], [/^reels\.json$|\.reel-suggestions\.txt$/, "Reel suggestions"], [/\.principles\.json$/, "teachings"]];
-  const found = roles.find(([pattern]) => pattern.test(file));
-  return found ? found[1] : "file";
-}
 
 /** What is wrong with an episode's files, in the words of the Mac that says it: `dropbox`, the lines for a file in Dropbox (filesProblems), and
     `mac`, the lines for a file kept on this Mac that is not whole in its video/ folder: "<name>'s <role> is not whole on this Mac. Ask Jason." */
@@ -2876,7 +2869,7 @@ async function resolveIn(ctx, found, keep) {
     // Sides that keep the episode's files in different places (Phase 3, L4): keeping either leaves the other's files behind. So when either side lists a
     // file kept on a Mac it is for Jason. A plan lists none of its own (its three files are in Dropbox): keeping either side is allowed, and the side kept
     // says which Mac it is filmed on, unless a part of it is kept on another Mac than that one, whose footage would then be left behind.
-    const placeOf = (r) => JSON.stringify(r.local ?? null);
+    const placeOf = (r) => (r.local && typeof r.local.on === "string" ? r.local.on : null);
     const listsLocal = (r) => Object.keys(r.files || {}).some((rel) => filePlace(r, rel) === "local");
     if (placeOf(record) !== placeOf(copyRecord)) {
       const kept = keep === "B" ? copyRecord : record;

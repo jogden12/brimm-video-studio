@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { editMain } from "../edit.js";
 import { episodeFilesFolder, episodeWork, writeSettings } from "../settings.js";
 import { READ_LOOK_MS } from "../reading.js";
+import { noWords } from "../app.js";
 import { RAW, world } from "./workcopy-world.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { writePending } from "../filing.js";
@@ -69,6 +70,13 @@ describe("the waits of an episode kept on this Mac", () => {
     const old = episodeFor(setup(), { record: { ...WAITING, kind: "raw" } });
     t.done();
     assert.ok(old);
+  });
+});
+
+describe("noWords, for an episode kept on this Mac", () => {
+  it("does not blame Dropbox: its words are not whole on this Mac, and Jason is to be asked", () => {
+    assert.equal(noWords("Pricing talk", true), "Pricing talk's words are not whole on this Mac. Ask Jason.");
+    assert.match(noWords("Pricing talk"), /Dropbox may still be bringing them/);
   });
 });
 

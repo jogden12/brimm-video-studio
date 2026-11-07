@@ -17,7 +17,7 @@ import { episodeFilesFolder, runsFolder } from "./settings.js";
     own; each file it replaces is renamed into video/history/<moment> <name>; each new file is renamed into place; the record is written with `expectRev`,
     listing the files put in at their sizes; the journal is removed. A file it is given under history/ (a reading's own set-aside) is written into
     video/history/ and never listed. A refused record write renames each replaced file back and removes the new ones, and gives { put: false, why }.
-    A journal a stopped run left is undone first, unless the record it was making was written (the record's rev is above the journal's), when only the
+    A journal a stopped run left is undone first, unless the record it was making was written (the record lists the files it put in, at their sizes), when only the
     journal is removed. Resolves { put: true, record } or { put: false, why }. */
 export function putHereNow(found, files, opts = {}) {
   const { home = studioHome(), writer, work, clone, sameDisk, change = (record) => record, log = () => {}, killed = () => {} } = opts;
@@ -36,7 +36,11 @@ export function putHereNow(found, files, opts = {}) {
     }
     if (left && Array.isArray(left.entries)) {
       const at = readEpisode(folder);
-      if (!(at.record && at.record.rev > left.rev)) undoPut(own, left.entries);
+      // The record was written when it lists every file the stopped put meant to list at the size it put in, not merely when its rev is above the journal's:
+      // a title or a spelling written in between raises the rev and lists none of them.
+      const listed = left.entries.filter((e) => !e.rel.startsWith("history/"));
+      const written = Boolean(at.record) && at.record.rev > left.rev && listed.length > 0 && listed.every((e) => at.record.files && at.record.files[e.rel] === e.bytes);
+      if (!written) undoPut(own, left.entries);
     }
     rmSync(journal, { force: true });
   }
@@ -46,12 +50,12 @@ export function putHereNow(found, files, opts = {}) {
   if (before.newer) return { put: false, why: "the episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac" };
   const gone = undone(before.record, home);
   if (gone) return { put: false, why: gone.replace(/\.$/, "") };
-  if (expectRev !== undefined && before.record.rev > expectRev) return { put: false, why: "this episode changed on the other Mac meanwhile. Say it again" };
+  if (expectRev !== undefined && before.record.rev > expectRev) return { put: false, why: "this episode changed meanwhile. Say it again" };
   if (expectRev !== undefined && before.record.rev !== expectRev) return { put: false, why: "the episode changed while this was made. Say it again" };
   const moment = localStamp(new Date(opts.now !== undefined ? opts.now : Date.now())).replace(/:/g, "-");
   // What each file becomes: a name of its own to be written under, and where what it replaces is set aside.
   const taken = new Set();
-  const entries = files.map(({ rel }) => {
+  const entries = files.map(({ rel, from }) => {
     const dir = dirname(rel);
     const tmp = join(dir === "." ? "" : dir, `.${basename(rel)}.${process.pid}.put`);
     let was = null;
@@ -65,7 +69,7 @@ export function putHereNow(found, files, opts = {}) {
       taken.add(aside);
       was = aside;
     }
-    return { rel, tmp, was };
+    return { rel, tmp, was, bytes: statSync(from).size };
   });
   const sizes = {};
   writeFileSync(`${journal}.${process.pid}.writing`, JSON.stringify({ rev: before.record.rev, entries }) + "\n");

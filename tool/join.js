@@ -29,7 +29,7 @@ import { copyIn } from "./guide.js";
 import { waitFacts } from "./late-wait.js";
 import { progressFolder, readRates } from "./progress.js";
 import { requestWorkCopy, workCopyLimits } from "./workcopy.js";
-import { fileAt, keptOnAMac } from "./where.js";
+import { ON_OTHER_MAC, fileAt, keptOnAMac, onOtherMac, roleOf } from "./where.js";
 
 export { isFromPlan };
 
@@ -404,8 +404,14 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
   try {
     mkdirSync(work, { recursive: true });
     const bring = deps.readAll || readThrough;
-    /** Make a file of a part whole on this Mac (Dropbox may show only a placeholder), or say why not: "" when it is here. */
-    const hereWhy = async (part, path) => {
+    /** Make a file of a part whole on this Mac (Dropbox may show only a placeholder), or say why not: "" when it is here. A part kept on another Mac is that
+        Mac's, and one kept on this Mac that is not whole in its video/ is for Jason: neither is Dropbox's to bring (Phase 3, L4). */
+    const hereWhy = async (part, path, rel) => {
+      if (keptOnAMac(part.record)) {
+        const away = onOtherMac(ctx, part.record);
+        if (away) return ON_OTHER_MAC(labelOf(part), away);
+        return ctx.isWhole(path) ? "" : `${labelOf(part)}'s ${roleOf(rel)} is not whole on this Mac. Ask Jason.`;
+      }
       if (!ctx.isWhole(path)) {
         try {
           await bring(path);
@@ -459,7 +465,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
     const printeds = [];
     for (const [i, part] of chosen.entries()) {
       const video = fileAt(ctx, part, part.record.video.file);
-      const why = await hereWhy(part, video);
+      const why = await hereWhy(part, video, part.record.video.file);
       if (why) return stop(why);
       // The video is the one that came in: a plan made its video can never be joined again, so a file Dropbox is still changing makes no video (the final review, fix 3).
       if (differs(video, part.record.video?.bytes)) return stop(changedWords(part));
@@ -516,7 +522,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       // The files its light import filed beside it: the part's record lists them.
       const rels = Object.keys(part.record.files).filter((rel) => rel !== part.record.video.file && !rel.startsWith("record/"));
       for (const rel of rels) {
-        const why = await hereWhy(part, fileAt(ctx, part, rel));
+        const why = await hereWhy(part, fileAt(ctx, part, rel), rel);
         if (why) return stop(why);
         if (differs(fileAt(ctx, part, rel), part.record.files[rel])) return stop(changedWords(part));
       }

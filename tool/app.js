@@ -66,7 +66,7 @@ import { teleprompterText } from "./sentences.js";
 import { studioFolder } from "./studio.js";
 import { clockAt } from "./unedited.js";
 import { requestWorkCopy, voiceCopyPaths, workCopyKey, workCopyLockOf, workCopyPaths } from "./workcopy.js";
-import { fileAt } from "./where.js";
+import { fileAt, keptOnAMac } from "./where.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -83,7 +83,7 @@ export const KEPT = "kept for an earlier kind";
 
 /** What she is told, in words that hold no path, no flag and no command name. The three exported ones are said of a Reel's project in
     the same words (app-reel.js, plan PR 5); the other two, which tell her what to say again, have a Reel's own there. */
-export const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Dropbox may still be bringing them: say it again in a few minutes. If it says this again, tell Jason.`;
+export const noWords = (name, local = false) => local ? `${name}'s words are not whole on this Mac. Ask Jason.` : `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Dropbox may still be bringing them: say it again in a few minutes. If it says this again, tell Jason.`;
 const beingMade = (name, ready = "") => `The video for HyperFrames is being made.${ready} Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
 /** When the video for HyperFrames will be ready, as a clock time and in minutes, for the line that says it is being made: from the speed
     this Mac measured of making one (guide.js copyIn, which the guide's "It usually takes" is made of) and the recording's length, as
@@ -464,7 +464,7 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   }
   const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(fileOf(ctx, found, `${stem}.words.json`));
   if (!words) {
-    ctx.say(noWords(record.name.text));
+    ctx.say(noWords(record.name.text, keptOnAMac(record)));
     return { code: 1 };
   }
   const raw = statSync(fileOf(ctx, found, record.video.file));

@@ -141,6 +141,29 @@ describe("putHere", () => {
     for (const [rel, bytes] of Object.entries(record.files)) assert.equal(statSync(join(w.own, rel)).size, bytes, rel);
     w.done();
   });
+  it("a stopped put is judged by the sizes the record lists, not by its rev: a title written in between does not make the files it never listed stay", async () => {
+    const w = world();
+    const before = w.inVideo();
+    class Killed extends Error {}
+    await assert.rejects(putHere(w.found(), [w.made("IMG_0042.cut-plan.json", "the new plan, a longer one")], w.opts({ killed: (at) => {
+      if (at === "renamed") throw new Killed("killed");
+    } })), Killed);
+    // A title write lands: the next record, listing the files as they were.
+    const record = readEpisode(w.folder).record;
+    writeFileSync(recordFile(w.folder, 2), recordText({ ...record, rev: 2, name: { text: "A title", placeholder: false } }));
+    const r = await putHere(w.found(), [w.made("IMG_0042.srt", "other words")], w.opts({ expectRev: 2 }));
+    assert.equal(r.put, true);
+    assert.equal(w.inVideo()["IMG_0042.cut-plan.json"], before["IMG_0042.cut-plan.json"]);
+    w.done();
+  });
+  it("says it changed meanwhile, never that the other Mac changed it", async () => {
+    const w = world();
+    const r = await putHere(w.found(), [w.made("IMG_0042.notes.txt", "notes")], w.opts({ expectRev: 0 }));
+    assert.equal(r.put, false);
+    assert.doesNotMatch(r.why, /other Mac/);
+    assert.match(r.why, /changed meanwhile/);
+    w.done();
+  });
   it("a put stopped after its record is written leaves its files: the next put removes the journal only", async () => {
     const w = world();
     class Killed extends Error {}

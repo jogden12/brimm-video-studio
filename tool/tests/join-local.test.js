@@ -5,11 +5,12 @@
 // Nothing here runs a real program: ffprobe and ffmpeg are stand-ins, and each test has a folder of its own.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { editMain } from "../edit.js";
 import { episodeFault, isFromPlan, isPlannedRecord, layoutOf, newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
 import { readPendings } from "../filing.js";
+import { readResult } from "../detached.js";
 import { episodeFilesFolder } from "../settings.js";
 import { fileSafe } from "../names.js";
 import { localDay } from "../shared/text.js";
@@ -81,7 +82,7 @@ const LIGHT = (stem, words) => ({
   [`${stem}.rough-cut.transcript.txt`]: "[0:00] words\n"
 });
 /** A talking part dropped on this Mac: its own episode, its files in its own video/ folder, its record kept here. */
-function part(t, n, { words, local = true } = {}) {
+function part(t, n, { words, local = true, on = "Mac Studio" } = {}) {
   const stem = `Take ${n}`;
   const name = `2026-11-04 Drop ${n} (Mac Studio)`;
   const folder = join(t.root, "Episodes", name);
@@ -98,7 +99,7 @@ function part(t, n, { words, local = true } = {}) {
     files: sizes, label: `Video of 4 Nov, 0${n}:00 (Mac Studio)`, fingerprint: `fp${n}`, answer: { state: "needs your answer", guess: "raw", seen: "wide, 1:00, no retakes", came: "camera", match: null }
   });
   const next = {
-    ...made, rev: 2, ...(local ? { local: { on: "Mac Studio" } } : {}),
+    ...made, rev: 2, ...(local ? { local: { on } } : {}),
     answer: { ...made.answer, state: "part", by: "Mac Studio", on: "Mac Studio", at: `2026-11-04T09:3${n}:00-05:00`, private: "no" },
     partOf: { id: `e-${day(t).replaceAll("-", "")}-400000`, as: "talking", shot: null, client: false }
   };
@@ -166,11 +167,36 @@ describe("the join of a plan kept on this Mac", () => {
     await planned(t);
     const a = part(t, 1, { words: SCRIPT[0].split(" ") });
     const b = part(t, 2, { words: SCRIPT[1].split(" ") });
+    // A real look at the disk, not a stub that says everything is whole: the copy is asked for only if the joined video is in the plan's video/.
+    t.studio.isWhole = (path) => existsSync(path);
     assert.equal((await joinRun(t, [a.record.id, b.record.id])).code, 0);
+    const own = episodeFilesFolder(t.home, FOLDER(t));
+    assert.ok(existsSync(join(own, "Too many SKUs.mov")));
+    assert.ok(!existsSync(join(folderOf(t), "Too many SKUs.mov")), "nothing of the video is in Dropbox");
     const started = t.started.map(([, args]) => args.slice(1).join(" "));
     assert.ok(started.some((s) => s.startsWith(`read --now ${FOLDER(t)}`)), started.join(" | "));
     assert.ok(started.some((s) => s === `workcopy --now ${FOLDER(t)}`), started.join(" | "));
     t.done();
+  });
+  it("says a part's file missing from its video/ in the plain local line, and a part kept on another Mac in that Mac's line, never Dropbox", async () => {
+    const t = world();
+    await planned(t);
+    const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+    rmSync(join(one.own, "Take 1.mov"));
+    t.studio.isWhole = (path) => existsSync(path);
+    await joinRun(t, [one.record.id]);
+    const failed = readResult(t.home, FOLDER(t), "join").failed.join(" ");
+    assert.match(failed, /Video of 4 Nov, 01:00 \(Mac Studio\)'s recording is not whole on this Mac\. Ask Jason\./);
+    assert.doesNotMatch(failed, /Dropbox/);
+    t.done();
+    const u = world();
+    await planned(u);
+    const away = part(u, 1, { words: SCRIPT[0].split(" "), on: "Jason's MacBook" });
+    await joinRun(u, [away.record.id]);
+    const said = readResult(u.home, FOLDER(u), "join").failed.join(" ");
+    assert.match(said, /is on Jason's MacBook: carry on there\. Nothing was changed\./);
+    assert.doesNotMatch(said, /Dropbox/);
+    u.done();
   });
   it("a plan whose footage began before the switch has no local and is joined the old way: into Dropbox, with a late check", async () => {
     const t = world();

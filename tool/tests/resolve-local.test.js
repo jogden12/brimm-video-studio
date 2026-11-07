@@ -104,6 +104,16 @@ describe("resolve, a record whose sides keep the files in different places", () 
     assert.equal(readEpisode(folder).record.name.text, "Test B");
     t.done();
   });
+  it("keeps a side when both are on one Mac and only one has the recording's original noted (local.original)", async () => {
+    const t = setup();
+    const folder = conflict(t, { a: STUDIO, b: STUDIO });
+    const copy = join(folder, COPY);
+    const b = JSON.parse(readFileSync(copy, "utf8"));
+    writeFileSync(copy, recordText({ ...b, local: { on: STUDIO, original: { file: "IMG_0042.mov", bytes: 13, mtimeMs: 1 } } }));
+    const r = await keep(t.ctx.deps, "A");
+    assert.equal(r.code, 0, r.text);
+    t.done();
+  });
   it("keeps a side as before when neither keeps its files on a Mac", async () => {
     const t = setup();
     const folder = conflict(t, { a: null, b: null });

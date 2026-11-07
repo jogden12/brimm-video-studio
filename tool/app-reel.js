@@ -59,7 +59,7 @@ import {
   openProjectInApp, plainName, readListed, readWords, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, wordsIn, wordsOfText
 } from "./app.js";
 import { reelCopyKey, reelCopyPaths, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
-import { fileAt } from "./where.js";
+import { fileAt, keptOnAMac } from "./where.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -222,7 +222,7 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   }
   const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(fileOf(ctx, found, `${stem}.words.json`));
   if (!words) {
-    ctx.say(noWords(name));
+    ctx.say(noWords(name, keptOnAMac(record)));
     return { code: 1 };
   }
   if (wait === "reading") {
