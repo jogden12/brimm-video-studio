@@ -1282,6 +1282,22 @@ describe("onMac and voiceSeconds, the small words of a HeyGen explainer's projec
 });
 
 describe("app, for a planned HeyGen explainer: its project, with no media (PR H6)", () => {
+  it("says nothing of where to export, though this Mac picked an exports folder: her step there is the voice, and there is nothing to export yet (L1b fix 3)", async () => {
+    const t = world();
+    await explainer(t, { voice: "heygen" });
+    writeSettings(t.home, { exportsPath: join(t.home, "Movies", "Exports") });
+    const r = await on(depsOf(t), "app", TITLE);
+    assert.deepEqual([r.code, r.said], [0, ["It's open in HyperFrames.", BUTTONS_SAID]]);
+    // Opened again before its voice is done, the same.
+    const again = await on(depsOf(t), "app", TITLE);
+    assert.deepEqual([again.code, again.said], [0, ["It's open in HyperFrames.", BUTTONS_SAID]]);
+    // Once its voice is taken in it is a video to export, and its project's open says where.
+    voiceMade(t);
+    assert.equal((await on(depsOf(t), "join", "--now", nameOf(t), "--voice")).code, 0);
+    const made = await on(depsOf(t), "app", TITLE);
+    assert.deepEqual([made.code, made.said], [0, ["It's open in HyperFrames.", BUTTONS_SAID, "Export it on This Mac, into Movies › Exports, in your home folder."]]);
+    t.done();
+  });
   it("makes an upright project from the package, with no media, opens it, and writes it into the plan in one write", async () => {
     const t = world();
     await explainer(t, { voice: "heygen" });

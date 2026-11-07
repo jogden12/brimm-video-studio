@@ -212,9 +212,10 @@ export function factsOf(home, s, { tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp
     "light" in the import setting, and no setting, is not set up for them: the import itself is light all the same. */
 export const lightImport = (s) => s?.import === "light";
 /** Whether this Mac names a video waiting in a drop folder, an episode whose record cannot be read, and what an error nobody foresaw
-    says, as the light import's rules have it, never by a file's or a folder's own name, which may be a client's: a Mac whose file says
-    the light import, and a Mac with a drop folder of its own whatever its file says (every import is light since Phase 2, and since
-    Phase 3's L1b a drop folder of a Mac's own no longer needs the file to say so). Whether her chat is set up stays lightImport's. */
+    says, as the light import's rules have it, never by a file's or a folder's own name, which may be a client's, and refuses every
+    command for an episode while a record above the one read is still coming (edit.js gateOf): a Mac whose file says the light import,
+    and a Mac with a drop folder of its own whatever its file says (every import is light since Phase 2, and since Phase 3's L1b a drop
+    folder of a Mac's own no longer needs the file to say so). Whether her chat is set up stays lightImport's. */
 export const namesQuietly = (s) => lightImport(s) || isLocal(s);
 
 /** Whether Claude may read what is taught in a client or group session on this Mac: only when Jason has turned the teachings on
@@ -338,12 +339,12 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
                                [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the
-                               teachings from sessions, shown as (not shown), and then the import it will be, the drop
-                               folder as it is now and as it will be, and, when the folder watched changes, the old one's
-                               whole path, a line each, or why it would refuse it. The exports folder it will be, whether the
-                               drop folder is in a cloud folder (and which), and whether macOS asks once about reading it
-                               come before the old folder's line, each only when it applies. Nothing is written. install.sh
-                               asks this before it changes anything
+                               teachings from sessions, shown as (not shown), and then the import it will be (always light),
+                               the drop folder as it is now and as it will be, and the exports folder it will be, a line
+                               each; then, each only when it applies, whether the drop folder is in a cloud folder (and
+                               which) and whether macOS asks once about reading it; and, when the folder watched changes, the
+                               old one's whole path; or why it would refuse it. Nothing is written. install.sh asks this
+                               before it changes anything
   node settings.js set [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--exports-folder "<whole path>"] [--app hyperframes|off] [--app-handover on|off]
                                change the settings of the switch to the light import, and say what changed. Any other
                                setting is kept. It does not change the drop folder: it is switched by the installer, which

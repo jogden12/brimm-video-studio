@@ -1606,17 +1606,28 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const said = (lines) => `printf '%s\\n' ${lines.map((l) => `'${l}'`).join(" ")}\n`;
     const answers = (lines) => `if [ "$2" = plan ]; then ${said(lines)}exit 0; fi\nexec "${process.execPath}" "$@"\n`;
     const cannot = (lines) => ["The installer could not read what settings.js said of the import and the drop folder, so it changed nothing. It said:", ...lines, "", "Nothing was changed.", ""].join("\n");
+    // Each case between the first and the last is what settings.js says whole but for the one fault named above it, so that each is
+    // refused for its own: a case with a second fault would stay refused were the installer's check of the first taken out.
     for (const lines of [
       ["{", '  "version": 1', "}"],
+      // A drop folder that is not Drop, Unedited Video or a whole path.
       ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Elsewhere", "The exports folder will be: /x/Downloads"],
+      // No line for the exports folder.
       ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
+      // The full import, which is gone (Phase 2, F4).
       ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads"],
+      // An exports folder that is not a whole path.
       ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: Downloads"],
-      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads", "The old drop folder: /x/old", "The drop folder needs Files and Folders access"],
+      // The old drop folder's line before the Files and Folders line. The drop folder is a whole path, which may need that access.
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: /x/Drop", "The exports folder will be: /x/Downloads", "The old drop folder: /x/old", "The drop folder needs Files and Folders access"],
+      // A cloud folder said of the drop folder Drop, in BRIMM Video, which is no folder of this Mac's own.
       ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads", "The drop folder is in a cloud folder: Dropbox"],
-      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder will be: Drop", "The drop folder is now: Unedited Video"],
-      ["{", '  "version": 1', "}", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
-      ["{", '  "version": 1', "}", "The import will be: heavy", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
+      // The drop folder as it will be before the one it is now.
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder will be: Drop", "The drop folder is now: Unedited Video", "The exports folder will be: /x/Downloads"],
+      // No line for the import.
+      ["{", '  "version": 1', "}", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads"],
+      // An import that is neither light nor full.
+      ["{", '  "version": 1', "}", "The import will be: heavy", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads"],
       ["nothing of the kind"]
     ]) {
       const r = askWith({ onPath: { node: answers(lines) } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);

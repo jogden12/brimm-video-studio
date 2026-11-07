@@ -240,16 +240,14 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         this Mac picked, or where the export's own record says it went), and ask what it
                                         must; it stops, and says so, when this Mac will not let it look in either folder.
                                         --final says an export is the final one though the project changed after it. With
-                                        --yes and nothing left to
-                                        ask, it transcribes the finished videos again, copies them into final/ and
-                                        writes the hand-off for BRIMM Ops, detached. It says when the hand-off will
-                                        be ready, and returns once the run has begun (at most five seconds; it says
-                                        so if none does). An iPhone clip she answered that was not opened in
-                                        HyperFrames is asked about once; --as-it-is writes its hand-off from the
-                                        import's captions. For a main video taken from an export it reads the words on
-                                        its picture out of the HyperFrames
-                                        project and asks if they are right (a --yes takes them only after a call has shown
-                                        them), and a raw video's hand-off also holds the Reel
+                                        --yes and nothing left to ask, it transcribes the finished videos again, copies them
+                                        into final/ and writes the hand-off for BRIMM Ops, detached. It says when the
+                                        hand-off will be ready, and returns once the run has begun (at most five seconds; it
+                                        says so if none does). An iPhone clip she answered that was not opened in
+                                        HyperFrames is asked about once; --as-it-is writes its hand-off from the import's
+                                        captions. For a main video taken from an export it reads the words on its picture
+                                        out of the HyperFrames project and asks if they are right (a --yes takes them only
+                                        after a call has shown them), and a raw video's hand-off also holds the Reel
                                         suggestions that fall in it. --on-screen gives those words, once for each line in
                                         the order they appear, when she changes or drops one, and --no-on-screen says there
                                         are none. A Reel's title, when it has none, is asked with the Reel's first line
@@ -449,8 +447,9 @@ const recordShaped = (r) => typeof r.id === "string" && Number.isInteger(r.versi
     - A record of a layout newer than this code is refused for every command that names an episode, in the words episodeFor has
       always used for it, with `newer: true`, so that episodeFor ends the command with the code that command gives such a record.
     - A record file numbered above the one read, which Dropbox is still bringing over or this code rejects, may be a video corrected
-      to a session or not answered: on a Mac that does the light import, or when the record read is of the switch's layout (3), it
-      refuses every command. With today's settings and records it is passed over, as it always was.
+      to a session or not answered: on a Mac that does the light import, or that has a drop folder of its own whatever its file says
+      of the import (settings.js namesQuietly), or when the record read is of the switch's layout (3), it refuses every command.
+      With today's settings and records it is passed over, as it always was.
     - A conflicted episode is refused when any one of its records is, so that a copy not answered, or a session's, is not got round
       by the record in force. A copy that is not shaped as a record (recordShaped) is not asked.
     - A video held as a session (`e.held`: one of its other versions is a session not cleared) runs only what gate.js heldGateFor
@@ -459,7 +458,7 @@ function gateOf(ctx, e, records, said, inForce) {
   if (!ctx.asked || UNSCOPED.includes(ctx.asked.command)) return null;
   const refused = (why, more = {}) => ({ why, name: e.name, folder: e.folder, gate: true, ...more });
   if (e.read.newer) return refused(newerWhy(e.read.record), { newer: true });
-  if (inForce && (lightImport(ctx.settings) || ofTheSwitch(inForce)) && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
+  if (inForce && (namesQuietly(ctx.settings) || ofTheSwitch(inForce)) && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
   const on = teachingsOn(ctx.settings, ctx.now());
   const lapsed = teachingsLapsed(ctx.settings, ctx.now());
   for (const record of records.filter(recordShaped)) {
@@ -5926,7 +5925,8 @@ function guideSession(ctx, e, r) {
     read once for the pass). A gated video is named as `episodes` names it (listedAs: by its label and short id), and is found
     only by its label, its id or short id, and the name it is listed by (gatedName, of gatedRecord); never by its folder or a name
     given to it, which may be its file's. Any other is named by its name and short id, and found by its folder's name too. `downloads` is
-    the pass's one listing of Downloads (exports.js downloadsOnce, made by guideItems): the videos that look in it for an export are given it.
+    the pass's one listing of Downloads, and its `exports` that of the exports folder this Mac picked (exports.js downloadsOnce, made by
+    guideItems): the videos that look in them for an export are given it.
     `footageIn` is the pass's one look at the parts of the plans (footage.js partsReader, made by guideItems): a plan is given its parts by it.
     A planned episode (PR H4) has no video, no reading and no project to look at: it is named by its title and short id, found by those
     and by its folder, and its one fact is `planned`, { route, voice }, which gives it the guide's stage `film`. */

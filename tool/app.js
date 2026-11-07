@@ -118,8 +118,9 @@ const STAYS = {
   "no chat": "This chat could not be found, so it stays here."
 };
 const STAYS_OTHERWISE = "This video's chat stays here.";
-/** The line said whenever the app opened, last but for where to export when this Mac picked an exports folder that is not Downloads
-    (openOnly) (architecture 3.3 and 5.9): the app's own buttons, which Studio cannot turn off, and what
+/** The line said whenever the app opened (openOnly), last but for where to export, which openProjectInApp says after it for the main
+    video's project and a Reel's when this Mac picked an exports folder that is not Downloads, and never for a HeyGen explainer's opened
+    for its voice (architecture 3.3 and 5.9): the app's own buttons, which Studio cannot turn off, and what
     is allowed with them: Share for invited people only, and exports on This Mac, though the Export dialog may start on Cloud. It
     ends with a warning and blocks nothing (Jason, 2026-11-04): The BRIMM doesn't use AI avatars or an AI Sallie, her face or her
     voice, for now. It holds no path, no flag and no name of a command. */
@@ -670,8 +671,8 @@ function placeFootage(ctx, { found, dir, kit, record }, { rename }) {
     (nextMain), "main 2" after the first, and the kept one keeps its folder, its name and its entry in the record.
     What it says when the app opened is the command line's own words in hers, one line more about her chat when a handover was
     wanted and not made, then the line about the buttons Studio cannot control (BUTTONS), and last, when this Mac picked an exports
-    folder that is not Downloads, where to export: "Export it on This Mac, into <the folder in Finder's words>." (openOnly); when
-    the app did not open it says the reason alone.
+    folder that is not Downloads, where to export: "Export it on This Mac, into <the folder in Finder's words>." (openProjectInApp);
+    when the app did not open it says the reason alone.
     The record that is saved holds the project in `app.projects`, with a time in `opened` only if the app opened, and `handover`
     true if the command line says it took her chat, whatever was asked of it.
     `deps` is all that is touched beyond the episode's own files, and each one but `save` has a default:
@@ -735,10 +736,9 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
 /** Ask the app to open the project in `dir`, and say what came of it in her words, without writing any record (PR H6: the open half of
     openProjectInApp, which a HeyGen explainer's project is opened by too, before its voice is taken in, when its record is a plan's: explainer.js
     openVoiceProject). Resolves what the command line printed, as hyperframes.js readOpen reads it: { opened, handedOver, words }. What it says is the
-    command line's own words in hers (readOpen), one line more about her chat when a handover was wanted and not made, then, whenever the app
-    opened, the line about the buttons Studio cannot control (BUTTONS), and after it, when this Mac picked an exports folder that is not Downloads
-    (settings.js exportsWords), where to export: "Export it on This Mac, into <the folder in Finder's words>." (Phase 3, L1b).
-    `record` is the episode's record, which says whether her chat may be handed over
+    command line's own words in hers (readOpen), one line more about her chat when a handover was wanted and not made, and last, whenever the app
+    opened, the line about the buttons Studio cannot control (BUTTONS). Where to export is said after it by openProjectInApp alone: a HeyGen
+    explainer's project opens for its voice, with nothing to export yet. `record` is the episode's record, which says whether her chat may be handed over
     (hyperframes.js handoverAllowed). `deps` are `cli`, `spawn`, `env`, `node` and `chat` as openInApp has them; the chat is asked only when this Mac's
     setting wants the handover. */
 export function openOnly(ctx, { record, dir }, { cli, spawn = spawnSync, env = process.env, node = process.execPath, chat: given }) {
@@ -760,12 +760,7 @@ export function openOnly(ctx, { record, dir }, { cli, spawn = spawnSync, env = p
   if (wanted && read.opened && !read.handedOver) ctx.say(Object.hasOwn(STAYS, handover.why) ? STAYS[handover.why] : STAYS_OTHERWISE);
   // The buttons Studio cannot control are named whenever the app opened, after the opening and whatever is said of her chat. The app
   // is open whether or not the record can be written, so the reminder does not wait for it.
-  if (read.opened) {
-    ctx.say(BUTTONS);
-    // Where to export, when this Mac picked an exports folder that is not Downloads (Phase 3, L1b), in Finder's words.
-    const into = exportsWords(ctx.settings, home);
-    if (into) ctx.say(`Export it on This Mac, into ${into}.`);
-  }
+  if (read.opened) ctx.say(BUTTONS);
   return read;
 }
 
@@ -779,14 +774,22 @@ export function openOnly(ctx, { record, dir }, { cli, spawn = spawnSync, env = p
     picked in the same write); it is given it whole and gives it back. `restored` is what the record keeps of the working copy that
     was put back into the project's folder a moment before (putVideoBack), when one was: the project's entry gets it.
     What it says is the command line's own words in hers (readOpen), one line more about her chat when a handover was wanted and not
-    made, then the line about the buttons Studio cannot control (BUTTONS), which is said whenever the app opened, and after it, when
-    this Mac picked an exports folder that is not Downloads, where to export (openOnly). The record gets
+    made, then the line about the buttons Studio cannot control (BUTTONS), which is said whenever the app opened (openOnly), and after
+    it, when this Mac picked an exports folder that is not Downloads (settings.js exportsWords), where to export: "Export it on This
+    Mac, into <the folder in Finder's words>." (Phase 3, L1b). The record gets
     the time of the open only if the app opened, `handover` true if the command line says it took her chat, and the state moved
     from made to opened and never back.
     `deps` are the `save` that writes the record (resolves 0 when it has), the pinned command line's program `cli`, and `spawn`,
     `env`, `node` and `chat` as openInApp has them. The chat is asked only when this Mac's setting wants the handover. */
 export async function openProjectInApp(ctx, { record, project, dir, projects, keeps, at = localStamp(new Date(ctx.now())), also = (next) => next, restored = null }, { save, cli, spawn = spawnSync, env = process.env, node = process.execPath, chat: given }) {
   const read = openOnly(ctx, { record, dir }, { cli, spawn, env, node, chat: given });
+  // Where to export, in Finder's words, when this Mac picked an exports folder that is not Downloads (Phase 3, L1b): said for the main
+  // video's project and a Reel's, which are exported from the app, and not by openOnly, which a HeyGen explainer's project opens by too
+  // before its voice is made. Like the buttons line, it does not wait for the record.
+  if (read.opened) {
+    const into = exportsWords(ctx.settings, ctx.home);
+    if (into) ctx.say(`Export it on This Mac, into ${into}.`);
+  }
 
   // A time is added only if the app opened; a chat once handed over stays recorded as handed over; a later state is not moved back.
   const updated = {
