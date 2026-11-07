@@ -52,6 +52,7 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
   const calls = [];
   const waits = [];
   const notices = [];
+  const kicks = [];
   let clock = Date.parse("2026-10-20T15:00:00-05:00");
   // A clone never writes over a file: the rule deletes one first (replaceIn). This stand-in refuses, so a test fails if
   // anything is ever written in place. And it keeps the file's times, as cp -c (clonefile) does.
@@ -105,7 +106,7 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     openApp: (app, file) => opened.push([app, file]), start: (cmd, args) => started.push([cmd, args]),
     alive: () => false, isWhole: () => true, clone, sameDisk: () => true, commit: "c709b57", keepAwake: () => {},
     // No test asks launchctl whether this Mac's launch agent is at work: it is not, unless a test says it is.
-    agentRunning: () => false,
+    agentRunning: () => false, kickstart: () => kicks.push("kickstart"),
     // No test posts a notice on the Mac's screen (unedited.js banner runs osascript): the notices a run posts are written down.
     notify: (text) => notices.push(text),
     // No test waits for the process `finish … --yes` starts: the stand-in for it starts nothing, so there is no lock to wait for. A test of
@@ -124,7 +125,7 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     }
   });
   return {
-    dir, root, home, work, ctx, opened, started, clones, calls, waits, notices,
+    dir, root, home, work, ctx, opened, started, clones, calls, waits, notices, kicks,
     said: () => said.join("\n"),
     now: () => clock,
     /** A video the app exported into Downloads, `ms` after the clock's start. */

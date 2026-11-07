@@ -6,7 +6,7 @@
 // them, and they are read as they were. Nothing in Dropbox is renamed, moved or written into (dropbox.js). The raw video stays in the drop
 // folder, and the run's folder stays, until the late check.
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { localDay } from "./shared/text.js";
@@ -586,15 +586,57 @@ export function clearCrashes({ statusFolders, machine, now = Date.now(), alive =
     video's label, which its banner names it by. `problem` is there once a late check found a file still wrong. */
 const pendingFile = (home, id) => join(pendingFolder(home), `${id}.json`);
 
-/** Keep a late check still to be made, written whole on this Mac's own disk, under another name and then renamed. */
+/** The kinds of pending a Mac keeps besides the import's own (no `kind`): each in a folder of its own under pending/. `record` is a
+    local import's first record, `final` a finish's copies in final/ (one per revision), `original` L6's. */
+export const PENDING_KINDS = ["record", "final", "original"];
+
+/** A pending's key: its file's path from pendingFolder. */
+export const pendingKeyOf = (pending) => (!pending.kind ? `${pending.id}.json` : pending.kind === "final" ? `final/${pending.id}-${pending.revision}.json` : `${pending.kind}/${pending.id}.json`);
+
+/** Keep a pending still to be made, written whole on this Mac's own disk, under another name and then renamed. Throws when it cannot. */
 export function writePending(home, pending) {
-  const file = pendingFile(home, pending.id);
+  const file = join(pendingFolder(home), pendingKeyOf(pending));
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(`${file}.writing`, JSON.stringify(pending, null, 2) + "\n");
   renameSync(`${file}.writing`, file);
 }
 
-/** The late checks this Mac has still to make, oldest first. One that cannot be read is left out. */
+/** The pending in the file `key` (pendingKeyOf), when it reads whole, is version 1, has an entries list and a finite lastCopy, and its own key is `key`. */
+export function readPendingAt(home, key) {
+  try {
+    const pending = JSON.parse(readFileSync(join(pendingFolder(home), key), "utf8"));
+    if (pending && pending.version === 1 && Array.isArray(pending.entries) && Number.isFinite(pending.lastCopy) && pendingKeyOf(pending) === key) return pending;
+  } catch (e) {
+    // It is not there, or half written.
+  }
+  return null;
+}
+
+/** The pendings of one kind, oldest first. A folder that cannot be read gives []. */
+export function readPendingsOf(home, kind) {
+  let names = [];
+  try {
+    names = readdirSync(join(pendingFolder(home), kind)).filter((n) => n.endsWith(".json"));
+  } catch (e) {
+    return [];
+  }
+  const read = [];
+  for (const name of names) {
+    const pending = readPendingAt(home, `${kind}/${name}`);
+    if (!pending || pending.kind !== kind || typeof pending.id !== "string") continue;
+    if (kind === "final" && !(Number.isInteger(pending.revision) && Number.isInteger(pending.rev))) continue;
+    read.push(pending);
+  }
+  return read.sort((a, b) => a.lastCopy - b.lastCopy);
+}
+
+/** Every pending of this Mac, the import's and each kind's, oldest first. */
+export const readEveryPending = (home) => [...readPendings(home), ...PENDING_KINDS.flatMap((kind) => readPendingsOf(home, kind))].sort((a, b) => a.lastCopy - b.lastCopy);
+
+/** Take a pending away. */
+export const removePending = (home, pending) => rmSync(join(pendingFolder(home), pendingKeyOf(pending)), { force: true });
+
+/** The late checks this Mac has still to make, oldest first: the import's own (no kind) alone. One that cannot be read is left out. */
 export function readPendings(home) {
   let names = [];
   try {
@@ -636,8 +678,58 @@ export const importIdOf = (id) => (id ? Number(id.ino).toString(36) : "");
     short id (importIdOf) it is what a local import's marker, video/.import.json, holds, so that a run stopped part-way finds its folder. */
 export const dropIdOf = (id) => (id ? `${id.ino}:${id.size}:${id.mtimeMs}` : "");
 
-/** When a late check is due, in milliseconds. */
-export const dueAt = (pending) => pending.lastCopy + LATE_CHECK_MS;
+/** When a pending is due, in milliseconds: the later of its own due and its `nextLook`, which only ever makes a look later. An import's
+    (no kind) is LATE_CHECK_MS after its last copy; one with `owed` (L6's move) is due at its lastCopy; any other is LATE_CHECK_MS after the later of its
+    last copy and `woke`, when the Mac last woke or started (ruling 33). */
+export const dueAt = (pending, woke = null) => {
+  const base = pending.owed === true ? pending.lastCopy : pending.kind ? Math.max(pending.lastCopy, Number.isFinite(woke) ? woke : -Infinity) + LATE_CHECK_MS : pending.lastCopy + LATE_CHECK_MS;
+  return Math.max(base, Number.isFinite(pending.nextLook) ? pending.nextLook : -Infinity);
+};
+
+/** The later of when this Mac last woke from sleep and when it last started, in milliseconds, or null when neither can be read (kern.waketime and kern.boottime). */
+export function lastWake({ run = spawnSync } = {}) {
+  const times = [];
+  for (const name of ["kern.waketime", "kern.boottime"]) {
+    try {
+      const ran = run("/usr/sbin/sysctl", ["-n", name], { encoding: "utf8" });
+      const sec = ran && ran.status === 0 ? /sec = (\d+)/.exec(String(ran.stdout)) : null;
+      if (sec) times.push(Number(sec[1]) * 1000);
+    } catch (e) {
+      // It cannot be read.
+    }
+  }
+  return times.length ? Math.max(...times) : null;
+}
+
+/** Whether a pending's hour of looks is gone. */
+export const pastLookUntil = (pending, now) => Number.isFinite(pending.lookUntil) && now > pending.lookUntil;
+
+/** Whether a pending is one the loop waits for: no problem found, and its hour of looks not gone. */
+export const isOpen = (pending, now) => !pending.problem && !pastLookUntil(pending, now);
+
+/** How soon a check that waits looks again in the run, and for how long a run goes on looking (ruling 36). */
+export const WAIT_LOOK_MS = 5 * 60 * 1000;
+export const WAIT_LOOK_FOR_MS = 60 * 60 * 1000;
+
+/** Append a line to the tool's log, as edit.js toolLog does; a throw is passed over. */
+export const logTo = (home) => (line) => {
+  try {
+    const file = join(home, "Library", "Logs", "brimm-video.log");
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, `${line}\n`);
+  } catch (e) {
+    // The log costs nothing but itself.
+  }
+};
+
+/** Ask the launch agent to run when it is not running, so a check that was just left is made within a minute. A throw is logged, named `shown`, and nothing else happens. */
+export function askAgent(ctx, shown) {
+  try {
+    if (!ctx.agentRunning()) ctx.kickstart();
+  } catch (e) {
+    logTo(ctx.home)(`${shown}: the launch agent could not be asked to make the check of its copies (${e.code || "an error"}). It is made when the Mac's import next runs.`);
+  }
+}
 
 /** How long the wait for late checks waits before it looks again, when it put a check off because a reading held its lock (plan R1c). */
 export const LOCK_AGAIN_MS = 10 * 1000;
@@ -1066,12 +1158,17 @@ export function clearRuns(home, alive = isRunning) {
   } catch (e) {
     return [];
   }
-  const needed = new Set(readPendings(home).map((p) => resolve(p.work)));
-  const gone = [];
-  for (const name of names) {
+  // Which runs are not running is asked first, then the pendings of every kind are read: a writer writes its pending before it ends,
+  // so a run found dead has written every pending it will.
+  const dead = names.filter((name) => {
     // A run's folder is named for its process: "<pid>-<time>", or a command's word first ("push-", "finish-", "reel-").
     const m = /^(?:[a-z]+-)?(\d+)-\d+$/.exec(name);
-    if (!m || alive(Number(m[1])) || needed.has(resolve(join(runs, name)))) continue;
+    return m && !alive(Number(m[1]));
+  });
+  const needed = new Set(readEveryPending(home).filter((p) => typeof p.work === "string").map((p) => resolve(p.work)));
+  const gone = [];
+  for (const name of dead) {
+    if (needed.has(resolve(join(runs, name)))) continue;
     rmSync(join(runs, name), { recursive: true, force: true });
     gone.push(name);
   }
