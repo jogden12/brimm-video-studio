@@ -1827,6 +1827,7 @@ print(values?.ubiquitousItemIsUploaded.map { $0 ? "true" : "false" } ?? "null")
 - Answers: each value and its time. If the flag never reads `true`, or reads `true` while paused, L6 would never delete, or could not trust its flag: Jason decides what to do before L6 is built.
 
 **P3-1. Before the merge.**
+0. An episode from before the switch, for P3-9 (every old test episode went to the Trash on 7 Nov, on Jason's word "all"; their recordings are kept in `~/BRIMM Video Work/Saved test recordings`). Jason, in Finder: hold Option and drag `IMG_3692.MOV` from Saved test recordings into Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio. Claude: `… episodes` until it waits, then `… kind "<label>" raw --private no`; Claude waits for its reading and its 15-minute check. It is not handed off.
 1. Claude: `launchctl list | grep com.thebrimm`. Every line starts with `-`: nothing is importing.
 2. Claude: `find PENDING -name '*.json' | wc -l` prints `0`: no Dropbox check is owed.
 3. Claude counts what waits in the Mac Studio's drop folder in Dropbox, without listing it: `ls -A "$BRIMM_DB/BRIMM Video/Drop/Mac Studio" | grep -v -e '^\.DS_Store$' -e '^\.brimm-watched-by$' | wc -l` prints `0`. If not, the merge waits until those videos are imported.
@@ -1886,7 +1887,7 @@ print(values?.ubiquitousItemIsUploaded.map { $0 ? "true" : "false" } ?? "null")
 3. Only if the Mac Studio's teachings are on: Claude reads its teachings and hands it off as the page's session steps say, then, 31 minutes later, repeats step 2 (no `Original files`, the recording still in `video/`) and `find PENDING -name '*.json' | wc -l` prints `0`. With teachings off, Claude notes that L6's tests hold this case.
 - Answers: what steps 2 and 3 printed.
 
-**P3-9. An episode from before the switch.** Claude finds one of Jason's own that is not handed off, by its record (layout 5 or below, no `local`). Claude: `… guide "<id>"` gives its old step; `… app "<id>"` opens it as before. If it is then handed off, `ls -A "<its folder in Episodes>"` shows no `Original files`. Claude also counts the episodes from before the switch that are not handed off yet, for the later round that removes the old code.
+**P3-9. An episode from before the switch.** Claude uses IMG_3692's episode from P3-1 step 0, not handed off, and checks its record is layout 5 or below, with no `local`. Claude: `… guide "<id>"` gives its old step; `… app "<id>"` opens it as before. If it is then handed off, `ls -A "<its folder in Episodes>"` shows no `Original files`. Claude also counts the episodes from before the switch that are not handed off yet, for the later round that removes the old code.
 - Answers: what each printed; the count.
 
 **P3-10. Checks this retires.** Claude marks as skipped, with the note "retired by the local working folder": `pr9-two-macs` (check 34). The other two-Mac checks, 24 (`pr11-two-macs`) and 29 (`pr18-two-macs`), were retired with Final Cut in Phase 2 (its check 85, `p2-retire`). `pr17-online-only` stays: an episode from before the switch still has the step. Nothing to run.
