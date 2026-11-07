@@ -30,7 +30,7 @@ export const RECORD_DIR = "record";
     2026-10-27, 7.1). It holds numbers, names, states and times, never a session's words.
     Layout 5 (the HyperFrames-led path, PR H4) adds the planned episode: a record made in her chat from words she gave, before
     any footage exists, with no video and no kind, and `planned`: its route, title, voice, cues, shots and teleprompter lines.
-    A record is written at layout 2, 3, 4 or 5 only once it holds one of them (layoutOf), so an episode that none of them has
+    A record is written at layout 2, 3, 4, 5 or 6 only once it holds one of them (layoutOf), so an episode that none of them has
     touched is still read by a Mac that knows layout 1 alone, and one that holds them is refused there, never changed by code
     that would drop them. Layout 5 is written for a planned record, and for a part (PR H5a: a dropped video answered as footage for a
     planned video, which holds `partOf`) alone: every other record stays at layout 4 or below, which is RECORD_VERSION, the newest
@@ -41,8 +41,8 @@ export const RECORD_DIR = "record";
     whatever else it holds, so a Mac on older code reads every such record as newer and leaves it alone; every other record stays at the
     layout it had. */
 export const RECORD_VERSION = 4;
-/** The layout of a planned episode's record (and a part's): a record of a higher layout is read for what it says and never written by a
-    Mac that knows layout 5 alone. */
+/** The layout of a planned episode's record, and a part's, while it holds no `local` (a plan or a part kept on one Mac is at layout 6,
+    LOCAL_VERSION): a record of a higher layout is read for what it says and never written by a Mac that knows layout 5 alone. */
 export const PLANNED_VERSION = 5;
 /** The layout of a record that holds `local` (D2), and the newest layout this BRIMM Video Studio reads and writes (NEWEST_VERSION): a record of
     a higher layout is read for what it says and never written. */
@@ -267,7 +267,9 @@ const holdsLocal = (r) => r.local !== undefined && r.local !== null;
     - it was written at layout 5, which a Mac on older code reads as newer, and holds no `local`; or (Phase 3, L2) at layout 6 with a whole
       `local` (isLocalPlace), a plan kept on one Mac; and
     - it holds no session mark.
-    It reads nothing else of the record, and anything that is not an object is none. */
+    It reads nothing else of the record, and anything that is not an object is none. No code clears a plan's `local`: writeEpisode never lowers
+    a layout, so a plan written again with `local` null would stay at layout 6, whole, and be no plan here (L2 review, R0-F4). L4 rules whether
+    a plan's `local` is ever cleared; if it is, this rule or faultFor changes with it. */
 export const isPlannedRecord = (r) => isObject(r) && (r.version === PLANNED_VERSION ? !holdsLocal(r) : r.version === LOCAL_VERSION && isLocalPlace(r.local))
   && r.kind === null && r.video === null && isPlannedAnswer(r.answer) && isPlanned(r.planned)
   && (r.session === undefined || r.session === null);
@@ -275,7 +277,8 @@ export const isPlannedRecord = (r) => isObject(r) && (r.version === PLANNED_VERS
 /** Whether a record is a video made from a plan (PR H5b): the plan's own record, written once more as the video its footage made when she said
     all the footage was in (`join`). It holds the plan it was (`planned`, whole), the video that was made (`video`) and a kind of its own, "raw"
     or "short video". It is no plan waiting for its footage (isPlannedRecord is false of it: it has a video and a kind), and it is gated as any
-    answered video is. Its plan is kept in it, so that it stays at layout 5; its `planned.filmed` says when and of which parts it was made. */
+    answered video is. Its plan is kept in it, so that it stays at layout 5 (at 6, with its `local`, for a plan kept on one Mac); its
+    `planned.filmed` says when and of which parts it was made. */
 export const isFromPlan = (r) => isObject(r) && isObject(r.video) && KINDS.includes(r.kind) && isPlanned(r.planned);
 
 /** The kind of a record as a person means it: "raw", "finished", "session" or "short video", or null while the video waits for

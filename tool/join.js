@@ -294,7 +294,8 @@ const stopped = (title, why, voice = false) => ({
     always a short video: `kind`), its video, files and fingerprint those of the video that was filed, with the plan's own files kept; its answer
     says it is answered, by this Mac, now, as no card asked her anything: what was seen of it and how it came are the first talking part's (`seen` is
     that of the video the light import read, for several parts); and its plan is kept whole but for `filmed`, { at, parts }: when, and which parts,
-    in the order they were joined. Nothing else of the plan's record changes: its name stays its title, and it stays at layout 5.
+    in the order they were joined. Nothing else of the plan's record changes: its name stays its title, and it stays at layout 5 (at 6, with its
+    `local`, for a plan kept on one Mac).
     An explainer (PR H6) is given the voice it has, hers when it had none (`voice`); one read by a HeyGen voice (`project`, the entry of its project
     for `app.projects`, which is the main project in use from now on) moves its project out of its plan, where it was kept until the voice was in. */
 function videoOf(plan, made, { at, machine, ids, came, seen, kind = made.kind, voice = null, project = null }) {

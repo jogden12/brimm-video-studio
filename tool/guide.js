@@ -161,8 +161,6 @@ export function opsText(handoff, step, again, note) {
     - `conflicted`, when Dropbox kept two copies of a change to it; `kind`, "finished", "raw", "short video", "session", or null
       before she has answered; `waiting`, for her answer; `heldAsSession`, when one of its other versions is a session after all;
       `elsewhere`, when it is open, or being answered, on the other Mac; `readingsOff`, when this Mac reads none.
-    - `onOtherMac`, when its record says it is kept on another Mac (its `local`; Phase 3, L2), which `mac` names then: it is changed only
-      there, and edit.js says it is waiting for her answer, in a conflict or held as a session on that Mac alone. Absent or false otherwise.
     - `reading`: "done", "running", "failed", "later" (at `readsAt`, once the import has checked its copies) or "none". `roughAt`
       is, for a raw video whose reading waits (`later`), the time its rough cut should be ready, "" when not known.
       `offersAnswered`, once the spellings card is answered; `v2`, when this Mac hands off version 2; `app`, when this Mac's settings turn
@@ -433,7 +431,10 @@ function filmStep({ route, voice, footage = "", joining = false, joinFailed = fa
 /** The next step for a finished episode, a raw one or a short video: Claude's reading, the spellings, a raw video's edit and
     finish, then its hand-off's BRIMM Ops steps. A raw video and an iPhone clip are edited in HyperFrames (appStep). A planned episode
     is told to film (filmStep) before anything else. A video or a plan kept on another Mac (`onOtherMac`, Phase 3 L2) is changed only there:
-    until its hand-off is written its step is on that Mac, before anything else; its hand-off's steps on the BRIMM Ops page are hers on any Mac. */
+    until its hand-off is written its step is on that Mac, before anything else; its hand-off's steps on the BRIMM Ops page are hers on any Mac.
+    `onOtherMac` is the fact edit.js gives when its record says it is kept on another Mac (its `local`), with that Mac in `mac`, and is absent or
+    false otherwise; edit.js says such a video is waiting for her answer, in a conflict or held as a session on that Mac alone. sessionNext
+    takes the same fact. */
 function videoNext(facts, notes, now) {
   if (facts.onOtherMac && !facts.handoff) return toDo("on-other-mac", `It is on ${spokenMac(facts.mac)}. Carry on there.`);
   if (facts.planned) return filmStep(facts.planned);
