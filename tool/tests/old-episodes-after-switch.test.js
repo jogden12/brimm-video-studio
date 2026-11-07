@@ -335,6 +335,25 @@ const LIGHT = (stem, words) => ({
   [`${stem}.rough-cut.transcript.txt`]: "[0:00] words\n"
 });
 
+describe("B1-F16 a video dropped again, held by an episode from before the switch, on a Mac with a drop folder of its own", () => {
+  it("is told to stay in the drop folder for you to delete by `episodes` and `retry`, never until Dropbox's check passes", async () => {
+    const t = setup();
+    const patch = switchMac(t);
+    const found = episodeFor(t, { record: { version: 3, kind: "finished", answer: { state: "answered", guess: null, seen: "", came: "camera", by: "Sallie Ogden", on: STUDIO, at: "2026-10-20T15:00:00-05:00", private: "no" }, name: { text: NAME, placeholder: false } } });
+    try {
+      writeFileSync(join(patch.dropPath, "Pricing talk.mp4"), "v".repeat(found.record.video.bytes));
+      const listed = await on(t.ctx.deps, "episodes");
+      assert.match(listed.text, /already imported as .*\. It stays in the drop folder for you to delete\./, listed.text);
+      assert.doesNotMatch(listed.text, /until Dropbox's check of its copies passes/);
+      const retried = await on(t.ctx.deps, "retry", "Pricing talk");
+      assert.match(retried.text, /It stays in the drop folder for you to delete\./, retried.text);
+      assert.doesNotMatch(retried.text, /until Dropbox's check of its copies passes/);
+    } finally {
+      t.done();
+    }
+  });
+});
+
 describe("a plan filed before the switch, on a Mac that has switched", () => {
   /** A Mac with the plan's stand-ins: ffprobe says every part is a wide minute, and ffmpeg's concat writes the joined file, writing down the list it joins. */
   function planWorld() {
