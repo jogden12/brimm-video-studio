@@ -160,7 +160,8 @@ export function opsText(handoff, step, again, note) {
       known. `readyAt` is the time it should be Ready, as this Mac's clock says it ("15:06"), "" when not known.
     - `conflicted`, when Dropbox kept two copies of a change to it; `kind`, "finished", "raw", "short video", "session", or null
       before she has answered; `waiting`, for her answer; `heldAsSession`, when one of its other versions is a session after all;
-      `elsewhere`, when it is open, or being answered, on the other Mac; `readingsOff`, when this Mac reads none.
+      `elsewhere`, when it is open, or being answered, on the other Mac; `keeperFirst`, when it is kept on another Mac (`onOtherMac`) that has
+      a conflict or a session to settle first, so that its step stays that Mac's even once a hand-off is written; `readingsOff`, when this Mac reads none.
     - `reading`: "done", "running", "failed", "later" (at `readsAt`, once the import has checked its copies) or "none". `roughAt`
       is, for a raw video whose reading waits (`later`), the time its rough cut should be ready, "" when not known.
       `offersAnswered`, once the spellings card is answered; `v2`, when this Mac hands off version 2; `app`, when this Mac's settings turn
@@ -320,6 +321,7 @@ function opsStep(facts, notes, now) {
 function sessionNext(facts, notes, now) {
   const session = facts.session;
   const there = facts.onOtherMac ? toDo("on-other-mac", `It is on ${spokenMac(facts.mac)}. Carry on there.`) : null;
+  if (there && facts.keeperFirst) return there;
   if (session.emptyOwed) return there || toDo("session-empty-owed", 'Say "it was a session after all" again: its empty revision for the BRIMM Ops page is still to be written.');
   if (facts.handoff) {
     const ops = opsStep(facts, notes, now);
@@ -436,7 +438,7 @@ function filmStep({ route, voice, footage = "", joining = false, joinFailed = fa
     false otherwise; edit.js says such a video is waiting for her answer, in a conflict or held as a session on that Mac alone. sessionNext
     takes the same fact. */
 function videoNext(facts, notes, now) {
-  if (facts.onOtherMac && !facts.handoff) return toDo("on-other-mac", `It is on ${spokenMac(facts.mac)}. Carry on there.`);
+  if (facts.onOtherMac && (!facts.handoff || facts.keeperFirst)) return toDo("on-other-mac", `It is on ${spokenMac(facts.mac)}. Carry on there.`);
   if (facts.planned) return filmStep(facts.planned);
   const raw = facts.kind === "raw";
   const clip = facts.kind === "short video";

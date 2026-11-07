@@ -1008,6 +1008,12 @@ function episodeLines(ctx, e, left, all, links) {
   return lines;
 }
 
+/** Whether the Mac an episode is kept on has steps of its own to take before the BRIMM Ops page's, which only it can take: a conflicted copy of
+    its record is sorted out there, and a video held beside a session that is not cleared is settled there (guide.js nextFor puts both before the
+    page's steps). Said by the records alone, so that the guide (guideFacts' `keeperFirst`) and `episodes` (stepThere) agree even once a hand-off is
+    written (review R2-F1). */
+const keeperFirst = (e) => e.read.code === "CONFLICTED" || Boolean(e.held && !gated(e.inForce));
+
 /** Whether the guide's own step for the episode `e`, kept on another Mac, is on that Mac (guide.js videoNext and sessionNext, by `onOtherMac`),
     by its records alone, so that `episodes` says "Carry on there." under it only where the guide does (review R1-F4). Never for a video she left
     alone (`left`), which has no step; always for a video waiting for her answer, which is answered there; for a session, while its empty
@@ -1016,6 +1022,7 @@ function episodeLines(ctx, e, left, all, links) {
     the page's step for a session's empty revision is still hers, the guide says that step first, and the session's own steps there after it. */
 function stepThere(e, left) {
   if (left) return false;
+  if (keeperFirst(e)) return true;
   const named = isGated(e) ? gatedRecord(e) : e.inForce;
   if (recordKind(named) === null && !isPlannedRecord(named)) return true;
   const r = e.inForce;
@@ -6041,6 +6048,7 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
     heldAsSession: !there && e.held && !gated(r),
     elsewhere: Boolean(away),
     onOtherMac: Boolean(there),
+    keeperFirst: Boolean(there) && keeperFirst(e),
     readingsOff: ctx.settings.readings === false,
     ...guideReading(ctx, e, r, kind, running, rates),
     offersAnswered: answerOf(r) !== null,

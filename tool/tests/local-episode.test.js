@@ -309,6 +309,73 @@ describe("an episode kept on the Mac Studio, on another Mac (Jason's MacBook, on
   });
 });
 
+/** The episode `found` handed off on the Mac Studio, as `handedOff` does the raw video, but for any kind and name: its hand-off in final/, and the
+    record `over` laid over it as its record 2 (which a test may make a conflict of, with conflictedRecord). Returns the record. */
+function handedOffAs(found, { name, kind, over = {}, finished = {} }) {
+  const handoff = `final/${name}.brimm-ops.json`;
+  mkdirSync(join(found.folder, "final"), { recursive: true });
+  writeFileSync(join(found.folder, handoff), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: found.record.id, kind, name }, main: { file: `${name}.mov` } }));
+  const record = { ...found.record, rev: 2, ...over, finished: { revision: 1, at: "2026-10-20T13:00:00-05:00", on: STUDIO, handoff, parts: {}, ...finished } };
+  writeFileSync(recordFile(found.folder, 2), recordText({ ...record, version: layoutOf(record) }));
+  return record;
+}
+
+describe("a handed-off episode kept on the Mac Studio whose first steps are still the Mac Studio's, seen on another Mac (review R2-F1, R2-F2)", () => {
+  const ON_LINE = "    It is on the Mac Studio. Carry on there.";
+  const underLine = (r, start) => {
+    const at = r.said.indexOf(start);
+    assert.ok(at >= 0, `${start}\n${r.text}`);
+    return r.said[at + 1];
+  };
+  it("keeps the Mac Studio's steps first for a handed-off video held beside a session that is not cleared: the guide and `episodes` say Carry on there", async () => {
+    const w = world();
+    try {
+      const found = KEPT.held.make(w);
+      handedOffAs(found, { name: "Jane Doe pricing", kind: "raw" });
+      const guide = await on(w.macbook, "guide", KEPT.held.said);
+      assert.deepEqual([guide.code, guide.said], [0, [`${KEPT.held.said} (${KEPT.held.short}): It is on the Mac Studio. Carry on there.`]], guide.text);
+      assert.equal(underLine(await on(w.macbook, "episodes"), KEPT.held.line), ON_LINE);
+    } finally {
+      w.done();
+    }
+  });
+  it("keeps the Mac Studio's steps first for a handed-off video whose record has a conflicted copy", async () => {
+    const w = world();
+    try {
+      const found = KEPT.raw.make(w);
+      const record = handedOffAs(found, { name: "Pricing talk", kind: "raw" });
+      conflictedRecord(found, { inForce: { finished: record.finished }, copy: { finished: record.finished, title: { text: "Another", approved: false } } });
+      const guide = await on(w.macbook, "guide", KEPT.raw.said);
+      assert.deepEqual([guide.code, guide.said], [0, [`${KEPT.raw.said} (${KEPT.raw.short}): It is on the Mac Studio. Carry on there.`]], guide.text);
+      assert.equal(underLine(await on(w.macbook, "episodes"), KEPT.raw.line), ON_LINE);
+    } finally {
+      w.done();
+    }
+  });
+  it("says only where a session handed off with its teachings is, as the guide gives the BRIMM Ops page's step", async () => {
+    const w = world();
+    try {
+      const found = KEPT.session.make(w);
+      handedOffAs(found, { name: "Session, 2026-10-20", kind: "session", over: { session: { ...found.record.session, teachings: "asked" } } });
+      const r = await on(w.macbook, "episodes");
+      assert.equal(underLine(r, KEPT.session.line), "    It is on the Mac Studio.", r.text);
+    } finally {
+      w.done();
+    }
+  });
+  it("still says Carry on there for a session whose empty revision is the one handed off", async () => {
+    const w = world();
+    try {
+      const found = KEPT.session.make(w);
+      handedOffAs(found, { name: "Session, 2026-10-20", kind: "session", over: { session: { ...found.record.session, teachings: "asked", emptyRevision: 1 } } });
+      const r = await on(w.macbook, "episodes");
+      assert.equal(underLine(r, KEPT.session.line), ON_LINE, r.text);
+    } finally {
+      w.done();
+    }
+  });
+});
+
 /** Record 2 of the episode `found` and the conflicted copy Dropbox kept of it from the Mac `by`, as when two Macs wrote that record at once: each
     side is the first record with `inForce` or `copy` laid over it, at the layout it then holds, and with no `local` where that says null. */
 function conflictedRecord(found, { inForce = {}, copy = {}, by = STUDIO }) {
