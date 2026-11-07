@@ -181,6 +181,16 @@ describe("the folder a local import goes into (Phase 3, L3)", () => {
     assert.equal(findFolder(t.episodes, t.ask).reused, false);
     t.done();
   });
+  it("does not reuse a folder by its marker when Episodes has a whole record for it", () => {
+    const t = setup();
+    t.local("2026-10-12 Talk (Mac Studio)", { import: "3k9", drop: "11:5:1700" });
+    const folder = join(t.episodes, "2026-10-12 Talk (Mac Studio)");
+    mkdirSync(join(folder, "record"), { recursive: true });
+    const r = { ...newEpisode({ id: "e-20261012-3fa9c1", machine: "Mac Studio", at: "2026-10-12T09:12:00-05:00", video: { file: "Talk.mp4", bytes: 5, seconds: 23.4, created: null }, kind: "episode", writer: { commit: "abc1234", on: "Mac Studio" } }), rev: 1 };
+    writeFileSync(recordFile(folder, 1), recordText(r));
+    assert.deepEqual(findFolder(t.episodes, t.ask), { name: "2026-10-14 Talk (Mac Studio)", reused: false });
+    t.done();
+  });
   it("is as it was for an import that gives no work folder", () => {
     const t = setup();
     assert.deepEqual(findFolder(t.episodes, asked), { name: "2026-10-14 Talk (Mac Studio)", reused: false });

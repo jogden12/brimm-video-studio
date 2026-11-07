@@ -104,7 +104,10 @@ export function findFolder(episodes, { video, bytes, machine, day, work, importI
     const mine = localFolders(work);
     const stopped = importId && dropId ? mine.sort().find((name) => {
       const mark = markOf(join(work, name, "video"));
-      return mark !== null && mark.import === importId && mark.drop === dropId;
+      if (mark === null || mark.import !== importId || mark.drop !== dropId) return false;
+      // A folder whose record is whole is an episode, not a run that stopped: it is never used again.
+      const folder = join(episodes, name);
+      return !statSync(folder, { throwIfNoEntry: false }) || readEpisode(folder).code === "NONE";
     }) : undefined;
     return stopped ? { name: stopped, reused: true } : { name: episodeFolderName([...names, ...mine], day, stem, machine), reused: false };
   }
@@ -174,8 +177,12 @@ export function fileEpisode({ file, made, at, facts, printed, kind, read, reels 
   mkdirSync(episodes, { recursive: true });
   const found = into ? { name: basename(into.folder), reused: false } : findFolder(episodes, { video, bytes, machine: episode.machine, day });
   const path = into ? into.folder : join(episodes, found.name);
-  // A stopped import may have left a record that is not whole. It is no one's record, and the first one is written anew.
-  if (found.reused) rmSync(join(path, RECORD_DIR), { recursive: true, force: true });
+  // A stopped import may have left a record that is not whole. It is no one's record, and the first one is written anew. A whole record is
+  // never taken away, whoever asks.
+  if (found.reused) {
+    if (statSync(path, { throwIfNoEntry: false }) && readEpisode(path).code !== "NONE") throw new Error(`${found.name} has a record already, and a record is never written over`);
+    rmSync(join(path, RECORD_DIR), { recursive: true, force: true });
+  }
   const entries = [];
   const files = {};
   // What this call put into an episode that was there before it, to take away again if it cannot finish.
@@ -242,6 +249,20 @@ function placeWhole(from, to, wrote, { clone = cloneFile, sameDisk = onSameDisk 
   renameSync(own, to);
 }
 
+/** Take away the files a killed run left half-written in `folder` and the folders in it: those whose names end in .writing. */
+function clearWriting(folder) {
+  let entries = [];
+  try {
+    entries = readdirSync(folder, { withFileTypes: true });
+  } catch (e) {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) clearWriting(join(folder, entry.name));
+    else if (entry.name.endsWith(".writing")) rmSync(join(folder, entry.name), { force: true });
+  }
+}
+
 /** File a video on a Mac with a drop folder of its own (Phase 3, L3), in this order: Episodes is listed (an error but its not being there ends
     the filing), the folder is found (findFolder, by the marker of a run that stopped, else by a name no folder in Episodes or on this Mac has),
     video/ is made in the episode's folder in BRIMM Video Work with its marker, each made file is written there whole, the drop file is checked
@@ -261,8 +282,15 @@ function fileLocal({ file, made, at, facts, printed, kind, read, reels, work, dr
   const found = findFolder(episodes, { video, bytes, machine: episode.machine, day, work: workFolder(episode.home), importId: importIdOf(dropFile), dropId: dropIdOf(dropFile) });
   const path = join(episodes, found.name);
   const own = episodeFilesFolder(episode.home, found.name);
-  // A stopped import may have left a record that is not whole. It is no one's record, and the first one is written anew.
-  if (found.reused) rmSync(join(path, RECORD_DIR), { recursive: true, force: true });
+  // A stopped import may have left a record that is not whole. It is no one's record, and the first one is written anew. A whole record is
+  // never taken away, whoever asks.
+  if (found.reused) {
+    if (statSync(path, { throwIfNoEntry: false }) && readEpisode(path).code !== "NONE") throw new Error(`${found.name} has a record already, and a record is never written over`);
+    rmSync(join(path, RECORD_DIR), { recursive: true, force: true });
+  }
+  // What this run makes in Dropbox, to take away again, empty, if the record cannot be written.
+  const madeFolder = !existsSync(path);
+  const madeRecords = !existsSync(join(path, RECORD_DIR));
   const entries = [];
   const files = {};
   // What this run wrote in video/, to take away if it cannot finish, and whether it wrote the marker.
@@ -274,7 +302,9 @@ function fileLocal({ file, made, at, facts, printed, kind, read, reels, work, dr
   try {
     mkdirSync(own, { recursive: true });
     const mark = join(own, IMPORT_MARK);
-    marked = true;
+    // Writing a killed run left half-way is cleared; the marker a stopped run left is kept if this run fails, as it is not this run's.
+    if (found.reused) clearWriting(own);
+    marked = !existsSync(mark);
     writeFileSync(`${mark}.${process.pid}.writing`, JSON.stringify({ import: importIdOf(dropFile), drop: dropIdOf(dropFile) }) + "\n");
     renameSync(`${mark}.${process.pid}.writing`, mark);
     for (const to of made) {
@@ -306,7 +336,7 @@ function fileLocal({ file, made, at, facts, printed, kind, read, reels, work, dr
   } catch (e) {
     for (const f of wrote) rmSync(f, { force: true });
     if (marked) rmSync(join(own, IMPORT_MARK), { force: true });
-    for (const folder of [own, dirname(own)]) {
+    for (const folder of [own, dirname(own), ...(madeRecords ? [join(path, RECORD_DIR)] : []), ...(madeFolder ? [path] : [])]) {
       try {
         rmdirSync(folder);
       } catch (stays) {

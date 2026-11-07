@@ -2905,6 +2905,7 @@ describe("an episode filed on a Mac with a drop folder of its own (Phase 3, L3)"
     assert.equal(r.ok, false);
     assert.deepEqual([namesOf(t.drop), statSync(join(t.drop, "Talk.mov")).size], [["Talk.mov"], "the whole video".length]);
     assert.equal(existsSync(t.video()), false, "nothing this run wrote is left in video/, nor the marker");
+    assert.equal(existsSync(join(t.episodes, FOLDER)), false, "the record folder and its folder this run made are taken away again");
     const failed = readStatusesIn([t.statuses]).map(({ status }) => status);
     assert.match(failed[0].failed, /^it could not be filed into Episodes: /);
     // retry takes the failed status away, and the next run imports the video.
@@ -2912,7 +2913,7 @@ describe("an episode filed on a Mac with a drop folder of its own (Phase 3, L3)"
     t.deps.clone = clone;
     const [again] = await uneditedFolder(t.drop, t.deps);
     assert.deepEqual([again.ok, namesOf(t.drop)], [true, []], t.logs.join("\n"));
-    assert.match(again.folder, /^2026-10-13 Talk \(Mac Studio\)(-2)?$/);
+    assert.equal(again.folder, FOLDER);
     assert.deepEqual(namesOf(episodeFilesFolder(t.home, again.folder)), [".import.json", ...ENDINGS].sort());
     t.done();
   });
@@ -2993,6 +2994,51 @@ describe("an episode filed on a Mac with a drop folder of its own (Phase 3, L3)"
       assert.deepEqual(namesOf(t.drop), [], day);
       t.done();
     }
+  });
+  /** A stopped run's folder: video/ with the marker of the drop file `file`, and what the run had copied. */
+  const stopped = (t, file, folder = "2026-10-12 Talk (Mac Studio)") => {
+    const id = fileId(file);
+    mkdirSync(t.video(folder), { recursive: true });
+    writeFileSync(join(t.video(folder), ".import.json"), JSON.stringify({ import: importIdOf(id), drop: dropIdOf(id) }));
+    return folder;
+  };
+  it("a folder reused by its marker has the stray .writing files of a killed run cleared", async () => {
+    const t = local();
+    const folder = stopped(t, t.put("Talk.mov"));
+    writeFileSync(join(t.video(folder), "Talk.mov.4242.writing"), "half");
+    writeFileSync(join(t.video(folder), "Talk.srt.4242.writing"), "half");
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual([r.ok, r.folder], [true, folder]);
+    assert.deepEqual(namesOf(t.video(folder)), [".import.json", ...ENDINGS].sort());
+    t.done();
+  });
+  it("when a reused folder's run fails, the marker it found stays, since this run did not make it", async () => {
+    const t = local();
+    const folder = stopped(t, t.put("Talk.mov"));
+    const clone = t.deps.clone;
+    t.deps.clone = (from, to) => {
+      if (to.endsWith("0001.json")) throw new Error("Dropbox is not there");
+      clone(from, to);
+    };
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.equal(r.ok, false);
+    assert.deepEqual(namesOf(t.video(folder)), [".import.json"]);
+    assert.equal(existsSync(join(t.episodes, folder)), false);
+    t.done();
+  });
+  it("a folder with a whole record is never reused by its marker, and its record is not replaced", async () => {
+    const t = local();
+    t.put("Talk.mov", "the first video");
+    await uneditedFolder(t.drop, t.deps);
+    const first = t.record();
+    const second = t.put("Talk.mov", "a second video, longer");
+    const id = fileId(second);
+    writeFileSync(join(t.video(), ".import.json"), JSON.stringify({ import: importIdOf(id), drop: dropIdOf(id) }));
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual([r.ok, r.folder], [true, `${FOLDER}-2`]);
+    assert.deepEqual([t.record().id, t.record().rev], [first.id, first.rev]);
+    assert.equal(namesOf(join(t.episodes, FOLDER, "record")).length, 1);
+    t.done();
   });
   it("a drop file that cannot be deleted stays, held by its episode, in the words the import gives, and is not imported again", async () => {
     const t = local();
