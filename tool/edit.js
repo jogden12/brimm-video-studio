@@ -932,7 +932,8 @@ export function cardLinesFor(named, label, others, links, { notASession = false 
   // Zoom, has no picture, has a session's words in it (its Maybe line is a session's) or is held beside a session.
   const maybe = maybeOf(named, others, links);
   const blocked = Boolean((maybe && maybe.session) || links.sessionsBeside(named, null).length > 0);
-  const lines = footageCards({ record: named, label, records: others.map((e) => e.inForce).filter(Boolean), blocked });
+  // A plan kept on another Mac (Phase 3, L4) is filmed there: this Mac's card never offers it.
+  const lines = footageCards({ record: named, label, records: others.filter((e) => !e.away).map((e) => e.inForce).filter(Boolean), blocked });
   // A video with no sound has no card: it can be footage for a planned video, or be left, and takes no kind. Nothing Claude reads of it is said.
   if (named.video && named.video.sound === false) return [...lines, NO_SOUND];
   lines.push(`    Card: ${JSON.stringify(cardFor(named, label, others, links))}`);
