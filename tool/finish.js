@@ -38,6 +38,10 @@ import { commitOf, thisCheckout } from "./filing.js";
 import { findPrograms } from "./unedited.js";
 import { approvedSession, undecided } from "./sessions.js";
 import { TEACHINGS_FORMAT, SESSION_LABEL, SESSION_NAME_MOST, herWordsName, isFilesName, isTeachingsName, itemsOf, readTeachings, seenFrom, sessionSeen } from "./teachings.js";
+import { fileAt, folderAt } from "./where.js";
+
+/** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
+const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
 
 /** How often a finished video's size is looked at while HyperFrames may still be writing it, and how many looks before the
     finish stops: ten minutes. */
@@ -285,7 +289,7 @@ function walk(view, record, folder) {
 }
 
 /** A video's versions, newest first, each as { folder, record }: the record, then every episode it is a version of, by
-    `versionOf`, through the ones answered. `folder` is the record's own episode folder, found by its id when it is not given.
+    `versionOf`, through the ones answered. `folder` is the record's own episode folder, found by its id when it is not given; `home` is this Mac's, to find the video/ folder of a version kept here.
     This only reads: nothing is written into any folder of the chain. */
 export function chainOf(root, record, folder) {
   return linksOf(root).chainOf(record, folder);
@@ -486,9 +490,9 @@ function revisionIn({ members, folders }, first, handoffsAt = (folder) => handof
     history/ (the numbers of their principles, recurring principles and Reel ideas), and of the numbers each version's record
     holds a client's agreement for (`session.agreed`). Numbers never repeat within a video, across
     asking again, asking for a session's teachings again, a corrected kind and a new version (spec 2026-10-22, section 8), so a
-    new reading numbers on from this one. `folder` is the record's own episode folder, found by its id when it is not given.
+    new reading numbers on from this one. `folder` is the record's own episode folder, found by its id when it is not given; `home` is this Mac's, to find the video/ folder of a version kept here.
     This only reads. */
-export function highestNumberOf(root, record, folder) {
+export function highestNumberOf(root, record, folder, home) {
   const view = viewOf(root);
   const walked = walk(view, record, folder || null);
   const { members, folders } = setOf(view, walked);
@@ -500,7 +504,9 @@ export function highestNumberOf(root, record, folder) {
   for (const { record: one } of members) for (const reel of Array.isArray(one.reels) ? one.reels : []) take(reel && reel.n);
   // A number a client's agreement was noted for stays taken, whatever else is lost: a new Reel idea must not inherit it.
   for (const { record: one } of members) for (const agreed of one.session && Array.isArray(one.session.agreed) ? one.session.agreed : []) take(agreed && agreed.n);
-  for (const at of new Set(members.map((one) => one.folder).filter(Boolean))) {
+  // A version kept on this Mac (Phase 3) keeps its reels.json and teachings files in its video/ folder, and sets its own aside in video/history/: read there.
+  const ownFolders = new Map(members.filter((one) => one.folder).map((one) => [one.folder, home ? folderAt({ home }, { folder: one.folder, record: one.record }, "local") : one.folder]));
+  for (const at of ownFolders.values()) {
     for (const list of reelsListsIn(at)) {
       take(list.highest);
       for (const candidate of Array.isArray(list.candidates) ? list.candidates : []) take(candidate && candidate.n);
@@ -773,7 +779,7 @@ export async function finishNow(ctx, found, deps = {}) {
     // Its shape, before anything is transcribed; its sound too, which is stopped, and its colour, which is said for a person to look
     // at and stops nothing (architecture 8.2).
     progress.step("Checking the files");
-    const plan = readJson(join(found.folder, `${stem(record.video.file)}.cut-plan.json`));
+    const plan = readJson(fileOf(ctx, found, `${stem(record.video.file)}.cut-plan.json`));
     for (const part of news) {
       const wrong = shapeFault(part, part.video.name, part.facts, plan && plan.facts);
       if (wrong) failed.push(wrong);
@@ -802,7 +808,7 @@ export async function finishNow(ctx, found, deps = {}) {
         // part, a kept one too, so there they are read.
         if (!base) {
           part.srt = readFileSync(join(finalDir, `${stem(name)}.srt`), "utf8");
-          const words = was.words ? readJson(join(found.folder, was.words)) : null;
+          const words = was.words ? readJson(fileOf(ctx, found, was.words)) : null;
           part.words = words && Array.isArray(words.words) ? words.words : null;
         }
         continue;
@@ -865,7 +871,7 @@ export async function finishNow(ctx, found, deps = {}) {
     // (`<stem>.words.json`, with the episode's spellings, as the words of a Reel are), or, when that file is not there, the captions of the
     // hand-off it is made from; and its length is that hand-off's.
     const main = parts.find((p) => p.key === "main");
-    const imported = base ? wordsIn(join(found.folder, `${stem(record.video.file)}.words.json`)) : null;
+    const imported = base ? wordsIn(fileOf(ctx, found, `${stem(record.video.file)}.words.json`)) : null;
     const timedMain = base ? Boolean(imported && imported.length) : Boolean(main.words);
     const mainWords = base ? (timedMain ? imported.map((word) => ({ ...word, w: spelled(word.w, record.spellings || []) })) : wordsOfCaptions(onFile.main.srt)) : main.words || wordsOfCaptions(main.srt);
     const mainSeconds = base ? onFile.main.seconds : main.seconds;
@@ -889,7 +895,7 @@ export async function finishNow(ctx, found, deps = {}) {
     // The Reel suggestions that fall in the exported main video (plan PR 8; architecture 8.6): for a raw video's main taken from HyperFrames'
     // export, in a version 2 hand-off. An iPhone clip's contract has none. A
     // number is a Reel or a suggestion in a hand-off, never both: the record can still call unmade a suggestion whose Reel is in this hand-off.
-    const placed = !base && v2 && kindOf(record) === "raw" ? suggestionsFor({ folder: found.folder, record, main: { words: mainWords, seconds: mainSeconds, timed: timedMain } }) : { list: [], left: [] };
+    const placed = !base && v2 && kindOf(record) === "raw" ? suggestionsFor({ folder: found.folder, record, ctx, main: { words: mainWords, seconds: mainSeconds, timed: timedMain } }) : { list: [], left: [] };
     placed.list = placed.list.filter((suggestion) => !reels.some((reel) => reel.n === suggestion.n));
     next.push(...placed.left);
     if (failed.length) return result();
@@ -967,7 +973,7 @@ export async function finishNow(ctx, found, deps = {}) {
       // The record lists what final/ holds now: each copy made so far at its size, and one whose old file replaceIn deleted
       // before its clone failed no more, so that a finish again goes through (the P1 check, T3).
       const files_ = { ...record.files, ...files };
-      for (const rel of Object.keys(files_)) if (rel.startsWith("final/") && !existsSync(join(found.folder, rel))) delete files_[rel];
+      for (const rel of Object.keys(files_)) if (rel.startsWith("final/") && !existsSync(fileOf(ctx, found, rel))) delete files_[rel];
       if (JSON.stringify(files_) !== JSON.stringify(record.files)) {
         try {
           writeEpisode(found.folder, { ...record, files: files_, ...(asked.claimed ? { editing: null } : {}) }, { expectRev: asked.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer, home: ctx.home });
@@ -1354,11 +1360,11 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
   const standing = (rel) => {
     let size = null;
     try {
-      size = statSync(join(folder, rel)).size;
+      size = statSync(fileAt(ctx, { folder, record }, rel)).size;
     } catch (e) {
       return "gone";
     }
-    return ctx.isWhole(join(folder, rel)) && (!listed(rel) || record.files[rel] === size) ? "here" : "wrong";
+    return ctx.isWhole(fileAt(ctx, { folder, record }, rel)) && (!listed(rel) || record.files[rel] === size) ? "here" : "wrong";
   };
   // What it is made from: the import's captions and, for a finished video, the reels.json of the reading; and what it replaces,
   // which is read first, to be put back as it was if the record cannot be written. A file the record lists that is not here is
@@ -1376,15 +1382,15 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
   let reels = null;
   let onFile = null;
   try {
-    imported = readFileSync(join(folder, captionsRel), "utf8");
-    if (kind === "finished" && standing(REELS_FILE) === "here") reels = readReels(readFileSync(join(folder, REELS_FILE), "utf8"));
+    imported = readFileSync(fileAt(ctx, { folder, record }, captionsRel), "utf8");
+    if (kind === "finished" && standing(REELS_FILE) === "here") reels = readReels(readFileSync(fileAt(ctx, { folder, record }, REELS_FILE), "utf8"));
   } catch (e) {
     return { why: `${who}'s files could not be read (${e.code || "they are not what they should be"}). Nothing was written.` };
   }
   if (reels && reels.why) return { why: `${who}'s list of Reel suggestions cannot be used: ${reels.why.replace(/\.$/, "")}. Nothing was written.` };
   if (prior && standing(prior.handoff) === "here") {
     try {
-      const read = JSON.parse(readFileSync(join(folder, prior.handoff), "utf8"));
+      const read = JSON.parse(readFileSync(fileAt(ctx, { folder, record }, prior.handoff), "utf8"));
       if (read !== null && typeof read === "object" && !Array.isArray(read)) onFile = read;
     } catch (e) {
       // It cannot be read as a hand-off: it is made again whole.
@@ -1554,15 +1560,15 @@ export async function finishSession(ctx, found, { host } = {}) {
   const earlier = record.finished && typeof record.finished.handoff === "string" ? record.finished.handoff : "";
   const prior = /^final\/[^/\\]+\.brimm-ops\.json$/.test(earlier) && earlier !== handoffRel && existsSync(join(folder, earlier)) ? earlier : "";
   const whole = (path) => (ctx.isWhole || (() => true))(path);
-  const read = readTeachings(folder, record, whole);
+  const read = readTeachings(folderAt(ctx, { folder, record }, "local"), record, whole);
   if (read.none) return { why: `${who} has no teachings to hand off yet: Claude has not read it. Nothing was written.` };
-  const coming = [...(read.coming ? [read.coming] : []), ...[...seenFrom(record), ...(prior ? [prior] : [])].filter((rel) => !whole(join(folder, rel)))];
+  const coming = [...(read.coming ? [read.coming] : []), ...[...seenFrom(record), ...(prior ? [prior] : [])].filter((rel) => !whole(fileAt(ctx, { folder, record }, rel)))];
   if (coming.length) return { coming };
   if (read.why) return { why: `${who}'s teachings cannot be read (${read.why}). Nothing was written.` };
   const items = itemsOf(read.teachings, record.session);
   const open = undecided(items);
   if (open.length) return { why: open.join("\n") };
-  const seen = sessionSeen(folder, record, { host });
+  const seen = sessionSeen(folderAt(ctx, { folder, record }, "local"), record, { host });
   if (seen.why) return { why: `${who}: ${seen.why}. Nothing was written.` };
   const approved = approvedSession(items, seen.names);
   if (approved.why) return { why: approved.why };

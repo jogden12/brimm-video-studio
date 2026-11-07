@@ -66,6 +66,10 @@ import { teleprompterText } from "./sentences.js";
 import { studioFolder } from "./studio.js";
 import { clockAt } from "./unedited.js";
 import { requestWorkCopy, voiceCopyPaths, workCopyKey, workCopyLockOf, workCopyPaths } from "./workcopy.js";
+import { fileAt } from "./where.js";
+
+/** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
+const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
 
 /** What is said of a Mac that is not set up for the app (settings.js appOf). edit.js says it before it goes any further, so
     openInApp is only ever given a Mac that is set up, and does not say it. */
@@ -376,8 +380,8 @@ export const fromOf = (record, raw) => ({ file: record.video.file, bytes: raw.si
     looked at is no change that can be told, since a project is opened without it. A project that says nothing readable of the
     recording it was made from (no `from`, or one that is no record of a file) may have been made from another: it counts as changed,
     and the record, which two Macs write, is never taken to hold what it does not. */
-export function changedSince(project, { found, record }) {
-  const raw = statOf(join(found.folder, record.video.file));
+export function changedSince(project, { found, record, ctx = null }) {
+  const raw = statOf(ctx ? fileOf(ctx, found, record.video.file) : join(found.folder, record.video.file));
   if (raw === undefined) return false;
   const from = project?.from;
   if (from === null || typeof from !== "object") return true;
@@ -416,7 +420,7 @@ function adoptProject(ctx, { found, record, at, projects }) {
   const { name } = nextMain(record, projects);
   const dir = join(episodeWork(home, found.name), name);
   if (!existsSync(dir)) return null;
-  const raw = statSync(join(found.folder, record.video.file));
+  const raw = statSync(fileOf(ctx, found, record.video.file));
   const copy = copyPathsOf(home, found.name, record, raw);
   const workingCopy = copyOf(factsIn(copy.facts)) ?? copyIn(dir, record);
   if (!workingCopy) {
@@ -453,17 +457,17 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   const wait = projectWaits(ctx, { name: found.name, record });
   // While the reading's own late check is still to come (plan R1d), the three files read from the episode's folder are held to the
   // sizes the record lists, judged by the bytes read; one that is not whole makes nothing.
-  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel, i) => (i === 0 ? readWords : readListed)(found.folder, record, rel)) : null;
+  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel, i) => (i === 0 ? readWords : readListed)(dirname(fileOf(ctx, found, rel)), record, rel)) : null;
   if (checked && checked.some((got) => got.notWhole)) {
     ctx.say(notWholeYet(record.name.text));
     return { code: 0 };
   }
-  const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(join(found.folder, `${stem}.words.json`));
+  const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(fileOf(ctx, found, `${stem}.words.json`));
   if (!words) {
     ctx.say(noWords(record.name.text));
     return { code: 1 };
   }
-  const raw = statSync(join(found.folder, record.video.file));
+  const raw = statSync(fileOf(ctx, found, record.video.file));
   const copy = copyPathsOf(home, found.name, record, raw);
   const reading = wait === "reading";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
@@ -477,8 +481,8 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   }
   const facts = JSON.parse(readFileSync(copy.facts, "utf8"));
   const { name, number } = nextMain(record, projects);
-  const reels = checked ? (checked[1].text === undefined ? undefined : JSON.parse(checked[1].text)) : jsonIn(join(found.folder, REELS_FILE));
-  const plan = checked ? (checked[2].text === undefined ? undefined : JSON.parse(checked[2].text)) : jsonIn(join(found.folder, `${stem}.cut-plan.json`));
+  const reels = checked ? (checked[1].text === undefined ? undefined : JSON.parse(checked[1].text)) : jsonIn(fileOf(ctx, found, REELS_FILE));
+  const plan = checked ? (checked[2].text === undefined ? undefined : JSON.parse(checked[2].text)) : jsonIn(fileOf(ctx, found, `${stem}.cut-plan.json`));
   // The graphic cues go in beside the suggested cuts, placed on the project's words (project.js). A raw video's are the cut plan's own,
   // or for a plan made before them its ideas for graphics as cues (graphic-cues.js graphicCuesOfPlan). An iPhone clip's are the ones its
   // reading kept in its record (graphicCuesOfRecord, PR H2): its cut plan is the import's, and holds none.
@@ -540,12 +544,12 @@ export function copyFits({ was, made, size, starts = true }) {
 function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
   const { home } = ctx;
   const name = record.name.text;
-  const raw = statOf(join(found.folder, record.video.file));
+  const raw = statOf(fileOf(ctx, found, record.video.file));
   if (raw === undefined) {
     ctx.say(noRecording(name));
     return { code: 1 };
   }
-  if (changedSince(project, { found, record })) {
+  if (changedSince(project, { found, record, ctx })) {
     ctx.say(videoGoneAndChanged(name));
     return { code: 1 };
   }
@@ -709,7 +713,7 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
       const back = putVideoBack(ctx, { found, record, project, dir: join(work, project.name) }, { rename });
       if (back.code !== undefined) return back.code;
       restored = back.workingCopy;
-    } else if (media !== null && changedSince(project, { found, record })) {
+    } else if (media !== null && changedSince(project, { found, record, ctx })) {
       // The project is opened as it was whatever the recording is now: a project that may be open in the app is never changed (4.8).
       ctx.say(recordingChanged(record.name.text));
     }

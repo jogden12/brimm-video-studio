@@ -740,8 +740,10 @@ export function fileProblems(folder, record, { stat = statSync, machine, localFo
 /** What is wrong with an episode's files, one line for each file, in plain words for a command's refusal: missing, short, or
     not the size listed, with any other name Dropbox may have kept it under. [] when every file is there at its size. It takes the options
     fileProblems takes. */
-export function filesProblems(folder, record, { stat = statSync, machine, localFolder = folder } = {}) {
+export function filesProblems(folder, record, { stat = statSync, machine, localFolder = folder, onMac } = {}) {
   return fileProblems(folder, record, { stat, machine, localFolder }).map(({ file, kind, size, bytes, kept }) => {
+    // A file of an episode kept on this Mac, not whole in its video/ folder, is said in this Mac's words when `onMac` gives them (L2c).
+    if (typeof onMac === "function" && filePlace(record, file) === "local") return onMac(file);
     const as = kept.length ? `, and Dropbox may have kept it as ${kept.join(" or ")}` : "";
     if (kind === "missing") return `${file} is missing${as}`;
     if (kind === "short") return `${file} is short: ${size} bytes of ${bytes}${as}`;

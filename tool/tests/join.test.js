@@ -5,7 +5,7 @@
 // its own under the temp folder.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HELP, editMain } from "../edit.js";
@@ -21,7 +21,7 @@ import { fileEpisode, readPendings } from "../filing.js";
 import { clockAt, importInto } from "../unedited.js";
 import { COPY_STEP } from "../guide.js";
 import { addRates, progressFolder } from "../progress.js";
-import { episodeWork } from "../settings.js";
+import { episodeFilesFolder, episodeWork } from "../settings.js";
 import { localDay } from "../shared/text.js";
 import { FOOTAGE_STEP, WORK_COPY_STEP, footageCopyPaths, workCopyDir, workCopyKey, workCopyPaths } from "../workcopy.js";
 import { probed } from "./fixtures.js";
@@ -516,6 +516,28 @@ describe("plan … join, for \"that's all the footage\" (PR H5b)", () => {
       NO_MORE
     ]]);
     assert.deepEqual([snapshot(t), t.started], [before, []]);
+    t.done();
+  });
+  it("finds the words of a local plan's parts in each part's own video/, so that none is whose place is unknown (L2c)", async () => {
+    const t = world();
+    await planned(t);
+    // The same two parts as above, each kept on this Mac (layout 6): its files are in its video/ folder, none in its folder in Dropbox.
+    const local = (n, words) => {
+      const made = part(t, n, { words, record: { version: 6, local: { on: "Mac Studio" } } });
+      const own = episodeFilesFolder(t.home, made.name);
+      mkdirSync(own, { recursive: true });
+      for (const rel of readdirSync(made.folder).filter((name) => name !== "record")) renameSync(join(made.folder, rel), join(own, rel));
+      return made;
+    };
+    local(1, SCRIPT[2].split(" "));
+    local(2, SCRIPT[0].split(" "));
+    const r = await on(depsOf(t), "plan", TITLE, "join");
+    assert.deepEqual([r.code, r.said], [0, [
+      `The talking parts of "${TITLE}", in the order of its script:`,
+      `1. ${labelOf(2)}`,
+      `2. ${labelOf(1)}`,
+      NO_MORE
+    ]]);
     t.done();
   });
   it("starts the run at once for one talking part, and again when it is named", async () => {

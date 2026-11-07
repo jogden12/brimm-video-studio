@@ -13,6 +13,7 @@ import { keptWords } from "./clock.js";
 import { spelled } from "./final-transcript.js";
 import { inMain } from "./handoff.js";
 import { REELS_FILE, readReels } from "./reel-candidates.js";
+import { fileAt } from "./where.js";
 
 const text = (value) => (typeof value === "string" ? value.trim() : "");
 const isRange = (r) => r !== null && typeof r === "object" && Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start;
@@ -64,10 +65,10 @@ export function suggestionsInMain({ candidates, words, spellings = [], main }) {
     finished nor dropped (a suggestion made into a Reel is the Reel, and `reels` offers no other), against the recording's words, from
     `<stem>.words.json`, with the episode's spellings. { list, left }; with the list or the words unusable it says why nothing is listed,
     and with no list at all it says nothing. */
-export function suggestionsFor({ folder, record, main }) {
+export function suggestionsFor({ folder, record, ctx = null, main }) {
   let read;
   try {
-    read = readReels(readFileSync(join(folder, REELS_FILE), "utf8"));
+    read = readReels(readFileSync(ctx ? fileAt(ctx, { folder, record }, REELS_FILE) : join(folder, REELS_FILE), "utf8"));
   } catch (e) {
     return { list: [], left: e && e.code === "ENOENT" ? [] : ["No Reel suggestions are in the hand-off: their list cannot be read."] };
   }
@@ -78,7 +79,7 @@ export function suggestionsFor({ folder, record, main }) {
     const status = new Map((Array.isArray(record.reels) ? record.reels : []).map((r) => [r && r.n, r && r.status]));
     const unmade = read.reels.candidates.filter((c) => (status.get(c.n) ?? "candidate") === "candidate");
     if (!unmade.length) return { list: [], left: [] };
-    const recording = wordsIn(join(folder, `${basename(record.video.file, extname(record.video.file))}.words.json`));
+    const recording = wordsIn(ctx ? fileAt(ctx, { folder, record }, `${basename(record.video.file, extname(record.video.file))}.words.json`) : join(folder, `${basename(record.video.file, extname(record.video.file))}.words.json`));
     if (!recording) return { list: [], left: ["No Reel suggestions are in the hand-off: the recording's words are not on this Mac."] };
     return suggestionsInMain({ candidates: unmade, words: recording, spellings: Array.isArray(record.spellings) ? record.spellings : [], main });
   } catch (e) {

@@ -46,6 +46,10 @@ import { stamp } from "./shared/text.js";
 import { checkNames } from "./sessions.js";
 import { namesOf, withoutNames } from "./kinds.js";
 import { TEACHINGS_FORMAT, accountWhy, teachingsWhy, teachingsFiles, earlierTeachings, sessionSeen, seenFrom, planOf, teachingsText, ideasText } from "./teachings.js";
+import { fileAt, folderAt } from "./where.js";
+
+/** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
+const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
 
 /** How often a raw reading looks again while the import's late check holds its video, and how long it waits in all before it
     gives up and says why: the check comes at most LATE_CHECK_MS after the import filed the video, and a little more is allowed. */
@@ -243,10 +247,10 @@ const claudesClip = (line) => String(line).replace(/^Clip (\d+) was left out: /,
 /** Whether every file the record lists, the video among them, is in the episode's `folder` at its listed size, as the import filed
     them (plan R1c): a reading that starts before the import's late check is made may do so only when nothing the check would put
     back is missing or short. False when the record lists none. */
-export function asFiled(folder, record) {
+export function asFiled(folder, record, ctx = null) {
   const listed = Object.entries(record.files || {});
   if (!listed.length) return false;
-  const size = (rel) => statSync(join(folder, rel), { throwIfNoEntry: false })?.size;
+  const size = (rel) => statSync(ctx ? fileAt(ctx, { folder, record }, rel) : join(folder, rel), { throwIfNoEntry: false })?.size;
   return size(record.video.file) === record.video.bytes && listed.every(([rel, bytes]) => size(rel) === bytes);
 }
 
@@ -309,7 +313,7 @@ export async function readEpisodeNow(ctx, found, deps) {
   // and every file is as the import filed it (plan R1c): it takes the files it replaces out of the check as it puts them in. An iPhone
   // clip's replaces no file: it changes the record alone (its graphic cues are kept in the record's reading, and its cut plan is left as
   // the import wrote it), so it never waits.
-  const replaces = kind === "raw" || (kind === "finished" && [REELS_FILE, `${stem}.reel-suggestions.txt`].some((rel) => existsSync(join(found.folder, rel))));
+  const replaces = kind === "raw" || (kind === "finished" && [REELS_FILE, `${stem}.reel-suggestions.txt`].some((rel) => existsSync(fileOf(ctx, found, rel))));
   if (replaces) {
     let waited = 0;
     for (;;) {
@@ -317,7 +321,7 @@ export async function readEpisodeNow(ctx, found, deps) {
       if (!hold.why) break;
       // This Mac's own check is all that holds it, and every file is as the import filed it: no wait. The reading takes its files out of
       // the check when it puts them in (keepCheckInStep), and the check is still made of every other file.
-      if (ownCheckOnly(ctx, record) && asFiled(found.folder, record)) {
+      if (ownCheckOnly(ctx, record) && asFiled(found.folder, record, ctx)) {
         log(`${named}: Claude reads it now, while the import's late check of its copies is still to come.`);
         break;
       }
@@ -337,32 +341,32 @@ export async function readEpisodeNow(ctx, found, deps) {
   // teachings an earlier reading wrote, which it sets aside. One Dropbox has not brought over yet is read through, so that it
   // does. A session's files are said by what they are, never by name.
   const planRel = `${stem}.cut-plan.json`;
-  const there = (rel) => existsSync(join(found.folder, rel));
+  const there = (rel) => existsSync(fileOf(ctx, found, rel));
   const earlier = session ? earlierTeachings(record) : [];
   const need = session ? [...seenFrom(record), ...earlier.filter(there)] : [planRel, ...(kind === "raw" ? [video, `${stem}.srt`, ...[`${stem}.words.json`, `${stem}.cut-plan.txt`].filter(there)] : [])];
   const said = (rel) => (!session ? rel : rel === planOf(record) ? "its cut plan" : earlier.includes(rel) ? "its earlier teachings" : "the meeting's own transcript");
   const gone = need.find((rel) => !there(rel));
   if (gone) return stop(session ? `${capital(said(gone))} is not in the episode's folder, so Claude did not read ${name}.` : `${gone} is not in the episode's folder, so Claude did not read ${name}.`);
   const bring = deps.readAll || readThrough;
-  for (const rel of need.filter((r) => !whole(join(found.folder, r)))) {
+  for (const rel of need.filter((r) => !whole(fileOf(ctx, found, r)))) {
     try {
-      await bring(join(found.folder, rel));
+      await bring(fileOf(ctx, found, rel));
     } catch (e) {
       // It is said below, with the others that are not here.
     }
   }
-  const coming = need.filter((rel) => !whole(join(found.folder, rel)));
+  const coming = need.filter((rel) => !whole(fileOf(ctx, found, rel)));
   if (coming.length) return stop(`Dropbox is still bringing ${coming.map(said).join(", ")} over to this Mac, so Claude did not read ${name}.`, session ? AGAIN_TEACHINGS : AGAIN);
   let plan;
   // What a session's names are checked against, and the meeting's speakers, its own replaced (teachings.js sessionSeen).
   let seen = null;
   if (session) {
-    seen = sessionSeen(found.folder, record, { host: ctx.settings.host });
+    seen = sessionSeen(folderAt(ctx, { folder: found.folder, record }, "local"), record, { host: ctx.settings.host });
     if (seen.why) return stop(`${capital(seen.why)}, so Claude did not read ${name}.`);
     plan = seen.plan;
   } else {
     try {
-      plan = JSON.parse(readFileSync(join(found.folder, planRel), "utf8"));
+      plan = JSON.parse(readFileSync(fileOf(ctx, found, planRel), "utf8"));
       if (!isObject(plan) || !Array.isArray(plan.phrases) || !Array.isArray(plan.ranges)) throw new Error("it is not a cut plan this tool wrote");
     } catch (e) {
       return stop(`The cut plan of ${name} cannot be read (${e instanceof SyntaxError ? "it is not JSON" : e.code || e.message}), so Claude did not read it.`);
@@ -441,7 +445,7 @@ export async function askReelCues({ ctx, found, record, stretch, work }, deps) {
     if (kindOf(now.record) !== "finished" || gated(now.record)) return { why: "it is no longer a finished video that may be read" };
     let plan;
     try {
-      plan = JSON.parse(readFileSync(join(found.folder, `${stem}.cut-plan.json`), "utf8"));
+      plan = JSON.parse(readFileSync(fileOf(ctx, found, `${stem}.cut-plan.json`), "utf8"));
     } catch (e) {
       return { why: `its cut plan cannot be read (${e instanceof SyntaxError ? "it is not JSON" : e.code || e.message})` };
     }
@@ -459,6 +463,8 @@ export async function askReelCues({ ctx, found, record, stretch, work }, deps) {
 async function written(ctx, found, deps, { kind, record, plan, facts, read, at, account, work, named, name, stem, log, now }) {
   const home = ctx.home;
   const folder = found.folder;
+  // The episode's own files are read where the record keeps them: in its video/ folder on this Mac when it is kept here (where.js).
+  const own = folderAt(ctx, { folder, record }, "local");
   const files = filesOf(work, { name: named, hold: true, log });
   const madeAt = [];
   const text = (rel, body) => {
@@ -475,7 +481,7 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   let planLast = "";
   const reeled = kind === "finished" || kind === "raw";
   // Numbers are never given twice under one video's id: a reading numbers on from the highest ever given (finish.js).
-  const base = highestNumberOf(ctx.root, record, folder);
+  const base = highestNumberOf(ctx.root, record, folder, ctx.home);
   const number = (items) => {
     const out = [];
     for (const item of items) {
@@ -496,11 +502,11 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
     // The import's plan, the rules' alone, and its cut log are set aside in history/ by the rule, put in before the reading
     // replaces them, so that a raw reading made again can start from them.
     // A rules' plan that `kind … --again` put back from history/ is kept there already, whole: it is not set aside twice.
-    const rules = plan.claude ? null : rulesPlanKept(folder, stem);
-    if (!plan.claude && !(rules && rules.text === readFileSync(join(folder, `${stem}.cut-plan.json`), "utf8"))) {
+    const rules = plan.claude ? null : rulesPlanKept(own, stem);
+    if (!plan.claude && !(rules && rules.text === readFileSync(join(own, `${stem}.cut-plan.json`), "utf8"))) {
       const aside = `${localStamp(new Date(now())).replace(/:/g, "-")} ${stem}`;
       for (const ending of [".cut-plan.json", ".cut-plan.txt"]) {
-        const at_ = join(folder, `${stem}${ending}`);
+        const at_ = join(own, `${stem}${ending}`);
         if (existsSync(at_)) text(`history/${aside}${ending}`, readFileSync(at_, "utf8"));
       }
     }
@@ -652,7 +658,7 @@ async function writtenSession(ctx, found, deps, { record, read, at, account, wor
   };
   // Numbers are never given twice under one video's id: every list numbers on from the highest ever given (finish.js), and a
   // Reel idea names the principle it shows by that principle's number.
-  const base = highestNumberOf(ctx.root, record, folder);
+  const base = highestNumberOf(ctx.root, record, folder, ctx.home);
   const on = (n) => n + base;
   const numbered = {
     principles: read.principles.map((p) => ({ ...p, n: on(p.n) })),
@@ -665,7 +671,7 @@ async function writtenSession(ctx, found, deps, { record, read, at, account, wor
   // first), put in before they are replaced.
   const aside = localStamp(new Date(now())).replace(/:/g, "-");
   for (const rel of earlierTeachings(record)) {
-    const was = join(folder, rel);
+    const was = join(folderAt(ctx, { folder, record }, "local"), rel);
     if (existsSync(was)) text(`history/${aside} ${rel}`, readFileSync(was, "utf8"));
   }
   const teachings = { format: TEACHINGS_FORMAT, version: 1, made: at, principles: kept.principles, recurringPrinciples: kept.recurringPrinciples, reelIdeas: kept.reelIdeas, dropped, skipped: seen.skipped, problems: read.problems };
@@ -712,7 +718,7 @@ async function writtenSession(ctx, found, deps, { record, read, at, account, wor
     Dropbox. ffprobe is asked first which streams the video has, and whether it is the video the plan was made of. It is opened
     once the reading is in the episode, not here. Resolves { at, to } or { why }. */
 async function renderRough(ctx, found, deps, { record, plan, facts, work, named, name, log, now }) {
-  const video = join(found.folder, record.video.file);
+  const video = fileOf(ctx, found, record.video.file);
   try {
     const probed = join(work, "facts.json");
     const probe = await deps.run(deps.tools.ffprobe, probeArgs(video, probed));

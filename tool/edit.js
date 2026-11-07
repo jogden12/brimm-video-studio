@@ -121,7 +121,10 @@ import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
-import { ON_OTHER_MAC, folderAt, onOtherMac } from "./where.js";
+import { ON_OTHER_MAC, fileAt, filePlace, folderAt, onOtherMac } from "./where.js";
+
+/** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
+const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -895,7 +898,8 @@ function maybeOf(named, others, links) {
   if (answer === null || typeof answer !== "object") return null;
   if (matchedSession(links, named)) return { session: true };
   const match = typeof answer.match === "string" && answer.match !== named.id ? others.find((e) => !e.newer && e.inForce && recordShaped(e.inForce) && e.inForce.id === answer.match) : undefined;
-  if (match && !match.inForce.archived && match.records.filter(recordShaped).every((r) => !gated(r) && recordKind(r) !== "session")
+  // A version never spans two Macs (edits are not handed between Macs; Phase 3, D3): a video kept on another Mac is not offered as one to be a version of.
+  if (match && !match.away && !match.inForce.archived && match.records.filter(recordShaped).every((r) => !gated(r) && recordKind(r) !== "session")
     && !links.gapOf(match.inForce) && !links.chainOf(match.inForce).some((link) => link.record.id === named.id)
     && !links.setOf(links.firstOf(match.inForce)).members.some((one) => links.holdsSession(one))) {
     return { record: match.inForce };
@@ -1038,7 +1042,7 @@ function stepThere(e, left) {
     is known by the record read whole, so that one with a conflicted copy is listed with its conflict, to be sorted out; but one kept on another
     Mac (keptOn), whose conflict is said and sorted out on that Mac alone, is left out by its record in force, as the guide leaves it out (review
     R1-F5). */
-const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived) && !(e.inForce && e.inForce.archived && keptOn(ctx, e)) && !isPart(e.inForce));
+const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived) && !(e.inForce && e.inForce.archived && keptOn(ctx, e)) && !isPart(e.inForce)).map((e) => ({ ...e, away: keptOn(ctx, e) }));
 
 /** Whether an episode is a video she has left alone, not for brimm-video: its gated record says so. */
 const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boolean(gatedRecord(e).answer) && gatedRecord(e).answer.state === "not for brimm-video";
@@ -1152,6 +1156,8 @@ function episodeFor(ctx, rest, { newerEnds = 0, codes = false } = {}) {
 /** Say once on this Mac, at the first open of an episode that completes, how to keep the episode on this Mac: Dropbox
     offers no command for it. A marker in this Mac's folder for the episode says it was said. */
 function offlineStep(ctx, found) {
+  // An episode kept on this Mac has nothing in Dropbox to keep: its files are on this Mac already.
+  if (found.read?.record?.local) return;
   const said = join(episodeWork(ctx.home, found.name), "offline-step-said");
   if (existsSync(said)) return;
   ctx.say(`So that Dropbox keeps this episode on this Mac, Control-click its folder in Finder and choose Make available offline: ${found.folder}`);
@@ -1163,8 +1169,26 @@ function offlineStep(ctx, found) {
   }
 }
 
+/** What fileProblems and filesProblems are given to look for a record's own files where they are (episode.js): this Mac, and the folder of its own files here. */
+const lookedFor = (ctx, found, record) => ({ machine: ctx.machine, localFolder: folderAt(ctx, { folder: found.folder, record }, "local") });
+
+/** What a file of an episode's own, kept on this Mac, is called in what is said of it: by its role, never by its path. */
+function roleOf(file) {
+  const roles = [[/\.(mov|mp4|m4v)$/i, "recording"], [/\.rough-cut\.srt$/, "rough cut's captions"], [/\.srt$/, "captions"], [/\.transcript\.txt$/, "transcript"], [/\.words\.json$/, "words"], [/\.cut-plan\.json$/, "cut plan"], [/\.edit-notes\.txt$/, "notes"], [/^reels\.json$|\.reel-suggestions\.txt$/, "Reel suggestions"], [/\.principles\.json$/, "teachings"]];
+  const found = roles.find(([pattern]) => pattern.test(file));
+  return found ? found[1] : "file";
+}
+
+/** What is wrong with an episode's files, in the words of the Mac that says it: `dropbox`, the lines for a file in Dropbox (filesProblems), and
+    `mac`, the lines for a file kept on this Mac that is not whole in its video/ folder: "<name>'s <role> is not whole on this Mac. Ask Jason." */
+function problemsOf(ctx, found, record) {
+  const own = [];
+  const dropbox = filesProblems(found.folder, record, { ...lookedFor(ctx, found, record), onMac: (file) => (own.push(file), null) }).filter((line) => line !== null);
+  return { dropbox, mac: own.map((file) => `${shownName(record)}'s ${roleOf(file)} is not whole on this Mac. Ask Jason.`) };
+}
+
 /** The episode's files that are not whole on this Mac yet, as Dropbox brings them over: by the record's list. */
-const notHere = (ctx, found, record) => Object.keys(record.files).filter((rel) => !ctx.isWhole(join(found.folder, rel)));
+const notHere = (ctx, found, record) => Object.keys(record.files).filter((rel) => !ctx.isWhole(fileOf(ctx, found, rel)));
 
 /** How long `open` waits after writing its claim before it reads the record again: Dropbox shows no sign of having taken a
     change across, so a fixed 20 seconds, in which the other Mac's claim made at the same time comes across too. */
@@ -1184,17 +1208,17 @@ function claimHeld(ctx, record) {
 
 /** The files the record lists (the record's own folder apart) that are missing or not at their listed size, and that Dropbox has kept under no
     other name: what claimAndBring takes for a plain wait in the window of plan R1d. */
-function plainShort(folder, record) {
+function plainShort(ctx, folder, record) {
   const out = [];
   for (const [rel, bytes] of Object.entries(record.files)) {
     if (rel.split("/")[0] === RECORD_DIR) continue;
     let size = null;
     try {
-      size = statSync(join(folder, rel)).size;
+      size = statSync(fileAt(ctx, { folder, record }, rel)).size;
     } catch (e) {
       // Not there.
     }
-    if (size !== bytes && !otherNames(folder, rel).length) out.push(rel);
+    if (size !== bytes && !otherNames(folderAt(ctx, { folder, record }, filePlace(record, rel)), rel).length) out.push(rel);
   }
   return out;
 }
@@ -1233,17 +1257,18 @@ async function claimAndBring(ctx, found, record, { again, by = "", notYet = null
     say(held);
     return { code: 1 };
   }
-  const problems = filesProblems(found.folder, record);
+  const { dropbox: problems, mac: onThisMac } = problemsOf(ctx, found, record);
   // `app` and `app … reel` while the reading's own late check is still to come (plan R1d): when every problem is a listed file that is
   // missing or not at its listed size, with no other name Dropbox may have kept it under, it is a wait, not a refusal; nothing is
   // claimed or written. Judged by the record's list and the sizes, not by the words of the problems.
-  if (problems.length && notYet && projectWaits(ctx, { name: found.name, record }) === "verify" && plainShort(found.folder, record).length === problems.length) {
+  if (problems.length && !onThisMac.length && notYet && projectWaits(ctx, { name: found.name, record }) === "verify" && plainShort(ctx, found.folder, record).length === problems.length) {
     say(notYet());
     return { code: 0 };
   }
-  if (problems.length) {
-    say(`${found.name} is not whole in Dropbox:`);
+  if (problems.length || onThisMac.length) {
+    if (problems.length) say(`${found.name} is not whole in Dropbox:`);
     for (const problem of problems) say(`  ${problem}`);
+    for (const line of onThisMac) say(line);
     say(`It is not opened. Say "what's waiting?" to see the episodes.`);
     return { code: 1 };
   }
@@ -1302,7 +1327,7 @@ export async function open(ctx, rest) {
   if (record.name.placeholder) say("The name is a placeholder: say what to call it.");
   say(record.title ? `Title: ${record.title.text}${record.title.approved ? "" : " (recommended by Claude)"}` : "No title yet.");
   const stem = basename(record.video.file, extname(record.video.file));
-  const notes = join(found.folder, `${stem}.edit-notes.txt`);
+  const notes = fileOf(ctx, found, `${stem}.edit-notes.txt`);
   if (existsSync(notes)) {
     say("Claude's notes, the first lines:");
     for (const line of notesForHer(readFileSync(notes, "utf8"), record).split("\n").filter((l) => l.trim()).slice(0, 12)) say(`  ${line}`);
@@ -1523,13 +1548,13 @@ export async function bring(ctx, rest) {
   const { record } = found.read;
   const name = record.name.text;
   const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "bring", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
-    const wanted = () => (only.length ? only.filter((rel) => !ctx.isWhole(join(found.folder, rel))) : notHere(ctx, found, record));
+    const wanted = () => (only.length ? only.filter((rel) => !ctx.isWhole(fileOf(ctx, found, rel))) : notHere(ctx, found, record));
     const coming = wanted();
     const read = ctx.deps.readAll || readThrough;
     const failed = [];
     for (const rel of coming) {
       try {
-        await read(join(found.folder, rel));
+        await read(fileOf(ctx, found, rel));
       } catch (e) {
         failed.push(`${rel} could not be read (${e.code || e.message})`);
       }
@@ -1903,7 +1928,7 @@ async function reelTitle(ctx, found, n, words) {
   const reel = reels.find((r) => r.n === n);
   if (!reel) return refuse(ctx, `There is no Reel ${n}.`);
   // A Reel a reading suggested is not made, and no Reel brimm-video makes would show its title: she is told how to make it.
-  if (!madeInApp(found.record, n) && notMade(found, n)) return refuse(ctx, notMadeSaid(ctx, found.record, n));
+  if (!madeInApp(found.record, n) && notMade(ctx, found, n)) return refuse(ctx, notMadeSaid(ctx, found.record, n));
   if (words == null) {
     ctx.say(reel.title ? `Reel ${n}'s title on screen is "${reel.title}".` : `Reel ${n} has no title on screen. Say what it says.`);
     return 0;
@@ -1938,10 +1963,10 @@ export async function dropReels(ctx, found, ns) {
 /** Whether Reel `n` of the episode `found` is one a reading suggested and nobody has made (reels.json version 2): its candidate
     has no crops, and no project of its own is listed. It is not made yet, whatever the
     record says of it: a Reel is made in HyperFrames (`app … reel <n>`). */
-function notMade(found, n) {
+function notMade(ctx, found, n) {
   const { record } = found;
-  if ((record.files && timelineFile({ part: { reel: n }, v: 0 }) in record.files) || !existsSync(join(found.folder, REELS_FILE))) return false;
-  const listing = readReels(readFileSync(join(found.folder, REELS_FILE), "utf8"));
+  if ((record.files && timelineFile({ part: { reel: n }, v: 0 }) in record.files) || !existsSync(fileOf(ctx, found, REELS_FILE))) return false;
+  const listing = readReels(readFileSync(fileOf(ctx, found, REELS_FILE), "utf8"));
   const candidate = listing.reels ? listing.reels.candidates.find((c) => c.n === n) : null;
   return Boolean(candidate && uncropped(candidate));
 }
@@ -1997,10 +2022,10 @@ function reelsWhy(ctx, found, record) {
 
 /** The words a Reel made from suggestion `n` is expected to start with: the suggestion's opening in reels.json (its `first`, else its
     words), its first twelve words. "" when it was made from times she gave, or the list cannot be read. */
-function suggestionOpening(folder, n) {
+function suggestionOpening(ctx, found, n) {
   if (!Number.isInteger(n)) return "";
   try {
-    const candidate = (readReels(readFileSync(join(folder, REELS_FILE), "utf8")).reels?.candidates ?? []).find((c) => c.n === n);
+    const candidate = (readReels(readFileSync(fileOf(ctx, found, REELS_FILE), "utf8")).reels?.candidates ?? []).find((c) => c.n === n);
     const text = (v) => (typeof v === "string" ? v.trim() : "");
     return candidate ? (text(candidate.first) || text(candidate.words)).split(/\s+/).filter(Boolean).slice(0, 12).join(" ") : "";
   } catch (e) {
@@ -2089,8 +2114,9 @@ export async function finishEpisode(ctx, found, answers = {}) {
   const { v2 } = target;
   if (record.name && record.name.placeholder && (!v2 || recordKind(record) === "raw")) stops.push(`Give the episode its name first: it is still called "${record.name.text}", from the video's file name.`);
   if (!v2 && record.kind !== "short video" && !(record.title && record.title.approved)) stops.push("Approve a title first.");
-  const problems = filesProblems(found.folder, record);
+  const { dropbox: problems, mac: onThisMac } = problemsOf(ctx, found, record);
   if (problems.length) stops.push(`${calledAs(ctx, found)} is not whole in Dropbox: ${problems.join(" ")}`);
+  stops.push(...onThisMac);
   const running = runningCommand(ctx.home, found.name, ctx.alive);
   // What she says to hand it off, in the words of the way it goes: the Reels' or HyperFrames'.
   const sayIt = forReels ? '"hand off the Reels"' : '"hand it off"';
@@ -2144,7 +2170,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
       if (part.project) stops.push(`The record has no Reel ${part.reel} for its HyperFrames project: ask Jason.`);
       continue;
     }
-    const opening = suggestionOpening(found.folder, part.fromSuggestion);
+    const opening = suggestionOpening(ctx, found, part.fromSuggestion);
     // What the Reel's picture holds is a proposal for its title, which she confirms as she gives any title (plan PR 8).
     looked.asks.push(reelTitleAsk({ n: part.reel, found: part.project ? projectWordsIn(work, part.project).words : [], opening }));
   }
@@ -2175,7 +2201,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // start with; its video is the export, with no export of the edit to go with it.
   const askedPart = (p) => ({
     key: p.key, label: p.label, ...(p.reel ? { reel: p.reel } : {}), projects: p.projects,
-    project: p.project, fromSuggestion: p.fromSuggestion ?? null, expected: p.reel && !p.kept ? suggestionOpening(found.folder, p.fromSuggestion) : "",
+    project: p.project, fromSuggestion: p.fromSuggestion ?? null, expected: p.reel && !p.kept ? suggestionOpening(ctx, found, p.fromSuggestion) : "",
     ...(p.key === "main" && onPicture !== null ? { onPicture } : {}),
     video: p.video ? { name: p.video.name, dir: p.video.dir, where: p.video.where, bytes: p.video.bytes, mtimeMs: p.video.mtimeMs } : p.video,
     export: p.export, kept: p.kept, noHandEdits: false
@@ -2310,7 +2336,7 @@ async function show(ctx, rest) {
   const projectInUse = (record.app?.projects ?? []).some(inUse);
   const roughCut = kind === "transcript" && isAnswered(record) && recordKind(record) === "raw" && !projectInUse;
   const file = roughCut ? `${stem}.rough-cut.transcript.txt` : `${stem}${ending}`;
-  const path = join(found.folder, file);
+  const path = fileOf(ctx, found, file);
   /** A file not whole on this Mac yet is brought over by a detached run, unless one is at it already. */
   const bringing = (name) => {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [name] });
@@ -2321,7 +2347,7 @@ async function show(ctx, rest) {
   // The recording's own transcript has the recording's times. Where the project's page puts the recording is where they are on its timeline,
   // so the recording's captions are printed at those times when the page, the recording in it and the captions can be read (on-timeline.js).
   const placements = kind === "transcript" && projectInUse && !roughCut ? recordingPlacementsIn(mainProjectDir(ctx, { found, record })) : [];
-  const captions = join(found.folder, `${stem}.srt`);
+  const captions = fileOf(ctx, found, `${stem}.srt`);
   if (placements.length && existsSync(captions)) {
     if (!ctx.isWhole(captions)) return bringing(`${stem}.srt`);
     let onTimeline = null;
@@ -2405,7 +2431,7 @@ function madeShown(ctx, found, record, what, fill) {
     Dropbox has not brought whole yet is copied all the same: reading it is what brings it, and it is small. */
 function showCopy(ctx, found, record, rel, what) {
   const name = namedAs(found, record);
-  const from = join(found.folder, rel);
+  const from = fileOf(ctx, found, rel);
   if (!existsSync(from)) return refuse(ctx, `${name} has no ${what} yet.`);
   let copy = "";
   try {
@@ -2756,6 +2782,7 @@ async function resolveIn(ctx, found, keep) {
     return 0;
   }
   const copy = inOrder[0];
+  // Dropbox keeps a conflicted copy of a file in Dropbox only: the copy, and the file it is of, are looked for in the episode's folder there.
   const at = (rel) => join(found.folder, rel);
   const isRecord = copy.startsWith("record/");
   let of = conflictedOf(copy);
@@ -2987,7 +3014,7 @@ async function resolveIn(ctx, found, keep) {
   // both Macs to refuse in silence (round 2, D: W1, W8).
   const outOfStep = () => {
     const inForceNow = readEpisode(found.folder, { pastCopies: true }).record;
-    const problems = inForceNow ? filesProblems(found.folder, inForceNow) : [];
+    const problems = inForceNow ? (({ dropbox, mac }) => [...dropbox, ...mac])(problemsOf(ctx, found, inForceNow)) : [];
     if (!problems.length) return "";
     // resolve again would say there is no conflict: open is what says again whether a file is not whole (the final check).
     return `\nThe files are not as the record now lists them: ${problems.join("; ")}. Once Dropbox has finished, say "open" again; if it still says a file is not whole, ${NEEDS_JASON[0].toLowerCase()}${NEEDS_JASON.slice(1)}`;
@@ -3125,8 +3152,8 @@ async function noteAgreement(ctx, found, record, n) {
   const checks = async (rec, settings) => {
     const gate = teachingsWhy(settings, ctx.now());
     if (gate) return { why: gate };
-    let read = readTeachings(found.folder, rec, ctx.isWhole);
-    if (read.coming && !(await broughtOver(ctx, found, [read.coming])).length) read = readTeachings(found.folder, rec, ctx.isWhole);
+    let read = readTeachings(folderAt(ctx, { folder: found.folder, record: rec }, "local"), rec, ctx.isWhole);
+    if (read.coming && !(await broughtOver(ctx, found, [read.coming])).length) read = readTeachings(folderAt(ctx, { folder: found.folder, record: rec }, "local"), rec, ctx.isWhole);
     if (read.none) return { why: `${name} has no teachings yet: Claude has not read it.` };
     if (read.coming) return { why: TEACHINGS_COMING };
     if (read.why) return { why: `${name}'s teachings cannot be read (${read.why}).` };
@@ -3207,7 +3234,7 @@ async function reels(ctx, rest) {
   const { found, record } = { found: got.found, record: got.record };
   // A short video she has answered has no Reels, and its reading writes no list of them: said as drop says it.
   if (isAnswered(record) && record.kind === "short video") return refuse(ctx, "A short video has no Reels.");
-  const at = join(found.folder, REELS_FILE);
+  const at = fileOf(ctx, found, REELS_FILE);
   if (!existsSync(at) && record.files && REELS_FILE in record.files) return refuse(ctx, `${REELS_FILE} is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. ${keptOrWait(ctx, found, record)}`);
   if (!existsSync(at)) {
     const ns = (record.reels || []).map((r) => `Reel ${r.n}`);
@@ -3248,12 +3275,12 @@ async function reels(ctx, rest) {
   ctx.say(reelsText(read.reels, record, blocked.bring ? "" : (blocked.why || "").replace(/ Nothing was changed\.$/, "")));
   if (flags["no-play"]) return 0;
   const previews = read.reels.candidates.filter((c) => c.preview).map((c) => c.preview);
-  const coming = previews.filter((rel) => !ctx.isWhole(join(found.folder, rel)));
+  const coming = previews.filter((rel) => !ctx.isWhole(fileOf(ctx, found, rel)));
   if (coming.length) {
     ctx.say(`Dropbox is still bringing ${coming.join(", ")} over to this Mac. Say "show me the Reels" again when it is done.`);
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: coming });
   }
-  for (const rel of previews.filter((p) => !coming.includes(p))) ctx.openApp("QuickTime Player", join(found.folder, rel));
+  for (const rel of previews.filter((p) => !coming.includes(p))) ctx.openApp("QuickTime Player", fileOf(ctx, found, rel));
   return 0;
 }
 
@@ -3550,7 +3577,7 @@ async function workcopy(ctx, rest) {
     if (held.why) return { ok: false, made: [], failed: [held.why], next: "" };
     // The copy itself, from the video or from the file this Mac holds of it (`held.from`).
     const copyOf = async (held, deps) => {
-      const video = join(found.folder, held.record.video.file);
+      const video = fileOf(ctx, found, held.record.video.file);
       // The file this Mac holds of the video, when the run did not wait for the late check (waitForImport): read in place of the video, which stays its identity.
       const fromOf = (h) => (h.from ? { from: h.from } : {});
       if (!reel) {
@@ -3566,7 +3593,7 @@ async function workcopy(ctx, rest) {
         return { ...main, made: [...main.made, ...footage.made], ...(footage.failed?.length ? { footageFailed: footage.failed } : {}) };
       }
       // A Reel's video is the suggestion's stretch of the recording; the list is read once the video is whole and checked, or once the file this Mac holds of it is in hand (plan R1b).
-      const got = reelStretch(found.folder, reel);
+      const got = reelStretch(dirname(fileOf(ctx, found, REELS_FILE)), reel);
       if (!got.stretch) {
         const why = got.gone ? `Reel ${reel} is not one of the suggestions any more` : got.nothing ? `Reel ${reel} has nothing to show: ${got.nothing}` : "the Reel suggestions cannot be read";
         deps.log(`${shownName(held.record)}: the video for Reel ${reel} could not be made: ${why}.`);
@@ -3925,9 +3952,9 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
   const unhandedAfterAsk = ask ? "" : unhanded;
   if (!parts.some((p) => p.toApply.length)) return save(ctx, found, { ...record, finished: withHeld({}) }, `${done}${ask}${keptNote}${unhandedAfterAsk}`);
   const finals = [...parts.flatMap((p) => [`${p.stem}.srt`, `${p.stem}.transcript.txt`, ...(p.part.words ? [p.part.words] : [])]), finished.handoff];
-  const gone = finals.find((rel) => !existsSync(join(found.folder, rel)));
+  const gone = finals.find((rel) => !existsSync(fileOf(ctx, found, rel)));
   if (gone) return refuse(ctx, `${gone} is not in the episode's folder, so the final transcripts cannot be spelled again. Nothing was changed. Say finish again.`);
-  const coming = finals.filter((rel) => !ctx.isWhole(join(found.folder, rel)));
+  const coming = finals.filter((rel) => !ctx.isWhole(fileOf(ctx, found, rel)));
   if (coming.length) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: coming });
     return refuse(ctx, "Dropbox is bringing the final transcripts over to this Mac. Say it again when it is done. Nothing was changed.");
@@ -3939,7 +3966,7 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
   /** Each final file put back as it was, each on its own: the ones that could not be. */
   const putBack = () => before.filter(([rel, text]) => {
     try {
-      put(join(found.folder, rel), text, { replace: true });
+      put(fileOf(ctx, found, rel), text, { replace: true });
       return false;
     } catch (e) {
       return true;
@@ -3952,7 +3979,7 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
     // The pairs each part's captions are spelled with now, by its key.
     const spelledWith = {};
     for (const p of parts) {
-      const was = { srt: readFileSync(join(found.folder, `${p.stem}.srt`), "utf8"), words: p.part.words ? readFileSync(join(found.folder, p.part.words), "utf8") : null };
+      const was = { srt: readFileSync(fileOf(ctx, found, `${p.stem}.srt`), "utf8"), words: p.part.words ? readFileSync(fileOf(ctx, found, p.part.words), "utf8") : null };
       const sameWords = (made) => !made.words || JSON.stringify(JSON.parse(made.words).words) === JSON.stringify(JSON.parse(was.words).words);
       // A spelling is held by a part only once it has changed it: one whose word the part does not have is not.
       const changing = p.toApply.filter((pair) => {
@@ -3975,7 +4002,7 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
     // Version 1 is under the episode's own id, and a revision is never used twice, even one a finish left in final/ without
     // writing its record (finish.js lastRevision). Which version, the id, the revision and a refusal are finish.js
     // handoffTarget's, as every hand-off writer asks them.
-    const onFile = JSON.parse(readFileSync(join(found.folder, finished.handoff), "utf8"));
+    const onFile = JSON.parse(readFileSync(fileOf(ctx, found, finished.handoff), "utf8"));
     const target = handoffTarget(ctx, { folder: found.folder, record });
     if (target.refusal) return refuse(ctx, target.refusal);
     const { v2, revision } = target;
@@ -4000,8 +4027,8 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
     if (waits) return refuse(ctx, waits);
     const files = {};
     for (const [rel, text] of writes) {
-      before.push([rel, readFileSync(join(found.folder, rel), "utf8")]);
-      files[rel] = put(join(found.folder, rel), text, { replace: true }).bytes;
+      before.push([rel, readFileSync(fileOf(ctx, found, rel), "utf8")]);
+      files[rel] = put(fileOf(ctx, found, rel), text, { replace: true }).bytes;
     }
     // A finished part may have captions drawn into its picture (whether it has is not known here), which keep the old spelling
     // until it is made again (stillWords): a full episode's main video has none (the brief the app's agent is given says a wide main video has no
@@ -4494,7 +4521,7 @@ function answerWhy(ctx, found, record, plan) {
     if (stored !== "session") return MARK_STAYS;
     // A video answered as a session after it was read as another kind owes the BRIMM Ops page its empty session revision until it
     // is written (a gap in its versions, or this Mac handing off version 1, held it back): the same answer again writes it.
-    if (!plan.again || !(revisionOwed(record) || sweepOwed(found.folder, record))) return `${name} is a client or group session already.`;
+    if (!plan.again || !(revisionOwed(record) || sweepOwed(ctx, found, record))) return `${name} is a client or group session already.`;
     // The same answer alone writes it: another link now would not be the one it is owed under.
     if (plan.versionOf || plan.unlink) return owedLinked(name);
     plan.owed = true;
@@ -4514,6 +4541,9 @@ function answerWhy(ctx, found, record, plan) {
     const picked = exact[0] || named[0];
     if (picked && picked.record.id === record.id) return `${name} cannot be a version of itself.`;
     if (!picked) return `No answered video on this Mac has the id ${id}.`;
+    // A version never spans two Macs: a video kept on another Mac is refused as the gate refuses its commands.
+    const away = onOtherMac(ctx, picked.record);
+    if (away) return ON_OTHER_MAC(shownName(picked.record), away);
     if (stored !== "session" && gated(picked.record)) return SESSION_TARGET;
     plan.target = picked;
   }
@@ -4539,6 +4569,8 @@ function answerWhy(ctx, found, record, plan) {
   if (plan.target) {
     const target = (links.find(plan.target.record.id) || plan.target).record;
     const targetName = shownName(target);
+    const away = onOtherMac(ctx, target);
+    if (away) return ON_OTHER_MAC(targetName, away);
     if (links.chainOf(target).some((link) => link.record.id === record.id)) return `${name} cannot be a version of ${targetName}: ${targetName} is already a version of it.`;
     // A chain that loops or runs to an episode not on this Mac cannot be read to its first, and what it holds is not known.
     const gap = links.gapOf(target);
@@ -4766,14 +4798,14 @@ async function answerKind(ctx, found, plan, began) {
   // A raw reading needs the video itself for the rough cut. On a Mac it is not whole on (the one that did not import it), that
   // brings it all over first: only with --here, her "read it here". Otherwise nothing is written or claimed, so that the other Mac
   // may answer it (spec 2, "Which Mac reads it").
-  if (stored === "raw" && !plan.here && ctx.settings.readings !== false && !ctx.isWhole(join(found.folder, record.video.file))) return refuse(ctx, notHereYet(ctx, record));
+  if (stored === "raw" && !plan.here && ctx.settings.readings !== false && !ctx.isWhole(fileOf(ctx, found, record.video.file))) return refuse(ctx, notHereYet(ctx, record));
   // A video answered before is being corrected: what its earlier reading and its hand-off left in the shared folder is set aside
   // with the answer, and must be whole on this Mac first (read through when it is not), before she is asked anything or it is
   // claimed.
   const correcting = recordKind(record) !== null;
   if (correcting) {
-    const earlier = earlierFiles(found.folder, record, { session: stored === "session" }).rels;
-    await broughtOver(ctx, found, earlier.filter((rel) => existsSync(join(found.folder, rel))));
+    const earlier = earlierFiles(ctx, found, record, { session: stored === "session" }).rels;
+    await broughtOver(ctx, found, earlier.filter((rel) => existsSync(fileOf(ctx, found, rel))));
     // A correction to a session is written at once, so that the gate holds the video at once: what is not here yet is owed (below).
     if (stored !== "session" && notReady(ctx, found, earlier).length) return refuse(ctx, comingWhy(ctx, found, name));
   }
@@ -4801,7 +4833,7 @@ async function answerKind(ctx, found, plan, began) {
   // What a correction sets aside, as the folder holds it now that the claim has waited: every file whole here still. To a session,
   // only what is here and whole: a file the record lists that is not stays listed, owed, and the same answer again sweeps it once
   // Dropbox has brought it (sweepOwed, emptyRevisionAgain).
-  const listedAside = correcting ? earlierFiles(found.folder, base, { session: stored === "session" }) : null;
+  const listedAside = correcting ? earlierFiles(ctx, found, base, { session: stored === "session" }) : null;
   const owed = listedAside && stored === "session" ? notReady(ctx, found, listedAside.rels) : [];
   const aside = listedAside ? { ...listedAside, rels: listedAside.rels.filter((rel) => !owed.includes(rel)) } : null;
   if (aside && notReady(ctx, found, aside.rels).length) {
@@ -4845,7 +4877,7 @@ async function answerKind(ctx, found, plan, began) {
     // an empty session revision, which redacts what it had (spec 2, "A session answered as something else"). It is judged with the
     // record as it is to be written, its last finish still on it for the version of the hand-off on file.
     if (aside) {
-      empty = emptyRevisionOf(ctx, found, { ...next, finished: base.finished }, at, { gone: readBefore(found.folder, base, { rels: listedAside.rels, restored: aside.restore.length > 0 }) });
+      empty = emptyRevisionOf(ctx, found, { ...next, finished: base.finished }, at, { gone: readBefore(ctx, found, base, { rels: listedAside.rels, restored: aside.restore.length > 0 }) });
       next.session.emptyRevision = empty.handoff ? empty.revision : "owed";
       if (empty.handoff) next.finished = empty.finished;
     }
@@ -4877,7 +4909,7 @@ async function answerKind(ctx, found, plan, began) {
     // It is a session from now on: nothing the command says after this holds the names it had. Its other versions are held as
     // sessions from now on too, and she is told which she must answer as one (sayVersionsToMark).
     hideNames(ctx, episodeAt(ctx, found.name));
-    const shown = !(empty && empty.handoff) || (await showInFinder(ctx, { record: next, label: next.name.text, path: join(found.folder, empty.handoff.rel) }));
+    const shown = !(empty && empty.handoff) || (await showInFinder(ctx, { record: next, label: next.name.text, path: fileOf(ctx, found, empty.handoff.rel) }));
     say(`${next.name.text}: marked a client or group session. ${ASK_FOR_TEACHINGS}`);
     if (empty) sayEmpty(ctx, next.name.text, empty, written.stayed, shown);
     if (!shown) say(cantOpen(next.name.text));
@@ -4928,7 +4960,7 @@ async function answerKind(ctx, found, plan, began) {
   // for the reading, and a request while a run of it is at work starts none. It is asked for at once, whether or not the import's
   // late check of the video is still to come: its run waits for that itself (waitForImport). A video not here yet is made into one by
   // `app`, which asks for it when it is not there.
-  if (copyWanted(ctx, stored, wrote.record) && ctx.isWhole(join(found.folder, wrote.record.video.file))) requestWorkCopy(ctx, { folder: found.name });
+  if (copyWanted(ctx, stored, wrote.record) && ctx.isWhole(fileOf(ctx, found, wrote.record.video.file))) requestWorkCopy(ctx, { folder: found.name });
   if (holdsUntil !== null) {
     // When its rough cut is ready too, as the guide says it (guideReading), once this Mac has measured the speeds of Claude's call and of
     // the rough cut.
@@ -5003,8 +5035,8 @@ const revisionOwed = (record) => record.session !== null && typeof record.sessio
 /** Whether a session answered so after it was read as another kind (it has `session.emptyRevision`) still owes a sweep of final/: a
     file its record lists there, or one there, that is no session's own hand-off (earlierFiles, finalOnly), as one that Dropbox had
     not brought when it was answered, or brought since. The same answer again sweeps it (emptyRevisionAgain). */
-const sweepOwed = (folder, record) => record.session !== null && typeof record.session === "object" && !Array.isArray(record.session) && record.session.emptyRevision !== undefined
-  && earlierFiles(folder, record, { session: true, finalOnly: true }).rels.length > 0;
+const sweepOwed = (ctx, found, record) => record.session !== null && typeof record.session === "object" && !Array.isArray(record.session) && record.session.emptyRevision !== undefined
+  && earlierFiles(ctx, found, record, { session: true, finalOnly: true }).rels.length > 0;
 
 /** Whether a file, by its name or its path, is one a reading of Claude's writes: Claude's notes, the Reel suggestions (reels.json and
     the copy she reads) or a session's teachings. A set-aside copy in history/ ("<stamp> <name>") is one too. */
@@ -5014,11 +5046,11 @@ const readingFile = (rel) => /(?:^|[/ ])reels\.json$|\.(?:edit-notes|reel-sugges
     correction let go (null); or the files of one are among `rels` (those set aside now, and those owed: listed, and not here yet),
     or the record lists them, or they were set aside into its history/ before; or `restored` (the rules' plan put back, which a raw
     reading's plan had replaced). Only then do its words say they have gone to Claude. */
-function readBefore(folder, record, { rels = [], restored = false } = {}) {
+function readBefore(ctx, found, record, { rels = [], restored = false } = {}) {
   const listedFiles = record.files !== null && typeof record.files === "object" ? Object.keys(record.files) : [];
   if (record.reading !== undefined || restored || [...rels, ...listedFiles].some(readingFile)) return true;
   try {
-    return readdirSync(join(folder, "history"), { recursive: true }).some((rel) => readingFile(String(rel)));
+    return readdirSync(join(folderAt(ctx, { folder: found.folder, record }, "local"), "history"), { recursive: true }).some((rel) => readingFile(String(rel)));
   } catch (e) {
     return false;
   }
@@ -5064,7 +5096,7 @@ function whatInFinal(rel) {
 const whatsInFinal = (rels) => [...new Set([...rels].sort().map(whatInFinal))];
 
 /** The files of `rels` (paths from the episode's folder) that are not on this Mac, or not whole on it. */
-const notReady = (ctx, found, rels) => rels.filter((rel) => !existsSync(join(found.folder, rel)) || !ctx.isWhole(join(found.folder, rel)));
+const notReady = (ctx, found, rels) => rels.filter((rel) => !existsSync(fileOf(ctx, found, rel)) || !ctx.isWhole(fileOf(ctx, found, rel)));
 
 /** What `kind … --again` sets aside of the episode in `folder`, whose record is `record`, before a new reading (spec 2, "Correcting a
     wrong answer"): only the text files of the earlier reading, never the video, the import's own files, or a rough cut, upright
@@ -5083,10 +5115,12 @@ const notReady = (ctx, found, rels) => rels.filter((rel) => !existsSync(join(fou
       that plan already is left alone, and set aside again never;
     - `reels`, the numbers of the Reel suggestions in the reels.json set aside, which the record lets go with it.
     This only reads. */
-function earlierFiles(folder, record, { session = false, finalOnly = false } = {}) {
+function earlierFiles(ctx, found, record, { session = false, finalOnly = false } = {}) {
+  const { folder } = found;
+  const own = folderAt(ctx, { folder, record }, "local");
   const stem = basename(record.video.file, extname(record.video.file));
   const listedFiles = record.files !== null && typeof record.files === "object" ? record.files : {};
-  const there = (rel) => existsSync(join(folder, rel));
+  const there = (rel) => existsSync(fileAt(ctx, { folder, record }, rel));
   const rels = [];
   const add = (rel, always = false) => {
     if ((always || there(rel) || Object.hasOwn(listedFiles, rel)) && !rels.includes(rel)) rels.push(rel);
@@ -5098,7 +5132,7 @@ function earlierFiles(folder, record, { session = false, finalOnly = false } = {
     if (reading.kind === "raw") for (const rel of [`${stem}.rough-cut.srt`, `${stem}.rough-cut.transcript.txt`]) add(rel);
     const v0 = (Array.isArray(record.main.pushed) ? record.main.pushed : []).find((p) => p.v === 0 && p.how === "render");
     if (v0 && typeof v0.file === "string") add(v0.file);
-    for (const name of [...new Set([...topFiles(folder), ...Object.keys(listedFiles)])].filter(isTeachingsFile).sort()) add(name);
+    for (const name of [...new Set([...topFiles(own), ...Object.keys(listedFiles)])].filter(isTeachingsFile).sort()) add(name);
   }
   let finals = [];
   try {
@@ -5112,9 +5146,9 @@ function earlierFiles(folder, record, { session = false, finalOnly = false } = {
     add(rel, true);
   }
   if (!finalOnly) {
-    const rules = rulesPlanKept(folder, stem);
+    const rules = rulesPlanKept(own, stem);
     const planRel = `${stem}.cut-plan.json`;
-    if (rules && there(planRel) && readFileSync(join(folder, planRel), "utf8") !== rules.text) {
+    if (rules && there(planRel) && readFileSync(fileAt(ctx, { folder, record }, planRel), "utf8") !== rules.text) {
       add(planRel);
       restore.push([planRel, rules.json]);
       if (rules.txt) {
@@ -5126,7 +5160,7 @@ function earlierFiles(folder, record, { session = false, finalOnly = false } = {
   const reels = new Set();
   if (rels.includes(REELS_FILE) && there(REELS_FILE)) {
     try {
-      const read = readReels(readFileSync(join(folder, REELS_FILE), "utf8"));
+      const read = readReels(readFileSync(fileAt(ctx, { folder, record }, REELS_FILE), "utf8"));
       for (const c of read.reels ? read.reels.candidates : []) reels.add(c.n);
     } catch (e) {
       // A list that cannot be read lets go no Reel of the record.
@@ -5137,10 +5171,10 @@ function earlierFiles(folder, record, { session = false, finalOnly = false } = {
 
 /** A free name in the episode's history/ for the file `rel` set aside at `stamp`, as every set-aside names one: "<stamp> <name>",
     and "<stamp>-2 <name>" and on when that is taken, in the folder or by this set-aside (`taken`, which it is added to). */
-function asideName(folder, stamp, rel, taken) {
+function asideName(dir, stamp, rel, taken) {
   for (let n = 1; ; n++) {
     const name = `history/${stamp}${n > 1 ? `-${n}` : ""} ${basename(rel)}`;
-    if (!taken.has(name) && !existsSync(join(folder, name))) {
+    if (!taken.has(name) && !existsSync(join(dir, name))) {
       taken.add(name);
       return name;
     }
@@ -5158,6 +5192,10 @@ function asideName(folder, stamp, rel, taken) {
     as `stayed`, for her to be told by what it is. Resolves { code: 0, stayed } when written, { code: 1 } having said why. */
 async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { quiet = false, session = false } = {}) {
   const { folder } = found;
+  // A file of a record kept on this Mac that is set aside goes into video/history/ here, unlisted; one in Dropbox (final/) into history/ there, listed.
+  const dirOf = (rel) => folderAt(ctx, { folder, record: base }, filePlace(base, rel));
+  const pathOf = (rel) => fileAt(ctx, { folder, record: base }, rel);
+  const own = folderAt(ctx, { folder, record: base }, "local");
   const gone = undone(base, ctx.home);
   if (gone) {
     ctx.say(`${gone} Nothing was changed.`);
@@ -5176,22 +5214,22 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { 
   const taken = new Set();
   /** Put `text` in at `rel` by the rule, keeping what was there to put back. */
   const putIn = (rel, text) => {
-    const at = join(folder, rel);
+    const at = pathOf(rel);
     const there = existsSync(at);
     replaced.push({ at, was: there ? readFileSync(at, "utf8") : null, ours: text });
     mkdirSync(dirname(at), { recursive: true });
     files[rel] = put(at, text, { replace: there }).bytes;
   };
   try {
-    if (aside.rels.length) mkdirSync(join(folder, "history"), { recursive: true });
     for (const rel of aside.rels) {
-      const to = asideName(folder, stamp, rel, taken);
-      cloneIn(join(folder, rel), join(folder, to), opts);
-      copies.push(join(folder, to));
-      files[to] = statSync(join(folder, to)).size;
+      mkdirSync(join(dirOf(rel), "history"), { recursive: true });
+      const to = asideName(dirOf(rel), stamp, rel, taken);
+      cloneIn(pathOf(rel), join(dirOf(rel), to), opts);
+      copies.push(join(dirOf(rel), to));
+      if (filePlace(base, rel) === "dropbox") files[to] = statSync(join(dirOf(rel), to)).size;
       if (!placed.has(rel)) delete files[rel];
     }
-    for (const [rel, from] of aside.restore) putIn(rel, readFileSync(join(folder, from), "utf8"));
+    for (const [rel, from] of aside.restore) putIn(rel, readFileSync(join(own, from), "utf8"));
     if (handoff) putIn(handoff.rel, handoff.text);
     writeEpisode(folder, { ...next, files }, { expectRev: base.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer: writerOf(ctx), home: ctx.home });
   } catch (e) {
@@ -5220,7 +5258,7 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { 
   // Each file set aside, whole in history/ and listed there by the record, leaves the episode.
   for (const rel of aside.rels.filter((r) => !placed.has(r))) {
     try {
-      rmSync(join(folder, rel), { force: true });
+      rmSync(pathOf(rel), { force: true });
     } catch (e) {
       // The record lists it no more, and history/ holds it whole: what stayed in final/ is said below.
     }
@@ -5290,18 +5328,18 @@ async function showInFinder(ctx, { record, label, path, clone }) {
 async function emptyRevisionAgain(ctx, found, record) {
   const label = shownName(record);
   const at = localStamp(new Date(ctx.now()));
-  const aside = earlierFiles(found.folder, record, { session: true, finalOnly: true });
+  const aside = earlierFiles(ctx, found, record, { session: true, finalOnly: true });
   // An empty revision written already is not written again: only the sweep it still owes (sweepOwed) is made.
-  const empty = revisionOwed(record) ? emptyRevisionOf(ctx, found, record, at, { gone: readBefore(found.folder, record, { rels: aside.rels }) }) : null;
+  const empty = revisionOwed(record) ? emptyRevisionOf(ctx, found, record, at, { gone: readBefore(ctx, found, record, { rels: aside.rels }) }) : null;
   if (!(empty && empty.handoff) && !aside.rels.length) return refuse(ctx, empty ? `${empty.words} ${OUT_OF_SHARED}` : `${label} is a client or group session already.`);
-  await broughtOver(ctx, found, aside.rels.filter((rel) => existsSync(join(found.folder, rel))));
+  await broughtOver(ctx, found, aside.rels.filter((rel) => existsSync(fileOf(ctx, found, rel))));
   if (notReady(ctx, found, aside.rels).length) return refuse(ctx, comingWhy(ctx, found, label));
   const handoff = empty && empty.handoff;
   const next = handoff ? { ...record, session: { ...record.session, emptyRevision: empty.revision }, finished: empty.finished } : record;
   const wrote = await setAsideWritten(ctx, found, record, next, aside, handoff, { quiet: true, session: true });
   if (wrote.code !== 0) return 1;
   forgetComing(ctx, found);
-  const shown = !handoff || (await showInFinder(ctx, { record: next, label, path: join(found.folder, empty.handoff.rel) }));
+  const shown = !handoff || (await showInFinder(ctx, { record: next, label, path: fileOf(ctx, found, empty.handoff.rel) }));
   if (empty) sayEmpty(ctx, label, empty, wrote.stayed, shown);
   else {
     ctx.say(`${label}: its earlier files are set aside in history/. ${OUT_OF_SHARED}`);
@@ -5458,7 +5496,7 @@ export async function whichCommand(ctx, rest) {
   if (!got.found) return got.code;
   const { found, record } = got;
   const name = namedAs(found, record);
-  const video = join(found.folder, record.video.file);
+  const video = fileOf(ctx, found, record.video.file);
   const here = ctx.isWhole(video);
   let opened = "";
   if (here) {
@@ -5522,14 +5560,14 @@ const taughtSession = (record) => recordKind(record) === "session" && gated(reco
     (dropbox.js readThrough, as a reading reads its files), so that Dropbox brings it down: the gate refuses `bring` for a
     session, and a file online-only on this Mac would otherwise never come. */
 async function broughtOver(ctx, found, rels) {
-  for (const rel of rels.filter((r) => !ctx.isWhole(join(found.folder, r)))) {
+  for (const rel of rels.filter((r) => !ctx.isWhole(fileOf(ctx, found, r)))) {
     try {
-      await (ctx.deps.readAll || readThrough)(join(found.folder, rel));
+      await (ctx.deps.readAll || readThrough)(fileOf(ctx, found, rel));
     } catch (e) {
       // It is said by what is still not whole.
     }
   }
-  return rels.filter((r) => !ctx.isWhole(join(found.folder, r)));
+  return rels.filter((r) => !ctx.isWhole(fileOf(ctx, found, r)));
 }
 
 /** The names brimm-video can see in the session `found` (teachings.js sessionSeen), once what they are seen from is whole on this
@@ -5537,7 +5575,7 @@ async function broughtOver(ctx, found, rels) {
 async function sessionNames(ctx, found) {
   const { record } = found;
   if ((await broughtOver(ctx, found, seenFrom(record))).length) return { why: WORDS_COMING };
-  const seen = sessionSeen(found.folder, record, { host: ctx.settings.host });
+  const seen = sessionSeen(folderAt(ctx, { folder: found.folder, record }, "local"), record, { host: ctx.settings.host });
   return seen.why ? { why: `${shownName(record)}'s names cannot be checked now: ${seen.why}.` } : { names: seen.names, hers: seen.hers };
 }
 
@@ -5687,8 +5725,8 @@ async function sessionItems(ctx, rest, command) {
   if (!taughtSession(record)) return refuse(ctx, `${name} is not a client or group session: it has no ${command === "ideas" ? "Reel ideas" : "principles"} of its own.`);
   const gate = teachingsWhy(ctx.settings, ctx.now());
   if (gate) return refuse(ctx, gate);
-  let read = readTeachings(found.folder, record, ctx.isWhole);
-  if (read.coming && !(await broughtOver(ctx, found, [read.coming])).length) read = readTeachings(found.folder, record, ctx.isWhole);
+  let read = readTeachings(folderAt(ctx, { folder: found.folder, record }, "local"), record, ctx.isWhole);
+  if (read.coming && !(await broughtOver(ctx, found, [read.coming])).length) read = readTeachings(folderAt(ctx, { folder: found.folder, record }, "local"), record, ctx.isWhole);
   if (read.none) return refuse(ctx, `${name} has no teachings yet: Claude has not read it.`);
   if (read.coming) return refuse(ctx, TEACHINGS_COMING);
   if (read.why) return refuse(ctx, `${name}'s teachings cannot be read (${read.why}).`);
@@ -5959,7 +5997,7 @@ function guideReels(ctx, e, r, downloads) {
     cannot be read, counts as one undecided, so that the guide never says every item is decided of what it could not see. */
 function guideSession(ctx, e, r) {
   const mark = r.session !== null && typeof r.session === "object" ? r.session : {};
-  const got = readTeachings(e.folder, r, ctx.isWhole);
+  const got = readTeachings(folderAt(ctx, { folder: e.folder, record: r }, "local"), r, ctx.isWhole);
   const items = itemsOf(got.teachings, r.session);
   const undecided = got.coming !== undefined || got.why !== undefined ? 1 : ITEM_LISTS.reduce((n, [key]) => n + items[key].filter((item) => typeof item.approved !== "boolean").length, 0);
   return { choice: mark.teachings ?? null, teachingsOn: teachingsOn(ctx.settings, ctx.now()), undecided, emptyOwed: revisionOwed(r) };

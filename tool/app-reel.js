@@ -43,7 +43,7 @@
 // What it says goes into her chat, so it holds no path, no flag and no name of a command. What it touches beyond the episode's own
 // files is given to it (`deps`), so that no test runs the command line, the app or `claude`.
 import { existsSync, readFileSync, renameSync, statSync } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { clockText } from "./clock.js";
 import { runningCommand } from "./detached.js";
 import { projectWaits } from "./late-wait.js";
@@ -59,6 +59,10 @@ import {
   openProjectInApp, plainName, readListed, readWords, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, wordsIn, wordsOfText
 } from "./app.js";
 import { reelCopyKey, reelCopyPaths, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
+import { fileAt } from "./where.js";
+
+/** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
+const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
 
 /** The kinds of video a Reel's video is made for (architecture 4.3): a raw video, and a video finished by her editor. A short video
     has no Reels, and a session reaches the app only as a clip of its own. */
@@ -164,7 +168,7 @@ function adoptReel(ctx, { found, record, n, at, dir }) {
     ctx.say(notWhole(`Reel ${n} of ${record.name.text}`));
     return { code: 1 };
   }
-  return { project: madeEntry(ctx, { n, name: basename(dir), at, from: fromOf(record, statSync(join(found.folder, record.video.file))), workingCopy }) };
+  return { project: madeEntry(ctx, { n, name: basename(dir), at, from: fromOf(record, statSync(fileOf(ctx, found, record.video.file))), workingCopy }) };
 }
 
 /** The graphic cues a Reel's project is given (PR H2), by what the video is that the Reel is of, as projectFiles takes them:
@@ -211,12 +215,12 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   const wait = projectWaits(ctx, { name: found.name, record });
   // While the reading's own late check is still to come (plan R1d), the words, the suggestions and the cut plan are held to the sizes the
   // record lists, judged by the bytes read.
-  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel, i) => (i === 0 ? readWords : readListed)(found.folder, record, rel)) : null;
+  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel, i) => (i === 0 ? readWords : readListed)(dirname(fileOf(ctx, found, rel)), record, rel)) : null;
   if (checked && checked.some((got) => got.notWhole)) {
     ctx.say(reelNotWholeYet(n, name));
     return { code: 0 };
   }
-  const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(join(found.folder, `${stem}.words.json`));
+  const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(fileOf(ctx, found, `${stem}.words.json`));
   if (!words) {
     ctx.say(noWords(name));
     return { code: 1 };
@@ -225,13 +229,13 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
     ctx.say(stillReading(n, name));
     return { code: 0 };
   }
-  const listed = suggestion(found.folder, n, checked ? checked[1].text ?? "" : undefined);
+  const listed = suggestion(dirname(fileOf(ctx, found, REELS_FILE)), n, checked ? checked[1].text ?? "" : undefined);
   if (!listed.candidate) {
     ctx.say(listed.gone ? noSuchReel(n, listed.numbers) : listed.nothing ? `Reel ${n} has nothing to show: ${listed.nothing}.` : unreadable(name));
     return { code: 1 };
   }
   const asked = { n, start: listed.candidate.start, end: listed.candidate.end };
-  const raw = statSync(join(found.folder, record.video.file));
+  const raw = statSync(fileOf(ctx, found, record.video.file));
   const copy = reelCopyPaths(home, found.name, n, reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, asked));
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     // Asked for once: when a run is at work already, whichever video it makes, nothing is started, and she is not told that it is.
@@ -253,7 +257,7 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   const stretch = facts.stretch ?? asked;
   // The cut plan places the words' starts, as it does the main video's (project.js saidWords); it cuts nothing of the Reel, and with
   // none the words are only moved inside their time.
-  const plan = checked ? (checked[2].text === undefined ? undefined : JSON.parse(checked[2].text)) : jsonIn(join(found.folder, `${stem}.cut-plan.json`));
+  const plan = checked ? (checked[2].text === undefined ? undefined : JSON.parse(checked[2].text)) : jsonIn(fileOf(ctx, found, `${stem}.cut-plan.json`));
   const input = {
     kind: "reel", part: { reel: n }, id: record.id, name, spellings: record.spellings, logos: logosIn(ctx.settings.root), facts, words, stretch,
     plan, faces: factsIn(copy.faces), ...cuesFor(kindOf(record), { plan, file: copy.cues, record }),
@@ -285,12 +289,12 @@ function putReelVideoBack(ctx, { found, record, n, project, dir }, { rename }) {
   const { home } = ctx;
   const name = record.name.text;
   const of = `Reel ${n} of ${name}`;
-  const raw = statOf(join(found.folder, record.video.file));
+  const raw = statOf(fileOf(ctx, found, record.video.file));
   if (raw === undefined) {
     ctx.say(noRecording(name));
     return { code: 1 };
   }
-  if (changedSince(project, { found, record })) {
+  if (changedSince(project, { found, record, ctx })) {
     ctx.say(videoGoneAndChanged(name));
     return { code: 1 };
   }
@@ -299,12 +303,12 @@ function putReelVideoBack(ctx, { found, record, n, project, dir }, { rename }) {
     ctx.say(stillReading(n, name));
     return { code: 0 };
   }
-  const checked = wait === "verify" ? readListed(found.folder, record, REELS_FILE) : null;
+  const checked = wait === "verify" ? readListed(dirname(fileOf(ctx, found, REELS_FILE)), record, REELS_FILE) : null;
   if (checked && checked.notWhole) {
     ctx.say(reelNotWholeYet(n, name));
     return { code: 0 };
   }
-  const listed = suggestion(found.folder, n, checked ? checked.text ?? "" : undefined);
+  const listed = suggestion(dirname(fileOf(ctx, found, REELS_FILE)), n, checked ? checked.text ?? "" : undefined);
   if (!listed.candidate) {
     ctx.say(listed.gone ? noSuchReel(n, listed.numbers) : listed.nothing ? `Reel ${n} has nothing to show: ${listed.nothing}.` : unreadable(name));
     return { code: 1 };
@@ -380,7 +384,7 @@ export async function openReelInApp(ctx, { found, record, n }, deps = {}) {
       const back = putReelVideoBack(ctx, { found, record, n, project, dir: folder }, { rename: deps.rename ?? renameSync });
       if (back.code !== undefined) return back.code;
       restored = back.workingCopy;
-    } else if (changedSince(project, { found, record })) {
+    } else if (changedSince(project, { found, record, ctx })) {
       // The project is opened as it was whatever the recording is now: a project that may be open in the app is never changed (4.8).
       ctx.say(recordingChanged(record.name.text));
     }

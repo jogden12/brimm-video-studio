@@ -29,6 +29,7 @@ import { copyIn } from "./guide.js";
 import { waitFacts } from "./late-wait.js";
 import { progressFolder, readRates } from "./progress.js";
 import { requestWorkCopy, workCopyLimits } from "./workcopy.js";
+import { fileAt } from "./where.js";
 
 export { isFromPlan };
 
@@ -173,10 +174,10 @@ const takenOf = (record) => (record.planned.route === "explainer" ? isVoiceover 
 
 /** The words a talking part is read from, for the order it comes in: the words file its light import filed. [] when it is not there, is not whole
     or cannot be read, and the part then has no place in the script. */
-function wordsOfPart(part) {
+function wordsOfPart(ctx, part) {
   const stem = basename(part.record.video.file, extname(part.record.video.file));
   try {
-    const held = JSON.parse(readFileSync(join(part.folder, `${stem}.words.json`), "utf8"));
+    const held = JSON.parse(readFileSync(fileAt(ctx, part, `${stem}.words.json`), "utf8"));
     return Array.isArray(held?.words) ? held.words : [];
   } catch (e) {
     return [];
@@ -223,7 +224,7 @@ export function joinCase(ctx, record, kit, { videos = [], ids = null } = {}) {
   if (held) return { why: heldWords(held.part, held.held, kit) };
   const ordered = explainer
     ? taken.map((part) => ({ id: part.record.id, label: labelOf(part), place: null }))
-    : partOrder(taken.map((part) => ({ id: part.record.id, label: labelOf(part), words: wordsOfPart(part) })), record.planned.lines);
+    : partOrder(taken.map((part) => ({ id: part.record.id, label: labelOf(part), words: wordsOfPart(ctx, part) })), record.planned.lines);
   const labels = ordered.map((part) => part.label).join(", ");
   if (explainer && taken.length > 1) return { why: `"${title}" has more than one voiceover: ${labels}. Take the others back, each with "that's not footage for ${title}".` };
   if (ids !== null || videos.length) {
@@ -446,7 +447,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
     // What ffprobe prints of each part's video, as a JSON text, "" for one it cannot read.
     const printeds = [];
     for (const [i, part] of chosen.entries()) {
-      const video = join(part.folder, part.record.video.file);
+      const video = fileAt(ctx, part, part.record.video.file);
       const why = await hereWhy(part, video);
       if (why) return stop(why);
       // The video is the one that came in: a plan made its video can never be joined again, so a file Dropbox is still changing makes no video (the final review, fix 3).
@@ -499,17 +500,17 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       // as the plan's video. Several are held to the sound of the first by partsFault, and to a sound to join by the check of its streams below.
       if (streamsOf(printeds[0]).audio === null) return stop(`${labelOf(part)} has no sound, so it can't be a talking part`);
       const facts = factsOf(printeds[0]);
-      const video = join(part.folder, part.record.video.file);
+      const video = fileAt(ctx, part, part.record.video.file);
       // The files its light import filed beside it: the part's record lists them.
       const rels = Object.keys(part.record.files).filter((rel) => rel !== part.record.video.file && !rel.startsWith("record/"));
       for (const rel of rels) {
-        const why = await hereWhy(part, join(part.folder, rel));
+        const why = await hereWhy(part, fileAt(ctx, part, rel));
         if (why) return stop(why);
-        if (differs(join(part.folder, rel), part.record.files[rel])) return stop(changedWords(part));
+        if (differs(fileAt(ctx, part, rel), part.record.files[rel])) return stop(changedWords(part));
       }
       try {
         filed = fileEpisode({
-          file: video, made: rels.map((rel) => join(part.folder, rel)), at: (to) => to, facts, printed: printeds[0], kind: taken.explainer || episodeKind(facts) === "short video" ? "short video" : "raw",
+          file: video, made: rels.map((rel) => fileAt(ctx, part, rel)), at: (to) => to, facts, printed: printeds[0], kind: taken.explainer || episodeKind(facts) === "short video" ? "short video" : "raw",
           read: null, reels: [], work, fingerprint: typeof part.record.fingerprint === "string" ? part.record.fingerprint : "", into: into(part.record.answer.seen)
         }, fdeps);
       } catch (e) {
@@ -531,7 +532,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       const streams = streamsOf(printeds[0]);
       if (streams.video === null || streams.audio === null) return stop("talking part 1 has no picture or no sound this Mac can read, so the parts cannot be joined");
       try {
-        writeFileSync(list, concatList(chosen.map((part) => join(part.folder, part.record.video.file))));
+        writeFileSync(list, concatList(chosen.map((part) => fileAt(ctx, part, part.record.video.file))));
       } catch (e) {
         return stop(String(e.message).replace(/\.$/, ""));
       }
@@ -591,7 +592,7 @@ export function afterJoin(ctx, found, started, notify = banner) {
   let copyAsked = false;
   if (ctx.settings.readings !== false) {
     startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", started.kind, "--rev", String(started.rev)] });
-    if (started.project !== true && appOf(ctx.settings) !== "" && ctx.isWhole(join(found.folder, started.video))) {
+    if (started.project !== true && appOf(ctx.settings) !== "" && ctx.isWhole(fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, started.video))) {
       requestWorkCopy(ctx, { folder: found.name });
       copyAsked = true;
     }

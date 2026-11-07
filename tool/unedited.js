@@ -54,6 +54,7 @@ import { fingerprintOf, matchVersion } from "./versions.js";
 import { LEFT, leftAlone, sessionNotCleared } from "./gate.js";
 import { STUDIO_NAME } from "./name.js";
 import { readStatuses, importState, shownStep } from "./importing.js";
+import { folderAt } from "./where.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
     transcript tool's own numbers. */
@@ -404,7 +405,7 @@ const LIGHT_PLAN_NOTE = "The times here are the recording's own, from its start.
     nothing is brought down from Dropbox for it, and the log says so, by the episode's label, or its id when it has none. A
     record of before the switch has no fingerprint, and never matches. Nothing is thrown from here: a folder that cannot be
     read is no match. */
-function versionIn(root, mine, { log = () => {}, whole = isWhole }) {
+function versionIn(root, mine, { log = () => {}, whole = isWhole, home = null }) {
   let names = [];
   try {
     names = readdirSync(episodesFolder(root)).filter((n) => !n.startsWith(".")).sort();
@@ -424,7 +425,7 @@ function versionIn(root, mine, { log = () => {}, whole = isWhole }) {
     const record = records.get(folder);
     // Named by its label, or by its id: never by its folder, whose name is its file's.
     const named = record.label || record.id;
-    const words = cutOutputs(join(folder, record.video.file)).words;
+    const words = cutOutputs(join(home ? folderAt({ home }, { folder, record }, "local") : folder, record.video.file)).words;
     if (!whole(words)) {
       log(`${named}: its words are not on this Mac, so it was not compared.`);
       return null;
@@ -1283,7 +1284,7 @@ export function keptList({ folder, record, home }) {
   const kept = join(episodeWork(home, basename(folder)), "put back", REELS_FILE);
   const there = statSync(kept, { throwIfNoEntry: false });
   if (!Number.isInteger(listed) || !there || there.size !== listed) return "";
-  const at = join(folder, REELS_FILE);
+  const at = join(folderAt({ home }, { folder, record }, "local"), REELS_FILE);
   return !existsSync(at) || sameBytes(at, `${kept}.unlisted`) ? kept : "";
 }
 
@@ -1296,7 +1297,7 @@ export function listGone({ folder, record, home }) {
   const listed = record.files ? record.files[REELS_FILE] : undefined;
   if (listed === undefined) return "";
   const kept = home ? keptList({ folder, record, home }) : "";
-  const there = statSync(join(folder, REELS_FILE), { throwIfNoEntry: false });
+  const there = statSync(join(folderAt({ home: home || studioHome() }, { folder, record }, "local"), REELS_FILE), { throwIfNoEntry: false });
   const after = kept ? ` The one its record lists is kept at ${kept}: ask Jason to put it back.` : "";
   if (!there) return `${REELS_FILE} is missing from this episode, though its record lists it, so Claude is not asked: the candidates in it would be lost.${after}`;
   if (Number.isInteger(listed) && there.size !== listed) return `${REELS_FILE} in this episode is not the one its record lists (it is ${there.size} bytes, and the record lists ${listed}), so Claude is not asked: the candidates in the one it lists would be lost.${after || " Say it again once Dropbox has brought that one."}`;
@@ -1334,28 +1335,30 @@ export function askBlocked({ folder, record, root, home, machine, now = Date.now
   if (held) return { why: held };
   const name = record.video.file;
   const plan = `${basename(name, extname(name))}.cut-plan.json`;
-  if (!existsSync(join(folder, plan))) return { why: `${name} has no cut plan here, so Claude cannot be asked.` };
+  // The episode's own files are in its video/ folder on this Mac when its record keeps them there (where.js).
+  const own = folderAt({ home }, { folder, record }, "local");
+  if (!existsSync(join(own, plan))) return { why: `${name} has no cut plan here, so Claude cannot be asked.` };
   const lost = listGone({ folder, record, home });
-  if (lost && !existsSync(join(folder, REELS_FILE))) return { why: lost };
-  const listed = existsSync(join(folder, REELS_FILE));
+  if (lost && !existsSync(join(own, REELS_FILE))) return { why: lost };
+  const listed = existsSync(join(own, REELS_FILE));
   const bring = (coming) => ({ why: `Dropbox is still bringing ${coming.join(", ")} over to this Mac. Say "ask Claude again for Reels" again when it is done.`, bring: coming });
   // What the cut plan and the list decide is decided before the video is brought, so it is never brought only to be refused.
   const small = [plan, ...(listed ? [REELS_FILE] : [])].filter((rel) => !whole(join(folder, rel)));
   if (small.length) return bring(small);
   let facts = null;
   try {
-    facts = JSON.parse(readFileSync(join(folder, plan), "utf8")).facts || null;
+    facts = JSON.parse(readFileSync(join(own, plan), "utf8")).facts || null;
   } catch (e) {
     return { why: `The cut plan of ${name} cannot be read (${e instanceof SyntaxError ? "it is not JSON" : e.code || e.message}), so Claude cannot be asked.` };
   }
   if (!facts || !facts.height) return { why: "A recording with no picture gets no Reels." };
   if (listed) {
-    const read = readReels(readFileSync(join(folder, REELS_FILE), "utf8"));
+    const read = readReels(readFileSync(join(own, REELS_FILE), "utf8"));
     if (read.why) return { why: `The list of Reel candidates cannot be read: ${read.why.replace(/\.$/, "")}.` };
     if (read.reels.rulesOnly === true) return { why: `Claude cannot be asked for Reels: ${read.reels.cannotAsk || "its import went by the rules alone"}.` };
     if (lost) return { why: lost };
   }
-  return whole(join(folder, name)) ? {} : bring([name]);
+  return whole(join(own, name)) ? {} : bring([name]);
 }
 
 export async function askAgain({ folder, record }, deps) {
@@ -1366,13 +1369,14 @@ export async function askAgain({ folder, record }, deps) {
   const name = record.video.file;
   const video = join(folder, name);
   const stem = basename(name, extname(name));
-  const plan = JSON.parse(readFileSync(join(folder, `${stem}.cut-plan.json`), "utf8"));
+  const own = folderAt({ home: deps.home || studioHome() }, { folder, record }, "local");
+  const plan = JSON.parse(readFileSync(join(own, `${stem}.cut-plan.json`), "utf8"));
   const work = join(runsFolder(deps.home || studioHome()), `ask-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
   try {
     // ffprobe is asked whether the video can be read at all.
     const probed = join(work, "facts.json");
-    const probe = await deps.run(deps.tools.ffprobe, probeArgs(video, probed));
+    const probe = await deps.run(deps.tools.ffprobe, probeArgs(join(own, name), probed));
     const printed = probe.code === 0 && existsSync(probed) ? readFileSync(probed, "utf8") : "";
     if (!printed || !factsOf(printed)) return { ok: false, made: [], failed: [`${name} could not be read (${lastLine(probe.stderr)}).`], next: as };
     const asked = await askClaude(name, plan, plan.facts, work, deps);
@@ -1384,13 +1388,13 @@ export async function askAgain({ folder, record }, deps) {
     // What was wrong with Claude's reply, and the clips of it that were left out, are said whatever else happens.
     const said = [...asked.read.problems, ...picked.ignored];
     if (!picked.clips.length) return { ok: true, made: [], failed: said, next: `Claude picked no clip that stands alone. ${as}` };
-    const seen = await facesIn(video, work, deps).catch((e) => ({ why: `the work stopped (${e.code || e.message})` }));
+    const seen = await facesIn(join(own, name), work, deps).catch((e) => ({ why: `the work stopped (${e.code || e.message})` }));
     if (seen.why) log(`${name}: the faces could not be looked for (${seen.why}), so the new candidates are cropped at the centre of the picture.`);
     const fresh = reelCandidates({ clips: picked.clips, plan, facts: plan.facts, stills: seen.stills || [] });
     // The list is read again, as it is now that Claude has answered, and a list that cannot be read now is refused, as at the
     // start: one a newer brimm-video wrote meanwhile is never written over.
     const reelsAt = join(folder, REELS_FILE);
-    const listed = existsSync(reelsAt) ? readFileSync(reelsAt, "utf8") : null;
+    const listed = existsSync(join(own, REELS_FILE)) ? readFileSync(join(own, REELS_FILE), "utf8") : null;
     const read = listed === null ? null : readReels(listed);
     if (read && read.why) return { ok: false, made: [], failed: [...said, `The list of Reel candidates cannot be read: ${read.why.replace(/\.$/, "")}.`], next: as };
     // The record is read again for it: the other Mac's ask may have landed meanwhile, which the rev check then says.
@@ -1404,7 +1408,7 @@ export async function askAgain({ folder, record }, deps) {
     // Nothing goes in when the record or the list changed while Claude was asked: the candidates were worked out from them as
     // they were.
     const now = readEpisode(folder);
-    const nowListed = existsSync(reelsAt) ? readFileSync(reelsAt, "utf8") : null;
+    const nowListed = existsSync(join(own, REELS_FILE)) ? readFileSync(join(own, REELS_FILE), "utf8") : null;
     if (!now.record || now.record.rev !== record.rev || nowListed !== listed) return { ok: false, made: [], failed: [...said, "This episode changed while Claude was asked, so nothing was changed. Ask again."], next: as };
     const into = await intoEpisode(video, [reelsAt], work, { ...deps, files }, { change: (r) => ({ ...r, reels: entries }), expectRev: record.rev });
     const failed = [...said, ...merged.ignored, ...into.problems.map((p) => `${p}.`), ...into.notes.map((n) => `${n}.`)];

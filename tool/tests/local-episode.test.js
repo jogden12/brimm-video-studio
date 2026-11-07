@@ -8,14 +8,18 @@
 // the root and both homes are a test's own folders, and the programs are episodes.js's stand-ins.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { COMMAND_NAMES, editMain } from "../edit.js";
 import { UNSCOPED } from "../gate.js";
 import { layoutOf, newEpisode, newPlannedEpisode, readEpisode, recordFile, recordText } from "../episode.js";
 import { ON_OTHER_MAC } from "../where.js";
+import { highestNumberOf, lastRevision } from "../finish.js";
+import { TEACHINGS_FORMAT } from "../teachings.js";
 import { episodeFilesFolder } from "../settings.js";
 import { setup, listAll } from "./episodes.js";
+import { entry } from "./exports-world.js";
+import { cliPath } from "../hyperframes.js";
 
 const STUDIO = "Mac Studio";
 const MACBOOK = "Jason's MacBook";
@@ -611,6 +615,239 @@ describe("an episode kept on the Mac Studio, on the Mac Studio", () => {
       const same = await on(w.studio, "plan", "Too many SKUs");
       assert.deepEqual(r.said, same.said);
       assert.ok(r.said.length > 0 && !r.text.includes("waiting for its answer"), r.text);
+    } finally {
+      w.done();
+    }
+  });
+});
+
+describe("L2c: every reader of an episode kept on the Mac Studio finds its files in video/, on the Mac Studio", () => {
+  const NAME = "2026-10-20 IMG_0042 (Mac Studio)";
+  /** The raw video of KEPT.raw with more of its own files in video/ (a transcript she reads, Reel suggestions, notes). */
+  const withFiles = (w, extra) => {
+    const found = KEPT.raw.make(w);
+    for (const [rel, text] of Object.entries(extra)) writeFileSync(join(found.video, rel), text);
+    return found;
+  };
+  const REELS = JSON.stringify({ format: "brimm-video reels", version: 2, video: "IMG_0042.mov", by: "import", made: "2026-10-20T08:00:00-05:00", highest: 1, candidates: [{ n: 1, start: 1, end: 9, ranges: [[1, 9]], first: "words", words: "words", why: "A point.", point: "A point.", title: "A", crops: [] }] });
+  const NOT_THE_DROPBOX_WAY = /Make available offline|is missing|not whole|not all here|not the one Studio saved|not in the episode's folder|no transcript yet|no list of Reel/i;
+
+  it("`open` claims it and says its notes, with no Make available offline line", async () => {
+    const w = world();
+    try {
+      withFiles(w, { "IMG_0042.edit-notes.txt": "Cut the intro.\nKeep the price talk.\n" });
+      const r = await on(w.studio, "open", NAME);
+      assert.equal(r.code, 0, r.text);
+      assert.match(r.text, /Claude's notes, the first lines:\n {2}Cut the intro\./);
+      assert.doesNotMatch(r.text, NOT_THE_DROPBOX_WAY, r.text);
+      assert.equal(readEpisode(join(w.root, "Episodes", NAME)).record.editing.by, STUDIO);
+    } finally {
+      w.done();
+    }
+  });
+  it("`app` goes past its files: nothing is called missing, or brought from Dropbox", async () => {
+    const w = world();
+    try {
+      KEPT.raw.make(w);
+      mkdirSync(dirname(cliPath(w.home)), { recursive: true });
+      writeFileSync(cliPath(w.home), "");
+      const r = await on({ ...w.studio, settings: { ...w.studio.settings, app: "hyperframes" } }, "app", NAME);
+      assert.match(r.text, /The video for HyperFrames is being made\./, r.text);
+      assert.doesNotMatch(r.text, NOT_THE_DROPBOX_WAY, r.text);
+      assert.doesNotMatch(r.text, /command line isn't on this Mac/, r.text);
+    } finally {
+      w.done();
+    }
+  });
+  it("`show … transcript` prints the rough cut's transcript from video/", async () => {
+    const w = world();
+    try {
+      withFiles(w, { "IMG_0042.rough-cut.transcript.txt": "[0:00] the rough cut\n" });
+      const r = await on(w.studio, "show", NAME, "transcript");
+      assert.equal(r.code, 0, r.text);
+      assert.match(r.text, /the rough cut/);
+    } finally {
+      w.done();
+    }
+  });
+  it("`which` opens the recording from video/", async () => {
+    const w = world();
+    try {
+      KEPT.raw.make(w);
+      const r = await on(w.studio, "which", NAME);
+      assert.equal(r.code, 0, r.text);
+      assert.match(JSON.stringify(w.opened), /BRIMM Video Work/);
+    } finally {
+      w.done();
+    }
+  });
+  it("`reels` lists the suggestions of the reels.json in video/", async () => {
+    const w = world();
+    try {
+      const found = withFiles(w, { "reels.json": REELS });
+      writeFileSync(recordFile(found.folder, 2), recordText({ ...found.record, rev: 2, files: { ...found.record.files, "reels.json": Buffer.byteLength(REELS) } }));
+      const r = await on(w.studio, "reels", NAME, "--no-play");
+      assert.doesNotMatch(r.text, NOT_THE_DROPBOX_WAY, r.text);
+    } finally {
+      w.done();
+    }
+  });
+  it("`free` and `graphic … ideas` find the words and the cut plan in video/", async () => {
+    const w = world();
+    try {
+      withFiles(w, {});
+      const free = await on(w.studio, "free", NAME);
+      assert.doesNotMatch(free.text, NOT_THE_DROPBOX_WAY, free.text);
+      const ideas = await on(w.studio, "graphic", NAME, "ideas");
+      assert.doesNotMatch(ideas.text, /not in the episode's folder|not on this Mac|Dropbox/, ideas.text);
+    } finally {
+      w.done();
+    }
+  });
+  it("says a kept file that is not whole in video/ in this Mac's words, by its role, on `open` and on `finish`", async () => {
+    const w = world();
+    try {
+      // A raw video with a main project in use in HyperFrames, which `finish` looks into.
+      const found = kept(w, { id: "e-20261020-ffffff", name: "2026-10-20 IMG_0060 (Mac Studio)", stem: "IMG_0060", record: { kind: "raw", answer: ANSWERED, reading: READ("raw"), offers: OFFERS, name: { text: "Pricing talk", placeholder: false }, label: "Video of 20 Oct, 14:00 (Mac Studio)", app: { toolchain: "0.8.208", projects: [entry("main")] } } });
+      const hf = { ...w.studio, settings: { ...w.studio.settings, app: "hyperframes" } };
+      writeFileSync(join(found.video, "IMG_0060.words.json"), "");
+      for (const argv of [["open", found.name], ["finish", found.name]]) {
+        const r = await on(hf, ...argv);
+        assert.equal(r.code, 1, r.text);
+        assert.match(r.text, /Pricing talk's words is not whole on this Mac\. Ask Jason\./, argv[0]);
+        assert.doesNotMatch(r.text, /IMG_0042|Dropbox/, `${argv[0]}\n${r.text}`);
+      }
+    } finally {
+      w.done();
+    }
+  });
+});
+
+describe("L2c: numbers, hand-offs and set-asides of an episode kept on the Mac Studio follow the file", () => {
+  const TEACHINGS = (n) => JSON.stringify({ format: TEACHINGS_FORMAT, version: 1, made: "2026-10-20T08:00:00-05:00", principles: [{ n }], recurringPrinciples: [], reelIdeas: [], dropped: [], skipped: "", problems: [] });
+
+  it("numbers a local session's next items after the teachings in video/ and in video/history/", () => {
+    const w = world();
+    try {
+      const found = KEPT.session.make(w);
+      writeFileSync(join(found.video, "Session, 2026-10-20.principles.json"), TEACHINGS(5));
+      mkdirSync(join(found.video, "history"), { recursive: true });
+      writeFileSync(join(found.video, "history", "2026-10-20T08-00-00 Session, 2026-10-20.principles.json"), TEACHINGS(9));
+      assert.equal(highestNumberOf(w.root, found.record, found.folder, w.home), 9);
+      // Without this Mac's home, Dropbox's folder is looked in, as for any episode from before the switch: it holds none.
+      assert.equal(highestNumberOf(w.root, found.record, found.folder), 0);
+    } finally {
+      w.done();
+    }
+  });
+  it("counts a hand-off set aside into Dropbox's history/ for the next revision, and reads no history/ of video/ as a hand-off", () => {
+    const w = world();
+    try {
+      const found = KEPT.raw.make(w);
+      mkdirSync(join(found.folder, "history"), { recursive: true });
+      const aside = (revision) => JSON.stringify({ format: "brimm-video hand-off", version: 2, revision, video: { id: found.record.id, kind: "raw", name: "Pricing talk" } });
+      writeFileSync(join(found.folder, "history", "2026-10-20T13-00-00 Pricing talk.brimm-ops.json"), aside(3));
+      assert.equal(lastRevision(join(found.folder, "final"), found.record.id), 3);
+      // A hand-off in video/history/ is nothing Studio wrote: it is never listed, and no check reads it.
+      mkdirSync(join(found.video, "history"), { recursive: true });
+      writeFileSync(join(found.video, "history", "2026-10-20T13-00-00 Pricing talk.brimm-ops.json"), aside(7));
+      assert.equal(lastRevision(join(found.folder, "final"), found.record.id), 3);
+    } finally {
+      w.done();
+    }
+  });
+  it("finds a local raw video's rules' plan in video/history/ for the correction `kind … --again`, and sets the files aside in video/history/, unlisted", async () => {
+    const w = world();
+    try {
+      const found = KEPT.raw.make(w);
+      const plan = JSON.parse(readFileSync(join(found.video, "IMG_0042.cut-plan.json"), "utf8"));
+      const rules = JSON.stringify({ ...plan, phrases: [{ text: "hello", start: 0, end: 1, keep: true }], ranges: [] });
+      const claudes = JSON.stringify({ ...plan, phrases: [{ text: "hello", start: 0, end: 1, keep: true }], ranges: [], claude: { model: "m" } });
+      mkdirSync(join(found.video, "history"), { recursive: true });
+      writeFileSync(join(found.video, "history", "2026-10-20T08-05-00 IMG_0042.cut-plan.json"), rules);
+      writeFileSync(join(found.video, "IMG_0042.cut-plan.json"), claudes);
+      writeFileSync(join(found.video, "IMG_0042.edit-notes.txt"), "Notes.\n");
+      const size = (rel) => Buffer.byteLength(readFileSync(join(found.video, rel), "utf8"));
+      writeFileSync(recordFile(found.folder, 2), recordText({ ...found.record, rev: 2, files: { ...found.record.files, "IMG_0042.cut-plan.json": size("IMG_0042.cut-plan.json"), "IMG_0042.edit-notes.txt": size("IMG_0042.edit-notes.txt") } }));
+      const r = await on(w.studio, "kind", found.name, "raw", "--private", "no", "--again");
+      assert.equal(r.code, 0, r.text);
+      // The rules' plan is back in its place, the notes are set aside in video/history/, and nothing of video/ is listed in history/.
+      assert.equal(readFileSync(join(found.video, "IMG_0042.cut-plan.json"), "utf8"), rules);
+      assert.ok(!existsSync(join(found.video, "IMG_0042.edit-notes.txt")), "the notes left video/");
+      assert.ok(readdirSync(join(found.video, "history")).some((name) => name.endsWith(" IMG_0042.edit-notes.txt")), "the notes are in video/history/");
+      assert.ok(!existsSync(join(found.folder, "history")), "nothing was set aside in Dropbox");
+      assert.ok(!Object.keys(readEpisode(found.folder).record.files).some((rel) => rel.startsWith("history/")), "no set-aside of video/ is listed");
+    } finally {
+      w.done();
+    }
+  });
+});
+
+describe("L2c: a version never spans two Macs", () => {
+  /** A video of the MacBook's own, in Dropbox, waiting for her answer: it came by camera, so the answer is a plain one. */
+  function waitingOnMacbook(w) {
+    const made = kept(w, { id: "e-20261021-777777", name: "2026-10-21 IMG_0070 (Jason's MacBook)", stem: "IMG_0070", record: { answer: { state: "needs your answer", guess: "raw", seen: "wide, 0:42", came: "camera", match: "e-20261020-3fa9c1" }, label: "Video of 21 Oct, 09:00 (Jason's MacBook)" } });
+    // Its files are in Dropbox, as a video filed on a Mac with a drop folder there has them: no `local`.
+    const { local, ...plain } = made.record;
+    for (const rel of Object.keys(OWN("IMG_0070"))) writeFileSync(join(made.folder, rel), readFileSync(join(made.video, rel)));
+    writeFileSync(recordFile(made.folder, 2), recordText({ ...plain, rev: 2, version: 5 }));
+    return { name: made.name, folder: made.folder };
+  }
+
+  it("refuses `kind … --version-of` a video kept on another Mac, in the gate's own line, and writes nothing", async () => {
+    const w = world();
+    try {
+      KEPT.raw.make(w);
+      const waiting = waitingOnMacbook(w);
+      const before = shared(w);
+      const r = await on(w.macbook, "kind", waiting.name, "raw", "--private", "no", "--version-of", "3fa9c1");
+      assert.deepEqual([r.code, r.said], [1, [ON_OTHER_MAC("Pricing talk", STUDIO)]]);
+      assert.deepEqual(shared(w), before);
+    } finally {
+      w.done();
+    }
+  });
+  it("does not offer a video kept on another Mac as the Maybe line of a card", async () => {
+    const w = world();
+    try {
+      KEPT.raw.make(w);
+      waitingOnMacbook(w);
+      const r = await on(w.macbook, "episodes");
+      assert.doesNotMatch(r.text, /Maybe a new version of/, r.text);
+      // On the Mac Studio the same video is on this Mac, and is offered.
+      const there = await on(w.studio, "episodes");
+      assert.match(there.text, /Maybe a new version of: Pricing talk/, there.text);
+    } finally {
+      w.done();
+    }
+  });
+});
+
+describe("L2c: `resolve … --keep` on the Mac that keeps the episode", () => {
+  it("sorts out a conflicted record and checks the files against video/ there, not in Dropbox", async () => {
+    const w = world();
+    try {
+      const found = KEPT.raw.make(w);
+      conflictedRecord(found, { inForce: {}, copy: { name: { text: "Pricing", placeholder: false } } });
+      const shownR = await on(w.studio, "resolve", found.name); assert.equal(shownR.code, 0, shownR.text);
+      const r = await on(w.studio, "resolve", found.name, "--keep", "A");
+      assert.equal(r.code, 0, r.text);
+      assert.doesNotMatch(r.text, /not as the record now lists|is missing/, r.text);
+      assert.match(r.text, /^Kept A/);
+    } finally {
+      w.done();
+    }
+  });
+  it("says a kept file short in video/ after the keep in this Mac's words", async () => {
+    const w = world();
+    try {
+      const found = KEPT.raw.make(w);
+      conflictedRecord(found, { inForce: {}, copy: { name: { text: "Pricing", placeholder: false } } });
+      writeFileSync(join(found.video, "IMG_0042.words.json"), "");
+      const shownR = await on(w.studio, "resolve", found.name); assert.equal(shownR.code, 0, shownR.text);
+      const r = await on(w.studio, "resolve", found.name, "--keep", "A");
+      assert.match(r.text, /Pricing talk's words is not whole on this Mac\. Ask Jason\./, r.text);
+      assert.doesNotMatch(r.text, /IMG_0042/, r.text);
     } finally {
       w.done();
     }
