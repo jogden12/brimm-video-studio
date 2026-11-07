@@ -1099,6 +1099,24 @@ describe("L6: after the recording's move", () => {
     }
   });
 
+  it("C1 `open`, `app` and `app … reel` do not ask to bring a recording that left the Mac for Original files", async () => {
+    const w = world();
+    try {
+      movedOff(w);
+      mkdirSync(dirname(cliPath(w.home)), { recursive: true });
+      writeFileSync(cliPath(w.home), "");
+      // A real look at the disk, after the Mac's copy is deleted.
+      const deps = { ...w.studio, isWhole: (path) => existsSync(path), settings: { ...w.studio.settings, app: "hyperframes" } };
+      for (const argv of [["open", NAME], ["app", NAME], ["app", NAME, "reel", "1"]]) {
+        const r = await on(deps, ...argv);
+        assert.doesNotMatch(r.text, /bringing|over to this Mac/i, `${argv.join(" ")}: ${r.text}`);
+      }
+      assert.equal(w.started.some(([, args]) => args.includes("bring")), false, JSON.stringify(w.started));
+    } finally {
+      w.done();
+    }
+  });
+
   it("A5 `which` opens the copy in Original files", async () => {
     const w = world();
     try {
@@ -1171,6 +1189,9 @@ describe("L6: after the recording's move", () => {
       const placed = readEpisode(found.folder).record;
       const before = statSync(join(found.video, FILE));
       const moved = movedOffFrom(w, { ...found, record: placed });
+      // Dropbox brings the copy back with its time at whole seconds: the key is still the recording's as it was.
+      const whole = Math.floor(moved.original.mtimeMs / 1000);
+      utimesSync(moved.copy, whole, whole);
       const key = reelCopyKey({ bytes: moved.original.bytes, mtimeMs: moved.original.mtimeMs }, { start: 0, end: 11.878 });
       assert.equal(key.startsWith(workCopyKey({ bytes: before.size, mtimeMs: before.mtimeMs })), true);
       const read = [];

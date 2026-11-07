@@ -1205,7 +1205,12 @@ function problemsOf(ctx, found, record) {
 
 /** The episode's files that are not whole on this Mac yet, as Dropbox brings them over: by the record's list. */
 // A recording copied into Original files (L6) is never asked to be brought: whoever needs it whole brings it down then.
-const notHere = (ctx, found, record) => Object.keys(record.files).filter((rel) => !rel.startsWith(`${ORIGINALS_FOLDER}/`) && !ctx.isWhole(fileOf(ctx, found, rel)));
+const notHere = (ctx, found, record) => {
+  // The recording's own place once it has left the Mac for Original files is not asked of either (as episode.js fileProblems): it is brought down by whoever reads it.
+  const file = record.video && typeof record.video.file === "string" ? record.video.file : null;
+  const away = file !== null && recordingAt(ctx, { folder: found.folder, record }) !== fileOf(ctx, found, file);
+  return Object.keys(record.files).filter((rel) => !rel.startsWith(`${ORIGINALS_FOLDER}/`) && !(away && rel === file) && !ctx.isWhole(fileOf(ctx, found, rel)));
+};
 
 /** How long `open` waits after writing its claim before it reads the record again: Dropbox shows no sign of having taken a
     change across, so a fixed 20 seconds, in which the other Mac's claim made at the same time comes across too. */

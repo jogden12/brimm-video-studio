@@ -94,7 +94,7 @@ export function oweForgotten({ episode: { root, machine, home }, clock = Date.no
       const folder = join(episodesFolder(root), name);
       const read = readEpisode(folder);
       const record = read.record;
-      if (!record || read.newer || !keptOnAMac(record) || record.local.on !== machine || moved(record) || !record.video || typeof record.video.file !== "string") continue;
+      if (!record || read.newer || record.archived || !keptOnAMac(record) || record.local.on !== machine || moved(record) || !record.video || typeof record.video.file !== "string") continue;
       if (!existsSync(join(episodeFilesFolder(home, name), record.video.file))) continue;
       if (readPendingAt(home, pendingFile(record.id)) !== null) continue;
       links ??= linksOf(root);
@@ -193,7 +193,8 @@ export function checkOriginal(p, deps) {
   const ours = () => {
     const mine = statSync(from, { throwIfNoEntry: false });
     const copy = statSync(to, { throwIfNoEntry: false });
-    return Boolean(mine && copy && copy.size === mine.size && (!whole(to) || sameBytes(to, from)));
+    // A placeholder is not read, so it is not known to be ours.
+    return Boolean(mine && copy && copy.size === mine.size && whole(to) && sameBytes(to, from));
   };
   if (p.owed === true) {
     if (held) {
@@ -248,6 +249,18 @@ export function checkOriginal(p, deps) {
       if (undone(read.record, home)) {
         if (Number.isInteger(p.rev) && lastWritten(home, p.id) === p.rev) acceptRev(home, p.id, read.record.rev);
         else return wait(`${shown}: its recording waits: Dropbox undid this Mac's last change to it, which the next command on it says first. It is looked at again later.`);
+      }
+      // The gate again, under the lock with a fresh look: a session mark may have come while the earlier writes were settled (ruling 5).
+      if (asSession(linksOf(p.root), { folder: p.folder, record: read.record })) {
+        if (existsSync(to) && !listsOriginal(read.record) && ours()) {
+          try {
+            rmSync(to, { force: true });
+          } catch (e) {
+            log(`${shown}: a copy of its recording in Original files could not be taken away (${code(e)}). Ask Jason.`);
+          }
+        }
+        if (putAway()) log(`${withShortId(heldName(read.record), read.record)}: it is held as a session now, so its recording stays on this Mac.`);
+        return;
       }
       // 9. The copy.
       if (statSync(to, { throwIfNoEntry: false })) {
@@ -304,8 +317,21 @@ export function checkOriginal(p, deps) {
       if (putAway()) log(`${shown}: its recording on this Mac changed after it was copied into Original files, so it is kept on this Mac.`);
     };
     if (!sameFile(e.from, p.macCopy)) return changed();
-    // 6. The copy in Dropbox, by table J.
+    // 6 and 7. The flag is asked first: a copy Dropbox has not uploaded yet costs no read of the recording. Table J's byte compare comes once it says uploaded.
+    const asked = deps.uploaded || ((path) => uploadedOf(path, { swift: (deps.tools && deps.tools.swift) || "" }));
+    if (asked(e.to) !== true) {
+      writePending(home, { ...base(p), nextLook: clock() + UPLOAD_LOOK_MS, lookUntil: Number.isFinite(p.lookUntil) ? p.lookUntil : clock() + WAIT_LOOK_FOR_MS });
+      once(`${shown}: Dropbox has not uploaded its copy in Original files yet, so the recording stays on this Mac. It is looked at again later.`);
+      return;
+    }
+    // The copy in Dropbox, by table J.
     const judged = judgeEntry({ from: e.from, to: e.to, bytes: e.bytes }, p.folder, read.record.files, whole);
+    // The record no longer lists it at these bytes (step 4 has met this already): it is listed again, not taken for whole.
+    if (judged.left) {
+      writePending(home, { ...base(p), owed: true, lastCopy: clock() });
+      log(`${shown}: the record no longer lists its copy in Original files, so it is listed again.`);
+      return;
+    }
     if (judged.put) {
       try {
         mkdirSync(dirname(e.to), { recursive: true });
@@ -318,13 +344,6 @@ export function checkOriginal(p, deps) {
       log(`${shown}: its copy in Original files was not whole in Dropbox (${judged.put}), so it is put back from the recording on this Mac.`);
       return;
     }
-    // 7. The flag.
-    const asked = deps.uploaded || ((path) => uploadedOf(path, { swift: (deps.tools && deps.tools.swift) || "" }));
-    if (asked(e.to) !== true) {
-      writePending(home, { ...base(p), nextLook: clock() + UPLOAD_LOOK_MS, lookUntil: Number.isFinite(p.lookUntil) ? p.lookUntil : clock() + WAIT_LOOK_FOR_MS });
-      once(`${shown}: Dropbox has not uploaded its copy in Original files yet, so the recording stays on this Mac. It is looked at again later.`);
-      return;
-    }
     // 8. No run at work on it.
     const names = [...new Set([p.name, ...(p.of && typeof p.of.name === "string" ? [p.of.name] : [])])];
     if (names.some((n) => runningRun(home, n, alive, workCopyLockOf(home, n)))) return putOff();
@@ -332,7 +351,13 @@ export function checkOriginal(p, deps) {
     const took = takeEpisodeLock(lockOf(home, p.name), ORIGINALS_COMMAND, alive);
     if (!took.taken) return putOff();
     try {
-      // 9. Under the lock: the Mac's copy is deleted if it is still the one that was copied.
+      // 9. Under the lock: the gate again with a fresh look (a session mark may have come while the copy was read and the flag asked), and the Mac's copy is deleted if it is still the one that was copied.
+      const latest = readEpisode(p.folder);
+      if (unreadable(latest)) return wait(recordLater);
+      if (asSession(linksOf(p.root), { folder: p.folder, record: latest.record })) {
+        if (putAway()) log(ORIGINALS_SESSION(heldName(latest.record)));
+        return;
+      }
       if (!sameFile(e.from, p.macCopy)) return changed();
       try {
         rmSync(e.from, { force: true });

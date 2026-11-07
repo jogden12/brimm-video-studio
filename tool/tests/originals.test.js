@@ -557,7 +557,8 @@ describe("L6: the check", () => {
       look(t, depsOf(t, { uploaded: (path) => { asked.push(path); return true; } }));
       assert.equal(textOf(originalOf(found)), RECORDING);
       assert.equal(readPendingAt(t.home, `original/${ID}.json`).lastCopy, t.now());
-      assert.deepEqual(asked, []);
+      // The flag is asked first (the review's round), and the put-back follows it; the Mac's copy is not taken off in this look.
+      assert.deepEqual(asked, [originalOf(found)]);
       assert.equal(existsSync(join(found.video, FILE)), true);
       assert.equal(t.logs.filter((l) => l.startsWith(`${SHOWN}: its copy in Original files was not whole in Dropbox (`)).length, 1);
       t.done();
@@ -827,3 +828,77 @@ describe("L6: P2 her command during the move", () => {
     w.t.done();
   });
 });
+
+describe("L6: the review's fix round", () => {
+  it("F1 a session mark written after the flag was asked and before the delete keeps the Mac's copy", () => {
+    const t = world();
+    const found = local(t);
+    moveIt(t, found);
+    t.advance(LATE_CHECK_MS);
+    const deps = depsOf(t, { uploaded: () => { writeRecord(found, 4, sessionRecord(found)); return true; } });
+    look(t, deps);
+    assert.equal(existsSync(join(found.video, FILE)), true);
+    assert.equal(readPendingAt(t.home, `original/${ID}.json`), null);
+    assert.equal(textOf(originalOf(found)), RECORDING);
+    assert.equal(count(t, ORIGINALS_SESSION("Video of 14 Oct, 09:00 (Mac Studio)")), 1);
+    t.done();
+  });
+
+  it("F2 a session mark written after the move's gate and before its clone moves nothing", () => {
+    const t = world();
+    const found = local(t, { record: { files: { ...Object.fromEntries(Object.entries(OWN("Pricing talk")).map(([k, v]) => [k, Buffer.byteLength(v)])), "final/x.srt": 5 } } });
+    const entry = { from: join(t.dir, "work", "x.srt"), to: join(found.folder, "final", "x.srt"), bytes: 5 };
+    writePending(t.home, { version: 1, kind: "final", id: ID, name: FOLDER, folder: found.folder, root: t.root, machine: STUDIO, revision: 2, rev: 3, entries: [entry], took: [], work: null, lastCopy: t.now(), reading: { pid: 999999, at: t.now(), to: [entry.to], nonce: "n", rev: 3 } });
+    oweOriginals(t.ctx2, found);
+    let written = false;
+    const deps = depsOf(t, { log: (line) => { t.logs.push(line); if (!written) { written = true; writeRecord(found, 3, sessionRecord(found)); } } });
+    look(t, deps);
+    assert.equal(written, true);
+    assert.equal(existsSync(join(found.folder, "Original files")), false);
+    assert.equal(readPendingAt(t.home, `original/${ID}.json`), null);
+    assert.equal(existsSync(join(found.video, FILE)), true);
+    t.done();
+  });
+
+  it("F3 an unlisted placeholder at the target is a problem, and the Mac's copy stays", () => {
+    const t = world();
+    const found = local(t);
+    mkdirSync(join(found.folder, "Original files"), { recursive: true });
+    writeFileSync(originalOf(found), "the recordinG");
+    oweOriginals(t.ctx2, found);
+    look(t, depsOf(t, { isWhole: (path) => path !== originalOf(found) }));
+    assert.equal(readPendingAt(t.home, `original/${ID}.json`).problem, "Original files in Dropbox holds another file of its name.");
+    assert.equal(reread(found).rev, 2);
+    assert.equal(existsSync(join(found.video, FILE)), true);
+    t.done();
+  });
+
+  it("F4 an archived video is not owed again at a run's start", () => {
+    const t = world();
+    const found = local(t, { record: { archived: { at: "2026-10-15T09:00:00-05:00", by: "Sallie Ogden" } } });
+    assert.ok(found.record.archived);
+    assert.deepEqual(oweForgotten({ episode: { root: t.root, machine: STUDIO, home: t.home }, clock: () => t.now(), log: () => {} }), { owed: [] });
+    t.done();
+    const u = world();
+    local(u);
+    assert.deepEqual(oweForgotten({ episode: { root: u.root, machine: STUDIO, home: u.home }, clock: () => u.now(), log: () => {} }).owed, [ID]);
+    u.done();
+  });
+
+  it("F5 a look that finds the copy not uploaded reads nothing of it", () => {
+    const t = world();
+    const found = local(t);
+    moveIt(t, found);
+    t.advance(LATE_CHECK_MS);
+    const read = [];
+    look(t, depsOf(t, { uploaded: () => false, isWhole: (path) => { read.push(path); return true; } }));
+    assert.equal(read.includes(originalOf(found)), false);
+    // Once it says uploaded, the copy is looked at (put back when it is not whole), and then the Mac's copy goes.
+    writeFileSync(originalOf(found), "the recordinG");
+    look(t, depsOf(t));
+    assert.equal(textOf(originalOf(found)), RECORDING);
+    assert.equal(existsSync(join(found.video, FILE)), true);
+    t.done();
+  });
+});
+
