@@ -1332,6 +1332,23 @@ describe("the check of a local finish's copies in final/ (L5)", () => {
     }
   });
 
+  it("C16d an episode folder that Episodes lists in NFD, named in NFC by its pending, is not taken for a gone folder", async () => {
+    const nfc = "2026-11-06 Caf\u00e9 (Mac Studio)";
+    const nfd = nfc.normalize("NFD");
+    for (const kind of ["final", "record"]) {
+      await withWorld(async (w) => {
+        const h = kind === "final" ? holdFinal(w, L, { name: nfd }) : holdRecord(w, L, { name: nfd, there: "none" });
+        const listed = readdirSync(join(w.root, "Episodes"));
+        assert.deepEqual(listed, [nfd]);
+        filing.writePending(w.home, { ...h.pending, name: nfc, folder: join(w.root, "Episodes", nfc) });
+        const r = await run(w, AT);
+        assert.deepEqual(r.notices, []);
+        assert.equal(r.logs.some((l) => l.includes("is gone from Episodes")), false, r.logs.join("|"));
+        assert.deepEqual(filing.readEveryPending(w.home).filter((p) => p.kind === kind && !p.problem), []);
+      });
+    }
+  });
+
   it("C16 never makes a gone episode folder again, says so in one short notice, and waits while Episodes cannot be listed", async () => {
     const GONE = "The folder of an episode (ab0001) is gone from Episodes, so the check of its copies in Dropbox is not made. Ask Jason.";
     await withWorld(async (w) => {
