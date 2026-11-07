@@ -178,6 +178,20 @@ describe("putHere", () => {
     assert.equal(existsSync(join(w.own, ".put.json")), false);
     w.done();
   });
+  it("B0-F18 a stopped put whose record was written is not undone while the record cannot be read: the journal stays and the put is refused", async () => {
+    const w = world();
+    class Killed extends Error {}
+    await assert.rejects(putHere(w.found(), [w.made("IMG_0042.notes.txt", "notes")], w.opts({ killed: (at) => {
+      if (at === "recorded") throw new Killed("killed");
+    } })), Killed);
+    // Dropbox keeps a conflicted copy of a record file, and the record cannot be read.
+    writeFileSync(join(w.folder, "record", "0002 (Jason Ogden's conflicted copy 2026-10-21).json"), "{}");
+    const r = await putHere(w.found(), [w.made("IMG_0042.srt", "other words")], w.opts({ expectRev: 2 }));
+    assert.equal(r.put, false);
+    assert.equal(existsSync(join(w.own, ".put.json")), true);
+    assert.equal(w.inVideo()["IMG_0042.notes.txt"], "notes");
+    w.done();
+  });
   it("waits for nothing and calls no check", async () => {
     const w = world();
     let waited = 0;

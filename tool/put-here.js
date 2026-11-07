@@ -36,6 +36,8 @@ export function putHereNow(found, files, opts = {}) {
     }
     if (left && Array.isArray(left.entries)) {
       const at = readEpisode(folder);
+      // A record that cannot be read now (a conflicted copy, a placeholder, a newer writer) cannot say whether the stopped put's record was written: the journal stays, nothing is undone, and the put waits for a later look.
+      if (!at.record || at.newer) return { put: false, why: `the episode's record cannot be read now: ${String(at.why || "it is not there").replace(/\.$/, "")}` };
       // The record was written when it lists every file the stopped put meant to list at the size it put in, not merely when its rev is above the journal's:
       // a title or a spelling written in between raises the rev and lists none of them.
       const listed = left.entries.filter((e) => !e.rel.startsWith("history/"));
