@@ -30,7 +30,7 @@
 //     variables of its own, with her chat handed to the app only when handoverAllowed says it may be (5.6);
 //   - what the command line printed is said in her words, and, whenever the app opened, a line names the app's buttons that
 //     Studio cannot control (BUTTONS; 3.3 and 5.9), and after it, when this Mac picked an exports folder that is not Downloads, a
-//     last line says where to export, in Finder's words (Phase 3, L1b). The record gets the project and the time it was opened
+//     line says where to export, in Finder's words (Phase 3, L1b); the lines of a plan's footage, if any, come after it. The record gets the project and the time it was opened
 //     (7.1). A record that could not be written ends the run with 1, and the project it was for stays on this Mac.
 // A project that was made is kept whether or not the app opened: nothing here takes one away.
 //
@@ -707,7 +707,7 @@ function placeFootage(ctx, { found, dir, kit, record }, { rename }) {
     kind (KEPT) is none in use: the next is made as any first one is, under the first name no project the record keeps has
     (nextMain), "main 2" after the first, and the kept one keeps its folder, its name and its entry in the record.
     What it says when the app opened is the command line's own words in hers, one line more about her chat when a handover was
-    wanted and not made, then the line about the buttons Studio cannot control (BUTTONS), and last, when this Mac picked an exports
+    wanted and not made, then the line about the buttons Studio cannot control (BUTTONS), and after it, when this Mac picked an exports
     folder that is not Downloads, where to export: "Export it on This Mac, into <the folder in Finder's words>." (openProjectInApp);
     when the app did not open it says the reason alone.
     The record that is saved holds the project in `app.projects`, with a time in `opened` only if the app opened, and `handover`
