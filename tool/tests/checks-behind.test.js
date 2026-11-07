@@ -3,13 +3,13 @@
 // loads before they are there.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as filing from "../filing.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { episodeWork, pendingFolder, runsFolder } from "../settings.js";
-import { acceptRev, recordFile } from "../episode.js";
-import { HANDOFF, ID, L, MAC, NAME, SRT, cloneOf, ctxOf, deadLock, holdFinal, holdImport, holdRecord, liveLock, mine, recordOf, run, runs, world } from "./checks-world.js";
+import { acceptRev, recordFile, recordText } from "../episode.js";
+import { HANDOFF, ID, L, LABEL, MAC, MP4, NAME, SRT, cloneOf, ctxOf, deadLock, holdFinal, holdImport, holdRecord, liveLock, mine, recordOf, run, runs, world } from "./checks-world.js";
 
 const base = (kind, over = {}) => ({ version: 1, ...(kind ? { kind } : {}), id: ID, name: NAME, folder: "/x", root: "/r", machine: MAC, entries: [], work: null, lastCopy: L, ...over });
 
@@ -730,6 +730,307 @@ describe("takeOutOfCheck, restoreReads and busyWords, for a local episode (L5)",
       assert.equal(await filing.restoreReads(ctxOf(w), { name: NAME, record: old, folder: h.folder, rels, rev: 3 }, { wait: async () => {} }), "");
     } finally {
       w.done();
+    }
+  });
+});
+
+describe("a local import's first record, checked behind (L5)", () => {
+  const AT = L + M15 + 1;
+  const GONE = `The folder of ${LABEL} is gone from Episodes, so the check of its copies in Dropbox is not made. Ask Jason.`;
+  const ourText = recordText(recordOf({ rev: 1 }));
+  const has = (r, line) => r.logs.includes(`${LABEL}: ${line}`);
+  const gone = (h) => !existsSync(join(pendingFolder(h.w.home), h.key)) && !existsSync(h.work);
+  const make = (over = {}) => {
+    const w = world();
+    const h = holdRecord(w, L, over);
+    return { ...h, w };
+  };
+
+  it("R1 puts back a first record Dropbox lost, then goes", async () => {
+    const h = make({ there: "none" });
+    try {
+      const r = await run(h.w, AT);
+      assert.equal(readFileSync(h.to, "utf8"), ourText);
+      assert.ok(gone(h));
+      assert.ok(has(r, "Dropbox lost its first record, so it is put back."), r.logs.join("|"));
+    } finally {
+      h.w.done();
+    }
+  });
+
+  it("R2 puts nothing back when a later record is there", async () => {
+    const h = make({ there: "none", later: true });
+    try {
+      const r = await run(h.w, AT);
+      assert.equal(existsSync(h.to), false);
+      assert.ok(existsSync(join(h.folder, "record", "0002.json")));
+      assert.ok(gone(h));
+      assert.ok(has(r, "its first record is not in Dropbox, but a later one is, so nothing is put back."));
+    } finally {
+      h.w.done();
+    }
+  });
+
+  it("R3 drops a pending whose record never reached Dropbox", async () => {
+    for (const drop of ["there", "unknown"]) {
+      const h = make({ copied: false, there: "none", drop });
+      try {
+        const r = await run(h.w, AT);
+        assert.ok(gone(h));
+        assert.deepEqual(readdirSync(join(h.folder, "record")), []);
+        assert.ok(has(r, "its import stopped before its first record reached Dropbox, so there is nothing to check."));
+        if (drop === "there") assert.equal(readFileSync(h.dropPath, "utf8"), MP4);
+      } finally {
+        h.w.done();
+      }
+    }
+  });
+
+  it("R4 takes a record that reached Dropbox before the import noted it as its own", async () => {
+    const h = make({ copied: false, there: "ours" });
+    try {
+      const r = await run(h.w, AT);
+      assert.ok(gone(h));
+      assert.equal(readFileSync(h.to, "utf8"), ourText);
+      assert.ok(has(r, "its first record is whole in Dropbox."));
+    } finally {
+      h.w.done();
+    }
+  });
+
+  it("R5 never puts back over another import's first record", async () => {
+    const h = make({ there: "another" });
+    try {
+      const was = readFileSync(h.to, "utf8");
+      const r = await run(h.w, AT);
+      assert.equal(readFileSync(h.to, "utf8"), was);
+      assert.ok(gone(h));
+      assert.ok(has(r, "another import's first record is in its place now, so nothing is put back."));
+    } finally {
+      h.w.done();
+    }
+  });
+
+  it("R5b drops the pending of a stopped import whose folder another import has filed since", async () => {
+    const h = make({ copied: false, there: "another", drop: "there" });
+    try {
+      const was = readFileSync(h.to, "utf8");
+      const r = await run(h.w, AT);
+      assert.equal(readFileSync(h.to, "utf8"), was);
+      assert.ok(gone(h));
+      assert.ok(has(r, "its import stopped before its first record reached Dropbox, so there is nothing to check."));
+      assert.equal(r.logs.some((l) => l.includes("another import")), false);
+    } finally {
+      h.w.done();
+    }
+  });
+
+  it("R6 puts back a first record Dropbox left unreadable", async () => {
+    const h = make({ there: "unreadable" });
+    try {
+      await run(h.w, AT);
+      assert.equal(readFileSync(h.to, "utf8"), ourText);
+      assert.ok(gone(h));
+    } finally {
+      h.w.done();
+    }
+  });
+
+  it("R7 a first record that cannot be put back is a problem: one notice, made again at the next run's start", async () => {
+    const h = make({ there: "none", workCopy: false });
+    try {
+      const line = `${LABEL}: Dropbox lost its first record: its first record is not in Dropbox, and its copy on this Mac is gone, so it could not be put back.`;
+      const first = await run(h.w, AT);
+      assert.deepEqual(first.notices, [`Dropbox lost a file of ${LABEL}, and it could not be put back. Ask Jason.`]);
+      assert.ok(filing.readPendingAt(h.w.home, h.key).problem);
+      assert.deepEqual(first.waits, []);
+      assert.ok(first.logs.includes(line));
+      const second = await run(h.w, AT + 1000);
+      assert.ok(second.logs.includes(line));
+      assert.deepEqual(second.notices, []);
+    } finally {
+      h.w.done();
+    }
+  });
+
+  it("R8 waits when its folder cannot be looked at, looking again every five minutes for an hour", async () => {
+    const h = make({});
+    const dir = join(h.folder, "record");
+    try {
+      chmodSync(dir, 0o000);
+      const before = filing.readPendingAt(h.w.home, h.key);
+      const r = await run(h.w, AT);
+      const after = filing.readPendingAt(h.w.home, h.key);
+      const { nextLook, lookUntil, ...rest } = after;
+      assert.deepEqual(rest, before);
+      assert.equal(lookUntil, AT + filing.WAIT_LOOK_FOR_MS);
+      assert.ok(existsSync(h.work));
+      assert.ok(r.waits.reduce((a, b) => a + b, 0) >= filing.WAIT_LOOK_FOR_MS - filing.WAIT_LOOK_MS);
+      assert.equal(r.logs.filter((l) => l.includes("its check waits: its folder in Episodes cannot be read now")).length, 1);
+      const again = await run(h.w, AT + filing.WAIT_LOOK_FOR_MS + 120000);
+      assert.equal(again.logs.filter((l) => l.includes("its check waits: its folder in Episodes cannot be read now")).length, 1);
+    } finally {
+      chmodSync(dir, 0o755);
+      h.w.done();
+    }
+  });
+
+  it("R9 makes a lost first record's folder again only while this Mac holds the episode's video, and waits while Episodes cannot be listed", async () => {
+    // (a)
+    let h = make({});
+    try {
+      rmSync(h.folder, { recursive: true, force: true });
+      const r = await run(h.w, AT);
+      assert.equal(readFileSync(h.to, "utf8"), ourText);
+      assert.ok(gone(h));
+      assert.ok(has(r, "Dropbox lost its first record, so it is put back."));
+      assert.deepEqual(r.notices, []);
+    } finally {
+      h.w.done();
+    }
+    // (b)
+    h = make({ video: false });
+    try {
+      rmSync(h.folder, { recursive: true, force: true });
+      const r = await run(h.w, AT);
+      assert.ok(gone(h));
+      assert.equal(existsSync(h.folder), false);
+      assert.deepEqual(r.notices, [GONE]);
+      assert.equal(r.logs.filter((l) => l === GONE).length, 1);
+    } finally {
+      h.w.done();
+    }
+    // (c)
+    h = make({ there: "none" });
+    const episodes = join(h.w.root, "Episodes");
+    try {
+      renameSync(episodes, `${episodes}.away`);
+      const r = await run(h.w, AT);
+      assert.ok(filing.readPendingAt(h.w.home, h.key).lookUntil);
+      assert.ok(existsSync(h.work));
+      assert.equal(r.logs.filter((l) => l.includes("its check waits: its folder in Episodes cannot be read now")).length, 1);
+      assert.deepEqual(r.notices, []);
+      assert.equal(existsSync(episodes), false);
+    } finally {
+      if (existsSync(`${episodes}.away`)) renameSync(`${episodes}.away`, episodes);
+      h.w.done();
+    }
+    // (d)
+    h = make({ there: "none" });
+    const ep = join(h.w.root, "Episodes");
+    try {
+      renameSync(ep, `${ep}.away`);
+      let first = true;
+      const r = await run(h.w, AT, {
+        onWait: (ms, c) => {
+          if (first) { renameSync(`${ep}.away`, ep); first = false; }
+          c.add(ms);
+        }
+      });
+      assert.equal(readFileSync(h.to, "utf8"), ourText);
+      assert.ok(gone(h));
+      assert.ok(has(r, "Dropbox lost its first record, so it is put back."));
+    } finally {
+      if (existsSync(`${ep}.away`)) renameSync(`${ep}.away`, ep);
+      h.w.done();
+    }
+    // (e)
+    h = make({ copied: false, written: false, there: "none", video: false });
+    try {
+      rmSync(h.folder, { recursive: true, force: true });
+      const r = await run(h.w, AT);
+      assert.ok(gone(h));
+      assert.ok(has(r, "its import stopped before its first record reached Dropbox, so there is nothing to check."));
+      assert.deepEqual(r.notices, []);
+      assert.equal(existsSync(h.folder), false);
+    } finally {
+      h.w.done();
+    }
+  });
+
+  it("R10 takes a placeholder first record as in Dropbox, and does not read it", async () => {
+    const h = make({ there: "unreadable" });
+    try {
+      const r = await run(h.w, AT, { isWhole: (p) => !p.endsWith("0001.json") });
+      assert.equal(readFileSync(h.to, "utf8"), "{ half");
+      assert.ok(gone(h));
+      assert.ok(has(r, "its first record is whole in Dropbox."));
+    } finally {
+      h.w.done();
+    }
+  });
+
+  it("R11 puts back a first record whose import stopped before it noted it, by this Mac's note that it wrote it", async () => {
+    for (const drop of ["gone", "another"]) {
+      const h = make({ copied: false, written: true, there: "none", drop });
+      try {
+        const r = await run(h.w, AT);
+        assert.equal(readFileSync(h.to, "utf8"), ourText);
+        assert.ok(gone(h));
+        assert.ok(has(r, "Dropbox lost its first record, so it is put back."));
+      } finally {
+        h.w.done();
+      }
+    }
+  });
+
+  it("R12 puts nothing back while its video is still in the drop folder, for the next look to import it again", async () => {
+    for (const swap of [false, true]) {
+      const h = make({ there: "none", drop: "there" });
+      try {
+        if (swap) {
+          const ino = statSync(h.dropPath).ino;
+          rmSync(h.dropPath);
+          writeFileSync(h.dropPath, MP4);
+          utimesSync(h.dropPath, new Date(L - 60000), new Date(L - 60000));
+          assert.notEqual(statSync(h.dropPath).ino, ino);
+        }
+        const r = await run(h.w, AT);
+        assert.equal(existsSync(h.to), false);
+        assert.ok(gone(h));
+        assert.equal(readFileSync(h.dropPath, "utf8"), MP4);
+        assert.ok(has(r, "its first record is not in Dropbox, and its video is still in the drop folder, so the next look imports it again, and nothing is put back."));
+      } finally {
+        h.w.done();
+      }
+    }
+  });
+
+  it("R13 drops a pending whose import was stopped before its clone, though its video has left the drop folder", async () => {
+    const h = make({ copied: false, written: false, there: "none", drop: "gone" });
+    try {
+      const r = await run(h.w, AT);
+      assert.ok(gone(h));
+      assert.deepEqual(readdirSync(join(h.folder, "record")), []);
+      assert.ok(has(r, "its import stopped before its first record reached Dropbox, so there is nothing to check."));
+    } finally {
+      h.w.done();
+    }
+  });
+
+  it("R14 replaces a garbled first record its stopped import wrote, and waits on one it cannot tell", async () => {
+    for (const [there, written] of [["unreadable", true], ["short", false]]) {
+      const h = make({ copied: false, written, there, drop: "there" });
+      try {
+        const r = await run(h.w, AT);
+        assert.equal(readFileSync(h.to, "utf8"), ourText);
+        assert.ok(gone(h));
+        assert.ok(has(r, "Dropbox lost its first record, so it is put back."));
+        assert.equal(readFileSync(h.dropPath, "utf8"), MP4);
+      } finally {
+        h.w.done();
+      }
+    }
+    const h = make({ copied: false, written: false, there: "unreadable", drop: "there" });
+    try {
+      const r = await run(h.w, AT);
+      assert.equal(readFileSync(h.to, "utf8"), "{ half");
+      const p = filing.readPendingAt(h.w.home, h.key);
+      assert.ok(p.nextLook && p.lookUntil);
+      assert.ok(existsSync(h.work));
+      assert.equal(r.logs.filter((l) => l.includes("whether it is this import's cannot be told")).length, 1);
+    } finally {
+      h.w.done();
     }
   });
 });

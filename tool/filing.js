@@ -1049,6 +1049,162 @@ export async function restoreReads(ctx, { name, record, folder, rels, rev }, { w
   return "";
 }
 
+/** The notice of a first record that cannot be put back. */
+export const RECORD_LOST = (label) => `Dropbox lost a file of ${label}, and it could not be put back. Ask Jason.`;
+
+/** The one line, posted and logged, of a check that puts its pending away because its episode's folder is gone from Episodes (ruling 16). */
+export const FOLDER_GONE = (who) => `The folder of ${who} is gone from Episodes, so the check of its copies in Dropbox is not made. Ask Jason.`;
+
+/** The name a check's lines give a pending: a record pending's import label, any other by its short id. */
+const whoOf = (p) => p.label || `an episode (${String(p.id).slice(-6)})`;
+
+/** Make the check of a local import's first record (algorithm B), under the episode's late-check lock, with the pending read again: the first record is put back
+    when Dropbox lost it, and only then. Synchronous. */
+export function checkRecord(p, deps) {
+  const home = deps.episode.home;
+  const e = p.entries[0];
+  const who = whoOf(p);
+  const clock = deps.clock;
+  const log = deps.log || (() => {});
+  const once = deps.once || log;
+  const opts = ruleOpts({ ...deps, log });
+  const whole = deps.isWhole || isWhole;
+  const putAway = () => {
+    try {
+      removePending(home, p);
+      if (typeof p.work === "string") rmSync(p.work, { recursive: true, force: true });
+      return true;
+    } catch (err) {
+      once(`${who}: its check is made, but it could not be put away (${err.code || "an error"}). The next run looks at it again.`);
+      return false;
+    }
+  };
+  const goneAway = () => {
+    if (!putAway()) return;
+    log(FOLDER_GONE(who));
+    (deps.notify || (() => {}))(FOLDER_GONE(who));
+  };
+  const wait = (line) => {
+    writePending(home, { ...p, nextLook: clock() + WAIT_LOOK_MS, lookUntil: Number.isFinite(p.lookUntil) ? p.lookUntil : clock() + WAIT_LOOK_FOR_MS });
+    once(line);
+  };
+  const cannotTell = () => wait(`${who}: its check waits: its folder in Episodes cannot be read now. It is looked at again later.`);
+  // 0. Its record never reached Dropbox, whatever became of its folder: it is put away before the folder is looked at.
+  if (p.copied !== true && lastWritten(home, p.id) < 1) {
+    let there = true;
+    try {
+      there = Boolean(statSync(e.to, { throwIfNoEntry: false }));
+    } catch (err) {
+      there = true;
+    }
+    if (!there) {
+      if (putAway()) log(`${who}: its import stopped before its first record reached Dropbox, so there is nothing to check.`);
+      return;
+    }
+  }
+  // 1. The folder (ruling 16).
+  let list;
+  try {
+    list = readdirSync(episodesFolder(p.root));
+  } catch (err) {
+    cannotTell();
+    return;
+  }
+  try {
+    if (!list.includes(basename(p.folder))) {
+      const video = statSync(episodeFilesFolder(home, p.name), { throwIfNoEntry: false });
+      if (!(video && video.isDirectory())) return goneAway();
+    } else {
+      const folder = statSync(p.folder, { throwIfNoEntry: false });
+      if (!(folder && folder.isDirectory())) return goneAway();
+    }
+  } catch (err) {
+    cannotTell();
+    return;
+  }
+  // 2. What is at its first record's place.
+  let state;
+  try {
+    const found = statSync(e.to, { throwIfNoEntry: false });
+    if (!found) state = "absent";
+    else if (!whole(e.to)) state = "placeholder";
+    else {
+      try {
+        const read = JSON.parse(readFileSync(e.to, "utf8"));
+        state = read && read.id === p.id && read.rev === 1 ? "ours" : "another";
+      } catch (err) {
+        state = "unreadable";
+      }
+    }
+  } catch (err) {
+    cannotTell();
+    return;
+  }
+  // 3.
+  if (state === "ours" || state === "placeholder") {
+    if (putAway()) log(`${who}: its first record is whole in Dropbox.`);
+    return;
+  }
+  // 4. Whether its record reached Dropbox (rulings 0, 9 and 32).
+  const reached = p.copied === true || lastWritten(home, p.id) >= 1 || (state === "unreadable" && existsSync(e.from) && startsAlike(e.to, e.from, statSync(e.to).size));
+  if (!reached) {
+    if (state === "unreadable") {
+      wait(`${who}: its check waits: its first record in Dropbox does not read, and whether it is this import's cannot be told. It is looked at again later.`);
+      return;
+    }
+    if (putAway()) log(`${who}: its import stopped before its first record reached Dropbox, so there is nothing to check.`);
+    return;
+  }
+  // 5.
+  if (state === "another") {
+    if (putAway()) log(`${who}: another import's first record is in its place now, so nothing is put back.`);
+    return;
+  }
+  // 6. The video is still in the drop folder as it arrived: the next look imports it again, and nothing is put back.
+  if (state === "absent") {
+    const known = p.dropFile && typeof p.dropFile === "object" && typeof p.drop === "string";
+    let there = false;
+    if (known) {
+      try {
+        there = sameFile(p.drop, { size: p.dropFile.size, mtimeMs: p.dropFile.mtimeMs });
+      } catch (err) {
+        there = false;
+      }
+    }
+    if (there) {
+      if (putAway()) log(`${who}: its first record is not in Dropbox, and its video is still in the drop folder, so the next look imports it again, and nothing is put back.`);
+      return;
+    }
+  }
+  // 7.
+  if ((recordNumbers(p.folder)[0] || 0) > 1) {
+    if (putAway()) log(`${who}: its first record is not in Dropbox, but a later one is, so nothing is put back.`);
+    return;
+  }
+  // 8. Put it back.
+  let problem = "";
+  if (!existsSync(e.from)) problem = "its first record is not in Dropbox, and its copy on this Mac is gone, so it could not be put back.";
+  else {
+    try {
+      mkdirSync(dirname(e.to), { recursive: true });
+      if (state === "absent") cloneIn(e.from, e.to, opts);
+      else replaceIn(e.from, e.to, opts);
+    } catch (err) {
+      problem = `its first record could not be put back in Dropbox (${err.code || "an error"}).`;
+    }
+  }
+  if (!problem) {
+    if (putAway()) log(`${who}: Dropbox lost its first record, so it is put back.`);
+    return;
+  }
+  log(`${who}: Dropbox lost its first record: ${problem}`);
+  if (!p.problem) (deps.notify || (() => {}))(RECORD_LOST(who));
+  const { nextLook, ...rest } = p;
+  writePending(home, { ...rest, problem });
+}
+
+CHECKS.record = checkRecord;
+
 /** A time of day as a person reads it, "10:15". */
 export const clockTime = (ms) => new Date(ms).toTimeString().slice(0, 5);
 
