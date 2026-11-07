@@ -1608,13 +1608,13 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const cannot = (lines) => ["The installer could not read what settings.js said of the import and the drop folder, so it changed nothing. It said:", ...lines, "", "Nothing was changed.", ""].join("\n");
     for (const lines of [
       ["{", '  "version": 1', "}"],
-      ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Elsewhere", "The exports folder will be: /x/Downloads"],
-      ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Elsewhere", "The exports folder will be: /x/Downloads"],
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
       ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads"],
-      ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: Downloads"],
-      ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads", "The old drop folder: /x/old", "The drop folder needs Files and Folders access"],
-      ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads", "The drop folder is in a cloud folder: Dropbox"],
-      ["{", '  "version": 1', "}", "The import will be: full", "The drop folder will be: Drop", "The drop folder is now: Unedited Video"],
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: Downloads"],
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads", "The old drop folder: /x/old", "The drop folder needs Files and Folders access"],
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads", "The drop folder is in a cloud folder: Dropbox"],
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder will be: Drop", "The drop folder is now: Unedited Video"],
       ["{", '  "version": 1', "}", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
       ["{", '  "version": 1', "}", "The import will be: heavy", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
       ["nothing of the kind"]
@@ -2037,6 +2037,37 @@ describe("a drop folder of this Mac's own, asked what the installer would do (--
     // The exports folder is refused too, as the drop folder.
     const same = askWith({ files: ["Desktop/.keep"] }, ...BASE, "--drop-folder", (home) => `${home}/Desktop/Drop`, "--exports-folder", (home) => `${home}/Desktop`, d.root);
     assert.deepEqual([same.status, same.out], [2, "Not written: the drop folder cannot be the exports folder, or inside it, or hold it.\n\nNothing was changed.\n"]);
+    d.done();
+  });
+  it("refuses an exports folder that is, is inside or holds a drop folder in Dropbox, before anything is changed: the import would take every export (L1b fix 2)", () => {
+    const d = box();
+    for (const exports of [join(d.root, "Drop", "Mac Studio"), join(d.root, "Drop", "Mac Studio", "Exports"), join(d.root, "Drop")]) {
+      const r = askWith({ settings: d.mine({ import: "light", drop: "Drop" }) }, ...BASE, "--exports-folder", exports, d.root);
+      assert.deepEqual([r.status, r.out], [2, "Not written: the drop folder cannot be the exports folder, or inside it, or hold it.\n\nNothing was changed.\n"], exports);
+      assert.deepEqual([r.agents, r.ran], [[], ""], exports);
+    }
+    d.done();
+  });
+  it("switches a Mac whose file says the full import, or has no import, to a drop folder of its own without --import light, and keeps what the file says (L1b fix 2)", () => {
+    const d = box();
+    const TOLD = ["--print", "--machine", "Mac Studio", "--handoff", "2"];
+    for (const setting of ["full", undefined]) {
+      const settings = d.mine({ drop: "Drop", ...(setting ? { import: setting } : {}) });
+      const local = askWith({ settings }, ...TOLD, "--switch-local", d.root);
+      assert.equal(local.status, 0, local.err + local.out);
+      assert.ok(lineOf(local, `  Its drop folder, on this Mac:  ${local.home}/BRIMM Video Work/Drop`), local.out);
+      assert.deepEqual([shown(local).dropPath, shown(local).import], [`${local.home}/BRIMM Video Work/Drop`, setting], String(setting));
+      assert.deepEqual(local.agents.map(held), [agent(local, [`${local.home}/BRIMM Video Work/Drop`])]);
+      const picked = askWith({ settings }, ...TOLD, "--drop-folder", (home) => `${home}/BRIMM Video Work/Drop`, "--exports-folder", (home) => `${home}/Movies/Exports`, d.root);
+      assert.equal(picked.status, 0, picked.err + picked.out);
+      assert.ok(lineOf(picked, `  Exports from HyperFrames, looked for in:  ${picked.home}/Movies/Exports`), picked.out);
+      assert.deepEqual([shown(picked).dropPath, shown(picked).exportsPath, shown(picked).import], [`${picked.home}/BRIMM Video Work/Drop`, `${picked.home}/Movies/Exports`, setting], String(setting));
+      assert.deepEqual(picked.agents.map(held), [agent(picked, [`${picked.home}/BRIMM Video Work/Drop`])]);
+      for (const r of [local, picked]) {
+        assert.equal(r.ran, "", String(setting));
+        assert.match(r.out, /\nNothing was changed\.\n$/);
+      }
+    }
     d.done();
   });
   it("refuses --drop Drop on a Mac with a drop folder of its own unless --switch-back is given too, and goes back with it", () => {

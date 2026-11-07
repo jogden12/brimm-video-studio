@@ -41,9 +41,10 @@
 #                                    iCloud Drive or another cloud folder is allowed with a warning; one under Desktop or Documents,
 #                                    or on another disk, is allowed too and macOS asks once whether node may read it.
 #                                    --exports-folder names where HyperFrames' exports are looked for besides Downloads (default
-#                                    Downloads). A Mac with a drop folder of its own goes back to one in Dropbox only with
-#                                    --drop Drop (or "Unedited Video") and --switch-back together. A run with no drop option keeps
-#                                    the folder the settings name. Run it with --print first
+#                                    Downloads): never the drop folder, a folder inside it or one that holds it, whether the drop
+#                                    folder is in Dropbox or on this Mac. A Mac with a drop folder of its own goes back to one in
+#                                    Dropbox only with --drop Drop (or "Unedited Video") and --switch-back together. A run with no
+#                                    drop option keeps the folder the settings name. Run it with --print first
 #   ./install.sh --machine "Mac Studio" --import light --handoff 2 "/path/to/The BRIMM DB/BRIMM Video"
 #                                    write the import (light; full is gone and refused) and the version of the hand-off (1 or 2) in this Mac's
 #                                    settings, with --drop's own rules: a setting that is not named is left as it is. With

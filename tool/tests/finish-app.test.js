@@ -589,6 +589,20 @@ describe("E6. the late check, and what is removed from Downloads", () => {
     assert.equal(existsSync(join(found.folder, "final", REEL_FILE)), true);
     w.t.done();
   });
+  it("takes a file she names in the picked exports folder, under another name, and keeps it there after the check (L1b fix 2)", async () => {
+    const w = fw();
+    const picked = join(w.t.home, "Movies", "Picked");
+    w.t.ctx.settings = { ...w.t.ctx.settings, exportsPath: picked };
+    const main = exportOf(w, "main", { folder: picked, name: "Pricing final.mp4", record: false });
+    const reel = exportOf(w, "reel 2");
+    const found = await asked(w, { take: { main: "Pricing final.mp4" } });
+    assert.deepEqual([w.asked().parts[0].video.name, w.asked().parts[0].video.dir, w.asked().parts[0].video.where], ["Pricing final.mp4", picked, "the exports folder"]);
+    const result = await finishNow(w.t.ctx, found);
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.deepEqual([existsSync(main.path), existsSync(reel.path)], [true, false]);
+    assert.equal(existsSync(join(found.folder, "final", "Pricing final.mp4")), true);
+    w.t.done();
+  });
   it("takes an export as from Downloads, and removes it after the check, when the exports folder is Downloads or a link to it", async () => {
     for (const via of ["itself", "a link"]) {
       const w = fw();

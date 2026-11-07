@@ -63,7 +63,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
-import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf } from "./settings.js";
+import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, namesQuietly, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
@@ -236,9 +236,11 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js finish "<episode>" [--yes] [--take "<part>=<file>"] [--final "<part>"]
                      [--without "reel <n>"] [--as-it-is]
                      [--on-screen "<words>"]… [--no-on-screen]
-                                        find what HyperFrames exported of each part (in Downloads, or where the export's
-                                        own record says it went), and ask what it must. --final says an export is the final
-                                        one though the project changed after it. With --yes and nothing left to
+                                        find what HyperFrames exported of each part (in Downloads, in the exports folder
+                                        this Mac picked, or where the export's own record says it went), and ask what it
+                                        must; it stops, and says so, when this Mac will not let it look in either folder.
+                                        --final says an export is the final one though the project changed after it. With
+                                        --yes and nothing left to
                                         ask, it transcribes the finished videos again, copies them into final/ and
                                         writes the hand-off for BRIMM Ops, detached. It says when the hand-off will
                                         be ready, and returns once the run has begun (at most five seconds; it says
@@ -559,8 +561,8 @@ const FOLDER_NAME = /^(\d{4}-\d{2}-\d{2}) .*\(([^()]+)\)(?:-\d+)?$/;
 
 /** How an episode is named in a list of several, and wherever edit.js would name it by its folder: a gated one by its label and
     its short id, since two labels may be the same (shownName); one a newer brimm-video wrote by its short id alone
-    (newerName); on a Mac that does the light import, one with no record that can be read by its day and Mac alone
-    (unreadName); and any other by its folder's name, as always. */
+    (newerName); on a Mac that does the light import, or that has a drop folder of its own whatever its file says (namesQuietly),
+    one with no record that can be read by its day and Mac alone (unreadName); and any other by its folder's name, as always. */
 function listedAs(ctx, e) {
   if (e.newer) return newerName(e.newer);
   if (isGated(e)) {
@@ -568,7 +570,7 @@ function listedAs(ctx, e) {
     // A gated video, or one held as a session, with no label is named by its short id already: it is said once.
     return withShortId(gatedName(r, e.held), r);
   }
-  if (!e.inForce && lightImport(ctx.settings)) return unreadName(e.name);
+  if (!e.inForce && namesQuietly(ctx.settings)) return unreadName(e.name);
   return e.name;
 }
 
@@ -990,8 +992,8 @@ const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boole
     yet answered, or a session, is named by its label (episodeLines), with the lines of her card under one not yet answered
     (cardLines), and one she has left alone is listed apart, under a heading of its own. A video waiting in a drop folder that
     a light import's status gives a label, or that a gated episode holds, is named by its label, or by what it is and its size,
-    and why it waits holds no name of its file, on either Mac; on a Mac that does the light import, every video waiting is; any
-    other, on a Mac that does not, as always. */
+    and why it waits holds no name of its file, on either Mac; on a Mac that does the light import, or that has a drop folder of
+    its own whatever its file says of the import, every video waiting is; any other, on a Mac that does not, as always. */
 export async function episodes(ctx) {
   const { say } = ctx;
   // The versions of a video are read from Episodes once: for the episodes a version of a session holds, and the cards' matches.
@@ -1008,8 +1010,10 @@ export async function episodes(ctx) {
     say("Left alone, not for BRIMM Video Studio:");
     for (const e of left) for (const line of episodeLines(ctx, e, true, all, links)) say(line);
   }
-  // The videos in each Mac's drop folder.
-  const light = lightImport(ctx.settings);
+  // The videos in each Mac's drop folder. A Mac with a drop folder of its own names them as one that does the light import, whatever
+  // its file says of the import (namesQuietly): every import is light, and a video waiting there may be a session, its file named for
+  // a client.
+  const light = namesQuietly(ctx.settings);
   const statuses = readStatuses(ctx.root, ctx.now());
   const waiting = [];
   for (const { mac, folder } of dropFolders(ctx)) {
@@ -1664,7 +1668,8 @@ function lateCheckOwed(ctx, video, held, who = video, plain = (text) => text) {
     it (Part L), whatever its case and spacing. Refused when an episode holds it already (but see lateCheckOwed), and while its
     import is running. Its status files from this Mac are taken away, and the launch agent is asked to look (kickstart).
     A video with a label is named by it in every line, and why its import failed is said with no path or name of its file in
-    it; on a Mac that does the light import, a video with none is named by what it is and its size, and never by its file. */
+    it; on a Mac that does the light import, or that has a drop folder of its own, a video with none is named by what it is and
+    its size, and never by its file. */
 export async function retry(ctx, rest) {
   const { say } = ctx;
   const said = rest.join(" ").trim();
@@ -1679,7 +1684,9 @@ export async function retry(ctx, rest) {
   } catch (e) {
     // The drop folder is not there, or cannot be read: it holds nothing that can be imported.
   }
-  const light = lightImport(ctx.settings);
+  // A Mac with a drop folder of its own is taken as one that does the light import, whatever its file says (namesQuietly), as
+  // `episodes` takes it.
+  const light = namesQuietly(ctx.settings);
   const statuses = readStatuses(ctx.root, ctx.now());
   const labelOf = (v) => labelIn(statuses, v, ctx.machine);
   const sizeOf = (v) => (statSync(join(drop, v), { throwIfNoEntry: false }) || { size: 0 }).size;
@@ -2049,7 +2056,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // A finished Reel's title is the words in its picture, which BRIMM Ops is told: one that has none is asked for, never made up.
   /** What is said of each part, and then of what was passed over, before the stops and the asks. */
   const lines = [];
-  // HyperFrames' exports, in Downloads (exports.js), for the projects of the record.
+  // HyperFrames' exports, in Downloads and in the exports folder this Mac picked (exports.js), for the projects of the record.
   const seen = exportsFound({ home: ctx.home, exports: exportsFolderOf(ctx.settings, ctx.home), name: found.name, record, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
   if (seen.unreadable) return refuse(ctx, DOWNLOADS_UNREADABLE);
   if (seen.exportsUnreadable) return refuse(ctx, exportsUnreadable(folderWords(exportsFolderOf(ctx.settings, ctx.home), ctx.home)));
@@ -5829,14 +5836,16 @@ function guideCopy(ctx, e, r, rates) {
   return { left, usual: left === null && mainCopy && !toldTime ? copyIn(rates, r.video && r.video.seconds) : null, wait: waitFacts(ctx, r, copyIn(rates, r.video && r.video.seconds)) };
 }
 
-/** The episode's main project in use, for the guide (plan PR 10; guide.js VideoFacts `project`): { opened, last, exported }, or null when
-    the record has none, or its folder is not on this Mac. `opened` is whether the record lists a time the app opened it; `last` the time
+/** The episode's main project in use, for the guide (plan PR 10; guide.js VideoFacts `project`): { opened, last, exported, exportsWords }, or
+    null when the record has none, or its folder is not on this Mac. `exportsWords` is the exports folder this Mac picked in Finder's words
+    when it is not Downloads, and "" otherwise (settings.js exportsWords), which the in-app step names. `opened` is whether the record lists a time the app opened it; `last` the time
     of the newest turn that `what-happened` tells in the project's `.hyperframes/app-history.jsonl` (app-history.js toldTurns, so that it is
     the first time that gives), in words (turnTime, in the zone a test gives as `deps.app.tz`), "" when the app has kept none that can be
     read; `exported` whether it has an export that began after its last change, or two that began in one minute so that `finish` asks
     which is final (exports.js exportsFound and lookForExports, for the main video alone): in Downloads or the exports folder this Mac picked, by the app's own record in the
     project's renders/. A Downloads folder or picked exports folder this Mac will not let be read, or any trouble in reading, is
-    no export seen: the guide only reads, and `finish` tells her what it needs. `downloads` is the pass's one listing of Downloads (guideItems). */
+    no export seen: the guide only reads, and `finish` tells her what it needs. `downloads` is the pass's one listing of Downloads, and its
+    `exports` that of the picked folder (guideItems). */
 function guideProject(ctx, e, r, downloads) {
   const main = (r.app?.projects ?? []).find(inUse);
   if (!main || !plainName(main.name)) return null;
@@ -5864,14 +5873,16 @@ function guideProject(ctx, e, r, downloads) {
 
 /** The Reels of a finished video that were exported from HyperFrames and are not in its hand-off, for the guide (plan PR 16; guide.js VideoFacts
     `reelsExported`): their numbers, in order, or [] when there are none or when `finish "<episode>" reels` would go no further. It looks in
-    this order and reads nothing more once a look says no, so that Downloads is listed only for a video that has a Reel project on this Mac and
-    a hand-off that Reels can be added to: the record has a Reel project (not kept for an earlier kind, not of a Reel she dropped) whose folder
-    is on this Mac and whose Reel it holds; the hand-off on file is one that Reels can be added to (finish.js reelsBase, which reads it as a
-    regular file alone; one that is not whole on this Mac is the bring `finish` starts, so it stands); then the exports, as `finish` finds them
+    this order and reads nothing more once a look says no, so that Downloads, and the exports folder this Mac picked, are listed only for a
+    video that has a Reel project on this Mac and a hand-off that Reels can be added to: the record has a Reel project (not kept for an
+    earlier kind, not of a Reel she dropped) whose folder is on this Mac and whose Reel it holds; the hand-off on file is one that Reels can
+    be added to (finish.js reelsBase, which reads it as a regular file alone; one that is not whole on this Mac is the bring `finish` starts,
+    so it stands); then the exports, as `finish` finds them
     (exports.js exportsFound and lookForExports, for those projects alone): the Reels with an export to take now that the last finish did not
     take, and those with two exports that began in one minute, which `finish` asks the final one of (as for the main video, plan PR 10, B13). An
-    export of a Reel the record does not hold stops `finish`, so it stops this. A Downloads folder this Mac will not let be read, or any trouble
-    in reading, is no export seen: the guide only reads. `downloads` is the pass's one listing of Downloads (guideItems). */
+    export of a Reel the record does not hold stops `finish`, so it stops this. A Downloads folder, or picked exports folder, this Mac will not
+    let be read, or any trouble in reading, is no export seen: the guide only reads. `downloads` is the pass's one listing of Downloads, and
+    its `exports` that of the picked folder (guideItems). */
 function guideReels(ctx, e, r, downloads) {
   const work = episodeWork(ctx.home, e.name);
   const dropped = new Set((r.reels ?? []).filter((reel) => reel && reel.status === "dropped").map((reel) => `reel ${reel.n}`));
@@ -6103,7 +6114,8 @@ function guideItems(ctx) {
   const rates = readRates(progressFolder(ctx.home));
   // Downloads is listed once for the pass, by the first video that looks in it for an export, and given to every other (exports.js downloadsOnce;
   // plan PR 17, the review of PR 10, M5): a pass is one `guide`, one look of `guide wait` (every 5 seconds) or one of `guide … tell` (every 15), and a
-  // listing costs 20 to 50 ms. A pass in which no video looks in it lists nothing.
+  // listing costs 20 to 50 ms. A pass in which no video looks in it lists nothing. The exports folder this Mac picked, when it is not Downloads, is
+  // listed the same way, once for the pass and only when a video looks in it (Phase 3, L1b).
   const downloads = downloadsOnce({ home: ctx.home, exports: exportsFolderOf(ctx.settings, ctx.home), readdir: ctx.deps.readdir });
   // The parts of the plans (PR H5a) are read from Episodes once for the pass too, by the first plan that has parts to count and then given to every
   // other, so that a pass costs the same whatever the number of plans (footage.js partsReader).
@@ -6533,10 +6545,10 @@ export async function editMain(argv, deps = {}) {
     code = await run(ctx, rest);
   } catch (e) {
     // Something nobody foresaw stopped a command that found a video not yet answered, or a session, or a record of the switch, or
-    // any command on a Mac that does the light import, where any video's file may be named for a client: its error may name the
-    // video's file or folder, as a path does, so only its code is said, through the filter, and the command ends there. Any other
-    // is thrown as it always was.
-    if (!ctx.hidden.names.length && !ctx.hidden.switched && !lightImport(ctx.settings)) throw e;
+    // any command on a Mac that does the light import, or that has a drop folder of its own whatever its file says (namesQuietly),
+    // where any video's file may be named for a client: its error may name the video's file or folder, as a path does, so only its
+    // code is said, through the filter, and the command ends there. Any other is thrown as it always was.
+    if (!ctx.hidden.names.length && !ctx.hidden.switched && !namesQuietly(ctx.settings)) throw e;
     ctx.say(`The work stopped (${(e && e.code) || "an error"}).`);
     code = 1;
   }
