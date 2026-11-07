@@ -470,6 +470,20 @@ describe("L6: sessions", () => {
     t.done();
   });
 
+  it("B0-F24 N2 with the clone a placeholder: it is left, and the log says it is there and unlisted", () => {
+    const t = world();
+    const found = local(t);
+    mkdirSync(join(found.folder, "Original files"), { recursive: true });
+    copyFileSync(join(found.video, FILE), originalOf(found));
+    oweOriginals(t.ctx2, found);
+    writeRecord(found, 3, sessionRecord(found));
+    look(t, depsOf(t, { isWhole: (path) => path !== originalOf(found) }));
+    assert.equal(existsSync(originalOf(found)), true);
+    assert.equal(readPendingAt(t.home, `original/${ID}.json`), null);
+    assert.equal(t.logs.filter((l) => l.includes("the record does not list it. Jason removes it by hand")).length, 1, t.logs.join("|"));
+    t.done();
+  });
+
   it("N3: a session after the move: nothing in Dropbox changes, and the Mac keeps its copy", () => {
     const t = world();
     const found = local(t);

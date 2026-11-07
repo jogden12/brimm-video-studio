@@ -196,15 +196,23 @@ export function checkOriginal(p, deps) {
     // A placeholder is not read, so it is not known to be ours.
     return Boolean(mine && copy && copy.size === mine.size && whole(to) && sameBytes(to, from));
   };
+  // A session's recording stays on this Mac. A clone of it this move made and the record never listed is taken away; one that is not known to be ours (a
+  // placeholder, or the Mac's copy gone) is left, and the log says it is there, so that Jason removes it by hand if he wants (D6).
+  const clearUnlisted = () => {
+    if (!existsSync(to) || listsOriginal(read.record)) return;
+    if (!ours()) {
+      log(`${shown}: a copy of its recording is in Original files in Dropbox, and the record does not list it. Jason removes it by hand if he wants.`);
+      return;
+    }
+    try {
+      rmSync(to, { force: true });
+    } catch (e) {
+      log(`${shown}: a copy of its recording in Original files could not be taken away (${code(e)}). Ask Jason.`);
+    }
+  };
   if (p.owed === true) {
     if (held) {
-      if (existsSync(to) && !listsOriginal(read.record) && ours()) {
-        try {
-          rmSync(to, { force: true });
-        } catch (e) {
-          log(`${shown}: a copy of its recording in Original files could not be taken away (${code(e)}). Ask Jason.`);
-        }
-      }
+      clearUnlisted();
       if (putAway()) log(`${withShortId(heldName(read.record), read.record)}: it is held as a session now, so its recording stays on this Mac.`);
       return;
     }
@@ -252,13 +260,7 @@ export function checkOriginal(p, deps) {
       }
       // The gate again, under the lock with a fresh look: a session mark may have come while the earlier writes were settled (ruling 5).
       if (asSession(linksOf(p.root), { folder: p.folder, record: read.record })) {
-        if (existsSync(to) && !listsOriginal(read.record) && ours()) {
-          try {
-            rmSync(to, { force: true });
-          } catch (e) {
-            log(`${shown}: a copy of its recording in Original files could not be taken away (${code(e)}). Ask Jason.`);
-          }
-        }
+        clearUnlisted();
         if (putAway()) log(`${withShortId(heldName(read.record), read.record)}: it is held as a session now, so its recording stays on this Mac.`);
         return;
       }
