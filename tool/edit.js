@@ -6597,7 +6597,7 @@ function noteFinished(ctx, { facts }) {
 /** The guide's overview of what guideItems read: this Mac's drop folder in Finder's words, each video under way with its one next
     step, and how many videos from before the switch it does not guide. */
 function sayOverview(ctx, { items, old, unreadable = false }) {
-  for (const line of overviewLines({ drop: dropWords(ctx.settings, ctx.machine, ctx.home), items, old, unreadable })) ctx.say(line);
+  for (const line of overviewLines({ drop: dropWords(ctx.settings, ctx.machine, ctx.home), items, old, unreadable, local: isLocal(ctx.settings) })) ctx.say(line);
   return 0;
 }
 

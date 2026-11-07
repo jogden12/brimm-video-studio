@@ -3,7 +3,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { OPS, OPS_PAGE, NOT_SET_UP, ZOOM_WORDS, dropWords, dropUnreadable, noteKindOf, opsNext, noteAfter, opsText } from "../guide.js";
-import { nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT, signatureOf, WAIT_MS, POLL_MS } from "../guide.js";
+import { AIRDROP, nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT, signatureOf, WAIT_MS, POLL_MS } from "../guide.js";
 import { readyIn, roughIn, READING_STEPS, apart, COMING } from "../guide.js";
 import { APP_NOT_SET_UP, COPY_STEP, copyIn } from "../guide.js";
 import { NOT_SET_UP as APP_SAYS } from "../app.js";
@@ -816,6 +816,15 @@ describe("the guide's lists", () => {
     assert.deepEqual(overviewLines({ drop: "D", items: [], old: 1, unreadable: true }), ["Your drop folder: D", dropUnreadable("D"), "1 video from before the switch is not guided."]);
     assert.deepEqual(overviewLines({ drop: "D", items: [item("Asked", { at: 0 }, waiting)], old: 0, unreadable: true }), ["Your drop folder: D", dropUnreadable("D"), "Under way:", "  Asked: W."]);
     assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0 }), ["Your drop folder: D", NOTHING_UNDER_WAY]);
+  });
+  it("add, on a Mac with a drop folder of its own and nothing under way, the AirDrop sentence for a clip (L9)", () => {
+    assert.equal(AIRDROP, "A clip from your iPhone? Send it to this Mac with AirDrop. It lands in Downloads: drag it from there into your drop folder.");
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0, local: true }), ["Your drop folder: D", NOTHING_UNDER_WAY, AIRDROP]);
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 1, local: true }), ["Your drop folder: D", NOTHING_UNDER_WAY, AIRDROP, "1 video from before the switch is not guided."]);
+    // Not on a Mac whose drop folder is in Dropbox, and not when it cannot look in the folder or a video is under way.
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0, local: false }), ["Your drop folder: D", NOTHING_UNDER_WAY]);
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0, local: true, unreadable: true }), ["Your drop folder: D", dropUnreadable("D")]);
+    assert.ok(!overviewLines({ drop: "D", items: [item("Asked", { at: 0 }, waiting)], old: 0, local: true }).includes(AIRDROP));
   });
   it("say after a video's own lines the lines edit.js adds of its own for it, and none for a video that is done", () => {
     const ops = { done: false, stage: "ops", text: "On the BRIMM Ops page: K.", step: "kit", after: "P." };
