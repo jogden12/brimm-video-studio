@@ -494,6 +494,20 @@ describe("read --kind session: the session's one reading", () => {
     assert.ok(names.names.includes("Ossery"), names.names.join());
     mac.t.done();
   });
+  it("B1-F15 a session kept on this Mac refuses her words holding a name given before it became a session, at edit and at the name", async () => {
+    const mac = sessionMac({ over: { ...ASKED_OVER } });
+    const session = reread(mac.found);
+    writeFileSync(recordFile(mac.found.folder, 1), recordText({ ...session, kind: "raw", session: undefined, name: { text: "Ossery pricing chat", placeholder: false }, answer: { ...ANSWER, private: "no" }, editing: null }));
+    writeFileSync(recordFile(mac.found.folder, 2), recordText({ ...session, rev: 2 }));
+    makeLocal(mac);
+    const r = await on(mac.t.ctx.deps, ...readArgs(3));
+    assert.equal(r.code, 0, r.text);
+    const edited = await on(mac.t.ctx.deps, "principles", LABEL, "edit", "1", "--description", "As Ossery learned, charge for the outcome.");
+    assert.deepEqual([edited.code, edited.said], [1, [EDIT_HOLDS("Ossery")]]);
+    const named = await on(mac.t.ctx.deps, "name", LABEL, "Ossery pricing");
+    assert.deepEqual([named.code, named.said], [1, [NAME_HOLDS("Ossery")]]);
+    mac.t.done();
+  });
   it("says so when the transcriber capitalised the recording throughout, so its capitalised words were not checked", async () => {
     const SKIPPED = "The transcriber wrote this recording with capitals throughout, so BRIMM Video Studio did not check its capitalised words for names: only the speakers' names and the file's name were checked.";
     const shouted = { ...PLAN, phrases: [{ id: "p1", start: 0, end: 9, keep: true, text: "Welcome Back Everyone To The Group Call Where We Talk About Pricing For Your Business And How To Set It Right Every Single Time." }, ...PHRASES.slice(1)] };
