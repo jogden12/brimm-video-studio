@@ -484,6 +484,27 @@ describe("L6: sessions", () => {
     t.done();
   });
 
+  it("B1-F11 the unlisted file beside a session is named by the gate's name, 'a copy of' only when the Mac's copy is alike, and left when the Mac's copy is gone (B1-F18)", () => {
+    for (const how of ["alike", "other", "gone"]) {
+      const t = world();
+      const found = local(t);
+      mkdirSync(join(found.folder, "Original files"), { recursive: true });
+      if (how === "other") writeFileSync(originalOf(found), "another recording, longer than the Mac's");
+      else copyFileSync(join(found.video, FILE), originalOf(found));
+      if (how === "gone") rmSync(join(found.video, FILE));
+      oweOriginals(t.ctx2, found);
+      writeRecord(found, 3, sessionRecord(found));
+      look(t, depsOf(t, { isWhole: (path) => how === "alike" ? path !== originalOf(found) : true }));
+      assert.equal(existsSync(originalOf(found)), true, how);
+      const told = t.logs.filter((l) => l.includes("the record does not list it. Jason removes it by hand"));
+      assert.equal(told.length, 1, `${how}: ${t.logs.join("|")}`);
+      assert.ok(told[0].startsWith("Video of 14 Oct, 09:00 (Mac Studio)"), told[0]);
+      assert.doesNotMatch(told[0], /Pricing talk/);
+      assert.match(told[0], how === "other" ? /a file of its recording's name is in Original files/ : /a copy of its recording is in Original files|a file of its recording's name is in Original files/);
+      t.done();
+    }
+  });
+
   it("N3: a session after the move: nothing in Dropbox changes, and the Mac keeps its copy", () => {
     const t = world();
     const found = local(t);

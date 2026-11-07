@@ -200,14 +200,19 @@ export function checkOriginal(p, deps) {
   // placeholder, or the Mac's copy gone) is left, and the log says it is there, so that Jason removes it by hand if he wants (D6).
   const clearUnlisted = () => {
     if (!existsSync(to) || listsOriginal(read.record)) return;
+    // The video is held beside a session here, so it is named as the gate names it (its file's name may be a client's), not by `shown`.
+    const as = withShortId(heldName(read.record), read.record);
     if (!ours()) {
-      log(`${shown}: a copy of its recording is in Original files in Dropbox, and the record does not list it. Jason removes it by hand if he wants.`);
+      const mine = statSync(from, { throwIfNoEntry: false });
+      const copy = statSync(to, { throwIfNoEntry: false });
+      const alike = Boolean(mine && copy && copy.size === mine.size);
+      log(`${as}: ${alike ? "a copy of its recording" : "a file of its recording's name"} is in Original files in Dropbox, and the record does not list it. Jason removes it by hand if he wants.`);
       return;
     }
     try {
       rmSync(to, { force: true });
     } catch (e) {
-      log(`${shown}: a copy of its recording in Original files could not be taken away (${code(e)}). Ask Jason.`);
+      log(`${as}: a copy of its recording in Original files could not be taken away (${code(e)}). Ask Jason.`);
     }
   };
   if (p.owed === true) {
