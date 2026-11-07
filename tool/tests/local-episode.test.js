@@ -1197,6 +1197,21 @@ describe("L6: after the recording's move", () => {
     }
   });
 
+  it("B1-F12 `kind … raw --again` of a recording that is in neither place is for Jason: nothing is written and no hand-off is set aside", async () => {
+    const w = world();
+    try {
+      const found = movedOff(w);
+      rmSync(found.copy);
+      const rev = readEpisode(found.folder).record.rev;
+      const r = await on(w.studio, "kind", found.name, "raw", "--private", "no", "--again");
+      assert.equal(r.code, 1, r.text);
+      assert.match(r.text, /recording is not whole on this Mac\. Ask Jason\./);
+      assert.equal(readEpisode(found.folder).record.rev, rev);
+    } finally {
+      w.done();
+    }
+  });
+
   it("A8 askBlocked stands on the recording in Original files: whole, nothing to bring; a placeholder, the copy to bring", () => {
     const w = world();
     try {

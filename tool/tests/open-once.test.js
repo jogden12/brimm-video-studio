@@ -70,6 +70,12 @@ describe("kind: an answer for a video kept on this Mac", () => {
     const t = setup();
     writeSettings(t.home, { app: "hyperframes" });
     const found = episodeFor(t, { record: { ...WAITING, ...record } });
+    // A video kept on this Mac has its recording in video/ (B1-F12: an answer is refused when the recording is in neither place).
+    if (record.local) {
+      const own = episodeFilesFolder(t.home, FOLDER);
+      mkdirSync(own, { recursive: true });
+      writeFileSync(join(own, found.record.video.file), "the recording");
+    }
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     return { t, found, r };
   };
