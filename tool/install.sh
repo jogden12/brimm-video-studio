@@ -85,8 +85,8 @@ set -euo pipefail
 
 LABEL="com.thebrimm.unedited"
 AGENT_FILE="$HOME/Library/LaunchAgents/$LABEL.plist"
-# The transcript tool's launch agent. Its file, and that file turned off (.plist.off, by-hand check 88), are only ever read, for
-# the folders they list: here (watched) and by settings.js transcriptFolders.
+# The transcript tool's launch agent. Its file is only ever read, for the folders it lists: here (watched), for the drop folder's
+# refusal, and by settings.js transcriptFolders, which also reads that file turned off (.plist.off, by-hand check 88) for the exports folder.
 TRANSCRIBE_LABEL="com.thebrimm.transcribe"
 # Where the launch agent looks for the programs. /usr/bin is on it for swift, which finds the faces for a Reel's crop.
 # A test names other folders in BRIMM_AGENT_PATH: on a Mac that has Claude Code where Homebrew puts programs, that is the one
@@ -401,8 +401,8 @@ drop_check() {
   rm -f "$CHECK_FILE"
 }
 
-# The folders that a launch agent's file in this Mac's LaunchAgents lists, by the file's name ($1: the label and .plist, or .plist.off
-# for one turned off), one to a line. None when there is no such file, or it cannot be read.
+# The folders that a launch agent's file in this Mac's LaunchAgents lists, by the file's name ($1: the label and .plist), one to a
+# line. None when there is no such file, or it cannot be read.
 watched() {
   local file="$HOME/Library/LaunchAgents/$1" count i
   count="$(plutil -extract WatchPaths raw -o - "$file" 2>/dev/null)" || return 0

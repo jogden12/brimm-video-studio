@@ -3099,6 +3099,66 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
         t.done();
       }
     });
+    it("takes each MacBook's move: Sallie's laptop from Drop › Sallie's laptop with the transcript tool turned off, Jason's MacBook set up fresh, and a Mac that keeps its drop folder in Dropbox, each with an exports folder in Dropbox (L1c)", async () => {
+      const told = (t, machine) => ["--machine", machine, "--root", t.root, "--checkout", CHECKOUT, "--import", "light", "--handoff", "2"];
+      const shared = (t) => { const d = join(dirname(t.root), "HyperFrames exports"); mkdirSync(d, { recursive: true }); return d; };
+      const t = mac({ machine: "Sallie's laptop", drop: "Drop", handoffVersion: 2 }, { transcripts: ({ root }) => ({ ".plist.off": [join(dirname(root), "BRIMM VIDEO Transfer")] }) });
+      const hers = t.folder("Drop", "Sallie's laptop");
+      writeFileSync(join(hers, ".brimm-watched-by"), "Sallie's laptop\n");
+      writeFileSync(join(hers, ".DS_Store"), "x");
+      mkdirSync(join(dirname(t.root), "BRIMM VIDEO Transfer", "Zoom Video Transfer"), { recursive: true });
+      for (const exports of [shared(t), join(t.home, "Downloads")]) {
+        for (const command of ["plan", "write"]) {
+          t.said.length = 0;
+          assert.equal(await t.run(command, ...told(t, "Sallie's laptop"), "--drop-folder", join(t.home, "BRIMM Video Work", "Drop"), "--exports-folder", exports), 0, `${command}: ${t.said.join("\n")}`);
+        }
+        assert.equal(t.read().dropPath, join(t.home, "BRIMM Video Work", "Drop"));
+        assert.equal(t.read().exportsPath, exports);
+        writeSettings(t.home, { drop: "Drop" }, ["dropPath"]);
+      }
+      assert.deepEqual(readdirSync(shared(t)), []);
+      t.done();
+      const j = mac({}, { transcripts: ({ root }) => ({ ".plist": [join(dirname(root), "BRIMM VIDEO MacBook")] }) });
+      mkdirSync(join(dirname(j.root), "BRIMM VIDEO MacBook"), { recursive: true });
+      rmSync(j.file);
+      assert.equal(await j.run("write", ...told(j, "Jason's MacBook"), "--drop-folder", j.desktop, "--exports-folder", shared(j)), 0, j.said.join("\n"));
+      assert.equal(j.read().machine, "Jason's MacBook");
+      assert.equal(j.read().dropPath, j.desktop);
+      j.done();
+      const k = mac({ machine: "Sallie's laptop", drop: "Drop" });
+      writeFileSync(join(k.folder("Drop", "Sallie's laptop"), ".brimm-watched-by"), "Sallie's laptop\n");
+      assert.equal(await k.run("write", ...told(k, "Sallie's laptop"), "--drop", "Drop", "--exports-folder", shared(k)), 0, k.said.join("\n"));
+      assert.equal(k.read().exportsPath, shared(k));
+      k.done();
+    });
+    it("takes again the folder this Mac watches now named in other letter case, on a disk whose names are not case-sensitive, and names no old folder (L1c)", { skip: caseBlind ? false : "the test's disk tells letter case apart" }, async () => {
+      const t = mac();
+      const own = join(t.home, "Desktop", "Drop");
+      mkdirSync(own, { recursive: true });
+      writeFileSync(join(own, "Talk.mov"), "v");
+      writeSettings(t.home, { dropPath: own });
+      assert.equal(await t.run("plan", ...t.told, "--drop-folder", join(t.home, "desktop", "drop")), 0, t.said.join("\n"));
+      assert.ok(!t.said.some((l) => l.startsWith("The old drop folder:")), t.said.join("\n"));
+      assert.equal(await t.run("write", ...t.told, "--drop-folder", join(t.home, "desktop", "drop")), 0, t.said.join("\n"));
+      assert.deepEqual(readdirSync(own), ["Talk.mov"]);
+      t.done();
+    });
+    it("asks no real path of ~/Documents/Zoom when the exports folder is Downloads or in Dropbox, which macOS could answer with a question about Documents (L1c)", async () => {
+      const t = mac({ drop: "Drop" });
+      t.folder("Drop");
+      const zoom = join(t.home, "Documents", "Zoom");
+      const dropbox = join(dirname(t.root), "HyperFrames exports");
+      mkdirSync(dropbox, { recursive: true });
+      for (const argv of [[], ["--exports-folder", dropbox]]) {
+        const { result, calls } = await watched(() => t.run("plan", ...t.told, ...argv), { names: ["existsSync", "statSync", "lstatSync", "readdirSync", "readFileSync", "realpathSync"] });
+        assert.equal(result, 0, t.said.join("\n"));
+        assert.deepEqual(calls.filter(({ path }) => path === zoom || path.startsWith(`${zoom}/`)), [], argv.join(" "));
+      }
+      t.said.length = 0;
+      assert.equal(await t.run("plan", ...t.told, "--exports-folder", join(zoom, "Call")), 1);
+      assert.deepEqual(t.said, ["Not written: the exports folder cannot be Zoom's recordings, or inside it."]);
+      t.done();
+    });
     it("takes the Mac Studio's switch at P3-3: Drop in BRIMM Video Work, made or not, with Downloads, a link into Dropbox, as the exports folder, while the transcript tool watches BRIMM VIDEO Transfer (L1c)", async () => {
       for (const made of [false, true]) {
         const t = mac({ drop: "Drop", handoffVersion: 2 }, { transcripts: ({ root }) => ({ ".plist": [join(dirname(root), "BRIMM VIDEO Transfer"), join(dirname(root), "BRIMM VIDEO Transfer", "Zoom Video Transfer")] }) });

@@ -2207,6 +2207,43 @@ describe("a drop folder of this Mac's own, asked what the installer would do (--
     assert.ok(lineOf(mended, `  Exports from HyperFrames, looked for in:  ${d.dir}/Exports`), mended.out);
     d.done();
   });
+  it("takes each MacBook's move: Sallie's laptop with the transcript tool turned off, Jason's MacBook set up fresh with BRIMM VIDEO MacBook in the .plist, and a Mac that keeps its drop folder in Dropbox, each with exports in Dropbox or Downloads; and the letter-case re-pick (L1c)", () => {
+    const d = box();
+    const transfer = join(d.dir, "The BRIMM DB", "BRIMM VIDEO Transfer");
+    mkdirSync(join(transfer, "Zoom Video Transfer"), { recursive: true });
+    const macbook = join(d.dir, "The BRIMM DB", "BRIMM VIDEO MacBook");
+    mkdirSync(macbook);
+    const hers = join(d.root, "Drop", "Sallie's laptop");
+    mkdirSync(hers, { recursive: true });
+    writeFileSync(join(hers, ".brimm-watched-by"), "Sallie's laptop\n");
+    const shared = join(d.dir, "The BRIMM DB", "HyperFrames exports");
+    mkdirSync(shared);
+    const off = ["Library/LaunchAgents/com.thebrimm.transcribe.plist.off", transcriptAgent([transfer, join(transfer, "Zoom Video Transfer")])];
+    const laptop = { ...d.mine({ import: "light", drop: "Drop", handoffVersion: 2 }), machine: "Sallie's laptop" };
+    const MB = ["--print", "--machine", "Sallie's laptop", "--import", "light", "--handoff", "2"];
+    for (const args of [["--switch-local"], ["--drop-folder", (home) => `${home}/Desktop/Drop`]]) {
+      for (const exports of [shared, (home) => `${home}/Downloads`]) {
+        const r = askWith({ settings: laptop, files: [off, "Desktop/.keep", "Downloads/.keep"] }, ...MB, ...args, "--exports-folder", exports, d.root);
+        assert.equal(r.status, 0, r.err + r.out);
+        assert.ok(r.out.includes(`  The old drop folder:  ${hers}, no longer watched once this is done`), r.out);
+      }
+    }
+    const j = askWith({ installed: { "com.thebrimm.transcribe": transcriptAgent([macbook]) }, files: ["Desktop/.keep"] }, "--print", "--machine", "Jason's MacBook", "--import", "light", "--handoff", "2", "--switch-local", "--exports-folder", shared, d.root);
+    assert.equal(j.status, 0, j.err + j.out);
+    assert.ok(lineOf(j, `  Its drop folder, on this Mac:  ${j.home}/BRIMM Video Work/Drop`), j.out);
+    const k = askWith({ settings: laptop }, "--print", "--machine", "Sallie's laptop", "--import", "light", "--handoff", "2", "--drop", "Drop", "--exports-folder", shared, d.root);
+    assert.equal(k.status, 0, k.err + k.out);
+    const own = join(d.dir, "Own", "Drop");
+    mkdirSync(own, { recursive: true });
+    writeFileSync(join(own, "Talk.mov"), "v");
+    const re = askWith({ settings: d.mine({ import: "light", dropPath: own }) }, ...BASE, "--drop-folder", join(d.dir, "own", "drop"), d.root);
+    if (existsSync(join(d.dir, "own", "drop"))) {
+      assert.equal(re.status, 0, re.out);
+      assert.doesNotMatch(re.out, /The old drop folder:/);
+    }
+    assert.deepEqual(readdirSync(own), ["Talk.mov"]);
+    d.done();
+  });
   it("takes the Mac Studio's switch at P3-3, with Downloads as the exports folder, its old drop folder in Dropbox marked, and the transcript tool watching BRIMM VIDEO Transfer (L1c)", () => {
     const d = box();
     const transfer = join(d.dir, "The BRIMM DB", "BRIMM VIDEO Transfer");

@@ -612,9 +612,9 @@ export function dropFolderFault(path, { home, root, exports = downloadsFolder(ho
     the file that is on first. Read as install.sh's watched() reads them, through plutil (`plutil` is a stand-in in a test): a file
     that is not there is not asked about, and one that cannot be read, or that lists no array of whole paths, lists none. Nothing is
     written. */
-export function transcriptFolders(home, plutil = spawnSync, { off = true } = {}) {
+export function transcriptFolders(home, plutil = spawnSync, { off = true, on = true } = {}) {
   const folders = [];
-  for (const name of off ? [`${TRANSCRIBE_LABEL}.plist`, `${TRANSCRIBE_LABEL}.plist.off`] : [`${TRANSCRIBE_LABEL}.plist`]) {
+  for (const name of [...(on ? [`${TRANSCRIBE_LABEL}.plist`] : []), ...(off ? [`${TRANSCRIBE_LABEL}.plist.off`] : [])]) {
     const file = join(home, "Library", "LaunchAgents", name);
     if (!lstatSync(file, { throwIfNoEntry: false })) continue;
     try {
@@ -664,7 +664,11 @@ export function exportsFolderFault(path, { home, root, drop, zoom = join(home, "
   if (transcripts.some((folder) => inside(folder))) return cannot("a folder the transcript tool watches");
   if (inside(studioFolder(home))) return cannot("BRIMM Video Studio");
   if (inside(workshopFolder(home))) return cannot("BRIMM Video Workshop");
-  if (inside(zoom)) return cannot("Zoom's recordings");
+  // Zoom's folder is under Documents by default, which macOS guards: its real path is asked only when the exports folder could be in
+  // or under Documents (by its real path or as spelt), or Zoom's folder is elsewhere.
+  const docs = fold(join(realOf(home), "Documents"));
+  const zoomMaybe = !underFolded(fold(resolve(zoom)), docs) || underFolded(fold(me), docs) || underFolded(fold(resolve(path)), fold(resolve(zoom)));
+  if (zoomMaybe && inside(zoom)) return cannot("Zoom's recordings");
   const guarded = fold(join(realOf(home), "Downloads"));
   for (let at = me; ; at = dirname(at)) {
     if (!underFolded(fold(at), guarded) && existsSync(join(at, MARKER))) {
@@ -714,12 +718,13 @@ function planned(home, rest, now, plutil = spawnSync) {
   // The folder picked, or the one this Mac has when the exports folder changes under it, must be one a drop folder may be.
   // The transcript tool's launch agent is read once, for both checks below: its file turned off too for the exports folder, and its
   // file that is on alone for the drop folder, which is what install.sh's own refusal reads.
-  const transcripts = transcriptFolders(home, plutil);
+  const listedOn = transcriptFolders(home, plutil, { off: false });
+  const transcripts = [...listedOn, ...transcriptFolders(home, plutil, { on: false })];
   const toCheck = picked ?? (wasLocal && !remove.length && told.fields.exportsPath !== undefined ? held.dropPath : undefined);
   if (toCheck !== undefined) {
     const why = dropFolderFault(toCheck, {
       home, root: told.fields.root, exports: exportsFolderOf({ ...held, ...told.fields }, home), zoom: zoomFolderOf(held, home),
-      current: wasLocal ? held.dropPath : undefined, machine: told.fields.machine, transcripts: transcriptFolders(home, plutil, { off: false })
+      current: wasLocal ? held.dropPath : undefined, machine: told.fields.machine, transcripts: listedOn
     });
     if (why) return { code: 1, said: [`Not written: ${why}.`] };
   }
