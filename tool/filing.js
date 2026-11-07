@@ -92,17 +92,17 @@ function markOf(folder) {
   }
 }
 
-/** Whether the folder `name` of a local import, found by its marker, is a run that stopped and nothing else: Episodes/<name> is not there,
-    or has no record file at all (NNNN.json, whether it reads now or not) and none of the episode's work in video/ (history/, .put.json). */
+/** Whether the folder `name` of a local import, found by its marker, is a run that stopped and nothing else: video/ holds none of the episode's
+    work (history/, .put.json), and Episodes/<name> is not there, or has no record file at all (NNNN.json, whether it reads now or not). */
 export function stoppedRun(episodes, work, name) {
+  const video = join(work, name, "video");
+  if (existsSync(join(video, "history")) || existsSync(join(video, ".put.json"))) return false;
   const folder = join(episodes, name);
   if (!statSync(folder, { throwIfNoEntry: false })) return true;
-  if (readEpisode(folder).code !== "NONE" || cannotTell(folder, { code: "NONE" })) return false;
-  const video = join(work, name, "video");
-  return !existsSync(join(video, "history")) && !existsSync(join(video, ".put.json"));
+  return readEpisode(folder).code === "NONE" && !cannotTell(folder, { code: "NONE" });
 }
 
-/** The folder in `episodes` the video `video`, of `bytes` bytes, goes into on `machine`, on the day `day`: { name, reused }.
+/** The folder in `episodes` the video `video`, of `bytes` bytes, goes into on `machine`, on the day `day`: { name, reused }, and `held: true` for a marked folder that is no stopped run and has no whole record (neither used again nor written over).
     Listing Episodes throws on any error but its not being there: a name is never given while Episodes cannot be read.
     With no `work` (a Mac on a drop folder in Dropbox, or the join), an import of this video by this Mac that stopped before it wrote a
     whole record left a folder, which is used again: its name is one this Mac would give the video, it has no whole record, and it
@@ -126,10 +126,10 @@ export function findFolder(episodes, { video, bytes, machine, day, work, importI
       const mark = markOf(join(work, name, "video"));
       return mark !== null && mark.import === importId && mark.drop === dropId;
     }) : undefined;
-    // A folder with a record is an episode, not a run that stopped: it is never used again, whether its record reads now or not. One
-    // whose records are there and do not read now, or whose video/ was worked on, is held: the drop file waits for a later look.
+    // A folder with a whole record is an episode, not a run that stopped: it is never used again. A marked folder that is no stopped run and has no
+    // whole record (its records are there and do not read now, or its folder cannot be read, or its video/ was worked on) is held: the drop file waits.
     if (marked && stoppedRun(episodes, work, marked)) return { name: marked, reused: true };
-    if (marked && readEpisode(join(episodes, marked)).code === "NONE") return { name: marked, reused: false, held: true };
+    if (marked && !readEpisode(join(episodes, marked)).record) return { name: marked, reused: false, held: true };
     return { name: episodeFolderName([...names, ...mine], day, stem, machine), reused: false };
   }
   const stopped = names.filter((name) => namedFor(name, stem, machine)).sort().find((name) => {
@@ -139,6 +139,17 @@ export function findFolder(episodes, { video, bytes, machine, day, work, importI
     return size === -1 || size === bytes;
   });
   return stopped ? { name: stopped, reused: true } : { name: episodeFolderName(names, day, stem, machine), reused: false };
+}
+
+/** The name of the marked folder that holds the video `file` back on a Mac with a drop folder of its own (findFolder's `held`), or "": decided before
+    any work is done on the video, so that a held video is not read and transcribed again at every look. */
+export function heldFolderOf(file, dropFile, { episode, today }) {
+  try {
+    const found = findFolder(episodesFolder(episode.root), { video: basename(file), bytes: statSync(file).size, machine: episode.machine, day: today ? today() : localDay(), work: workFolder(episode.home), importId: importIdOf(dropFile), dropId: dropIdOf(dropFile) });
+    return found.held ? found.name : "";
+  } catch (e) {
+    return "";
+  }
 }
 
 /** Which brimm-video is at work: the short commit the checkout `checkout` is at, as git says it, or "unknown". It goes into
@@ -336,8 +347,8 @@ function fileLocal({ file, made, at, facts, printed, kind, read, reels, work, dr
   const found = findFolder(episodes, { video, bytes, machine: episode.machine, day, work: workFolder(episode.home), importId: importIdOf(dropFile), dropId: dropIdOf(dropFile) });
   const path = join(episodes, found.name);
   const own = episodeFilesFolder(episode.home, found.name);
-  // A stopped import may have left a record that is not whole. It is no one's record, and the first one is written anew. A whole record is
-  // never taken away, whoever asks.
+  // A reused folder (a stopped run's) has no record file at all, and none of the episode's work in video/: the first record is written in it. A marked
+  // folder with records or work (`held`) is not reused: the drop file waits.
   if (found.held) throw new Error(`${found.name} has records or work already that cannot be read now, so this video waits for a later look`);
   if (found.reused) {
     if (statSync(path, { throwIfNoEntry: false }) && readEpisode(path).code !== "NONE") throw new Error(`${found.name} has a record already, and a record is never written over`);

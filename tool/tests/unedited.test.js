@@ -3045,18 +3045,58 @@ describe("an episode filed on a Mac with a drop folder of its own (Phase 3, L3)"
     assert.equal(existsSync(join(t.episodes, folder)), false);
     t.done();
   });
-  it("B0-F2 a marked folder whose records are there but do not read, or whose video/ was worked on, is not taken for a stopped run", async () => {
+  it("B0-F2 a marked folder whose records are there but do not read is not taken for a stopped run: its records and work stay, the drop file waits, and no work is done on the video", async () => {
+    const t = local();
+    const file = t.put("Talk.mov");
+    const folder = stopped(t, file);
+    writeFileSync(join(t.video(folder), "Talk.cut-plan.json"), "the cut plan");
+    mkdirSync(join(t.episodes, folder, "record"), { recursive: true });
+    writeFileSync(join(t.episodes, folder, "record", "0001.json"), "{");
+    writeFileSync(join(t.episodes, folder, "record", "0002.json"), "{");
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.notEqual(r.ok, true, t.logs.join("|"));
+    assert.deepEqual(t.calls, [], "the video was neither probed nor transcribed");
+    assert.deepEqual(namesOf(join(t.episodes, folder, "record")), ["0001.json", "0002.json"]);
+    assert.equal(readFileSync(join(t.video(folder), "Talk.cut-plan.json"), "utf8"), "the cut plan");
+    assert.deepEqual(namesOf(t.drop), ["Talk.mov"]);
+    assert.deepEqual(t.folders(), [folder]);
+    assert.ok(t.logs.some((l) => l.endsWith("so it stays in the drop folder. Ask Jason.")), t.logs.join("|"));
+    t.done();
+  });
+  it("B0-F2 (video/ worked on) a marked folder whose video/ holds history, with an empty record/, is held", async () => {
     const t = local();
     const file = t.put("Talk.mov");
     const folder = stopped(t, file);
     mkdirSync(join(t.video(folder), "history"), { recursive: true });
-    writeFileSync(join(t.video(folder), "Talk.cut-plan.json"), "the cut plan");
+    mkdirSync(join(t.episodes, folder, "record"), { recursive: true });
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.notEqual(r.ok, true, t.logs.join("|"));
+    assert.deepEqual(namesOf(t.drop), ["Talk.mov"]);
+    assert.deepEqual(namesOf(join(t.episodes, folder, "record")), []);
+    t.done();
+  });
+  it("B0-F2 (unreadable record) a marked folder with only an unreadable record and no work in video/ is held, not reused", async () => {
+    const t = local();
+    const file = t.put("Talk.mov");
+    const folder = stopped(t, file);
     mkdirSync(join(t.episodes, folder, "record"), { recursive: true });
     writeFileSync(join(t.episodes, folder, "record", "0001.json"), "{");
     const [r] = await uneditedFolder(t.drop, t.deps);
     assert.notEqual(r.ok, true, t.logs.join("|"));
     assert.equal(readFileSync(join(t.episodes, folder, "record", "0001.json"), "utf8"), "{");
-    assert.equal(readFileSync(join(t.video(folder), "Talk.cut-plan.json"), "utf8"), "the cut plan");
+    assert.deepEqual(namesOf(t.drop), ["Talk.mov"]);
+    t.done();
+  });
+  it("B1-F1 a marked folder whose video/ was worked on is held even when Episodes/<folder> is gone", async () => {
+    const t = local();
+    const file = t.put("Talk.mov");
+    const folder = stopped(t, file);
+    mkdirSync(join(t.video(folder), "history"), { recursive: true });
+    writeFileSync(join(t.video(folder), "Talk.cut-plan.json"), "Claude's cut plan");
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.notEqual(r.ok, true, t.logs.join("|"));
+    assert.equal(readFileSync(join(t.video(folder), "Talk.cut-plan.json"), "utf8"), "Claude's cut plan");
+    assert.equal(existsSync(join(t.episodes, folder)), false);
     assert.deepEqual(namesOf(t.drop), ["Talk.mov"]);
     t.done();
   });

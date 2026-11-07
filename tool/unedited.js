@@ -46,7 +46,7 @@ import { stillsArgs } from "./reframe.js";
 import { reelCandidates, reelsFile, readReels, mergeCandidates, REELS_FILE } from "./reel-candidates.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, sameBytes, startsAlike, LATE_CHECK_MS } from "./dropbox.js";
-import { episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, statusWriteFolder, statusReadFolders, importEpisodes, writePending, removePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
+import { heldFolderOf, episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, statusWriteFolder, statusReadFolders, importEpisodes, writePending, removePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
 import { readSettings, runsFolder, episodeWork, episodesFolder, importingFolder, importingFolderOf, statusFoldersOf, isLocal, episodeFilesFolder } from "./settings.js";
 import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf } from "./episode.js";
 import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
@@ -544,6 +544,11 @@ async function workOn(file, deps) {
         log(`${shown}: Episodes could not be read (${e.code || "an error"}), so this video is looked at again later.`);
         return { ok: false, name, arriving: true, message: "Episodes could not be read" };
       }
+    }
+    // A marked folder of an import that stopped, which has records or work that cannot be read now, holds the video: it is decided here, before the work.
+    if (heldFolderOf(file, arrived, { episode, today: deps.today })) {
+      log(`${shown}: an episode made of it already has records or work that cannot be read now, so it stays in the drop folder. Ask Jason.`);
+      return { ok: false, name, arriving: true, message: "an episode of it has records or work that cannot be read now" };
     }
   }
   // An episode's record waits for her answer (spec 2026-10-22, section 1). Her screen may be shared, so the progress
