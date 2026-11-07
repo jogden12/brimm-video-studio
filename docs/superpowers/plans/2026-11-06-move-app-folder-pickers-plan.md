@@ -20,7 +20,7 @@
 
 **Tech Stack:** zsh (`set -euo pipefail`); Swift (Foundation for the launcher, AppKit for the helper, `swiftc -target arm64-apple-macos13.0`); Node 22+ with `node:test`, no packages.
 
-**Spec:** `docs/superpowers/specs/2026-11-06-move-app-folder-pickers-design.md`, version 4. Every quoted line of the app's words in it is exact copy. Read the spec's sections named in a task before its steps.
+**Spec:** `docs/superpowers/specs/2026-11-06-move-app-folder-pickers-design.md`, version 5. Every quoted line of the app's words in it is exact copy. Read the spec's sections named in a task before its steps.
 
 ## Global Constraints
 
@@ -35,9 +35,12 @@
   - counters are changed with `x=$(( … ))`, never `(( … ))` alone;
   - an `if` is never written as `[[ … ]] && …` at a function's end;
   - every counter starts at 0;
+  - a variable is declared first and assigned after (`local n; n="$(…)" || rc=$?`), never `local n=$(…)`, which hides the status;
+  - the last command of a loop at a function's end counts as the function's end;
+  - a result file is read only after `[[ -r … ]]`, with `|| content=""`;
   - a stop always goes through `stop_here`.
-- **node.** Every node call made for words or answers keeps node's errors off the screen (`2>/dev/null`), and never ends the run.
-- **Agents.** Every agent runs on Opus 5.5 (Jason, 6 November).
+- **node.** Every node call made for words or answers keeps node's errors off the screen (`2>/dev/null`), and never ends the run. `settings.js` is never node's first argument, since its main guard would run it as a command. The call is install.sh's `lock_facts` form: `"$NODE" --input-type=module -e '…await import(pathToFileURL(join(process.argv[1], "settings.js")).href)…' "$STUDIO/tool" "<path>" "$HOME" 2>/dev/null`.
+- **Agents.** Builders run on Sonnet 5.5 (claude-sonnet-5-5). Reviewers, skeptics and judges run on Opus 5.5 (Jason, 7 November: "Yes, Sonnet builders").
 - **Merging.** Nothing is merged or pushed without Jason's yes.
 
 ## Review Focus
@@ -91,7 +94,13 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - **The second way:** `<message> <start folder>`.
     - It prints the whole path and a newline, and ends 0.
     - Cancel ends 1.
-    - A path with a line break ends 2 with one line.
+    - A path with a line break ends 3 with one line.
+  - **How it starts:**
+    - `NSApplication.shared`, then its delegate, then `run()`;
+    - the panel from `applicationDidFinishLaunching`;
+    - the process-id source on a queue of its own;
+    - `application(_:open:)` and `application(_:openFiles:)` answer by ignoring the request;
+    - its arguments read from `CommandLine.arguments`.
   - **Either way:** fewer than two arguments, or a start folder that is not there, ends 2 with one line on stderr and opens no window.
   - **The panel:**
     - `canChooseDirectories` true, `canChooseFiles` false, `allowsMultipleSelection` false, `canCreateDirectories` true, `resolvesAliases` true;
@@ -126,7 +135,7 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - The helper's Info.plist, as JSON, deep-equals the keys above.
   - The zip lists the helper's program and has no entry starting `._` or holding `/._`.
 - **"signs the chooser first, with its own identifier, the hardened runtime and a timestamp, and verifies it"**, and **"seals the chooser ad hoc without --sign, before the app"**: by the lines' order in `ran`.
-- **"zips with --norsrc --noextattr, and prints the same for after stapling".**
+- **"zips with --norsrc --noextattr, and prints the same for after stapling".** The stand-in `swiftc` also runs `xattr -w com.example.mark yes` on its `-o` file, so a zip made the old way would hold a `._` entry and fail.
 - **"the launcher passes on --try-chooser alone".** The source holds the line above. Where the real `swiftc` is there, the launcher is compiled into a made-up bundle whose `Resources/open-in-terminal.zsh` notes its arguments. Run with `--try-chooser -psn_0_1 x`, it is given `--try-chooser` alone. Run with nothing, it is given nothing.
 - **"the chooser compiles at its real target, and with no arguments ends 2 within 10 seconds, opening nothing".** Where the real `swiftc` is there, `choose-folder.swift` is compiled into a temporary folder with `-target arm64-apple-macos13.0`, sharing one module cache, made in `before()`, with the launcher's existing type-check. This compile is its type-check. Run with no arguments, and with a start folder that is not there, it ends 2 with one stderr line. `spawnSync` gets `timeout: 10000`, and a timeout fails the test.
 - **open-in-terminal.zsh.** The existing tests stay. The resources helper gains a stand-in `Helpers/Choose a Folder.app` with an Info.plist, a 755 program, and `_CodeSignature/CodeResources`.
@@ -161,15 +170,16 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
 
 **Interfaces (produced, in `move.zsh`):**
 - **The chooser's settings.**
-  - `CHOOSER_APP="${BRIMM_CHOOSER_APP:-${SELF:A:h}/Choose a Folder.app}"`.
+  - `CHOOSER_APP="${BRIMM_CHOOSER_APP:-${SELF:A:h}/Choose a Folder.app}"`, written after `SELF=`, since `set -u` ends the script on an unset `SELF`.
   - `CHOOSER_ROUTE=app`: a plain variable, `app` or `program`, naming which way goes first.
   - `THROWN=0`, with the run's other state.
 - **`answer_of <line>`** prints `y`, `c` or nothing: y or yes, c or choose, in any case, with spaces round them.
 - **`ask_y_or_c <words> <prompt> [c-only]`** says the words, reads one line as `ask_yes` does (logging it), and sets `ANSWER` to `y` or `c`. Anything else, or the end of input, stops through `stop_here`. With `c-only`, a y stops too.
 - **`choose_folder <message> <start>`.**
   - It says the spec's Terminal line, then tries the first way of `CHOOSER_ROUTE`, then the other.
-  - The app way runs `open -n -W "$CHOOSER_APP" --args "<message>" "<start>" "<result>" "$$" || rc=$?`, with `<result>` in a fresh `mktemp -d`. It reads the file first, and looks at `rc` only when there is none. It takes the path as everything after the first line, less one final newline.
-  - The program way runs `"$CHOOSER_APP/Contents/MacOS/Choose a Folder" "<message>" "<start>"`, capturing stdout, with `|| rc=$?`.
+  - The app way runs `open -n -W "$CHOOSER_APP" --args "<message>" "<start>" "<result>" "$$" 2>/dev/null || rc=$?`, with `<result>` in a fresh `mktemp -d`. It reads the file first, and looks at `rc` only when there is none. It takes the path as everything after the first line, less one final newline.
+  - Before the program way follows a failed app way, it waits until `pgrep -f "$CHOOSER_APP/Contents/MacOS/Choose a Folder"` finds nothing, for up to 5 seconds.
+  - The program way runs `"$CHOOSER_APP/Contents/MacOS/Choose a Folder" "<message>" "<start>" 2>/dev/null`, capturing stdout, with `|| rc=$?`. A 3 is the line break.
   - It returns:
     - 0 with `CHOSEN` set to the path made whole (`${path:A}`);
     - 1 on Cancel;
@@ -177,7 +187,8 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
     - 2 when neither way could show it.
   - Every way back runs `open -a Terminal || true`, then `throw_away_typed_keys`.
 - **`throw_away_typed_keys`** is exactly the spec's block. It says the spec's sentence when this call's count is more than 0.
-- **`words_for <path>`** prints Studio's `folderWords(path, $HOME)`, run by `"$NODE" --input-type=module -e '<import of "$STUDIO/tool/settings.js">' 2>/dev/null`. When that fails, or there is no node, it prints the path.
+- **`words_for <path>`** prints Studio's `folderWords(path, $HOME)`, by the Global Constraints' node form. When that fails, or there is no node, it prints the path.
+- **The drop question on a moved Mac** says the spec's "Today the drop folder is …" line first.
 - **`ask_drop_folder` and `ask_exports_folder`** run their questions and their re-asks.
   - They set:
     - `DROP_FOLDER` and `EXPORTS_FOLDER`, whole paths;
@@ -187,7 +198,8 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - The exports folder of the settings is `exportsPath`, read with `plutil`, only when it is not Downloads by real path.
   - The last-time folders are the marks `drop=` and `exports=`.
   - The exports chooser starts in `$HOME`.
-  - When the answer is `c-only` and `choose_folder` returns 2, the run stops with the spec's words.
+  - When the answer is `c-only` and `choose_folder` returns 2, the run stops with the spec's words for that refusal's kind (Task 3).
+  - When `DROP_FROM` was `last` and another folder is picked, it says the spec's line about the folder left behind, in Finder's words, with its count.
 - **`set_install_options`** sets `INSTALL_OPTIONS=(--machine "$MACHINE" [--drop-folder "$DROP_FOLDER"] [--exports-folder "$EXPORTS_FOLDER"] --import light --handoff 2)`, by the spec's "What the installer is given". `which_mac` no longer sets `INSTALL_OPTIONS`.
 - **`run_the_installer`** calls `ask_drop_folder`, `ask_exports_folder` and `set_install_options` before its print, unless the install finished at this commit already.
   - Under `--print` it asks nothing, opens no chooser, says the spec's "Would ask …" line, and uses the folders y would give.
@@ -200,7 +212,14 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - `program`: answers for the stand-in helper's second way: `"<HOME>/…"`, `"cancel"`, `"two"` or `"missing"`;
   - `agentWatches`: a list of folders the stand-in unedited plist's `WatchPaths` name, with `agentLoaded`, true or false.
 - Every home gets `Downloads`.
+- **A second run in the same home.** `moveOn` returns `again(options)`, which runs the move script again in the same home, with the same stand-ins, and returns the same shape.
+- **Defaults that keep today's tests meaning what they meant:**
+  - the default marks gain `finder=SHA`;
+  - a moved Mac's default agent is loaded, with `WatchPaths` naming `Drop › <Mac>`;
+  - the stand-in `launchctl` answers `list com.thebrimm.unedited` from `agentLoaded` without touching its counter for `list`.
+- **Today's tests.** Each test whose run reaches step 5 adds the two new answers (`y\ny\n`), and `LABELS` and the option string change. "The old ones still pass" means after these changes, which are listed in the commit.
 - **The fake `settings.js` for Studio's checkout:**
+  - it has `settings.js`'s own main guard, so importing it runs nothing;
   - `show` prints `  Its drop folder:  <dropPath, or root/drop/machine>` and `  Exports from HyperFrames, looked for in:  <exportsPath, or HOME/Downloads>`;
   - it exports `folderWords` (the folders after the home, joined with " › ", then ", in your home folder"), `cloudFolder` ("Dropbox" under `<HOME>/Dropbox` or `<HOME>/Library/CloudStorage/Dropbox*`, else "") and `needsFilesAccess` (true under `<HOME>/Desktop` or `<HOME>/Documents`);
   - its `set --app hyperframes` is as today.
@@ -208,7 +227,8 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   The old checkout's fake keeps only `show` and `set`.
 - **The stand-in `open`:**
   - For `open -n -W <app> --args <message> <start> <result> <pid>`, it checks `<app>` is `BRIMM_CHOOSER_APP`, then takes the next pick: it writes the result, writes nothing (`nofile`), or ends 1 (`fail`).
-  - It appends `chooser <message> | <start>` to the move's log.
+  - It notes `chooser <message> | <start>` in `ran`, and on its own stdout, so that `out` holds it in order with what the script says. It never writes into the home.
+  - It writes each argument it was given on a line of its own into `ran`, so a test can see a name passed whole.
   - Its `-a Safari` part stays as today, and it notes `-a Terminal`.
 - **The stand-in helper** at `BRIMM_CHOOSER_APP`: its `Contents/MacOS/Choose a Folder` answers the second way from `program`.
 - **The stand-in installer:**
@@ -228,7 +248,9 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - the options.
 - "Cancel asks again; the end of input then stops with nothing run for real".
 - "the first way not shown: the second way is tried". This is checked for `nofile` and for `fail`, then for the second way answering a path, `cancel` and `two`.
-- "neither way shown: asked again, y takes the suggested; with c alone offered, the run stops with the spec's words".
+- "neither way shown: asked again, and y takes the suggested folder". The c-alone case is Task 3's.
+- "a name with a space, an apostrophe, an accent and an emoji reaches the installer whole", from the stand-ins' lines in `ran`.
+- Sourced tests that reach `choose_folder` put a stand-in `open` first on PATH, and set `BRIMM_CHOOSER_APP` before sourcing.
 - "a line break from the chooser is refused by the app's line, and asked again" (`linebreak`).
 - "answers piped after the chooser are still read".
 - "the exports question":
@@ -238,7 +260,7 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - an `exportsPath` naming Downloads is not a kept folder;
   - going back to Downloads from another `exportsPath` gives `--exports-folder <HOME>/Downloads`.
 - "a Mac whose settings have dropPath: y keeps it with no drop option; c gives --drop-folder".
-- "a folder picked last time is offered again, and is not held to the empty check".
+- "a folder picked last time is offered again; held to the empty check; and, when another is picked, named with its count".
 - "under --print: no chooser and no question, the would line, and the installer's print with the folders y would give, keeping dropPath and exportsPath".
 - "the second way, sourced: a path; Cancel (1); 2 with a sentence; a missing program".
 - The current tests' option string, `--machine Sallie's laptop --drop Drop --import light --handoff 2`, becomes the new line wherever it is asserted.
@@ -261,18 +283,23 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
 
 **Interfaces (produced):**
 - **`same_or_nested <a> <b>`**: true when one is the other or inside it. It compares by real path (`${p:A}`), with letter case folded (`${(L)…}`), and treats a missing part as spelled.
-- **`count_entries <folder>`** prints the number of entries but `.DS_Store` and `.brimm-watched-by`. A folder that is not there prints 0. It returns 2 when the folder cannot be listed. It names no entry. `look_at_import_and_drop` uses it too.
-- **`transcript_folders`** prints, one a line, `"${ROOT:A:h}/BRIMM VIDEO Transfer"` and every `WatchPaths` entry of `~/Library/LaunchAgents/com.thebrimm.transcribe.plist`, or of its `.plist.off`, read with `plutil -extract WatchPaths json`. It prints nothing for a file that is not there.
+- **`count_entries <folder>`** prints the number of entries but `.DS_Store` and `.brimm-watched-by`. It names no entry. `look_at_import_and_drop` uses it too.
+  - A folder is "not there", and prints 0, only when the folder that holds it can be listed and the name is absent from it.
+  - It returns 2 when the folder, or the folder that holds it, cannot be listed.
+- **`plist_watch_paths <file>`** prints a plist's `WatchPaths`, one a line, as install.sh reads them: `count="$(plutil -extract WatchPaths raw -o - "$f" 2>/dev/null)" || return 0; [[ $count == <-> ]] || return 0`, then `WatchPaths.$i raw` for each index. No JSON is read, so no node is needed.
+- **`transcript_folders`** prints, one a line, `"${ROOT:A:h}/BRIMM VIDEO Transfer"` and `plist_watch_paths` of `~/Library/LaunchAgents/com.thebrimm.transcribe.plist`, and of its `.plist.off`.
 - **`in_downloads <path>`**: true when the path is `$HOME/Downloads`, or inside it, by real path.
-- **`drop_folder_fault <path> <from>`** prints the spec's refusal words, in this order, and prints nothing when the folder will do:
+- **`drop_folder_fault <path> <from>`** prints the spec's refusal words, in this order, and prints nothing when the folder will do. It sets `FAULT_KIND` to `linebreak`, `transcript`, `cannot-look` or `not-empty`.
   - a line break;
   - the transcript tool's;
   - Terminal cannot look in it;
-  - not empty, only when `<from>` is `suggested` or `picked`.
-- **`exports_folder_fault <path>`**:
-  - for a folder in Downloads, nothing, with nothing read;
-  - otherwise, in this order: a line break; the transcript tool's; one of Studio's folders (the spec's list, with Zoom's folder from the settings' `zoomFolder`, else `~/Documents/Zoom`); `.brimm-watched-by` in the folder or above it, where Terminal can look.
+  - not empty, unless `<from>` is `settings`.
+- **`exports_folder_fault <path>`** sets `FAULT_KIND` the same way, with `studio` for one of Studio's folders or a drop folder.
+  - **Every folder:** a line break; the transcript tool's.
+  - **Not in Downloads:** then, in this order: one of Studio's folders (the spec's list, with Zoom's folder from the settings' `zoomFolder`, else `~/Documents/Zoom`); `.brimm-watched-by` in the folder or above it, where Terminal can look.
+  - **In Downloads:** nothing inside it is read.
   - It sets `EXPORTS_PASSED_OVER=yes` when it passed over a place Terminal could not look in.
+- **Where c alone is offered.** It is offered when y would give a refused folder again, unless `FAULT_KIND` is `cannot-look`, which keeps its y. When c alone is offered and the chooser cannot be shown, the stop's words follow `FAULT_KIND`: `not-empty` gets the "Empty it in Finder" words, and any other kind the "Tell Jason" words.
 
 **Tests:**
 - **Sourced:** each refusal's exact words, and each pass:
@@ -280,14 +307,18 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - a full folder, counted;
   - a missing folder, taken as empty;
   - a folder at mode 000, refused as unreadable;
-  - the last-time folder holding a file, passed;
-  - Downloads, and a folder inside it, at mode 000, passed with nothing read;
+  - the last-time folder holding a file, refused as not empty;
+  - a picked folder inside a folder at mode 000: "cannot look", never 0;
+  - Downloads, and a folder inside it, at mode 000, passed with nothing read; and a Downloads pick named by a made-up transcribe plist, refused;
+  - a `WatchPaths` entry holding a comma and a quote, read whole;
   - an exports folder in `Episodes`, in BRIMM Video Work, in the workshop, in Zoom's folder, and under a folder holding `.brimm-watched-by`;
   - a folder above an exports folder at mode 000: passed over, with `EXPORTS_PASSED_OVER`;
   - `BRIMM VIDEO Transfer`, a folder named in a made-up transcribe plist, and one named in a `.plist.off`, for either pick.
 - **Whole runs:**
   - "a refused pick says why and asks again";
   - "the suggested drop folder, when it holds a file, is asked again with c alone; y then stops";
+  - "with c alone offered, and the chooser not shown (`fail`, then the second way's `two`), the run stops with the not-empty words; after a transcript refusal, with the Tell Jason words";
+  - "a drop folder Terminal cannot look in keeps its y";
   - "a folder inside Downloads, picked for exports, gets its note".
 
 **Steps:**
@@ -322,12 +353,12 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - It prints. When `PRINT_RC` is not 0 and `refused_pick` names a folder, it says the words, runs that question again, sets the options again, and prints again.
     - `nested` asks the question of the folder whose `*_FROM` is `picked`, or the exports one when both are.
     - When y would give the same folder again, the question is asked with c alone.
-  - Any other non-zero status stops, as today.
-  - Then the cloud question, unless `CLOUD_OK_FOR` already holds this drop folder's real path. A y sets `CLOUD_OK_FOR`, and nothing is written.
+  - Any other non-zero status stops, as today. Under `--print`, every non-zero print stops with the installer's words, and nothing is asked again.
+  - Then the cloud question, unless `DROP_KEPT` is yes (the installer gets no drop option), or `CLOUD_OK_FOR` already holds this drop folder's real path. A y sets `CLOUD_OK_FOR`, and nothing is written. When the Warning line itself already holds the sessions sentence (L1c), the app does not add its own.
   - Then Claude Code's lines as today, with `tries` counted only after `claude update` or the Claude app's update.
 - **`privacy_notes`**, said before the real install's question:
-  - always the Downloads line;
-  - the drop folder's line when `studio_says needsFilesAccess` is `yes`, or `studio_says cloudFolder` names a cloud other than Dropbox, or Dropbox on a Mac set up fresh;
+  - always the Downloads line. Its words follow Phase 3's L5 answer (spec, finding 10); until then, the spec's words;
+  - the drop folder's line, decided by `studio_says cloudFolder` first: Dropbox gives the line only on a Mac set up fresh (`SET_UP_FRESH`). Any other cloud gives it, and otherwise it comes when `studio_says needsFilesAccess` is `yes`;
   - the exports folder's line on the same rule, or when `EXPORTS_PASSED_OVER` is set.
 
 **Tests:**
@@ -340,8 +371,11 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
 - "the cloud question":
   - it is said with the sessions sentence;
   - c asks the drop question again;
-  - y holds when the print is shown again after `claude update`;
-  - a different Dropbox folder picked after a refused exports pick is asked about again.
+  - y holds when the print is shown again after `claude update`, and after a refused exports pick;
+  - after a c at the cloud question, a different cloud folder is asked about afresh;
+  - a Mac whose settings already name a Dropbox drop folder, kept by y, is not asked, and its report says "kept on a y on an earlier run";
+  - a Warning line that already holds the sessions sentence gets no second one.
+- "under --print, a refused print stops with its words, and asks nothing".
 - "a print shown again after a refused pick, then an older Claude Code, still offers claude update".
 - "privacy":
   - the Downloads line on every run;
@@ -367,17 +401,25 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
 - Modify `tool/move-app/move.zsh` and `tool/tests/move-app.test.js`.
 
 **Interfaces (produced):**
+- **Two pure functions**, which Task 7's ties call:
+  - `show_folders` runs Studio's `settings.js show` once (guarded), and prints its drop folder and its exports folder on two lines. `START_DROP`, `look_at_import_and_drop`, `summary` and the report use it.
+  - `finder_sentence <dropPath>` prints the Finder step's sentence, by `studio_says cloudFolder` and `SET_UP_FRESH`. `turn_on_hyperframes` says it.
 - **The marks.** Right before the real install's run, after its y:
-  - `write_mark drop "$DROP_FOLDER"` and `write_mark exports "$EXPORTS_FOLDER"`;
+  - `write_mark drop "$DROP_FOLDER"` only when `--drop-folder` is given, and `write_mark exports "$EXPORTS_FOLDER"` only when `--exports-folder` is given;
   - on a Mac set up fresh, `write_mark fresh yes`;
   - `INSTALL_STARTED=yes`.
-
-  `BACKGROUND_SEEN=yes` is set when the installer's output holds "From the background job:". `finder=<commit>` is written once the Finder step's Return is pressed.
-- **`START_DROP`**: the drop folder `show` names when step 1 counts it, as a real path.
-- **`summary`.** When `INSTALL_STARTED` is set, it reads Studio's `show` (guarded) before its own lines. When the drop folder changed from `START_DROP`, it says the spec's "now" words if `BACKGROUND_SEEN`, else its "not finished" words. The Dropbox sentences are said only on a Mac moved from brimm-video. `stop_here` and `interrupted` both call `summary`.
+- **`BACKGROUND_SEEN=yes`** is set in the loop that reads the installer's output, as soon as the line "From the background job:" passes, before the status is looked at.
+- **`finder=<commit>`** is written once the Finder step's Return is pressed.
+- **`START_DROP`**: the drop folder `show_folders` gives when step 1 counts it, as a real path.
+- **`summary`.** When `INSTALL_STARTED` is set, it reads `show_folders` before its own lines.
+  - With `BACKGROUND_SEEN`, and the drop folder changed from `START_DROP`, it says the spec's "now" words. Their Dropbox sentence is said only on a Mac moved from brimm-video.
+  - Without `BACKGROUND_SEEN`, it says the spec's "not finished" words, whether or not the folder changed.
+  - It never counts the old drop folder, and never waits or asks, so every stop stops. `stop_here` and `interrupted` both call `summary`.
 - **`which_mac`.** With settings and the mark `fresh=yes`, it sets `SET_UP_FRESH=yes` and leaves `FRESH` empty. With no settings, `FRESH=yes` and `SET_UP_FRESH=yes`. Step 7, the last lines and `summary` read `SET_UP_FRESH`.
-- **Step 1** takes `drop` "Drop", or a `dropPath`, as expected, and says the spec's words for each. With `SET_UP_FRESH` and settings, it says "set up fresh on an earlier run", asks nothing, and reads BRIMM Video from the settings.
-- **`watched_by_agent <folder>`**: `launchctl list com.thebrimm.unedited` ends 0, and the plist's `WatchPaths` name the folder, by real path.
+- **Step 1** takes `drop` "Drop", or a `dropPath`, as expected, and says the spec's words for each. With `SET_UP_FRESH` and settings, it says "set up fresh on an earlier run", asks nothing, and reads BRIMM Video from the settings. Once `installed` is this commit, it counts the drop folder for the report and does not stop on it.
+- **The set-up-fresh question** says the spec's new words: "a drop folder picked in step 5 (suggested: BRIMM Video Work › Drop, on this Mac)".
+- **`privacy_notes` and step 7** read `SET_UP_FRESH`, not `FRESH`.
+- **`watched_by_agent <folder>`**: `launchctl list com.thebrimm.unedited` ends 0, and `plist_watch_paths` of the plist name the folder, by real path.
 - **`look_at_import_and_drop`**, by the spec's "What step 1 counts":
   - `Drop › <Mac>` while it is there, on a moved Mac whose `installed` mark is not this commit;
   - the folder `show` names;
@@ -386,9 +428,8 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - It runs when the install finished on this run, or while `finder=` is not this commit.
   - It decides its sentence by `studio_says cloudFolder "$dropPath"` and `SET_UP_FRESH`, and names the folder by `words_for`.
 - **`old_drop_lines`.**
-  - It runs on a Mac that is not `SET_UP_FRESH`, while `$ROOT/Drop/$MACHINE` is a folder, right before "Done.", and on a stop after the install finished.
-  - It counts with `count_entries`, and says the spec's 0, N or unreadable words.
-  - At N it calls `wait_for`, counts again, and loops until 0. n stops.
+  - It runs only right before "Done.", on a Mac that is not `SET_UP_FRESH`, while `$ROOT/Drop/$MACHINE` is a folder. It never runs on a stop.
+  - It counts once with `count_entries`, and says the spec's 0, N or unreadable words. It never waits or asks.
 - **The report.** Under check 44's heading, after its current lines:
   - `Drop folder: …` and `Exports folder: …`, from this run's options, or from Studio's `show` after the install;
   - `Cloud warning: …`, from `studio_says cloudFolder` of the drop folder: `none`, `<name>, kept on a y`, or `<name>, kept on a y on an earlier run` when the settings already named it;
@@ -410,17 +451,22 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
 - "Drop › <Mac> holding a file stops: 'still to be imported' when watched, 'Tell Jason' when not".
 - "a stop after the installer started":
   - with the background line: "This Mac's drop folder is now …", with the Dropbox sentence on a moved Mac only;
-  - without it (`install.noBackground`, or `ranExit`): the "not finished" words;
-  - an n at the HyperFrames question after the install: the first words.
+  - with the background line and `ranExit: 1`: the same "now" words;
+  - without it (`install.noBackground`, with or without `ranExit`): the "not finished" words;
+  - an n at the HyperFrames question after the install: the "now" words, and no count of the old folder.
+- "a later run after the install finished at this commit, with a file in the drop folder: counted for the report, no stop".
+- "the set-up-fresh question's new words".
+- "the marks: drop= only with --drop-folder, exports= only with --exports-folder (a rerun after y to Downloads has no exports=)".
 - "the Finder step":
   - a local drop folder gets the sidebar, Option-drag and never-export words;
   - one in Dropbox gets Make available offline with the folder's words, and the node sentence on a fresh Mac;
   - a later run shows it again until it is done.
 - "the last lines on a moved Mac":
   - at 0;
-  - at 2, counted, never named, with the wait and the count again;
-  - unreadable, without a stop;
+  - at 2, counted, never named, said once, with no wait: the run ends 0 with "Done.";
+  - unreadable, said once, without a stop;
   - none once the folder is gone, and none on a Mac set up fresh.
+- "a stop after the install, with a file in the old folder, says no last lines, and ends 1 at once".
 - "the report's three lines on a first run, on a later run, and under --print".
 
 **Steps:**
@@ -448,7 +494,8 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - BRIMM Video from `root`, or from `set_up_fresh`'s search with its question passed over. When none is found, it says so, and passes over the checks that need it;
   - `ask_drop_folder` and `ask_exports_folder` with the app's own checks;
   - when `words_for` gave a path for any pick, the spec's one line about paths;
-  - its end lines: the folders, `sw_vers -productVersion`, `uname -m`, the keys thrown away, and "Studio's installer checks more at the move.". It ends 0.
+  - its own heading, its chooser line with no double-click advice, and its own stop words (spec, "Its own words"), said by `summary` and by the c-alone stop when `TRY` is set;
+  - its end lines: the folders, `sw_vers -productVersion`, `uname -m`, the keys thrown away, and "Nothing was changed. Studio's installer checks more at the move.". It ends 0.
 
 **Tests:**
 - "--try-chooser on the Mac Studio's settings":
@@ -461,6 +508,7 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
 - "--try-chooser with no BRIMM Video says so, and still asks".
 - "--try-chooser --second-way uses the program first".
 - "--try-chooser with --commit, or with --print, is refused with 2".
+- "--try-chooser stopped at its first question says the try's own stop words, with the open … --args --try-chooser line, and no double-click advice".
 
 **Steps:**
 - [ ] Write the tests.
@@ -481,9 +529,9 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
 - Create `tool/tests/move-app-ties.test.js`.
 
 **Interfaces (consumed):**
-- `settingsMain` (`tool/settings.js`);
-- `install.test.js`'s way of running `install.sh --print` in a made-up home: copy its helper, or import it if it is exported;
-- `move.zsh`'s `refused_pick`, `cloud_warning`, `words_for`, `privacy_notes`, the Finder sentence and `look_at_import_and_drop`'s reading of `show`, sourced with `zsh -c 'source move.zsh; …'` (`main` runs only when the file is run).
+- `settingsMain` (`tool/settings.js`). Every call is awaited, and a missing line fails the test: an empty reading is never taken for "nothing".
+- **Running the real `install.sh --print`.** `install.test.js`'s `askWith` and `box`. If they are not exported, move them into a helper module that both test files import. Their stand-ins (`ffmpegSays`, `onPath`) come with them. Every folder named in the settings or a transcribe plist is kept inside the test's own folder, so nothing of the Mac's own is read.
+- `move.zsh`'s `refused_pick`, `cloud_warning`, `words_for`, `privacy_notes`, `finder_sentence` and `show_folders` (Task 5). They are sourced with `zsh -c 'source move.zsh; …'` (`main` runs only when the file is run), with stand-in `open` and `launchctl` first on PATH.
 
 **Tests:**
 - **Tie 1.** Run `settingsMain(["plan", "--machine", "Mac Studio", "--root", <root>, "--checkout", <co>, "--drop-folder", <pick>, …], { home, say })` for each of these. Feed the first said line to `refused_pick`, and expect the spec's routing:
@@ -506,10 +554,12 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - `privacy_notes`.
 - **Keys on a terminal.**
   - Run a sourced `choose_folder`, then an `ask_y_or_c`, under `/bin/sh -c 'cat | /usr/bin/script -q /dev/null /bin/zsh -c "…"'`.
-  - The test writes into `cat`'s input, and waits on the output before each write. The stand-in chooser waits on a file.
-  - The test writes `y` with no Return, lets the chooser close, then writes a lone Return.
+  - The stand-in chooser waits on a release file.
+  - The test writes `y` with no Return. It waits for the echoed `y` in the output, then makes the release file. It waits for the next question's prompt, then writes a lone Return.
   - The run must stop, and its output must hold "Keys typed while the window was open were not taken as answers."
-  - Skipped where `/usr/bin/script` is missing.
+  - Every wait has a 10-second limit, which fails the test. `cat`'s input is closed at the end, and the child is killed if it is still there.
+  - **A second test** writes Control-C (`\x03`) while the stand-in chooser waits. The run must end with the stop summary, and the stand-in, watching the script's process id, must see it end.
+  - Both are skipped where `/usr/bin/script` is missing.
 
 **Steps:**
 - [ ] Write the ties and the terminal test.
@@ -522,7 +572,7 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
 
 **Files:**
 - Modify `docs/setup/move-to-studio-app.md` and `docs/superpowers/specs/2026-11-05-laptop-move-app-design.md`.
-- Modify `tool/move-app/move.zsh`, only for step 3's time.
+- Modify `tool/move-app/move.zsh` for step 3's time.
 
 **Steps:**
 - [ ] The doc, by the spec's "Other changes":
@@ -539,7 +589,10 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
 ### Task 9. The By-Hand page and her guide (no code)
 
 Done by this session after the final review, before the merge question goes to Jason.
-- [ ] Re-read the live By-Hand page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT). Change only the move group and checks 44 to 46, by the spec's "The By-Hand page". Run `scratchpad/by-hand/check-page.mjs`, publish, and tell the coordinator in one line.
+- [ ] Re-read the live By-Hand page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT).
+  - Change the move group (72 to 74), his MacBook's group (80) and checks 44 to 46, by the spec's "The By-Hand page".
+  - Rewrite every existing step there that describes a drop folder in Dropbox, and put check 80 before check 74.
+  - Run `scratchpad/by-hand/check-page.mjs`, publish, and tell the coordinator in one line.
 - [ ] Check with Phase 3's session that her guide's lines (the spec's "In step with brimm-operations", finding 9) went to the BRIMM Ops session with L9.
 
 ---

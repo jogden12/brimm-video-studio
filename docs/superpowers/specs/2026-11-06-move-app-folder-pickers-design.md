@@ -4,12 +4,13 @@
 
 It needs Phase 3's installer options, so it is built and merged after Phase 3. Those options are L1 (af3d75a) and L1b (c125ae7) on `claude/studio-local-folder`, reviewed and not merged; L1c and L9 are coming. Phase 3's plan is `docs/superpowers/plans/2026-11-06-local-working-folder-plan.md` on that branch. Its rulings D4, D7, D8, D10, D11 and D12 are cited here by number.
 
-This is version 4. Each version was attacked before the next:
+This is version 5. Each version was attacked before the next:
 - **Version 1** was read by a builder and attacked once.
 - **Version 2** went through a workflow on Opus 5.5: four lenses, two skeptics per serious finding, and a judge on how to show the folder chooser. All 14 serious findings stood.
 - **Version 3** went through a second workflow of the same four lenses: 17 serious findings stood and one was refuted, most of them about the try mode it added.
+- **Version 4 and its plan** went through a third round of six lenses, three on the design and three on the plan. It found 25 serious findings, most of them in the plan. The weekly usage limit stopped its skeptics after 4 of them were checked, and all 4 stood. The round was then paused, to keep the shared extra-usage budget for Phase 3. The other 21 were ruled on here, by reading them against the code; they were not checked by skeptics. Many were the same finding seen by several lenses. The finished skeptics are kept, and the round can be resumed.
 
-Every serious finding is in this version, with most of the minor ones.
+Every serious finding is in this version or its plan, with most of the minor ones.
 
 ## In short
 
@@ -69,27 +70,30 @@ Step 5 keeps its heading, "5. Studio's installer (check 44)", so no step or chec
 Type y and press Return to use the suggested folder, or c and press Return to choose another. Anything else stops:
 ```
 
+- **On a Mac moved from brimm-video**, the question first says: "Today the drop folder is Drop › <Mac> in Dropbox. Once the install has run, it is no longer watched."
 - **y** takes `~/BRIMM Video Work/Drop`, Phase 3's default. y and c are read as `ask_yes` reads y: any case, with spaces round them.
 - **c** opens the chooser (see "The chooser").
-  - Terminal first says: "A window to choose the folder is opening. If you don't see it, click the folder icon named Choose a Folder in the Dock. If no window comes at all, press Control-C, then double-click Move to Studio again."
+  - Terminal first says: "A window to choose the folder is opening. If you don't see it, click the folder icon named Choose a Folder in the Dock. If no window comes at all, press Control-C; on the next run, y uses the suggested folder."
   - The chooser starts in the home folder. Its message is "Move to Studio: choose the folder you will drop videos into, or make a new one with New Folder." macOS shows no title on a chooser, so the message names the folder. Its button is "Use This Folder".
   - The folder chosen is said back in Finder's words, which Studio's own `folderWords` gives (`settings.js`, through node). When that cannot be asked, the whole path is said instead: there is no node, no Studio checkout, or an error. node's errors are kept off the screen.
   - Cancel asks the question again.
-  - If the chooser cannot be shown either way, the app says "The window to choose a folder could not be shown." and asks the question again. y still takes the suggested folder, so a chooser that fails never blocks a move. It does block one in a single case: when c alone is offered (below). Then the run stops with "The window to choose a folder could not be shown. Empty <folder> in Finder, or tell Jason, then double-click Move to Studio again."
+  - If the chooser cannot be shown either way, the app says "The window to choose a folder could not be shown." and asks the question again. y still takes the suggested folder, so a chooser that fails never blocks a move. It does block one in a single case: when c alone is offered (below). Then the run stops with words that fit the refusal:
+    - after the not-empty refusal: "The window to choose a folder could not be shown, and <folder> is not empty. Empty it in Finder, or tell Jason, then double-click Move to Studio again.";
+    - after any other refusal: "The window to choose a folder could not be shown, and <folder> can't be used: <the refusal's reason>. Tell Jason, then double-click Move to Studio again."
 - **Anything else**, an empty line or the end of input stops the run, as every question in the app does. A run stopped here has changed nothing in step 5.
 
 The question changes in three cases:
 - **The settings already name a drop folder of its own** (`dropPath`). This happens on a later run, after the installer wrote the settings but did not finish. The app says "This Mac's drop folder is <folder>.", then "Type y and press Return to keep it, or c and press Return to choose another." y keeps it, and the installer is given no drop option (D8).
 - **A folder was picked on an earlier run**, and the settings don't name one yet. This happens when a run stopped before the installer wrote them. The app says "Last time, this folder was picked: <folder>.", then "Type y and press Return to use it again, or c and press Return to choose another."
-  - That folder may hold this Mac's marker. It may also hold videos dropped since, which the import will take once the watching starts. So it is not held to the empty check.
-  - If another is picked, the app says the earlier folder was left as it is. Jason checks it is empty, then deletes it by hand if it is not wanted.
+  - That folder may hold this Mac's marker. It is held to the empty check like any new pick, since Phase 3's L1c refuses a new drop folder that holds a video. Nothing watched it, and nothing told anyone to drop there, so it should be empty.
+  - If another is picked, the app says the earlier folder was left as it is, in Finder's words, with its count, counted and never listed. Jason checks it is empty, then deletes it by hand if it is not wanted.
 - **y would give a refused folder again.** That covers the suggested folder, the kept one, or the last-time one, refused by the app's checks or by the installer. The question is asked with c alone: "Type c and press Return to choose another folder. Anything else stops:". A refusal that allowing Terminal in System Settings cures keeps its y.
 
 ### 2. The exports folder
 
 ```
   Where HyperFrames' exports go: the exports folder.
-  Suggested: Downloads, where HyperFrames saves an export unless its Export dialog is given another folder. Studio looks in Downloads in any case.
+  Suggested: Downloads, where HyperFrames saves an export unless its Export dialog is given another folder. Studio looks in Downloads in any case, and deletes each export it takes from there once its copy in the video's final folder in Dropbox is checked.
   A folder in Dropbox is fine, for instance to share the exports with other people.
 Type y and press Return to use Downloads, or c and press Return to choose another. Anything else stops:
 ```
@@ -116,7 +120,7 @@ Each pick is checked by the app's own checks (below) right after it is made. The
 
   Any other refusal stops the run, as today. The likeliest is the old drop folder's check, `Not written: the drop folder would change from …`. See "What the old drop folder holds".
 - **A drop folder in a cloud folder.** The print holds D11's line, `Warning: this drop folder is in <name>. A video still syncing there can be imported late, or twice. A folder on this Mac is safer.`
-  - The app says it, and adds: "Every video dropped there, a client session too, goes up to <name>, and stays in its deleted files after Studio takes it out."
+  - The app says it, and adds: "Every video dropped there, a client session too, goes up to <name>, and stays in its deleted files after Studio takes it out." Phase 3's L1c may put that sentence in the Warning line itself. If it does, the app does not add its own.
   - Then it asks: "Type y and press Return to use it anyway, or c and press Return to choose another. Anything else stops:".
   - A y holds for that folder, by real path, for the rest of the run. It is not asked again when the print is shown again, after a `claude update` or after an exports folder is picked again. A different drop folder in a cloud is asked about afresh.
   - A later run asks again only if it gives the installer a new drop folder. A folder the settings already name was answered on the run that wrote it.
@@ -126,6 +130,9 @@ Each pick is checked by the app's own checks (below) right after it is made. The
 
 - **Privacy questions.** Before the real install's question, the app says which questions macOS may still ask. It decides by asking Studio's own `needsFilesAccess` and `cloudFolder` (`settings.js`, through node), never by its own list.
   - **On every run:** "Studio looks in Downloads for exports, whatever is picked. macOS may ask once whether Claude Code may access files in your Downloads folder, the first time the chat on this Mac looks for an export. Choose Allow."
+    - Phase 3's L5 moves the deleting in Downloads into the launch agent, so node will be asked too.
+    - The line's final words follow what Phase 3's session sends once L5 is settled (finding 10).
+  - **Dropbox is decided first,** by `cloudFolder`: L1c's `needsFilesAccess` will also cover `~/Library/CloudStorage`, Dropbox included.
   - **For a drop folder under Desktop or Documents, in iCloud Drive or another cloud folder, or on another disk:** "macOS may also ask whether node may read <folder>, at the first import, and whether Claude Code may, the first time the chat on this Mac looks there ("what's waiting?"). Choose Allow each time. A Don't Allow is undone in System Settings › Privacy & Security › Files and Folders, under that name. macOS may ask node again after Homebrew updates it, and until someone clicks Allow, Studio sees no video dropped there." Terminal's own question came already, at the app's check that the folder is empty.
   - **Dropbox** brings these questions only on a Mac set up fresh. On a moved Mac, node and Claude Code read Dropbox already.
   - **For an exports folder in one of those places,** or one whose look for a marker passed over a folder Terminal could not open: "macOS may ask whether Claude Code may look in <folder>, at the first hand-off. Choose Allow."
@@ -140,16 +147,19 @@ The lines that matter, the question, the look again at the old drop folder and t
 
 - **Any stop after the installer started on this run.** This includes a stop inside it, a stop at the check of Claude, an n at a later question, Control-C and a closed window.
   - The run's stop summary (`summary`, which both `stop_here` and `interrupted` call) reads Studio's `settings.js show`. It compares its drop folder, by real path, with the drop folder at the start of the run.
-  - **If it changed, and the installer's output held its "From the background job:" line,** the new launch agent was started. The summary says: "This Mac's drop folder is now <folder>." On a Mac moved from brimm-video it adds: "Videos put in Drop › <Mac> in Dropbox are no longer imported."
-  - **If it changed and that line is missing,** the installer stopped part way. The summary says: "Move to Studio has not finished. Nothing may import from <folder> yet." On a moved Mac it adds: "and brimm-video may still import from Drop › <Mac>." Then: "Drop no video, in either folder, until Move to Studio has finished: double-click it again now."
+  - **If the installer's output held its "From the background job:" line,** the new launch agent was started. install.sh prints it only after the agent was started. The line is noted as it is read, before the installer's status is looked at, so an installer that printed it and then ended 1 still counts.
+    - If the drop folder changed, the summary says: "This Mac's drop folder is now <folder>."
+    - On a Mac moved from brimm-video it adds: "Videos put in Drop › <Mac> in Dropbox are no longer imported."
+  - **If that line is missing,** whether or not the folder changed, the installer stopped part way. The summary says: "Move to Studio has not finished, so a video dropped now may not be imported. Drop no video until it has finished: double-click it again now."
 - **The Finder step.** The drop folder is shown in Finder (`open -R`), as today. What it says is decided from the settings, by Studio's `cloudFolder` of the settings' `dropPath`. A print that may not have run on this run is never used for this. The folder is named in Finder's words, never by the Mac's name.
   - **For a drop folder in Dropbox,** it keeps today's sentence: Control-click it, choose Make available offline. On a Mac set up fresh it also keeps today's "click Allow if macOS asks whether node may read the Dropbox folder".
   - **Otherwise** it says: "This is the drop folder from now on: <folder>. Drag it into Finder's sidebar now, under Favorites, so it is one click away. To bring in a video that is in Dropbox, hold Option as you drag it, so that Dropbox keeps its copy. Never export into the drop folder."
   - It waits for Return, as today. The step is marked done (`finder=<commit>`), and is shown on every later run until it is.
-- **The last lines, on a Mac moved from brimm-video.** These lines are said only while `Drop › <Mac>` is still in Dropbox (`$ROOT/Drop/$MACHINE`), never on a Mac set up fresh. Right before them, the app counts that folder as step 1 counts a drop folder: nothing but `.DS_Store` and `.brimm-watched-by`, counted and never listed.
+- **The last lines, on a Mac moved from brimm-video.** These lines are said only at the end of a run that reaches "Done.", never on the way to a stop, and never on a Mac set up fresh. They are said only while `Drop › <Mac>` is still in Dropbox (`$ROOT/Drop/$MACHINE`). Right before them, the app counts that folder once, as step 1 counts a drop folder: nothing but `.DS_Store` and `.brimm-watched-by`, counted and never listed. Nothing here waits or asks, so nothing here can stop the run.
   - **At 0:** "The old drop folder, Drop › <Mac> in Dropbox, is empty and no longer watched. Jason checks it is still empty, then deletes it by hand, and takes it out of Finder's sidebar."
-  - **At N:** "The old drop folder, Drop › <Mac> in Dropbox, holds N files or folders that nothing imports now. Drag each video in it into <new drop folder>, with a plain drag, which moves it out of Dropbox, and it is imported there." It waits for Return (n stops), counts again, and says the 0 words only at 0.
-  - **When the folder cannot be read:** "The old drop folder, Drop › <Mac> in Dropbox, could not be read, so it was not counted. Jason counts it from the Mac Studio before deleting it." This does not stop the run.
+  - **At N:** "The old drop folder, Drop › <Mac> in Dropbox, holds N files or folders that nothing imports now. Drag each video in it into <new drop folder>, with a plain drag, which moves it out of Dropbox, and it is imported there. Jason deletes the folder by hand once it is empty."
+  - **When the folder cannot be read:** "The old drop folder, Drop › <Mac> in Dropbox, could not be read, so it was not counted. Jason counts it from the Mac Studio before deleting it."
+  - The By-Hand step right after the install counts it again, and the folder is deleted only at 0. A file in it that is not a video, which the import would never take, is dealt with by Jason there.
 
 ## The app's own checks
 
@@ -166,14 +176,16 @@ For either folder:
   The transcript tool takes each video put there and files it away. "<folder> is watched by the transcript tool, which takes each video put there. Choose another."
 
 For the drop folder:
-- **Terminal can look in it.** A folder Terminal cannot look in is refused, never taken for empty: "macOS did not let Terminal look in <folder>. Allow Terminal in System Settings › Privacy & Security › Files and Folders, or choose another folder." A folder that is not there yet is not looked in: the installer makes it.
-- **Empty.** A new drop folder, picked or suggested, must be empty. Empty means nothing in it but `.DS_Store` and `.brimm-watched-by`, as step 1 counts. A folder that is not there yet is empty. The settings' own drop folder and the last-time folder are not held to this.
+- **Terminal can look in it.** A folder Terminal cannot look in is refused, never taken for empty: "macOS did not let Terminal look in <folder>. Allow Terminal in System Settings › Privacy & Security › Files and Folders, or choose another folder." This refusal keeps its y, since allowing Terminal cures it.
+  - A folder is "not there yet" only when the folder that holds it can be listed and the name is absent from it. A folder that cannot even be looked at is "cannot look", never "not there".
+  - A folder that is not there yet is not looked in: the installer makes it.
+- **Empty.** A new drop folder, picked, suggested or picked last time, must be empty. Empty means nothing in it but `.DS_Store` and `.brimm-watched-by`, as step 1 counts. A folder that is not there yet is empty. Only the settings' own drop folder is not held to this.
   - A folder that holds anything is refused: "<folder> holds N files or folders. Studio takes every video out of a drop folder, so choose an empty folder that only you drop into, or make one with New Folder."
   - Without this check, picking the Desktop would import every video on it, and the import deletes each original once it is filed (D11). The first attacker ran Phase 3's `plan` on a Desktop holding a video: it was accepted.
   - The folder is counted and never listed.
 
 For the exports folder, which Studio checks only for being a whole path and apart from the drop folder:
-- **Downloads is never looked in.** Downloads, by y or by a pick that is Downloads or inside it by real path, takes no check that reads inside it. D11 keeps every drop folder out of it, and none of Studio's folders is there.
+- **Downloads is never looked in.** Downloads, by y or by a pick that is Downloads or inside it by real path, takes no check that reads inside it. D11 keeps every drop folder out of it, and none of Studio's folders is there. It still takes the two checks that read nothing inside it: a line break, and the transcript tool's folders.
   - So the suggested answer brings no question from macOS at the move.
   - A folder inside Downloads gets one more line in its note: "Studio tidies only Downloads itself, so exports in this folder are never tidied."
 - **Not one of Studio's folders, and not a drop folder.** It is refused when it is, or is inside, any of these:
@@ -210,7 +222,7 @@ zsh "$STUDIO/tool/install.sh" --print --machine "<Mac>" --drop-folder "<drop>" [
   - On a Mac set up fresh, the old folder is `Unedited Video › <Mac>`, which the installer names for a Mac with no settings. It is normally not there.
 - It refuses while the old folder holds a video. It also refuses while this Mac has an import in `Episodes/.importing` that failed or whose late check found a problem, even when its video is gone. The first attacker ran it: "Not written: the drop folder would change from Drop to …, and work is not finished in the old one: 1 import failed, and its video is not in the old folder now… a person takes it away by hand."
 - Step 1 counts the old folder's files, but reads no statuses. Without a pre-check, the move would stop at step 5's print, after the key, the clone and the tests. The installer would have changed nothing.
-- **The By-Hand pre-check, before checks 74 and 80.** Claude, on the Mac Studio, runs Studio's own `heldInOld` for that Mac: its old folder, light, and the statuses in Dropbox. It names no video.
+- **The By-Hand pre-check, before checks 80 and 74.** Claude, on the Mac Studio, runs Studio's own `heldInOld` for that Mac: its old folder, light, and the statuses in Dropbox. It names no video.
   - It is for what only Dropbox's status files show: an import of that Mac that failed, or whose late check found a problem.
   - A failed import whose video is gone has its status taken away by hand, as the installer's words say. A problem is Jason's to look at.
   - **Nothing in the old drop folder is deleted on the pre-check's word**, whatever it calls a video. From the Mac Studio, `heldInOld` cannot see the late checks a MacBook still owes, which are kept on its own disk. So it calls such a video "kept", though the MacBook's late check still needs it. A video waiting there is left for the MacBook's own import, which step 1 waits for.
@@ -229,7 +241,10 @@ A small helper app, `Choose a Folder.app`, inside Move to Studio at `Contents/He
 - **The second way.** The helper's program, run directly as `"$CHOOSER_APP/Contents/MacOS/Choose a Folder" "<message>" "<start folder>"`.
   - It prints the path and ends 0, ends 1 on Cancel, or ends 2 with one sentence on stderr.
   - With no arguments, or a start folder that is not there, it ends 2 and opens no window.
-- **When the first way can't be shown.** No file, an unreadable one, or `open` failing all mean the chooser could not be shown. The app then tries the second way at once. If that fails as well, it says so.
+- **When the first way can't be shown.** No file, an unreadable one, or `open` failing all mean the chooser could not be shown.
+  - The app then tries the second way, but only once no process runs the first way's program. It looks for that program by its path (`pgrep -f`), for up to 5 seconds. So two choosers never show at once.
+  - If the second way fails as well, it says so.
+  - The second way ends 3 on a path with a line break, so that this is never mistaken for a chooser that could not be shown.
   - Which way goes first is one constant in `move.zsh`, `CHOOSER_ROUTE`, for the case where the tries show the first way bringing a question from macOS.
   - Every call is written so that `set -euo pipefail` cannot end the run on a non-zero status (`|| rc=$?`). A stop always goes through `stop_here`. Control-C while `open -W` waits goes to the script's traps, and the helper goes too (below).
 - **What it shows.** `NSOpenPanel`:
@@ -242,6 +257,13 @@ A small helper app, `Choose a Folder.app`, inside Move to Studio at `Contents/He
   - its panel sits at the modal-panel level, does not hide when the app is not in front, is ordered to the front, and moves to the active Space;
   - it bounces its Dock icon if it is not in front half a second after the panel opens.
 - **It goes when the move goes.** It watches the script's process id, so Control-C or a closed Terminal window takes the chooser away. The script's traps need nothing more.
+- **How it starts.**
+  - It sets itself up as an app first (`NSApplication.shared`, then its delegate).
+  - It shows the panel from `applicationDidFinishLaunching`, so it has finished launching first.
+  - It watches the process id on a queue of its own, not on the main queue, which the panel holds while it is open.
+  - Its delegate answers any request to open a document by ignoring it. It reads its own arguments, and never takes them as files to open.
+  - `open`'s own lines, and the second way's stderr, are kept off the screen. The app says its own words.
+- **Asking Studio's code.** `settings.js` runs as a command when node's first argument is its own path, because of its main guard. So the app never passes that path as an argument. It passes the tool folder as the first argument and imports `settings.js` from it, as install.sh's `lock_facts` does, with node's errors kept off the screen.
 - **Keys typed meanwhile.** After the chooser closes, the app brings Terminal to the front (`open -a Terminal`), then throws away any keys typed into Terminal while the chooser was open:
 
   ```zsh
@@ -285,7 +307,11 @@ The try mode runs step 5's two questions and nothing else, with the real chooser
 - **It changes nothing.**
   - It writes no log, takes no lock, writes no report and no marks, changes no settings, and runs no installer.
   - It runs on any Mac, the Mac Studio included, so `which_mac`'s refusal is passed over in this mode alone.
-- **What it says at the end:** the folders picked, `sw_vers -productVersion`, `uname -m`, and whether keys were thrown away. Then: "Studio's installer checks more at the move."
+- **Its own words.**
+  - It opens with its own heading: "Trying the folder questions. Nothing is changed."
+  - Its chooser line gives no advice to double-click Move to Studio, since a double-click starts a real move.
+  - Its stop summary, and its stop when c alone is offered, say: "This was a try of the folder questions: nothing was changed. To try again: open "<app>" --args --try-chooser".
+- **What it says at the end:** the folders picked, `sw_vers -productVersion`, `uname -m`, and whether keys were thrown away. Then: "Nothing was changed. Studio's installer checks more at the move."
 
 ## Later runs
 
@@ -301,6 +327,7 @@ The try mode runs step 5's two questions and nothing else, with the real chooser
     - otherwise: "N files or folders wait in the old drop folder, Drop › <Mac>, and nothing imports them now. Tell Jason."
   - **A drop folder of its own** is counted as the folder `settings.js show` names. A drop folder that is not there yet counts as empty: the installer makes it. Files in it stop the run with "still to be imported" only when it is watched. Otherwise the run goes on: "N files or folders wait in <folder>. Nothing watches it yet: the install starts the watching, and they are imported then."
   - **Its sentence for a folder it cannot read** names no cloud: "macOS may have asked whether Terminal may read it…".
+  - **Once the install has finished at this commit,** a later run counts the drop folder for the report and does not stop on it. Only step 7 and the end are left then, and neither changes the drop folder. A video held there, or one whose import failed, then never blocks the run.
 - **A Mac set up fresh is remembered.** The `fresh=yes` mark is written right before the real install.
   - On a later run, the settings are there, and `which_mac` reads the mark. The run treats the Mac as set up fresh: step 7 leaves brimm-video's key alone, and no line names an old Dropbox drop folder.
   - It does not search Dropbox or ask the set-up-fresh question again. Step 1 says "set up fresh on an earlier run", takes BRIMM Video and the drop folder from the settings, and counts the drop folder.
@@ -327,9 +354,17 @@ The try mode runs step 5's two questions and nothing else, with the real chooser
 
 ## The By-Hand page
 
-The live page is re-read before each publish, since the review session publishes the same page. What changes is the move group, and the laptop checks 44 to 46 that check 74 sends Jason to.
+The live page is re-read before each publish, since the review session publishes the same page.
 
-- **Before checks 74 and 80**, the pre-check under "What the old drop folder holds".
+What changes:
+- the move group (checks 72 to 74);
+- his MacBook's group (check 80), which is a group of its own;
+- the laptop checks 44 to 46 that check 74 sends Jason to.
+
+Existing steps that describe a drop folder in Dropbox are rewritten, not only added to, so that nothing on the page contradicts the app on the day of a move.
+
+- **His MacBook moves first.** Check 80 runs before check 74, as a rehearsal, so the parts of step 5 that the try never reaches run for real on his MacBook before hers.
+- **Before checks 80 and 74**, the pre-check under "What the old drop folder holds".
 - **Check 73 (build, sign, notarize)** gets these steps after the build. The check still waits for Jason's word that the app is ready.
   - **Signatures.**
     - `codesign -dvvv` on the helper shows the Developer ID authority, the runtime flag, a timestamp and its identifier.
@@ -347,7 +382,7 @@ The live page is re-read before each publish, since the review session publishes
       - that y typed into Terminal while it was open, with and without Return, is thrown away, and the next question still waits;
       - that Terminal is in front after it closes;
       - that Control-C, and closing the window, take the chooser away;
-      - that Return at once, in each chooser, picks its start folder: the home folder, refused as not empty, each time.
+      - that Return at once picks the chooser's start folder, the home folder. In the drop chooser it is refused as not empty. In the exports chooser, the app's checks accept it, and at a move the installer refuses it, since it holds the drop folder.
     - If there is time, he tries Terminal in full screen, on another desktop, and with Stage Manager on.
 - **Before her laptop.** The notarized zip goes by AirDrop to a Mac that is not the build Mac (Jason's MacBook). First `uname -m`, to confirm Apple silicon, since the app is built for arm64 only (her laptop is an M4, per `docs/setup/sallies-laptop.md`). Then, from Downloads, with the app not moved, `open "…/Move to Studio.app" --args --try-chooser`.
   - Gatekeeper may ask its one question for Move to Studio, and none for the helper.
@@ -415,7 +450,8 @@ Tests come first, in `tool/tests/move-app.test.js`, `tool/tests/move-app-build.t
     - a line break;
     - a folder that is not empty, counted and never listed;
     - a missing suggested folder, taken as empty;
-    - the last-time folder holding files, taken;
+    - the last-time folder holding files, refused as not empty;
+    - a folder that cannot even be looked at, refused as "cannot look", never taken as not there;
     - a drop folder Terminal cannot read (mode 000), refused, not taken as empty;
     - Downloads at mode 000, accepted by y and never looked in;
     - a folder inside Downloads, with its note;
@@ -433,7 +469,7 @@ Tests come first, in `tool/tests/move-app.test.js`, `tool/tests/move-app-build.t
     - without it: "Move to Studio has not finished…";
     - an n at the HyperFrames question after the install: the first of these.
   - **The Finder step,** decided from the settings, for a local drop folder and for one in Dropbox, on a moved Mac and on a fresh one, and shown again on a later run until it is done.
-  - **The last lines:** on a moved Mac only, while the old folder is there, at 0, at N with the wait and the count again, and unreadable without a stop.
+  - **The last lines:** on a moved Mac only, at the end of a run that reaches "Done.", while the old folder is there: at 0, at N, and unreadable, each said once, with no wait. A stop after the install says none of them.
   - **The report's three lines** on a first run, on a later run and under `--print`.
   - **`--print`:** no chooser and no question. A Mac with `exportsPath` keeps it. A refused suggestion stops the print.
   - **The try mode:**
@@ -442,7 +478,7 @@ Tests come first, in `tool/tests/move-app.test.js`, `tool/tests/move-app-build.t
     - with no settings: BRIMM Video found with no question;
     - with none found: says so, and still asks;
     - `--try-chooser` with `--commit` or `--print`: refused, with exit 2.
-- **Keys thrown away, on a real terminal.** macOS's `/usr/bin/script` refuses input that is a socket, which is what node's pipes are. So the test runs it behind a real pipe (`/bin/sh -c 'cat | /usr/bin/script -q /dev/null /bin/zsh …'`), and waits on the run's output before each key.
+- **Keys thrown away, on a real terminal.** macOS's `/usr/bin/script` refuses input that is a socket, which is what node's pipes are. So the test runs it behind a real pipe (`/bin/sh -c 'cat | /usr/bin/script -q /dev/null /bin/zsh …'`). It waits on the run's output before each key: for the echoed y before it lets the chooser close. Each wait has a time limit, and `cat`'s input is closed at the end. A second test sends Control-C (`\x03`) while the stand-in chooser waits: the run must end with the stop summary, and the stand-in must see the script's process end.
   - A stand-in chooser waits while the test types y with no Return.
   - Then the chooser closes, and the test sends a lone Return. The run must stop, and must have said "Keys typed while the window was open were not taken as answers."
   - The test is skipped where `/usr/bin/script` is missing.
@@ -533,6 +569,9 @@ One more goes with this version:
 13. **The privacy wording.** It names macOS's question about Downloads on every run, and steers people to the suggested drop folder, which brings none.
 14. **Checks 44 to 46 change in the same publish** as checks 74 and 80. Her guide's lines go through Phase 3's session to BRIMM Ops.
 15. **The zip loses the build Mac's own marks** (`--norsrc --noextattr`). That also changes today's zip, for the better.
+16. **His MacBook moves before hers**, as a rehearsal of the real step 5.
+17. **The end of the run counts the old Dropbox drop folder once, and never waits.** Deleting it waits for the By-Hand count at 0. A stop never counts it, so a stop can always stop.
+18. **A folder picked on a run that stopped is held to the empty check, like any new pick**, to match L1c.
 
 ## Questions for Jason
 
