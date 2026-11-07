@@ -17,6 +17,7 @@ import { holdsVideo, importState, readStatusesIn } from "./importing.js";
 import { currentReading, shownName } from "./episode.js";
 import { readResult, runningCommand, runningRun } from "./detached.js";
 import { clockAt, importHold } from "./unedited.js";
+import { keptOnAMac } from "./where.js";
 
 /** This Mac's pending late check of the episode with `record`: the check it still owes, or undefined. It leaves out one that has found a
     problem, unless `problem` is true (projectWaits holds while the check is owed, with or without a problem). */
@@ -37,6 +38,8 @@ const sizeOf = (path) => {
     record's size. For a video the join made (its drop file is nobody's and not there) it is the `from` of the pending check's
     entry that was put in under the video's name, when that is there, whole, and of the record's size. */
 export function localSource(ctx, record) {
+  // An episode kept on this Mac has its video here, and no late check of Dropbox's reads or holds it (Phase 3, L4, D4).
+  if (keptOnAMac(record)) return null;
   const owed = owedFor(ctx, record);
   const bytes = record.video && record.video.bytes;
   if (!owed || !Number.isFinite(bytes)) return null;
@@ -59,6 +62,8 @@ export function localSource(ctx, record) {
     copied into its episode already. A check that found a problem, or an import that failed or stopped, does not clear by
     itself, and holds nothing here: the reading says why when it meets it. */
 export function lateCheckAt(ctx, record) {
+  // Nothing of an episode kept on this Mac waits for Dropbox's check (D4): the checks that remain run behind, and no one waits for them.
+  if (keptOnAMac(record)) return null;
   const now = ctx.now();
   const owed = owedFor(ctx, record);
   if (owed) return Math.max(dueAt(owed), now);
@@ -84,6 +89,7 @@ export function ownCheckOnly(ctx, record) {
     nothing of it that it cannot keep in step (`ownCheckOnly`), or nothing holds it. Otherwise the time the check will have been made
     (`lateCheckAt`). */
 export function readingWaitsUntil(ctx, record) {
+  if (keptOnAMac(record)) return null;
   return ownCheckOnly(ctx, record) ? null : lateCheckAt(ctx, record);
 }
 
@@ -169,6 +175,7 @@ const clockNear = (ms) => clockAt(Math.round(ms / 60000) * 60000);
     { checkAt, readyAt, inSeconds }, "17:15" for when Dropbox has checked its copies, "17:26" for when the copy is ready ("" when
     `copySeconds` is null) and the seconds from now to then (null); or null when it does not wait. */
 export function waitFacts(ctx, record, copySeconds) {
+  if (keptOnAMac(record)) return null;
   const due = lateWaitFor(ctx, record);
   if (due === null) return null;
   const ready = copySeconds === null || copySeconds === undefined ? null : due + copySeconds * 1000;
@@ -181,6 +188,8 @@ export function waitFacts(ctx, record, copySeconds) {
     work and this Mac owes the import's late check, with or without a problem found: then the project may be made, from the files
     the record lists at the sizes it lists (app.js readListed); "" when nothing holds it. Nothing is locked, written or waited for. */
 export function projectWaits(ctx, { name, record }) {
+  // On an episode kept on this Mac only "reading" stays: its files are here, so there is no Dropbox file to verify (Phase 3, L4, D4).
+  if (keptOnAMac(record)) return runningCommand(ctx.home, name, ctx.alive) === "read" && !currentReading(record) ? "reading" : "";
   if (runningCommand(ctx.home, name, ctx.alive) === "read") return currentReading(record) ? "verify" : "reading";
   return owedFor(ctx, record, { problem: true }) ? "verify" : "";
 }
