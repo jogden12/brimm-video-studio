@@ -2991,6 +2991,79 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
       assert.equal(t.held(), before);
       t.done();
     });
+    describe("what a switch away from a picked folder says of it (B1-F6, B1-F14)", () => {
+      /** A Mac with a drop folder of its own on the Desktop, going back to Dropbox's Drop, and the lines it is refused in. */
+      const local = () => {
+        const t = mac({ drop: "Drop" });
+        mkdirSync(t.desktop, { recursive: true });
+        writeSettings(t.home, { dropPath: t.desktop });
+        const own = importingFolderOf({ root: t.root, dropPath: t.desktop }, t.home);
+        mkdirSync(own, { recursive: true });
+        const said = async (...more) => {
+          t.said.length = 0;
+          assert.equal(await t.run("write", ...t.told, "--drop", "Drop", "--switch-back", ...more), 1, t.said.join("\n"));
+          return t.said.slice();
+        };
+        return { ...t, own, said };
+      };
+      it("a running import is left in the old folder without 'which its late check needs'", async () => {
+        const t = local();
+        writeFileSync(join(t.desktop, "Talk.mov"), "video");
+        writeFileSync(join(t.own, "Talk.mov (Mac Studio) 1.json"), JSON.stringify({ version: 1, machine: "Mac Studio", pid: 4242, video: "Talk.mov", bytes: 5, seconds: 120, step: "Making the rough cut", at: AT.toISOString() }));
+        const said = await t.said();
+        assert.deepEqual(said.slice(1), ["  1 video is being imported now.", "Wait for each of these imports to finish, then run this again: leave the video in the old folder."]);
+        t.done();
+      });
+      it("a video an episode holds is a copy of an imported video, with no late check to wait for", async () => {
+        const t = local();
+        writeFileSync(join(t.desktop, "Talk.mov"), "video");
+        const path = join(t.root, "Episodes", "2026-11-06 Talk (Mac Studio)");
+        mkdirSync(join(path, "record"), { recursive: true });
+        writeFileSync(recordFile(path, 1), recordText({ ...newEpisode({ id: "e-20261106-000001", machine: "Mac Studio", at: "2026-11-06T09:00:00-05:00", video: { file: "Talk.mov", bytes: 5, seconds: 120, created: null }, kind: "episode", writer: { commit: "abc1234", on: "Mac Studio" }, label: "Video of 6 Nov, 09:00 (Mac Studio)" }), rev: 1 }));
+        const said = await t.said();
+        assert.ok(said[1].endsWith(": it is a copy of an imported video."), said.join("\n"));
+        assert.ok(!said.join("\n").includes("late check"), said.join("\n"));
+        t.done();
+      });
+      it("an old picked folder that cannot be read is told to allow the app this runs in, a status folder in Dropbox keeps today's words, and this Mac's own status folder is on its own disk", async () => {
+        const t = local();
+        chmodSync(t.desktop, 0o000);
+        try {
+          const said = await t.said();
+          assert.equal(said[1], `  The old folder, ${t.desktop}, could not be read (EACCES), so what it holds is not known.`);
+          assert.equal(said[2], "Make the old folder readable (in System Settings, under Privacy & Security, Files and Folders, allow the app this runs in, if it was refused), then run this again.");
+          assert.ok(!said.join("\n").includes("node"), said.join("\n"));
+        } finally {
+          chmodSync(t.desktop, 0o755);
+        }
+        const dropbox = join(t.root, "Episodes", ".importing");
+        chmodSync(dropbox, 0o000);
+        try {
+          const said = await t.said();
+          assert.equal(said.at(-1), "Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again.");
+        } finally {
+          chmodSync(dropbox, 0o755);
+        }
+        chmodSync(t.own, 0o000);
+        try {
+          const said = await t.said();
+          assert.equal(said.at(-1), "Make this Mac's own status folder readable again (it is on this Mac's own disk, not in Dropbox), then run this again.");
+        } finally {
+          chmodSync(t.own, 0o755);
+        }
+        t.done();
+      });
+      it("a Mac going from Dropbox to a picked folder keeps the Dropbox words for a running import", async () => {
+        const t = mac({ drop: "Drop" });
+        const old = t.folder("Drop");
+        writeFileSync(join(old, "Talk.mov"), "video");
+        writeFileSync(join(t.root, "Episodes", ".importing", "Talk.mov (Mac Studio) 1.json"), JSON.stringify({ version: 1, machine: "Mac Studio", pid: 4242, video: "Talk.mov", bytes: 5, seconds: 120, step: "Making the rough cut", at: AT.toISOString() }));
+        t.said.length = 0;
+        assert.equal(await t.run("write", ...t.told, "--drop-folder", t.desktop), 1, t.said.join("\n"));
+        assert.deepEqual(t.said.slice(1), ["  1 video is being imported now.", "Wait for each of these imports to finish, then run this again: leave the video in the old folder, which its late check needs."]);
+        t.done();
+      });
+    });
     it("leaves a run with no drop option on a Mac with a drop folder of its own as it is, whatever the folder holds", async () => {
       const t = mac();
       mkdirSync(t.desktop, { recursive: true });

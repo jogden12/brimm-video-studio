@@ -767,7 +767,7 @@ function planned(home, rest, now, plutil = spawnSync) {
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")
     .then(({ heldInOld }) => {
-      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable, lateChecks } = heldInOld({ root: oldRoot, statusFolders: statusFoldersOf({ ...held, root: oldRoot, machine: oldMachine }, home), machine: oldMachine, folder: oldFolder, home, now: Number(now), local: wasLocal });
+      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable, unreadablePlaces, lateChecks } = heldInOld({ root: oldRoot, statusFolders: statusFoldersOf({ ...held, root: oldRoot, machine: oldMachine }, home), machine: oldMachine, folder: oldFolder, home, now: Number(now), local: wasLocal });
       if (![work, running, problem, imported, kept, unreadable, lateChecks].some((lines) => lines.length)) return { settings, fields, remove, from, to, old: oldFolder };
       // What it is not done for: work in the old folder; else that folder, or its status files, could not be looked at; else this
       // Mac's own late checks could not be read, the old folder having been.
@@ -784,7 +784,13 @@ function planned(home, rest, now, plutil = spawnSync) {
         ]],
         [imported, ["A video that is already imported leaves the old folder once its late check has passed: run this again after that."]],
         [kept, ["Delete each of these from the old folder by hand, then run this again."]],
-        [unreadable, [wasLocal ? "Make each readable (macOS asks whether node may read that folder: Allow it in System Settings, Privacy & Security, Files and Folders), then run this again." : "Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again."]],
+        // The advice follows the place that could not be read: Dropbox's (macOS asks whether node may read Dropbox), the picked old folder's (the question came to the
+        // app this runs in), and this Mac's own status folder (on its own disk, so System Settings cannot help).
+        [unreadable, [
+          ...(unreadablePlaces.includes("dropbox") ? ["Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again."] : []),
+          ...(unreadablePlaces.includes("old") ? ["Make the old folder readable (in System Settings, under Privacy & Security, Files and Folders, allow the app this runs in, if it was refused), then run this again."] : []),
+          ...(unreadablePlaces.includes("own") ? ["Make this Mac's own status folder readable again (it is on this Mac's own disk, not in Dropbox), then run this again."] : [])
+        ]],
         [lateChecks, ["Make that folder readable again (it is on this Mac's own disk, not in Dropbox), then run this again."]]
       ];
       return {

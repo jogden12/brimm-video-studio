@@ -46,10 +46,12 @@ function namesIn(folder) {
     problem stays owed, and is a `problem`): the video leaves the folder once the check has passed, is to be waited for and never taken
     out, and its line says when it is due. `kept` is a video an episode holds already, with no such
     check (its late check has passed, or it is a copy of an imported video), so nothing of this Mac's import will take it out,
-    and a person deletes it. `unreadable` is what could not be read, with the error's code and the folder's own path, which
+    and a person deletes it. `unreadable` is what could not be read (and `unreadablePlaces` where: "old" the picked old folder, "dropbox" the old folder or the status files in Dropbox, "own" this Mac's own status folder), with the error's code and the folder's own path, which
     holds no video's name: the old folder, or the status files. `lateChecks` is this Mac's late checks, on its own disk, when
     they could not be read (and then no video is said to be `kept`).
-    `now` is a time in milliseconds, for the status files.
+    `now` is a time in milliseconds, for the status files. `local` is true when the old folder is one picked on this Mac (the Mac had a drop folder of its
+    own): a running import is then not said to need its video "for its late check", a kept video is only ever a copy of an imported one (no late check is
+    owed from a picked folder), and an old folder that cannot be read is the picked one's (`unreadablePlaces` "old"), not Dropbox's.
     A line names a thing by a label when it has one: a light import's status carries its video's label, and the record of an
     episode that holds the video does too. A video an episode holds whose record edit.js names by a label and not by its file
     (gate.js gatedAsOf, over the versions of the video, finish.js linksOf: a video not yet answered, a session not cleared, and an
@@ -74,14 +76,21 @@ export function heldInOld({ root, statusFolders = [importingFolder(root)], machi
   const unknownAs = (holding, video, bytes) => (holding && holding.unknown ? capital(unlabelled(video, bytes)) : "");
   const unreadable = [];
   const inFolder = namesIn(folder);
-  if (inFolder.code) unreadable.push(`  The old folder, ${folder}, could not be read (${inFolder.code}), so what it holds is not known.`);
+  const places = new Set();
+  if (inFolder.code) {
+    unreadable.push(`  The old folder, ${folder}, could not be read (${inFolder.code}), so what it holds is not known.`);
+    places.add(local ? "old" : "dropbox");
+  }
   const videos = (inFolder.names || []).filter(isMedia).sort();
   // The status files are read where the settings the switch is from keep them: a Mac with a drop folder of its own, its own folder and
   // Episodes/.importing, else Episodes/.importing alone. A folder that cannot be read is said, and none of its statuses is known.
   const found = [];
   for (const where of statusFolders) {
     const importing = namesIn(where);
-    if (importing.code) unreadable.push(`  The import status files, in ${where}, could not be read (${importing.code}), so whether an import failed is not known.`);
+    if (importing.code) {
+      unreadable.push(`  The import status files, in ${where}, could not be read (${importing.code}), so whether an import failed is not known.`);
+      places.add(where === importingFolder(root) ? "dropbox" : "own");
+    }
     else found.push(...readStatusesIn([where], now));
   }
   const mine = found.map((s) => s.status).filter((status) => status && status.machine === machine);
@@ -193,5 +202,5 @@ export function heldInOld({ root, statusFolders = [importingFolder(root)], machi
   }
   if (runningCounted) running.add(runningCounted === 1 ? "  1 video is being imported now." : `  ${runningCounted} videos are being imported now.`);
   if (importedCounted) imported.add(importedCounted === 1 ? "  1 video is already imported, and its late check is still to come." : `  ${importedCounted} videos are already imported, and their late checks are still to come.`);
-  return { work: lines, running: [...running], problem: [...problem], problemHere, problemGone, imported: [...imported], kept, unreadable, lateChecks };
+  return { work: lines, running: [...running], problem: [...problem], problemHere, problemGone, imported: [...imported], kept, unreadable, unreadablePlaces: [...places], lateChecks };
 }
