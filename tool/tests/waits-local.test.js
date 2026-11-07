@@ -4,7 +4,7 @@
 // held as it was. Nothing here runs a real program or touches Dropbox.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain } from "../edit.js";
 import { episodeFilesFolder, episodeWork, writeSettings } from "../settings.js";
@@ -104,7 +104,10 @@ describe("kind, a raw answer of a video kept on this Mac", () => {
   it("starts the reading and the copy at once and says the reading's own words, with no time of Dropbox's, while a check is owed", async () => {
     const t = setup();
     writeSettings(t.home, { app: "hyperframes" });
-    episodeFor(t, { record: { ...WAITING, ...LOCAL } });
+    const found = episodeFor(t, { record: { ...WAITING, ...LOCAL } });
+    // Its recording is in video/ on this Mac (B1-F12: an answer is refused when it is in neither place).
+    mkdirSync(episodeFilesFolder(t.home, FOLDER), { recursive: true });
+    writeFileSync(join(episodeFilesFolder(t.home, FOLDER), found.record.video.file), "the recording");
     owe(t);
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     assert.deepEqual([r.code, r.said], [0, [STILL(LABEL)]]);
