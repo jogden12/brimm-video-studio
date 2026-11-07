@@ -452,7 +452,7 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
     const words = "Movies › Exports, in your home folder";
     const n = nextFor({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm", exportsWords: words }) }) }, NONE, NOW);
     assert.equal(n.stage, "in-app");
-    assert.equal(n.text, `Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it as MP4. Export it on This Mac, into ${words}. Then say "hand it off".`);
+    assert.equal(n.text, `Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, into ${words}, then say "hand it off".`);
     for (const exportsWords of [undefined, ""]) {
       assert.equal(nextFor({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT({ exportsWords }) }) }, NONE, NOW).text, 'Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, then say "hand it off".');
     }

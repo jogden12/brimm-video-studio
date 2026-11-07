@@ -752,6 +752,26 @@ describe("C2 (on a disk). exportsFound: the projects of the record, their record
     assert.equal(looked.looked, `Looked in Downloads for exports of: ${P_MAIN}.`);
     w.done();
   });
+  it("says so when this Mac will not let the tool look in the picked exports folder, apart from Downloads", () => {
+    const w = made();
+    const picked = join(w.home, "Movies", "Exports");
+    mkdirSync(picked, { recursive: true });
+    for (const code of ["EPERM", "EACCES"]) {
+      const readdir = (dir, ...more) => {
+        if (dir === picked) throw Object.assign(new Error(`${code}: operation not permitted`), { code });
+        return readdirSync(dir, ...more);
+      };
+      const got = w.asked(recordOf(entry("main", P_MAIN)), { exports: picked, readdir });
+      assert.deepEqual([got.unreadable, got.exportsUnreadable, got.input.exports.files], [false, true, []], code);
+      assert.equal(w.asked(recordOf(entry("main", P_MAIN)), { exports: picked }).exportsUnreadable, false);
+      assert.equal(w.asked(recordOf(entry("main", P_MAIN)), { readdir }).exportsUnreadable, false, "none picked");
+    }
+    // The picked folder is listed through the pass's one listing when it is given one.
+    let listed = 0;
+    const got = w.asked(recordOf(entry("main", P_MAIN)), { exports: picked, listExports: () => (listed++, { files: [{ name: "x.mp4", bytes: 1, mtimeMs: 1 }], unreadable: false }) });
+    assert.deepEqual([listed, got.input.exports.files.length], [1, 1]);
+    w.done();
+  });
   it("tells a file its record names in the picked folder from one in another folder", () => {
     const w = made();
     const dir = w.project(P_MAIN);
@@ -761,6 +781,13 @@ describe("C2 (on a disk). exportsFound: the projects of the record, their record
     writeFileSync(join(dir, "renders", `${P_MAIN}_2026-10-20_13-56-40.meta.json`), meta("main.meta.json", picked).replace(/[^/"]+2026-10-20 13\.56\.mp4/, "final.mp4"));
     const [part] = w.asked(recordOf(entry("main", P_MAIN)), { exports: picked }).input.parts;
     assert.deepEqual(part.recorded.map((r) => [r.name, r.dir, r.where]), [["final.mp4", picked, "the exports folder"]]);
+    // The same record with a file in yet another folder is "another folder", with the picked folder named.
+    const desktop = join(w.home, "Desktop");
+    mkdirSync(desktop);
+    w.put(join(desktop, "final.mp4"), 10);
+    writeFileSync(join(dir, "renders", `${P_MAIN}_2026-10-20_13-56-40.meta.json`), meta("main.meta.json", desktop).replace(/[^/"]+2026-10-20 13\.56\.mp4/, "final.mp4"));
+    const [other] = w.asked(recordOf(entry("main", P_MAIN)), { exports: picked }).input.parts;
+    assert.deepEqual(other.recorded.map((r) => [r.name, r.dir, r.where]), [["final.mp4", desktop, "another folder"]]);
     w.done();
   });
   it("takes a Downloads folder that is not there for empty", () => {

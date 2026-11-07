@@ -12,9 +12,10 @@
 // work. That look is switch.js's, which reads the status files and the episodes, and this file reaches it by a dynamic import:
 // importing.js and filing.js import this file, and a static import here would make the three a cycle. `set` changes the
 // settings of the switch later, but never the drop folder: it says to switch that with the installer, and changes nothing.
-// A Mac may also watch a drop folder of its own, picked on it (dropPath; every import is light, so whatever the file says of the import): --drop-folder, checked by
-// dropFolderFault, the exports folder it looks in besides Downloads (exportsPath, --exports-folder), and --switch-back to go back
-// to a drop folder in Dropbox. Where it is, in Finder's words, and whether it is in a cloud folder are found here too.
+// A Mac may also watch a drop folder of its own, picked on it (dropPath, whatever the file says of the import, since every import is
+// light): --drop-folder, checked by dropFolderFault. The settings also hold the exports folder it looks in besides Downloads
+// (exportsPath, --exports-folder), and --switch-back goes back to a drop folder in Dropbox. Where a folder is, in Finder's words,
+// and whether it is in a cloud folder are found here too.
 //
 //   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
 //                          [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off]
@@ -322,8 +323,9 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                version of such a session is named by the episode's label or, with none, by what it is and
                                its short id ("a client or group session (3fa9c1)"), never by its own file.
                                --drop-folder picks a drop folder of this Mac's own instead (a whole path, made when missing,
-                               whose parent is there, whatever the file says of the import, which is light): not BRIMM Video's folders, BRIMM Video
-                               Work (but for Drop in it), her chat's folders, Zoom's, Downloads or the exports folder.
+                               whose parent is there, whatever the file says of the import, which is light): not
+                               BRIMM Video's folders, BRIMM Video Work (but for Drop in it), her chat's folders, Zoom's,
+                               Downloads or the exports folder.
                                --exports-folder says where HyperFrames' exports are looked for besides Downloads. On a Mac
                                with a drop folder of its own, --drop goes back to one in Dropbox only with --switch-back
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
@@ -477,7 +479,7 @@ export function folderWords(path, home) {
     if (icloud) return ["iCloud Drive", ...icloud].join(" › ");
     const disk = cut(p, "/Volumes");
     if (disk && disk.length) return disk.join(" › ");
-    const cloud =cut(p, join(h, "Library", "CloudStorage"));
+    const cloud = cut(p, join(h, "Library", "CloudStorage"));
     if (cloud && cloud.length) return [cloud[0].split("-")[0], ...cloud.slice(1)].join(" › ");
     const inHome = cut(p, h);
     if (inHome) return inHome.length ? `${inHome.join(" › ")}, in your home folder` : "your home folder";

@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, uti
 import { join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
 import { localStamp, recordFile, recordText } from "../episode.js";
-import { DOWNLOADS_UNREADABLE, NEVER_OPENED } from "../exports.js";
+import { DOWNLOADS_UNREADABLE, NEVER_OPENED, exportsUnreadable } from "../exports.js";
 import { finishNow } from "../finish.js";
 import { reelsFile } from "../reel-candidates.js";
 import { episodeWork, writeSettings } from "../settings.js";
@@ -264,6 +264,26 @@ describe("D3. what finish refuses, and Downloads", () => {
       assert.deepEqual(w.t.said().split("\n"), [DOWNLOADS_UNREADABLE], code);
       assert.deepEqual([w.t.started, reread(w.found).rev], [[], 1], code);
       plain([DOWNLOADS_UNREADABLE]);
+      w.t.done();
+    }
+  });
+  it("stops when this Mac will not let the tool look in the exports folder it picked, saying which in Finder's words, and starts and writes nothing", async () => {
+    for (const code of ["EPERM", "EACCES"]) {
+      const w = world();
+      const picked = join(w.t.home, "Movies", "Exports");
+      w.t.ctx.settings = { ...w.t.ctx.settings, exportsPath: picked };
+      exportOf(w, "main");
+      const readdir = w.t.ctx.deps.readdir;
+      w.t.ctx.deps.readdir = (dir, ...more) => {
+        if (dir === picked) throw Object.assign(new Error(`${code}: operation not permitted`), { code });
+        return (readdir || readdirSync)(dir, ...more);
+      };
+      const said = exportsUnreadable("Movies › Exports, in your home folder");
+      assert.equal(said, 'This Mac does not let BRIMM Video Studio look in your exports folder, Movies › Exports, in your home folder, where HyperFrames puts its exports. Allow it in System Settings, under Privacy & Security, Files and Folders, then say "hand it off" again.');
+      assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1, code);
+      assert.deepEqual(w.t.said().split("\n"), [said], code);
+      assert.deepEqual([w.t.started, reread(w.found).rev], [[], 1], code);
+      plain([said]);
       w.t.done();
     }
   });

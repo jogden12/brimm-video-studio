@@ -2391,7 +2391,7 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
   }
 
   describe("the settings and the helpers", () => {
-    it("takes dropPath and exportsPath as whole paths, and dropPath only with the light import", () => {
+    it("takes dropPath and exportsPath as whole paths, and dropPath with any import setting (every import is light)", () => {
       const base = { version: 1, machine: "Mac Studio", root: ROOT, checkout: CHECKOUT, import: "light" };
       assert.equal(settingsFault({ ...base, dropPath: "/Users/s/Desktop/Drop", exportsPath: "/Users/s/Exports" }), "");
       assert.equal(settingsFault({ ...base, dropPath: "Desktop/Drop" }), "the path to the drop folder is not a whole path");

@@ -15,7 +15,7 @@ import { KEPT, isMain } from "./app.js";
 import { historyTail } from "./app-history.js";
 import { isDay } from "./episode.js";
 import { turnsOf } from "./hyperframes.js";
-import { downloadsFolder, episodeWork, folderWords } from "./settings.js";
+import { downloadsFolder, episodeWork, folderWords, sameFolder } from "./settings.js";
 import { isHdr } from "./workcopy.js";
 
 /** The endings of a video that is taken as an export. A WebM is read and mentioned, and never taken (8.1). */
@@ -197,7 +197,7 @@ const once = (files) => files.filter((f, i) => !files.some((g, k) => k < i && nf
 /** The video a part is given, as the detached part is told it. */
 const videoOf = (file) => ({ name: file.name, dir: file.dir, where: file.where, bytes: file.bytes, mtimeMs: file.mtimeMs, began: file.began ?? null });
 
-/** The files that can be a part's export: those its own records name (`part.recorded`), and those in Downloads whose name is an
+/** The files that can be a part's export: those its own records name (`part.recorded`), and those in Downloads or in the exports folder this Mac picked (`input.exports`) whose name is an
     export's name for the part's project. A file found both ways is one, the record's; one with nothing in it
     is none. Each is { name, dir, where, bytes, mtimeMs, began, ending }. */
 function candidatesOf(part, input, zone) {
@@ -226,7 +226,7 @@ function candidatesOf(part, input, zone) {
 }
 
 /** What `finish` looks for among HyperFrames' exports, and what it asks (architecture 8.1, plan PR 7), in plain data.
-    `input`: { parts, downloads, finished, zone }. A part is { key, label, reel?, project, fromSuggestion, here, mac, changed,
+    `input`: { parts, downloads, exports?, finished, zone }, `exports` being { dir, words, files } for the exports folder this Mac picked when it is not Downloads. A part is { key, label, reel?, project, fromSuggestion, here, mac, changed,
     recorded, renders }: its key ("main" or "reel 2") and label ("the main video", "Reel 2"), the project's name, the suggestion a Reel
     was made from, whether the project is on this Mac and the Mac it was made on, when it last changed (projectChange, null when not known),
     the files its records name (each with `where` and `began`), and the renders in its renders/ that no record names. `downloads` is
@@ -357,6 +357,8 @@ export function lookForExports(input, answers = {}) {
 /** What finish says of a raw video that was never opened in HyperFrames (architecture 4.1, plan PR 7). `finish` says it on a Mac set up for the app; on any other it says the Mac is not set up (app.js NOT_SET_UP). */
 export const NEVER_OPENED = 'The main video was never opened in HyperFrames. Say "open it in HyperFrames" first, edit it there, export it on This Mac, then say "hand it off".';
 /** What finish says when this Mac will not let it look in Downloads: macOS asks once, and keeps the answer. */
+/** What finish says when this Mac will not let it look in the exports folder it picked (`words`: folderWords of it): as DOWNLOADS_UNREADABLE. */
+export const exportsUnreadable = (words) => `This Mac does not let BRIMM Video Studio look in your exports folder, ${words}, where HyperFrames puts its exports. Allow it in System Settings, under Privacy & Security, Files and Folders, then say "hand it off" again.`;
 export const DOWNLOADS_UNREADABLE = 'This Mac does not let BRIMM Video Studio look in the Downloads folder, where HyperFrames puts its exports. Allow it in System Settings, under Privacy & Security, Files and Folders, then say "hand it off" again.';
 /** Whether a name leads nowhere but a folder of its own: a project's name comes from the record, which Dropbox and the other Mac write. */
 const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name);
@@ -374,14 +376,6 @@ const isFile = (path) => {
     return false;
   }
 };
-/** Whether two paths are one folder, however a link names it. */
-function sameFolder(a, b) {
-  try {
-    return realpathSync(a) === realpathSync(b);
-  } catch (e) {
-    return resolve(a) === resolve(b);
-  }
-}
 
 /** The videos in a folder, by their endings, as { name, bytes, mtimeMs }; a name that starts with a dot, a folder and anything gone while
     it was read are left out. { files, unreadable }: `unreadable` is true when this Mac will not let the folder be read (macOS keeps
@@ -445,20 +439,25 @@ function recordsIn(dir, downloads, zone, exports = null) {
     exports of many videos in one pass, the guide (edit.js guideItems; plan PR 17, the review of PR 10, M5). The folder is read once however many
     videos look in it, and not at all when none does, and a folder this Mac will not let be read is tried once and is unreadable for every video.
     It gives what the listing of Downloads is, { files, unreadable }, as `videosIn` has it. `readdir` lists a folder as readdirSync does. */
-export function downloadsOnce({ home, readdir = readdirSync }) {
+export function downloadsOnce({ home, exports = null, readdir = readdirSync }) {
   let seen = null;
-  return () => (seen ??= videosIn(downloadsFolder(home), readdir));
+  let there = null;
+  const listing = () => (seen ??= videosIn(downloadsFolder(home), readdir));
+  // The exports folder this Mac picked (settings.js exportsFolderOf) is listed the same way, through `listing.exports`, which exportsFound is
+  // given as `listExports`: lazily and once, so a pass in which no video looks in it reads nothing of it, not even whether it is Downloads.
+  listing.exports = () => (there ??= videosIn(exports, readdir));
+  return listing;
 }
 
 /** What `finish` reads of the disk to look for HyperFrames' exports (plan PR 7): for the main project in use and each Reel project of
     the record (not a project kept for an earlier kind, and not one of a Reel the record says is dropped), whether its folder is on this Mac, when it last changed (projectChange), the
     files its records name and the renders in its renders/ that none does; and the videos in Downloads. `home` is this Mac's home,
     `name` the episode's folder name. Gives { input, unreadable }: `input` is what lookForExports is given, and `unreadable` is true when this Mac will
-    not let Downloads be read. `exports` is the exports folder this Mac picked (settings.js exportsFolderOf): when it is not Downloads, by their
+    not let Downloads be read, and `exportsUnreadable` is true when it will not let the picked exports folder be read. `exports` is the exports folder this Mac picked (settings.js exportsFolderOf): when it is not Downloads, by their
     real paths, its videos are listed too, as `input.exports` ({ dir, words, files }, `words` in Finder's words); when it is, it is left out, so
-    that one folder is listed once and its files keep `where: "Downloads"`. `readdir` lists a folder as readdirSync does, for a test to give another. `listDownloads`, when it is given
+    that one folder is listed once and its files keep `where: "Downloads"`; `listExports`, when given (downloadsOnce(...).exports), lists it in its place. `readdir` lists a folder as readdirSync does, for a test to give another. `listDownloads`, when it is given
     (downloadsOnce), lists Downloads in its place: so that a caller that asks for many videos reads the folder once. Nothing is written. */
-export function exportsFound({ home, exports = null, name, record, zone = LOCAL_ZONE, readdir = readdirSync, listDownloads = null }) {
+export function exportsFound({ home, exports = null, name, record, zone = LOCAL_ZONE, readdir = readdirSync, listDownloads = null, listExports = null }) {
   const downloads = downloadsFolder(home);
   // The exports folder this Mac picked (settings.js exportsFolderOf), looked in besides Downloads; once, when they are one folder.
   const picked = typeof exports === "string" && exports !== "" && !sameFolder(exports, downloads) ? exports : null;
@@ -479,9 +478,10 @@ export function exportsFound({ home, exports = null, name, record, zone = LOCAL_
     };
   });
   const seen = listDownloads ? listDownloads() : videosIn(downloads, readdir);
-  const there = picked ? videosIn(picked, readdir) : null;
+  const there = picked ? (listExports ? listExports() : videosIn(picked, readdir)) : null;
   return {
     unreadable: seen.unreadable,
+    exportsUnreadable: Boolean(there && there.unreadable),
     input: { parts, downloads: { dir: downloads, files: seen.files }, ...(picked ? { exports: { dir: picked, words: folderWords(picked, home), files: there.files } } : {}), finished: record.finished || null, zone }
   };
 }

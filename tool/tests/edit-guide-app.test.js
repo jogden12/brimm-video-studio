@@ -301,7 +301,7 @@ describe("the guide while the video for HyperFrames is made", () => {
     atWork(w.t, "workcopy");
     const picked = join(w.t.home, "Movies", "Exports");
     const settings = { ...depsOf(w).settings, exportsPath: picked };
-    assert.equal(await line(w, { settings }), says('Edit it in HyperFrames. When you are done, export it as MP4. Export it on This Mac, into Movies › Exports, in your home folder. Then say "hand it off".'));
+    assert.equal(await line(w, { settings }), says('Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, into Movies › Exports, in your home folder, then say "hand it off".'));
     assert.equal(await line(w, { settings: { ...settings, exportsPath: join(w.t.home, "Downloads") } }), says(edit()));
     w.t.done();
   });

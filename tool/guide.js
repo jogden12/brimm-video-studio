@@ -1,8 +1,8 @@
 // The guide in her Claude folder (spec 2026-10-25): where a video has got, from her drop folder to the BRIMM Ops page's cascade,
 // and the one next step for it, in her own words. brimm-video cannot see the BRIMM Ops page, so her note on this Mac keeps the
 // steps she has done there, by the hand-off's id.
-// Everything here reads and writes nothing from the disk but folderWords (settings.js), which looks at a folder's real path to say where it is
-// in Finder's words (dropWords, and edit.js's exportsWords for the export step); edit.js gives it all else it read.
+// Everything here is pure but dropWords, which says a folder in Finder's words through settings.js folderWords (it looks at the folder's real
+// path); the export step's folder words are a fact edit.js computes (project.exportsWords). edit.js gives it all else it read.
 import { spokenMac } from "./kinds.js";
 import { aboutLeft } from "./progress.js";
 import { folderWords, isLocal } from "./settings.js";
@@ -186,9 +186,10 @@ export function opsText(handoff, step, again, note) {
       app has not opened) or "finished"; a raw video is on the HyperFrames way whichever of the first two it is. `copy`, while this Mac's run makes
       the video for HyperFrames, and null otherwise: { left, usual }, the seconds left as the panel's run says (null when it says none)
       and the seconds it usually takes by the speed this Mac measured (copyIn; null while not known). `project`, the main project in use
-      when its folder is here and no hand-off is written yet, and null otherwise: { opened, last, exported }, whether the record says
-      the app opened it, the time of the last turn in the app's history in words ("today at 3:41 pm"; "" when there is none), and
-      whether it has an export that began after its last change.
+      when its folder is here and no hand-off is written yet, and null otherwise: { opened, last, exported, exportsWords }, whether the record says
+      the app opened it, the time of the last turn in the app's history in words ("today at 3:41 pm"; "" when there is none),
+      whether it has an export that began after its last change, and the exports folder this Mac picked in Finder's words when it is not
+      Downloads ("" otherwise), which the in-app step names.
     - For a finished video whose hand-off is written (plan PR 16): `reelsExported`, the numbers of its Reels, in order, that were exported from
       HyperFrames and are not in that hand-off, as `finish … reels` would take them (edit.js guideReels); [] when there are none, when that
       command would go no further, or when she has said the video is finished, which is read for nothing of its Reels. It is said ahead of the
@@ -368,9 +369,8 @@ function appStep(facts) {
   // When this Mac picked an exports folder that is not Downloads (project.exportsWords, in Finder's words), she is told where to export.
   if (project && project.opened) {
     const last = project.last ? ` Your last request there was ${project.last}.` : "";
-    return toDo("in-app", project.exportsWords
-      ? `Edit it in HyperFrames.${last} When you are done, export it as MP4. Export it on This Mac, into ${project.exportsWords}. Then say "hand it off".`
-      : `Edit it in HyperFrames.${last} When you are done, export it on This Mac, as MP4, then say "hand it off".`);
+    const into = project.exportsWords ? `, into ${project.exportsWords}` : "";
+    return toDo("in-app", `Edit it in HyperFrames.${last} When you are done, export it on This Mac, as MP4${into}, then say "hand it off".`);
   }
   if (!facts.app) return toDo("app-off", APP_NOT_SET_UP);
   if (!project && facts.copy) return copyStep(facts.copy);

@@ -63,7 +63,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
-import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, isLocal, studioAllowOf } from "./settings.js";
+import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
@@ -79,7 +79,7 @@ import { BRINGING, REEL_KEY, exportAgainWords, keepOldWords, nextHandoff, noReel
 import { checkingNow, problemFlagged } from "./finish-check.js";
 import { endedSinceYes, endedWithoutHandoff } from "./finish-ended.js";
 import { handoffIn, videoSeconds } from "./finish-time.js";
-import { DOWNLOADS_UNREADABLE, NEVER_OPENED, downloadsOnce, exportsFound, lookForExports, readRegular } from "./exports.js";
+import { DOWNLOADS_UNREADABLE, NEVER_OPENED, downloadsOnce, exportsFound, exportsUnreadable, lookForExports, readRegular } from "./exports.js";
 import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
 import { videoClock } from "./video-clock.js";
 import { clockText, timelineAt } from "./clock.js";
@@ -2052,6 +2052,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // HyperFrames' exports, in Downloads (exports.js), for the projects of the record.
   const seen = exportsFound({ home: ctx.home, exports: exportsFolderOf(ctx.settings, ctx.home), name: found.name, record, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
   if (seen.unreadable) return refuse(ctx, DOWNLOADS_UNREADABLE);
+  if (seen.exportsUnreadable) return refuse(ctx, exportsUnreadable(folderWords(exportsFolderOf(ctx.settings, ctx.home), ctx.home)));
   // A finished video has no main project, so no part is made for the main video and nothing asks for one.
   const looked = lookForExports(forReels ? { ...seen.input, parts: seen.input.parts.filter((part) => part.reel) } : seen.input, answers);
   // A Reel number another version of the video gave under the same id is never given again: said now, before any export is waited for,
@@ -5833,8 +5834,8 @@ function guideCopy(ctx, e, r, rates) {
     of the newest turn that `what-happened` tells in the project's `.hyperframes/app-history.jsonl` (app-history.js toldTurns, so that it is
     the first time that gives), in words (turnTime, in the zone a test gives as `deps.app.tz`), "" when the app has kept none that can be
     read; `exported` whether it has an export that began after its last change, or two that began in one minute so that `finish` asks
-    which is final (exports.js exportsFound and lookForExports, for the main video alone): in Downloads, by the app's own record in the
-    project's renders/. A Downloads folder this Mac will not let be read, or any trouble in reading, is
+    which is final (exports.js exportsFound and lookForExports, for the main video alone): in Downloads or the exports folder this Mac picked, by the app's own record in the
+    project's renders/. A Downloads folder or picked exports folder this Mac will not let be read, or any trouble in reading, is
     no export seen: the guide only reads, and `finish` tells her what it needs. `downloads` is the pass's one listing of Downloads (guideItems). */
 function guideProject(ctx, e, r, downloads) {
   const main = (r.app?.projects ?? []).find(inUse);
@@ -5849,8 +5850,8 @@ function guideProject(ctx, e, r, downloads) {
   const [newest] = toldTurns(turnsOf(historyTail(dir)), { tz: ctx.deps.app?.tz }, 1);
   let exported = false;
   try {
-    const seen = exportsFound({ home: ctx.home, exports: exportsFolderOf(ctx.settings, ctx.home), name: e.name, record: { ...r, app: { ...r.app, projects: [main] } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads });
-    if (!seen.unreadable) {
+    const seen = exportsFound({ home: ctx.home, exports: exportsFolderOf(ctx.settings, ctx.home), name: e.name, record: { ...r, app: { ...r.app, projects: [main] } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads, listExports: downloads.exports });
+    if (!seen.unreadable && !seen.exportsUnreadable) {
       // An export she is asked to choose between (two began in one minute) is an export waiting to be handed off: `finish` asks which.
       const looked = lookForExports(seen.input, {});
       exported = looked.parts.some((part) => part.key === "main" && part.video !== null) || looked.tied.includes("main");
@@ -5886,8 +5887,8 @@ function guideReels(ctx, e, r, downloads) {
   const based = reelsBase(e.folder, r, { isWhole: ctx.isWhole, read: regularJson });
   if (!based.onFile && !based.coming) return [];
   try {
-    const seen = exportsFound({ home: ctx.home, exports: exportsFolderOf(ctx.settings, ctx.home), name: e.name, record: { ...r, app: { ...r.app, projects: here } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads });
-    if (seen.unreadable) return [];
+    const seen = exportsFound({ home: ctx.home, exports: exportsFolderOf(ctx.settings, ctx.home), name: e.name, record: { ...r, app: { ...r.app, projects: here } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads, listExports: downloads.exports });
+    if (seen.unreadable || seen.exportsUnreadable) return [];
     const looked = lookForExports(seen.input, {});
     const numberOf = (key) => Number(key.slice(5));
     const exported = [...new Set([...looked.parts.filter((part) => part.reel && !part.kept).map((part) => part.reel), ...looked.tied.filter((key) => REEL_KEY.test(key)).map(numberOf)])];
@@ -6103,7 +6104,7 @@ function guideItems(ctx) {
   // Downloads is listed once for the pass, by the first video that looks in it for an export, and given to every other (exports.js downloadsOnce;
   // plan PR 17, the review of PR 10, M5): a pass is one `guide`, one look of `guide wait` (every 5 seconds) or one of `guide … tell` (every 15), and a
   // listing costs 20 to 50 ms. A pass in which no video looks in it lists nothing.
-  const downloads = downloadsOnce({ home: ctx.home, readdir: ctx.deps.readdir });
+  const downloads = downloadsOnce({ home: ctx.home, exports: exportsFolderOf(ctx.settings, ctx.home), readdir: ctx.deps.readdir });
   // The parts of the plans (PR H5a) are read from Episodes once for the pass too, by the first plan that has parts to count and then given to every
   // other, so that a pass costs the same whatever the number of plans (footage.js partsReader).
   const footageIn = partsReader(ctx.root);
