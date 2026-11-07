@@ -5249,7 +5249,13 @@ async function answerKind(ctx, found, plan, began) {
     say(`Answered. Claude reads it at ${clockAt(holdsUntil)}, when the import has checked its copies.${rough === null ? "" : ` Its rough cut is ready about ${clockNear(holdsUntil + rough * 1000)}.`}`);
     return 0;
   }
-  return waitForReading(ctx, found, name, previous, began);
+  const waited = await waitForReading(ctx, found, name, previous, began);
+  // A recording that was moved to Original files and made online-only is brought down by the reading and by the copy: she is told so, as `which` says it.
+  if (stored === "raw" && keptOnAMac(wrote.record) && onOtherMac(ctx, wrote.record) === "") {
+    const at = recordingAt(ctx, { folder: found.folder, record: wrote.record });
+    if (at !== fileOf(ctx, found, wrote.record.video.file) && !ctx.isWhole(at)) ctx.say(ONLINE_ONLY);
+  }
+  return waited;
 }
 
 // --- Correcting a wrong answer (spec 2026-10-22, section 2, "Correcting a wrong answer"; section 1, "Episodes imported before this

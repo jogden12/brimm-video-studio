@@ -1192,6 +1192,8 @@ describe("L6: after the recording's move", () => {
       const r = await on({ ...w.studio, isWhole: (path) => existsSync(path) && !path.includes("Original files") }, "kind", found.name, "raw", "--private", "no", "--again");
       assert.equal(r.code, 0, r.text);
       assert.doesNotMatch(r.text, /not here|not on this Mac|other Mac|still bringing|not whole/i, r.text);
+      // B1-F17: she is told the download comes first, as `which` says it of an online-only recording.
+      assert.match(r.text, /It is online-only on this Mac: Dropbox brings it over first/);
     } finally {
       w.done();
     }
