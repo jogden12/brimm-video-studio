@@ -2639,6 +2639,8 @@ function recordDifferences(a, b) {
     return rows;
   };
   const who = (r) => (r.editing ? r.editing.by : "nobody");
+  // Where a side keeps the episode's files (Phase 3, L4), in plain words: the Mac its `local` names, else Dropbox.
+  const keptWords = (r) => (r.local && typeof r.local.on === "string" && r.local.on !== "" ? spokenMac(r.local.on) : "Dropbox");
   const title = (r) => (r.title ? `"${r.title.text}"${r.title.approved ? ", approved" : ", not approved"}` : "none");
   const shownIn = (pushed) => (Array.isArray(pushed) && pushed.length ? `shown ${pushed.map((p) => `v${p.v} on ${p.on}`).join(", ")}` : "not shown");
   const reel = (r, n) => {
@@ -2658,7 +2660,7 @@ function recordDifferences(a, b) {
   // Claude's reading, but for the account it was read on, which is never said into the chat.
   const reading = (r) => (r.reading !== null && typeof r.reading === "object" && !Array.isArray(r.reading) ? Object.fromEntries(Object.entries(r.reading).filter(([k]) => k !== "account")) : r.reading);
   const others = [
-    ...fields(a, b, ["version", "rev", "writer", "editing", "name", "title", "reels", "main", "finished", "released", "files", "planned"]).map((k) => [`${k[0].toUpperCase()}${k.slice(1)}`, as(k === "reading" ? reading(a) : a[k]), as(k === "reading" ? reading(b) : b[k])]),
+    ...fields(a, b, ["version", "rev", "writer", "editing", "name", "title", "reels", "main", "finished", "released", "files", "planned", "local"]).map((k) => [`${k[0].toUpperCase()}${k.slice(1)}`, as(k === "reading" ? reading(a) : a[k]), as(k === "reading" ? reading(b) : b[k])]),
     ...fields(a.main, b.main, ["pushed"]).map((k) => [`The main video's ${k}`, as(a.main && a.main[k]), as(b.main && b.main[k])]),
     ...ns.flatMap((n) => fields(reelOf(a, n), reelOf(b, n), ["n", "status", "pushed"]).map((k) => [`Reel ${n}'s ${k}`, as((reelOf(a, n) || {})[k]), as((reelOf(b, n) || {})[k])]))
   ];
@@ -2666,6 +2668,7 @@ function recordDifferences(a, b) {
     ["Who has it open", who(a), who(b)],
     ["Name", `"${a.name && a.name.text}"`, `"${b.name && b.name.text}"`],
     ["Title", title(a), title(b)],
+    ["Kept on", keptWords(a), keptWords(b)],
     ...plannedRows(),
     ...ns.map((n) => [`Reel ${n}`, reel(a, n), reel(b, n)]),
     ["The main video", shownIn(a.main && a.main.pushed), shownIn(b.main && b.main.pushed)],
@@ -2676,7 +2679,7 @@ function recordDifferences(a, b) {
     ...sizes("Handed-over file", a.released && a.released.files, b.released && b.released.files)
   ].filter(([, x, y]) => x !== y);
   const names = gated(a) || gated(b) ? namesOf(a.video && a.video.file, b.video && b.video.file) : null;
-  const shown = (what) => ["Who has it open", "Finished", "Handed over", "The main video"].includes(what) || what.startsWith("File ") || what.startsWith("Handed-over file ");
+  const shown = (what) => ["Who has it open", "Kept on", "Finished", "Handed over", "The main video"].includes(what) || what.startsWith("File ") || what.startsWith("Handed-over file ");
   // What each side is, and its session mark, in words of brimm-video's own that name nothing, so that she sees which side holds the
   // answer or the mark that keeping the other would drop (resolveIn refuses that).
   const kindWords = (r) => (recordKind(r) === null ? (leftAlone(r) ? "left alone" : "not answered yet") : KIND_SAID[recordKind(r)]);
@@ -2870,6 +2873,13 @@ async function resolveIn(ctx, found, keep) {
   if (isRecord && copyRecord && !sameRecord(record, copyRecord)) {
     const why = keptOverWhy(keep === "B" ? copyRecord : record, keep === "B" ? record : copyRecord);
     if (why) return refuse(ctx, why);
+    // Sides that keep the episode's files in different places (Phase 3, L4): keeping either leaves the other's files behind, or the plan's parts on a Mac its
+    // record no longer names. So when either side lists a file kept on a Mac, or is a plan, it is for Jason.
+    const placeOf = (r) => JSON.stringify(r.local ?? null);
+    const listsLocal = (r) => Object.keys(r.files || {}).some((rel) => filePlace(r, rel) === "local");
+    if (placeOf(record) !== placeOf(copyRecord) && [record, copyRecord].some((r) => listsLocal(r) || r.planned)) {
+      return refuse(ctx, `The two sides keep ${name}'s files in different places, so keeping either could leave files behind. ${NEEDS_JASON}`);
+    }
   }
   const aHere = existsSync(at(of));
   if (!isRecord && keep === "A" && !aHere) return refuse(ctx, `A, ${of}, is not there, so it cannot be kept. Say B. If that is not what you want, tell Jason.`);
