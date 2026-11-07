@@ -18,7 +18,7 @@ export const PLAN_FILES = Object.freeze(["video guide.md", "shot list.md", "tele
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 /** Whether a record keeps its own files on a Mac: it holds `local`. */
-const keptOnAMac = (record) => isObject(record) && isObject(record.local);
+export const keptOnAMac = (record) => isObject(record) && isObject(record.local);
 /** A Mac as a sentence says it (kinds.js spokenMac, which a test holds this to): "the Mac Studio", and a Mac named for its owner as it is. */
 const spoken = (mac) => (/['’]s\b/.test(mac) ? mac : `the ${mac}`);
 
