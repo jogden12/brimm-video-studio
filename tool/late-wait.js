@@ -12,7 +12,7 @@
 import { statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { LATE_CHECK_MS } from "./dropbox.js";
-import { dueAt, readPendings, releaseLateCheckLock, sameFile, settleReading, takeLateCheckLock, writePending, statusReadFolders } from "./filing.js";
+import { dueAt, readPendings, sameFile, statusReadFolders, takeOutOfCheck } from "./filing.js";
 import { holdsVideo, importState, readStatusesIn } from "./importing.js";
 import { currentReading, shownName } from "./episode.js";
 import { readResult, runningCommand, runningRun } from "./detached.js";
@@ -71,9 +71,8 @@ export function lateCheckAt(ctx, record) {
   return working ? now + LATE_CHECK_MS : null;
 }
 
-/** How often a reading looks again for the lock of the import's late check while the check holds it, and for how long in all. */
-export const LOCK_LOOK_MS = 1000;
-export const LOCK_WAIT_MS = 2 * 60 * 1000;
+/** How often a reading looks again for the lock of the import's late check while the check holds it, and for how long in all (moved to filing.js). */
+export { LOCK_LOOK_MS, LOCK_WAIT_MS } from "./filing.js";
 
 /** Whether the only late check that holds the episode with `record` is this Mac's own, so that a reading here can keep it in step instead
     of waiting for it (plan R1c): this Mac owes the check of the record's import (a pending one of this Mac, of this root, with the
@@ -94,71 +93,9 @@ export function readingWaitsUntil(ctx, record) {
 }
 
 /** Take the files a reading is about to put in out of this Mac's own late check of the episode's import, under the lock the check also
-    takes (plan R1c), so that the check never puts an older file back over one the reading wrote, and still looks at every other file.
-    `paths` are the files the reading puts in; `name` is the episode's folder. Resolves:
-    - { none: true } when this Mac owes no check for the record, or none of whose entries is among `paths`, or it was made while the
-      reading waited for the lock: nothing is locked or written;
-    - { why } when the lock was not to be had in LOCK_WAIT_MS (the check holds it that long), or the check found a problem meanwhile,
-      or a mark an earlier reading left cannot be settled yet: then nothing is put in;
-    - { end }, with the lock held and the pending check marked `reading` with the entries among `paths`. `end({ put })` is to be called
-      once, whatever happens, and again does nothing: with `put`, the files went in, and their entries are taken out of the check; without
-      it they did not, and the check is as it was. Either way the mark is taken away and the lock let go. A write that fails is logged
-      and leaves the mark, which the check settles by the episode's record (filing.js settleReading); the lock goes all the same.
-    The lock is held from here to `end`. */
-export async function keepCheckInStep(ctx, { name, record, paths }, { wait, log = () => {} }) {
-  const same = (p) => p.id === record.id && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root);
-  // Both sides are spelled by two sources (the reading's folder, the pending's own), so they are compared resolved and in NFC.
-  const spelled = (path) => resolve(String(path)).normalize("NFC");
-  const wanted = new Set(paths.map(spelled));
-  const among = (p) => p.entries.filter((e) => e && wanted.has(spelled(e.to))).map((e) => e.to);
-  const first = readPendings(ctx.home).find(same);
-  if (!first || !among(first).length) return { none: true };
-  const shown = shownName(record);
-  let held = null;
-  for (let waited = 0; ; waited += LOCK_LOOK_MS) {
-    held = takeLateCheckLock(ctx.home, name, "read", ctx.alive);
-    if (held) break;
-    if (waited >= LOCK_WAIT_MS) return { why: `The import was still checking its copies of ${shown} in Dropbox after two minutes, so nothing Claude read was put in.` };
-    await wait(LOCK_LOOK_MS);
-  }
-  let to = [];
-  let marked = false;
-  try {
-    // Under the lock the pending is read again: the check may have been made, or found a problem, while the lock was waited for.
-    let fresh = readPendings(ctx.home).find(same);
-    if (!fresh) return { none: true };
-    if (fresh.problem) return { why: importHold({ root: ctx.root, statusFolders: statusReadFolders(ctx), home: ctx.home, machine: ctx.machine, record, now: ctx.now() }).why || `Dropbox found a problem with a copy of this episode: ${String(fresh.problem).replace(/\.$/, "")}.` };
-    // A mark an earlier reading left (it stopped while it put its files in) is settled first, by the record, as the check settles it.
-    if (fresh.reading) {
-      const settled = settleReading(fresh, { home: ctx.home, log });
-      if (settled.later) return { why: `The import's check of its copies of ${shown} in Dropbox is not settled yet, so nothing Claude read was put in.` };
-      fresh = settled.pending;
-    }
-    to = among(fresh);
-    if (!to.length) return { none: true };
-    writePending(ctx.home, { ...fresh, reading: { pid: process.pid, at: ctx.now(), to } });
-    marked = true;
-  } finally {
-    if (!marked) releaseLateCheckLock(held);
-  }
-  let ended = false;
-  const end = ({ put }) => {
-    if (ended) return;
-    ended = true;
-    try {
-      const now = readPendings(ctx.home).find(same);
-      if (now) {
-        const { reading, ...rest } = now;
-        writePending(ctx.home, put ? { ...rest, entries: now.entries.filter((e) => !to.includes(e.to)) } : rest);
-      }
-    } catch (e) {
-      log(`The import's late check could not be kept in step with the reading (${e.code || "an error"}). It settles the reading's files at its next look.`);
-    } finally {
-      releaseLateCheckLock(held);
-    }
-  };
-  return { end };
-}
+    takes (plan R1c): filing.js takeOutOfCheck, moved there so that a writer into final/ can use it too; this keeps its old name, and
+    gives the import's problem words (importHold) for a record without `local`. Its results and words are as they always were. */
+export const keepCheckInStep = (ctx, step, opts) => takeOutOfCheck(ctx, step, { ...opts, problemWhy: (record) => importHold({ root: ctx.root, statusFolders: statusReadFolders(ctx), home: ctx.home, machine: ctx.machine, record, now: ctx.now() }).why });
 
 /** When the copy of the episode's video for HyperFrames can begin, in milliseconds, or null when nothing holds it (plan R1a). It
     waits for the import's late check (`lateCheckAt`) unless it starts from the local file (`localSource`): that one waits for

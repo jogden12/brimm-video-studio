@@ -21,6 +21,8 @@ import { CLAUDE_MODEL } from "../unedited.js";
 import { sameAccount, teachingsWhy, herWordsName, OTHER_ACCOUNT } from "../teachings.js";
 import { setup, listAll } from "./episodes.js";
 import { OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
+import * as filing from "../filing.js";
+import { makeLocal } from "./local-world.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -1406,5 +1408,22 @@ describe("fix round 4, 1: ordinary words the transcript writes with capitals sid
     }
     assert.deepEqual((await on(t.ctx.deps, "name", LABEL, "quillonmarsh notes")).said, [NAME_HOLDS("quillonmarsh")]);
     t.done();
+  });
+});
+
+describe("a session's hand-off on a video kept on this Mac (Phase 3, L5)", () => {
+  it("L20 takes the check's lock: it writes its hand-off after exactly two waits for it, and is 0", async () => {
+    const mac = await decidedSession();
+    makeLocal(mac);
+    const THIS = (pid) => pid === process.pid;
+    const lock = filing.takeLateCheckLock(mac.t.home, mac.found.name, "late check", THIS);
+    const base = mac.t.ctx.deps.wait;
+    const waits = [];
+    const deps = { ...mac.t.ctx.deps, alive: THIS, wait: async (ms) => { waits.push(ms); if (waits.length === 2) filing.releaseLateCheckLock(lock); await base(ms); } };
+    const r = await on(deps, "finish", SHORT);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(waits.slice(0, 2), [filing.LOCK_LOOK_MS, filing.LOCK_LOOK_MS]);
+    assert.equal(mac.t.inFinal(mac.found).length, 1);
+    mac.t.done();
   });
 });

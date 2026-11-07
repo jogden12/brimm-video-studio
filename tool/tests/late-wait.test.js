@@ -130,6 +130,23 @@ describe("localSource", () => {
   });
 });
 
+describe("a pending of another kind holds no reading and no copy (L5)", () => {
+  it("K1 is not an import's: of the same id, a final, a record and an original pending hold nothing", () => {
+    const s = setup();
+    for (const [rel, kind] of [[`final/${ID}-1.json`, "final"], [`record/${ID}.json`, "record"], [`original/${ID}.json`, "original"]]) {
+      const file = join(pendingFolder(s.home), rel);
+      mkdirSync(join(pendingFolder(s.home), kind), { recursive: true });
+      writeFileSync(file, JSON.stringify({ ...s.pending({ lastCopy: NOW + 60000 }), kind, revision: 1, rev: 2, ...(kind === "original" ? { owed: true, took: [] } : {}), work: null }));
+    }
+    assert.equal(lateCheckAt(s.ctx, s.record), null);
+    assert.equal(ownCheckOnly(s.ctx, s.record), false);
+    assert.equal(readingWaitsUntil(s.ctx, s.record), null);
+    assert.equal(localSource(s.ctx, s.record), null);
+    assert.equal(projectWaits(s.ctx, { name: "x", record: s.record }), "");
+    s.done();
+  });
+});
+
 describe("lateCheckAt", () => {
   it("is the pending check's time, or now when that has passed, and null when nothing holds the video", () => {
     const s = setup();

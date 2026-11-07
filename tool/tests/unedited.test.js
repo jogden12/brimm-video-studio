@@ -17,7 +17,7 @@ import { readNotes, applyDecisions, clipRanges, pausesOfPlan } from "../notes.js
 import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
 import { progressFolder, noProgress } from "../progress.js";
 import { seenFile, writeSettings, pendingFolder, importingFolderOf, statusFoldersOf, episodeFilesFolder } from "../settings.js";
-import { readEpisode, writeEpisode } from "../episode.js";
+import { lastWritten, readEpisode, writeEpisode } from "../episode.js";
 import { dropIdOf, fileId, importIdOf, noteSeen, writePending } from "../filing.js";
 import { readStatusesIn, removeStatusIn, writeStatusIn } from "../importing.js";
 import { importingFolder } from "../settings.js";
@@ -2856,8 +2856,9 @@ describe("an episode filed on a Mac with a drop folder of its own (Phase 3, L3)"
     };
     await uneditedFolder(t.drop, t.deps);
     assert.deepEqual(seen.map(([text, , there]) => [text, there]), [[READY, false]]);
-    assert.equal(seen[0][1], t.waits.length, "no wait comes after the banner");
-    assert.deepEqual(t.waits.filter((ms) => ms >= 60000), []);
+    // The run waits for its record's check after the banner (Phase 3, L5), and makes it: no wait of a minute or more comes before the banner.
+    assert.deepEqual(t.waits.slice(0, seen[0][1]).filter((ms) => ms >= 60000), []);
+    assert.equal(t.logs[t.logs.length - 1], "Video of 13 Oct, 10:00 (Mac Studio): its first record is whole in Dropbox.");
     assert.deepEqual(namesOf(pendingFolder(t.home)).filter((n) => n.endsWith(".json")), []);
     t.done();
   });
@@ -3118,6 +3119,217 @@ describe("an episode filed on a Mac with a drop folder of its own (Phase 3, L3)"
     const hold = (folders) => importHold({ root: t.root, statusFolders: folders, home: t.home, machine: "Mac Studio", record, now: NOW }).state;
     assert.equal(hold(statusFoldersOf(t.deps.settings, t.home)), "running");
     assert.equal(hold([t.statuses]), "");
+    t.done();
+  });
+});
+
+describe("a local import's record pending, its record checked behind (Phase 3, L5)", () => {
+  const FOLDER = "2026-10-13 Talk (Mac Studio)";
+  const LABEL = "Video of 13 Oct, 10:00 (Mac Studio)";
+  const READY = `Ready: ${LABEL}. In Claude, say "what's waiting?"`;
+  const namesOf = (folder) => {
+    try {
+      return readdirSync(folder).sort();
+    } catch (e) {
+      return [];
+    }
+  };
+  const local = (script = {}) => {
+    const t = episodic({ local: true, ...script });
+    const statuses = importingFolderOf(t.deps.settings, t.home);
+    const video = (folder = FOLDER) => episodeFilesFolder(t.home, folder);
+    const recordPendings = () => namesOf(join(pendingFolder(t.home), "record")).filter((n) => n.endsWith(".json"));
+    const pendingOf = () => {
+      const [n] = recordPendings();
+      return n ? JSON.parse(readFileSync(join(pendingFolder(t.home), "record", n), "utf8")) : null;
+    };
+    const runs = () => namesOf(join(t.home, "BRIMM Video Work", ".runs"));
+    return { ...t, statuses, video, recordPendings, pendingOf, runs, recordFile: join(t.episodes, FOLDER, "record", "0001.json") };
+  };
+  /** Run the import with `onWait(ms)` called at the first wait of a minute or more, before the clock moves. */
+  const withWait = (t, onWait) => {
+    const wait = t.deps.wait;
+    let done = false;
+    t.deps.wait = async (ms) => {
+      if (!done && ms >= 60000) {
+        done = true;
+        onWait(ms);
+      }
+      return wait(ms);
+    };
+  };
+
+  it("I1 writes its record pending before its record reaches Dropbox, and keeps it until its check is made", async () => {
+    const t = local();
+    const file = t.put("Talk.mov");
+    const arrived = fileId(file);
+    const clone = t.deps.clone;
+    const before = [];
+    t.deps.clone = (from, to) => {
+      if (to.endsWith("record/0001.json")) before.push(t.pendingOf() ? { copied: t.pendingOf().copied } : null);
+      clone(from, to);
+    };
+    let during = null;
+    withWait(t, () => {
+      during = { pending: t.pendingOf(), notes: [...t.notes], work: t.pendingOf() && existsSync(t.pendingOf().work), top: namesOf(pendingFolder(t.home)).filter((n) => n.endsWith(".json")), logs: [...t.logs] };
+    });
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(before, [{ copied: undefined }]);
+    const p = during.pending;
+    assert.equal(p.copied, true);
+    assert.equal(p.kind, "record");
+    assert.deepEqual(p.entries.map((e) => e.to), [t.recordFile]);
+    assert.equal(p.entries.length, 1);
+    assert.deepEqual([p.label, p.drop, p.dropFile], [LABEL, file, arrived]);
+    assert.equal(during.work, true);
+    assert.ok(during.notes.includes(READY));
+    assert.deepEqual(during.top, []);
+    assert.ok(during.logs.some((l) => new RegExp(`^${LABEL.replace(/[()]/g, "\\$&")}: its first record is in Dropbox\\. Its check is due at \\d\\d:\\d\\d\\.$`).test(l)), during.logs.join("|"));
+    assert.deepEqual(t.recordPendings(), []);
+    assert.deepEqual(t.runs(), []);
+    assert.ok(t.logs.includes(`${LABEL}: its first record is whole in Dropbox.`));
+    t.done();
+  });
+
+  it("I2 a record write that fails after the hook wrote the pending takes the pending away, and nothing is ever put back for it", async () => {
+    for (const locked of [false, true]) {
+      const t = local();
+      t.put("Talk.mov", "the whole video");
+      const clone = t.deps.clone;
+      let hooked = false;
+      t.deps.clone = (from, to) => {
+        if (to.endsWith("record/0001.json")) {
+          hooked = t.recordPendings().length === 1;
+          if (locked) chmodSync(join(pendingFolder(t.home), "record"), 0o555);
+          throw new Error("Dropbox is not there");
+        }
+        clone(from, to);
+      };
+      withWait(t, () => chmodSync(join(pendingFolder(t.home), "record"), 0o755));
+      try {
+        await uneditedFolder(t.drop, t.deps);
+      } finally {
+        if (existsSync(join(pendingFolder(t.home), "record"))) chmodSync(join(pendingFolder(t.home), "record"), 0o755);
+      }
+      assert.equal(hooked, true);
+      assert.deepEqual(t.recordPendings(), []);
+      assert.deepEqual(t.runs(), []);
+      assert.equal(existsSync(t.video()), false);
+      assert.equal(existsSync(join(t.episodes, FOLDER)), false);
+      assert.deepEqual(namesOf(t.drop), ["Talk.mov"]);
+      assert.deepEqual(t.notes.filter((n) => n.startsWith("Ready")), []);
+      assert.equal(lastWritten(t.home, "e-20261013-000000"), 0);
+      if (locked) assert.ok(t.logs.some((l) => l.includes("the check kept for it could not be taken away")), t.logs.join("|"));
+      t.done();
+    }
+  });
+
+  it("I3 a pending that cannot be written stops the import before its record", async () => {
+    const t = local();
+    t.put("Talk.mov", "the whole video");
+    mkdirSync(pendingFolder(t.home), { recursive: true });
+    chmodSync(pendingFolder(t.home), 0o555);
+    let results;
+    try {
+      results = await uneditedFolder(t.drop, t.deps);
+    } finally {
+      chmodSync(pendingFolder(t.home), 0o755);
+    }
+    assert.equal(results[0].ok, false);
+    assert.equal(existsSync(t.recordFile), false);
+    assert.deepEqual(namesOf(t.drop), ["Talk.mov"]);
+    assert.equal(existsSync(t.video()), false);
+    assert.ok(t.logs.some((l) => l.includes("it could not be filed into Episodes: the check of its first record could not be kept on this Mac")), t.logs.join("|"));
+    assert.deepEqual(t.notes.filter((n) => n.startsWith("Ready")), []);
+    t.done();
+  });
+
+  it("I4 a run stopped between the pending and the record: the pending is dropped at its check, and the import is found again by its marker", async () => {
+    const t = local();
+    const file = t.put("Talk.mov");
+    const id = fileId(file);
+    const folder = "2026-10-12 Talk (Mac Studio)";
+    mkdirSync(t.video(folder), { recursive: true });
+    writeFileSync(join(t.video(folder), ".import.json"), JSON.stringify({ import: importIdOf(id), drop: dropIdOf(id) }));
+    const work = join(t.home, "BRIMM Video Work", ".runs", "99999999-1");
+    mkdirSync(join(work, "record"), { recursive: true });
+    writeFileSync(join(work, "record", "1-0001.json"), "stopped");
+    const oldId = "e-20261012-aaaaaa";
+    writePending(t.home, { version: 1, kind: "record", id: oldId, name: folder, folder: join(t.episodes, folder), root: t.deps.settings.root, machine: "Mac Studio", label: LABEL, drop: file, dropFile: id, entries: [{ from: join(work, "record", "1-0001.json"), to: join(t.episodes, folder, "record", "0001.json"), bytes: 7 }], work, lastCopy: Date.parse("2026-10-12T10:00:00") });
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual([r.ok, r.folder], [true, folder]);
+    assert.equal(existsSync(work), false);
+    assert.deepEqual(t.recordPendings(), []);
+    assert.ok(t.logs.includes(`${LABEL}: its import stopped before its first record reached Dropbox, so there is nothing to check.`), t.logs.join("|"));
+    assert.ok(t.logs.some((l) => /its first record is in Dropbox\. Its check is due at/.test(l)));
+    assert.ok(t.logs.includes(`${LABEL}: its first record is whole in Dropbox.`));
+    t.done();
+  });
+
+  it("I5 its check puts back a lost first record, end to end", async () => {
+    const t = local();
+    t.put("Talk.mov");
+    let text = "";
+    withWait(t, () => {
+      text = readFileSync(t.recordFile, "utf8");
+      rmSync(t.recordFile);
+    });
+    await uneditedFolder(t.drop, t.deps);
+    assert.equal(readFileSync(t.recordFile, "utf8"), text);
+    assert.deepEqual(t.recordPendings(), []);
+    assert.deepEqual(t.runs(), []);
+    assert.ok(t.logs.includes(`${LABEL}: Dropbox lost its first record, so it is put back.`));
+    t.done();
+  });
+
+  it("I6 an import stopped after its clone and before it noted its record still has a lost first record put back", async () => {
+    const t = local();
+    t.put("Talk.mov");
+    let text = "";
+    let noted = null;
+    withWait(t, () => {
+      const p = t.pendingOf();
+      noted = lastWritten(t.home, p.id);
+      const { copied, ...rest } = p;
+      writePending(t.home, rest);
+      text = readFileSync(t.recordFile, "utf8");
+      rmSync(t.recordFile);
+    });
+    await uneditedFolder(t.drop, t.deps);
+    assert.equal(noted, 1);
+    assert.equal(readFileSync(t.recordFile, "utf8"), text);
+    assert.deepEqual(t.recordPendings(), []);
+    assert.deepEqual(t.runs(), []);
+    assert.ok(namesOf(t.video()).includes("Talk.mov"));
+    t.done();
+  });
+
+  it("I7 a local import of a video with no sound writes its record pending too, through its own filing", async () => {
+    const SILENT = probed({ picture: { width: 1080, height: 1920 }, sound: null, duration: "8.000000" });
+    const t = local({ probed: SILENT });
+    const file = t.put("Talk.mov");
+    const arrived = fileId(file);
+    const clone = t.deps.clone;
+    const before = [];
+    t.deps.clone = (from, to) => {
+      if (to.endsWith("record/0001.json")) before.push(t.pendingOf() ? { copied: t.pendingOf().copied } : null);
+      clone(from, to);
+    };
+    let during = null;
+    let text = "";
+    withWait(t, () => {
+      during = t.pendingOf();
+      during = { ...during, work: existsSync(during.work) };
+      text = readFileSync(t.recordFile, "utf8");
+      rmSync(t.recordFile);
+    });
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(before[0], { copied: undefined });
+    assert.equal(during.copied, true);
+    assert.deepEqual([during.label, during.drop, during.dropFile, during.work], [LABEL, file, arrived, true]);
+    assert.equal(readFileSync(t.recordFile, "utf8"), text);
+    assert.deepEqual(t.recordPendings(), []);
+    assert.deepEqual(t.runs(), []);
     t.done();
   });
 });

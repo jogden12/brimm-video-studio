@@ -10,7 +10,7 @@
 // And a file that Dropbox is still bringing over to this Mac can show its full size with no data in it yet, so a file counts
 // as here only when its blocks on the disk cover its size, or the disk does not mark it dataless.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { lastLine } from "./run.js";
 
@@ -232,4 +232,35 @@ export function textWriter({ work, keep = false, onCopy, ...opts }) {
       if (!keep) rmSync(from, { force: true });
     }
   };
+}
+
+/** Whether the first `length` bytes of the files at `a` and `b` are the same, read a megabyte at a time. False when either
+    cannot be read. */
+export function startsAlike(a, b, length) {
+  let fa;
+  let fb;
+  try {
+    fa = openSync(a, "r");
+    fb = openSync(b, "r");
+    const size = 1024 * 1024;
+    const ba = Buffer.alloc(size);
+    const bb = Buffer.alloc(size);
+    for (let at = 0; at < length; at += size) {
+      const n = Math.min(size, length - at);
+      if (readSync(fa, ba, 0, n, at) !== n || readSync(fb, bb, 0, n, at) !== n || !ba.subarray(0, n).equals(bb.subarray(0, n))) return false;
+    }
+    return true;
+  } catch (e) {
+    return false;
+  } finally {
+    if (fa !== undefined) closeSync(fa);
+    if (fb !== undefined) closeSync(fb);
+  }
+}
+
+/** Whether the files at `a` and `b` hold the same bytes. */
+export function sameBytes(a, b) {
+  const sa = statSync(a, { throwIfNoEntry: false });
+  const sb = statSync(b, { throwIfNoEntry: false });
+  return Boolean(sa && sb) && sa.size === sb.size && startsAlike(a, b, sa.size);
 }

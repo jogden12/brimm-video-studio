@@ -31,7 +31,7 @@
 // one file given on the command line, are imported the same way, and name the video by its file.
 // What Claude is still asked from here: askClaude and askAgain (Reel candidates, asked for in her chat) and the readings (reading.js).
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
@@ -45,8 +45,8 @@ import { notesRequest, readNotes, clipRanges, pausesOfPlan } from "./notes.js";
 import { stillsArgs } from "./reframe.js";
 import { reelCandidates, reelsFile, readReels, mergeCandidates, REELS_FILE } from "./reel-candidates.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
-import { isWhole, readThrough, textWriter, replaceIn, LATE_CHECK_MS } from "./dropbox.js";
-import { episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, statusWriteFolder, statusReadFolders, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
+import { isWhole, readThrough, textWriter, replaceIn, sameBytes, startsAlike, LATE_CHECK_MS } from "./dropbox.js";
+import { episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, statusWriteFolder, statusReadFolders, importEpisodes, writePending, removePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
 import { readSettings, runsFolder, episodeWork, episodesFolder, importingFolder, importingFolderOf, statusFoldersOf, isLocal, episodeFilesFolder } from "./settings.js";
 import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf } from "./episode.js";
 import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
@@ -578,6 +578,36 @@ async function workOn(file, deps) {
     progress = statusReporter(progress, { folder: statusWriteFolder(episode), machine: episode.machine, video: name, bytes: sizeOf(file), importId: importIdOf(arrived), label, writeText, log, ...(deps.every ? { every: deps.every } : {}), ...(deps.cancel ? { cancel: deps.cancel } : {}) });
   }
   deps = { ...deps, log, files, progress };
+  // A local import writes the `record` pending of its first record's check before the record reaches Dropbox, through the hook L3 gave textWriter
+  // (ruling 9): once its work copy is whole and before it is cloned in. `hook` says what was written, and whether the filing came back.
+  const hook = { pending: null, filed: false };
+  if (episode && episode.local && !into) {
+    const upstream = deps.onRecordCopy;
+    deps = {
+      ...deps,
+      onRecordCopy: (entry) => {
+        const folder = dirname(dirname(entry.to));
+        const pending = { version: 1, kind: "record", id: JSON.parse(readFileSync(entry.from, "utf8")).id, name: basename(folder), folder, root: episode.root, machine: episode.machine, label, drop: file, dropFile: arrived, entries: [{ from: entry.from, to: entry.to, bytes: entry.bytes }], work, lastCopy: (deps.clock || Date.now)() };
+        try {
+          writePending(episode.home, pending);
+        } catch (e) {
+          throw Object.assign(new Error("the check of its first record could not be kept on this Mac"), { code: e.code });
+        }
+        hook.pending = pending;
+        if (upstream) upstream(entry);
+      }
+    };
+  }
+  /** Take the pending the hook wrote away, when the filing threw before its record was in place: nothing is ever put back for an import whose video/ was emptied. */
+  const dropHooked = () => {
+    if (!hook.pending || hook.filed) return;
+    try {
+      removePending(episode.home, hook.pending);
+    } catch (e) {
+      log(`${shown}: its first record could not be written, and the check kept for it could not be taken away (${e.code || "an error"}). Its check drops it.`);
+    }
+    hook.pending = null;
+  };
   /** Keep the late check of the episode just filed (`filed`) on this Mac's own disk, so that a run stopped first leaves it for the next. */
   const keepLateCheck = (filed) => {
     // The video the join made is not in a drop folder: the file the check takes away is one in the run's own folder that is nobody's.
@@ -596,6 +626,15 @@ async function workOn(file, deps) {
     if (episode.local && !into) {
       progress.drop();
       keepWork = Boolean(deps.onRecordCopy);
+      // Its record is in Dropbox: its pending says so. A write that fails costs only this mark (this Mac's note of rev 1 says it too).
+      if (hook.pending) {
+        try {
+          writePending(episode.home, { ...hook.pending, copied: true });
+          log(`${shown}: its first record is in Dropbox. Its check is due at ${new Date(dueAt(hook.pending)).toTimeString().slice(0, 5)}.`);
+        } catch (e) {
+          log(`${shown}: its first record is in Dropbox, but its check could not note it (${e.code || "an error"}).`);
+        }
+      }
       return;
     }
     // A video made for a plan kept on this Mac was filed into the plan's video/ here: nothing is in Dropbox to check, and the run's folder goes.
@@ -645,8 +684,10 @@ async function workOn(file, deps) {
       try {
         // No sound is read, no transcript, plan or words are made, and so there are no retakes, no guess and no fingerprint to match.
         filed = fileEpisode({ file, made: [], at: files.at, facts, printed, kind: null, read: null, reels: [], work, dropFile: arrived, label, ...lightFields({ name, facts, plan: null, words: [], root: episode.root }, { log, whole, home: episode.home }) }, deps);
+        hook.filed = true;
         afterFiling(filed);
       } catch (e) {
+        dropHooked();
         if (e.code === "DROP_CHANGED") {
           log(`${shown}: it changed in the drop folder while it was imported, so this import is stopped, and the new file is imported on its own.`);
           progress.drop();
@@ -770,11 +811,13 @@ async function workOn(file, deps) {
         // that one only once she says so. The video the join made is filed into its plan instead (`into`), as the kind the rule
         // gives it ("raw", or "short video"), and is nobody's new version.
         filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: into ? (kind === "short video" ? "short video" : "raw") : null, read: null, reels: [], work, dropFile: arrived, label, ...(into ? { into } : {}), ...lightFields({ name, facts, plan, words: planned.words || [], root: episode.root, matching: !into }, { log, whole, home: episode.home }) }, deps);
+        hook.filed = true;
         const match = filed.record.answer ? filed.record.answer.match : null;
         if (match) log(`${shown}: its words are those of the episode ${match}, so her card offers it as a new version of that one.`);
         // The late check is kept on this Mac's own disk, so a run stopped before it leaves it for the next run.
         afterFiling(filed);
       } catch (e) {
+        dropHooked();
         if (e.code === "DROP_CHANGED") {
           // Nothing of it was put into Dropbox. The new file is imported on its own, as another recording.
           log(`${shown}: it changed in the drop folder while it was imported, so this import is stopped, and the new file is imported on its own.`);
@@ -862,37 +905,6 @@ export async function importInto(file, into, deps) {
 const SAME_LENGTH = 0.1;
 
 export const sameVideo = (a, b) => a.width === b.width && a.height === b.height && a.fps === b.fps && Math.abs(a.duration - b.duration) <= SAME_LENGTH;
-
-/** Whether the first `length` bytes of the files at `a` and `b` are the same, read a megabyte at a time. False when either
-    cannot be read. */
-function startsAlike(a, b, length) {
-  let fa;
-  let fb;
-  try {
-    fa = openSync(a, "r");
-    fb = openSync(b, "r");
-    const size = 1024 * 1024;
-    const ba = Buffer.alloc(size);
-    const bb = Buffer.alloc(size);
-    for (let at = 0; at < length; at += size) {
-      const n = Math.min(size, length - at);
-      if (readSync(fa, ba, 0, n, at) !== n || readSync(fb, bb, 0, n, at) !== n || !ba.subarray(0, n).equals(bb.subarray(0, n))) return false;
-    }
-    return true;
-  } catch (e) {
-    return false;
-  } finally {
-    if (fa !== undefined) closeSync(fa);
-    if (fb !== undefined) closeSync(fb);
-  }
-}
-
-/** Whether the files at `a` and `b` hold the same bytes. */
-function sameBytes(a, b) {
-  const sa = statSync(a, { throwIfNoEntry: false });
-  const sb = statSync(b, { throwIfNoEntry: false });
-  return Boolean(sa && sb) && sa.size === sb.size && startsAlike(a, b, sa.size);
-}
 
 /** Put the files made again of an episode's video into its folder, by the rule: each made whole in the run's folder `work`,
     the one before deleted, the new one cloned in (replaceIn), never moved. Then the episode's record is written again, with

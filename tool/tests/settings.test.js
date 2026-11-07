@@ -2946,6 +2946,31 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
       assert.equal(after.drop, "Drop");
       t.done();
     });
+    it("H1 a pending of a kind is not an import's: a switch back from the picked folder is not refused for it (L5)", async () => {
+      const t = mac({ drop: "Drop" });
+      mkdirSync(t.desktop, { recursive: true });
+      writeSettings(t.home, { dropPath: t.desktop });
+      for (const kind of ["record", "final", "original"]) {
+        const dir = join(pendingFolder(t.home), kind);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, kind === "final" ? "e-20261106-ab0001-1.json" : "e-20261106-ab0001.json"), JSON.stringify({ version: 1, kind, id: "e-20261106-ab0001", name: "x", folder: "/x", root: t.root, machine: "Mac Studio", revision: 1, rev: 2, entries: [], took: [], work: null, lastCopy: 1, video: "Talk.mov", bytes: 5 }));
+      }
+      t.said.length = 0;
+      assert.equal(await t.run("plan", ...t.told, "--drop", "Drop", "--switch-back"), 0, t.said.join("\n"));
+      // The same pendings name a failed import's video, and still say nothing: only the import's own pending is read there.
+      writeFileSync(join(t.desktop, "Talk.mov"), "video");
+      const own = importingFolderOf({ root: t.root, dropPath: t.desktop }, t.home);
+      mkdirSync(own, { recursive: true });
+      writeFileSync(join(own, "Talk.mov (Mac Studio) 1.json"), JSON.stringify({ version: 1, machine: "Mac Studio", pid: 4242, video: "Talk.mov", bytes: 5, seconds: 120, step: "Filing", at: AT.toISOString(), failed: "it could not be filed into Episodes" }));
+      t.said.length = 0;
+      assert.equal(await t.run("write", ...t.told, "--drop", "Drop", "--switch-back"), 1);
+      assert.deepEqual(t.said.slice(0, 3), [`Not written: the drop folder would change from ${t.desktop} to Drop, and work is not finished in the old one:`, "  1 import failed, and its video is still in the old folder.", "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again."]);
+      rmSync(join(t.desktop, "Talk.mov"));
+      rmSync(join(own, "Talk.mov (Mac Studio) 1.json"));
+      t.said.length = 0;
+      assert.equal(await t.run("write", ...t.told, "--drop", "Drop", "--switch-back"), 0, t.said.join("\n"));
+      t.done();
+    });
     it("a switch back from a picked folder reads the local status folder: a failed import there is refused in the words of the old folder's work, and nothing is written (Phase 3, L3)", async () => {
       const t = mac({ drop: "Drop" });
       mkdirSync(t.desktop, { recursive: true });
