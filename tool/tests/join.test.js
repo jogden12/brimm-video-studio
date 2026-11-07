@@ -21,7 +21,6 @@ import { fileEpisode, readPendings } from "../filing.js";
 import { clockAt, importInto } from "../unedited.js";
 import { COPY_STEP } from "../guide.js";
 import { addRates, progressFolder } from "../progress.js";
-import { holds } from "../snapshot.js";
 import { episodeWork } from "../settings.js";
 import { localDay } from "../shared/text.js";
 import { FOOTAGE_STEP, WORK_COPY_STEP, footageCopyPaths, workCopyDir, workCopyKey, workCopyPaths } from "../workcopy.js";
@@ -1065,7 +1064,7 @@ describe("the join run, a talking part with no sound (PR H5b, ruling 5: a video 
       })
     };
     const deps = { episode: { root: t.root, machine: "Mac Studio", checkout: "/checkout", home: t.home }, clone: t.ctx.deps.clone, sameDisk: () => true, commit: "c709b57" };
-    const filing = (facts, printed, kind) => fileEpisode({ file, made: [], at: (to) => to, fcpxml: "", facts, printed, kind, read: null, reels: [], work, fingerprint: "", into }, deps);
+    const filing = (facts, printed, kind) => fileEpisode({ file, made: [], at: (to) => to, facts, printed, kind, read: null, reels: [], work, fingerprint: "", into }, deps);
     const SILENT_FACTS = { duration: 60, width: 1920, height: 1080, fps: "30/1", sound: false };
     for (const kind of ["raw", "short video"]) {
       assert.throws(() => filing(SILENT_FACTS, silentOf("60.000000"), kind), /^Error: a video with no sound takes no kind, so it is not filed as one$/, kind);
@@ -1809,14 +1808,6 @@ describe("the guide, and the words of the join through the guard (PR H5b)", () =
   });
 });
 
-describe("a snapshot of the project of a video made from a plan (PR H5b)", () => {
-  it("leaves the footage in media/ out, as it leaves the recording: a project rebuilt on the other Mac gets it at its open, where the copies are made again from the parts' own videos", () => {
-    for (const rel of ["media/b-roll-2.mp4", "media/screen-4.mp4", "media/recording.mp4"]) assert.equal(holds(rel), false, rel);
-    // What a snapshot does hold of such a project is what it held: the notes with the footage rule, the cues with their material, the brand kit.
-    for (const rel of ["CLAUDE.md", "brimm/graphic-cues.json", "brimm/facts.json", "index.html"]) assert.equal(holds(rel), true, rel);
-  });
-});
-
 describe("the README on the join (PR H5b)", () => {
   const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
   const rows = readme.split("\n");
@@ -1897,63 +1888,6 @@ describe("from the parts to the project: the join, the copies and the open, run 
     // Nothing of any of it was written into Dropbox but the join's files and the records: no part's video was taken, and the footage is only on this Mac.
     for (const one of [broll, screen, client, talk]) assert.ok(existsSync(join(one.folder, one.record.video.file)), "a part's own video stays in its own episode");
     assert.deepEqual(listAll(folder).filter((rel) => /b-roll|screen|footage/.test(rel)), []);
-    t.done();
-  });
-  it("rebuilds the project on the other Mac from its snapshot, and gives it the footage her client agreed to and none that waits for a click", async () => {
-    const t = world({ probes: longTalk("Take 1"), copy: "120.000000" });
-    t.ctx.deps.running = async () => false;
-    writeFileSync(join(t.home, "hyperframes-stand-in.json"), JSON.stringify({ open: "opened" }));
-    await planned(t, { shots: [...SHOT_ARGS, ...CUES] });
-    const talk = part(t, 1, { words: SCRIPT.join(" ").split(" ") });
-    part(t, 2, { as: "b-roll", shot: 2 });
-    part(t, 3, { as: "screen", shot: 4, client: true });
-    part(t, 4, { as: "b-roll", shot: 5, client: true });
-    const studio = (more = {}) => appDeps(t, { app: { cli: STAND_IN, node: process.execPath, guidance: GUIDANCE }, ...more });
-    // The plan is its video; the launch agent's late check of it passes; her click is noted for the screen recording of one client and not for the b-roll of the other.
-    assert.equal((await joinRun(t, [talk.record.id])).code, 0);
-    const { finishLate } = await import("../filing.js");
-    const [pending] = readPendings(t.home);
-    assert.deepEqual(finishLate(pending, { episode: { root: t.root, machine: "Mac Studio", home: t.home }, log: () => {}, notify: () => {}, clone: t.ctx.deps.clone, sameDisk: () => true }).problems, []);
-    const run = async (cmd, args, opts) => (cmd === "/usr/bin/osascript" ? { code: 0, stdout: `button returned:They agreed, text returned:${TYPED}\n`, stderr: "" } : t.ctx.deps.run(cmd, args, opts));
-    assert.equal((await on(depsOf(t, { run }), "plan", TITLE, "agreed", labelOf(3))).code, 0);
-    // Mac Studio makes the copies and the project, which holds the footage that may go in, and hands it over.
-    assert.equal((await on(studio(), "workcopy", "--now", FOLDER_NAME(t))).code, 0);
-    assert.equal((await on(studio(), "app", TITLE)).code, 0);
-    const name = planOf(t).app.projects[0].name;
-    const here = join(episodeWork(t.home, FOLDER_NAME(t)), name);
-    assert.deepEqual(readdirSync(join(here, "media")).sort(), ["b-roll-2.mp4", "recording.mp4", "screen-4.mp4"]);
-    const handed = await on(studio(), "release", TITLE);
-    assert.equal(handed.code, 0, handed.text);
-    // The snapshot holds the project but for its media/: the notes and the cues are in it, the footage is not.
-    const snapshotted = Object.keys(planOf(t).files).filter((rel) => rel.startsWith("app-snapshot/"));
-    assert.ok(snapshotted.some((rel) => rel.endsWith(`/${name}/CLAUDE.md`)) && snapshotted.some((rel) => rel.endsWith("/brimm/graphic-cues.json")), snapshotted.join("\n"));
-    assert.deepEqual(snapshotted.filter((rel) => rel.includes("/media/")), []);
-    // Sallie's laptop has no folder for the project and no copy of anything: it rebuilds the project from the snapshot, and its video is to be made.
-    const b = otherMac(t);
-    b.deps.settings = { ...b.deps.settings, app: "hyperframes", handoffVersion: 2 };
-    b.deps.running = async () => false;
-    b.deps.app = { cli: STAND_IN, node: process.execPath, guidance: GUIDANCE };
-    writeFileSync(join(b.home, "hyperframes-stand-in.json"), JSON.stringify({ open: "opened" }));
-    const there = join(episodeWork(b.home, FOLDER_NAME(t)), name);
-    const rebuilt = await on(b.deps, "app", TITLE);
-    assert.equal(rebuilt.code, 0, rebuilt.text);
-    assert.ok(rebuilt.said.some((line) => line.includes("is rebuilt on this Mac from what Mac Studio handed over")), rebuilt.text);
-    assert.equal(existsSync(join(there, "index.html")), true);
-    assert.equal(existsSync(join(there, "media", "screen-4.mp4")), false, "the snapshot has no media/");
-    // The run that makes the video makes the copies of the footage that may go in, here too; the open after it puts the video back and the footage in.
-    assert.equal((await on(b.deps, "workcopy", "--now", FOLDER_NAME(t))).code, 0);
-    assert.deepEqual(readdirSync(workCopyDir(b.home, FOLDER_NAME(t))).filter((n) => n.startsWith("footage-") && n.endsWith(".mp4")).map((n) => n.split("-")[1]), ["2", "4"], "no copy for the client who has not agreed");
-    const opened = await on(b.deps, "app", TITLE);
-    assert.equal(opened.code, 0, opened.text);
-    assert.ok(opened.said.includes("It's open in HyperFrames."), opened.text);
-    assert.deepEqual(readdirSync(join(there, "media")).sort(), ["b-roll-2.mp4", "recording.mp4", "screen-4.mp4"]);
-    assert.equal(existsSync(join(there, "media", "b-roll-5.mp4")), false);
-    // The rebuilt project still names the file of the cue whose client has not agreed, and the notes still say a cue with no file has no footage yet.
-    const cues = JSON.parse(readFileSync(join(there, "brimm", "graphic-cues.json"), "utf8")).cues;
-    assert.deepEqual(cues.map((cue) => cue.material ?? null), [null, "media/b-roll-2.mp4", "media/screen-4.mp4", "media/b-roll-5.mp4"]);
-    assert.match(readFileSync(join(there, "CLAUDE.md"), "utf8"), /A cue whose `material` is not in `media\/` has no footage yet, or waits for her client's agreement/);
-    // No second run was asked for: nothing was missing.
-    assert.deepEqual(t.started.filter(([, args]) => args.includes("--footage")), []);
     t.done();
   });
   it("keeps, in the record of the video a plan made, nothing a record's own judge would refuse: a record with a kind and no sound is the filing's to refuse, not the judge's", async () => {

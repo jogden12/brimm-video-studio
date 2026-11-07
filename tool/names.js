@@ -39,18 +39,9 @@ export const shortId = (id) => String(id).slice(-6);
 /** The name of a part as it goes into a name: "main", or "reel 2". */
 export const partName = (part) => (part === "main" ? "main" : `reel ${part.reel}`);
 
-/** The name a push gives its project in Final Cut, as "Pricing talk main v3 3fa9c1". Share and File > Export XML… name their
-    files after the project, so the push records it and files are found by it, never by the episode's current name. */
-export const projectName = ({ name, part, v, id }) => `${fileSafe(name)} ${partName(part)} v${v} ${shortId(id)}`;
-
 /** Where a timeline is kept in an episode's folder, as a path from it: the import's own as "edit/main.v0.fcpxml", and a push
     as "edit/main.v3.mac-studio.fcpxml", with the Mac's short name, so the two Macs never write the same file. */
 export function timelineFile({ part, v, machine }) {
   const kind = part === "main" ? "main" : `reel-${part.reel}`;
   return v === 0 ? `edit/${kind}.v0.fcpxml` : `edit/${kind}.v${v}.${machineSlug(machine)}.fcpxml`;
 }
-
-/** The Final Cut event every push of an episode puts its project in: the episode folder's name, for the main video and the
-    Reels alike, never changed. Phase 0 on Final Cut Pro 12.4 (A4): a new project pushed into the same library and event
-    asks nothing, and the video stays linked once. */
-export const eventName = (folder) => String(folder);

@@ -1,9 +1,9 @@
 // The episode import's own steps. When this Mac has settings and the folder the import watches is this Mac's drop folder,
 // in BRIMM Video in Dropbox, each video is made into an episode: everything is made as for any video, held in the run's own
 // folder, and then filed into a folder of its own in Episodes. The raw video is cloned in from the drop folder, each file
-// made of it is cloned in from the run's folder, the Final Cut file goes into edit/ as main.v0.fcpxml, naming its video by a
-// path from itself and naming no library, and the episode's first record, record/0001.json, comes last: it is the sign that
-// the import finished. Nothing in Dropbox is renamed, moved or written into (dropbox.js). The raw video stays in the drop
+// made of it is cloned in from the run's folder, and the episode's first record, record/0001.json, comes last: it is the sign that
+// the import finished. The import makes no Final Cut file and no edit/ folder (Phase 2); an episode of an older import still has
+// them, and they are read as they were. Nothing in Dropbox is renamed, moved or written into (dropbox.js). The raw video stays in the drop
 // folder, and the run's folder stays, until the late check.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -14,7 +14,7 @@ import { createdOf, waitingToCut } from "./cuts.js";
 import { isMedia } from "./lib.js";
 import { LATE_CHECK_MS, cloneIn, lateCheck, replaceIn, textWriter } from "./dropbox.js";
 import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, recordCopies, recordNumbers, writeEpisode, shownName } from "./episode.js";
-import { episodeFolderName, fileSafe, timelineFile } from "./names.js";
+import { episodeFolderName, fileSafe } from "./names.js";
 import { dropFolder, episodeWork, episodesFolder, pendingFolder, runsFolder, seenFile } from "./settings.js";
 // detached.js takes caffeinate and thisCheckout from here: each is used only when called, as kinds.js's are, so the cycle costs nothing at load.
 import { releaseEpisodeLock, takeEpisodeLock } from "./detached.js";
@@ -94,13 +94,12 @@ export const thisCheckout = () => dirname(dirname(fileURLToPath(import.meta.url)
 
 /** File a video that has been worked on into its episode, in Episodes under BRIMM Video. `file` is the raw video in the drop
     folder; `made` are the files made of it, each where it belongs, and `at(to)` where its whole copy is in the run's own
-    folder `work`; `fcpxml` is which of them is the Final Cut file, which goes into edit/main.v0.fcpxml; `facts` and
-    `printed` are what ffprobe said; `kind` is the episode's kind; `read` is Claude's reply as it was read, or null; `reels`
-    are the record's Reels, made of the Reel candidates (reelEntries, in reels.js). A made file goes into the episode folder
-    where it sits beside the video, "Talk.srt" or "previews/reel-1.mp4", and a folder it needs there is made. `deps` gives `episode` ({ root, machine, checkout, home }), and `clone`, `sameDisk`, `log`,
+    folder `work`; `facts` and `printed` are what ffprobe said; `kind` is the episode's kind; `read` and `reels` are null and [] for every
+    caller now (the import asks Claude nothing, and makes no Reel candidates). A made file goes into the episode folder
+    where it sits beside the video, "Talk.srt", and a folder it needs there is made. `deps` gives `episode` ({ root, machine, checkout, home }), and `clone`, `sameDisk`, `log`,
     `today`, `now`, `commit` and `rand` when a test gives others. A video the facts say has no sound (`facts.sound` is false; PR H5a)
     is filed with `video.sound` false in its record, and nothing else made of it (`made` is empty).
-    The light import (spec 2026-10-22, section 1) gives no Final Cut file, so no edit/ folder is made, and `kind` null, with
+    The import (the light import, spec 2026-10-22, section 1) gives no Final Cut file, so no edit/ folder is made, and `kind` null, with
     `answer` (her answer, waiting, with the guess and the episode whose words it matched, or null), `label` and
     `fingerprint`, which go into the record as they are (newEpisode). An import never sets `versionOf`: her answer does.
     The folder is made, or the one a stopped import left is used again; the raw video is cloned in from the drop folder; each
@@ -119,7 +118,7 @@ export const thisCheckout = () => dirname(dirname(fileURLToPath(import.meta.url)
     never over a file: one of the names is there already, and the call throws. And when it throws, for that or for a record that
     cannot be written, every file this call put in is taken away again, so that the episode is as it was. `file` and `made` are
     then wherever the call's caller made them, and there is no drop folder: `dropFile` is not asked. */
-export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read, reels = [], work, dropFile, answer = null, label = "", fingerprint = "", into = null }, deps) {
+export function fileEpisode({ file, made, at, facts, printed, kind, read, reels = [], work, dropFile, answer = null, label = "", fingerprint = "", into = null }, deps) {
   const { episode, log = () => {} } = deps;
   // The video in the drop folder must still be the one that was worked on: one put in its place meanwhile, as a corrected
   // export, is another recording, and is never filed with this one's transcript and cuts.
@@ -132,7 +131,6 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
   mkdirSync(episodes, { recursive: true });
   const found = into ? { name: basename(into.folder), reused: false } : findFolder(episodes, { video, bytes, machine: episode.machine, day });
   const path = into ? into.folder : join(episodes, found.name);
-  if (fcpxml) mkdirSync(join(path, "edit"), { recursive: true });
   // A stopped import may have left a record that is not whole. It is no one's record, and the first one is written anew.
   if (found.reused) rmSync(join(path, RECORD_DIR), { recursive: true, force: true });
   const entries = [];
@@ -153,7 +151,7 @@ export function fileEpisode({ file, made, at, fcpxml, facts, printed, kind, read
   let record;
   try {
     put(file, video);
-    for (const to of made) put(at(to), to === fcpxml ? timelineFile({ part: "main", v: 0 }) : relative(dirname(file), to).split(sep).join("/"));
+    for (const to of made) put(at(to), relative(dirname(file), to).split(sep).join("/"));
     const first = newEpisode({
       id: into ? into.record.id : newId(day, deps.rand),
       machine: episode.machine,
@@ -574,10 +572,9 @@ export function caffeinate(pid) {
     the design (2026-10-22) teaches the import Zoom's downloads. */
 const ZOOM_HELD = "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer.";
 
-/** Whether the light import leaves the video `name` where it is, held: a light import (`deps.light`) of a file that Zoom's
-    names say is its download. Only an episode import asks, so a watched folder that is not this Mac's drop folder and the
-    one-file command line never hold anything. */
-const holdsZoom = (name, deps) => Boolean(deps.light) && isZoomName(name);
+/** Whether the import leaves the video `name` where it is, held: a file that Zoom's names say is its download. Only an episode
+    import asks, so a watched folder that is not this Mac's drop folder and the one-file command line never hold anything. */
+const holdsZoom = (name) => isZoomName(name);
 
 /** Hold the video `name` in the drop folder `dir`: write the status that says why it is not imported, as a new file by the
     rule, so that both Macs' `episodes` say it. Its label is its Zoom time alone (kinds.js zoomTimeOf), by which every command on
@@ -599,14 +596,13 @@ function hold(name, dir, deps, told) {
 }
 
 /** Take away this Mac's status of each video it held that it holds no longer: the file has left the drop folder `dir`, as
-    when it is put in BRIMM VIDEO Transfer, or is another file of that name (its size is not the status's), or this is no
-    light import (`deps.light`) any more. */
+    when it is put in BRIMM VIDEO Transfer, or is another file of that name (its size is not the status's). */
 function releaseHeld(dir, deps) {
   const { episode, log = () => {} } = deps;
   for (const { status } of readStatuses(episode.root)) {
     if (!status || !status.held || status.machine !== episode.machine) continue;
     const size = statSync(join(dir, status.video), { throwIfNoEntry: false })?.size;
-    if (holdsZoom(status.video, deps) && size === status.bytes) continue;
+    if (holdsZoom(status.video) && size === status.bytes) continue;
     try {
       removeStatus(episode.root, status.video, episode.machine, status.import || "");
     } catch (e) {
@@ -622,20 +618,20 @@ const LOOK_AGAIN_MS = 60 * 1000;
 
 /** The episode import of this Mac's drop folder `dir`, with the folder's lock held: the late checks earlier runs left that
     are due, first; then each video waiting in the folder (`importOne(name)`, which resolves what uneditedFile does), unless
-    an episode or a status holds it (heldBy), or, in a light import (`deps.light`), it is a Zoom download, which is held in
+    an episode or a status holds it (heldBy), or it is a Zoom download, which is held in
     the folder with a status that says why until the import takes them; then, while any late check of this run is not yet
     due, a wait of a minute at most, a look for videos that arrived meanwhile, and each late check that has come due; and,
     while a video imports, each minute, the late checks that have come due then, whose drop files the loop then passes over.
     The Mac is kept awake while there is work (`deps.keepAwake`). Resolves the results of the videos imported, and of those
-    held, each with `held`. In a light import the log names no video by its file, which may be named for a client: a video by
+    held, each with `held`. The log names no video by its file, which may be named for a client: a video by
     the label its status carries, or as "A video in the drop folder", and why it is held with nothing of its file's names in it.
     A Zoom download is named by its Zoom time alone (kinds.js zoomTimeOf), the part of its name that is Zoom's: the time and a
     number. */
 export async function importEpisodes(dir, deps, importOne) {
   const { episode, log = () => {}, wait, clock = Date.now, keepAwake = caffeinate } = deps;
-  /** How the log names the video `name` in the drop folder: by its file, as always, and in a light import by its label, or as "A
-      video in the drop folder", unless Zoom named it. `labels` gives the labels the statuses carried, by the video's file. */
-  const named = (name, labels = labelsNow()) => (!deps.light ? name : isZoomName(name) ? zoomTimeOf(name) : labels.get(name) || "A video in the drop folder");
+  /** How the log names the video `name` in the drop folder: by its label, or as "A video in the drop folder", unless Zoom named it.
+      `labels` gives the labels the statuses carried, by the video's file. */
+  const named = (name, labels = labelsNow()) => (isZoomName(name) ? zoomTimeOf(name) : labels.get(name) || "A video in the drop folder");
   const labelsNow = () => new Map(readStatuses(episode.root).filter(({ status }) => status && status.machine === episode.machine && status.label).map(({ status }) => [status.video, status.label]));
   const results = [];
   // The files tried in this run, by name, inode and size: a video dropped again under the same name is another file. A video
@@ -723,7 +719,7 @@ export async function importEpisodes(dir, deps, importOne) {
       log(`The folder could not be read (${e.code || e.message}). If it is in Dropbox or another cloud drive, allow node to read it in System Settings, Privacy & Security, Files and Folders.`);
       return;
     }
-    if (first) log(names.length ? `Looked in the folder: ${names.length} waiting${deps.light ? "" : ` (${names.join(", ")})`}.` : "Looked in the folder: nothing is waiting.");
+    if (first) log(names.length ? `Looked in the folder: ${names.length} waiting.` : "Looked in the folder: nothing is waiting.");
     for (const name of names) {
       // A late check that came due while an earlier video imported took this video out of the folder: it is no video to import,
       // and none to say failed.
@@ -731,11 +727,11 @@ export async function importEpisodes(dir, deps, importOne) {
       const id = key(name);
       let held = heldBy({ root: episode.root, video: name, bytes: statSync(join(dir, name), { throwIfNoEntry: false })?.size ?? 0 });
       // A light import takes no Zoom download yet: it is left in the folder, and its status says why.
-      if (!held && holdsZoom(name, deps)) held = hold(name, dir, deps, told);
+      if (!held && holdsZoom(name)) held = hold(name, dir, deps, told);
       if (held) {
         if (!told.has(`${id}:${held}`)) {
           told.add(`${id}:${held}`);
-          log(deps.light ? `${named(name)}: ${withoutNames(held, namesOf(name), [named(name)])}` : `${name}: ${held}`);
+          log(`${named(name)}: ${withoutNames(held, namesOf(name), [named(name)])}`);
           results.push({ ok: true, name, held });
         }
         continue;

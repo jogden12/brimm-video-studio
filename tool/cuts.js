@@ -465,24 +465,6 @@ const SHOWN_LAST = 8;
     A reason that opens with its own kind stands alone, so that such a cut is not named twice. */
 export const cutReason = ({ kind, why }) => (why.toLowerCase().startsWith(`${kind}: `) ? why : `${kind}: ${why}`);
 
-/** The notes for the editor, one for each join: how much was taken out there and why, in the plan's own words. What is cut
-    with nothing kept in between is one join, and has one note. A note is given the moment its cut starts, and the Final Cut
-    writer puts it on the first picture after the join. */
-export function joinNotes(ranges) {
-  const capital = (text) => text[0].toUpperCase() + text.slice(1);
-  const notes = [];
-  let open = null;
-  for (const range of ranges) {
-    if (range.keep) open = null;
-    else {
-      if (!open) notes.push(open = { at: range.start, gone: 0, why: [] });
-      open.gone += range.end - range.start;
-      open.why.push(capital(cutReason(range)));
-    }
-  }
-  return notes.map((note) => ({ at: note.at, text: `Taken out, ${note.gone.toFixed(1)} seconds. ${note.why.join(". ")}` }));
-}
-
 /** The plan for a person to read: a first line with the totals, then one line for each range. `note` goes above them when
     something could not be made. What is cut is shown whole, and of a long kept stretch only how it begins and ends. The exact
     times are in the plan's JSON. */

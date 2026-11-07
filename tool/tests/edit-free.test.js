@@ -1,6 +1,6 @@
 // `free "<episode>"`: taking an episode's working copy and renders away from Sallie's chat (plan PR 15; architecture 2026-10-27,
 // sections 6.1, 6.2 and 7.4). edit.js is only the wiring here. It finds the episode through the gate, takes no flag, says the old
-// spelling `free "<episode>" library` is held back, and gives the rest to free.js, which free.test.js tests on its own. These
+// spelling `free "<episode>" library` is no command now (it is the help and 2), and gives the rest to free.js, which free.test.js tests on its own. These
 // tests run all of it through editMain, on a project that `app` really made (project.js's writer, with the stand-in for the
 // pinned command line), so that a path `free` names is the path the writer wrote; and they run `app` afterwards, which puts the
 // video back (app.js). Nothing here touches the real home, Dropbox or Downloads, and no test runs HyperFrames, the app or ffmpeg.
@@ -53,7 +53,6 @@ const WORKING_COPY = "the working copy's bytes";
 const OPEN = "It's open in HyperFrames.";
 const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
 const NOTHING = `There is nothing to take away for ${NAME} on this Mac.`;
-const HELD_BACK = "Deleting an episode's Final Cut library by command comes in a later version. To free space now, use Final Cut's File > Delete Generated Library Files.";
 
 /** What the stand-in wrote down of each run of the pinned command line on this Mac. */
 function runsOf(t) {
@@ -138,16 +137,16 @@ describe("free: the command", () => {
     assert.deepEqual([treeOf(w.work), reread(w.found).rev], before);
     w.t.done();
   });
-  it("says the old spelling, a Final Cut library, is held back, with or without --yes, and takes nothing: it is not gated, and names no episode in what it says", async () => {
+  it("says the help and ends with 2 for the old spelling, free \"<episode>\" library, with or without --yes: nothing is taken, the gate is not asked, and no Final Cut library is spoken of", async () => {
     const w = await worked();
     const before = treeOf(w.work);
     for (const more of [[], ["--yes"]]) {
       const r = await on(w.t.ctx.deps, "free", FOLDER, "library", ...more);
-      assert.deepEqual([r.code, r.said], [1, [HELD_BACK]], more.join(" "));
+      assert.deepEqual([r.code, r.said], [2, [HELP]], more.join(" "));
     }
     assert.deepEqual(treeOf(w.work), before);
     const unanswered = world({ record: UNANSWERED_RECORD });
-    assert.deepEqual((await on(unanswered.t.ctx.deps, "free", FOLDER, "library")).said, [HELD_BACK]);
+    assert.deepEqual((await on(unanswered.t.ctx.deps, "free", FOLDER, "library")).said, [HELP]);
     w.t.done();
     unanswered.t.done();
   });
@@ -256,7 +255,7 @@ describe("free: an episode HyperFrames was opened on", () => {
     writeFileSync(recordFile(w.found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, editing: HERS }));
     const before = treeOf(w.work);
     const r = await plain(w.t.ctx.deps, "free", FOLDER);
-    assert.deepEqual([r.code, r.said, treeOf(w.work)], [1, [`Sallie's laptop has ${NAME} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.`], before]);
+    assert.deepEqual([r.code, r.said, treeOf(w.work)], [1, [`Sallie's laptop has ${NAME} open. Carry on there. Nothing was changed.`], before]);
     w.t.done();
   });
   it("refuses while the working copy is being made, and while any other run is at work, and takes nothing", async () => {

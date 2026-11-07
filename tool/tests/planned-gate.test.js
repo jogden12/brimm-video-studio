@@ -110,7 +110,7 @@ describe("gateFor, a planned episode", () => {
   });
   it("refuses every other command in the same words, which name the title she gave and nothing else", () => {
     const others = COMMAND_NAMES.filter((name) => ![...UNSCOPED, ...PLANNED, "leave"].includes(name));
-    assert.ok(others.length > 25, others.join(" "));
+    assert.ok(others.length > 15, others.join(" "));
     for (const name of [...others, "somethingNew", "render", "read", "teachings"]) for (const on of [ON, OFF]) assert.equal(gateFor(name, planned(), on), NOT_PLANNED_YET, name);
   });
   it("names the plan by its name when she has given it another, as every line does", () => {
@@ -242,7 +242,7 @@ describe("a planned episode refused by the gate in a command, in the words of th
     const t = setup();
     try {
       folderWith(t, planned());
-      for (const ask of [["open", TITLE], ["app", TITLE], ["push", TITLE], ["finish", TITLE], ["kind", TITLE, "raw", "--private", "no"], ["release", TITLE], ["show", TITLE, "transcript"], ["free", TITLE], ["reels", TITLE], ["ask", TITLE]]) {
+      for (const ask of [["open", TITLE], ["app", TITLE], ["finish", TITLE], ["kind", TITLE, "raw", "--private", "no"], ["show", TITLE, "transcript"], ["free", TITLE], ["reels", TITLE], ["ask", TITLE]]) {
         const said = [];
         const code = await editMain(ask, { ...t.ctx.deps, say: (line) => said.push(line) });
         assert.deepEqual([code, said], [1, [NOT_PLANNED_YET]], ask.join(" "));

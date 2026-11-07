@@ -242,17 +242,6 @@ describe("F4. where there are none", () => {
     assert.equal(result.next.includes("uggestion"), false);
     w.t.done();
   });
-  it("lists none for a main video that went the Final Cut way, as a Final Cut finish never did", async () => {
-    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
-    const w = fw({ projects: ["reel 2"], candidates: CANDIDATES, over: { main: { ...EDITED.main, pushed: pushes } } });
-    w.t.shared(`${PROJECT.main}.mp4`, 2000);
-    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    exportOf(w, "reel 2");
-    const { found, result } = await finished(w);
-    assert.equal("suggestions" in handoffOf(found), false);
-    assert.equal(result.next.includes("uggestion"), false);
-    w.t.done();
-  });
   it("places them again on a second finish that keeps the main video, from the word times the last finish kept, in the next revision", async () => {
     const w = ready();
     const { found } = await finished(w);

@@ -2,10 +2,10 @@
 // own), and where its checkout of brimm-video is. The Claude model is not among them: it is named in unedited.js, so that both
 // Macs read a plan with the same one. And
 // the folders found from them: in BRIMM Video, this Mac's drop folder, the episodes and the status files of imports; on this
-// Mac's own disk, BRIMM Video Work, where Final Cut's work is kept, never in Dropbox.
+// Mac's own disk, BRIMM Video Work, where each episode's work on this Mac is kept, never in Dropbox.
 // The settings are kept in Application Support, on this Mac's own disk. install.sh --machine writes them, through this
 // file's command line, and edit.js and the import read them. A write keeps every setting it does not write. Besides those three,
-// the switch to the light import has settings of its own, all optional: what is absent is today's way (import "full", readings
+// the switch to the light import has settings of its own, all optional: what is absent is the default (import "light", readings
 // on, hand-off version 1, the drop folder Unedited Video, no teachings from sessions). install.sh --machine writes them as it is
 // told (--import, --handoff, --drop, and --rules-only as readings off): `plan` says what `write` would write, and refuses what
 // `write` would, before the installer changes anything. A switch of the drop folder is refused while the old folder still holds
@@ -14,10 +14,10 @@
 // settings of the switch later, but never the drop folder: it says to switch that with the installer, and changes nothing.
 //
 //   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-//                          [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+//                          [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
 //   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-//                         [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
-//   node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+//                         [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+//   node settings.js set [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
 //   node settings.js sessions --teachings on --cli-account <email> --app-account <email>
 //   node settings.js sessions --teachings off
 //   node settings.js show
@@ -49,22 +49,16 @@ export const episodesFolder = (root) => join(root, "Episodes");
 export const referencesFolder = (root) => join(root, "References");
 /** The folder of the small status files that say how far each import has got, in Episodes. */
 export const importingFolder = (root) => join(episodesFolder(root), ".importing");
-/** Where this Mac keeps its work in Final Cut: on its own disk, never in Dropbox. */
+/** Where this Mac keeps each episode's work: its projects, renders and copies, on its own disk, never in Dropbox. */
 export const workFolder = (home) => join(home, "BRIMM Video Work");
-/** The one folder Final Cut's Share and File > Export XML… both save into, on this Mac's own disk. */
-export const fromFinalCutFolder = (home) => join(workFolder(home), "From Final Cut");
 /** Where the HyperFrames app saves an export unless the Export dialog is given another folder (architecture 8.1). On the Mac Studio it is a
     link into Dropbox, so a file in it can be a Dropbox placeholder. exports.js is the one module that looks in it. */
 export const downloadsFolder = (home) => join(home, "Downloads");
 /** Where an import keeps its own folder while it works and until its late check: on the same disk as Dropbox, so its files
     can be cloned in, and not in the temp folder, which macOS may clear before a late check left by a restart is made. */
 export const runsFolder = (home) => join(workFolder(home), ".runs");
-/** This Mac's folder for one episode: the copies handed to Final Cut, and the episode's library. */
+/** This Mac's folder for one episode: its projects, renders and copies, and what detached runs left. */
 export const episodeWork = (home, folder) => join(workFolder(home), folder);
-/** Where the copies of an episode's timelines handed to Final Cut on this Mac are written. */
-export const pushedFolder = (home, folder) => join(episodeWork(home, folder), "pushed");
-/** This Mac's Final Cut library for one episode, named for the episode's folder. */
-export const libraryFor = (home, folder) => join(episodeWork(home, folder), `${folder}.fcpbundle`);
 /** Where this Mac notes the last rev it wrote of each episode's record, so it can tell when Dropbox undid one. */
 export const writtenFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "written.json");
 /** Where this Mac notes when it first saw each video in its drop folder, so that how long one has waited is known whatever
@@ -184,7 +178,7 @@ export function factsOf(home, s, { tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp
 }
 
 /** Whether this Mac does the light import, which asks Claude nothing about a video until its person answers. Anything but
-    "light" in the import setting, and no setting, is today's import. */
+    "light" in the import setting, and no setting, is not set up for them: the import itself is light all the same. */
 export const lightImport = (s) => s?.import === "light";
 
 /** Whether Claude may read what is taught in a client or group session on this Mac: only when Jason has turned the teachings on
@@ -286,7 +280,7 @@ export function writeSettings(home, fields) {
 const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Support/BRIMM Video/settings.json.
 
   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+                               [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
                                write them, as install.sh --machine does, and say where. The settings of the switch that it
                                is told are written with them, read as set reads them, and any setting it is not told is
                                kept. It refuses a value that will not do. Unlike set it changes the drop folder watched
@@ -297,13 +291,13 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                version of such a session is named by the episode's label or, with none, by what it is and
                                its short id ("a client or group session (3fa9c1)"), never by its own file
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-                               [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+                               [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the
                                teachings from sessions, shown as (not shown), and then the import it will be, the drop
                                folder as it is now and as it will be, and, when the folder watched changes, the old one's
                                whole path, a line each, or why it would refuse it. Nothing is written. install.sh asks this
                                before it changes anything
-  node settings.js set [--import light|full] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
+  node settings.js set [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--app hyperframes|off] [--app-handover on|off]
                                change the settings of the switch to the light import, and say what changed. Any other
                                setting is kept. It does not change the drop folder: it is switched by the installer, which
                                makes the new folder, marks it and points the import at it, after it has checked the old one.
@@ -356,11 +350,16 @@ function pairsOf(rest, options) {
 /** Each option of SETTABLE as `set` has it, by the name `pairsOf` gives what it is told. */
 const OF_SET = () => Object.fromEntries(Object.keys(SETTABLE).map((option) => [option, option]));
 
+/** What is said, and nothing is written, when the full import is asked for (Phase 2, "Final Cut retired"): every import is the light
+    one now. A Mac whose settings still say `import: "full"` is read as before, and imports lightly all the same. */
+const FULL_GONE = "The full import is gone: this Mac imports lightly.";
+
 /** What `write` and `plan` are told, as the fields of the settings: { fields }, or { code, said } when it is asked wrongly (2),
     or refused (1): a value that will not do, by the same readers `set` has. */
 function fieldsToldBy(rest) {
   const told = pairsOf(rest, { ...WRITTEN, ...OF_SET() });
   if (!told || told.machine === undefined || told.root === undefined || told.checkout === undefined) return { code: 2, said: HELP };
+  if (told["--import"] === "full") return { code: 2, said: FULL_GONE };
   const values = {};
   for (const option of Object.keys(SETTABLE).filter((o) => told[o] !== undefined)) {
     values[option] = SETTABLE[option].read(told[option]);
@@ -489,7 +488,7 @@ function plan(home, rest, say, now) {
     say(JSON.stringify(shown, null, 2));
     // The import it would be, and the drop folder as it is and as it would be, each on a line of its own, for install.sh, which
     // reads them without parsing JSON.
-    say(`The import will be: ${lightImport(result.settings) ? "light" : "full"}`);
+    say(`The import will be: ${result.settings.import === "full" ? "full" : "light"}`);
     say(`The drop folder is now: ${result.from}`);
     say(`The drop folder will be: ${result.to}`);
     // And when the folder watched changes, the whole path of the old one, which was checked: the installer names it as the one left.
@@ -502,8 +501,8 @@ function plan(home, rest, say, now) {
     it will not do); how that is said; what the setting is while the file does not say; and how a line about it is worded. */
 export const SETTABLE = {
   "--import": {
-    field: "import", takes: "light or full", read: (v) => (v === "light" || v === "full" ? v : undefined), said: String,
-    otherwise: "full", subject: "The import", be: "is", was: "it was"
+    field: "import", takes: "light", read: (v) => (v === "light" || v === "full" ? v : undefined), said: String,
+    otherwise: "light", subject: "The import", be: "is", was: "it was"
   },
   "--readings": {
     field: "readings", takes: "on or off", read: (v) => (v === "on" ? true : v === "off" ? false : undefined), said: (v) => (v ? "on" : "off"),
@@ -552,6 +551,10 @@ function set(home, rest, say) {
     say(HELP);
     return 2;
   }
+  if (told["--import"] === "full") {
+    say(FULL_GONE);
+    return 2;
+  }
   const values = {};
   for (const [option, said] of Object.entries(told)) {
     values[option] = SETTABLE[option].read(said);
@@ -578,7 +581,12 @@ function set(home, rest, say) {
   for (const [option, value] of Object.entries(values)) {
     const { field, said, otherwise, subject, be, was } = SETTABLE[option];
     const before = got.settings[field] ?? otherwise;
-    if (before === value) {
+    // The import that is not in the file is light all the same, but the file must say it for this Mac to be set up for her chat's
+    // questions (lightImport), so it is written once.
+    if (field === "import" && got.settings.import === undefined) {
+      changes[field] = value;
+      lines.push(`${subject} ${be} now ${said(value)}.`);
+    } else if (before === value) {
       lines.push(`${subject} ${be} ${said(value)} already.`);
     } else {
       changes[field] = value;
@@ -656,8 +664,7 @@ function show(home, say, now) {
   say(`  Episodes:  ${episodesFolder(s.root)}`);
   say(`  References:  ${referencesFolder(s.root)}`);
   say(`  BRIMM Video Studio, run from:  ${s.checkout}`);
-  say(`  Work in Final Cut:  ${workFolder(home)}`);
-  say(`  From Final Cut:  ${fromFinalCutFolder(home)}`);
+  say(`  Work folder:  ${workFolder(home)}`);
   if (s.import !== undefined) say(`  Import:  ${s.import}`);
   if (s.readings !== undefined) say(`  Readings:  ${s.readings ? "on" : "off"}`);
   if (s.handoffVersion !== undefined) say(`  Hand-off version:  ${s.handoffVersion}`);

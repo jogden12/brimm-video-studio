@@ -1,3 +1,4 @@
+// History: this ran in phase 0 with modules Studio retired with Final Cut (Phase 2, 6 November 2026); it no longer runs.
 // Phase 0, step B7 (and any push to try by hand): writes a push file as phase 1a hands one to Final Cut, for a video
 // anywhere on this Mac: the video by its whole path, and import options naming the library, copy assets 0 and suppress
 // warnings. It writes one new file on this Mac's own disk and changes nothing else.

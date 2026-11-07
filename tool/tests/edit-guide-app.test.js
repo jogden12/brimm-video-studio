@@ -32,9 +32,8 @@ const OPEN = 'Say "open it in HyperFrames" to edit it there.';
 const AFTER = 'Say "open it in HyperFrames" when it is done.';
 const EXPORTED = 'You have exported it. Say "hand it off" and I will check what you exported.';
 const edit = (last = "") => `Edit it in HyperFrames.${last ? ` Your last request there was ${last}.` : ""} When you are done, export it on This Mac, as MP4, then say "hand it off".`;
-const SHOW = 'Ask for any changes in your own words, then say "show it in Final Cut".';
-const FINISH = 'Trim it by hand in Final Cut. Then Share it with Command-E, and choose File > Export XML…, both into From Final Cut. Then say "finish the episode".';
-const AGAIN = 'It was shown in Final Cut again since its finish. Share it and Export XML again, then say "finish the episode".';
+/** The one line her words keep of Final Cut: for an episode edited there before (allow-listed, F8). */
+const FROM_FINAL_CUT = 'It was edited in Final Cut before. Studio doesn\'t use Final Cut now: say "open it in HyperFrames" to edit it there, from the recording.';
 const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
 const CLIP_NEXT = 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
@@ -95,16 +94,16 @@ describe("the guide picks the way as finish does, by the record", () => {
       assert.doesNotMatch(await line(w), /Final Cut/);
       w.t.done();
     }
-    // A Reel's project beside a push to Final Cut is the Final Cut way, as without it.
+    // A Reel's project beside a push to Final Cut makes it an episode edited there before: unopened, as without the push, and on a Mac not set up it is told so.
     const pushed = guideWorld({ projects: ["reel 2"], set: false, over: { main: MAIN_PUSHED([push(1, "2026-10-20T10:00:00-05:00")]) } });
-    assert.equal(await line(pushed), says(FINISH));
+    assert.equal(await line(pushed), says(NOT_SET_UP));
     pushed.t.done();
   });
-  it("leaves a raw video that was pushed to Final Cut and has no project on the Final Cut way, and so one on a Mac whose settings have the app off", async () => {
+  it("tells a raw video that was pushed to Final Cut and has no project that it was edited there before and to open it in HyperFrames, from the recording; one on a Mac whose settings have the app off is told that this Mac isn't set up", async () => {
     const pushed = guideWorld({ projects: null, over: { main: MAIN_PUSHED([push(1, "2026-10-20T10:00:00-05:00")]) } });
-    assert.equal(await line(pushed), says(FINISH));
+    assert.equal(await line(pushed), says(FROM_FINAL_CUT));
     const off = guideWorld({ projects: null, set: false });
-    assert.equal(await line(off), says(SHOW));
+    assert.equal(await line(off), says(NOT_SET_UP));
     pushed.t.done();
     off.t.done();
   });
@@ -116,7 +115,7 @@ describe("the guide picks the way as finish does, by the record", () => {
     both.t.done();
     kept.t.done();
   });
-  it("does not send a video on the HyperFrames way back to Final Cut after a finish, as it does one on the Final Cut way", async () => {
+  it("does not send a video back to Final Cut after a finish, whether or not it has a project: the page's step comes", async () => {
     const over = { finished: FINISHED, main: MAIN_PUSHED([push(1, "2026-10-20T09:00:00-05:00"), push(2, "2026-10-20T11:00:00-05:00")]) };
     const app = guideWorld({ over });
     handOff(app);
@@ -125,7 +124,8 @@ describe("the guide picks the way as finish does, by the record", () => {
     assert.doesNotMatch(step, /Final Cut|Share|Export XML/);
     const old = guideWorld({ projects: null, over });
     handOff(old);
-    assert.equal(await line(old), says(AGAIN));
+    assert.doesNotMatch(await line(old), /Final Cut|Share|Export XML/);
+    assert.equal(await line(old), says(TAKE + ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".'));
     app.t.done();
     old.t.done();
   });
@@ -154,7 +154,7 @@ describe("the guide on a Mac whose settings have the app off (plan PR 17; the re
     assert.equal(await line(w), says(OPEN));
     const asked = await on(depsOf(w, { app: { tz: "America/Chicago", cli } }), "app", FOLDER);
     assert.equal(asked.code, 1, asked.text);
-    assert.match(asked.said[0], /^The HyperFrames project for Pricing: what to charge\? is on Sallie's laptop, and Sallie's laptop has not handed it over yet\./);
+    assert.match(asked.said[0], /^The HyperFrames project of Pricing: what to charge\? is on Sallie's laptop\. Carry on there\./);
     w.t.done();
   });
   it("says it wherever it would say to open the video there: a project here that the app never opened, one whose video is being made again, and an iPhone clip whose project the app opened", async () => {
@@ -432,8 +432,8 @@ describe("the guide once a video is exported from HyperFrames", () => {
     const app = guideWorld();
     exportOf(app, "main");
     assert.equal(await line(app, { readdir }), says(EXPORTED));
-    // Downloads, and what the other Mac released into the episode: the two places an export is looked for in, and no other.
-    assert.deepEqual(looked, [app.downloads, join(app.found.folder, "edit", "from-hyperframes")]);
+    // Downloads: the one place an export is looked for in, and no other.
+    assert.deepEqual(looked, [app.downloads]);
     looked.length = 0;
     const none = guideWorld({ projects: null });
     exportOf(none, "main", { record: false });
@@ -616,21 +616,20 @@ describe("what says the guide's new states: the help and the README (the skills'
     const guide = HELP.slice(HELP.indexOf('node edit.js guide ["<video>"]'), HELP.indexOf('node edit.js kind "<video>"'));
     for (const words of [
       "A raw video and an iPhone clip are followed through HyperFrames", "while its video is made, how long is left", "then to open it there", "when she last asked the app for something",
-      "and once it is exported, to hand it off", "A raw video that goes the Final Cut way keeps its Final Cut steps",
+      "and once it is exported, to hand it off", "A raw video that was edited in Final Cut before is told so, and to open it in HyperFrames, from the recording",
       "being imported, being read or having its video for HyperFrames made", "its video for HyperFrames made, its finish's hand-off written, or an import, a reading or a finish that did not finish",
       // While a finish waits for its late check: the page's step, and a line of when Studio checks Dropbox's copies.
-      "Once its finish has written the hand-off it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's copies (a spelling, handing it off again and handing it over wait until then), though the finish goes on checking them for a quarter of an hour"
+      "Once its finish has written the hand-off it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's copies (a spelling and handing it off again wait until then), though the finish goes on checking them for a quarter of an hour"
     ]) assert.ok(guide.replace(/\n {40}/g, " ").includes(words), words);
   });
-  it("has the README's rows for guide say the same: the stages, the times and where they come from, the Final Cut way's until wave 4, and that it only reads", () => {
+  it("has the README's rows for guide say the same: the stages, the times and where they come from, and that it only reads", () => {
     const first = row('| `guide ["<video>"]`');
     for (const words of [
       "followed through HyperFrames (plan PR 10)", "Making the video for HyperFrames", "how long is left", "usually takes", ".hyperframes/app-history.jsonl", "the time of her last request there",
-      "export on This Mac", "an export that began after its last change", "Final Cut way", "until the retirement's wave 4", "These only read, and write nothing",
-      "is told to clear the mark, and nothing of HyperFrames or Final Cut is said or read for it",
-      // The ways, as finish picks them (review M6): a Reel's project makes a raw video that was never pushed go the HyperFrames way on any Mac.
-      "when it has a main project in use, or when it was never pushed to Final Cut and either this Mac's settings turn the app on or the record lists a Reel's project",
-      "pushed to Final Cut and no project in use, or never pushed on a Mac whose settings have the app off and no Reel project"
+      "export on This Mac", "an export that began after its last change", "is on the HyperFrames way always", "from the recording", "These only read, and write nothing",
+      "is told to clear the mark, and nothing of HyperFrames is said or read for it",
+      // The ways, as finish picks them: a raw video is always on the HyperFrames way, and one edited in Final Cut before has its one line.
+      "that it was edited there before, that Studio does not use Final Cut now, and to open it in HyperFrames"
     ]) assert.ok(first.includes(words), words);
     assert.ok(row("| `guide drop [zoom]").includes("being imported, being read or having its video for HyperFrames made"));
     assert.ok(row('| `guide "<video>" done').includes("Its video for HyperFrames being made is waited for too, and ends with its next step; no notice is posted for it"));
