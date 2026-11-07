@@ -7,7 +7,7 @@ import { chmodSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { join } from "node:path";
 import * as filing from "../filing.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
-import { markChecking, problemFlagged } from "../finish-check.js";
+import { flagProblem, markChecking, problemFlagged } from "../finish-check.js";
 import { readResult } from "../detached.js";
 import { episodeWork, pendingFolder } from "../settings.js";
 import { FOLDER, ID, reread } from "./episodes.js";
@@ -381,6 +381,42 @@ describe("the finish of a video kept on this Mac (L5)", () => {
     assert.ok(w.t.said().includes('was not whole in Dropbox, so it is put back, and nothing was changed. Say "hand it off" again.'), w.t.said());
     assert.equal(existsSync(mp4.to), true);
     assert.ok(!w.t.said().includes("is not whole in Dropbox:"));
+    w.t.done();
+  });
+
+  it("L18 the guide gives a local video no time of Dropbox's check", async () => {
+    const w = await finished();
+    const step = await on(seeing(w), "guide", "3fa9c1");
+    assert.equal(step.code, 0, step.text);
+    assert.equal(step.said.some((l) => /Studio checks Dropbox's copies|Make online-only/.test(l)), false, step.text);
+    const overview = await on(seeing(w), "guide");
+    assert.equal(overview.said.some((l) => /Studio checks Dropbox's copies/.test(l)), false, overview.text);
+    assert.equal(overview.said.some((l) => /^ {4}\S/.test(l) && /check/i.test(l)), false);
+    flagProblem(w.t.home, FOLDER, w.t.now());
+    const flagged = await on(seeing(w), "guide", "3fa9c1");
+    assert.ok(flagged.said[0].includes('The check of its copies in Dropbox found a problem. Say "how far is it?" to see what.'), flagged.text);
+    w.t.done();
+  });
+
+  it("L22 a spelling after Dropbox put an older hand-off back over a newer one puts the newer one back first", async () => {
+    const w = await finished();
+    const first = finalPending(w, 1);
+    const handoff = first.entries.find((e) => e.to.endsWith(".brimm-ops.json")).to;
+    const revisionOne = readFileSync(handoff, "utf8");
+    await askedAgain(w);
+    assert.equal(await finishRun(w), 0, w.t.said());
+    const two = readFileSync(handoff, "utf8");
+    assert.notEqual(two, revisionOne);
+    for (const older of [revisionOne, two.replace('"revision": 2', '"revision": 1')]) {
+      writeFileSync(handoff, older);
+      const r = await on(seeing(w), ...SPELL);
+      assert.equal(r.code, 1, r.text);
+      assert.equal(r.text, "A copy of Pricing: what to charge? in final/ was not whole in Dropbox, so it is put back, and nothing was changed. Say it again in a minute.");
+      assert.equal(readFileSync(handoff, "utf8"), two);
+    }
+    const again = await on(seeing(w), ...SPELL);
+    assert.equal(again.code, 0, again.text);
+    assert.ok(/revision 3/.test(again.text), again.text);
     w.t.done();
   });
 });
