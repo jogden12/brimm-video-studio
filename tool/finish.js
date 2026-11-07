@@ -39,6 +39,8 @@ import { findPrograms } from "./unedited.js";
 import { approvedSession, undecided } from "./sessions.js";
 import { TEACHINGS_FORMAT, SESSION_LABEL, SESSION_NAME_MOST, herWordsName, isFilesName, isTeachingsName, itemsOf, readTeachings, seenFrom, sessionSeen } from "./teachings.js";
 import { fileAt, folderAt, keptOnAMac } from "./where.js";
+// originals.js imports this file, as filing.js does: oweOriginals is used only inside functions.
+import { oweOriginals } from "./originals.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -1136,6 +1138,13 @@ export async function finishNow(ctx, found, deps = {}) {
           // The check finds the record by its file (recordHolds).
         }
       }
+      // The recordings dropped for this video go into Original files (L6): owed at once. On a video kept on this Mac the one kick below serves both; any other
+      // (an old plan's local parts) asks for itself.
+      try {
+        oweOriginals(ctx, { folder: found.folder, record: nextRecord }, { ask: !keptOnAMac(record) });
+      } catch (e) {
+        logTo(ctx.home)(`${shownName(nextRecord)}: its recording could not be noted to go into Original files (${e.code || "an error"}). The launch agent notes it at its next run.`);
+      }
     } catch (e) {
       written = false;
       if (pendingWritten) {
@@ -1596,6 +1605,8 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
     if (got.busy) return { why: busyWords(got.busy, who, { done: "nothing was written", again: "Say it again in a minute." }) };
     step = got;
   }
+  let wrote = null;
+  let reopened = false;
   try {
     mkdirSync(finalDir, { recursive: true });
     if (ordered.length) {
@@ -1612,8 +1623,8 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
       finished: same ? { ...prior, parts: { main: { ...prior.parts.main, spellings: held }, ...reelParts } } : finishedNow(target.revision, at),
       ...release
     };
-    writeEpisode(folder, next, { expectRev: found.record.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer, home: ctx.home });
-    if (step && step.end && step.end({ put: true }).reopened) askAgent(ctx, who);
+    wrote = writeEpisode(folder, next, { expectRev: found.record.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer, home: ctx.home });
+    reopened = Boolean(step && step.end && step.end({ put: true }).reopened);
   } catch (e) {
     const lost = putBack();
     if (step && step.end) step.end({ put: false });
@@ -1625,6 +1636,15 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
     if (step && step.end) step.end({ put: false });
     rmSync(work, { recursive: true, force: true });
   }
+  // The recordings dropped for this video go into Original files (L6): owed now that its record holds the hand-off, and the launch agent is asked once, for this and for a
+  // check that was reopened.
+  let owed = { owed: [] };
+  try {
+    owed = oweOriginals(ctx, { folder, record: wrote }, { ask: false });
+  } catch (e) {
+    logTo(ctx.home)(`${shownName(wrote)}: its recording could not be noted to go into Original files (${e.code || "an error"}). The launch agent notes it at its next run.`);
+  }
+  if (reopened || owed.owed.length) askAgent(ctx, shownName(wrote));
   // Shown in Finder for her to drop on the BRIMM Ops page, only now that the record says it is the hand-off: on an open-lock Mac a
   // copy of it (reveal.js), and `shown` is false when that copy could not be made.
   let shown = true;

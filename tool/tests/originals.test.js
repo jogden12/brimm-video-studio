@@ -14,7 +14,12 @@ import { episodeFilesFolder, episodeWork, pendingFolder, runsFolder } from "../s
 import { workCopyLockOf } from "../workcopy.js";
 import { ORIGINALS_COMMAND, ORIGINALS_PROBLEM, ORIGINALS_RUNNING, ORIGINALS_SESSION, UPLOAD_LOOK_MS, asSession, checkOriginal, listsOriginal, moved, oweForgotten, oweOriginals, originalsOf } from "../originals.js";
 import { linksOf } from "../finish.js";
+import * as filing from "../filing.js";
 import { setup } from "./episodes.js";
+import { agentRun, finishRun, localExported, makeLocal } from "./local-world.js";
+import { finishedWorld } from "./reels-world.js";
+import { on, seeing } from "./checking-world.js";
+import { READ as READING } from "./guide-world.js";
 
 const STUDIO = "Mac Studio";
 const MACBOOK = "Jason's MacBook";
@@ -707,5 +712,77 @@ describe("L6: the check", () => {
     assert.deepEqual([p.nextLook, Number.isFinite(p.lookUntil)], [t.now() + WAIT_LOOK_MS, true]);
     assert.equal(existsSync(join(found.video, FILE)), true);
     t.done();
+  });
+});
+
+describe("L6: through L5's worlds", () => {
+  const CHECKS_ON = { original: checkOriginal };
+  const originalPending = (w) => readPendingAt(w.t.home, `original/${ID}.json`);
+  const fileOf = (w) => reread(w.found).video.file;
+
+  it("X1: a local finish owes its recording, and its one kick serves both", async () => {
+    const w = await localExported("raw");
+    assert.equal(await finishRun(w), 0, w.t.said());
+    const p = originalPending(w);
+    assert.deepEqual([p.owed, p.of, p.file, p.kind], [true, { id: ID, name: FOLDER }, fileOf(w), "original"]);
+    assert.deepEqual(w.t.kicks, ["kickstart"]);
+    w.t.done();
+  });
+
+  it("X2: the agent's run moves it at once, and takes it off once Dropbox has it uploaded", async () => {
+    const w = await localExported("raw");
+    assert.equal(await finishRun(w), 0, w.t.said());
+    const finalP = filing.readPendingsOf(w.t.home, "final")[0];
+    const owed = originalPending(w);
+    const own = join(episodeFilesFolder(w.t.home, FOLDER), fileOf(w));
+    assert.ok(existsSync(own));
+    const r = await agentRun(w, { at: Math.max(finalP.lastCopy, owed.lastCopy) + 1, over: { checks: CHECKS_ON, uploaded: () => true } });
+    assert.equal(existsSync(own), false, r.logs.join("|"));
+    assert.ok(existsSync(join(w.found.folder, "Original files", fileOf(w))));
+    assert.equal(reread(w.found).files[`Original files/${fileOf(w)}`] > 0, true);
+    assert.equal(originalPending(w), null);
+    assert.equal(filing.readPendingsOf(w.t.home, "final").length, 0);
+    for (const t of finalP.took) assert.equal(existsSync(t.path), false, t.path);
+    w.t.done();
+  });
+
+  it("X3: a paused upload is looked at for an hour, and the loop then ends", async () => {
+    const w = await localExported("raw");
+    assert.equal(await finishRun(w), 0, w.t.said());
+    const calls = [];
+    const owed = originalPending(w);
+    const first = await agentRun(w, { at: owed.lastCopy + 1, over: { checks: CHECKS_ON, uploaded: () => { calls.push(1); return false; } } });
+    assert.equal(calls.length, 7, first.logs.join("|"));
+    assert.ok(first.waits.every((ms) => ms > 0));
+    assert.ok(originalPending(w));
+    const p = originalPending(w);
+    calls.length = 0;
+    await agentRun(w, { at: p.lastCopy + 3 * 60 * 60 * 1000, over: { checks: CHECKS_ON, uploaded: () => { calls.push(1); return false; } } });
+    assert.equal(calls.length, 1);
+    w.t.done();
+  });
+
+  it("X4: a hand-off writer stopped before it owed is owed at the next run's start", async () => {
+    const w = await localExported("raw");
+    assert.equal(await finishRun(w), 0, w.t.said());
+    rmSync(join(pendingFolder(w.t.home), "original", `${ID}.json`));
+    const own = join(episodeFilesFolder(w.t.home, FOLDER), fileOf(w));
+    const p = filing.readPendingsOf(w.t.home, "final")[0];
+    const r = await agentRun(w, { at: p.lastCopy + 1, over: { checks: CHECKS_ON, uploaded: () => false } });
+    assert.ok(r.logs.some((l) => l.endsWith("its recording is noted to go into Original files.")), r.logs.join("|"));
+    assert.ok(existsSync(join(w.found.folder, "Original files", fileOf(w))));
+    assert.ok(existsSync(own));
+    w.t.done();
+  });
+
+  it("X5: the first hand-off of a finished video from its spellings owes its recording", async () => {
+    const w = await finishedWorld({ projects: ["reel 1", "reel 2"], handoff: false, over: { reading: READING("finished"), offers: { spellings: [] } } });
+    makeLocal(w);
+    const r = await on(seeing(w), "spell", FOLDER, "offers", "all");
+    assert.equal(r.code, 0, r.text);
+    const p = originalPending(w);
+    assert.deepEqual([p.owed, p.of.id], [true, ID]);
+    assert.deepEqual(w.t.kicks, ["kickstart"]);
+    w.t.done();
   });
 });
