@@ -1114,7 +1114,7 @@ export function checkRecord(p, deps) {
     return;
   }
   try {
-    if (!list.includes(basename(p.folder))) {
+    if (!list.some((n) => n.normalize("NFC") === basename(p.folder).normalize("NFC"))) {
       const video = statSync(episodeFilesFolder(home, p.name), { throwIfNoEntry: false });
       if (!(video && video.isDirectory())) return goneAway();
     } else {
@@ -1313,7 +1313,7 @@ export function checkFinal(p, deps) {
     return unreadable();
   }
   try {
-    const folder = list.includes(basename(p.folder)) ? statSync(p.folder, { throwIfNoEntry: false }) : undefined;
+    const folder = list.some((n) => n.normalize("NFC") === basename(p.folder).normalize("NFC")) ? statSync(p.folder, { throwIfNoEntry: false }) : undefined;
     if (!(folder && folder.isDirectory())) return goneAway();
   } catch (err) {
     return unreadable();
