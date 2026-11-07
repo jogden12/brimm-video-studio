@@ -4174,9 +4174,11 @@ function ideasFor(read, record) {
   if (record.kind === "short video") return graphicIdeas({ ...read, plan: { ...read.plan, claude: { graphicCues: graphicCuesOfRecord(record) } } }, record.spellings);
   return graphicIdeas(read, record.spellings);
 }
+/** A time as HyperFrames shows it, the whole seconds passed (stamp), from the time taken to the thousandth first, as the project's files keep times, so that 15.9999999999 shows 0:16. */
+const shownSecond = (seconds) => stamp(Math.round(seconds * 1000) / 1000);
 /** Where an idea is on the clock she is reading, as its line says it: "0:04 to 0:07", "cut now", or, when its words are not on that
     clock, "not on <clock> (kept again since)". */
-const ideaWhere = (idea, on) => (idea.at === null ? "cut now" : idea.start === null ? `not on ${on} (kept again since)` : `${clockText(idea.start)} to ${clockText(idea.end)}`);
+const ideaWhere = (idea, on) => (idea.at === null ? "cut now" : idea.start === null ? `not on ${on} (kept again since)` : `${shownSecond(idea.start)} to ${shownSecond(idea.end)}`);
 /** An idea's words as a sentence: with a full stop, unless they end in one already. */
 const ideaSaid = (idea) => (/[.!?…]"?$/.test(oneLine(idea)) ? oneLine(idea) : `${oneLine(idea)}.`);
 /** An idea as the list says it: where it is, what it shows, and the words it goes with; or, for a graphic cue whose words were
