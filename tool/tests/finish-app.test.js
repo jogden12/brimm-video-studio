@@ -143,16 +143,6 @@ describe("E1. finish from HyperFrames' exports: what final/ holds, and the hand-
     assert.deepEqual(reread(found).main.texts, TITLED.texts, "the record keeps the titles all the same");
     w.t.done();
   });
-  it("keeps the titles of a main video that went the Final Cut way beside a Reel from HyperFrames", async () => {
-    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
-    const w = fw({ projects: ["reel 2"], over: { main: { ...EDITED.main, texts: TITLED.texts, pushed: pushes } } });
-    w.t.shared(`${PROJECT.main}.mp4`, 2000);
-    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    exportOf(w, "reel 2");
-    const { found } = await finished(w);
-    assert.deepEqual(handoffOf(found).main.onPicture, ["Three pricing mistakes"]);
-    w.t.done();
-  });
   it("leaves the original exports in Downloads untouched while it works, and touches nothing else there", async () => {
     const w = fw();
     const main = exportOf(w, "main");
@@ -567,11 +557,11 @@ describe("E6. the late check, and what is removed from Downloads", () => {
     assert.ok(result.next.includes(`${REEL_FILE} changed in Downloads after it was taken, so it is kept there.`), result.next);
     w.t.done();
   });
-  it("never removes a file it took from another folder, from what the other Mac released, or from the project's own renders", async () => {
+  it("never removes a file it took from another folder, or from the project's own renders", async () => {
     const w = fw({ projects: ["main", "reel 1", "reel 2"], over: THREE() });
     const elsewhere = join(w.t.home, "Movies", "exports");
     const main = exportOf(w, "main", { folder: elsewhere });
-    const reel = exportOf(w, "reel 2", { folder: join(w.found.folder, "edit", "from-hyperframes"), record: false });
+    const reel = exportOf(w, "reel 2", { folder: join(w.t.home, "Movies", "more") });
     const renders = join(w.dirOf("reel 1"), "renders", "Pricing_2026-10-20_14-00-30.mp4");
     writeFileSync(renders, "a render");
     utimesSync(renders, new Date(+w.t.now() - 3600000), new Date(+w.t.now() - 3600000));
@@ -749,30 +739,6 @@ describe("E7. again, and the run", () => {
     const { result } = await finished(w);
     assert.match(result.next, /make the episode's folder online-only: in Finder, Control-click it and choose Make online-only\./);
     assert.doesNotMatch(result.next, NOT_AN_APP_WORD);
-    w.t.done();
-  });
-  it("finishes a main video that went the Final Cut way beside a Reel from HyperFrames, each as its own way says", async () => {
-    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
-    const w = fw({ projects: ["reel 2"], over: { main: { ...EDITED.main, pushed: pushes } } });
-    w.t.shared(`${PROJECT.main}.mp4`, 2000);
-    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    const reel = exportOf(w, "reel 2");
-    const found = await asked(w);
-    let steps = null;
-    const progress = { begin() {}, length() {}, steps: (list) => (steps = list), step() {}, fraction() {}, encoding: () => ({ args: [], stop() {} }), end() {} };
-    const result = await finishNow(w.t.ctx, found, { progress });
-    assert.equal(result.ok, true, result.failed.join(" "));
-    assert.equal(steps[0], "Waiting for the finished videos");
-    const record = reread(found);
-    assert.equal(record.finished.parts.main.export, `final/${PROJECT.main}.fcpxmld`);
-    assert.equal("project" in record.finished.parts.main, false);
-    assert.equal(record.finished.parts["reel 2"].project, REEL2);
-    assert.equal("export" in record.finished.parts["reel 2"] || "noHandEdits" in record.finished.parts["reel 2"], false);
-    assert.deepEqual(record.app.projects.map((p) => [p.key, p.state]), [["reel 2", "finished"]]);
-    assert.deepEqual(readdirSync(w.downloads), [], "the Reel's export is removed from Downloads");
-    assert.equal(existsSync(reel.path), false);
-    assert.equal(readdirSync(join(w.t.home, "BRIMM Video Work", "From Final Cut")).length, 0, "and what it took from From Final Cut");
-    assert.match(result.next, /File > Delete Generated Library Files/);
     w.t.done();
   });
 });

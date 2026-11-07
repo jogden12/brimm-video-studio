@@ -77,30 +77,6 @@ const LABEL = "Video of 14 Oct, 09:12 (Mac Studio)";
 /** A light import's files of the made-up video: the video and its plan, and no timeline of its own (edit/main.v0.fcpxml). */
 const LIGHT = { "Pricing talk.mp4": "the video", "Pricing talk.cut-plan.json": "{}", "Pricing talk.srt": "1\n00:00:00,000 --> 00:00:02,000\nHello\n", "Pricing talk.transcript.txt": "[0:00] Hello" };
 
-describe("push of a video that has no timeline in Final Cut, and an error nobody foresaw for a record of the switch (item 20)", () => {
-  it("refuses a finished video, and an iPhone clip she answered, in plain words, before any timeline is read", async () => {
-    for (const [kind, what] of [["finished", "a finished video"], ["short video", "an iPhone clip"]]) {
-      const t = setup();
-      episodeFor(t, { record: { version: 3, kind, answer: ANSWERED, label: LABEL }, files: LIGHT });
-      for (const argv of [["push", "Pricing talk"], ["push", "Pricing talk", "main", "--no-hand-edits"]]) {
-        const r = await on(t.ctx.deps, ...argv);
-        assert.deepEqual([r.code, r.said], [1, [`Pricing talk has no timeline to show in Final Cut: ${what} is not edited here.`]], `${kind}: ${argv.join(" ")}`);
-      }
-      assert.deepEqual(t.opened, []);
-      t.done();
-    }
-  });
-  it("says only that the work stopped for a record of the switch, on a Mac whose import is not the light one: no path, no stack", async () => {
-    // A raw video she answered, whose timeline Dropbox never brought: reading it fails in a way nobody foresaw.
-    const t = setup();
-    episodeFor(t, { record: { version: 3, kind: "raw", answer: ANSWERED, label: LABEL }, files: LIGHT });
-    const r = await on(t.ctx.deps, "push", "Pricing talk");
-    assert.deepEqual([r.code, r.said], [1, ["The work stopped (ENOENT)."]]);
-    assert.equal(reread({ folder: join(t.root, "Episodes", FOLDER) }).rev, 1);
-    t.done();
-  });
-});
-
 /** A session mark, as `kind … session` writes it, with `cleared` as given. */
 const markOf = (cleared) => ({ marked: AT, on: "Mac Studio", teachings: null, cleared });
 /** A mark cleared by her click on the dialog: the one clearing the gate takes. */
@@ -130,7 +106,7 @@ describe("one rule for a session not cleared: the gate's (item 9)", () => {
   });
 });
 
-describe("the Final Cut finish of a kind a version 1 hand-off cannot hold (item 4)", () => {
+describe("the finish of a kind a version 1 hand-off cannot hold (item 4)", () => {
   it("refuses a finished video at once on a Mac that hands off version 1, before any part is looked for or anything is run", async () => {
     for (const settings of [{ handoffVersion: 1 }, {}]) {
       const t = setup();
@@ -148,13 +124,13 @@ describe("the Final Cut finish of a kind a version 1 hand-off cannot hold (item 
   });
 });
 
-describe("finish of a video that is not edited in Final Cut (item 5)", () => {
+describe("finish of a video that is not edited here (item 5)", () => {
   const FINISHED = { revision: 2, at: AT, on: "Mac Studio", handoff: "final/Pricing talk.brimm-ops.json", parts: {} };
   for (const [kind, what] of [["finished", "a finished video"], ["short video", "an iPhone clip she answered"]]) {
     it(`says of ${what} that its hand-off comes from its spellings, or is written already, or waits for version 2, and names no folder`, async () => {
       for (const [settings, over, said] of [
         // An iPhone clip is edited in HyperFrames if at all, so it is not said to be "not edited in Final Cut" (plan PR 7, item 4).
-        [{ handoffVersion: 2 }, {}, kind === "short video" ? 'Pricing talk\'s hand-off is written once its spellings are answered. Say "show me the spellings".' : 'Pricing talk is not edited in Final Cut: its hand-off is written once its spellings are answered. Say "show me the spellings".'],
+        [{ handoffVersion: 2 }, {}, kind === "short video" ? 'Pricing talk\'s hand-off is written once its spellings are answered. Say "show me the spellings".' : 'Pricing talk is not edited here: its hand-off is written once its spellings are answered. Say "show me the spellings".'],
         [{ handoffVersion: 2 }, { finished: FINISHED }, "Pricing talk's hand-off is written already, as revision 2: a spelling changed writes its next revision."],
         [{ handoffVersion: 1 }, {}, "Pricing talk's hand-off is written from its spellings once this Mac hands off version 2: ask Jason."]
       ]) {
@@ -455,7 +431,7 @@ describe("a session mark follows the video's other versions: each is held as a s
   it("lets run for a video held as a session only what runs for a video not yet answered, and the commands that name none", () => {
     assert.equal(HELD_WORDS, HELD);
     for (const name of COMMAND_NAMES) assert.equal(heldGateFor(name), [...UNSCOPED, ...UNANSWERED].includes(name) ? "" : HELD, name);
-    assert.deepEqual(COMMAND_NAMES.filter((name) => !heldGateFor(name)).sort(), ["behind", "episodes", "guide", "kind", "leave", "release", "resolve", "retry", "show", "status", "which"]);
+    assert.deepEqual(COMMAND_NAMES.filter((name) => !heldGateFor(name)).sort(), ["behind", "episodes", "guide", "kind", "leave", "resolve", "retry", "show", "status", "which"]);
   });
   it("B marked while A is handed off: names A to answer too, writes nothing into A's folder, and holds A as a session", async () => {
     const t = setup();
@@ -475,7 +451,7 @@ describe("a session mark follows the video's other versions: each is held as a s
     assert.deepEqual([shown.code, shown.said], [0, [`Opened ${A}'s transcript in TextEdit on this Mac.`]]);
     const spell = await on(t.ctx.deps, "spell", "a0a0a0", "add", "Jane", "Jayne");
     assert.deepEqual([spell.code, spell.said], [1, [HELD]]);
-    for (const [command, ...rest] of [["finish"], ["push"], ["title"], ["ask"], ["teachings"], ["name", "Another name"]]) {
+    for (const [command, ...rest] of [["finish"], ["title"], ["ask"], ["teachings"], ["name", "Another name"]]) {
       const refused = await on(t.ctx.deps, command, "a0a0a0", ...rest);
       assert.deepEqual([refused.code, refused.said], [1, [HELD]], command);
     }

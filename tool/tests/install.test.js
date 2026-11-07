@@ -29,8 +29,6 @@ const XCODE_MISSING = 'echo "xcode-select: error: unable to get active developer
 const MACOS = (version) => `[ "$1" = "-productVersion" ] && echo ${version}\n`;
 /** A PATH for a launch agent of folders on no Mac, so that this Mac's own Claude Code is not found. */
 const NOWHERE_ELSE = "/nowhere/bin:/nowhere/else/bin";
-/** Where a line about Final Cut Pro begins, for one of the two Macs (--machine): it is optional now, since HyperFrames is where she edits. */
-const FINAL_CUT = "  Final Cut Pro, optional now (HyperFrames is where she edits):";
 /** The two lines for one of the two Macs (--machine) about the Chrome the HyperFrames command line renders with and its doctor check,
     said right after the lines about the command line itself. `kept` is the folder the command line keeps that Chrome in: its own
     copy, in the home folder's cache (the pinned package's CACHE_DIR, which the H0 render test also found by hand). */
@@ -55,14 +53,13 @@ const ask = (...args) => askOn({}, ...args);
     stand-in for ffmpeg first on its PATH too, so that no test runs this Mac's own: { hwaccels, filters, version } are what it prints for
     -hwaccels, -filters and -version, and any other call it is given is written into `ran`, which a --print never makes; the calls it
     is given are kept, as what `asked` says of them, one to a line. `onPath` names more stand-ins to put first on
-    its PATH, each with the shell text it runs, such as "xcode-select" or "sw_vers". `finalCut` is the version of a made-up
-    Final Cut Pro the installer is pointed at, or null for none; without it the installer looks at this Mac's own. With
+    its PATH, each with the shell text it runs, such as "xcode-select" or "sw_vers". With
     `bare`, the Mac has no Homebrew: there is no stand-in brew, and the installer looks for programs on PATH alone, which
     holds the stand-ins and /usr/bin and /bin. `install` is the installer to ask, this checkout's unless a test gives a copy's. */
 function askOn(installed, ...args) {
   return askWith({ installed }, ...args);
 }
-function askWith({ installed = {}, programs = [], files = [], agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, ffmpegSays, finalCut, finalCutText, settings, bare = false, install = INSTALL }, ...args) {
+function askWith({ installed = {}, programs = [], files = [], agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, ffmpegSays, settings, bare = false, install = INSTALL }, ...args) {
   // The one rule of this file: nothing is run without --print.
   assert.ok(args.includes("--print"), "the installer is only ever asked what it would do");
   const dir = mkdtempSync(join(tmpdir(), "brimm-install-"));
@@ -112,19 +109,11 @@ function askWith({ installed = {}, programs = [], files = [], agentPath = "", cl
       mkdirSync(join(home, "Library", "Application Support", "BRIMM Video"), { recursive: true });
       writeFileSync(join(home, "Library", "Application Support", "BRIMM Video", "settings.json"), JSON.stringify({ version: 1, ...settings }));
     }
-    let app = "";
-    if (finalCut !== undefined) {
-      app = join(dir, "Applications", "Final Cut Pro.app");
-      if (finalCut !== null) {
-        mkdirSync(join(app, "Contents"), { recursive: true });
-        writeFileSync(join(app, "Contents", "Info.plist"), finalCutText ?? `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>${finalCut}</string></dict></plist>\n`);
-      }
-    }
     const env = {
       // The node that runs these tests is on the PATH of the installer, whatever PATH the tests were started with: with --machine it
       // reads this Mac's settings with node, before anything is changed. `bare` is a Mac with no Homebrew and no node.
       HOME: home, PATH: bare ? `${bin}:/usr/bin:/bin` : `${bin}:${process.env.PATH}:${dirname(process.execPath)}`, ...(agentPath ? { BRIMM_AGENT_PATH: agentPath } : {}),
-      ...(stands["claude-stand-in"] ? { BRIMM_CLAUDE: join(bin, "claude-stand-in") } : {}), ...(app ? { BRIMM_FINAL_CUT: app } : {}), ...(bare ? { BRIMM_HOMEBREW_DIRS: "" } : {})
+      ...(stands["claude-stand-in"] ? { BRIMM_CLAUDE: join(bin, "claude-stand-in") } : {}), ...(bare ? { BRIMM_HOMEBREW_DIRS: "" } : {})
     };
     const r = spawnSync("/bin/zsh", [install, ...args], { encoding: "utf8", input: "", env });
     const agents = (r.stdout.match(/<\?xml[\s\S]*?<\/plist>\n/g) || []).map((text, i) => {
@@ -199,13 +188,13 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
     assert.deepEqual(r.agents.map(held), [agent(r, ["/Volumes/Work/Unedited video", "/Volumes/Work/More of it"])]);
     assert.match(r.agents[0].ProgramArguments[0], /\/node$/);
     assert.ok(existsSync(r.agents[0].ProgramArguments[1]));
-    // swift, which finds the faces for the upright version, is in /usr/bin.
+    // swift, which finds the faces for a Reel's crop, is in /usr/bin.
     assert.ok(r.agents[0].EnvironmentVariables.PATH.split(":").includes("/usr/bin"));
     assert.ok(r.out.includes(`This is what the Mac would be given, at ${r.home}/Library/LaunchAgents/com.thebrimm.unedited.plist:`), r.out);
     assert.ok(r.out.includes("  Folder to watch for unedited video:  /Volumes/Work/Unedited video\n  Folder to watch for unedited video:  /Volumes/Work/More of it\n"), r.out);
     assert.ok(r.out.includes(`  Log:  ${r.home}/Library/Logs/brimm-video.log\n`), r.out);
     // It says whether swift is on this Mac, and installs nothing for it.
-    assert.match(r.out, /\n {2}Swift, to find the speaker's face: {2}(here already|not here, so the upright version is cropped at the centre\. To get it: xcode-select --install)\n/);
+    assert.match(r.out, /\n {2}Swift, to find the speaker's face: {2}(here already|not here, so a Reel is cropped at the centre of the picture\. To get it: xcode-select --install)\n/);
     // Of the transcript tool it gives nothing and says nothing: that tool's installer is in brimm-operations.
     assert.doesNotMatch(said(r), /com\.thebrimm\.transcribe|BRIMM Transcripts|brimm-transcribe\.log|transcribe\.js|for transcripts/);
     changedNothing(r);
@@ -225,8 +214,8 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
   it("says whether Claude Code is on this Mac, where the launch agent will look for it, and what is then sent to Claude. It installs nothing for it", () => {
     const r = ask("--print", "/Volumes/Work/Unedited video");
     assert.equal(r.status, 0, r.err);
-    const found = /\n {2}Claude Code, to read each cut plan: {2}here already, at (\/\S+\/claude)\n {2}Sent to Claude for each cut plan: {2}the words of the transcript with their times, the rules' plan, and the video's file name and length, on the Claude account signed in on this Mac\. The video and its sound never leave it\. To send nothing: --rules-only\n/.exec(r.out);
-    const missing = r.out.includes("\n  Claude Code, to read each cut plan:  not here, so each cut plan is the rules' alone and nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac\n");
+    const found = /\n {2}Claude Code, to read a video once its person has said what it is: {2}here already, at (\/\S+\/claude)\n {2}Sent to Claude: {2}nothing when a video is dropped, since this Mac's import is the light one\. Claude reads a video only once its person has said what it is, on the Claude account signed in on this Mac, and never a session's file name\. The video and its sound never leave it\. To send nothing: --rules-only\n/.exec(r.out);
+    const missing = r.out.includes("\n  Claude Code, to read a video once its person has said what it is:  not here, so nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac\n");
     assert.ok(found || missing, r.out);
     // It is looked for where the launch agent's own PATH leads, and not where this shell's does.
     if (found) assert.ok(["/opt/homebrew/bin/claude", "/usr/local/bin/claude", "/usr/bin/claude", "/bin/claude"].includes(found[1]), found[1]);
@@ -241,7 +230,7 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
   it("finds Claude Code in the home folder's own .local/bin, where the launch agent's PATH does not lead and unedited.js looks all the same", () => {
     const r = askWith({ programs: [".local/bin/claude"], agentPath: NOWHERE }, "--print", "/Volumes/Work/Unedited video");
     assert.equal(r.status, 0, r.err);
-    const found = /\n {2}Claude Code, to read each cut plan: {2}here already, at (\/\S+\/claude)\n/.exec(r.out);
+    const found = /\n {2}Claude Code, to read a video once its person has said what it is: {2}here already, at (\/\S+\/claude)\n/.exec(r.out);
     assert.ok(found, r.out);
     assert.equal(found[1], `${r.home}/.local/bin/claude`);
     assert.deepEqual([r.left, r.ran], [[".local", ".local/bin", ".local/bin/claude"], ""]);
@@ -249,7 +238,7 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
   it("says Claude Code is not here when it is nowhere the launch agent will look, and that each plan is then the rules' alone", () => {
     const r = askWith({ agentPath: NOWHERE }, "--print", "/Volumes/Work/Unedited video");
     assert.equal(r.status, 0, r.err);
-    assert.ok(r.out.includes("\n  Claude Code, to read each cut plan:  not here, so each cut plan is the rules' alone and nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac\n"), r.out);
+    assert.ok(r.out.includes("\n  Claude Code, to read a video once its person has said what it is:  not here, so nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac\n"), r.out);
     assert.doesNotMatch(r.out, /here already, at|Sent to Claude/);
     // The launch agent is given the PATH that was looked along.
     assert.equal(r.agents[0].EnvironmentVariables.PATH, NOWHERE);
@@ -265,7 +254,7 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
       const r = ask(...args);
       assert.equal(r.status, 0, r.err);
       assert.deepEqual(r.agents.map(held), [agent(r, ["/Volumes/Work/Unedited video"], ["--rules-only"])], args.join(" "));
-      assert.ok(r.out.includes("\n  Claude, to read each cut plan:  not asked (--rules-only), so each cut plan is the rules' alone and nothing leaves this Mac\n"), r.out);
+      assert.ok(r.out.includes("\n  Claude, to read a video once its person has said what it is:  not asked (--rules-only: no reading is made in folder mode, and with --machine readings are off), so nothing leaves this Mac\n"), r.out);
       assert.doesNotMatch(r.out, /Claude Code, to read|Sent to Claude/);
       changedNothing(r);
     }
@@ -353,7 +342,7 @@ describe("the installer's own text", () => {
     const r = ask("--print", "--help");
     assert.match(r.out, /\n {2}\.\/install\.sh "\/path\/to\/folder" --rules-only\n/);
     const help = r.out.replace(/\s+/g, " ");
-    assert.ok(help.includes("No video and no sound ever leaves the Mac. Claude is asked to read each cut plan: the words of the transcript with their times and the rules' plan are then sent to Claude through Claude Code, on the Claude account signed in on this Mac, with the video's file name and its length. With --rules-only nothing leaves the Mac."), r.out);
+    assert.ok(help.includes("No video and no sound ever leaves the Mac. The import is always the light one: nothing is sent to Claude when a video is dropped. Claude reads a video only once its person has said what it is, and never a session's file name; what is sent then is the words of the transcript with their times, the rules' plan, and the video's file name and length (never a session's), through Claude Code, on the Claude account signed in on this Mac. With --machine, --rules-only turns the readings off, so nothing leaves the Mac; in folder mode no reading is made."), r.out);
     // The help is the comment the file opens with, whole: it ends where the script begins.
     assert.ok(text.includes(`\n# ${r.out.trimEnd().split("\n").pop()}\nset -euo pipefail\n`), r.out);
   });
@@ -504,17 +493,17 @@ describe("the installer's own text", () => {
     }
   });
   // The lines it ends with are only said once it has set the Mac up, which no test does. So they are read here, not run.
-  it("ends by saying what the folder for unedited video gives", () => {
-    const closing = text.slice(text.lastIndexOf("launchctl bootstrap"));
+  it("ends by saying what the folder for unedited video gives: the transcript, the plan and the rough cut's captions, and no video", () => {
+    const closing = text.slice(text.lastIndexOf('\nsay "Done. Put an unedited video in:"'));
     assert.match(closing, /\nsay "Done\. Put an unedited video in:"\n/);
-    for (const named of ["<name>.cut-plan.txt", "<name>.rough-cut.mp4", "<name>.rough-cut.vertical.mp4", "<name>.fcpxml", "BRIMM Video Work", "<name>.edit-notes.txt", "<name>.reel-1.mp4"]) assert.ok(closing.includes(named), named);
-    // The plan's first lines name every file that could not be made but a short clip. So it says where a clip is named.
-    const told = closing.replace(/"\n +say "/g, " ");
-    assert.ok(told.includes("A clip that could not be cut is named in the log and at the end of the notes, and not in <name>.cut-plan.txt."), told);
+    for (const named of ["<name>.cut-plan.txt", "<name>.rough-cut.srt"]) assert.ok(closing.includes(named), named);
+    for (const gone of ["rough-cut.mp4", "vertical", "fcpxml", "Final Cut", "edit-notes", "reel-1"]) assert.ok(!closing.includes(gone), gone);
+    assert.ok(closing.replace(/"\n *say "/g, " ").includes("No video is made, and Claude is not asked."), closing);
   });
   it("for one of the two Macs, makes Episodes, marks the drop folder and writes the settings through settings.js, and ends by saying where to drop a video", () => {
     const made = text.slice(text.indexOf('if [[ -n "$machine" ]]; then\n  mkdir -p'), text.indexOf("agent \"$node\" > \"$AGENT_FILE\""));
-    assert.ok(made.includes('mkdir -p "$root/Episodes" "$root/References" "$WORK/From Final Cut"\n  [[ -n "$local_drop" ]] || mkdir -p "$root/Episodes/.importing"'), made);
+    assert.ok(made.includes('mkdir -p "$root/Episodes" "$root/References"\n  [[ -n "$local_drop" ]] || mkdir -p "$root/Episodes/.importing"'), made);
+    assert.ok(!text.includes("From Final Cut"), "no folder for Final Cut's work is made or named");
     // A library's backups stay on Final Cut's default (B4, the lead's ruling), so no folder is made for them. The one line that names
     // them says what the open lock keeps from Claude, Final Cut's backups among it.
     const backups = text.split("\n").filter((line) => /backup/i.test(line));
@@ -825,10 +814,10 @@ describe("the installer's own text", () => {
     const naming = text.split("\n").filter((line) => /TRANSCRIBE_LABEL|com\.thebrimm\.transcribe/.test(line) && !line.startsWith("#"));
     assert.ok(naming.length >= 2, naming.join("\n"));
     for (const line of naming) assert.doesNotMatch(line, /launchctl|rm |> ?"/, line);
-    // plutil reads a launch agent's file in two places, both in watched(); its other reads are of Final Cut Pro's own
-    // Info.plist and of what Claude Code says of its sign-in. None reads what settings.js says: that is read as lines.
+    // plutil reads a launch agent's file in two places, both in watched(); its other reads are of what Claude Code says
+    // of its sign-in. None reads what settings.js says: that is read as lines.
     const reads = text.split("\n").filter((line) => line.includes("plutil -extract"));
-    assert.deepEqual(reads.map((line) => (line.includes('"$file"') ? "agent" : line.includes('"$FINAL_CUT/Contents/Info.plist"') ? "Final Cut" : / -o - - /.test(line) ? "Claude" : line)), ["agent", "agent", "Final Cut", "Claude", "Claude"]);
+    assert.deepEqual(reads.map((line) => (line.includes('"$file"') ? "agent" : / -o - - /.test(line) ? "Claude" : line)), ["agent", "agent", "Claude", "Claude"]);
   });
 });
 
@@ -854,9 +843,11 @@ describe("the installer for one of the two Macs (--machine), asked what it would
       `  Its marker there, ${d.root}/Unedited Video/Mac Studio/.brimm-watched-by, saying:  Mac Studio`,
       `  Episodes, to make in Dropbox:  ${d.root}/Episodes`,
       `  The import status files, to make in Dropbox:  ${d.root}/Episodes/.importing`,
-      `  The reference folder, to make in Dropbox:  ${d.root}/References`,
-      "  On this Mac:  <home>/BRIMM Video Work/From Final Cut"
+      `  The reference folder, to make in Dropbox:  ${d.root}/References`
     ]) assert.ok(out.includes(`\n${line}\n`), `${line}\n---\n${out}`);
+    // Final Cut is no part of Studio: no line names it, and no folder for its work is named.
+    assert.doesNotMatch(out.split("\n  Kept from Claude")[0], /Final Cut/);
+    assert.ok(!out.includes("On this Mac:"), out);
     assert.ok(out.includes(`  This Mac's settings, in <home>/Library/Application Support/BRIMM Video/settings.json:\n{\n  "version": 1,\n  "machine": "Mac Studio",\n  "root": "${d.root}",\n  "checkout": "${dirname(HERE)}"\n}\n`), out);
     changedNothing(r);
     assert.deepEqual(d.held(), before);
@@ -871,25 +862,24 @@ describe("the installer for one of the two Macs (--machine), asked what it would
   });
   it("tells, for her laptop, the tools it finds and the steps by hand, and never prints her email", () => {
     const d = dropbox();
-    const r = askWith({ onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") }, finalCut: "12.4" }, "--print", "--machine", "Sallie's laptop", d.root);
+    const r = askWith({ onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") } }, "--print", "--machine", "Sallie's laptop", d.root);
     assert.equal(r.status, 0, r.err + r.out);
     const out = said(r);
     for (const line of [
       "  Xcode's command line tools (git, swift):  here already",
       "  Homebrew:  here already",
       "  macOS:  27.0.1",
-      `${FINAL_CUT}  12.4, here`,
       "  Claude Code, signed in:  yes (max)",
       "  Claude Code's version:  2.1.296 (her folder's guard needs 2.1.295 or later)",
       "  Sallie's folder for Claude:  ~/BRIMM Video Studio (its CLAUDE.md, its settings that allow only edit.js, its skill, and Pictures/)",
       "  The Claude app's Code tab:  runs its own copy of Claude Code, updated with the app, so the setup guide's \"Check that her Claude folder only runs BRIMM Video\", in the Code tab, is what proves her folder is locked down there",
-      "  At the end:  one real call to Claude from the background job (a launch agent of its own, com.thebrimm.claude-check, taken away when it answers or after 90 seconds), to prove its sign-in is seen there",
+      "  At the end:  one real call to Claude from the background job (a launch agent of its own, com.thebrimm.claude-check, taken away when it answers or after 90 seconds), to prove that the sign-in her readings use is seen there (the import itself never asks Claude)",
       "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
     ]) assert.ok(out.includes(`\n${line}\n`), `${line}\n---\n${out}`);
-    // The checks come after the line about swift, in this order: Final Cut Pro, then the HyperFrames command line, its download's check,
+    // The checks come after the line about swift, in this order: macOS, then the HyperFrames command line, its download's check,
     // its Chrome and its doctor check.
     const at = (line) => out.indexOf(`\n  ${line}`);
-    const order = ["Swift", "Xcode's", "Homebrew:", "macOS:", "Final Cut Pro, optional now", "HyperFrames toolchain:", "Its download is checked:", "Its Chrome:", "Its doctor check:", "Claude Code, signed in:", "Claude Code's version:", "Sallie's folder", "The Claude app's Code tab:", "At the end:", "By hand afterwards:"].map(at);
+    const order = ["Swift", "Xcode's", "Homebrew:", "macOS:", "HyperFrames toolchain:", "Its download is checked:", "Its Chrome:", "Its doctor check:", "Claude Code, signed in:", "Claude Code's version:", "Sallie's folder", "The Claude app's Code tab:", "At the end:", "By hand afterwards:"].map(at);
     assert.deepEqual(order, [...order].sort((a, b) => a - b), out);
     assert.ok(!order.includes(-1), out);
     assert.doesNotMatch(r.out, /sallie@example\.com|The BRIMM"|orgName/);
@@ -906,7 +896,7 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     ...(program ? [[`${toolchainDir("")}/node_modules/hyperframes/bin/hyperframes.mjs`, "// made for the test\n"]] : []),
     ...(lock ? [[`${toolchainDir("")}/package-lock.json`, JSON.stringify({ lockfileVersion: 3, packages: { "": {}, "node_modules/hyperframes": { version, integrity } } })]] : [])
   ];
-  // Final Cut Pro is optional now: HyperFrames is where she edits. Its command line, the version tool/hyperframes.pin.json pins, is
+  // HyperFrames is where she edits. Its command line, the version tool/hyperframes.pin.json pins, is
   // kept in a folder of its own for that version (hyperframes.js, toolchainDir). The installer says what it would put there and how
   // the download is checked, and installs nothing: the step itself runs only on Jason's yes, and no test runs it.
   it("names the step that installs the pinned HyperFrames command line, with its version and its folder, and says its download is checked against the pin's integrity string. It changes nothing", () => {
@@ -922,8 +912,8 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     ]) assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
     // They are the pin's own version and string, and not GSAP's, which are nested in the pin file.
     assert.ok(!r.out.includes(PIN.gsap.version) && !r.out.includes(PIN.gsap.integrity), r.out);
-    // Final Cut Pro is said to be optional, whether it is here or not.
-    assert.ok(r.out.includes(`\n${FINAL_CUT}  `), r.out);
+    // Final Cut Pro is not looked for, and not named.
+    assert.doesNotMatch(r.out, /Final Cut/);
     changedNothing(r);
     // A folder watched on its own, without --machine, is not given the command line, and says nothing of it.
     const plain = ask("--print", "/Volumes/Work/Unedited video");
@@ -1036,13 +1026,13 @@ describe("the installer for one of the two Macs (--machine), asked what it would
       assert.ok(r.out.includes(`\n${HDR}ffmpeg is not here yet, so whether it can make an HDR video standard is looked at once it is installed: the working copy refuses an HDR video on a Mac whose ffmpeg cannot\n`), r.out);
       assert.doesNotMatch(r.out, /can make an HDR video standard\b.*videotoolbox/);
     });
-    it("comes after the lines about the Mac's macOS and Final Cut Pro, which it leaves side by side, and before the HyperFrames command line's, and only for one of the two Macs", () => {
+    it("comes after the line about the Mac's macOS, and before the HyperFrames command line's, and only for one of the two Macs", () => {
       const r = withFfmpeg({ hwaccels: VT, filters: FILTERS("scale_vt") });
       const at = (line) => r.out.indexOf(`\n  ${line}`);
-      const order = ["Homebrew:", "macOS:", "Final Cut Pro, optional now", "HDR video:", "HyperFrames toolchain:"].map(at);
+      const order = ["Homebrew:", "macOS:", "HDR video:", "HyperFrames toolchain:"].map(at);
       assert.deepEqual(order, [...order].sort((a, b) => a - b), r.out);
       assert.ok(!order.includes(-1), r.out);
-      assert.match(r.out, /\n {2}macOS: {2}[^\n]*\n {2}Final Cut Pro, optional now \(/);
+      assert.match(r.out, /\n {2}macOS: {2}[^\n]*\n {2}HDR video:/);
       // A folder watched on its own, without --machine, says nothing of it, and asks ffmpeg nothing.
       const plain = askWith({ ffmpegSays: { hwaccels: VT, filters: FILTERS("scale_vt") } }, "--print", "/Volumes/Work/Unedited video");
       assert.equal(plain.status, 0, plain.err);
@@ -1145,7 +1135,7 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     ];
     for (const [versions, expected] of cases) {
       const d = dropbox();
-      const r = askWith({ files: versions.map(copy), onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") }, finalCut: "12.4" }, "--print", "--machine", "Sallie's laptop", d.root);
+      const r = askWith({ files: versions.map(copy), onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") } }, "--print", "--machine", "Sallie's laptop", d.root);
       assert.equal(r.status, 0, r.err + r.out);
       const out = said(r);
       assert.ok(out.includes(`\n${expected}\n`), `${expected}\n---\n${out}`);
@@ -1158,10 +1148,10 @@ describe("the installer for one of the two Macs (--machine), asked what it would
   });
   it("with --rules-only, asks Claude nothing at the end of the setup either, so nothing leaves this Mac", () => {
     const d = dropbox();
-    const r = askWith({ onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") }, finalCut: "12.4" }, "--print", "--machine", "Sallie's laptop", "--rules-only", d.root);
+    const r = askWith({ onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") } }, "--print", "--machine", "Sallie's laptop", "--rules-only", d.root);
     assert.equal(r.status, 0, r.err + r.out);
     assert.doesNotMatch(r.out, /\n {2}At the end:/);
-    assert.ok(r.out.includes("\n  Claude, to read each cut plan:  not asked (--rules-only), so each cut plan is the rules' alone and nothing leaves this Mac\n"), r.out);
+    assert.ok(r.out.includes("\n  Claude, to read a video once its person has said what it is:  not asked (--rules-only: no reading is made in folder mode, and with --machine readings are off), so nothing leaves this Mac\n"), r.out);
     // Her folder for Claude is still written, so Claude Code's sign-in and version are still told.
     assert.ok(r.out.includes("\n  Claude Code's version:  2.1.296 (her folder's guard needs 2.1.295 or later)\n"), r.out);
     changedNothing(r);
@@ -1182,33 +1172,19 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     }
     d.done();
   });
-  it("says how to get Homebrew, Xcode's tools, Final Cut and Claude's sign-in when they are missing, and the macOS that Final Cut 12.4 needs", () => {
+  it("says how to get Homebrew, Xcode's tools and Claude's sign-in when they are missing, and says nothing of Final Cut or of a macOS it needs", () => {
     const d = dropbox();
-    const r = askWith({ bare: true, claude: '{"loggedIn":false}', onPath: { "xcode-select": XCODE_MISSING, sw_vers: MACOS("26.5") }, finalCut: null }, "--print", "--machine", "Sallie's laptop", d.root);
+    const r = askWith({ bare: true, claude: '{"loggedIn":false}', onPath: { "xcode-select": XCODE_MISSING, sw_vers: MACOS("26.5") } }, "--print", "--machine", "Sallie's laptop", d.root);
     assert.equal(r.status, 0, r.err + r.out);
     for (const line of [
       "  Xcode's command line tools (git, swift):  not here. Jason runs: xcode-select --install",
       '  Homebrew:  not here. In Terminal, Sallie runs this (it asks for her password, which she types herself): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
-      "  macOS:  26.5; Final Cut Pro 12.4 needs macOS 26.6 or later (System Settings > General > Software Update)",
-      `${FINAL_CUT}  not here. To have it, install it from the App Store (on her Apple ID, or shared by Family Sharing) before the first push.`,
+      "  macOS:  26.5",
       "  Claude Code, signed in:  no. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser; signing in to the Claude app does not sign in this command), then run this again.",
       "  Programs to install with Homebrew:  ffmpeg whisper-cpp node"
     ]) assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
+    assert.doesNotMatch(r.out, /Final Cut|App Store/);
     changedNothing(r);
-    d.done();
-  });
-  it("says that a Final Cut Pro older than 12.4 was not what phase 0 checked, and how to update it, on the macOS 12.4 needs or not, as on her laptop", () => {
-    const d = dropbox();
-    for (const [macos, macosLine, after] of [
-      ["26.5", "26.5; Final Cut Pro 12.4 needs macOS 26.6 or later (System Settings > General > Software Update)", "update macOS first, then App Store > Updates"],
-      ["26.6", "26.6", "update it in App Store > Updates"],
-      ["27.0.1", "27.0.1", "update it in App Store > Updates"]
-    ]) {
-      const r = askWith({ onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS(macos) }, finalCut: "12.3" }, "--print", "--machine", "Sallie's laptop", d.root);
-      assert.ok(r.out.includes(`\n  macOS:  ${macosLine}\n${FINAL_CUT}  12.3, here; phase 0 was checked with 12.4: ${after}\n`), r.out);
-    }
-    const newer = askWith({ onPath: { sw_vers: MACOS("27.0.1") }, finalCut: "12.4.1" }, "--print", "--machine", "Sallie's laptop", d.root);
-    assert.ok(newer.out.includes(`\n${FINAL_CUT}  12.4.1, here\n`), newer.out);
     d.done();
   });
   it("says when Claude Code is older than her folder's guard needs, or its version cannot be read, or it is not here: the install then does not write her folder", () => {
@@ -1229,14 +1205,13 @@ describe("the installer for one of the two Macs (--machine), asked what it would
     assert.ok(newer.out.includes("\n  Claude Code's version:  2.2.0 (her folder's guard needs 2.1.295 or later)\n"), newer.out);
     d.done();
   });
-  it("goes on to the end when a check fails: macOS, Final Cut's version and Claude Code's each unreadable, and Xcode's tools missing", () => {
+  it("goes on to the end when a check fails: macOS and Claude Code's version each unreadable, and Xcode's tools missing", () => {
     const d = dropbox();
-    const r = askWith({ onPath: { "xcode-select": XCODE_MISSING, sw_vers: "exit 1\n" }, finalCut: "12.4", finalCutText: "not a plist", claudeVersion: "", versionExit: 3, claude: '{"loggedIn":false}' }, "--print", "--machine", "Sallie's laptop", d.root);
+    const r = askWith({ onPath: { "xcode-select": XCODE_MISSING, sw_vers: "exit 1\n" }, claudeVersion: "", versionExit: 3, claude: '{"loggedIn":false}' }, "--print", "--machine", "Sallie's laptop", d.root);
     assert.equal(r.status, 0, r.err + r.out);
     for (const line of [
       "  Xcode's command line tools (git, swift):  not here. Jason runs: xcode-select --install",
       "  macOS:  could not be read",
-      `${FINAL_CUT}  of a version that could not be read, here; phase 0 was checked with 12.4: update it in App Store > Updates`,
       "  Claude Code, signed in:  no. In Terminal, run: claude auth login (Sallie signs in to her own Claude account in the browser; signing in to the Claude app does not sign in this command), then run this again.",
       "  Claude Code's version:  could not be read (claude --version), so the install does not write her folder for Claude."
     ]) assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
@@ -1378,37 +1353,26 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.deepEqual(d.held(), before);
     d.done();
   });
-  // Under the light import nothing is sent to Claude when a video is dropped: the installer says what it sends then, and ends by
-  // saying to ask Claude what is waiting, not to open a video by its name. Today's import keeps today's lines.
-  const TODAY_SENT = "  Sent to Claude for each cut plan:  the words of the transcript with their times, the rules' plan, and the video's file name and length, on the Claude account signed in on this Mac. The video and its sound never leave it. To send nothing: --rules-only";
+  // The import is always the light one: the installer says so whatever the settings say, and ends by saying to ask Claude what is waiting.
   const LIGHT_SENT = "  Sent to Claude:  nothing when a video is dropped, since this Mac's import is the light one. Claude reads a video only once its person has said what it is, on the Claude account signed in on this Mac, and never a session's file name. The video and its sound never leave it. To send nothing: --rules-only";
-  it("says under the light import, told or in the settings, that nothing is sent to Claude when a video is dropped, and today's line otherwise", () => {
+  it("says, whatever the settings say of the import, that nothing is sent to Claude when a video is dropped", () => {
     const d = box();
-    for (const [settings, args] of [[undefined, ["--import", "light"]], [d.mine({ import: "light" }), []], [d.mine({ import: "full" }), ["--import", "light"]]]) {
+    for (const [settings, args] of [[undefined, []], [undefined, ["--import", "light"]], [d.mine({ import: "light" }), []], [d.mine({ import: "full" }), []], [d.mine(), []]]) {
       const r = askWith({ settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
       assert.equal(r.status, 0, r.err + r.out);
       assert.ok(r.out.includes(`\n${LIGHT_SENT}\n`), r.out);
       assert.doesNotMatch(r.out, /file name and length/);
     }
-    for (const [settings, args] of [[undefined, []], [d.mine({ import: "light" }), ["--import", "full"]], [d.mine(), []]]) {
-      const r = askWith({ settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
-      assert.equal(r.status, 0, r.err + r.out);
-      assert.ok(r.out.includes(`\n${TODAY_SENT}\n`), r.out);
-      assert.ok(!r.out.includes(LIGHT_SENT), r.out);
-    }
     d.done();
   });
-  it("ends under the light import by saying to ask Claude what is waiting, and today's import by opening the video: its closing lines, read, not run", () => {
+  it("ends by saying to ask Claude what is waiting, always: its closing lines, read, not run", () => {
     const text = readFileSync(INSTALL, "utf8");
     const closing = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
-    assert.ok(closing.includes(`  if [[ -n "$light_import" ]]; then
-    say "in Claude, say \\"what's waiting?\\". What the tool did is in $LOG"
-  else
-    say "in Claude, say \\"open\\" and the video's name. What the tool did is in $LOG"
-  fi`), closing);
+    assert.ok(closing.includes('say "in Claude, say \\"what\'s waiting?\\". What the tool did is in $LOG"'), closing);
+    assert.ok(!closing.includes("light_import") && !closing.includes('\\"open\\"'), closing);
     // The help says so too.
     const help = text.slice(0, text.indexOf("set -euo pipefail")).replace(/\n# ?/g, " ").replace(/\s+/g, " ");
-    assert.ok(help.includes("Under the light import (--import light, or settings that say so) nothing is sent when a video is dropped: Claude reads a video only once its person has said what it is, and never a session's file name."), help);
+    assert.ok(help.includes("The import is always the light one: nothing is sent to Claude when a video is dropped. Claude reads a video only once its person has said what it is, and never a session's file name;"), help);
   });
   it("says at its end that the old folder, the one settings.js checked, is no longer watched, and that Jason checks it is still empty, then deletes it: its closing lines, read, not run", () => {
     const text = readFileSync(INSTALL, "utf8");
@@ -1467,12 +1431,12 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.match(r.out, /\nNothing was changed\.\n$/);
     d.done();
   });
-  it("shows every setting it keeps, and writes what it is told over them: --import full, --handoff, --drop, and --rules-only as readings off", () => {
+  it("shows every setting it keeps, and writes what it is told over them: --import light, --handoff, --drop, and --rules-only as readings off", () => {
     const d = box();
-    const kept = d.mine({ import: "light", readings: true, handoffVersion: 1, drop: "Unedited Video", later: { x: 1 } });
-    const r = askWith({ settings: kept }, "--print", "--machine", "Mac Studio", "--import", "full", "--handoff", "2", "--rules-only", d.root);
+    const kept = d.mine({ import: "full", readings: true, handoffVersion: 1, drop: "Unedited Video", later: { x: 1 } });
+    const r = askWith({ settings: kept }, "--print", "--machine", "Mac Studio", "--import", "light", "--handoff", "2", "--rules-only", d.root);
     assert.equal(r.status, 0, r.err + r.out);
-    assert.deepEqual(shown(r), { ...kept, version: 1, import: "full", readings: false, handoffVersion: 2 });
+    assert.deepEqual(shown(r), { ...kept, version: 1, import: "light", readings: false, handoffVersion: 2 });
     // Not told, they stay as the file has them, readings on included: no --rules-only never writes readings on.
     const quiet = askWith({ settings: d.mine({ readings: false }) }, "--print", "--machine", "Mac Studio", d.root);
     assert.deepEqual(shown(quiet), { ...d.mine({ readings: false }), version: 1 });
@@ -1512,9 +1476,9 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     refusedWith(ask("--print", "--machine", "Mac Studio", d.root, "--handoff", "3"), ["Not written: --handoff takes 1 or 2."]);
     refusedWith(askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", d.root), ['This Mac\'s settings could not be written (the import must be "full" or "light"). Jason puts that setting right by hand, or runs install.sh --machine on it, which writes this Mac\'s name, BRIMM Video and the checkout every time, the import, the hand-off version and the drop folder when told --import, --handoff or --drop, and readings off with --rules-only.'], true);
     // What it is told mends that one.
-    const mended = askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", "--import", "full", d.root);
+    const mended = askWith({ settings: d.mine({ import: "ligth" }) }, "--print", "--machine", "Mac Studio", "--import", "light", d.root);
     assert.equal(mended.status, 0, mended.out);
-    assert.equal(shown(mended).import, "full");
+    assert.equal(shown(mended).import, "light");
     d.done();
   });
   it("refuses to switch while the old folder holds a video, naming it by its file name when the import is today's, and says what to do", () => {
@@ -1592,7 +1556,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     }
     for (const [args, said] of [
       [["--machine", "Mac Studio", d.root, "--drop"], 'Say which folder after --drop, as --drop Drop or --drop "Unedited Video".'],
-      [["--machine", "Mac Studio", "--import", "--print", d.root], "Say which import after --import, as --import light or --import full."],
+      [["--machine", "Mac Studio", "--import", "--print", d.root], "Say which import after --import, as --import light."],
       [["--machine", "Mac Studio", d.root, "--handoff"], "Say which version after --handoff, as --handoff 1 or --handoff 2."],
       [["--machine", "Mac Studio", d.root, "--drop-folder"], 'Say which folder after --drop-folder, as --drop-folder "<path>".'],
       [["--machine", "Mac Studio", d.root, "--exports-folder"], 'Say which folder after --exports-folder, as --exports-folder "<path>".']
@@ -1605,7 +1569,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   it("refuses plainly, before any change, when node is not here and it is told --drop, --import or --handoff, or this Mac has settings", () => {
     const d = box();
     const WHY = "Node is not on this Mac, and the installer needs it to read and check this Mac's settings before it changes anything. Install it with Homebrew (brew install node; Homebrew is at https://brew.sh), then run this again.";
-    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "full"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
+    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "light"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
       const r = askWith({ bare: true, settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
       assert.deepEqual([r.status, r.out], [2, `${WHY}\n\nNothing was changed.\n`], args.join(" "));
       assert.deepEqual([r.left, r.ran], [settings ? ["Library", "Library/Application Support", "Library/Application Support/BRIMM Video", "Library/Application Support/BRIMM Video/settings.json"] : [], ""]);
@@ -1681,7 +1645,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   const OLD_NODE = "Node here is v20.1.0, and the tool needs 22 or later. Run: brew upgrade node";
   it("treats a node older than 22 as no node when the settings are to be read and checked: refused before any change, with the node's own words", () => {
     const d = box();
-    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "full"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
+    for (const [args, settings] of [[["--drop", "Drop"], undefined], [["--import", "light"], undefined], [["--handoff", "2"], undefined], [[], d.mine()]]) {
       const r = askWith({ onPath: { node: NODE_OF("20.1.0") }, settings }, "--print", "--machine", "Mac Studio", ...args, d.root);
       assert.deepEqual([r.status, r.out], [2, `${OLD_NODE}\n\nNothing was changed.\n`], args.join(" "));
       assert.deepEqual([r.left, r.ran, r.agents], [settings ? SETTINGS_LEFT : [], "", []]);
@@ -1769,7 +1733,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   });
   it("refuses --drop, --import and --handoff with --remove, which changes no settings, plainly and before anything else", () => {
     const d = box();
-    for (const args of [["--drop", "Drop"], ["--import", "full"], ["--handoff", "2"], ["--drop-folder", "/x"], ["--switch-back"], ["--machine", "Mac Studio", "--drop", "Drop", d.root]]) {
+    for (const args of [["--drop", "Drop"], ["--import", "light"], ["--handoff", "2"], ["--drop-folder", "/x"], ["--switch-back"], ["--machine", "Mac Studio", "--drop", "Drop", d.root]]) {
       const r = ask("--print", "--remove", ...args);
       assert.deepEqual([r.status, r.out], [2, "--remove stops the watching and changes no settings, so it does not take --drop, --drop-folder, --exports-folder, --switch-back, --switch-local, --import or --handoff.\n"], args.join(" "));
       assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
@@ -1824,7 +1788,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
       assert.deepEqual([r.status, r.stdout, r.stderr], [1, [
         "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:",
         "",
-        `The settings were not written, so they and the launch agent are as they were. This run did make ${dir}/BRIMM Video/Drop/Mac Studio and its marker, and the folders for Episodes and its status files, for the reference pictures and for Final Cut's work, which a later run uses. Deal with what is said above, then run this again.`,
+        `The settings were not written, so they and the launch agent are as they were. This run did make ${dir}/BRIMM Video/Drop/Mac Studio and its marker, and the folders for Episodes and its status files and for the reference pictures, which a later run uses. Deal with what is said above, then run this again.`,
         ""
       ].join("\n"), ""]);
       // The marker was asked for, then the write, and nothing after it: her folder for Claude is not written.
@@ -1837,7 +1801,8 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
     const line = readme.split("\n").find((l) => l.startsWith("Add `--rules-only` to that line"));
     assert.ok(line, "README's --rules-only paragraph");
-    assert.ok(line.includes("To have Claude asked again, run the line again without `--rules-only`"), line);
+    assert.ok(line.includes("The import never asks Claude, with it or without"), line);
+    assert.ok(line.includes("To have Claude asked again to read a video, run the line again without `--rules-only`, and turn the readings on"), line);
     assert.ok(line.includes("with `--machine`, `--rules-only` wrote `readings: false` into this Mac's settings, and a run without it leaves that as it is: turn the readings on with `node settings.js set --readings on`"), line);
   });
   it("says in its help what the three options do, and that a switch is refused while the old folder holds work", () => {
@@ -1875,7 +1840,7 @@ describe("the installer and her folder's lock (the open lock, K1), asked what it
     const root = join(dir, "The BRIMM DB", "BRIMM Video");
     mkdirSync(root, { recursive: true });
     try {
-      return askWith({ install, settings: settings && { machine: "Sallie's laptop", root, checkout: dirname(dirname(install)), ...settings }, claudeVersion: `${version} (Claude Code)`, files, onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") }, finalCut: "12.4" }, "--print", "--machine", "Sallie's laptop", ...more, root);
+      return askWith({ install, settings: settings && { machine: "Sallie's laptop", root, checkout: dirname(dirname(install)), ...settings }, claudeVersion: `${version} (Claude Code)`, files, onPath: { "xcode-select": XCODE_HERE, sw_vers: MACOS("27.0.1") } }, "--print", "--machine", "Sallie's laptop", ...more, root);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -2121,5 +2086,21 @@ describe("a drop folder of this Mac's own, asked what the installer would do (--
     const closing = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
     assert.ok(closing.includes('if [[ -z "$local_drop" || "$cloud_name" == Dropbox ]]; then\n    say "Once, in Finder: Control-click that folder and choose Make available offline'), closing);
     assert.ok(closing.includes('[[ -z "$cloud_name" ]] || say "Warning: this drop folder is in $cloud_name.'), closing);
+  });
+});
+
+describe("the full import is gone (Phase 2, F4)", { skip: notAMac }, () => {
+  it("--import full prints that the full import is gone, changes nothing and ends 2, on a Mac set up with --machine or not", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    for (const args of [["--machine", "Mac Studio", "--import", "full", root], ["--import", "full", "/Volumes/Work/Unedited video"], ["--machine", "Mac Studio", "--drop", "Drop", "--import", "full", root]]) {
+      const r = ask("--print", ...args);
+      assert.deepEqual([r.status, r.out], [2, "The full import is gone: this Mac imports lightly.\n"], args.join(" "));
+      assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
+    }
+    // --import light is as it was.
+    assert.equal(ask("--print", "--machine", "Mac Studio", "--import", "light", root).status, 0);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

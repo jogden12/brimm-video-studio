@@ -1,3 +1,4 @@
+// History: this ran in phase 0 with modules Studio retired with Final Cut (Phase 2, 6 November 2026); it no longer runs.
 // Makes the made-up clips and Final Cut files for phase 0 (docs/phase-0-checklist.md), on this Mac's own disk.
 // Nothing here is part of brimm-video. It writes only into the folder it is given, by default ~/BRIMM Video Work/Phase 0,
 // and refuses a folder inside a cloud drive: nothing here is ever written into Dropbox.

@@ -1,3 +1,4 @@
+// History: this ran in phase 4 with modules Studio retired with Final Cut (Phase 2, 6 November 2026); it no longer runs.
 // The files for phase 4's by-hand checks (docs/phase-4/checks.md), from brimm-video's own writer: two made-up clips and two
 // made-up pictures, and the Final Cut files, written into ~/BRIMM Video Work/Phase 4 checks/, which is outside Dropbox (or
 // into the folder given, for a dry run). Each file imports into one library there, "Phase 4 checks".

@@ -432,7 +432,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
             workingCopy: { bytes: made.video.bytes, seconds: facts.duration, fps: 30 }, opened: project.opened, handover: false, fromSuggestion: null, state: "opened"
           }
         })
-      }, { ...deps, episode, work, shown: title, light: true });
+      }, { ...deps, episode, work, shown: title });
       if (!imported.filed) return stop(String(imported.message || "the work stopped").replace(/^it could not be filed into Episodes: /, ""));
       kept = true;
       if (!imported.ok) ctx.say(`${title}: ${imported.message}.`);
@@ -508,7 +508,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       }
       try {
         filed = fileEpisode({
-          file: video, made: rels.map((rel) => join(part.folder, rel)), at: (to) => to, fcpxml: "", facts, printed: printeds[0], kind: taken.explainer || episodeKind(facts) === "short video" ? "short video" : "raw",
+          file: video, made: rels.map((rel) => join(part.folder, rel)), at: (to) => to, facts, printed: printeds[0], kind: taken.explainer || episodeKind(facts) === "short video" ? "short video" : "raw",
           read: null, reels: [], work, fingerprint: typeof part.record.fingerprint === "string" ? part.record.fingerprint : "", into: into(part.record.answer.seen)
         }, fdeps);
       } catch (e) {
@@ -547,7 +547,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       if (ended.overMemory || ended.outOfTime) return stop(`ffmpeg was stopped: ${ended.stopped}`);
       if (ended.signal) return stop(`ffmpeg was killed by ${ended.signal}`);
       if (ended.code !== 0 || !existsSync(output) || !(statSync(output).size > 0)) return stop(lastLine(ended.stderr) || "ffmpeg wrote nothing");
-      const imported = await importInto(output, into(null), { ...fdeps, work, shown: title, light: true });
+      const imported = await importInto(output, into(null), { ...fdeps, work, shown: title });
       if (!imported.filed) return stop(String(imported.message || "the work stopped").replace(/^it could not be filed into Episodes: /, ""));
       filed = imported.filed;
       kept = true;

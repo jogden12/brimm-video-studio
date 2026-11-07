@@ -25,6 +25,7 @@
 // names in it, and takes nothing else out of what was said (a single-dash option or another program's name stays). What it touches
 // beyond the project's own files is given to it (`deps`), so that no test runs the command line or the app; the defaults are the
 // Mac's.
+import { spokenMac } from "./kinds.js";
 import { spawnSync } from "node:child_process";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
@@ -50,7 +51,7 @@ export const noVersions = (name) => `${name} has no versions in HyperFrames yet.
 /** What `versions` says when the command line cannot list them: History is a trial (F7), and nothing else depends on it. */
 export const CANNOT_LIST = "I can't list the versions right now; HyperFrames shows its history.";
 /** What both say when the main project in use was made on another Mac and is not here: its history is there. */
-const elsewhere = (name, on) => `The HyperFrames project for ${name} is on ${on}, with everything done in it, so there is nothing to look at on this Mac. Ask Jason.`;
+const elsewhere = (name, on) => `The HyperFrames project of ${name} is on ${spokenMac(on)}. Carry on there.`;
 const earlier = (count) => `${count} earlier ${count === 1 ? "request is" : "requests are"} not shown.`;
 const newest = `These are the newest ${VERSIONS_LIMIT}; HyperFrames shows any older ones.`;
 
