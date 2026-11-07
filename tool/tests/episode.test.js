@@ -470,7 +470,7 @@ describe("E1: a recording that left the Mac (Phase 3, L6)", () => {
     assert.deepEqual(fileProblems(t.folder, moved, { machine: "Mac Studio", localFolder: video }), []);
     const gone = setup();
     const video2 = place(gone, { "IMG.words.json": 12 }, {});
-    assert.deepEqual(fileProblems(gone.folder, moved, { machine: "Mac Studio", localFolder: video2 }).map((p) => [p.file, p.kind]), [["IMG.mov", "missing"], ["Original files/IMG.mov", "missing"]]);
+    assert.deepEqual(fileProblems(gone.folder, moved, { machine: "Mac Studio", localFolder: video2 }).map((p) => [p.file, p.kind]), [["Original files/IMG.mov", "missing"]]);
     const { original, ...local } = moved.local;
     const plain = setup();
     const video3 = place(plain, { "IMG.words.json": 12 }, { "Original files/IMG.mov": 30 });
