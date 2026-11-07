@@ -82,7 +82,7 @@ import { handoffIn, videoSeconds } from "./finish-time.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, downloadsOnce, exportsFound, lookForExports, readRegular } from "./exports.js";
 import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
 import { videoClock } from "./video-clock.js";
-import { clockText, timelineAt } from "./clock.js";
+import { timelineAt } from "./clock.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
 import { spelled } from "./final-transcript.js";
 import { GRAPHIC_CUE_KINDS, SHOT_KINDS, graphicCuesOf, graphicCuesOfPlan, graphicCuesOfRecord, keptIndexes, keptPhraseSpans, placeGraphicCues } from "./graphic-cues.js";
