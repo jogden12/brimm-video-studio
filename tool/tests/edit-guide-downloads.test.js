@@ -249,7 +249,8 @@ describe("the exports folder this Mac picked (L1b): the guide looks in it as in 
   const EDIT = IN_APP.replace("as MP4, then", `as MP4, into ${WORDS}, then`);
   it("counts an export in it as exported, lists it once for two videos, and tells the other where to export", async () => {
     const w = raw({ exported: false });
-    exportOf(w, "main", { folder: picked(w) });
+    // No record of the app's names it: it is found by its name in the picked folder's listing alone.
+    exportOf(w, "main", { folder: picked(w), record: false });
     const b = another(w, { exported: false });
     const { result, calls } = await watched(() => on(withPicked(w), "guide"), { names: ["readdirSync"] });
     assert.ok(result.said.includes(`  ${NAMED}: ${EXPORTED}`), result.text);
@@ -265,6 +266,26 @@ describe("the exports folder this Mac picked (L1b): the guide looks in it as in 
     assert.equal(calls.filter((call) => call.path === picked(w)).length, 1, "tried once");
     assert.ok(result.said.includes(`  ${NAMED}: ${EDIT}`), result.text);
     assert.ok(result.said.includes(`  ${b.line(EDIT)}`), result.text);
+  });
+  it("tells a finished video's Reel exported into it to be handed off, found by its name there alone (L1b fix 2)", async () => {
+    const w = await finished({ exported: false });
+    exportOf(w, "reel 2", { folder: picked(w), record: false });
+    const { result } = await watched(() => on(withPicked(w), "guide"), { names: ["readdirSync"] });
+    assert.ok(result.said.includes(`  ${NAMED}: ${REEL_2}`), result.text);
+    // Where the settings pick no exports folder it is not looked in, and the Reel is not seen.
+    const plain = await on(depsOf(w), "guide");
+    assert.ok(!plain.said.includes(`  ${NAMED}: ${REEL_2}`), plain.text);
+    assert.ok(plain.said.includes(`  ${NAMED}: ${TAKE}`), plain.text);
+  });
+  it("takes a finished video's Reels for none exported while this Mac will not let the picked folder be read, though Downloads holds one (L1b fix 2)", async () => {
+    const w = await finished();
+    const refuse = { deny: (name, path) => (path === picked(w) ? Object.assign(new Error(`EPERM: operation not permitted, scandir '${path}'`), { code: "EPERM" }) : null) };
+    const { result } = await watched(() => on(withPicked(w), "guide"), { names: ["readdirSync"], ...refuse });
+    assert.ok(!result.said.includes(`  ${NAMED}: ${REEL_2}`), result.text);
+    assert.ok(result.said.includes(`  ${NAMED}: ${TAKE}`), result.text);
+    // The same world with no exports folder picked sees the Reel's export in Downloads.
+    const plain = await on(depsOf(w), "guide");
+    assert.ok(plain.said.includes(`  ${NAMED}: ${REEL_2}`), plain.text);
   });
   it("reads nothing of it for a video she set aside", async () => {
     const w = raw();

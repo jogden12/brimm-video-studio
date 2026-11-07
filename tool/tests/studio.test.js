@@ -794,6 +794,17 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     }
     for (const head of ["## Not ready yet", "## Keeping an episode's folder on this Mac", "## In HyperFrames, to hand it off"]) assert.equal(sectionOf(open, head), sectionOf(strict, head), head);
   });
+  it("tells her to export into the exports folder this Mac was set up with, when the guide or the open names one, in both skills (Phase 3, L1b fix 2)", () => {
+    const [strict, open] = ["SKILL.md", "SKILL-open.md"].map((name) => readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8"));
+    for (const [name, text] of [["SKILL.md", strict], ["SKILL-open.md", open]]) {
+      const steps = sectionOf(text, "## In HyperFrames, to hand it off").split("\n");
+      const step = (n) => steps.find((line) => line.startsWith(`${n}. `)) ?? "";
+      assert.ok(step(1).includes("HyperFrames saves it in her Downloads folder, or in the exports folder this Mac was set up with: when the guide or the open names one, tell her to export into it. Studio takes an export out of Downloads after its check, and never out of another exports folder."), `${name}: ${step(1)}`);
+      assert.ok(step(4).startsWith("4. If it says this Mac does not let it look in the Downloads folder or in her exports folder, tell her what it says: she allows it once, in System Settings."), `${name}: ${step(4)}`);
+      const row = text.split("\n").find((line) => line.startsWith('- "Hand it off": An episode she edited in HyperFrames')) ?? "";
+      assert.ok(row.includes("which `finish` finds in her Downloads folder, and in the exports folder this Mac was set up with when that is another folder"), `${name}: ${row}`);
+    }
+  });
   it("asks the card's second question again before a correction, and corrects only a video she has answered (Ruling 24)", () => {
     const row = rowOf(`"It's actually raw" (or finished, or an iPhone clip)`);
     const asked = row.indexOf('on one `AskUserQuestion`: "Is it a private session with a client or a group?": "Yes", "No"');

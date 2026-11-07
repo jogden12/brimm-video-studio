@@ -610,6 +610,24 @@ describe("the gate, a record Dropbox is still bringing over", () => {
       t.done();
     }
   });
+  it("refuses them on a Mac with a drop folder of its own whatever its file says of the import, an old record from before the switch in force (L1b fix 3)", async () => {
+    // Since L1b such a Mac's file may still say "full", or nothing, and every import is light: a video corrected on the other Mac to a session, whose
+    // record Dropbox is still bringing over, is refused there as on a Mac whose file says light, though the record in force is of layout 1 or 2.
+    for (const imported of ["full", undefined]) {
+      for (const record of [{}, { version: 2, spellings: [["Ogdin", "Ogden"]] }]) {
+        for (const name of SCOPED) {
+          const t = setup();
+          const found = episodeFor(t, { record });
+          PENDING_FILE(found, 2, "{");
+          const { import: _, ...rest } = t.ctx.settings;
+          const settings = { ...rest, ...(imported ? { import: imported } : {}), dropPath: join(t.dir, "Drop") };
+          const r = await on({ ...t.ctx.deps, settings }, name, ...ASKED[name]);
+          assert.deepEqual([r.code, r.said, t.started], [1, [PENDING], []], `${imported} ${found.record.version} ${name}`);
+          t.done();
+        }
+      }
+    }
+  });
   it("refuses them on a record of the switch's layout, though this Mac does not do the light import", async () => {
     for (const record of [FINISHED_RECORD, SESSION_RECORD, CLEARED_RECORD, UNANSWERED_RECORD]) {
       for (const name of ["open", "ask", "show", "resolve", "spell"]) {

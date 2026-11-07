@@ -211,6 +211,12 @@ export function factsOf(home, s, { tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp
 /** Whether this Mac does the light import, which asks Claude nothing about a video until its person answers. Anything but
     "light" in the import setting, and no setting, is not set up for them: the import itself is light all the same. */
 export const lightImport = (s) => s?.import === "light";
+/** Whether this Mac names a video waiting in a drop folder, an episode whose record cannot be read, and what an error nobody foresaw
+    says, as the light import's rules have it, never by a file's or a folder's own name, which may be a client's, and refuses every
+    command for an episode while a record above the one read is still coming (edit.js gateOf): a Mac whose file says the light import,
+    and a Mac with a drop folder of its own whatever its file says (every import is light since Phase 2, and since Phase 3's L1b a drop
+    folder of a Mac's own no longer needs the file to say so). Whether her chat is set up stays lightImport's. */
+export const namesQuietly = (s) => lightImport(s) || isLocal(s);
 
 /** Whether Claude may read what is taught in a client or group session on this Mac: only when Jason has turned the teachings on
     and it is less than 90 days since. `now` is a time in milliseconds, or a Date. Settings that do not say so (absent, null or
@@ -326,17 +332,19 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                whose parent is there, whatever the file says of the import, which is light): not
                                BRIMM Video's folders, BRIMM Video Work (but for Drop in it), her chat's folders, Zoom's,
                                Downloads or the exports folder.
-                               --exports-folder says where HyperFrames' exports are looked for besides Downloads. On a Mac
-                               with a drop folder of its own, --drop goes back to one in Dropbox only with --switch-back
+                               --exports-folder says where HyperFrames' exports are looked for besides Downloads: never
+                               the drop folder, a folder inside it or one that holds it, whether the drop folder is in
+                               Dropbox or on this Mac. On a Mac with a drop folder of its own, --drop goes back to one in
+                               Dropbox only with --switch-back
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
                                [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the
-                               teachings from sessions, shown as (not shown), and then the import it will be, the drop
-                               folder as it is now and as it will be, and, when the folder watched changes, the old one's
-                               whole path, a line each, or why it would refuse it. The exports folder it will be, whether the
-                               drop folder is in a cloud folder (and which), and whether macOS asks once about reading it
-                               come before the old folder's line, each only when it applies. Nothing is written. install.sh
-                               asks this before it changes anything
+                               teachings from sessions, shown as (not shown), and then the import it will be (always light),
+                               the drop folder as it is now and as it will be, and the exports folder it will be, a line
+                               each; then, each only when it applies, whether the drop folder is in a cloud folder (and
+                               which) and whether macOS asks once about reading it; and, when the folder watched changes, the
+                               old one's whole path; or why it would refuse it. Nothing is written. install.sh asks this
+                               before it changes anything
   node settings.js set [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--exports-folder "<whole path>"] [--app hyperframes|off] [--app-handover on|off]
                                change the settings of the switch to the light import, and say what changed. Any other
                                setting is kept. It does not change the drop folder: it is switched by the installer, which
@@ -425,10 +433,12 @@ function fieldsToldBy(rest) {
 }
 
 /** Whether two folders are the same: by their real paths when both are there, so that one reached by a link is the same as the
-    one it leads to; by how they are spelt, resolved, otherwise. switch.js compares the BRIMM Video a late check names so too. */
+    one it leads to; by how they are spelt, resolved, otherwise. switch.js compares the BRIMM Video a late check names so too.
+    The real path is macOS's own (realpathSync.native, as places.js realOf has it), which spells each folder as the disk keeps it:
+    on a Mac's disk, whose names are not case-sensitive, "~/downloads" is Downloads, as Finder and HyperFrames take it. */
 export function sameFolder(a, b) {
   try {
-    return realpathSync(a) === realpathSync(b);
+    return realpathSync.native(a) === realpathSync.native(b);
   } catch (e) {
     return resolve(a) === resolve(b);
   }
@@ -469,23 +479,30 @@ export function needsFilesAccess(path, home) {
   return there !== undefined && there !== deviceOf(h);
 }
 
-/** A folder in Finder's words: under the home folder, the folders after it and ", in your home folder"; under
-    ~/Library/CloudStorage/<Provider>-<account>/, the provider and the folders after it; else each folder of the path. */
+/** A folder in Finder's words, by the first rule that fits it, as it is spelt and then by its real path: under
+    ~/Library/Mobile Documents/com~apple~CloudDocs/, "iCloud Drive" and the folders after it; under
+    ~/Library/CloudStorage/<Provider>-<account>/, the provider and the folders after it; under the home folder, the folders after
+    it and ", in your home folder"; under /Volumes/, on another disk, the disk's name and the folders after it (a home folder on
+    another disk is still the home folder); else each folder of the path. */
 export function folderWords(path, home) {
   const cut = (p, dir) => (p === dir || p.startsWith(`${dir}/`) ? p.slice(dir.length).split("/").filter(Boolean) : null);
   for (const [p, h] of [[resolve(path), resolve(home)], [realOf(path), realOf(home)]]) {
     // Finder names a folder in iCloud Drive "iCloud Drive" and one on another disk by the disk's name, not by the path's own folders.
     const icloud = cut(p, join(h, "Library", "Mobile Documents", "com~apple~CloudDocs"));
     if (icloud) return ["iCloud Drive", ...icloud].join(" › ");
-    const disk = cut(p, "/Volumes");
-    if (disk && disk.length) return disk.join(" › ");
     const cloud = cut(p, join(h, "Library", "CloudStorage"));
     if (cloud && cloud.length) return [cloud[0].split("-")[0], ...cloud.slice(1)].join(" › ");
     const inHome = cut(p, h);
     if (inHome) return inHome.length ? `${inHome.join(" › ")}, in your home folder` : "your home folder";
+    const disk = cut(p, "/Volumes");
+    if (disk && disk.length) return disk.join(" › ");
   }
   return resolve(path).split("/").filter(Boolean).join(" › ");
 }
+
+/** Why an exports folder that is, is inside or holds the drop folder will not do, as `plan`, `write` and `set` refuse it: the import
+    would take every export as a new video, and the guide and the open tell her to export into it. dropFolderFault says the same. */
+const EXPORTS_IN_DROP = "the drop folder cannot be the exports folder, or inside it, or hold it";
 
 /** Whether the folders `a` and `b` are the same, or one is inside the other, by their real paths, letter case folded. */
 function sameOrNested(a, b) {
@@ -567,6 +584,9 @@ function planned(home, rest, now) {
   }
   const { settings, fault } = afterWrite(held, fields, remove);
   if (fault) return { code: 1, said: [`This Mac's settings could not be written (${fault}). ${MEND_SETTING}`] };
+  // And whatever the drop folder is, in Dropbox or this Mac's own, and whichever option moved it or the exports folder (--exports-folder,
+  // --drop, --switch-back), the exports folder the settings would name may not be, be inside or hold it, as `set` refuses it.
+  if (sameOrNested(exportsFolderOf(settings, home), dropFolderOf(settings, home))) return { code: 1, said: [`Not written: ${EXPORTS_IN_DROP}.`] };
   // The drop folder is Unedited Video until the file says Drop; or a whole path, on a Mac with one of its own.
   const dropWord = (s) => (isLocal(s) ? s.dropPath : s.drop === "Drop" ? "Drop" : "Unedited Video");
   const from = dropWord(held);
@@ -582,8 +602,10 @@ function planned(home, rest, now) {
   const moved = !sameFolder(oldRoot, settings.root) || oldMachine !== settings.machine;
   const either = wasLocal || isLocal(settings);
   if (either ? sameFolder(oldFolder, newFolder) : !moved && from === to) return { settings, fields, remove, from, to };
-  // Named by the folder alone when only the drop folder changes, and by its whole path when the Mac or BRIMM Video do.
-  const light = lightImport(held) || lightImport(settings);
+  // Named by the folder alone when only the drop folder changes, and by its whole path when the Mac or BRIMM Video do. A video waiting
+  // in the old folder is named as under the light import on a switch to or from a drop folder of this Mac's own, whatever the file
+  // says of the import (namesQuietly; every import is light): it may be a session, and its file's name a client's (switch.js heldInOld).
+  const light = namesQuietly(held) || namesQuietly(settings);
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")
     .then(({ heldInOld }) => {
@@ -638,10 +660,11 @@ function write(home, rest, say, now) {
 }
 
 /** `plan`: the settings `write` would write, whole, as JSON (the emails of the accounts of the teachings from sessions shown as
-    "(not shown)"), then the import it will be ("light" or "full"), and the drop folder now and as it will be, each on a line of
-    its own, and, when the folder watched changes, the old one's whole path, the one checked, on a line after them; and nothing
-    written; or the lines `write` would refuse by. Gives the number it ends with, or a promise of it when the
-    drop folder changes. */
+    "(not shown)"), then the import it will be (always "light": every import is light, whatever an old file still says), the drop
+    folder now and as it will be and the exports folder it will be, each on a line of its own, then, each only when it applies, that
+    the drop folder is in a cloud folder and that macOS asks once about reading it, and, when the folder watched changes, the old
+    one's whole path, the one checked, on a line after them; and nothing written; or the lines `write` would refuse by. Gives the
+    number it ends with, or a promise of it when the drop folder changes. */
 function plan(home, rest, say, now) {
   return afterwards(planned(home, rest, now), (result) => {
     if (!result.fields) {
@@ -767,7 +790,7 @@ function set(home, rest, say) {
   if (exportsTo !== undefined) {
     const why = local
       ? dropFolderFault(got.settings.dropPath, { home, root: got.settings.root, exports: exportsTo, zoom: zoomFolderOf(got.settings, home) })
-      : sameOrNested(exportsTo, dropFolderOf(got.settings, home)) ? "the drop folder cannot be the exports folder, or inside it, or hold it" : "";
+      : sameOrNested(exportsTo, dropFolderOf(got.settings, home)) ? EXPORTS_IN_DROP : "";
     if (why) {
       say(`Not changed: ${why}.`);
       return 1;

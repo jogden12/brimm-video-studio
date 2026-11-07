@@ -4,12 +4,23 @@
 // on a folder made in the test's own temporary directory. No time here depends on the Mac the test runs on: a zone is given.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { lutimesSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, lutimesSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { downloadsFolder, episodeWork } from "../settings.js";
 import { turnsOf } from "../hyperframes.js";
 import { exportNameOf, metaNameOf, metaOf, beganAt, fixedZone, lastChangeOf, projectChange, lookForExports, exportsFound, isExportOf, shapeFault, soundFault, colourNote, firstWordsMatch } from "../exports.js";
+
+/** Whether the test's folders are on a disk whose names are not case-sensitive, as a Mac's own disk is unless it was made otherwise. */
+const caseBlind = (() => {
+  const dir = mkdtempSync(join(tmpdir(), "brimm-case-"));
+  try {
+    mkdirSync(join(dir, "Case"));
+    return existsSync(join(dir, "CASE"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+})();
 
 const MAIN = "Pricing- what to charge- main 3fa9c1";
 const fixture = (name) => readFileSync(new URL(`./fixtures/hyperframes-0.8.208/exports/${name}`, import.meta.url), "utf8");
@@ -383,6 +394,17 @@ describe("C4. two exports of one minute, and a file she names", () => {
     assert.deepEqual([got.asks, got.parts[0].video.name, got.parts[0].video.began], [[], "my final cut.mp4", null]);
     assert.equal(got.parts[0].line, "The main video: my final cut.mp4, from Downloads, the file you named.");
   });
+  it("takes a file she names in the exports folder this Mac picked, whatever it is called, and says where it came from (L1b fix 2)", () => {
+    const picked = "/h/Movies/Exports";
+    const input = { ...found([main({ changed: ms(14, 59) })], [file(named(P_MAIN, "13.56"))]), exports: { dir: picked, words: "Movies › Exports, in your home folder", files: [file("final.mp4", { bytes: 5, mtimeMs: ms(9, 0) })] } };
+    const got = lookForExports(input, { take: { main: "final.mp4" } });
+    assert.deepEqual(got.asks, []);
+    assert.deepEqual([got.parts[0].video.name, got.parts[0].video.dir, got.parts[0].video.where, got.parts[0].video.bytes], ["final.mp4", picked, "the exports folder", 5]);
+    assert.equal(got.parts[0].line, "The main video: final.mp4, from the exports folder, the file you named.");
+    // Without the picked folder's listing it is none of the files, and asked again.
+    const { exports, ...without } = input;
+    assert.deepEqual(lookForExports(without, { take: { main: "final.mp4" } }).asks, [`"final.mp4" is not an export of the main video. The ones there are: ${named(P_MAIN, "13.56")}. Which is the final one?`]);
+  });
   it("asks again when the name she gives is none of the files, and lists the exports of the part", () => {
     const got = lookForExports(found([main()], [file(named(P_MAIN, "13.56")), file("holiday.mp4")]), { take: { main: "final.mp4" } });
     assert.deepEqual(got.asks, [`"final.mp4" is not an export of the main video. The ones there are: ${named(P_MAIN, "13.56")}. Which is the final one?`]);
@@ -750,6 +772,20 @@ describe("C2 (on a disk). exportsFound: the projects of the record, their record
     const looked = lookForExports(got.input);
     assert.deepEqual(looked.parts.map((p) => [p.video.where, p.video.dir]), [["Downloads", w.downloads]]);
     assert.equal(looked.looked, `Looked in Downloads for exports of: ${P_MAIN}.`);
+    w.done();
+  });
+  it("lists one folder once when the exports folder is Downloads spelt in another letter case, on a disk whose names are not case-sensitive (L1b fix 2)", { skip: caseBlind ? false : "the test's disk tells letter case apart" }, () => {
+    const w = made();
+    w.project(P_MAIN);
+    w.put(join(w.downloads, `${P_MAIN} 2026-10-20 13.56.mp4`), 10);
+    for (const spelt of ["downloads", "DOWNLOADS"]) {
+      const got = w.asked(recordOf(entry("main", P_MAIN)), { exports: join(w.home, spelt) });
+      assert.equal(got.input.exports, undefined, spelt);
+      const looked = lookForExports(got.input);
+      assert.deepEqual(looked.parts.map((p) => [p.video.where, p.video.dir]), [["Downloads", w.downloads]], spelt);
+      assert.deepEqual(looked.asks, [], spelt);
+      assert.equal(looked.looked, `Looked in Downloads for exports of: ${P_MAIN}.`, spelt);
+    }
     w.done();
   });
   it("says so when this Mac will not let the tool look in the picked exports folder, apart from Downloads", () => {

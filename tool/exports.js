@@ -8,7 +8,7 @@
 // in the project, which says where the file went. The app updates itself, so everything here reads what it writes tolerantly.
 //
 // Only projectChange and (below) exportsFound read the disk, and only the folders they are given. Nothing here writes anywhere.
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { tokens } from "./shared/text.js";
 import { KEPT, isMain } from "./app.js";
@@ -357,9 +357,9 @@ export function lookForExports(input, answers = {}) {
 /** What finish says of a raw video that was never opened in HyperFrames (architecture 4.1, plan PR 7). `finish` says it on a Mac set up for the app; on any other it says the Mac is not set up (app.js NOT_SET_UP). */
 export const NEVER_OPENED = 'The main video was never opened in HyperFrames. Say "open it in HyperFrames" first, edit it there, export it on This Mac, then say "hand it off".';
 /** What finish says when this Mac will not let it look in Downloads: macOS asks once, and keeps the answer. */
+export const DOWNLOADS_UNREADABLE = 'This Mac does not let BRIMM Video Studio look in the Downloads folder, where HyperFrames puts its exports. Allow it in System Settings, under Privacy & Security, Files and Folders, then say "hand it off" again.';
 /** What finish says when this Mac will not let it look in the exports folder it picked (`words`: folderWords of it): as DOWNLOADS_UNREADABLE. */
 export const exportsUnreadable = (words) => `This Mac does not let BRIMM Video Studio look in your exports folder, ${words}, where HyperFrames puts its exports. Allow it in System Settings, under Privacy & Security, Files and Folders, then say "hand it off" again.`;
-export const DOWNLOADS_UNREADABLE = 'This Mac does not let BRIMM Video Studio look in the Downloads folder, where HyperFrames puts its exports. Allow it in System Settings, under Privacy & Security, Files and Folders, then say "hand it off" again.';
 /** Whether a name leads nowhere but a folder of its own: a project's name comes from the record, which Dropbox and the other Mac write. */
 const plainName = (name) => typeof name === "string" && name !== "" && name !== "." && name !== ".." && !/[/\0]/.test(name);
 const isFolder = (path) => {
@@ -451,8 +451,8 @@ export function downloadsOnce({ home, exports = null, readdir = readdirSync }) {
 
 /** What `finish` reads of the disk to look for HyperFrames' exports (plan PR 7): for the main project in use and each Reel project of
     the record (not a project kept for an earlier kind, and not one of a Reel the record says is dropped), whether its folder is on this Mac, when it last changed (projectChange), the
-    files its records name and the renders in its renders/ that none does; and the videos in Downloads. `home` is this Mac's home,
-    `name` the episode's folder name. Gives { input, unreadable }: `input` is what lookForExports is given, and `unreadable` is true when this Mac will
+    files its records name and the renders in its renders/ that none does; and the videos in Downloads and in the exports folder this Mac picked. `home` is this Mac's home,
+    `name` the episode's folder name. Gives { input, unreadable, exportsUnreadable }: `input` is what lookForExports is given, `unreadable` is true when this Mac will
     not let Downloads be read, and `exportsUnreadable` is true when it will not let the picked exports folder be read. `exports` is the exports folder this Mac picked (settings.js exportsFolderOf): when it is not Downloads, by their
     real paths, its videos are listed too, as `input.exports` ({ dir, words, files }, `words` in Finder's words); when it is, it is left out, so
     that one folder is listed once and its files keep `where: "Downloads"`; `listExports`, when given (downloadsOnce(...).exports), lists it in its place. `readdir` lists a folder as readdirSync does, for a test to give another. `listDownloads`, when it is given

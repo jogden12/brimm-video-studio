@@ -1430,6 +1430,53 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
   });
 });
 
+describe("a Mac with a drop folder of its own, whatever its file says of the import (Phase 3, L1b fix 2)", () => {
+  // Every import is light since Phase 2, and a drop folder of a Mac's own no longer needs the file to say so: a video waiting in it may
+  // be a session, and its file's name a client's, as an episode's folder may be named from it, so they are named as on a Mac that does
+  // the light import. (Whether her chat is set up is another rule, the file's alone.)
+  /** t's Mac with its drop folder in BRIMM Video Work, its file saying `setting` of the import (none when undefined): its folder and deps. */
+  const ownMac = (t, setting) => {
+    const own = join(t.home, "BRIMM Video Work", "Drop");
+    mkdirSync(own, { recursive: true });
+    return { own, deps: { ...depsOf(t), settings: { version: 1, machine: "Mac Studio", root: t.root, checkout: "/checkout", ...(setting ? { import: setting } : {}), dropPath: own } } };
+  };
+  it("episodes and retry name a video waiting in it by what it is and its size, never by its file, with the full import or none in the file", async () => {
+    for (const setting of ["full", undefined, "light"]) {
+      const t = setup();
+      const { own, deps } = ownMac(t, setting);
+      writeFileSync(join(own, VIDEO), "video");
+      const said = (await on(deps, "episodes")).said;
+      const at = said.indexOf("Waiting in the drop folders:");
+      assert.deepEqual(said.slice(at, at + 2), ["Waiting in the drop folders:", "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes"], String(setting));
+      const none = await on(deps, "retry", "nothing fits this");
+      assert.deepEqual(none.said, ['No video in this Mac\'s drop folder fits "nothing fits this". It holds: a video of 5 bytes.'], String(setting));
+      assert.doesNotMatch([...said, ...none.said].join("\n"), SECRET, String(setting));
+      t.done();
+    }
+  });
+  it("episodes names an episode whose record cannot be read by its day and Mac, never by its folder, with the full import or none in the file", async () => {
+    for (const setting of ["full", undefined, "light"]) {
+      const t = setup();
+      const { deps } = ownMac(t, setting);
+      writeFileSync(join(t.root, "Episodes", LIGHT_FOLDER), "not a folder");
+      const said = (await on(deps, "episodes")).said;
+      assert.deepEqual(said.slice(0, 2), ["Episodes, newest first:", "  An episode of 2026-10-20 from the Mac Studio whose record cannot be read: ask Jason."], String(setting));
+      assert.doesNotMatch(said.join("\n"), SECRET, String(setting));
+      t.done();
+    }
+  });
+  it("says only that the work stopped, with its code, for an error nobody foresaw, with the full import or none in the file", async () => {
+    for (const setting of ["full", undefined, "light"]) {
+      const t = setup();
+      const { own, deps } = ownMac(t, setting);
+      writeFileSync(join(own, VIDEO), "video");
+      const r = await refusing("statSync", own, () => on(deps, "retry", VIDEO));
+      assert.deepEqual([r.code, r.said], [1, ["The work stopped (EACCES)."]], String(setting));
+      t.done();
+    }
+  });
+});
+
 describe("an error that leaves a command for a gated video (fix 2)", () => {
   it("is said through the names' filter, as the work stopping, and the command ends with 1", async () => {
     // A video marked a session, not cleared, is gated as a session is, and the gate lets `kind` run for it: the lock it takes on

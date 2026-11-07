@@ -33,10 +33,11 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
     for (const words of [
       "A finished video whose hand-off is written is followed one step further (plan PR 16)",
       "has an export that `finish \"<episode>\" reels` would take now",
-      "for the Reel projects alone (in Downloads or by the records in the project's `renders/`)",
+      // The exports folder this Mac was set up with is looked in too, as `finish` looks in it (Phase 3, L1b).
+      "for the Reel projects alone (in Downloads, in the exports folder this Mac was set up with or by the records in the project's `renders/`)",
       "or two that began in one minute, which `finish` asks the final one of",
       'it says which Reels are exported and to say "hand off the Reels", ahead of the BRIMM Ops page\'s steps and of done',
-      "A Reel open and not exported, one already in the hand-off, an export older than the project's last change and a Downloads folder this Mac will not let be read are no such stage",
+      "A Reel open and not exported, one already in the hand-off, an export older than the project's last change and a Downloads folder, or exports folder, this Mac will not let be read are no such stage",
       // A Reel project on the other Mac: `finish` would take its export, and the guide does not look, for the reason it gives the main video (review F3).
       "A Reel project that is not on this Mac is not looked at either, though `finish … reels` would take its export from Downloads: as for the main video, the guide reads Downloads only for a project that is here, and `app` says what is on the other Mac.",
       // Where `finish` would go no further and a look that costs no other read can tell (review F1, F2a and F2c), and the two refusals it does not look for (F2b, F2d).
