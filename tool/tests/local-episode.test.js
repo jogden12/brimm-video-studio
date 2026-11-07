@@ -8,7 +8,7 @@
 // the root and both homes are a test's own folders, and the programs are episodes.js's stand-ins.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { COMMAND_NAMES, editMain } from "../edit.js";
 import { UNSCOPED } from "../gate.js";
@@ -20,7 +20,12 @@ import { asFiled } from "../reading.js";
 import { askBlocked, versionIn } from "../unedited.js";
 import { fingerprintOf } from "../versions.js";
 import { writeGuideNotes } from "../guide-note.js";
-import { workCopyKey, workCopyPaths } from "../workcopy.js";
+import { reelCopyKey, reelCopyPaths, workCopyKey, workCopyPaths } from "../workcopy.js";
+import { LATE_CHECK_MS } from "../dropbox.js";
+import { readPendingAt } from "../filing.js";
+import { checkOriginal, oweOriginals } from "../originals.js";
+import { changedSince, copyIsMade, fromOf } from "../app.js";
+import { readResult } from "../detached.js";
 import { TEACHINGS_FORMAT } from "../teachings.js";
 import { episodeFilesFolder } from "../settings.js";
 import { setup, listAll } from "./episodes.js";
@@ -994,6 +999,213 @@ describe("L2c round two: the conversions pinned, and a set of versions that neve
       assert.deepEqual(shared(w), before);
       const listed = await on(w.macbook, "episodes");
       assert.doesNotMatch(listed.text, /Maybe a new version of/, listed.text);
+    } finally {
+      w.done();
+    }
+  });
+});
+
+describe("L6: after the recording's move", () => {
+  const NAME = "2026-10-20 IMG_0042 (Mac Studio)";
+  const FILE = "IMG_0042.mov";
+  /** KEPT.raw handed off and moved off: owed, copied into Original files at the move, and its Mac copy taken off 15 minutes on, Dropbox saying it is uploaded.
+      With `keep`, the check that takes the Mac's copy off is not made. */
+  function movedOff(w, { keep = false, record = {} } = {}) {
+    const found = KEPT.raw.make(w);
+    handedOff(found);
+    if (Object.keys(record).length) writeFileSync(recordFile(found.folder, 3), recordText({ ...readEpisode(found.folder).record, rev: 3, ...record }));
+    const now = readEpisode(found.folder).record;
+    const ctx = { home: w.home, root: w.root, machine: STUDIO, now: () => at, agentRunning: () => false, kickstart: () => {} };
+    let at = w.now();
+    const deps = () => ({ episode: { root: w.root, machine: STUDIO, home: w.home, checkout: "/checkout" }, commit: "c709b57", log: () => {}, notify: () => {}, clock: () => at, alive: () => false, clone: w.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: () => true });
+    oweOriginals(ctx, { folder: found.folder, record: now });
+    const key = `original/${now.id}.json`;
+    checkOriginal(readPendingAt(w.home, key), deps());
+    if (!keep) {
+      at += LATE_CHECK_MS;
+      checkOriginal(readPendingAt(w.home, key), deps());
+    }
+    const record2 = readEpisode(found.folder).record;
+    return { ...found, record: record2, original: record2.local.original, copy: join(found.folder, "Original files", FILE) };
+  }
+
+  it("A1 `episodes` calls nothing of it missing, and `finish` is not refused over its recording", async () => {
+    const w = world();
+    try {
+      const found = movedOff(w);
+      assert.equal(existsSync(join(found.video, FILE)), false, "the Mac's copy is gone");
+      const listed = await on(w.studio, "episodes");
+      assert.doesNotMatch(listed.text, /missing|not whole/i, listed.text);
+      const r = await on(w.studio, "finish", "3fa9c1");
+      assert.doesNotMatch(r.text, /recording is not whole on this Mac/, r.text);
+    } finally {
+      w.done();
+    }
+  });
+
+  it("A2 the copy for HyperFrames made before the move is found as it was, and the recording is not taken to have changed", () => {
+    const w = world();
+    try {
+      const found = KEPT.raw.make(w);
+      handedOff(found);
+      const before = statSync(join(found.video, FILE));
+      const paths = workCopyPaths(w.home, found.name, workCopyKey({ bytes: before.size, mtimeMs: before.mtimeMs }));
+      mkdirSync(paths.dir, { recursive: true });
+      writeFileSync(paths.video, "the copy");
+      writeFileSync(paths.facts, "{}");
+      const project = { from: fromOf(readEpisode(found.folder).record, before) };
+      const moved = movedOffFrom(w, found);
+      const ctx = { ...w.studio, home: w.home, machine: STUDIO };
+      assert.equal(copyIsMade(ctx, { found: moved, record: moved.record }), true);
+      assert.equal(changedSince(project, { found: moved, record: moved.record, ctx }), false);
+      // Dropbox brings the copy back with its time at whole seconds.
+      const second = Math.floor(moved.original.mtimeMs / 1000);
+      utimesSync(moved.copy, second, second);
+      assert.equal(changedSince(project, { found: moved, record: moved.record, ctx }), false);
+      assert.equal(copyIsMade(ctx, { found: moved, record: moved.record }), true);
+    } finally {
+      w.done();
+    }
+  });
+  /** `found` (KEPT.raw, already handed off) moved off. */
+  function movedOffFrom(w, found) {
+    const record = readEpisode(found.folder).record;
+    let at = w.now();
+    const ctx = { home: w.home, root: w.root, machine: STUDIO, now: () => at, agentRunning: () => false, kickstart: () => {} };
+    const deps = () => ({ episode: { root: w.root, machine: STUDIO, home: w.home, checkout: "/checkout" }, commit: "c709b57", log: () => {}, notify: () => {}, clock: () => at, alive: () => false, clone: w.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: () => true });
+    oweOriginals(ctx, { folder: found.folder, record });
+    checkOriginal(readPendingAt(w.home, `original/${record.id}.json`), deps());
+    at += LATE_CHECK_MS;
+    checkOriginal(readPendingAt(w.home, `original/${record.id}.json`), deps());
+    const after = readEpisode(found.folder).record;
+    return { ...found, record: after, original: after.local.original, copy: join(found.folder, "Original files", FILE) };
+  }
+
+  it("A3 `open` and `app` bring nothing of Original files", async () => {
+    const w = world();
+    try {
+      movedOff(w);
+      const deps = { ...w.studio, isWhole: (path) => !path.includes("Original files") };
+      mkdirSync(dirname(cliPath(w.home)), { recursive: true });
+      writeFileSync(cliPath(w.home), "");
+      for (const argv of [["open", NAME], ["app", NAME]]) {
+        const r = await on({ ...deps, settings: { ...deps.settings, app: "hyperframes" } }, ...argv);
+        assert.doesNotMatch(r.text, /Original files|Dropbox is still bringing/, r.text);
+      }
+      assert.equal(w.started.some(([, args]) => args.includes("bring")), false, JSON.stringify(w.started));
+    } finally {
+      w.done();
+    }
+  });
+
+  it("A5 `which` opens the copy in Original files", async () => {
+    const w = world();
+    try {
+      const found = movedOff(w);
+      const r = await on(w.studio, "which", NAME);
+      assert.equal(r.code, 0, r.text);
+      // The Mac's copy is gone: what is opened was made from the copy in Original files.
+      assert.equal(readFileSync(w.opened.at(-1)[1], "utf8"), "the recording");
+      assert.ok(existsSync(found.copy));
+    } finally {
+      w.done();
+    }
+  });
+
+  it("A6 `free` takes its working copy away, found by the key of the recording as it was", async () => {
+    const w = world();
+    try {
+      const found = KEPT.raw.make(w);
+      handedOff(found);
+      const before = statSync(join(found.video, FILE));
+      const paths = workCopyPaths(w.home, found.name, workCopyKey({ bytes: before.size, mtimeMs: before.mtimeMs }));
+      mkdirSync(paths.dir, { recursive: true });
+      writeFileSync(paths.video, "the copy");
+      writeFileSync(paths.facts, "{}");
+      movedOffFrom(w, found);
+      const r = await on(w.studio, "free", found.name);
+      assert.equal(r.code, 0, r.text);
+      assert.match(r.text, /Took away the video made for HyperFrames for Pricing talk/);
+      assert.ok(!existsSync(paths.video), "the copy is gone");
+    } finally {
+      w.done();
+    }
+  });
+
+  it("A7 `kind … raw --again` reads the recording in Original files, and is not refused as not here", async () => {
+    const w = world();
+    try {
+      const found = movedOff(w);
+      // A real look at the disk: the Mac's file is gone, the copy in Original files is there.
+      const r = await on({ ...w.studio, isWhole: (path) => existsSync(path) }, "kind", found.name, "raw", "--private", "no", "--again");
+      assert.equal(r.code, 0, r.text);
+      assert.doesNotMatch(r.text, /not here|still bringing|not whole/i, r.text);
+    } finally {
+      w.done();
+    }
+  });
+
+  it("A8 askBlocked stands on the recording in Original files: whole, nothing to bring; a placeholder, the copy to bring", () => {
+    const w = world();
+    try {
+      const found = movedOff(w);
+      const plan = JSON.parse(readFileSync(join(found.video, "IMG_0042.cut-plan.json"), "utf8"));
+      writeFileSync(join(found.video, "IMG_0042.cut-plan.json"), JSON.stringify({ ...plan, facts: { ...(plan.facts || {}), height: 720 } }));
+      const ask = (whole) => askBlocked({ folder: found.folder, record: found.record, root: w.root, home: w.home, machine: STUDIO, now: Date.now(), whole });
+      assert.deepEqual(ask(() => true), {});
+      const placeholder = ask((path) => path !== found.copy);
+      assert.deepEqual(placeholder.bring, [`Original files/${FILE}`], JSON.stringify(placeholder));
+    } finally {
+      w.done();
+    }
+  });
+
+  it("A4 a later Reel is made from the copy in Original files, read through first, at the key of the recording as it was", async () => {
+    const w = world();
+    try {
+      const found = KEPT.raw.make(w);
+      const reels = JSON.stringify(reelsFile({ video: FILE, by: "read", made: "2026-10-20T08:00:00-05:00", candidates: [{ n: 1, start: 0, end: 11.878, ranges: [{ start: 0, end: 11.878 }], seconds: 11.878, fits: { fits: false, why: "It is short." }, title: "", reason: "It makes one point.", point: "", words: "", phrases: [], preview: null }] }));
+      writeFileSync(join(found.video, "reels.json"), reels);
+      writeFileSync(recordFile(found.folder, 2), recordText({ ...found.record, rev: 2, files: { ...found.record.files, "reels.json": Buffer.byteLength(reels) } }));
+      const placed = readEpisode(found.folder).record;
+      const before = statSync(join(found.video, FILE));
+      const moved = movedOffFrom(w, { ...found, record: placed });
+      const key = reelCopyKey({ bytes: moved.original.bytes, mtimeMs: moved.original.mtimeMs }, { start: 0, end: 11.878 });
+      assert.equal(key.startsWith(workCopyKey({ bytes: before.size, mtimeMs: before.mtimeMs })), true);
+      const read = [];
+      let came = false;
+      const deps = { ...w.studio, isWhole: (path) => (path === moved.copy ? came : true), readAll: async (path) => { read.push(path); came = true; } };
+      const r = await on(deps, "workcopy", "--now", NAME, "--reel", "1");
+      assert.deepEqual(read, [moved.copy], r.text);
+      const paths = reelCopyPaths(w.home, found.name, 1, key);
+      assert.equal(existsSync(paths.video), true, JSON.stringify(readResult(w.home, found.name, "workcopy")));
+      // With the copy still not whole once it is read, the run says so in words.
+      rmSync(paths.video);
+      rmSync(paths.facts, { force: true });
+      const stuck = await on({ ...w.studio, isWhole: (path) => path !== moved.copy, readAll: async () => {} }, "workcopy", "--now", NAME, "--reel", "1");
+      assert.ok(JSON.stringify(readResult(w.home, found.name, "workcopy")).includes("It can't be used: Dropbox is still bringing its recording over to this Mac."), stuck.text + JSON.stringify(readResult(w.home, found.name, "workcopy")));
+    } finally {
+      w.done();
+    }
+  });
+
+  it("A10 `guide … show` of a finished video's posting step shows the copy in Original files", async () => {
+    const w = world();
+    try {
+      const found = kept(w, { id: "e-20261020-a1a1a1", name: "2026-10-20 Launch talk (Mac Studio)", stem: "Launch talk", own: { "Launch talk.mov": "the video she dropped" }, record: { kind: "finished", answer: ANSWERED, reading: READ("finished"), offers: OFFERS, name: { text: "Launch talk", placeholder: false }, label: "Video of 20 Oct, 10:00 (Mac Studio)" } });
+      mkdirSync(join(found.folder, "final"), { recursive: true });
+      writeFileSync(join(found.folder, "final", "Launch talk.brimm-ops.json"), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: found.record.id, kind: "finished", name: "Launch talk" }, main: { file: "Launch talk.mov" } }));
+      writeFileSync(recordFile(found.folder, 2), recordText({ ...found.record, rev: 2, finished: { revision: 1, at: "2026-10-20T13:00:00-05:00", on: STUDIO, handoff: "final/Launch talk.brimm-ops.json", parts: {} } }));
+      writeGuideNotes(w.home, { version: 1, handoffs: { [found.record.id]: { kind: "episode", step: "kit", revision: 1, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });
+      // The recording left the Mac: its copy is in Original files, and the record lists it.
+      mkdirSync(join(found.folder, "Original files"), { recursive: true });
+      writeFileSync(join(found.folder, "Original files", "Launch talk.mov"), "the video she dropped");
+      const now = readEpisode(found.folder).record;
+      writeFileSync(recordFile(found.folder, 3), recordText({ ...now, rev: 3, files: { ...now.files, "Original files/Launch talk.mov": 21 }, local: { on: STUDIO, original: { file: "Launch talk.mov", bytes: 21, mtimeMs: 1000 } } }));
+      rmSync(join(found.video, "Launch talk.mov"));
+      const r = await on(w.studio, "guide", "Launch talk", "show");
+      assert.deepEqual([r.code, r.said], [0, ["Shown in Finder: the video of Launch talk (a1a1a1), to post."]]);
+      assert.ok(JSON.stringify(w.calls).includes(join(found.folder, "Original files", "Launch talk.mov")), JSON.stringify(w.calls));
     } finally {
       w.done();
     }

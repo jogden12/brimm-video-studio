@@ -121,7 +121,7 @@ import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
-import { ON_OTHER_MAC, fileAt, filePlace, folderAt, keptOnAMac, onOtherMac, roleOf } from "./where.js";
+import { ON_OTHER_MAC, ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, onOtherMac, recordingAt, recordingStat, roleOf } from "./where.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -1201,7 +1201,8 @@ function problemsOf(ctx, found, record) {
 }
 
 /** The episode's files that are not whole on this Mac yet, as Dropbox brings them over: by the record's list. */
-const notHere = (ctx, found, record) => Object.keys(record.files).filter((rel) => !ctx.isWhole(fileOf(ctx, found, rel)));
+// A recording copied into Original files (L6) is never asked to be brought: whoever needs it whole brings it down then.
+const notHere = (ctx, found, record) => Object.keys(record.files).filter((rel) => !rel.startsWith(`${ORIGINALS_FOLDER}/`) && !ctx.isWhole(fileOf(ctx, found, rel)));
 
 /** How long `open` waits after writing its claim before it reads the record again: Dropbox shows no sign of having taken a
     change across, so a fixed 20 seconds, in which the other Mac's claim made at the same time comes across too. */
@@ -3671,7 +3672,7 @@ async function planFootage(ctx, { found, record, deps }) {
   for (const { part, why } of footageWithheld(record, parts)) deps.log(`${partLabelOf(part)}: its footage is left out of the project: ${why}.`);
   const items = footageToUse(record, parts)
     .filter(({ part }) => typeof part.record.video?.file === "string")
-    .map(({ part, as, shot }) => ({ video: fileAt(ctx, part, part.record.video.file), shot, name: `${shownName(record)}, ${SHOT_SAID[as]} for shot ${shot}` }));
+    .map(({ part, as, shot }) => ({ video: recordingAt(ctx, part), raw: recordingStat(ctx, part), shot, name: `${shownName(record)}, ${SHOT_SAID[as]} for shot ${shot}` }));
   const done = await makeFootageCopies({ home: ctx.home, folder: found.name, items }, { ...deps, isWhole: ctx.isWhole, readAll: ctx.deps.readAll || readThrough });
   return { ...done, next: "" };
 }
@@ -3763,7 +3764,18 @@ async function workcopy(ctx, rest) {
     if (held.why) return { ok: false, made: [], failed: [held.why], next: "" };
     // The copy itself, from the video or from the file this Mac holds of it (`held.from`).
     const copyOf = async (held, deps) => {
-      const video = fileOf(ctx, found, held.record.video.file);
+      const video = recordingAt(ctx, { folder: found.folder, record: held.record });
+      const rawStat = recordingStat(ctx, { folder: found.folder, record: held.record });
+      const keyed = rawStat ? { rawStat } : {};
+      // The recording has left the Mac for Original files (L6): it is read through first, as a footage copy's video is, and the copy keeps the key of the recording as it was.
+      if (video !== fileOf(ctx, found, held.record.video.file) && !ctx.isWhole(video)) {
+        try {
+          await (ctx.deps.readAll || readThrough)(video);
+        } catch (e) {
+          // Whether it came is looked at next.
+        }
+        if (!ctx.isWhole(video)) return { ok: false, made: [], failed: [canNotBeUsed("Dropbox is still bringing its recording over to this Mac")], next: "" };
+      }
       // The file this Mac holds of the video, when the run did not wait for the late check (waitForImport): read in place of the video, which stays its identity.
       const fromOf = (h) => (h.from ? { from: h.from } : {});
       if (!reel) {
@@ -3771,8 +3783,8 @@ async function workcopy(ctx, rest) {
         // made for it. An explainer in a HeyGen voice has its voice in its project, so it has nothing to copy.
         const media = mediaOf(held.record);
         if (media === null) return { ok: false, made: [], failed: [canNotBeUsed("its voice is made in its HyperFrames project")], next: "" };
-        if (media === VOICEOVER) return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), voice: true, ...fromOf(held) }, deps);
-        const main = await makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), fourK: Boolean(flags["4k"]), ...fromOf(held) }, deps);
+        if (media === VOICEOVER) return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), voice: true, ...keyed, ...fromOf(held) }, deps);
+        const main = await makeWorkCopy({ home: ctx.home, folder: found.name, video, name: shownName(held.record), fourK: Boolean(flags["4k"]), ...keyed, ...fromOf(held) }, deps);
         if (!main.ok || !isFromPlan(held.record)) return main;
         // A video made from a plan has its footage copied after its own video, in the same run. A copy that fails is in the log and costs nothing.
         const footage = await planFootage(ctx, { found, record: held.record, deps });
@@ -3791,7 +3803,7 @@ async function workcopy(ctx, rest) {
       const cues = recordKind(held.record) === "finished" && ctx.settings.readings !== false && tools.claude
         ? (stretch, work) => askReelCues({ ctx, found, record: held.record, stretch, work }, deps)
         : null;
-      return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: `${shownName(held.record)}, Reel ${reel}`, reel: got.stretch, ...fromOf(held) }, { ...deps, faces, ...(cues ? { cues } : {}) });
+      return makeWorkCopy({ home: ctx.home, folder: found.name, video, name: `${shownName(held.record)}, Reel ${reel}`, reel: got.stretch, ...keyed, ...fromOf(held) }, { ...deps, faces, ...(cues ? { cues } : {}) });
     };
     // The import's check may pass, and take the drop file away, in the second between the wait and ffprobe or ffmpeg opening it (final review
     // M5). That is not a broken recording: the file's identity is taken before the copy, and when the copy fails while the file is not the one
@@ -5010,7 +5022,7 @@ async function answerKind(ctx, found, plan, began) {
   // A raw reading needs the video itself for the rough cut. On a Mac it is not whole on (the one that did not import it), that
   // brings it all over first: only with --here, her "read it here". Otherwise nothing is written or claimed, so that the other Mac
   // may answer it (spec 2, "Which Mac reads it").
-  if (stored === "raw" && !plan.here && ctx.settings.readings !== false && !ctx.isWhole(fileOf(ctx, found, record.video.file))) return refuse(ctx, notHereYet(ctx, record));
+  if (stored === "raw" && !plan.here && ctx.settings.readings !== false && !ctx.isWhole(recordingAt(ctx, { folder: found.folder, record }))) return refuse(ctx, notHereYet(ctx, record));
   // A video answered before is being corrected: what its earlier reading and its hand-off left in the shared folder is set aside
   // with the answer, and must be whole on this Mac first (read through when it is not), before she is asked anything or it is
   // claimed.
@@ -5173,7 +5185,7 @@ async function answerKind(ctx, found, plan, began) {
   // for the reading, and a request while a run of it is at work starts none. It is asked for at once, whether or not the import's
   // late check of the video is still to come: its run waits for that itself (waitForImport). A video not here yet is made into one by
   // `app`, which asks for it when it is not there.
-  if (copyWanted(ctx, stored, wrote.record) && ctx.isWhole(fileOf(ctx, found, wrote.record.video.file))) requestWorkCopy(ctx, { folder: found.name });
+  if (copyWanted(ctx, stored, wrote.record) && ctx.isWhole(recordingAt(ctx, { folder: found.folder, record: wrote.record }))) requestWorkCopy(ctx, { folder: found.name });
   if (holdsUntil !== null) {
     // When its rough cut is ready too, as the guide says it (guideReading), once this Mac has measured the speeds of Claude's call and of
     // the rough cut.
@@ -5724,7 +5736,7 @@ export async function whichCommand(ctx, rest) {
   if (!got.found) return got.code;
   const { found, record } = got;
   const name = namedAs(found, record);
-  const video = fileOf(ctx, found, record.video.file);
+  const video = recordingAt(ctx, { folder: found.folder, record });
   const here = ctx.isWhole(video);
   let opened = "";
   if (here) {
@@ -6506,13 +6518,13 @@ async function showForStep(ctx, { facts, next, folder, record }) {
   const video = next.step === "posted";
   const where = !video ? [record.finished.handoff] : facts.handoff.kind === "raw" ? ["final", facts.handoff.file] : [record.video.file];
   const what = `the ${video ? "video" : "hand-off"} of ${facts.name}`;
-  const path = where.every((part) => typeof part === "string" && part !== "") ? fileAt(ctx, { folder, record }, where.join("/")) : "";
+  const path = where.every((part) => typeof part === "string" && part !== "") ? (video && where.length === 1 && where[0] === record.video.file ? recordingAt(ctx, { folder, record }) : fileAt(ctx, { folder, record }, where.join("/"))) : "";
   if (!path || !existsSync(path)) return refuse(ctx, `${capital(what)} is not on this Mac: ask Jason.`);
   // On an open-lock Mac the video to post is shown as a clone of it, made only of one whole on this Mac (cloneWhole, as `which`):
   // one that is not, Dropbox is had bring over first, as `show` does.
   if (video && lockFor(ctx.settings, ctx.deps) === "open" && !ctx.isWhole(path)) {
     const name = basename(folder);
-    if (runningCommand(ctx.home, name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: name, args: [where.join("/")] });
+    if (runningCommand(ctx.home, name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: name, args: [path.startsWith(join(folder, ORIGINALS_FOLDER)) ? `${ORIGINALS_FOLDER}/${record.video.file}` : where.join("/")] });
     return refuse(ctx, "Dropbox is still bringing it over; say it again when it is done.");
   }
   const clone = video ? (from, to) => {

@@ -11,7 +11,7 @@ import { GRAPHIC_CUE_KINDS, SHOT_KINDS, graphicCuesOf } from "./graphic-cues.js"
 import { isFromPlan, isPart } from "./episode.js";
 import { linksForParts, mayGoIn, partHeld, partsOf } from "./footage.js";
 import { footageCopyPaths, workCopyKey } from "./workcopy.js";
-import { fileAt } from "./where.js";
+import { fileAt, recordingStat } from "./where.js";
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const list = (v) => (Array.isArray(v) ? v : []);
@@ -86,7 +86,8 @@ export function withMaterial(cues, record, parts) {
     footageCopyPaths): the copy is named for its shot and the key of the part's own video, so a part whose video has changed has none. */
 function copyOfFootage(ctx, found, part, shot) {
   try {
-    const raw = statSync(fileAt(ctx, part, part.record.video.file));
+    const raw = recordingStat(ctx, part);
+    if (!raw) return null;
     const paths = footageCopyPaths(ctx.home, found.name, shot, workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }));
     return existsSync(paths.video) && existsSync(paths.facts) ? paths.video : null;
   } catch (e) {

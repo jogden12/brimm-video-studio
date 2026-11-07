@@ -59,7 +59,7 @@ import {
   openProjectInApp, plainName, readListed, readWords, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, wordsIn, wordsOfText
 } from "./app.js";
 import { reelCopyKey, reelCopyPaths, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
-import { fileAt, keptOnAMac } from "./where.js";
+import { fileAt, keptOnAMac, recordingStat } from "./where.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -168,7 +168,7 @@ function adoptReel(ctx, { found, record, n, at, dir }) {
     ctx.say(notWhole(`Reel ${n} of ${record.name.text}`));
     return { code: 1 };
   }
-  return { project: madeEntry(ctx, { n, name: basename(dir), at, from: fromOf(record, statSync(fileOf(ctx, found, record.video.file))), workingCopy }) };
+  return { project: madeEntry(ctx, { n, name: basename(dir), at, from: fromOf(record, recordingStat(ctx, { folder: found.folder, record }) ?? statSync(fileOf(ctx, found, record.video.file))), workingCopy }) };
 }
 
 /** The graphic cues a Reel's project is given (PR H2), by what the video is that the Reel is of, as projectFiles takes them:
@@ -235,7 +235,7 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
     return { code: 1 };
   }
   const asked = { n, start: listed.candidate.start, end: listed.candidate.end };
-  const raw = statSync(fileOf(ctx, found, record.video.file));
+  const raw = recordingStat(ctx, { folder: found.folder, record }) ?? statSync(fileOf(ctx, found, record.video.file));
   const copy = reelCopyPaths(home, found.name, n, reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, asked));
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     // Asked for once: when a run is at work already, whichever video it makes, nothing is started, and she is not told that it is.
@@ -289,7 +289,7 @@ function putReelVideoBack(ctx, { found, record, n, project, dir }, { rename }) {
   const { home } = ctx;
   const name = record.name.text;
   const of = `Reel ${n} of ${name}`;
-  const raw = statOf(fileOf(ctx, found, record.video.file));
+  const raw = recordingStat(ctx, { folder: found.folder, record });
   if (raw === undefined) {
     ctx.say(noRecording(name));
     return { code: 1 };

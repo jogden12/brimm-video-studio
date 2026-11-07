@@ -11,7 +11,8 @@ import { LATE_CHECK_MS } from "../dropbox.js";
 import { FOLDER_GONE, LOCK_AGAIN_MS, WAIT_LOOK_FOR_MS, WAIT_LOOK_MS, fileId, pendingKeyOf, readEveryPending, readPendingAt, writePending } from "../filing.js";
 import { lockOf, releaseEpisodeLock, takeEpisodeLock } from "../detached.js";
 import { episodeFilesFolder, episodeWork, pendingFolder, runsFolder } from "../settings.js";
-import { workCopyLockOf } from "../workcopy.js";
+import { footageCopyPaths, workCopyKey, workCopyLockOf } from "../workcopy.js";
+import { planProject } from "../plan-project.js";
 import { ORIGINALS_COMMAND, ORIGINALS_PROBLEM, ORIGINALS_RUNNING, ORIGINALS_SESSION, UPLOAD_LOOK_MS, asSession, checkOriginal, listsOriginal, moved, oweForgotten, oweOriginals, originalsOf } from "../originals.js";
 import { linksOf } from "../finish.js";
 import * as filing from "../filing.js";
@@ -116,7 +117,7 @@ export function planMade(t, parts, { on = STUDIO } = {}) {
   mkdirSync(own, { recursive: true });
   writeFileSync(join(own, "Too many SKUs.mov"), joined);
   const { files: _files, ...plan } = newPlannedEpisode({ id: PLAN_ID, machine: STUDIO, at: "2026-10-14T07:00:00-05:00", title: "Too many SKUs", route: "script", voice: null, writer: WRITER });
-  const planned = { ...plan.planned, set: "2026-10-14T07:10:00-05:00", shots: [{ n: 1, kind: "talking", what: "Open on the problem." }], lines: ["Too many SKUs."], filmed: { at: "2026-10-14T10:00:00-05:00", parts: parts.map((p) => p.id) } };
+  const planned = { ...plan.planned, set: "2026-10-14T07:10:00-05:00", shots: [{ n: 1, kind: "talking", what: "Open on the problem." }, { n: 2, kind: "b-roll", what: "Sallie at her desk." }], lines: ["Too many SKUs."], filmed: { at: "2026-10-14T10:00:00-05:00", parts: parts.map((p) => p.id) } };
   const next = {
     ...plan, rev: 1, planned, kind: "raw", video: { file: "Too many SKUs.mov", bytes: Buffer.byteLength(joined), seconds: 120, recorded: "2026-10-14", recordedFrom: "import" },
     files: { "Too many SKUs.mov": Buffer.byteLength(joined) }, answer: ANSWERED, finished: FINISHED("Too many SKUs"), ...(on ? { local: { on } } : {})
@@ -784,5 +785,29 @@ describe("L6: through L5's worlds", () => {
     assert.deepEqual([p.owed, p.of.id], [true, ID]);
     assert.deepEqual(w.t.kicks, ["kickstart"]);
     w.t.done();
+  });
+});
+
+describe("L6: A9 a plan's footage copy", () => {
+  it("A9 is found by the key of its part's recording as it was, after the part is moved off", () => {
+    const t = world();
+    const a = part(t, 1, { as: "b-roll", client: false });
+    const plan = planMade(t, [a]);
+    const before = statSync(join(a.video, a.file));
+    const paths = footageCopyPaths(t.home, plan.name, 2, workCopyKey({ bytes: before.size, mtimeMs: before.mtimeMs }));
+    mkdirSync(paths.dir, { recursive: true });
+    writeFileSync(paths.video, "the footage");
+    writeFileSync(paths.facts, "{}");
+    const ctx = { home: t.home, root: t.root, machine: STUDIO };
+    const found = { name: plan.name, folder: plan.folder, record: plan.record };
+    const footage = () => planProject(ctx, { found, record: plan.record }).footage;
+    assert.deepEqual(footage().map((f) => f.from), [paths.video]);
+    oweOriginals(t.ctx2, plan);
+    look(t, depsOf(t), a.id);
+    t.advance(LATE_CHECK_MS);
+    look(t, depsOf(t), a.id);
+    assert.equal(existsSync(join(a.video, a.file)), false);
+    assert.deepEqual(footage().map((f) => f.from), [paths.video]);
+    t.done();
   });
 });

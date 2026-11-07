@@ -46,7 +46,7 @@ import { stamp } from "./shared/text.js";
 import { checkNames } from "./sessions.js";
 import { namesOf, withoutNames } from "./kinds.js";
 import { TEACHINGS_FORMAT, accountWhy, teachingsWhy, teachingsFiles, earlierTeachings, sessionSeen, seenFrom, planOf, teachingsText, ideasText } from "./teachings.js";
-import { fileAt, folderAt, keptOnAMac } from "./where.js";
+import { fileAt, folderAt, keptOnAMac, recordingAt } from "./where.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -752,7 +752,7 @@ async function writtenSession(ctx, found, deps, { record, read, at, account, wor
     Dropbox. ffprobe is asked first which streams the video has, and whether it is the video the plan was made of. It is opened
     once the reading is in the episode, not here. Resolves { at, to } or { why }. */
 async function renderRough(ctx, found, deps, { record, plan, facts, work, named, name, log, now }) {
-  const video = fileOf(ctx, found, record.video.file);
+  const video = recordingAt(ctx, { folder: found.folder, record });
   try {
     const probed = join(work, "facts.json");
     const probe = await deps.run(deps.tools.ffprobe, probeArgs(video, probed));

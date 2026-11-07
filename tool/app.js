@@ -66,7 +66,7 @@ import { teleprompterText } from "./sentences.js";
 import { studioFolder } from "./studio.js";
 import { clockAt } from "./unedited.js";
 import { requestWorkCopy, voiceCopyPaths, workCopyKey, workCopyLockOf, workCopyPaths } from "./workcopy.js";
-import { fileAt, keptOnAMac } from "./where.js";
+import { fileAt, keptOnAMac, recordingStat } from "./where.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -120,7 +120,7 @@ export function copyAtWork(ctx, { found, record }) {
 }
 /** Whether the video for HyperFrames of the episode `found` is made: its video and its facts are both there (`app --when-ready` goes on once they are). */
 export function copyIsMade(ctx, { found, record }) {
-  const raw = statOf(fileOf(ctx, found, record.video.file));
+  const raw = recordingStat(ctx, { folder: found.folder, record });
   if (raw === undefined) return false;
   const copy = copyPathsOf(ctx.home, found.name, record, raw);
   return existsSync(copy.video) && existsSync(copy.facts);
@@ -412,7 +412,7 @@ export const fromOf = (record, raw) => ({ file: record.video.file, bytes: raw.si
     recording it was made from (no `from`, or one that is no record of a file) may have been made from another: it counts as changed,
     and the record, which two Macs write, is never taken to hold what it does not. */
 export function changedSince(project, { found, record, ctx = null }) {
-  const raw = statOf(ctx ? fileOf(ctx, found, record.video.file) : join(found.folder, record.video.file));
+  const raw = ctx ? recordingStat(ctx, { folder: found.folder, record }) : statOf(join(found.folder, record.video.file));
   if (raw === undefined) return false;
   const from = project?.from;
   if (from === null || typeof from !== "object") return true;
@@ -451,7 +451,7 @@ function adoptProject(ctx, { found, record, at, projects }) {
   const { name } = nextMain(record, projects);
   const dir = join(episodeWork(home, found.name), name);
   if (!existsSync(dir)) return null;
-  const raw = statSync(fileOf(ctx, found, record.video.file));
+  const raw = recordingStat(ctx, { folder: found.folder, record }) ?? statSync(fileOf(ctx, found, record.video.file));
   const copy = copyPathsOf(home, found.name, record, raw);
   const workingCopy = copyOf(factsIn(copy.facts)) ?? copyIn(dir, record);
   if (!workingCopy) {
@@ -498,7 +498,7 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
     ctx.say(noWords(record.name.text, keptOnAMac(record)));
     return { code: 1 };
   }
-  const raw = statSync(fileOf(ctx, found, record.video.file));
+  const raw = recordingStat(ctx, { folder: found.folder, record }) ?? statSync(fileOf(ctx, found, record.video.file));
   const copy = copyPathsOf(home, found.name, record, raw);
   const reading = wait === "reading";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
@@ -576,7 +576,7 @@ export function copyFits({ was, made, size, starts = true }) {
 function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
   const { home } = ctx;
   const name = record.name.text;
-  const raw = statOf(fileOf(ctx, found, record.video.file));
+  const raw = recordingStat(ctx, { folder: found.folder, record });
   if (raw === undefined) {
     ctx.say(noRecording(name));
     return { code: 1 };

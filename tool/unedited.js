@@ -54,7 +54,7 @@ import { fingerprintOf, matchVersion } from "./versions.js";
 import { LEFT, leftAlone, sessionNotCleared } from "./gate.js";
 import { STUDIO_NAME } from "./name.js";
 import { readStatusesIn, importState, shownStep } from "./importing.js";
-import { fileAt, folderAt, keptOnAMac } from "./where.js";
+import { ORIGINALS_FOLDER, fileAt, folderAt, keptOnAMac, recordingAt } from "./where.js";
 import { putHereNow } from "./put-here.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
@@ -1406,7 +1406,9 @@ export function askBlocked({ folder, record, root, statusFolders, home, machine,
     if (read.reels.rulesOnly === true) return { why: `Claude cannot be asked for Reels: ${read.reels.cannotAsk || "its import went by the rules alone"}.` };
     if (lost) return { why: lost };
   }
-  return whole(at(name)) ? {} : bring([name]);
+  // The recording is read where it is: on this Mac, else in Original files once it has left (L6).
+  const rec = recordingAt({ home }, { folder, record });
+  return whole(rec) ? {} : bring([rec === at(name) ? name : `${ORIGINALS_FOLDER}/${name}`]);
 }
 
 export async function askAgain({ folder, record }, deps) {
@@ -1418,13 +1420,14 @@ export async function askAgain({ folder, record }, deps) {
   const video = join(folder, name);
   const stem = basename(name, extname(name));
   const own = folderAt({ home: deps.home || studioHome() }, { folder, record }, "local");
+  const recording = recordingAt({ home: deps.home || studioHome() }, { folder, record });
   const plan = JSON.parse(readFileSync(join(own, `${stem}.cut-plan.json`), "utf8"));
   const work = join(runsFolder(deps.home || studioHome()), `ask-${process.pid}-${Date.now()}`);
   mkdirSync(work, { recursive: true });
   try {
     // ffprobe is asked whether the video can be read at all.
     const probed = join(work, "facts.json");
-    const probe = await deps.run(deps.tools.ffprobe, probeArgs(join(own, name), probed));
+    const probe = await deps.run(deps.tools.ffprobe, probeArgs(recording, probed));
     const printed = probe.code === 0 && existsSync(probed) ? readFileSync(probed, "utf8") : "";
     if (!printed || !factsOf(printed)) return { ok: false, made: [], failed: [`${name} could not be read (${lastLine(probe.stderr)}).`], next: as };
     const asked = await askClaude(name, plan, plan.facts, work, deps);
@@ -1436,7 +1439,7 @@ export async function askAgain({ folder, record }, deps) {
     // What was wrong with Claude's reply, and the clips of it that were left out, are said whatever else happens.
     const said = [...asked.read.problems, ...picked.ignored];
     if (!picked.clips.length) return { ok: true, made: [], failed: said, next: `Claude picked no clip that stands alone. ${as}` };
-    const seen = await facesIn(join(own, name), work, deps).catch((e) => ({ why: `the work stopped (${e.code || e.message})` }));
+    const seen = await facesIn(recording, work, deps).catch((e) => ({ why: `the work stopped (${e.code || e.message})` }));
     if (seen.why) log(`${name}: the faces could not be looked for (${seen.why}), so the new candidates are cropped at the centre of the picture.`);
     const fresh = reelCandidates({ clips: picked.clips, plan, facts: plan.facts, stills: seen.stills || [] });
     // The list is read again, as it is now that Claude has answered, and a list that cannot be read now is refused, as at the

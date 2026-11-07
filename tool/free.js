@@ -42,7 +42,7 @@ import { heldText, shownName } from "./episode.js";
 import { sizeText } from "./kinds.js";
 import { episodeWork, workFolder } from "./settings.js";
 import { workCopyDir, workCopyLockOf } from "./workcopy.js";
-import { fileAt } from "./where.js";
+import { fileAt, recordingAt } from "./where.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -322,7 +322,7 @@ export async function freeEpisode(ctx, { found, record }, deps = {}) {
   if (targets.some((target) => target.what !== "renders")) {
     // A planned episode (PR H4) has no video and no project, so nothing of it is made on this Mac and there is nothing to take away (the gate
     // refuses `free` for it all the same): this stays as it is for a record with no video.
-    const raw = typeof record.video?.file === "string" && record.video.file !== "" ? ctx.stat(fileOf(ctx, found, record.video.file)) : undefined;
+    const raw = typeof record.video?.file === "string" && record.video.file !== "" ? ctx.stat(recordingAt(ctx, { folder: found.folder, record })) : undefined;
     if (!raw || !raw.isFile()) return stop(notThere(name));
     const taken = new Set(targets.filter((target) => target.what === "video").map((target) => target.project));
     const listed = Array.isArray(record.app?.projects) ? record.app.projects : [];
