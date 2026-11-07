@@ -629,7 +629,7 @@ describe("what the app is given to start from (5.8)", () => {
     assert.deepEqual(made.map((s) => [s.n, s.from, s.to, s.start, s.end, s.kind, s.why]), [
       [1, null, null, 0, 4.957, "pause", "silence before the first words"],
       [2, null, null, 6.2, 7.8, "pause", "2.4 seconds of silence, shortened to 0.4"],
-      [3, "w2", "w2", 8, 8.4, "false start", "a false start"]
+      [3, "w2", "w2", 7.8, 8.8, "false start", "a false start"]
     ]);
     assert.ok(made.every((s) => s.by === "rules"));
   });
@@ -661,9 +661,45 @@ describe("what the app is given to start from (5.8)", () => {
   it("lists no silence when the plan has no ranges", () => {
     assert.equal(cutSuggestions(PLAN, transcript).suggestions.length, 1);
   });
-  it("tells the app's agent to propose word cuts by their ids and silence cuts by their times, the opening first", () => {
+  it("tells the app's agent to propose each cut from its start to its end, the opening first, and what from and to name", () => {
     const rules = projectFiles(main()).get("CLAUDE.md");
-    assert.match(rules, /propose the cuts in `brimm\/cut-suggestions.json` first: those with word ids by their ids, and those with `from` and `to` null \(silence\) by their `start` and `end` times, the opening first/);
+    assert.ok(rules.includes("When she asks to clean up retakes, propose the cuts in `brimm/cut-suggestions.json` first, each from its `start` to its `end`, the opening first: `from` and `to` name the words a cut holds, and are null for a silence."), rules);
+  });
+  it("gives a cut that holds words the plan's whole cut range, not its words' own times (check 83: a stretched word over a quiet stretch)", () => {
+    // "Okay." is said at 9.502 to 9.72, and the plan cuts 0 to 16.274 around it: the cue before she starts, with the pause after it.
+    const words = [{ w: "Okay.", start: 9.502, end: 9.72 }, { w: "Hello", start: 16.4, end: 16.9 }];
+    const why = "Claude: A ready cue before she starts the opening line, not part of the video.";
+    const plan = {
+      by: "claude",
+      phrases: [
+        { id: "p1", start: 9.502, end: 9.72, text: "Okay.", words: words.slice(0, 1), keep: false, kind: "claude", why },
+        { id: "p2", start: 16.4, end: 16.9, text: "Hello", words: words.slice(1), keep: true, kind: "keep", why: "" }
+      ],
+      ranges: [
+        { start: 0, end: 16.274, keep: false, kind: "claude", why, phrases: ["p1"], text: "Okay." },
+        { start: 16.274, end: 17, keep: true, kind: "keep", why: "", phrases: ["p2"], text: "Hello" }
+      ]
+    };
+    assert.deepEqual(cutSuggestions(plan, transcriptJson(words, [])).suggestions, [{ n: 1, from: "w0", to: "w0", start: 0, end: 16.274, kind: "claude", why, by: "claude" }]);
+  });
+  it("gives one suggestion for two cut phrases of one range, from the first's first word to the second's last, with the range's times", () => {
+    const words = [{ w: "Keep", start: 0, end: 1 }, { w: "uh", start: 2, end: 2.2 }, { w: "um", start: 2.5, end: 2.7 }, { w: "end.", start: 4, end: 5 }];
+    const why = "a false start";
+    const plan = {
+      by: "rules",
+      phrases: [
+        { id: "p1", start: 0, end: 1, text: "Keep", words: words.slice(0, 1), keep: true, kind: "keep", why: "" },
+        { id: "p2", start: 2, end: 2.2, text: "uh", words: words.slice(1, 2), keep: false, kind: "false start", why },
+        { id: "p3", start: 2.5, end: 2.7, text: "um", words: words.slice(2, 3), keep: false, kind: "false start", why },
+        { id: "p4", start: 4, end: 5, text: "end.", words: words.slice(3), keep: true, kind: "keep", why: "" }
+      ],
+      ranges: [
+        { start: 0, end: 1.8, keep: true, kind: "keep", why: "", phrases: ["p1"], text: "Keep" },
+        { start: 1.8, end: 3.5, keep: false, kind: "false start", why, phrases: ["p2", "p3"], text: "uh um" },
+        { start: 3.5, end: 5, keep: true, kind: "keep", why: "", phrases: ["p4"], text: "end." }
+      ]
+    };
+    assert.deepEqual(cutSuggestions(plan, transcriptJson(words, [])).suggestions, [{ n: 1, from: "w1", to: "w2", start: 1.8, end: 3.5, kind: "false start", why, by: "rules" }]);
   });
   it("starts each phrase's first word no earlier than the phrase starts in transcript.json, whatever the transcriber gave it", () => {
     const stretched = [{ w: "Here's", start: 0, end: 5.3 }, { w: "the", start: 5.3, end: 5.6 }];
