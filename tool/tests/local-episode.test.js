@@ -933,6 +933,9 @@ describe("L2c round two: the conversions pinned, and a set of versions that neve
       assert.equal(asFiled(found.folder, found.record, { home: w.home }), true);
       const blocked = askBlocked({ folder: found.folder, record: found.record, root: w.root, home: w.home, machine: STUDIO, now: Date.now() });
       assert.doesNotMatch(String(blocked.why), /no cut plan here|not whole|is missing/, String(blocked.why));
+      // With the real look at the disk, the plan and the list whole in video/ are not Dropbox's to bring (B0-F14).
+      assert.equal(blocked.bring, undefined, JSON.stringify(blocked));
+      assert.doesNotMatch(String(blocked.why), /still bringing/);
     } finally {
       w.done();
     }

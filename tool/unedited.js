@@ -54,7 +54,7 @@ import { fingerprintOf, matchVersion } from "./versions.js";
 import { LEFT, leftAlone, sessionNotCleared } from "./gate.js";
 import { STUDIO_NAME } from "./name.js";
 import { readStatusesIn, importState, shownStep } from "./importing.js";
-import { ORIGINALS_FOLDER, fileAt, folderAt, keptOnAMac, recordingAt } from "./where.js";
+import { ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, recordingAt } from "./where.js";
 import { putHereNow } from "./put-here.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
@@ -1391,7 +1391,10 @@ export function askBlocked({ folder, record, root, statusFolders, home, machine,
   const listed = existsSync(at(REELS_FILE));
   const bring = (coming) => ({ why: `Dropbox is still bringing ${coming.join(", ")} over to this Mac. Say "ask Claude again for Reels" again when it is done.`, bring: coming });
   // What the cut plan and the list decide is decided before the video is brought, so it is never brought only to be refused.
-  const small = [plan, ...(listed ? [REELS_FILE] : [])].filter((rel) => !whole(join(folder, rel)));
+  const small = [plan, ...(listed ? [REELS_FILE] : [])].filter((rel) => !whole(at(rel)));
+  // A file kept on this Mac is not brought by Dropbox: if it is not whole, that is for Jason.
+  const kept = small.filter((rel) => filePlace(record, rel) === "local");
+  if (kept.length) return { why: `${kept.join(", ")} is not whole on this Mac, so Claude cannot be asked. Ask Jason.` };
   if (small.length) return bring(small);
   let facts = null;
   try {
