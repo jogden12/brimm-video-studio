@@ -4,15 +4,18 @@
 // at layout 6 (episode.js LOCAL_VERSION). Its folder in Dropbox keeps record/, final/, history/, Original files/ and a plan's three files. A
 // file's place is its name, and `files` keeps its shape. A record without `local` keeps every file in its folder in Dropbox, as before.
 // An episode with `local` is changed only on its Mac (D3): on any other, every command that names it says ON_OTHER_MAC and changes nothing.
-// This module reads and writes nothing: it says places and builds paths. It imports only what episode.js imports already (settings.js), so that
+// This module reads and writes nothing but whether a recording is on this Mac (recordingAt, recordingStat): it says places and builds paths. It imports only what episode.js imports already (settings.js), so that
 // episode.js and every reader of an episode's files can take it in without a loop of imports; for that, it names a plan's files itself
 // (PLAN_FILES, held to plan.js PLAN_FILE_NAMES by a test) and says a Mac as kinds.js does (held to spokenMac by a test).
+import { statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { episodeFilesFolder } from "./settings.js";
 
 /** The folders of an episode's folder in Dropbox whose files stay in Dropbox on a record with `local`: its records, the hand-off's (final/), what
     is set aside there (history/) and the recordings copied in after the hand-off (Original files/, D6). */
-const DROPBOX_FOLDERS = ["record", "final", "history", "Original files"];
+/** The folder of an episode in Dropbox that keeps the recordings copied in after the hand-off (D6). */
+export const ORIGINALS_FOLDER = "Original files";
+const DROPBOX_FOLDERS = ["record", "final", "history", ORIGINALS_FOLDER];
 /** A plan's three files, made before any footage and kept in its folder in Dropbox (plan.js PLAN_FILE_NAMES, which a test holds this to). */
 export const PLAN_FILES = Object.freeze(["video guide.md", "shot list.md", "teleprompter.txt"]);
 
@@ -57,4 +60,33 @@ export function roleOf(file) {
   const roles = [[/\.(mov|mp4|m4v)$/i, "recording"], [/\.rough-cut\.srt$/, "rough cut's captions"], [/\.srt$/, "captions"], [/\.transcript\.txt$/, "transcript"], [/\.words\.json$/, "words"], [/\.cut-plan\.json$/, "cut plan"], [/\.edit-notes\.txt$/, "notes"], [/^reels\.json$|\.reel-suggestions\.txt$/, "Reel suggestions"], [/\.principles\.json$/, "teachings"]];
   const found = roles.find(([pattern]) => pattern.test(file));
   return found ? found[1] : "file";
+}
+
+const statOf = (path) => {
+  try {
+    return statSync(path, { throwIfNoEntry: false });
+  } catch (e) {
+    return undefined;
+  }
+};
+const listsOriginal = (record) => Number.isInteger((record.files || {})[`${ORIGINALS_FOLDER}/${record.video.file}`]);
+
+/** The path to read a recording from (L6, ruling 8): where a record puts it (fileAt) while that is there, else its copy in Original files/ when the record lists it,
+    else where the record puts it. A record without `local` has it in its folder in Dropbox. */
+export function recordingAt(ctx, { folder, record }) {
+  const here = fileAt(ctx, { folder, record }, record.video.file);
+  if (filePlace(record, record.video.file) !== "local") return here;
+  const found = statOf(here);
+  if (found && found.isFile()) return here;
+  return listsOriginal(record) ? join(folder, ORIGINALS_FOLDER, record.video.file) : here;
+}
+
+/** The size and time of a recording, to key a copy of it or tell whether it changed: the Mac's file while it is there, else what the record's `local.original` kept of it
+    while the copy in Original files/ has that size (a placeholder shows its full size). Undefined when neither is there. */
+export function recordingStat(ctx, { folder, record }) {
+  const found = statOf(fileAt(ctx, { folder, record }, record.video.file));
+  if (found) return found;
+  if (!keptOnAMac(record) || !isObject(record.local.original) || record.local.original.file !== record.video.file) return undefined;
+  const copy = statOf(join(folder, ORIGINALS_FOLDER, record.video.file));
+  return copy && copy.size === record.local.original.bytes ? { size: record.local.original.bytes, mtimeMs: record.local.original.mtimeMs } : undefined;
 }

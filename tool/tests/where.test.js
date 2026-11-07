@@ -5,7 +5,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { ON_OTHER_MAC, PLAN_FILES, fileAt, filePlace, folderAt, onOtherMac } from "../where.js";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { ON_OTHER_MAC, ORIGINALS_FOLDER, PLAN_FILES, fileAt, filePlace, folderAt, onOtherMac, recordingAt, recordingStat } from "../where.js";
 import { PLAN_FILE_NAMES } from "../plan.js";
 import { spokenMac } from "../kinds.js";
 import { episodeFilesFolder } from "../settings.js";
@@ -92,6 +94,56 @@ describe("ON_OTHER_MAC, what every command that names an episode kept on another
   it("says each Mac as kinds.js spokenMac does", () => {
     for (const mac of ["Mac Studio", "Sallie's laptop", "Jason's MacBook", "Sallie’s MacBook Air", "MacBook Pro"]) {
       assert.equal(ON_OTHER_MAC("x", mac), `"x" is on ${spokenMac(mac)}: carry on there. Nothing was changed.`, mac);
+    }
+  });
+});
+
+describe("W1/W2: the recording once it may have left the Mac (Phase 3, L6)", () => {
+  const record = { id: "e-20261106-3fa9c1", version: 6, local: { on: "Mac Studio" }, video: { file: "IMG.mov" }, files: { "IMG.mov": 9 } };
+  const world = () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-where-"));
+    const home = join(dir, "home");
+    const folder = join(dir, "Episodes", NAME);
+    const video = episodeFilesFolder(home, NAME);
+    mkdirSync(video, { recursive: true });
+    mkdirSync(join(folder, ORIGINALS_FOLDER), { recursive: true });
+    return { dir, home, folder, video, ctx: { home, machine: "Mac Studio" }, done: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+  it("W1: recordingAt is video/ while it is there, else Original files when listed", () => {
+    const w = world();
+    try {
+      writeFileSync(join(w.video, "IMG.mov"), "recording!");
+      assert.equal(recordingAt(w.ctx, { folder: w.folder, record }), join(w.video, "IMG.mov"));
+      rmSync(join(w.video, "IMG.mov"));
+      const listed = { ...record, files: { ...record.files, "Original files/IMG.mov": 9 } };
+      assert.equal(recordingAt(w.ctx, { folder: w.folder, record: listed }), join(w.folder, "Original files", "IMG.mov"));
+      assert.equal(recordingAt(w.ctx, { folder: w.folder, record }), join(w.video, "IMG.mov"));
+      const dropbox = { id: record.id, version: 5, video: { file: "IMG.mov" }, files: { "IMG.mov": 9 } };
+      assert.equal(recordingAt(w.ctx, { folder: w.folder, record: dropbox }), join(w.folder, "IMG.mov"));
+    } finally {
+      w.done();
+    }
+  });
+  it("W2: recordingStat is the Mac's file, else local.original's size and time while the copy has that size", () => {
+    const w = world();
+    try {
+      writeFileSync(join(w.video, "IMG.mov"), "recording!");
+      utimesSync(join(w.video, "IMG.mov"), 5000.5, 5000.5);
+      const here = recordingStat(w.ctx, { folder: w.folder, record });
+      assert.deepEqual([here.size, here.mtimeMs], [10, 5000500]);
+      rmSync(join(w.video, "IMG.mov"));
+      const moved = { ...record, local: { on: "Mac Studio", original: { file: "IMG.mov", bytes: 10, mtimeMs: 5000500 } }, files: { "IMG.mov": 10, "Original files/IMG.mov": 10 } };
+      const copy = join(w.folder, "Original files", "IMG.mov");
+      writeFileSync(copy, "recording!");
+      utimesSync(copy, 5000, 5000);
+      assert.deepEqual(recordingStat(w.ctx, { folder: w.folder, record: moved }), { size: 10, mtimeMs: 5000500 });
+      writeFileSync(copy, "recording!!");
+      assert.equal(recordingStat(w.ctx, { folder: w.folder, record: moved }), undefined);
+      rmSync(copy);
+      assert.equal(recordingStat(w.ctx, { folder: w.folder, record: moved }), undefined);
+      assert.equal(recordingStat(w.ctx, { folder: w.folder, record }), undefined);
+    } finally {
+      w.done();
     }
   });
 });

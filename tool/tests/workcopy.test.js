@@ -2145,3 +2145,23 @@ describe("making the footage copies of a plan's video (PR H5b)", () => {
     assert.deepEqual(stuck.failed, ["The footage for shot 4 could not be made: Dropbox is still bringing Video 4 over to this Mac."]);
   });
 });
+
+describe("K1: a copy's key is the rawStat it is given (Phase 3, L6)", () => {
+  it("makeWorkCopy and makeFootageCopies take the key from the recording as the record keeps it", async (c) => {
+    const t = setup();
+    c.after(t.done);
+    const rawStat = { size: 5, mtimeMs: 1000 };
+    const key = workCopyKey({ bytes: 5, mtimeMs: 1000 });
+    const paths = workCopyPaths(t.home, t.folder, key);
+    mkdirSync(paths.dir, { recursive: true });
+    writeFileSync(paths.video, "THE COPY");
+    writeFileSync(paths.facts, "{}");
+    const result = await t.job({ rawStat });
+    assert.deepEqual([result.ok, result.made, result.key], [true, [], key]);
+    const fPaths = footageCopyPaths(t.home, t.folder, 3, key);
+    writeFileSync(fPaths.video, "THE FOOTAGE");
+    writeFileSync(fPaths.facts, "{}");
+    const footage = await makeFootageCopies({ home: t.home, folder: t.folder, items: [{ video: t.video, shot: 3, name: "Shot", raw: rawStat }] }, t.deps);
+    assert.deepEqual([footage.ok, footage.made, footage.failed], [true, [], []]);
+  });
+});

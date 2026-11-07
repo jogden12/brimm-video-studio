@@ -452,6 +452,35 @@ describe("the files of an episode kept on one Mac (Phase 3, L2: layout 6)", () =
   });
 });
 
+describe("E1: a recording that left the Mac (Phase 3, L6)", () => {
+  const moved = { ...RECORD, version: 6, local: { on: "Mac Studio", original: { file: "IMG.mov", bytes: 30, mtimeMs: 1000 } }, video: { ...RECORD.video, file: "IMG.mov" }, files: { "IMG.mov": 30, "IMG.words.json": 12, "Original files/IMG.mov": 30 } };
+  const place = (t, here, there) => {
+    const video = join(t.dir, "BRIMM Video Work", "2026-10-14 Pricing talk (Mac Studio)", "video");
+    for (const [dir, sizes] of [[video, here], [t.folder, there]]) {
+      for (const [path, bytes] of Object.entries(sizes)) {
+        mkdirSync(join(dir, path, ".."), { recursive: true });
+        writeFileSync(join(dir, path), "x".repeat(bytes));
+      }
+    }
+    return video;
+  };
+  it("fileProblems calls a recording gone from video/ missing only when Original files has none", () => {
+    const t = setup();
+    const video = place(t, { "IMG.words.json": 12 }, { "Original files/IMG.mov": 30 });
+    assert.deepEqual(fileProblems(t.folder, moved, { machine: "Mac Studio", localFolder: video }), []);
+    const gone = setup();
+    const video2 = place(gone, { "IMG.words.json": 12 }, {});
+    assert.deepEqual(fileProblems(gone.folder, moved, { machine: "Mac Studio", localFolder: video2 }).map((p) => [p.file, p.kind]), [["IMG.mov", "missing"], ["Original files/IMG.mov", "missing"]]);
+    const { original, ...local } = moved.local;
+    const plain = setup();
+    const video3 = place(plain, { "IMG.words.json": 12 }, { "Original files/IMG.mov": 30 });
+    assert.deepEqual(fileProblems(plain.folder, { ...moved, local }, { machine: "Mac Studio", localFolder: video3 }).map((p) => [p.file, p.kind]), [["IMG.mov", "missing"]]);
+    t.done();
+    gone.done();
+    plain.done();
+  });
+});
+
 describe("layout 6: an episode kept on one Mac (Phase 3, L2)", () => {
   const LOCAL = { on: "Mac Studio" };
   const ANSWER = { state: "needs your answer", guess: "raw", seen: "wide, 0:42", came: "camera" };

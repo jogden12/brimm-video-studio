@@ -705,7 +705,7 @@ async function keepCues({ cues, stretch, paths, work, shown, write, rename, log 
     (an HDR video's alone), `runGuarded`, `tools` ({ ffmpeg, ffprobe }), `probe` (a function from a file to what ffprobe printed
     of it, or "": read through `run` when none is given), `freeBytes`, `stat`, `mkdir`, `rename`, `rm`, `readDir`, `write`,
     `progress`, `log`, `now`, `pid`, which names the run's own folder, `faces` and `cues`. */
-export async function makeWorkCopy({ home, folder, video, name, fourK = false, reel = null, footage = null, voice = false, from = null }, deps = {}) {
+export async function makeWorkCopy({ home, folder, video, name, fourK = false, reel = null, footage = null, voice = false, from = null, rawStat = null }, deps = {}) {
   const {
     run = runProgram, runGuarded: guarded = runGuarded, tools = {}, probe: given, freeBytes = freeOn, stat = statOf, mkdir = mkdirSync,
     rename = renameSync, rm = rmSync, readDir = readdirSync, write = writeFileSync, progress = noProgress, log = () => {}, now = Date.now, pid = process.pid,
@@ -727,7 +727,8 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
     // A Reel's copy is of a stretch, and of a Reel: anything else is no Reel's.
     if (reel !== null && reel !== undefined && !(typeof reel === "object" && Number.isInteger(reel.n) && reel.n >= 1 && isStretch(reel))) return refuse("it is not a stretch of the video", "it is not a Reel with a stretch of the video");
     if (!tools.ffmpeg || !tools.ffprobe) return refuse("this Mac has no program to make it with: ask Jason", "ffmpeg or ffprobe is not installed");
-    const raw = stat(video);
+    // `rawStat`, when given (L6), is the recording as the record keeps it: its key and size are that, not those of the copy this Mac reads.
+    const raw = rawStat || stat(video);
     // `video` is the identity (the key, the places, the size); `from`, when given, is the file this Mac holds of it, which is read instead (plan R1b).
     const source = typeof from === "string" && from ? from : video;
     if (!raw) return refuse("it isn't on this Mac", "the video is not there");
@@ -948,7 +949,7 @@ export async function makeFootageCopies({ home, folder, items }, deps = {}) {
       log(`${shown}: the footage for shot ${item.shot} could not be made: Dropbox is still bringing the video over to this Mac.`);
       continue;
     }
-    const result = await makeWorkCopy({ home, folder, video: item.video, name: shown, footage: { shot: item.shot } }, deps);
+    const result = await makeWorkCopy({ home, folder, video: item.video, name: shown, footage: { shot: item.shot }, rawStat: item.raw || null }, deps);
     if (!result.ok) failed.push(`${said} ${reasonOf(result.failed)}.`);
     else if (result.made.length) made.push(`the footage for shot ${item.shot}`);
   }

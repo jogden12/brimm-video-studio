@@ -734,6 +734,8 @@ export function fileProblems(folder, record, { stat = statSync, machine, localFo
       // A file that cannot be measured is not there for any command that needs it.
     }
     if (size === bytes) continue;
+    // A recording that left the Mac (L6) is missing only when its copy in Original files/ is not there either, which the same loop looks at.
+    if (size === null && onTheMac && path === record.video.file && record.local.original && record.local.original.file === path && Number.isInteger(record.files[`Original files/${path}`])) continue;
     problems.push({ file: path, kind: size === null ? "missing" : size < bytes ? "short" : "different", size, bytes, kept: otherNames(dir, path) });
   }
   return problems;
