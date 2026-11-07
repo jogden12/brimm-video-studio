@@ -565,7 +565,12 @@ export function dropFolderFault(path, { home, root, exports = downloadsFolder(ho
   }
   const work = workFolder(home);
   if ((inside(work) && !inside(defaultDropFolder(home))) || holds(work)) return "the drop folder cannot be BRIMM Video Work, or inside it but for Drop, or hold it";
+  // Zoom's folder is under Documents by default, which macOS guards: its real path is asked only when the pick could be in or under Documents (by its
+  // real path or as spelt), or Zoom's folder is elsewhere (as exportsFolderFault does), so that no prompt for Documents comes during a move for no reason.
+  const docs = fold(join(realOf(home), "Documents"));
+  const zoomMaybe = !underFolded(fold(resolve(zoom)), docs) || underFolded(me, docs) || underFolded(fold(resolve(path)), fold(resolve(zoom)));
   for (const [what, folder] of [["BRIMM Video Studio", studioFolder(home)], ["BRIMM Video Workshop", workshopFolder(home)], ["Zoom's recordings", zoom], ["Downloads", downloadsFolder(home)], ["the exports folder", exports]]) {
+    if (what === "Zoom's recordings" && !zoomMaybe) continue;
     if (inside(folder) || holds(folder)) return cannot(what);
   }
   // The default, Drop in BRIMM Video Work, may be the first folder made in Work: the installer makes it with the drop folder.

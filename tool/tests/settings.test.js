@@ -3184,6 +3184,20 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
       assert.deepEqual(t.said, ["Not written: the exports folder cannot be Zoom's recordings, or inside it."]);
       t.done();
     });
+    it("B0-F9 asks no real path of ~/Documents/Zoom for a drop folder picked outside Documents, and still refuses one inside Zoom's folder", async () => {
+      const t = mac({ drop: "Drop" });
+      t.folder("Drop");
+      const zoom = join(t.home, "Documents", "Zoom");
+      const pick = join(t.home, "BRIMM Video Work", "Drop");
+      const { result, calls } = await watched(() => t.run("plan", ...t.told, "--drop-folder", pick), { names: ["existsSync", "statSync", "lstatSync", "readdirSync", "readFileSync", "realpathSync"] });
+      assert.equal(result, 0, t.said.join("\n"));
+      assert.deepEqual(calls.filter(({ path }) => path === zoom || path.startsWith(`${zoom}/`)), []);
+      t.said.length = 0;
+      mkdirSync(zoom, { recursive: true });
+      assert.equal(await t.run("plan", ...t.told, "--drop-folder", join(zoom, "Call")), 1);
+      assert.match(t.said.join("\n"), /Zoom's recordings/);
+      t.done();
+    });
     it("takes the Mac Studio's switch at P3-3: Drop in BRIMM Video Work, made or not, with Downloads, a link into Dropbox, as the exports folder, while the transcript tool watches BRIMM VIDEO Transfer (L1c)", async () => {
       for (const made of [false, true]) {
         const t = mac({ drop: "Drop", handoffVersion: 2 }, { transcripts: ({ root }) => ({ ".plist": [join(dirname(root), "BRIMM VIDEO Transfer"), join(dirname(root), "BRIMM VIDEO Transfer", "Zoom Video Transfer")] }) });
