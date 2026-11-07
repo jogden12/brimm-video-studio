@@ -25,6 +25,10 @@ export const dropWords = (settings, machine, home) => (isLocal(settings)
   ? folderWords(settings.dropPath, home)
   : finderWords("Dropbox", "The BRIMM DB", "BRIMM Video", settings?.drop || "Unedited Video", machine));
 
+/** What the guide and `episodes` say, right under the drop folder's line, when this Mac does not let BRIMM Video Studio look in the drop
+    folder (macOS's refusal, EPERM, which System Settings can lift): `words` is the folder in Finder words (dropWords). No app is named. */
+export const dropUnreadable = (words) => `This Mac does not let BRIMM Video Studio look in your drop folder, ${words}. Allow it in System Settings, under Privacy & Security, Files and Folders, then ask again.`;
+
 /** Where a Zoom download goes, in Finder words: Zoom Video Transfer, in BRIMM VIDEO Transfer, beside BRIMM Video. */
 export const ZOOM_WORDS = finderWords("Dropbox", "The BRIMM DB", "BRIMM VIDEO Transfer", "Zoom Video Transfer");
 
@@ -568,13 +572,16 @@ export function findIn(items, said) {
   return { why: NO_FIT };
 }
 
-/** The overview's lines: this Mac's drop folder in Finder words, each video under way with its next step, and the lines edit.js adds of
-    its own for it (`also`) under that, and, when there are any, how many videos from before the switch it does not guide. */
-export function overviewLines({ drop, items, old }) {
+/** The overview's lines: this Mac's drop folder in Finder words, when this Mac does not let it look in that folder (`unreadable`) the
+    line that says so (dropUnreadable), each video under way with its next step, and the lines edit.js adds of its own for it (`also`)
+    under that, and, when there are any, how many videos from before the switch it does not guide. With `unreadable` and none under way
+    it does not say that nothing is: "put the video in your drop folder" would have her drop it again. */
+export function overviewLines({ drop, items, old, unreadable = false }) {
   const under = ordered(items.filter(({ next }) => !next.done));
   return [
     `Your drop folder: ${drop}`,
-    ...(under.length ? ["Under way:", ...under.flatMap(({ facts, next, also = [] }) => [`  ${facts.name}: ${next.text}`, ...also.map((line) => `    ${line}`)])] : [NOTHING_UNDER_WAY]),
+    ...(unreadable ? [dropUnreadable(drop)] : []),
+    ...(under.length ? ["Under way:", ...under.flatMap(({ facts, next, also = [] }) => [`  ${facts.name}: ${next.text}`, ...also.map((line) => `    ${line}`)])] : unreadable ? [] : [NOTHING_UNDER_WAY]),
     ...(old > 0 ? [`${old} ${old === 1 ? "video" : "videos"} from before the switch ${old === 1 ? "is" : "are"} not guided.`] : [])
   ];
 }

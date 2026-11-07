@@ -6,7 +6,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { editMain, HELP } from "../edit.js";
 import { readGuideNotes, writeGuideNotes, guideFile } from "../guide-note.js";
-import { NOT_SET_UP, OPS_PAGE } from "../guide.js";
+import { NOT_SET_UP, OPS_PAGE, dropUnreadable } from "../guide.js";
+import { watched } from "./watched-fs.js";
 import { localStamp, readEpisode, recordFile, recordText } from "../episode.js";
 import { removeStatusIn, writeStatusIn } from "../importing.js";
 import { importingFolder } from "../settings.js";
@@ -412,6 +413,53 @@ describe("guide opens a folder, the page, or a file's place in Finder", () => {
     const r = await on(own(), "guide");
     assert.equal(r.said[0], `Your drop folder: ${WORDS}`);
     assert.deepEqual(r.said.slice(2), ['  A video of 5 bytes: It is coming into your drop folder. Wait for the "Ready" notice.']);
+    t.done();
+  });
+  it("says when this Mac does not let it look in its drop folder, in the overview and in episodes, on a Mac with a drop folder of its own and on one whose drop folder is in Dropbox, and lists nothing from that folder; another Mac's folder, one not there, or one its own permissions shut, is passed over as before (L1c, finding 6)", async () => {
+    const t = setup();
+    const picked = join(t.home, "Desktop", "Drop");
+    mkdirSync(picked, { recursive: true });
+    writeFileSync(join(picked, "Mine.mov"), "video");
+    const WORDS = "Desktop › Drop, in your home folder";
+    const SAID = dropUnreadable(WORDS);
+    const NOTHING = "Nothing is under way. To start, put the video in your drop folder.";
+    const shut = (folders, code) => ({ names: ["readdirSync"], deny: (name, path) => (folders.includes(path) ? Object.assign(new Error(`${code}: operation not permitted, scandir '${path}'`), { code }) : null) });
+    const own = { ...t.ctx.deps, settings: { ...t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 2, dropPath: picked } };
+    const run = async (deps, folders, code, ...argv) => (await watched(() => on(deps, ...argv), shut(folders, code))).result;
+    let r = await run(own, [picked], "EPERM", "guide");
+    assert.deepEqual(r.said, [`Your drop folder: ${WORDS}`, SAID]);
+    r = await run(own, [picked], "EPERM", "episodes");
+    assert.equal(r.said.filter((l) => l === SAID).length, 1, r.said.join("\n"));
+    assert.ok(!r.said.includes("Waiting in the drop folders:"), r.said.join("\n"));
+    assert.ok(r.said.indexOf(SAID) < r.said.indexOf("On this Mac:"), r.said.join("\n"));
+    // Her chat is told to allow it, not to retry the video: a video that is there stays, and the retry says so too.
+    r = await run(own, [picked], "EPERM", "retry", "Mine");
+    assert.deepEqual(r, { code: 1, said: [SAID] });
+    r = await run(own, [picked], "EACCES", "retry", "Mine");
+    assert.deepEqual(r, { code: 1, said: [SAID] });
+    // A folder its own permissions shut (EACCES), or one that is not there (ENOENT), is passed over as before.
+    for (const code of ["EACCES", "ENOENT"]) {
+      r = await run(own, [picked], code, "guide");
+      assert.deepEqual(r.said, [`Your drop folder: ${WORDS}`, NOTHING], code);
+      r = await run(own, [picked], code, "episodes");
+      assert.ok(!r.said.some((l) => l.startsWith("This Mac does not let")), r.said.join("\n"));
+    }
+    r = await run(own, [], "EPERM", "guide");
+    assert.ok(!r.said.includes(SAID));
+    assert.deepEqual(r.said.slice(2), ['  A video of 5 bytes: It is coming into your drop folder. Wait for the "Ready" notice.']);
+    // A Mac whose drop folder is in Dropbox: macOS shuts all of Dropbox at once, this Mac's folder first of all.
+    mkdirSync(join(t.root, "Drop", "Mac Studio"), { recursive: true });
+    mkdirSync(join(t.root, "Drop", "Sallie's laptop"), { recursive: true });
+    const all = [join(t.root, "Drop"), join(t.root, "Unedited Video"), join(t.root, "Drop", "Mac Studio"), join(t.root, "Drop", "Sallie's laptop")];
+    const dropbox = dropUnreadable("Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio");
+    r = await run(light(t), all, "EPERM", "guide");
+    assert.deepEqual(r.said, [DROP_LINE, dropbox]);
+    r = await run(light(t), all, "EPERM", "episodes");
+    assert.equal(r.said.filter((l) => l === dropbox).length, 1, r.said.join("\n"));
+    r = await run(light(t), [join(t.root, "Drop", "Sallie's laptop")], "EPERM", "guide");
+    assert.deepEqual(r.said, [DROP_LINE, NOTHING]);
+    r = await run(light(t), [join(t.root, "Drop", "Sallie's laptop")], "EPERM", "episodes");
+    assert.ok(!r.said.some((l) => l.startsWith("This Mac does not let")), r.said.join("\n"));
     t.done();
   });
   it("opens Zoom Video Transfer, beside BRIMM Video, or says to ask Jason", async () => {

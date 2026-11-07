@@ -36,16 +36,24 @@
 #                                    when missing, whose parent is there), or with --switch-local the default, Drop in BRIMM Video
 #                                    Work, whatever the settings say of the import (every import is light). It is marked as this
 #                                    Mac's, and is watched in place of the folder in BRIMM Video, which is left as it is. It is
-#                                    refused when it is, is inside or holds a folder of BRIMM Video, BRIMM Video Work (but for Drop
-#                                    in it), her chat's folders, Zoom's, Downloads or the exports folder; and, as for --drop, while
-#                                    the old folder holds a video. A folder in Dropbox, iCloud Drive or another cloud folder is
-#                                    allowed with a warning; one under Desktop or Documents, or on another disk, is allowed too and
-#                                    macOS asks once whether node may read it.
+#                                    refused when it is, is inside or holds a folder of BRIMM Video, BRIMM VIDEO Transfer, BRIMM
+#                                    VIDEO MacBook, BRIMM Video Work (but for Drop in it), her chat's folders, Zoom's, Downloads or
+#                                    the exports folder; when it holds a video already, which would be imported at once, or cannot
+#                                    be read, unless it is the folder this Mac watches now; when another Mac has marked it, or the
+#                                    transcript tool's launch agent lists it; and, as for --drop, while the old folder holds a
+#                                    video. A folder in Dropbox, iCloud Drive or another cloud folder is allowed with a warning:
+#                                    every video dropped there goes up to that cloud. For a folder in a cloud folder, under Desktop
+#                                    or Documents, or on another disk, macOS may ask whether node may read it, and again after node
+#                                    is updated.
 #                                    --exports-folder names where HyperFrames' exports are looked for besides Downloads (default
-#                                    Downloads): never the drop folder, a folder inside it or one that holds it, whether the drop
-#                                    folder is in Dropbox or on this Mac. A Mac with a drop folder of its own goes back to one in
-#                                    Dropbox only with --drop Drop (or "Unedited Video") and --switch-back together. A run with no
-#                                    drop option keeps the folder the settings name. Run it with --print first
+#                                    Downloads), a cloud folder too: never the drop folder, a folder inside it or one that holds
+#                                    it, whether the drop folder is in Dropbox or on this Mac; and not Episodes, References, Drop
+#                                    or Unedited Video in BRIMM Video, BRIMM Video Work, BRIMM VIDEO Transfer, BRIMM VIDEO MacBook,
+#                                    a folder the transcript tool watches, her chat's folders, Zoom's, Studio's settings folder, or
+#                                    a drop folder a Mac has marked as its own, nor a folder inside one. A Mac with a drop folder
+#                                    of its own goes back to one in Dropbox only with --drop Drop (or "Unedited Video") and
+#                                    --switch-back together. A run with no drop option keeps the folder the settings name. Run it
+#                                    with --print first
 #   ./install.sh --machine "Mac Studio" --import light --handoff 2 "/path/to/The BRIMM DB/BRIMM Video"
 #                                    write the import (light; full is gone and refused) and the version of the hand-off (1 or 2) in this Mac's
 #                                    settings, with --drop's own rules: a setting that is not named is left as it is. With
@@ -77,7 +85,8 @@ set -euo pipefail
 
 LABEL="com.thebrimm.unedited"
 AGENT_FILE="$HOME/Library/LaunchAgents/$LABEL.plist"
-# The transcript tool's launch agent. Its file is only ever read here, for the folders it watches.
+# The transcript tool's launch agent. Its file, and that file turned off (.plist.off, by-hand check 88), are only ever read, for
+# the folders they list: here (watched) and by settings.js transcriptFolders.
 TRANSCRIBE_LABEL="com.thebrimm.transcribe"
 # Where the launch agent looks for the programs. /usr/bin is on it for swift, which finds the faces for a Reel's crop.
 # A test names other folders in BRIMM_AGENT_PATH: on a Mac that has Claude Code where Homebrew puts programs, that is the one
@@ -392,13 +401,22 @@ drop_check() {
   rm -f "$CHECK_FILE"
 }
 
-# The folders that a launch agent on this Mac watches already, one to a line. None when there is no such agent, or its file
-# cannot be read.
+# The folders that a launch agent's file in this Mac's LaunchAgents lists, by the file's name ($1: the label and .plist, or .plist.off
+# for one turned off), one to a line. None when there is no such file, or it cannot be read.
 watched() {
-  local file="$HOME/Library/LaunchAgents/$1.plist" count i
+  local file="$HOME/Library/LaunchAgents/$1" count i
   count="$(plutil -extract WatchPaths raw -o - "$file" 2>/dev/null)" || return 0
   [[ "$count" == <-> ]] || return 0
   for (( i = 0; i < count; i++ )); do plutil -extract "WatchPaths.$i" raw -o - "$file" 2>/dev/null || true; done
+}
+
+# Whether the folders $1 and $2 are one folder, however each is named: by their real paths (zsh's :A, as settings.js's
+# realOf(resolve(...)): a link followed, `.` and `..` and a slash at the end taken away, a part not there yet kept as it is named),
+# letter case folded, as dropFolderFault compares folders. The transcript tool's installer lists its folders by their real
+# paths, and a drop folder picked with --drop-folder is kept as it was named, so the two are never compared as they are spelt.
+same_folder() {
+  local a="${1:A}" b="${2:A}"
+  [[ "${(L)a}" == "${(L)b}" ]]
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then say "This is for a Mac."; exit 1; fi
@@ -453,7 +471,7 @@ if [[ "$machined" == "yes" ]]; then
     say "Nothing was changed."
     exit 2
   fi
-  for w in "${(@f)$(watched "$TRANSCRIBE_LABEL")}"; do
+  for w in "${(@f)$(watched "$TRANSCRIBE_LABEL.plist")}"; do
     [[ -n "$w" ]] || continue
     if [[ "$root" == "$w" || "$root" == "$w"/* ]]; then
       say "BRIMM Video must not be inside a folder the transcript tool watches: $root is inside $w, which $TRANSCRIBE_LABEL watches. Put it beside BRIMM VIDEO Transfer."
@@ -498,7 +516,7 @@ if [[ "$machined" == "yes" ]]; then
   # What settings.js says after the settings, a line each as it says them, read by their words and never as JSON: the import it will
   # be; the drop folder as it is now and as it will be (Drop, Unedited Video, or a whole path for a drop folder of this Mac's own);
   # the exports folder it will be, a whole path; then, each only when it applies and in this order, that the drop folder is in a
-  # cloud folder (and which), that macOS asks once about reading it, and the whole path of the old drop folder, which it checked,
+  # cloud folder (and which), that macOS may ask about reading it, and the whole path of the old drop folder, which it checked,
   # when the folder watched changes. What cannot be read refuses, and is never taken for today's import or Unedited Video. The
   # settings are the lines above. With no node, the settings written are today's. The old folder named below is that line's alone,
   # so that it is always the one checked: the folder of the Mac and BRIMM Video the settings name, not of those this run is told.
@@ -606,13 +624,20 @@ if [[ "$machined" == "yes" ]]; then
 fi
 
 # The transcript tool's launch agent goes on watching its folders, and whichever tool looked first in a folder would file the
-# video away. So a folder it watches already is refused.
-already=("${(@f)$(watched "$TRANSCRIBE_LABEL")}")
+# video away. So a folder it watches already is refused, however either names it (same_folder): through a link, such as ~/Movies on
+# the Mac Studio, with a slash at the end, or in other letter case. (A pick with a . or .. part never reaches this: settings.js
+# refuses it first, and folder mode makes the pick real.) Only the comparison resolves paths: $folders, $drop, WatchPaths, --watch
+# and dropPath keep the spelling they have. The agent's file turned off (.plist.off) is not read here: settings.js's count of what
+# the folder holds speaks for it.
+already=("${(@f)$(watched "$TRANSCRIBE_LABEL.plist")}")
 for f in "${folders[@]}"; do
-  if (( ${already[(Ie)$f]} )); then
-    say "A folder is for transcripts or for unedited video, and not for both: $f is watched for transcripts already, by $TRANSCRIBE_LABEL. Take it off the transcript tool's list first, or name another folder."
-    exit 2
-  fi
+  for w in "${already[@]}"; do
+    [[ -n "$w" ]] || continue
+    if same_folder "$f" "$w"; then
+      say "A folder is for transcripts or for unedited video, and not for both: $f is watched for transcripts already, by $TRANSCRIBE_LABEL. Take it off the transcript tool's list first, or name another folder."
+      exit 2
+    fi
+  done
 done
 
 brew="$(find_program brew || true)"
@@ -642,14 +667,22 @@ settings_json() {
   print -r -- "}"
 }
 
+# What a drop folder in a cloud folder sends up to it, said in its warning in the summary and again after "Done" (Phase 3, L1c):
+# every video dropped there, a session's recording too. A folder under Desktop or Documents is in iCloud Drive only while iCloud
+# keeps Desktop & Documents, which a path cannot tell, so for it the sentence is an "if".
+cloud_up="Every video dropped there goes up to that cloud, a client or group session's recording too."
+if [[ "$cloud_name" == "iCloud Drive, if it keeps Desktop & Documents" ]]; then
+  cloud_up="If it does, every video dropped there goes up to it, a client or group session's recording too."
+fi
+
 say "The unedited-video tool"
 if [[ -n "$machine" ]]; then
   say "  This Mac:  $machine"
   say "  BRIMM Video:  $root"
   if [[ -n "$local_drop" ]]; then
     say "  Its drop folder, on this Mac:  $drop"
-    [[ -z "$cloud_name" ]] || say "Warning: this drop folder is in $cloud_name. A video still syncing there can be imported late, or twice. A folder on this Mac is safer."
-    [[ -z "$files_access" ]] || say "  Files and Folders:  macOS asks once whether node may read this folder: choose Allow (in System Settings, Privacy & Security, Files and Folders, if it was refused)"
+    [[ -z "$cloud_name" ]] || say "Warning: this drop folder is in $cloud_name. $cloud_up A video still syncing there can be imported late, or twice. A folder on this Mac is safer."
+    [[ -z "$files_access" ]] || say "  Files and Folders:  macOS may ask whether node may read this folder, and again after node is updated: choose Allow each time (in System Settings, Privacy & Security, Files and Folders, if it was refused); it may ask the same of the app her chat runs in, the first time she asks what's waiting"
   else
     say "  Its drop folder, to make in Dropbox and watch:  $drop"
   fi
@@ -1017,7 +1050,7 @@ if [[ -n "$machine" ]]; then
     say "Once, in Finder: Control-click that folder and choose Make available offline, so that a video dropped there from"
     say "another device is brought down at once. Dropbox offers no command for it."
   fi
-  [[ -z "$cloud_name" ]] || say "Warning: this drop folder is in $cloud_name. A video still syncing there can be imported late, or twice. A folder on this Mac is safer."
+  [[ -z "$cloud_name" ]] || say "Warning: this drop folder is in $cloud_name. $cloud_up A video still syncing there can be imported late, or twice. A folder on this Mac is safer."
   say "It is imported into $root/Episodes, in a folder of its own named for the day, the video and this Mac. Its files are"
   say "copied into Dropbox and checked again 15 minutes later, and only then is the video taken out of the drop folder. Then,"
   say "in Claude, say \"what's waiting?\". What the tool did is in $LOG"

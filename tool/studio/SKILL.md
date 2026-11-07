@@ -82,6 +82,7 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 - "That one is all done" / "Forget that one": tell her the guide will no longer bring it up, then ask on one `AskUserQuestion`: "Stop guiding <video>?": "Yes", "No". Only on "Yes", `guide "<video>" finished`; if it says a step must be done first, say that step.
 - Claude cannot see or press anything on the BRIMM Ops page: take her word for each step, and never note a step she has not said is done.
 - If it says this Mac isn't set up for the guide yet, tell her so, and to ask Jason; then go on as the rest of this skill says.
+- If `episodes` or the guide says this Mac does not let BRIMM Video Studio look in her drop folder, tell her what it says, and that what she allows there is the app she talks to Claude in; then she asks again. A video she has dropped stays where it is, and she does not drop it again: say this in place of asking where she dropped it, and do not run `guide wait` again until she says she has allowed it.
 
 ## What she says, and what to run
 

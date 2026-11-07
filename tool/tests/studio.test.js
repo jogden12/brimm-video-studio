@@ -1529,3 +1529,19 @@ describe("her skill asks Studio's cards as Studio printed them, in short rules, 
     assert.equal(lineOf(open, 'On an answer that starts "The voiceover for"'), lineOf(strict, 'On an answer that starts "The voiceover for"'));
   });
 });
+
+describe("her skill tells her what Studio says when this Mac does not let it look in her drop folder, in both locks (L1c, finding 6)", () => {
+  const SKILLS = Object.fromEntries(["SKILL.md", "SKILL-open.md"].map((name) => [name, readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8")]));
+  for (const [name, text] of Object.entries(SKILLS)) {
+    it(`${name}: once, in "Guide her", right after the line for a Mac not set up for the guide`, () => {
+      const lines = text.split("\n");
+      const at = lines.findIndex((line) => line.startsWith("- If `episodes` or the guide says this Mac does not let BRIMM Video Studio look in her drop folder"));
+      assert.ok(at > 0, name);
+      assert.equal(lines.filter((line) => line.startsWith("- If `episodes` or the guide says this Mac does not let")).length, 1);
+      assert.ok(lines[at - 1].startsWith("- If it says this Mac isn't set up for the guide yet"), lines[at - 1]);
+      assert.ok(text.indexOf("## Guide her") < text.indexOf(lines[at]) && text.indexOf(lines[at]) < text.indexOf("## What she says, and what to run"), name);
+      for (const clause of ["in place of asking where she dropped it", "do not run `guide wait` again until", "the app she talks to Claude in"]) assert.ok(lines[at].includes(clause), clause);
+      assert.ok(sectionOf(text, "## Guide her").trimEnd().split("\n").length <= 30, name);
+    });
+  }
+});
