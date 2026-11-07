@@ -34,7 +34,7 @@
 #   ./install.sh --machine "Mac Studio" --switch-local "/path/to/The BRIMM DB/BRIMM Video"
 #                                    switch this Mac to a drop folder of its own, on this Mac: the folder named (a whole path, made
 #                                    when missing, whose parent is there), or with --switch-local the default, Drop in BRIMM Video
-#                                    Work, whatever the settings say of the import (every import is light). It is marked as this
+#                                    Work. Whatever the settings say of the import, every import is light. It is marked as this
 #                                    Mac's, and is watched in place of the folder in BRIMM Video, which is left as it is. It is
 #                                    refused when it is, is inside or holds a folder of BRIMM Video, BRIMM VIDEO Transfer, BRIMM
 #                                    VIDEO MacBook, BRIMM Video Work (but for Drop in it), her chat's folders, Zoom's, Downloads or
@@ -998,7 +998,12 @@ if [[ -n "$machine" ]]; then
   # It checks the old drop folder once more, and may still refuse: the marker is made, and the settings and the agent are not.
   if ! "$node" "$HERE/settings.js" write --machine "$machine" --root "$root" --checkout "$CHECKOUT" "${switch_args[@]}"; then
     say ""
-    say "The settings were not written, so they and the launch agent are as they were. This run did make $drop and its marker, and the folders for Episodes and its status files and for the reference pictures, which a later run uses. Deal with what is said above, then run this again."
+    if [[ -n "$local_drop" ]]; then
+      # A drop folder on this Mac keeps its status files on this Mac: none was made in Dropbox.
+      say "The settings were not written, so they and the launch agent are as they were. This run did make $drop and its marker, and the folders for Episodes and for the reference pictures, which a later run uses. Deal with what is said above, then run this again."
+    else
+      say "The settings were not written, so they and the launch agent are as they were. This run did make $drop and its marker, and the folders for Episodes and its status files and for the reference pictures, which a later run uses. Deal with what is said above, then run this again."
+    fi
     exit 1
   fi
   if [[ -z "$studio_why" ]]; then "$node" "$HERE/settings.js" studio --node "$node"; fi
@@ -1051,8 +1056,14 @@ if [[ -n "$machine" ]]; then
     say "another device is brought down at once. Dropbox offers no command for it."
   fi
   [[ -z "$cloud_name" ]] || say "Warning: this drop folder is in $cloud_name. $cloud_up A video still syncing there can be imported late, or twice. A folder on this Mac is safer."
-  say "It is imported into $root/Episodes, in a folder of its own named for the day, the video and this Mac. Its files are"
-  say "copied into Dropbox and checked again 15 minutes later, and only then is the video taken out of the drop folder. Then,"
+  if [[ -n "$local_drop" ]]; then
+    say "It is imported on this Mac: its files are kept in a folder of its own in BRIMM Video Work, and its record is written in"
+    say "$root/Episodes, in a folder named for the day, the video and this Mac. The video is taken out of the drop folder once the"
+    say "record is written, and Studio checks the record in Dropbox by itself about 15 minutes later. Then,"
+  else
+    say "It is imported into $root/Episodes, in a folder of its own named for the day, the video and this Mac. Its files are"
+    say "copied into Dropbox and checked again 15 minutes later, and only then is the video taken out of the drop folder. Then,"
+  fi
   say "in Claude, say \"what's waiting?\". What the tool did is in $LOG"
   if [[ -n "$old_folder" && -d "$old_folder" ]]; then
     say "The old drop folder, $old_folder, is no longer watched. Jason checks it is still empty, then deletes it by hand, so that no video is dropped there by habit: a video there is never imported."
