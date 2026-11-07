@@ -74,7 +74,9 @@ export async function agentRun(w, { at, over = {} }) {
     log: (line) => logs.push(line),
     notify: (text) => notices.push(text),
     alive: () => false,
-    ...over
+    ...over,
+    // L6: a local finish's `original` pending holds no run of these tests open unless a test turns the check on.
+    checks: { original: null, ...(over.checks || {}) }
   }, async () => { throw new Error("nothing is waiting"); });
   return { logs, notices, waits };
 }

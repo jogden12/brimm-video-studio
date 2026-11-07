@@ -9,9 +9,10 @@
 // at least 15 minutes after the last copy, which copies a file in again when Dropbox has taken it away or left it short.
 // And a file that Dropbox is still bringing over to this Mac can show its full size with no data in it yet, so a file counts
 // as here only when its blocks on the disk cover its size, or the disk does not mark it dataless.
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { lastLine } from "./run.js";
 
 /** How long after the last copy into Dropbox the late check is made: 15 minutes. On 2026-10-14 Dropbox undid two renames
@@ -263,4 +264,22 @@ export function sameBytes(a, b) {
   const sa = statSync(a, { throwIfNoEntry: false });
   const sb = statSync(b, { throwIfNoEntry: false });
   return Boolean(sa && sb) && sa.size === sb.size && startsAlike(a, b, sa.size);
+}
+
+/** The helper that asks macOS whether Dropbox reports a file uploaded (ubiquitousItemIsUploadedKey): uploaded.swift, beside the tool. */
+export const UPLOADED = fileURLToPath(new URL("./uploaded.swift", import.meta.url));
+/** How long the helper may take: swift compiles it each time. */
+export const UPLOADED_TIMEOUT_MS = 20 * 1000;
+
+/** Whether Dropbox reports the file at `path` uploaded: true or false, or null when that cannot be told (no swift, a file outside Dropbox, a timeout, a failure, an
+    answer that is not the helper's JSON). Synchronous: it never gives a promise. */
+export function uploadedOf(path, { swift = "", exec = execFileSync, timeoutMs = UPLOADED_TIMEOUT_MS } = {}) {
+  if (!swift) return null;
+  try {
+    const out = exec(swift, [UPLOADED, path], { encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"] });
+    const said = JSON.parse(String(out).trim());
+    return said && (said.uploaded === true || said.uploaded === false) ? said.uploaded : null;
+  } catch (e) {
+    return null;
+  }
 }

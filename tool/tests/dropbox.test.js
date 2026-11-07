@@ -461,4 +461,42 @@ describe("textWriter's onCopy, and sameBytes (L5)", () => {
       s.done();
     }
   });
+
+  it("U1: uploadedOf reads the helper's one JSON document, synchronously", async () => {
+    const { UPLOADED, UPLOADED_TIMEOUT_MS, uploadedOf } = await import("../dropbox.js");
+    const calls = [];
+    const giving = (text) => (...args) => {
+      calls.push(args);
+      return text;
+    };
+    assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", exec: giving('{"uploaded": true}\n') }), true);
+    assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", exec: giving('{"uploaded": false}') }), false);
+    assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", exec: giving('{"uploaded": null}') }), null);
+    assert.deepEqual(calls[0], ["SWIFT", [UPLOADED, "/x/f.mov"], { encoding: "utf8", timeout: UPLOADED_TIMEOUT_MS, stdio: ["ignore", "pipe", "ignore"] }]);
+    assert.equal(UPLOADED_TIMEOUT_MS, 20 * 1000);
+    const got = uploadedOf("/x/f.mov", { swift: "SWIFT", exec: giving('{"uploaded": true}') });
+    assert.equal(typeof got.then, "undefined");
+  });
+
+  it("U2: anything else is null, and no swift runs nothing", async () => {
+    const { uploadedOf } = await import("../dropbox.js");
+    const throwing = (e) => () => {
+      throw e;
+    };
+    const giving = (text) => () => text;
+    for (const exec of [throwing(Object.assign(new Error("t"), { code: "ETIMEDOUT" })), throwing(Object.assign(new Error("end"), { status: 1 })), giving("yes"), giving("{}")]) {
+      assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", exec }), null);
+    }
+    let called = 0;
+    assert.equal(uploadedOf("/x/f.mov", { swift: "", exec: () => { called += 1; return '{"uploaded": true}'; } }), null);
+    assert.equal(uploadedOf("/x/f.mov", { exec: () => { called += 1; return '{"uploaded": true}'; } }), null);
+    assert.equal(called, 0);
+  });
+
+  it("U3: the helper is beside the tool", async () => {
+    const { UPLOADED } = await import("../dropbox.js");
+    assert.ok(UPLOADED.endsWith("/tool/uploaded.swift"));
+    assert.equal(existsSync(UPLOADED), true);
+    assert.match(readFileSync(UPLOADED, "utf8"), /ubiquitousItemIsUploadedKey/);
+  });
 });

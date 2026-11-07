@@ -55,7 +55,8 @@ export function runs(w, at, over = {}) {
     log: (line) => logs.push(line),
     notify: (text) => notices.push(text),
     alive: mine,
-    ...over
+    ...over,
+    checks: { original: null, ...(over.checks || {}) }
   };
   return { deps, logs, notices, waits, now: () => clock, setNow: ctl.set };
 }
