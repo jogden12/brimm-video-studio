@@ -16,7 +16,7 @@ import { recordFile, recordText } from "../episode.js";
 const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
 import { COPY_STEP } from "../guide.js";
 import { addRates, progressFolder } from "../progress.js";
-import { episodeFilesFolder, episodeWork, writeSettings } from "../settings.js";
+import { episodeFilesFolder, episodeWork, exportsWords, writeSettings } from "../settings.js";
 import { workCopyLockOf } from "../workcopy.js";
 import { clockAt } from "../unedited.js";
 import { RAW, atWork, world } from "./workcopy-world.js";
@@ -111,6 +111,23 @@ describe("app, while the video for HyperFrames of a video kept on this Mac is be
     assert.equal(argsOf(t).length, 1);
     assert.equal(reread(found).rev, 1);
     t.done();
+  });
+  it("B1-F22 on a Mac with an exports folder of its own, she is also told where to export, in both forms of the line", async () => {
+    for (const reading of [false, true]) {
+      const { t } = kept();
+      const exportsPath = join(t.home, "Exports");
+      mkdirSync(exportsPath, { recursive: true });
+      writeSettings(t.home, { exportsPath });
+      t.ctx.settings = { ...t.ctx.settings, exportsPath };
+      atWork(t, "workcopy");
+      if (reading) atWork(t, "read");
+      const r = await on(t.ctx.deps, "app", FOLDER);
+      assert.equal(r.code, 0, r.text);
+      const into = exportsWords(t.ctx.settings, t.home);
+      assert.ok(into, "the picked folder is named");
+      assert.deepEqual(r.said, [reading ? "Claude is still reading it. HyperFrames opens it by itself once it has read it and its video is made." : BEING_MADE("when it is ready"), BUTTONS, `Export it on This Mac, into ${into}.`]);
+      t.done();
+    }
   });
   it("names the time it opens when this Mac has measured the speed of making one", async () => {
     const { t } = kept();
