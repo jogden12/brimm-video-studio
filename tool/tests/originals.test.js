@@ -565,8 +565,10 @@ describe("L6: the check", () => {
     moveIt(t, found);
     const lostRev = reread(found).rev;
     t.advance(LATE_CHECK_MS);
-    look(t, depsOf(t, { uploaded: () => { rmSync(recordFile(found.folder, lostRev)); return true; } }));
+    const asked = [];
+    look(t, depsOf(t, { uploaded: () => { rmSync(recordFile(found.folder, lostRev)); return true; }, onlineOnly: (path) => { asked.push(path); return true; } }));
     assert.equal(existsSync(join(found.video, FILE)), true);
+    assert.deepEqual(asked, [], "the copy is not made online-only when the delete is refused");
     assert.equal(readPendingAt(t.home, `original/${ID}.json`).owed, true);
     t.done();
   });

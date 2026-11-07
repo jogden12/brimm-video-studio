@@ -175,6 +175,45 @@ describe("B0-F3 a raw reading after the recording moved to Original files", () =
   });
 });
 
+describe("B1-F18 a raw reading of a recording that is online-only in Original files", () => {
+  const moved = () => {
+    const w = mac();
+    const folder = w.found.folder;
+    mkdirSync(join(folder, "Original files"), { recursive: true });
+    const bytes = Buffer.byteLength(LIGHT_FILES[VIDEO]);
+    writeFileSync(join(folder, "Original files", VIDEO), LIGHT_FILES[VIDEO]);
+    rmSync(join(w.own, VIDEO));
+    const record = reread(w.found);
+    writeFileSync(recordFile(folder, 2), recordText({ ...record, rev: 2, files: { ...record.files, [`Original files/${VIDEO}`]: bytes }, local: { on: "Mac Studio", original: { file: VIDEO, bytes, mtimeMs: 1 } } }));
+    return { ...w, copy: join(folder, "Original files", VIDEO) };
+  };
+  it("brings the copy in Original files down first, and reads that path", async () => {
+    const { t, copy, asks } = moved();
+    let brought = false;
+    const reads = [];
+    t.ctx.deps.isWhole = (path) => path !== copy || brought;
+    t.ctx.deps.readAll = async (path) => {
+      reads.push(path);
+      brought = true;
+    };
+    const r = await on(t.ctx.deps, ...readArgs("raw", 2));
+    assert.equal(r.code, 0, r.text + JSON.stringify(readResult(t.home, FOLDER, "read")));
+    assert.deepEqual(reads, [copy]);
+    assert.equal(asks.length > 0, true);
+    t.done();
+  });
+  it("stops, with the reading's words, when Dropbox has not brought it over", async () => {
+    const { t, copy, asks } = moved();
+    t.ctx.deps.isWhole = (path) => path !== copy;
+    t.ctx.deps.readAll = async () => {};
+    const r = await on(t.ctx.deps, ...readArgs("raw", 2));
+    assert.equal(r.code, 1);
+    assert.match(r.text + JSON.stringify(readResult(t.home, FOLDER, "read")), /Dropbox is still bringing/);
+    assert.deepEqual(asks, []);
+    t.done();
+  });
+});
+
 describe("the AGAIN line", () => {
   it("is said in her words when nothing could be put in: Tell me what it is again, and Claude reads it again", async () => {
     const { t } = mac({ reply: "not json at all" });
