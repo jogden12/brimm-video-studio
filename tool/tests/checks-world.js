@@ -44,10 +44,11 @@ export function runs(w, at, over = {}) {
   const notices = [];
   const waits = [];
   let clock = at;
+  const ctl = { now: () => clock, set: (t) => { clock = t; }, add: (ms) => { clock += ms; } };
   const deps = {
     episode: { root: w.root, machine: MAC, home: w.home },
     clock: () => clock,
-    wait: async (ms) => { waits.push(ms); clock += ms; },
+    wait: async (ms) => { waits.push(ms); if (over.onWait) await over.onWait(ms, ctl); else clock += ms; },
     clone: cloneOf,
     sameDisk: () => true,
     keepAwake: () => {},
@@ -56,7 +57,7 @@ export function runs(w, at, over = {}) {
     alive: mine,
     ...over
   };
-  return { deps, logs, notices, waits, now: () => clock, setNow: (t) => { clock = t; } };
+  return { deps, logs, notices, waits, now: () => clock, setNow: ctl.set };
 }
 
 /** Run the loop on the world's drop folder. */
