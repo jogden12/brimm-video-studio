@@ -143,11 +143,12 @@ const SAYS = {
     her note on it, which says the revision she last took on the page and how far she got with it (a first take reads no note). It
     is the note that counts, as opsNext has it: the same kind of hand-off, with one of its steps. Taking an episode again when her
     note is at the cascade, the last step, ends by sending her on to the "Reels" card (LATE_REELS). Taking a raw episode ends with
-    freeing its space in Dropbox, after that. */
-export function opsText(handoff, step, again, note) {
+    freeing its space in Dropbox, after that: for an episode filed before the Mac's switch, whose recording is in Dropbox. An episode kept on
+    its Mac (`local`; Phase 3, L8) has no recording in Dropbox to free, so its words stop at the page's. */
+export function opsText(handoff, step, again, note, local = false) {
   const family = noteKindOf(handoff.kind);
   const text = SAYS[step](family, again, handoff.revision, note);
-  return step === "taken" && handoff.kind === "raw" ? text + ONLINE_ONLY : text;
+  return step === "taken" && handoff.kind === "raw" && !local ? text + ONLINE_ONLY : text;
 }
 
 /** What edit.js reads of a video for the guide (VideoFacts):
@@ -161,7 +162,8 @@ export function opsText(handoff, step, again, note) {
     - `conflicted`, when Dropbox kept two copies of a change to it; `kind`, "finished", "raw", "short video", "session", or null
       before she has answered; `waiting`, for her answer; `heldAsSession`, when one of its other versions is a session after all;
       `elsewhere`, when it is open, or being answered, on the other Mac; `keeperFirst`, when it is kept on another Mac (`onOtherMac`) that has
-      a conflict or a session to settle first, so that its step stays that Mac's even once a hand-off is written; `readingsOff`, when this Mac reads none.
+      a conflict or a session to settle first, so that its step stays that Mac's even once a hand-off is written; `readingsOff`, when this Mac reads none;
+      `local`, when its record keeps its files on a Mac (`local`, Phase 3), so that its hand-off's "taken" step has no "Make online-only" after it (opsText).
     - `reading`: "done", "running", "failed", "later" (at `readsAt`, once the import has checked its copies) or "none". `roughAt`
       is, for a raw video whose reading waits (`later`), the time its rough cut should be ready, "" when not known.
       `offersAnswered`, once the spellings card is answered; `v2`, when this Mac hands off version 2; `app`, when this Mac's settings turn
@@ -310,8 +312,8 @@ function opsStep(facts, notes, now) {
   const then = opsNext(handoff, noted.handoffs[handoff.id]);
   const own = !then && handoff.revision === handoff.emptyAt ? nextFor(facts, noted, now) : null;
   // Only a hand-off taken again reads her note (opsText), and that is one for a revision newer than the note's.
-  const after = then ? opsText(handoff, then.step, then.again, noted.handoffs[handoff.id]) : own && !own.done ? own.text : "";
-  return { done: false, stage: "ops", text: `On the BRIMM Ops page: ${opsText(handoff, next.step, next.again, note)}`, step: next.step, after };
+  const after = then ? opsText(handoff, then.step, then.again, noted.handoffs[handoff.id], facts.local === true) : own && !own.done ? own.text : "";
+  return { done: false, stage: "ops", text: `On the BRIMM Ops page: ${opsText(handoff, next.step, next.again, note, facts.local === true)}`, step: next.step, after };
 }
 
 /** The next step for a session. Its hand-off's BRIMM Ops steps come first, so that the withdrawal of a session after all comes

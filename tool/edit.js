@@ -6087,6 +6087,7 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
     elsewhere: Boolean(away),
     onOtherMac: Boolean(there),
     keeperFirst: Boolean(there) && keeperFirst(e),
+    local: Boolean(r.local),
     readingsOff: ctx.settings.readings === false,
     ...guideReading(ctx, e, r, kind, running, rates),
     offersAnswered: answerOf(r) !== null,
