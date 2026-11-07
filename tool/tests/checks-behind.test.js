@@ -982,8 +982,9 @@ describe("a local import's first record, checked behind (L5)", () => {
       try {
         if (swap) {
           const ino = statSync(h.dropPath).ino;
-          rmSync(h.dropPath);
-          writeFileSync(h.dropPath, MP4);
+          // Another file is written beside it and renamed over it, so it is another file on every disk: a remove and a write may get the same inode back on Linux.
+          writeFileSync(`${h.dropPath}.new`, MP4);
+          renameSync(`${h.dropPath}.new`, h.dropPath);
           utimesSync(h.dropPath, new Date(L - 60000), new Date(L - 60000));
           assert.notEqual(statSync(h.dropPath).ino, ino);
         }
@@ -1332,7 +1333,8 @@ describe("the check of a local finish's copies in final/ (L5)", () => {
     }
   });
 
-  it("C16d an episode folder that Episodes lists in NFD, named in NFC by its pending, is not taken for a gone folder", async () => {
+  // A Mac's disk finds a name in NFC or in NFD alike; a Linux disk (CI) does not, so there the NFC name is another folder.
+  it("C16d an episode folder that Episodes lists in NFD, named in NFC by its pending, is not taken for a gone folder", { skip: process.platform !== "darwin" ? "a Mac's disk finds a name in NFC or NFD alike" : false }, async () => {
     const nfc = "2026-11-06 Caf\u00e9 (Mac Studio)";
     const nfd = nfc.normalize("NFD");
     for (const kind of ["final", "record"]) {
