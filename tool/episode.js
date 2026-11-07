@@ -33,9 +33,10 @@ export const RECORD_DIR = "record";
     A record is written at layout 2, 3, 4, 5 or 6 only once it holds one of them (layoutOf), so an episode that none of them has
     touched is still read by a Mac that knows layout 1 alone, and one that holds them is refused there, never changed by code
     that would drop them. Layout 5 is written for a planned record, and for a part (PR H5a: a dropped video answered as footage for a
-    planned video, which holds `partOf`) alone: every other record stays at layout 4 or below, which is RECORD_VERSION, the newest
-    layout of every other record and the one a Mac on older code reads. So a Mac on older code reads a planned record as newer (it has
-    no video, which that Mac would read as an import that has not finished), and a part as newer too, and leaves both alone.
+    planned video, which holds `partOf`) alone, while it holds no `local`: every other record without `local` stays at layout 4 or
+    below, which is RECORD_VERSION, the newest layout of every other such record and the one a Mac on older code reads. So a Mac on
+    older code reads a planned record as newer (it has no video, which that Mac would read as an import that has not finished), and
+    a part as newer too, and leaves both alone.
     Layout 6 (Phase 3, the local working folder; L2) adds `local`: the episode's own files are kept on one Mac, `local.on`, in its work
     folder's video/, and it is changed only there (where.js says where each file is). It is written for a record that holds `local` alone,
     whatever else it holds, so a Mac on older code reads every such record as newer and leaves it alone; every other record stays at the
