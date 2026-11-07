@@ -3027,6 +3027,21 @@ describe("an episode filed on a Mac with a drop folder of its own (Phase 3, L3)"
     assert.equal(existsSync(join(t.episodes, folder)), false);
     t.done();
   });
+  it("B0-F2 a marked folder whose records are there but do not read, or whose video/ was worked on, is not taken for a stopped run", async () => {
+    const t = local();
+    const file = t.put("Talk.mov");
+    const folder = stopped(t, file);
+    mkdirSync(join(t.video(folder), "history"), { recursive: true });
+    writeFileSync(join(t.video(folder), "Talk.cut-plan.json"), "the cut plan");
+    mkdirSync(join(t.episodes, folder, "record"), { recursive: true });
+    writeFileSync(join(t.episodes, folder, "record", "0001.json"), "{");
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.notEqual(r.ok, true, t.logs.join("|"));
+    assert.equal(readFileSync(join(t.episodes, folder, "record", "0001.json"), "utf8"), "{");
+    assert.equal(readFileSync(join(t.video(folder), "Talk.cut-plan.json"), "utf8"), "the cut plan");
+    assert.deepEqual(namesOf(t.drop), ["Talk.mov"]);
+    t.done();
+  });
   it("a folder with a whole record is never reused by its marker, and its record is not replaced", async () => {
     const t = local();
     t.put("Talk.mov", "the first video");

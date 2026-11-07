@@ -92,6 +92,16 @@ function markOf(folder) {
   }
 }
 
+/** Whether the folder `name` of a local import, found by its marker, is a run that stopped and nothing else: Episodes/<name> is not there,
+    or has no record file at all (NNNN.json, whether it reads now or not) and none of the episode's work in video/ (history/, .put.json). */
+export function stoppedRun(episodes, work, name) {
+  const folder = join(episodes, name);
+  if (!statSync(folder, { throwIfNoEntry: false })) return true;
+  if (readEpisode(folder).code !== "NONE" || cannotTell(folder, { code: "NONE" })) return false;
+  const video = join(work, name, "video");
+  return !existsSync(join(video, "history")) && !existsSync(join(video, ".put.json"));
+}
+
 /** The folder in `episodes` the video `video`, of `bytes` bytes, goes into on `machine`, on the day `day`: { name, reused }.
     Listing Episodes throws on any error but its not being there: a name is never given while Episodes cannot be read.
     With no `work` (a Mac on a drop folder in Dropbox, or the join), an import of this video by this Mac that stopped before it wrote a
@@ -112,14 +122,15 @@ export function findFolder(episodes, { video, bytes, machine, day, work, importI
   }
   if (work) {
     const mine = localFolders(work);
-    const stopped = importId && dropId ? mine.sort().find((name) => {
+    const marked = importId && dropId ? mine.sort().find((name) => {
       const mark = markOf(join(work, name, "video"));
-      if (mark === null || mark.import !== importId || mark.drop !== dropId) return false;
-      // A folder whose record is whole is an episode, not a run that stopped: it is never used again.
-      const folder = join(episodes, name);
-      return !statSync(folder, { throwIfNoEntry: false }) || readEpisode(folder).code === "NONE";
+      return mark !== null && mark.import === importId && mark.drop === dropId;
     }) : undefined;
-    return stopped ? { name: stopped, reused: true } : { name: episodeFolderName([...names, ...mine], day, stem, machine), reused: false };
+    // A folder with a record is an episode, not a run that stopped: it is never used again, whether its record reads now or not. One
+    // whose records are there and do not read now, or whose video/ was worked on, is held: the drop file waits for a later look.
+    if (marked && stoppedRun(episodes, work, marked)) return { name: marked, reused: true };
+    if (marked && readEpisode(join(episodes, marked)).code === "NONE") return { name: marked, reused: false, held: true };
+    return { name: episodeFolderName([...names, ...mine], day, stem, machine), reused: false };
   }
   const stopped = names.filter((name) => namedFor(name, stem, machine)).sort().find((name) => {
     const folder = join(episodes, name);
@@ -327,6 +338,7 @@ function fileLocal({ file, made, at, facts, printed, kind, read, reels, work, dr
   const own = episodeFilesFolder(episode.home, found.name);
   // A stopped import may have left a record that is not whole. It is no one's record, and the first one is written anew. A whole record is
   // never taken away, whoever asks.
+  if (found.held) throw new Error(`${found.name} has records or work already that cannot be read now, so this video waits for a later look`);
   if (found.reused) {
     if (statSync(path, { throwIfNoEntry: false }) && readEpisode(path).code !== "NONE") throw new Error(`${found.name} has a record already, and a record is never written over`);
     rmSync(join(path, RECORD_DIR), { recursive: true, force: true });
