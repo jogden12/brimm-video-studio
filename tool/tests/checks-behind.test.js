@@ -1312,6 +1312,26 @@ describe("the check of a local finish's copies in final/ (L5)", () => {
     assert.ok(third.logs.some((l) => l.includes("passed")));
   }));
 
+  it("C15c a hold beside a session, whose lookUntil is past, that a wake keeps from being due at a run's start is looked at once in the run, when it is due", async () => {
+    const line = "a video (ab0001): another version of it is a session not cleared, so nothing of its hand-off is put back into Dropbox yet, and its exports stay in Downloads.";
+    const start = L + 14 * 3600000;
+    for (const [woke, atStart] of [[start - 60000, false], [null, true]]) {
+      await withWorld(async (w) => {
+        const h = holdFinal(w, L);
+        filing.writePending(w.home, { ...h.pending, lookUntil: L + 60 * 60000 });
+        rmSync(h.files.srt);
+        beside(w);
+        const r = await run(w, start, { wokeAt: () => woke });
+        assert.equal(r.logs.filter((l) => l === line).length, 1, r.logs.join("|"));
+        assert.equal(r.waits.length > 0, !atStart);
+        if (!atStart) assert.ok(r.waits.every((ms) => ms > 0) && r.waits.reduce((a, b) => a + b, 0) >= 13 * 60000);
+        assert.equal(existsSync(h.files.srt), false);
+        assert.ok(existsSync(h.exportPath));
+        assert.ok(filing.readPendingAt(w.home, h.key));
+      });
+    }
+  });
+
   it("C16 never makes a gone episode folder again, says so in one short notice, and waits while Episodes cannot be listed", async () => {
     const GONE = "The folder of an episode (ab0001) is gone from Episodes, so the check of its copies in Dropbox is not made. Ask Jason.";
     await withWorld(async (w) => {

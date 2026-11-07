@@ -6,7 +6,7 @@ import { basename, dirname, join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
 import { LOCAL_VERSION, readEpisode, recordFile, recordText } from "../episode.js";
 import { importEpisodes, readPendingAt } from "../filing.js";
-import { episodeFilesFolder, workFolder, writeSettings } from "../settings.js";
+import { episodeFilesFolder, settingsFile, workFolder, writeSettings } from "../settings.js";
 import { filePlace } from "../where.js";
 import { FOLDER, ID, reread } from "./episodes.js";
 import { exportOf, whisper } from "./exports-world.js";
@@ -16,7 +16,7 @@ import { guideWorld } from "./guide-world.js";
     in BRIMM Video Work, video/; the next record says `local`; this Mac gets the drop folder of its own. */
 export function makeLocal(w) {
   const { t } = w;
-  const record = w.found.record;
+  const record = reread(w.found);
   const local = { on: "Mac Studio" };
   const own = episodeFilesFolder(t.home, basename(w.found.folder));
   for (const rel of Object.keys(record.files || {})) {
@@ -29,10 +29,15 @@ export function makeLocal(w) {
   writeFileSync(recordFile(w.found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, version: LOCAL_VERSION, local }));
   const drop = join(workFolder(t.home), "Drop");
   mkdirSync(drop, { recursive: true });
-  const settings = { ...t.ctx.settings, drop: "Drop", dropPath: drop };
-  writeSettings(t.home, { version: 1, machine: settings.machine, root: settings.root, checkout: settings.checkout, drop: "Drop", dropPath: drop });
-  t.ctx.settings = settings;
-  t.ctx.deps.settings = settings;
+  let onDisk = {};
+  try {
+    onDisk = JSON.parse(readFileSync(settingsFile(t.home), "utf8"));
+  } catch (e) {
+    onDisk = { version: 1, machine: t.ctx.settings.machine, root: t.ctx.settings.root, checkout: t.ctx.settings.checkout };
+  }
+  writeSettings(t.home, { ...onDisk, drop: "Drop", dropPath: drop });
+  t.ctx.settings = { ...t.ctx.settings, drop: "Drop", dropPath: drop };
+  if (t.ctx.deps.settings) t.ctx.deps.settings = { ...t.ctx.deps.settings, drop: "Drop", dropPath: drop };
   w.found = { ...w.found, record: reread(w.found) };
   return w;
 }
