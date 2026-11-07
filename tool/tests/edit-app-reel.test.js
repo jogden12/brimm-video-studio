@@ -65,7 +65,7 @@ const NOT_FOR_SESSION = "This is a client or group session: that is not done for
 const NO_COMMAND_LINE = "HyperFrames' command line isn't on this Mac yet: ask Jason.";
 const OPEN = "It's open in HyperFrames.";
 const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
-const THEIRS = `Sallie's laptop has ${NAME} open, since 2026-10-20 14:00. Say "take it over" to open it here; anything not handed over stays on Sallie's laptop.`;
+const THEIRS = `Sallie's laptop has ${NAME} open. Carry on there. Nothing was changed.`;
 const REEL_COPY = "the Reel's bytes";
 const PROJECT = "Pricing- what to charge- reel 2 3fa9c1";
 const AGAIN = openReelWords(2, NAME);
@@ -116,9 +116,10 @@ describe("app … reel: the command", () => {
   it("is app's, with its usage in the help beside app's own; with a Reel and no number, or no episode, it says the help and ends with 2, claiming nothing", async () => {
     assert.ok(COMMAND_NAMES.includes("app"));
     const lines = HELP.split("\n");
-    const at = lines.indexOf('  node edit.js app "<episode>" reel <n> [--take-over]');
-    assert.ok(at > lines.indexOf('  node edit.js app "<episode>" [--take-over]'), "the help has the usage line of a Reel");
+    const at = lines.indexOf('  node edit.js app "<episode>" reel <n>');
+    assert.ok(at > lines.findIndex((line) => line.startsWith('  node edit.js app "<episode>" ')), "the help has the usage line of a Reel");
     assert.match(lines[at + 1], /^ {40}make Reel <n>/);
+    assert.doesNotMatch(HELP, /--take-over/);
     for (const argv of [[FOLDER, "reel"], ["reel", "2"], []]) {
       const { t, found } = world();
       const r = await on(t.ctx.deps, "app", ...argv);
@@ -306,16 +307,12 @@ describe("app … reel: the claim and the bring are open's, and she is sent back
     assert.deepEqual(record.app.projects.map((p) => [p.name, p.opened.length, p.state]), [[PROJECT, 2, "opened"]]);
     t.done();
   });
-  it("is refused while the other Mac has the episode, in open's words, and does nothing; a take-over works as app's", async () => {
+  it("is refused while the other Mac has the episode, in open's words, and does nothing", async () => {
     const { t, found } = world({ record: { ...RAW, editing: HERS } });
     const refused = await app(t.ctx.deps, FOLDER, "reel", "2");
     assert.deepEqual([refused.code, refused.said], [1, [THEIRS]]);
     assert.deepEqual((await on(t.ctx.deps, "open", FOLDER)).said, [THEIRS], "open gives the same answer for the same claim");
     assert.deepEqual([reread(found).rev, reread(found).editing.by, reread(found).app, t.waits, t.started, runsOf(t)], [1, "Sallie's laptop", undefined, [], [], []]);
-    const taken = await app(t.ctx.deps, FOLDER, "reel", "2", "--take-over");
-    assert.equal(taken.code, 0, taken.text);
-    assert.equal(taken.said[0], "Taken over from Sallie's laptop, who had it since 2026-10-20 14:00.");
-    assert.deepEqual([reread(found).editing.by, reread(found).app.projects.map((p) => p.state)], ["Mac Studio", ["opened"]]);
     t.done();
   });
   it("brings the files that are not whole here before anything else, and says to say it again with the Reel's words; a bring app starts for the video says its own", async () => {
@@ -328,14 +325,6 @@ describe("app … reel: the claim and the bring are open's, and she is sent back
     assert.deepEqual([reread(found).rev, t.waits, runsOf(t)], [1, [], []]);
     assert.deepEqual((await app(t.ctx.deps, FOLDER)).said, [coming(`open ${NAME} in HyperFrames`)]);
     assert.deepEqual(t.started.map(([, args]) => args.slice(1)).at(-1), ["bring", "--now", FOLDER, "--asked-by", "app"]);
-    t.done();
-  });
-  it("brings the files for a take-over, and says to take it over again, as open does", async () => {
-    const { t } = world({ record: { ...RAW, editing: HERS } });
-    t.ctx.deps.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
-    const r = await app(t.ctx.deps, FOLDER, "reel", "2", "--take-over");
-    assert.deepEqual([r.code, r.said], [0, [`Dropbox is bringing 1 file of ${NAME} over to this Mac. Say "take it over" again when it is done; "how far is it?" shows how far it has got.`]]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["bring", "--now", FOLDER, "--take-over", "--asked-by", "app reel 2"]]);
     t.done();
   });
   it("ends the bring it started by telling her to open that Reel, once every file is here or when one did not come", async () => {
@@ -503,18 +492,6 @@ describe("app … reel: the Reel's video", () => {
         t.done();
       }
     });
-  });
-  it("tells a take-over in the window to take it over again, not to say the plain Reel again (final review R1d-1)", async () => {
-    const reading = { ...RAW, editing: HERS, reading: { kind: "raw", model: "m", at: "2026-10-20T15:00:00-05:00", on: "Mac Studio", account: "a", outcome: "read" } };
-    const { t, found } = world({ record: reading });
-    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
-    assert.equal(takeEpisodeLock(lockOf(t.home, FOLDER), "read", () => true).taken, true);
-    t.ctx.deps.alive = (pid) => pid === process.pid;
-    const at = join(found.folder, "reels.json");
-    writeFileSync(at, readFileSync(at, "utf8").slice(0, -4));
-    const r = await app(t.ctx.deps, FOLDER, "reel", "2", "--take-over");
-    assert.deepEqual([r.code, r.said, t.started, runsOf(t)], [0, [`Some files of ${NAME} are not whole in Dropbox yet, so the project of Reel 2 wasn't made. Say "take it over" again in a few minutes. If it says this again, tell Jason.`], [], []]);
-    t.done();
   });
   it("says the words of the episode are not on this Mac, ending with 1, and makes and asks for nothing", async () => {
     const { t, found } = world();
@@ -761,8 +738,8 @@ describe("app … reel: its graphic cues (PR H2)", () => {
   });
 });
 
-describe("app … reel: a Reel project that is on another Mac, and that Mac has not handed over, is not made again here (plan PR 11: a snapshot makes it possible, edit-take-over-app.test.js)", () => {
-  const THERE = (on) => `The HyperFrames project for Reel 2 of ${NAME} is on ${on}, and ${on} has not handed it over yet. On ${on}, say "I'm done with it for now", then say it again here. If that can't be done, ask Jason.`;
+describe("app … reel: a Reel project that is on another Mac, is not made again here (one Mac edits a video from start to finish)", () => {
+  const THERE = (on) => `The HyperFrames project of Reel 2 of ${NAME} is on ${on}. Carry on there.`;
   const madeOn = (on) => ({
     ...RAW, version: 4,
     app: { toolchain: PIN.version, projects: [{
@@ -770,8 +747,8 @@ describe("app … reel: a Reel project that is on another Mac, and that Mac has 
       workingCopy: { bytes: REEL_COPY.length, seconds: 7, fps: 30 }, opened: ["2026-10-19T10:05:00-05:00"], handover: false, fromSuggestion: 2, state: "opened"
     }] }
   });
-  it("is refused in words that name the Mac, with or without --take-over, and claims, brings, asks for and makes nothing", async () => {
-    for (const more of [[], ["--take-over"]]) {
+  it("is refused in words that name the Mac, and claims, brings, asks for and makes nothing", async () => {
+    for (const more of [[]]) {
       const { t, found } = world({ record: madeOn("Sallie's laptop"), copy: false });
       const r = await app(t.ctx.deps, FOLDER, "reel", "2", ...more);
       assert.deepEqual([r.code, r.said], [1, [THERE("Sallie's laptop")]], more.join(" "));
@@ -931,67 +908,11 @@ describe("reels: how to make one", () => {
     assert.doesNotMatch((await on(t.ctx.deps, "reels", FOLDER, "--no-play")).text, /To make|cannot make Reel/);
     t.done();
   });
-  it("says nothing of making one for a video whose Reels are not suggestions, which BRIMM Video Studio still makes in Final Cut", async () => {
+  it("says nothing of making one for a video whose Reels are not suggestions, which Studio makes in HyperFrames", async () => {
     const { t } = world({ set: true });
     const r = await on(t.ctx.deps, "reels", FOLDER, "--no-play");
     assert.doesNotMatch(r.text, /To make|cannot make Reel/);
     t.done();
-  });
-});
-
-describe("push and the changes on a Reel: one HyperFrames opened is a project there, not a timeline in Final Cut", () => {
-  const IN_HYPERFRAMES = `Reel 2 is a project in HyperFrames, not in Final Cut: say "${AGAIN}" to work on it there.`;
-  const FINAL_CUT_WORDS = [["push", FOLDER, "reel", "2"], ["captions", FOLDER, "reel", "2", "on"], ["text", FOLDER, "reel", "2"], ["graphic", FOLDER, "reel", "2"], ["preset", FOLDER, "reel", "2", "--look", "bright"], ["cut", FOLDER, "remove", "reel", "2", "--words", "welcome"]];
-  it("says so for `push` and for each change on a Reel, in place of the line for a Reel nobody made, and writes and opens nothing", async () => {
-    const { t, found } = suggested();
-    assert.equal((await app(t.ctx.deps, FOLDER, "reel", "2")).code, 0);
-    const before = [reread(found).rev, listAll(found.folder), t.opened];
-    for (const words of FINAL_CUT_WORDS) {
-      const r = await on(t.ctx.deps, ...words);
-      assert.deepEqual([r.code, r.said], [1, [IN_HYPERFRAMES]], words.join(" "));
-      assert.doesNotMatch(r.text, PLAIN);
-    }
-    assert.deepEqual([reread(found).rev, listAll(found.folder), t.opened], before);
-    t.done();
-  });
-  it("says so of a Reel she has dropped since, which is still a project there", async () => {
-    const { t } = suggested();
-    assert.equal((await app(t.ctx.deps, FOLDER, "reel", "2")).code, 0);
-    assert.equal((await on(t.ctx.deps, "reel", "drop", FOLDER, "2")).code, 0);
-    assert.deepEqual((await on(t.ctx.deps, "push", FOLDER, "reel", "2")).said, [IN_HYPERFRAMES]);
-    t.done();
-  });
-  it("tells her how to make a Reel nobody has opened on a Mac set up for HyperFrames, as `title` and `reels` do, and that BRIMM Video Studio cannot make it on one that is not", async () => {
-    // On a Mac set up for the app the way to make it is to open it; the line that brimm-video cannot make it on this Mac is for a Mac that is not set up.
-    const NOT_MADE_YET = `Reel 2 isn't made yet. Say "${AGAIN}" to make it.`;
-    for (const [set, said] of [[true, NOT_MADE_YET], [false, CANNOT_MAKE("Reel 2")]]) {
-      const { t, found } = suggested({ set });
-      const before = [reread(found).rev, listAll(found.folder)];
-      for (const words of FINAL_CUT_WORDS) {
-        const r = await on(t.ctx.deps, ...words);
-        assert.deepEqual([r.code, r.said], [1, [said]], `${set} ${words.join(" ")}`);
-        assert.doesNotMatch(r.text, set ? /cannot make Reel|on this Mac/ : /isn't made yet/, `${set} ${words.join(" ")}`);
-        assert.doesNotMatch(r.text, PLAIN);
-      }
-      assert.deepEqual([reread(found).rev, listAll(found.folder)], before, "nothing is written");
-      t.done();
-    }
-  });
-});
-
-describe("push and the changes on a Reel not picked: she is told how a Reel is picked now that `reel pick` is gone", () => {
-  const NOT_PICKED = (n) => `Reel ${n} is not picked.`;
-  it("says on a Mac set up for HyperFrames that opening it picks it, and on one that is not that nothing picks a Reel", async () => {
-    // Reel 2 of the made-up episode has crops (the import's candidate), so it is not one nobody has made: it is just not picked.
-    for (const [set, then] of [[true, `Opening it in HyperFrames picks it: say "${AGAIN}".`], [false, "Nothing on this Mac picks a Reel any more: ask Jason."]]) {
-      const { t } = world({ set });
-      for (const words of [["push", FOLDER, "reel", "2"], ["captions", FOLDER, "reel", "2", "on"]]) {
-        const r = await on(t.ctx.deps, ...words);
-        assert.deepEqual([r.code, r.said], [1, [`${NOT_PICKED(2)} ${then}`]], `${set} ${words.join(" ")}`);
-        assert.doesNotMatch(r.text, /Pick it first|reel pick/);
-      }
-      t.done();
-    }
   });
 });
 

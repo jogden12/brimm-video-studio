@@ -160,18 +160,6 @@ describe("D4. the edges", () => {
     assert.equal("onPicture" in reread(found).finished.parts.main, false);
     w.t.done();
   });
-  it("keeps the record's titles for a main video that went the Final Cut way beside a Reel from HyperFrames, and writes no words into its part", async () => {
-    const texts = [{ id: "t1", kind: "lower-third", lines: ["Three pricing mistakes"], at: 3, for: 5 }];
-    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
-    const w = fw({ projects: ["reel 2"], over: { main: { ...EDITED.main, texts, pushed: pushes } } });
-    w.t.shared(`${PROJECT.main}.mp4`, 2000);
-    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    exportOf(w, "reel 2");
-    const { found } = await finished(w);
-    assert.deepEqual(handoffOf(found).main.onPicture, ["Three pricing mistakes"]);
-    assert.equal("onPicture" in reread(found).finished.parts.main, false);
-    w.t.done();
-  });
   it("reads an onPicture in finish.asked.json that is not a list of words as the words that are, and none for the rest", async () => {
     const w = ready();
     const found = await asked(w);

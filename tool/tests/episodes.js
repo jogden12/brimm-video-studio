@@ -6,11 +6,16 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readF
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { layoutOf, newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
+import { onPictureOf } from "../handoff-v2.js";
 import { contextFor } from "../edit.js";
-import { episodesFolder, fromFinalCutFolder, writeSettings } from "../settings.js";
+import { downloadsFolder, episodeWork, episodesFolder, workFolder, writeSettings } from "../settings.js";
 import { captionsOf } from "../lib.js";
 import { noProgress } from "../progress.js";
 import { probed, told } from "./fixtures.js";
+
+/** The folder the Final Cut days saved Shares and exports into. Nothing in the tool looks there now: a file a test leaves in it is a
+    leftover, which no command takes or names. */
+export const fromFinalCutFolder = (home) => join(workFolder(home), "From Final Cut");
 
 export const ID = "e-20261014-3fa9c1";
 export const NAME = "Pricing: what to charge?";
@@ -39,7 +44,7 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
   const root = join(dir, "BRIMM Video");
   const home = join(dir, "home");
   const work = join(dir, "work");
-  for (const d of [episodesFolder(root), fromFinalCutFolder(home), work]) mkdirSync(d, { recursive: true });
+  for (const d of [episodesFolder(root), work]) mkdirSync(d, { recursive: true });
   const said = [];
   const opened = [];
   const started = [];
@@ -122,11 +127,21 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     dir, root, home, work, ctx, opened, started, clones, calls, waits, notices,
     said: () => said.join("\n"),
     now: () => clock,
-    /** A file Final Cut wrote into From Final Cut, `ms` after the clock's start. An export is a bundle, a folder with its
-        Info.fcpxml in it, both of that time: an export is as new as the later of the two. */
+    /** A video the app exported into Downloads, `ms` after the clock's start. */
+    exported: (name, ms = 0, text = "a finished video") => {
+      const at = join(downloadsFolder(home), name);
+      const when = new Date(Date.parse("2026-10-20T14:00:00-05:00") + ms);
+      mkdirSync(downloadsFolder(home), { recursive: true });
+      writeFileSync(at, text);
+      utimesSync(at, when, when);
+      return at;
+    },
+    /** A file Final Cut left in From Final Cut in the days of Final Cut, `ms` after the clock's start (nothing takes it now). An export
+        is a bundle, a folder with its Info.fcpxml in it, both of that time. */
     shared: (name, ms = 0, text = "a finished video") => {
       const at = join(fromFinalCutFolder(home), name);
       const when = new Date(Date.parse("2026-10-20T14:00:00-05:00") + ms);
+      mkdirSync(fromFinalCutFolder(home), { recursive: true });
       if (name.endsWith(".fcpxmld")) {
         mkdirSync(at, { recursive: true });
         writeFileSync(join(at, "Info.fcpxml"), `<fcpxml version="1.11"><resources><asset id="r1"><media-rep src="file://${encodeURI(join(root, "Episodes", FOLDER, "Pricing talk.mp4"))}"/></asset></resources></fcpxml>\n`);
@@ -221,6 +236,27 @@ export function episodeAs(t, { id, name, record = {} }) {
   return { folder, name, record: readEpisode(folder).record };
 }
 
+/** The file each part of the made-up edit is exported as, in Downloads. */
+export const EXPORTED = { main: `${PROJECT.main}.mp4`, "reel 1": `${PROJECT["reel 1"]}.mov`, "reel 2": `${PROJECT["reel 2"]}.mov` };
+/** What the quick part leaves in finish.asked.json for the parts it takes: each part's project, the suggestion its Reel was made from, and
+    its export in Downloads as it is now. A part in `kept` is kept as the last finish made it. */
+export function askedFor(t, found, { kept = [], exports = EXPORTED } = {}) {
+  const dir = downloadsFolder(t.home);
+  const parts = Object.entries(exports).map(([key, name]) => {
+    const reel = key === "main" ? undefined : Number(key.slice(5));
+    const taken = statSync(join(dir, name));
+    return {
+      key, label: key === "main" ? "the main video" : `Reel ${reel}`, ...(reel ? { reel } : {}), projects: [PROJECT[key]], project: PROJECT[key],
+      fromSuggestion: reel ?? null, expected: "", ...(key === "main" ? { onPicture: onPictureOf(found.record) } : {}),
+      video: kept.includes(key) ? null : { name, dir, where: "Downloads", bytes: taken.size, mtimeMs: taken.mtimeMs }, export: null, kept: kept.includes(key), noHandEdits: false
+    };
+  });
+  const work = episodeWork(t.home, FOLDER);
+  mkdirSync(work, { recursive: true });
+  writeFileSync(join(work, "finish.asked.json"), JSON.stringify({ version: 1, source: "hyperframes", at: "2026-10-20T15:00:00-05:00", rev: found.record.rev, parts }, null, 2) + "\n");
+  return { ...found, record: reread(found) };
+}
+
 /** The episode's newest record, read again. */
 export const reread = (found) => readEpisode(found.folder).record;
 
@@ -228,6 +264,5 @@ export const reread = (found) => readEpisode(found.folder).record;
     first Mac's stand-ins (clone, clock, wait), so both Macs' writes go through the same rule and the same clock. */
 export function otherMac(t, machine = "Sallie's laptop") {
   const home = join(t.dir, `home-${machine.replace(/\W+/g, "-")}`);
-  mkdirSync(fromFinalCutFolder(home), { recursive: true });
   return contextFor({ ...t.ctx.deps, home, settings: { version: 1, machine, root: t.root, checkout: "/checkout" } });
 }

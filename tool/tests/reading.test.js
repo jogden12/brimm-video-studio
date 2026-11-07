@@ -13,7 +13,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSy
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { workCopyPaths, workCopyKey } from "../workcopy.js";
-import { editMain, pickReels } from "../edit.js";
+import { editMain } from "../edit.js";
 import { episodeFault, isFromPlan, localStamp, newPlannedEpisode, recordFile, recordText } from "../episode.js";
 import { episodeWork, pendingFolder, writeSettings } from "../settings.js";
 import { readResult, resultFile } from "../detached.js";
@@ -24,12 +24,13 @@ import { graphicCuesAsk } from "../graphic-cues.js";
 import { requestFor } from "../readings.js";
 import { stretchesOf } from "../reframe.js";
 import { CLAUDE_MODEL, AGAIN_MS } from "../unedited.js";
-import { readReels, reelsFile, previewSteps, REELS_VERSION } from "../reels.js";
+import { readReels, reelsFile, REELS_VERSION } from "../reel-candidates.js";
 import { READ_LOOK_MS, READ_HOLD_MS } from "../reading.js";
 import { LATE_CHECK_MS, lateCheck } from "../dropbox.js";
 import { removeStatus, writeStatus } from "../importing.js";
 import { READ_POLL_MS } from "../edit.js";
 import { sessionLabel } from "../kinds.js";
+import { stampedText } from "../lib.js";
 import { TOLD, PAUSES, SRT, probed } from "./fixtures.js";
 import { setup, episodeFor, episodeAs, reread, listAll, FOLDER, ID } from "./episodes.js";
 import { rawProbe } from "./phase4.js";
@@ -411,9 +412,9 @@ describe("read, an iPhone clip", () => {
       t.done();
     });
   });
-  it("has no Reels, which the list of Reels says as drop and push say it, naming no file", async () => {
+  it("has no Reels, which the list of Reels says as drop says it, naming no file", async () => {
     const { t, found } = reading("short video");
-    for (const words of [["reels", FOLDER, "--no-play"], ["reel", "drop", FOLDER, "1"], ["push", FOLDER, "reel", "1"]]) {
+    for (const words of [["reels", FOLDER, "--no-play"], ["reel", "drop", FOLDER, "1"]]) {
       const r = await on(t.ctx.deps, ...words);
       assert.deepEqual([r.code, r.said], [1, ["A short video has no Reels."]], words.join(" "));
     }
@@ -467,8 +468,9 @@ describe("read, a raw video", () => {
     assert.match(readFileSync(join(found.folder, "Pricing talk.edit-notes.txt"), "utf8"), /Open on the welcome\./);
     t.done();
   });
-  it("renders the rough cut as version 0 on this Mac, opens it, and keeps the timeline it was made from as edit/main.v0.fcpxml", async () => {
+  it("a raw reading writes no Final Cut file, renders the rough cut on this Mac, opens it, and adds no pushed entry", async () => {
     const { t, found, notices } = reading("raw");
+    const pushedBefore = JSON.parse(JSON.stringify(reread(found).main.pushed));
     const r = await on(t.ctx.deps, ...readArgs("raw"));
     assert.equal(r.code, 0, r.text);
     const plan = applyDecisions(PLAN, RAW_REPLY.decisions, HEARD).plan;
@@ -481,13 +483,17 @@ describe("read, a raw video", () => {
     assert.deepEqual(asked.slice(0, -1), roughCutArgs(join(found.folder, VIDEO), asked[asked.length - 1], { ranges: plan.ranges, fps: FACTS.fps, streams: streamsOf(probed({ sound: { sample_rate: "48000", channels: 2 } })) }).slice(0, -1));
     assert.ok(!listAll(found.folder).some((rel) => rel.endsWith(".mp4") && rel !== VIDEO));
     assert.deepEqual(t.opened, [["QuickTime Player", render]]);
-    // The record holds it as rendered version 0 of the main video, made from the timeline kept in edit/.
+    // No Final Cut file, and the record holds no entry for the rough cut: it is kept on this Mac, and said.
     const record = reread(found);
-    assert.deepEqual(record.main.pushed, [{ v: 0, how: "render", at: record.main.pushed[0].at, on: "Mac Studio", file: "edit/main.v0.fcpxml", opened: record.main.pushed[0].opened }]);
-    assert.ok(record.main.pushed[0].opened, "it says when it opened");
-    const v0 = readFileSync(join(found.folder, "edit", "main.v0.fcpxml"), "utf8");
-    assert.match(v0, /src="\.\.\/Pricing%20talk\.mp4"/);
-    assert.equal(record.files["edit/main.v0.fcpxml"], Buffer.byteLength(v0));
+    assert.ok(!existsSync(join(found.folder, "edit")), "no edit/ in the episode");
+    assert.equal("edit/main.v0.fcpxml" in record.files, false);
+    assert.deepEqual(record.main.pushed, pushedBefore);
+    assert.equal(episodeFault(record), "");
+    assert.ok("editing" in record, "editing is kept");
+    assert.equal(record.released, null);
+    const result = readResult(t.home, FOLDER, "read");
+    assert.equal(result.ok, true);
+    for (const m of ["the cut plan as Claude read it", "Claude's notes", "the rough cut, version 0"]) assert.ok(result.made.includes(m), `${m} in ${result.made.join(" | ")}`);
     // Its suggestions, crop-less, in reels.json at version 2, numbered from 1.
     const reels = JSON.parse(readFileSync(join(found.folder, "reels.json"), "utf8"));
     assert.equal(reels.version, 2);
@@ -506,11 +512,20 @@ describe("read, a raw video", () => {
     const record = reread(found);
     assert.deepEqual([record.rev, record.main.pushed, record.reading.kind, t.opened], [2, [], "raw", []]);
     assert.ok(!existsSync(renderOf(t)));
-    assert.ok(existsSync(join(found.folder, "edit", "main.v0.fcpxml")));
+    assert.ok(!existsSync(join(found.folder, "edit")));
     assert.deepEqual(JSON.parse(readFileSync(join(found.folder, "Pricing talk.cut-plan.json"), "utf8")).ranges, JSON.parse(JSON.stringify(applyDecisions(PLAN, RAW_REPLY.decisions, HEARD).plan.ranges)));
     const result = readResult(t.home, FOLDER, "read");
     assert.equal(result.ok, false);
     assert.ok(result.failed.some((f) => /^The rough cut could not be made: ffmpeg stopped \(Conversion failed!\)\.$/.test(f)), result.failed.join(" | "));
+    assert.ok(!result.failed.some((f) => /timeline/.test(f)), result.failed.join(" | "));
+    t.done();
+  });
+  it("still writes the rough cut's captions and transcript", async () => {
+    const { t, found } = reading("raw");
+    assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
+    const srt = readFileSync(join(found.folder, "Pricing talk.rough-cut.srt"), "utf8");
+    assert.ok(srt.length > 0);
+    assert.equal(readFileSync(join(found.folder, "Pricing talk.rough-cut.transcript.txt"), "utf8"), stampedText(srt));
     t.done();
   });
   it("waits, asking and replacing nothing, while the other Mac's import of the video is at work (its late check is not this Mac's to keep in step), and reads it once the check is made", async () => {
@@ -745,37 +760,10 @@ describe("a Reel with no crops yet, which every reader that needs crops refuses"
     const { t, found } = reading("finished", { over: { reels: [{ n: 3, status, from: 6.07, to: 21.097, title: "", why: "", files: [], pushed: [] }] }, files: { ...LIGHT_FILES, "reels.json": JSON.stringify(reelsFile({ video: VIDEO, by: "read", made: AT, candidates: [UNCROPPED] })) } });
     return { t, found };
   };
-  // No command picks a Reel any more (plan PR 5: `app … reel <n>` picks the one it opens), but `pickReels` stays for the Final Cut
-  // Reel path until the retirement's wave 5, and it refuses a Reel that is not made as it always did.
-  it("pickReels", async () => {
-    const { t, found } = listed("candidate");
-    assert.equal(await pickReels(t.ctx, { ...found, record: reread(found) }, [3]), 1);
-    assert.equal(t.said(), NOT_MADE(3));
-    assert.equal(reread(found).rev, 1);
-    t.done();
-  });
-  it("push … reel", async () => {
-    const { t, found } = listed("picked");
-    const r = await on(t.ctx.deps, "push", FOLDER, "reel", "3");
-    assert.deepEqual([r.code, r.said], [1, [NOT_MADE(3)]]);
-    assert.deepEqual([reread(found).rev, t.opened, readdirSync(found.folder).includes("edit")], [1, [], false]);
-    t.done();
-  });
-  it("previewSteps", () => {
-    assert.throws(() => previewSteps({ video: "/v/raw.mov", ranges: UNCROPPED.ranges, out: "/w/preview.mp4", fps: FACTS.fps, duration: 23.423, work: "/w", size: { width: 1280, height: 720 }, n: 3 }), { message: NOT_MADE(3) });
-  });
-  it("pickReels of several, naming each that cannot be made, and picking none", async () => {
-    const two = [{ n: 3, status: "candidate", from: 6.07, to: 21.097, title: "", why: "", files: [], pushed: [] }, { n: 4, status: "candidate", from: 6.07, to: 21.097, title: "", why: "", files: [], pushed: [] }];
-    const { t, found } = reading("finished", { over: { reels: two }, files: { ...LIGHT_FILES, "reels.json": JSON.stringify(reelsFile({ video: VIDEO, by: "read", made: AT, candidates: [UNCROPPED, { ...UNCROPPED, n: 4 }] })) } });
-    assert.equal(await pickReels(t.ctx, { ...found, record: reread(found) }, [3, 4]), 1);
-    assert.equal(t.said(), ELSEWHERE("Reels 3 and 4"));
-    assert.deepEqual([reread(found).rev, reread(found).reels.map((x) => x.status)], [1, ["candidate", "candidate"]]);
-    t.done();
-  });
-  it("captions, a title or a graphic on it, a style or a cut: never sent to pick it first, whatever the record says of it", async () => {
+  it("a title on it: never sent to pick it first, whatever the record says of it", async () => {
     for (const status of ["candidate", "picked"]) {
       const { t, found } = listed(status);
-      for (const words of [["captions", FOLDER, "reel", "3", "on"], ["text", FOLDER, "reel", "3"], ["graphic", FOLDER, "reel", "3"], ["preset", FOLDER, "reel", "3", "--look", "bright"], ["cut", FOLDER, "remove", "reel", "3", "--words", "welcome"], ["title", FOLDER, "reel", "3"], ["title", FOLDER, "reel", "3", "--words", "Say it again"]]) {
+      for (const words of [["title", FOLDER, "reel", "3"], ["title", FOLDER, "reel", "3", "--words", "Say it again"]]) {
         const r = await on(t.ctx.deps, ...words);
         assert.deepEqual([r.code, r.said], [1, [NOT_MADE(3)]], `${status}: ${words.join(" ")}`);
       }
@@ -786,7 +774,7 @@ describe("a Reel with no crops yet, which every reader that needs crops refuses"
   it("says nowhere to make it first", async () => {
     const { t } = listed("candidate");
     // It is never told to make Reel 3 (or to make it) first; that brimm-video "cannot make Reel 3 on this Mac" is not such a word.
-    for (const words of [["reel", "drop", FOLDER, "3"], ["push", FOLDER, "reel", "3"], ["captions", FOLDER, "reel", "3", "on"]]) assert.doesNotMatch((await on(t.ctx.deps, ...words)).text, /(?<!cannot )make Reel \d|make it|first/);
+    for (const words of [["reel", "drop", FOLDER, "3"], ["title", FOLDER, "reel", "3"]]) assert.doesNotMatch((await on(t.ctx.deps, ...words)).text, /(?<!cannot )make Reel \d|make it|first/);
     t.done();
   });
 });
@@ -814,7 +802,7 @@ describe("the Reel suggestions of a video she has answered, which BRIMM Video St
   });
   it("are never offered to a session: the gate refuses it before anything is listed", async () => {
     const { t } = reading("finished", { over: { kind: "session", session: { marked: AT, on: "Mac Studio", teachings: null, cleared: null } }, files: { ...LIGHT_FILES, "reels.json": list } });
-    for (const words of [["reels", FOLDER, "--no-play"], ["reel", "drop", FOLDER, "3"], ["push", FOLDER, "reel", "3"], ["captions", FOLDER, "reel", "3", "on"]]) {
+    for (const words of [["reels", FOLDER, "--no-play"], ["reel", "drop", FOLDER, "3"], ["title", FOLDER, "reel", "3"]]) {
       const r = await on(t.ctx.deps, ...words);
       assert.equal(r.code, 1, r.text);
       assert.doesNotMatch(r.text, /cannot make Reel|on this Mac|Reel suggestions/, words.join(" "));
@@ -1108,13 +1096,6 @@ describe("read gives up waiting for an import at work after READ_HOLD_MS (fix 6,
 });
 
 describe("the raw reading's version 0 (fix 7, fix 8, fix 9)", () => {
-  it("holds Claude's graphic cues on its timeline as ideas, each at the moment its words start", async () => {
-    const { t, found } = reading("raw");
-    assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
-    // "know" of "know your costs" is said at 15.3 seconds, which is picture 459.
-    assert.match(readFileSync(join(found.folder, "edit", "main.v0.fcpxml"), "utf8"), /<marker start="459459\/30000s" duration="[^"]*" value="Graphic idea: A chart of what it costs"/);
-    t.done();
-  });
   it("lists Claude's graphic cues in its notes under its ideas for graphics, at the time the words they go with are said, and those words", async () => {
     const { t, found } = reading("raw");
     assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
@@ -1123,15 +1104,13 @@ describe("the raw reading's version 0 (fix 7, fix 8, fix 9)", () => {
     assert.match(notes, /\n\nIts ideas for graphics\n0:15  "know your costs"  \|  A chart of what it costs\n\n/);
     t.done();
   });
-  it("has a marker for a cue placed in kept words, on the take she keeps when the words are said twice, and none for a cue that is not found or sits in a cut", async () => {
+  it("notes a cue placed in kept words, on the take she keeps when the words are said twice, and says so for a cue that is not found or sits in a cut", async () => {
     // "Welcome to the show" is said twice, and the rules cut the first take (p1): the cue names that take, which is cut, and is on the
     // one that is kept. "the moon landing" is never said; p3 is cut by the rules.
     const cue = (id, words, show) => ({ id, words, kind: "words", show, seconds: 3 });
     const reply = { ...RAW_REPLY, graphicCues: [cue("p1", "Welcome to the show", "The show's name."), cue("p9", "the moon landing", "The moon."), cue("p3", "do that again", "A slow zoom."), RAW_REPLY.graphicCues[0]] };
     const { t, found } = reading("raw", { reply });
     assert.equal((await on(t.ctx.deps, ...readArgs("raw"))).code, 0);
-    const xml = readFileSync(join(found.folder, "edit", "main.v0.fcpxml"), "utf8");
-    assert.deepEqual([...xml.matchAll(/<marker start="([^"]*)"[^>]*value="(Graphic idea[^"]*)"/g)].map((m) => `${m[1]} ${m[2]}`), ["182182/30000s Graphic idea: The show's name.", "459459/30000s Graphic idea: A chart of what it costs"]);
     // The notes tell each by where it is placed: listed at the time its words are said, in a cut, or not found.
     const notes = readFileSync(join(found.folder, "Pricing talk.edit-notes.txt"), "utf8");
     assert.match(notes, /Its ideas for graphics\n0:06  "Welcome to the show"  \|  The show's name\.\n0:15  "know your costs"  \|  A chart of what it costs\n\n/);
@@ -1198,9 +1177,6 @@ describe("fix 10 and fix 11", () => {
     assert.equal((await on(t.ctx.deps, ...readArgs("finished"))).code, 0);
     assert.deepEqual(JSON.parse(readFileSync(join(found.folder, "reels.json"), "utf8")).candidates.map((c) => [c.n, c.reason]), [[1, "It is the whole talk in brief."]]);
     t.done();
-  });
-  it("refuses a preview of a candidate with no crops, numbered or not", () => {
-    assert.throws(() => previewSteps({ video: "/v/raw.mov", ranges: UNCROPPED.ranges, out: "/w/preview.mp4", fps: FACTS.fps, duration: 23.423, work: "/w", size: { width: 1280, height: 720 } }), { message: ELSEWHERE("Reels") });
   });
   it("reads the account in the run's own empty folder, with no settings file read", async () => {
     const asks = [];

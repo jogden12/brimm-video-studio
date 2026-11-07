@@ -11,7 +11,7 @@ import { projectName } from "../project.js";
 import { downloadsFolder, episodeWork, writeSettings } from "../settings.js";
 import { FOLDER, ID, NAME, SRT, episodeFor, partOf, setup, toldOf } from "./episodes.js";
 import { probed } from "./fixtures.js";
-import { reelsFile } from "../reels.js";
+import { reelsFile } from "../reel-candidates.js";
 import { EPISODE, episode, rawProbe } from "./phase4.js";
 
 /** The zone the made-up records are in (UTC-5), so that no test depends on the Mac it runs on. */

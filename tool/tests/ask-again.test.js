@@ -1,13 +1,11 @@
-// A picked Reel pushed to Final Cut, through phase 1a's push, with its guard. For an episode imported before phase 3, which
-// has no reels.json, its timeline is the clip the import cut, whole: upright, with its captions on the clip's own clock
-// (reel.js). Further down: phase 3's own project of a Reel, the list of candidates (reels), and ask.
+// `ask`: Claude asked again for Reel candidates, and `reels`: the list of an episode's candidates, with the previews an older import made.
+// ask makes no preview now (Phase 2, F7): a new candidate has none. The tests of `ask` were in reel.test.js, with those of the Final Cut
+// Reel path, which are gone.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, copyFileSync as copyFile, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { reelTimeline } from "../reel.js";
-import { pushReel, editMain } from "../edit.js";
-import { checkFcpxml } from "../fcpxml.js";
+import { editMain } from "../edit.js";
 import { setup, episodeFor, reread, EDITED, FOLDER } from "./episodes.js";
 
 /** The attributes of every tag of one name in a Final Cut file. */
@@ -17,103 +15,10 @@ const PICKED = { ...EDITED, reels: EDITED.reels.map((r) => ({ ...r, pushed: [] }
 /** ffprobe's answer for an upright clip of 7.7 seconds at 30000/1001. */
 const facts = { duration: 7.7, frameRate: "30000/1001", width: 1080, height: 1920, hasAudio: true, audioRate: 48000, audioChannels: 2 };
 
-describe("reelTimeline", () => {
-  it("makes the clip the import cut into an upright timeline, whole, with its captions on the clip's own clock", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: PICKED });
-    const made = await reelTimeline(found, found.record.reels[0], t.ctx);
-    assert.ok(made.xml, made.why);
-    assert.deepEqual(checkFcpxml(made.xml, facts), []);
-    assert.deepEqual(tags(made.xml, "format").map((f) => [f.width, f.height]), [["1080", "1920"]]);
-    assert.equal(tags(made.xml, "asset-clip").length, 1);
-    assert.equal(tags(made.xml, "caption").length, 1);
-    assert.equal(tags(made.xml, "media-rep")[0].src, "../Pricing%20talk.reel-1.mp4");
-    assert.equal(tags(made.xml, "import-options").length, 0);
-    t.done();
-  });
-  it("says why there is no timeline: no clip was cut, or ffprobe cannot read the clip", async () => {
-    const t = setup({ programs: { FFPROBE: () => ({ code: 1, stderr: "moov atom not found\n" }) } });
-    const found = episodeFor(t, { record: PICKED });
-    assert.deepEqual(await reelTimeline(found, { ...found.record.reels[0], files: [] }, t.ctx), { why: "Reel 1 has no clip: the import could not cut it." });
-    assert.deepEqual(await reelTimeline(found, found.record.reels[0], t.ctx), { why: "Pricing talk.reel-1.mp4 could not be read (moov atom not found)." });
-    t.done();
-  });
-});
-
-describe("push reel", () => {
-  it("pushes a picked Reel through the push every part shares, as the Reel's own project", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: PICKED });
-    assert.equal(await pushReel(t.ctx, found, 1, {}), 0);
-    const pushed = reread(found).reels[0].pushed;
-    assert.equal(pushed.length, 1);
-    assert.equal(pushed[0].project, "Pricing- what to charge- reel 1 v1 3fa9c1");
-    assert.equal(pushed[0].file, "edit/reel-1.v1.mac-studio.fcpxml");
-    assert.ok(existsSync(join(found.folder, pushed[0].file)));
-    assert.match(readFileSync(join(found.folder, pushed[0].file), "utf8"), /media-rep kind="original-media" src="\.\.\/Pricing%20talk\.reel-1\.mp4"/);
-    assert.equal(t.opened.length, 1);
-    t.done();
-  });
-  it("keeps the guard: a second push of the Reel needs the answer that there were no hand edits", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: PICKED });
-    await pushReel(t.ctx, found, 1, {});
-    const again = { ...found, record: reread(found) };
-    assert.equal(await pushReel(t.ctx, again, 1, {}), 1);
-    assert.match(t.said(), /Did you change v1 of .* in Final Cut since it was shown\?/);
-    assert.equal(await pushReel(t.ctx, again, 1, { noHandEdits: true }), 0);
-    assert.deepEqual(reread(found).reels[0].pushed.map((p) => p.v), [1, 2]);
-    t.done();
-  });
-  it("asks the guard's question from the command line too, at a second push", async () => {
-    const t = setup();
-    episodeFor(t, { record: PICKED });
-    assert.equal(await editMain(["push", "Pricing", "reel", "1"], t.ctx.deps), 0);
-    assert.equal(await editMain(["push", "Pricing", "reel", "1"], t.ctx.deps), 1);
-    assert.match(t.said(), /Did you change v1 of .* in Final Cut since it was shown\?/);
-    assert.equal(await editMain(["push", "Pricing", "reel", "1", "--no-hand-edits"], t.ctx.deps), 0);
-    t.done();
-  });
-  it("starts bringing a clip over when it is not on this Mac yet, as open does, and says to ask again", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: PICKED });
-    t.ctx.isWhole = (path) => !path.endsWith(".reel-1.mp4");
-    assert.equal(await pushReel(t.ctx, found, 1, {}), 1);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(-5)), [["bring", "--now", FOLDER, "Pricing talk.reel-1.mp4", "Pricing talk.reel-1.srt"]]);
-    // bring, given files, reads those alone.
-    const read = [];
-    t.ctx.deps.readAll = async (path) => read.push(path);
-    t.ctx.isWhole = () => false;
-    assert.equal(await editMain(["bring", "--now", FOLDER, "Pricing talk.reel-1.mp4", "Pricing talk.reel-1.srt"], { ...t.ctx.deps, isWhole: () => false }), 1);
-    assert.deepEqual(read.map((p) => p.split("/").pop()), ["Pricing talk.reel-1.mp4", "Pricing talk.reel-1.srt"]);
-    assert.match(t.said(), /Dropbox is bringing Pricing talk\.reel-1\.mp4 over to this Mac\. Say "show reel 1 in Final Cut" again when it is done\./);
-    t.done();
-  });
-  it("refuses a Reel that is not picked, one that is not there, and any Reel of a short video", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: PICKED });
-    assert.equal(await pushReel(t.ctx, found, 3, {}), 1);
-    // `reel pick` is gone (plan PR 5): nothing on a Mac not set up for HyperFrames picks a Reel, and on one that is, opening it does.
-    assert.equal(t.said(), "Reel 3 is not picked. Nothing on this Mac picks a Reel any more: ask Jason.");
-    assert.equal(await pushReel({ ...t.ctx, settings: { ...t.ctx.settings, app: "hyperframes" } }, found, 3, {}), 1);
-    assert.ok(t.said().endsWith(`\nReel 3 is not picked. Opening it in HyperFrames picks it: say "open Reel 3 of ${NAME} in HyperFrames".`), t.said());
-    assert.equal(await pushReel(t.ctx, found, 9, {}), 1);
-    assert.match(t.said(), /There is no Reel 9\./);
-    const short = setup();
-    assert.equal(await pushReel(short.ctx, episodeFor(short, { record: { kind: "short video", reels: [] } }), 1, {}), 1);
-    assert.match(short.said(), /A short video has no Reels\./);
-    assert.equal(t.opened.length, 0);
-    t.done();
-    short.done();
-  });
-});
-
-// Phase 3: a Reel's own project. An episode the import made after phase 3 has reels.json, with each candidate's stretches and
-// crops, and a preview of each; its Reels' timelines are made from them (reels.js reelProject), not from a clip.
+// An episode an older import made has reels.json, with each candidate's stretches and crops, and a preview of each.
 import { wordsOf, pausesOf, phrasesOf, cutPlan } from "../cuts.js";
 import { readNotes, applyDecisions, clipRanges } from "../notes.js";
-import { reelCandidates, reelsFile, reelEntries, previewPath, REEL_FRAME } from "../reels.js";
-import { pickReels } from "../edit.js";
+import { previewPath, reelCandidates, reelsFile, reelEntries } from "../reel-candidates.js";
 import { TOLD, PAUSES, probed } from "./fixtures.js";
 import { NAME } from "./episodes.js";
 import { writeFileSync as writeFile } from "node:fs";
@@ -162,114 +67,6 @@ const phase3 = (programs = {}, { only } = {}) => {
   const files = { ...PHASE_3.files, "reels.json": JSON.stringify({ ...reels, candidates: keep(reels.candidates) }, null, 2) + "\n" };
   return { t, found: episodeFor(t, { record: { ...PHASE_3.record, reels: keep(PHASE_3.record.reels) }, files }) };
 };
-/** What `reel pick` did, before plan PR 5 took the command away: Reels `ns` of the episode `p.found` picked, on the record as it is on
-    disk now, as the command read it. Nothing picks a Reel by a command any more (`app … reel <n>` picks the Reel it opens, in its own
-    write); `pickReels` stays for the Final Cut Reel path until the retirement's wave 5, and the tests of its project, its refusals and
-    its list keep it so. Gives the exit code. */
-const pick = (p, ...ns) => pickReels(p.t.ctx, { ...p.found, record: reread(p.found) }, ns);
-
-describe("reelTimeline, a Reel's own project (phase 3)", () => {
-  it("is the Reel's stretches as clips, upright, each filled and moved onto the face, its video named from edit/", async () => {
-    const { t, found } = phase3();
-    const reel = found.record.reels.find((r) => r.n === 2);
-    const made = await reelTimeline(found, reel, t.ctx);
-    assert.ok(made.xml, made.why);
-    const candidate = PHASE_3.candidates[1];
-    assert.deepEqual(tags(made.xml, "format").map((f) => [f.id, f.width, f.height]), [["r1", "1280", "720"], ["r3", "1080", "1920"]]);
-    assert.deepEqual(tags(made.xml, "asset-clip").map((c) => c.format), candidate.ranges.map(() => "r1"));
-    assert.deepEqual(tags(made.xml, "adjust-transform").map((a) => a.position), candidate.ranges.map(() => "44.4444 0"));
-    assert.deepEqual(tags(made.xml, "media-rep").map((m) => m.src), ["../Pricing%20talk.mp4"]);
-    assert.equal(tags(made.xml, "import-options").length, 0);
-    assert.deepEqual(tags(made.xml, "marker").map((m) => m.value), ["Taken out, 2.7 seconds. Claude: It adds nothing to the line before it."]);
-    assert.deepEqual(checkFcpxml(made.xml, { duration: 23.423, frameRate: "30000/1001", width: 1280, height: 720 }, { frame: REEL_FRAME }), []);
-    t.done();
-  });
-  it("carries the video's sound and colour as ffprobe reads them, an iPhone's HDR video's own colour space included", async () => {
-    const { t, found } = phase3({ FFPROBE: rawProbe({ color_primaries: "bt2020", color_transfer: "arib-std-b67" }) });
-    const made = await reelTimeline(found, found.record.reels[1], t.ctx);
-    assert.deepEqual([tags(made.xml, "asset")[0].audioRate, tags(made.xml, "asset")[0].audioChannels], ["48000", "2"]);
-    assert.deepEqual(tags(made.xml, "format").map((f) => f.colorSpace), ["9-18-9 (Rec. 2020 HLG)", "1-1-1 (Rec. 709)"]);
-    t.done();
-  });
-  it("carries the sound the tool takes of an iPhone's clip, its AAC, and not the APAC listed first (main #18, soundStream)", async () => {
-    const { t, found } = phase3({ FFPROBE: (args) => {
-      const told = JSON.parse(probed({ sound: { sample_rate: "48000", channels: 4 } }));
-      const [picture, sound] = told.streams;
-      told.streams = [{ ...picture, index: 0 }, { ...sound, index: 1, codec_name: "apple_apac" }, { ...sound, index: 2, codec_name: "aac", sample_rate: "44100", channels: 2 }];
-      writeFile(args[args.indexOf("-o") + 1], JSON.stringify(told));
-      return { code: 0, stderr: "" };
-    } });
-    const made = await reelTimeline(found, found.record.reels[1], t.ctx);
-    assert.deepEqual([tags(made.xml, "asset")[0].audioRate, tags(made.xml, "asset")[0].audioChannels], ["44100", "2"]);
-    t.done();
-  });
-  it("says Dropbox is bringing the video over when it is not whole on this Mac yet", async () => {
-    const { t, found } = phase3();
-    t.ctx.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
-    assert.deepEqual(await reelTimeline(found, found.record.reels[1], t.ctx), { coming: "Pricing talk.mp4", bring: ["Pricing talk.mp4"] });
-    t.done();
-  });
-  it("says why there is no project: no such candidate, one with nothing to show, a video ffprobe cannot read, or another video", async () => {
-    const { t, found } = phase3();
-    assert.deepEqual(await reelTimeline(found, { n: 9, files: [] }, t.ctx), { why: "reels.json has no Reel 9." });
-    const empty = phase3();
-    const reels = JSON.parse(PHASE_3.files["reels.json"]);
-    reels.candidates[1] = { ...reels.candidates[1], ranges: [], failed: "it is shorter than one picture" };
-    writeFile(join(empty.found.folder, "reels.json"), JSON.stringify(reels));
-    assert.deepEqual(await reelTimeline(empty.found, empty.found.record.reels[1], empty.t.ctx), { why: "Reel 2 has nothing to show: it is shorter than one picture." });
-    const unread = phase3({ FFPROBE: () => ({ code: 1, stderr: "moov atom not found\n" }) });
-    assert.deepEqual(await reelTimeline(unread.found, unread.found.record.reels[1], unread.t.ctx), { why: "Pricing talk.mp4 could not be read (moov atom not found)." });
-    const other = phase3({ FFPROBE: (args) => { writeFile(args[args.indexOf("-o") + 1], probed({ duration: "45.000000" })); return { code: 0, stderr: "" }; } });
-    assert.deepEqual(await reelTimeline(other.found, other.found.record.reels[1], other.t.ctx), { why: "Pricing talk.mp4 is not the video its cut plan was made of: it is 45 seconds, 1280 by 720 at 30000/1001, and the plan's is 23.423 seconds, 1280 by 720 at 30000/1001." });
-    // A video of the same length and size at another frame rate is another video too: the plan's stretches are on its clock.
-    const rate = phase3({ FFPROBE: (args) => { writeFile(args[args.indexOf("-o") + 1], probed({ picture: { r_frame_rate: "25/1", avg_frame_rate: "25/1" } })); return { code: 0, stderr: "" }; } });
-    assert.deepEqual(await reelTimeline(rate.found, rate.found.record.reels[1], rate.t.ctx), { why: "Pricing talk.mp4 is not the video its cut plan was made of: it is 23.423 seconds, 1280 by 720 at 25/1, and the plan's is 23.423 seconds, 1280 by 720 at 30000/1001." });
-    for (const x of [t, empty.t, unread.t, other.t, rate.t]) x.done();
-  });
-});
-
-describe("a picked Reel's project (phase 3)", () => {
-  it("is written as edit/reel-<n>.v0.fcpxml by the rule when the Reel is picked, listed in the record, and the person is told", async () => {
-    const { t, found } = phase3();
-    assert.equal(await pickReels(t.ctx, found, [1]), 0);
-    const kept = join(found.folder, "edit", "reel-1.v0.fcpxml");
-    assert.ok(existsSync(kept));
-    assert.match(readFileSync(kept, "utf8"), /<format id="r3" frameDuration="[^"]+" width="1080" height="1920"/);
-    assert.ok(t.clones.some(([, to]) => to === kept), "it is cloned in");
-    const record = reread(found);
-    assert.deepEqual([record.reels[0].status, record.files["edit/reel-1.v0.fcpxml"]], ["picked", readFileSync(kept).length]);
-    assert.match(t.said(), /Reel 1 is picked\. Its upright Final Cut project is written\. Say "show reel 1 in Final Cut" to have it pushed\./);
-    t.done();
-  });
-  it("is pushed as the Reel's own project, upright, in the episode's event, its video the raw recording", async () => {
-    const { t, found } = phase3();
-    assert.equal(await pushReel(t.ctx, found, 2, {}), 0);
-    const pushed = reread(found).reels[1].pushed;
-    assert.equal(pushed[0].file, "edit/reel-2.v1.mac-studio.fcpxml");
-    const xml = readFileSync(join(found.folder, pushed[0].file), "utf8");
-    assert.match(xml, /media-rep kind="original-media" src="\.\.\/Pricing%20talk\.mp4"/);
-    assert.match(xml, /width="1080" height="1920"/);
-    assert.equal(tags(xml, "event")[0].name, FOLDER);
-    t.done();
-  });
-  it("still picks a Reel when its project cannot be written yet, and says why", async () => {
-    const { t, found } = phase3();
-    t.ctx.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
-    assert.equal(await pickReels(t.ctx, found, [1]), 0);
-    assert.equal(reread(found).reels[0].status, "picked");
-    assert.ok(!existsSync(join(found.folder, "edit", "reel-1.v0.fcpxml")));
-    assert.match(t.said(), /Reel 1 is picked\. Say "show reel 1 in Final Cut" to have it pushed\. Reel 1's project is written when it is shown: Dropbox is still bringing Pricing talk\.mp4 over to this Mac\./);
-    t.done();
-  });
-  it("brings the raw video over, when it is not on this Mac yet, before it can be pushed", async () => {
-    const { t, found } = phase3();
-    t.ctx.isWhole = (path) => !path.endsWith("Pricing talk.mp4");
-    assert.equal(await pushReel(t.ctx, found, 2, {}), 1);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(-4)), [["bring", "--now", FOLDER, "Pricing talk.mp4"]]);
-    assert.match(t.said(), /Dropbox is bringing Pricing talk\.mp4 over to this Mac\. Say "show reel 2 in Final Cut" again when it is done\./);
-    t.done();
-  });
-});
 
 describe("reels, the list of an episode's Reel candidates (phase 3)", () => {
   it("is printed, and each preview is opened in QuickTime Player", async () => {
@@ -295,21 +92,11 @@ describe("reels, the list of an episode's Reel candidates (phase 3)", () => {
     assert.deepEqual(t.opened, []);
     t.done();
   });
-  it("never says BRIMM Video Studio cannot make a Reel of an episode imported before the switch, whose Reels BRIMM Video Studio still makes", async () => {
-    const p = phase3();
-    const { t } = p;
-    assert.equal(await editMain(["reels", "Pricing", "--no-play"], t.ctx.deps), 0);
-    assert.equal(await pick(p, 1), 0, t.said());
-    assert.equal(await editMain(["captions", "Pricing", "reel", "1", "off"], t.ctx.deps), 0, t.said());
-    assert.doesNotMatch(t.said(), /cannot make Reel|on this Mac/);
-    t.done();
-  });
   it("says why, in one sentence, when the list cannot be read, as one a newer BRIMM Video Studio wrote", async () => {
     const { t, found } = phase3();
     writeFile(join(found.folder, "reels.json"), JSON.stringify({ ...JSON.parse(PHASE_3.files["reels.json"]), version: 3 }));
     assert.equal(await editMain(["reels", "Pricing"], t.ctx.deps), 1);
     assert.equal(t.said(), "Its list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac.");
-    assert.deepEqual(await reelTimeline(found, found.record.reels[1], t.ctx), { why: "The list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac." });
     t.done();
   });
   it("offers to ask again on a Mac that can, though the importing Mac had no Claude Code (PR 19's review)", async () => {
@@ -360,7 +147,7 @@ describe("reels, the list of an episode's Reel candidates (phase 3)", () => {
     p.t.done();
   });
   it("does not offer to ask while ask, or another command, is at work on the episode (N8, N16)", async () => {
-    for (const [command, said] of [["ask", 'Claude is being asked already. Say "how far is it?" to see how far it has got.'], ["push", `push is running for ${FOLDER} already. Say it again when it has finished.`]]) {
+    for (const [command, said] of [["ask", 'Claude is being asked already. Say "how far is it?" to see how far it has got.'], ["finish", `finish is running for ${FOLDER} already. Say it again when it has finished.`]]) {
       const p = askable();
       noneListed(p, { none: "Claude picked no clip that stands alone" });
       makeDir(join(p.t.home, "BRIMM Video Work", FOLDER), { recursive: true });
@@ -402,7 +189,7 @@ import { mkdirSync as makeDir } from "node:fs";
 
 /** What Claude Code prints with its reply: one clip, from "Today we are going..." (p5) to "pricing"... that is p5 alone. */
 const claudeSays = (clips) => () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify({ decisions: [], notes: "", graphicCues: [], clips }) }) });
-/** A phase 3 episode whose ctx can ask Claude, find faces and make previews, all by stand-ins. */
+/** A phase 3 episode whose ctx can ask Claude, find faces, all by stand-ins. */
 const askable = (programs = {}, shape = { only: [2] }) => {
   const p = phase3({ CLAUDE: claudeSays([{ from: "p7", to: "p7", hook: "Know your costs, first", why: "It is the point." }, { from: "p5", to: "p5", hook: "What this is about", why: "It says it." }]), SWIFT: () => ({ code: 0, stderr: "", stdout: JSON.stringify(Array.from({ length: 11 }, (_, i) => ({ file: String(i + 1).padStart(4, "0") + ".jpg", faces: [] }))) }), ...programs }, shape);
   p.t.ctx.deps.tools = { ...p.t.ctx.deps.tools, claude: "CLAUDE", swift: "SWIFT" };
@@ -439,7 +226,7 @@ describe("ask, Claude asked again for Reels (phase 3)", () => {
     assert.match(busy.t.said(), /Claude is being asked already\. Say "how far is it\?"/);
     for (const x of [short, none.t, busy.t]) x.done();
   });
-  it("adds Claude's new candidates and their previews by the rule, keeps the picked Reel, and numbers the new ones on", async () => {
+  it("adds Claude's new candidates, with no preview, by the rule, keeps the picked Reel, and numbers the new ones on", async () => {
     const { t, found } = askable();
     assert.equal(await editMain(["ask", "--now", FOLDER], t.ctx.deps), 0);
     const reels = JSON.parse(readFileSync(join(found.folder, "reels.json"), "utf8"));
@@ -449,9 +236,10 @@ describe("ask, Claude asked again for Reels (phase 3)", () => {
     assert.deepEqual(reels.candidates.map((c) => [c.n, c.title]), [[2, "Know your costs"], [3, "What this is about"]]);
     assert.equal(reels.highest, 3);
     const record = reread(found);
-    assert.deepEqual(record.reels.map((r) => [r.n, r.status, r.files]), [[2, "picked", ["previews/reel-2.mp4"]], [3, "candidate", ["previews/reel-3.mp4"]]]);
-    assert.ok(existsSync(join(found.folder, "previews", "reel-3.mp4")));
-    assert.ok(t.clones.some(([, to]) => to === join(found.folder, "previews", "reel-3.mp4")), "the preview is cloned in");
+    assert.deepEqual(record.reels.map((r) => [r.n, r.status, r.files]), [[2, "picked", ["previews/reel-2.mp4"]], [3, "candidate", []]]);
+    assert.deepEqual(reels.candidates.map((c) => [c.n, c.preview]), [[2, "previews/reel-2.mp4"], [3, null]]);
+    assert.ok(!existsSync(join(found.folder, "previews", "reel-3.mp4")), "no preview is made");
+    assert.ok(t.clones.some(([, to]) => to === join(found.folder, "reels.json")), "the list is cloned in");
     assert.ok(t.clones.some(([, to]) => to === join(found.folder, "record", "0002.json")), "the record is cloned in");
     assert.ok(t.waits.includes(15 * 60 * 1000), "the late check waited");
     const result = readResult(t.home, FOLDER, "ask");
@@ -500,67 +288,6 @@ describe("ask, Claude asked again for Reels (phase 3)", () => {
   });
 });
 
-describe("a Reel's timeline, decided for each Reel (from the review)", () => {
-  it("is the project written at its pick, edit/reel-<n>.v0.fcpxml, once there is one, whatever reels.json says after", async () => {
-    const { t, found } = phase3();
-    await pickReels(t.ctx, found, [1]);
-    const v0 = readFileSync(join(found.folder, "edit", "reel-1.v0.fcpxml"), "utf8");
-    // The other Mac's newer brimm-video writes a reels.json this one cannot read, and the record with its size.
-    const unreadable = JSON.stringify({ format: "brimm-video reels", version: 3, video: "Pricing talk.mp4", candidates: [] });
-    writeFile(join(found.folder, "reels.json"), unreadable);
-    const now = reread(found);
-    writeFile(join(found.folder, "record", "0003.json"), JSON.stringify({ ...now, rev: 3, files: { ...now.files, "reels.json": unreadable.length } }, null, 2) + "\n");
-    assert.deepEqual(await reelTimeline({ ...found, record: reread(found) }, reread(found).reels[0], t.ctx), { xml: v0 });
-    assert.equal(await pushReel(t.ctx, { ...found, record: reread(found) }, 1, {}), 0);
-    t.done();
-  });
-  it("is still the clip the import cut for an old episode's Reel, after ask has added candidates of its own", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: PICKED });
-    const four = { ...PHASE_3.candidates[1], n: 4 };
-    writeFile(join(found.folder, "reels.json"), JSON.stringify(reelsFile({ video: "Pricing talk.mp4", by: "ask", made: "2026-10-20T10:00:00-05:00", candidates: [four] })));
-    const made = await reelTimeline(found, found.record.reels[0], t.ctx);
-    assert.equal(tags(made.xml, "media-rep")[0].src, "../Pricing%20talk.reel-1.mp4");
-    assert.equal(await pushReel(t.ctx, found, 1, {}), 0);
-    t.done();
-  });
-  it("is still the clip for an old episode's Reel after ask itself has run on the episode, numbering its candidates on", async () => {
-    const t = setup({ programs: { CLAUDE: claudeSays([{ from: "p4", to: "p5", hook: "What this is about", why: "It says it." }]), SWIFT: () => ({ code: 0, stderr: "", stdout: "[]" }) } });
-    t.ctx.deps.tools = { ...t.ctx.deps.tools, claude: "CLAUDE", swift: "SWIFT" };
-    t.ctx.deps.runGuarded = async (cmd, args) => ({ ...(await t.ctx.deps.run(cmd, args)), overMemory: false, outOfTime: false, peak: 0, stopped: "" });
-    // Imported before phase 3: no reels.json, and its one Reel the clip the import cut, picked and pushed.
-    const found = episodeFor(t, { record: { ...PICKED, reels: [PICKED.reels[0]] }, files: { "Pricing talk.mp4": "the raw video", "Pricing talk.cut-plan.json": PHASE_3.files["Pricing talk.cut-plan.json"], "Pricing talk.reel-1.mp4": "clip one", "Pricing talk.reel-1.srt": "1\n00:00:00,000 --> 00:00:02,600\n So the first thing you need to do is know your\n\n" } });
-    assert.equal(await editMain(["ask", "--now", FOLDER], t.ctx.deps), 0, readResult(t.home, FOLDER, "ask").failed.join(" | "));
-    const reels = JSON.parse(readFileSync(join(found.folder, "reels.json"), "utf8"));
-    assert.deepEqual([reels.candidates.map((c) => [c.n, c.title]), reels.highest], [[[2, "What this is about"]], 2]);
-    const now = { ...found, record: reread(found) };
-    assert.deepEqual(now.record.reels.map((r) => [r.n, r.status, r.files]), [[1, "picked", ["Pricing talk.reel-1.mp4", "Pricing talk.reel-1.srt"]], [2, "candidate", ["previews/reel-2.mp4"]]]);
-    const made = await reelTimeline(now, now.record.reels[0], t.ctx);
-    assert.equal(tags(made.xml, "media-rep")[0].src, "../Pricing%20talk.reel-1.mp4");
-    assert.equal(await pushReel(t.ctx, now, 1, { noHandEdits: true }), 0, t.said());
-    t.done();
-  });
-  it("refuses to pick a candidate that has nothing to show, and says why", async () => {
-    const { t, found } = phase3();
-    const reels = JSON.parse(PHASE_3.files["reels.json"]);
-    reels.candidates[0] = { ...reels.candidates[0], ranges: [], preview: null, failed: "it is shorter than one picture" };
-    writeFile(join(found.folder, "reels.json"), JSON.stringify(reels));
-    assert.equal(await pickReels(t.ctx, found, [1]), 1);
-    assert.match(t.said(), /Reel 1 has nothing to show: it is shorter than one picture\./);
-    assert.equal(reread(found).reels[0].status, "candidate");
-    t.done();
-  });
-  it("leaves no project behind when the pick is not written, as when the other Mac wrote meanwhile", async () => {
-    const { t, found } = phase3();
-    const newer = { ...found.record, rev: 2 };
-    writeFile(join(found.folder, "record", "0002.json"), JSON.stringify(newer, null, 2) + "\n");
-    assert.equal(await pickReels(t.ctx, found, [1]), 1);
-    assert.match(t.said(), /Nothing was written/);
-    assert.ok(!existsSync(join(found.folder, "edit", "reel-1.v0.fcpxml")), "no project is left that no record lists");
-    t.done();
-  });
-});
-
 describe("ask, when something fails half-way (from the review)", () => {
   it("puts everything back, and writes no record of its own, when the other Mac writes the record meanwhile", async () => {
     const { t, found } = askable();
@@ -573,7 +300,6 @@ describe("ask, when something fails half-way (from the review)", () => {
     };
     assert.equal(await editMain(["ask", "--now", FOLDER], t.ctx.deps), 1);
     assert.equal(readFileSync(join(found.folder, "reels.json"), "utf8"), before);
-    assert.ok(!existsSync(join(found.folder, "previews", "reel-3.mp4")), "the new preview is taken away");
     assert.equal(reread(found).rev, 2);
     const result = readResult(t.home, FOLDER, "ask");
     assert.ok(result.failed.some((f) => /changed on the other Mac/.test(f)));
@@ -595,7 +321,6 @@ describe("ask, when something fails half-way (from the review)", () => {
     };
     assert.equal(await editMain(["ask", "--now", FOLDER], t.ctx.deps), 1);
     assert.equal(readFileSync(join(found.folder, "reels.json"), "utf8"), before);
-    assert.ok(!existsSync(join(found.folder, "previews", "reel-3.mp4")));
     assert.equal(reread(found).rev, 1);
     const result = readResult(t.home, FOLDER, "ask");
     assert.ok(result.failed.some((f) => /^reels\.json could not be put into .*: the clone could not be made\. Nothing was copied\.$/.test(f)), result.failed.join(" | "));
@@ -625,20 +350,6 @@ const askedBoth = async (p, said = "Pricing") => {
 };
 
 describe("ask, and a video with a sound ffmpeg cannot read beside one it can, as an iPhone's (main #17)", () => {
-  it("makes each new preview from the sound it can read, by its number, though APAC is listed first", async () => {
-    const p = askable({ FFPROBE: (args) => {
-      const told = JSON.parse(probed({ sound: { sample_rate: "48000", channels: 2 } }));
-      const [picture, sound] = told.streams;
-      told.streams = [{ ...picture, index: 0 }, { ...sound, index: 1, codec_name: "apple_apac", channels: 4 }, { ...sound, index: 2, codec_name: "aac" }];
-      writeFile(args[args.indexOf("-o") + 1], JSON.stringify(told));
-      return { code: 0, stderr: "" };
-    } });
-    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 0, readResult(p.t.home, FOLDER, "ask").failed.join(" | "));
-    const graphs = p.t.calls.filter((c) => c.cmd === "FFMPEG" && /\.part-\d+\.mov$/.test(c.args[c.args.length - 1])).map((c) => c.args[c.args.indexOf("-filter_complex") + 1]);
-    assert.ok(graphs.length > 0, "a preview was made");
-    for (const g of graphs) assert.ok(/\[0:0\]fps=/.test(g) && /\[1:2\]aresample/.test(g) && !/:[av]\]/.test(g), g);
-    p.t.done();
-  });
   it("asks nothing, and changes nothing, when ffprobe cannot read the video", async () => {
     const p = askable({ FFPROBE: () => ({ code: 1, stderr: "moov atom not found\n" }) });
     const before = readFileSync(join(p.found.folder, "reels.json"), "utf8");
@@ -670,26 +381,6 @@ describe("ask, when the list or Claude's reply is not as it was read (PR 19's re
     assert.deepEqual(readResult(p.t.home, FOLDER, "ask").failed, ["The list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac."]);
     p.t.done();
   });
-  it("puts nothing in when the list changed while the previews were made, as when the other Mac added a candidate", async () => {
-    const p = askable();
-    const at = join(p.found.folder, "reels.json");
-    const theirs = JSON.parse(readFileSync(at, "utf8"));
-    const other = JSON.stringify({ ...theirs, candidates: [...theirs.candidates, { ...theirs.candidates[0], n: 9 }], highest: 9 });
-    const guarded = p.t.ctx.deps.runGuarded;
-    p.t.ctx.deps.runGuarded = async (cmd, args) => {
-      if (readFileSync(at, "utf8") !== other) {
-        rmSync(at);
-        writeFile(at, other);
-      }
-      return guarded(cmd, args);
-    };
-    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
-    assert.equal(readFileSync(at, "utf8"), other);
-    assert.ok(!existsSync(join(p.found.folder, "previews", "reel-3.mp4")));
-    assert.equal(reread(p.found).rev, 1);
-    assert.deepEqual(readResult(p.t.home, FOLDER, "ask").failed, ["This episode changed while Claude was asked, so nothing was changed. Ask again."]);
-    p.t.done();
-  });
   it("says which of Claude's clips were left out, and what was wrong with its reply, when another clip is taken", async () => {
     const p = askable({ CLAUDE: () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify({ decisions: [], notes: 3, graphicCues: [], clips: [{ from: "p999", to: "p999", hook: "Nowhere", why: "None." }, { from: "p5", to: "p5", hook: "What this is about", why: "It says it." }] }) }) }) });
     assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 0);
@@ -702,9 +393,9 @@ describe("ask, when the list or Claude's reply is not as it was read (PR 19's re
 });
 
 describe("ask and pick, pinned (PR 19's review)", () => {
-  it("copies in again, at its late check, each file Dropbox took away during the wait: the list, the preview and the record", async () => {
+  it("copies in again, at its late check, each file Dropbox took away during the wait: the list and the record", async () => {
     const p = askable();
-    const gone = ["reels.json", "previews/reel-3.mp4", "record/0002.json"];
+    const gone = ["reels.json", "record/0002.json"];
     p.t.ctx.deps.wait = ((wait) => async (ms) => {
       if (ms === 15 * 60 * 1000) for (const f of gone) rmSync(join(p.found.folder, f), { force: true });
       return wait(ms);
@@ -713,30 +404,6 @@ describe("ask and pick, pinned (PR 19's review)", () => {
     for (const f of gone) assert.ok(existsSync(join(p.found.folder, f)), f);
     assert.deepEqual(JSON.parse(readFileSync(join(p.found.folder, "reels.json"), "utf8")).candidates.map((c) => c.n), [2, 3]);
     p.t.done();
-  });
-  it("keeps a candidate whose preview could not be made, when it adds new ones", async () => {
-    const p = askable();
-    const at = join(p.found.folder, "reels.json");
-    const reels = JSON.parse(readFileSync(at, "utf8"));
-    relist(p.found, JSON.stringify({ ...reels, candidates: reels.candidates.map((c) => ({ ...c, preview: null, failed: "ffmpeg was stopped: it took more than 2 GB of memory, so it was stopped" })) }, null, 2) + "\n");
-    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 0, readResult(p.t.home, FOLDER, "ask").failed.join(" | "));
-    const after = JSON.parse(readFileSync(at, "utf8"));
-    assert.deepEqual(after.candidates.map((c) => [c.n, c.preview, c.failed || ""]), [[2, null, "ffmpeg was stopped: it took more than 2 GB of memory, so it was stopped"], [3, "previews/reel-3.mp4", ""]]);
-    p.t.done();
-  });
-  it("pushes a picked Reel from the project written at its pick, though reels.json can be read and its crop changed since", async () => {
-    const { t, found } = phase3();
-    assert.equal(await pick({ t, found }, 1), 0, t.said());
-    const v0 = readFileSync(join(found.folder, "edit", "reel-1.v0.fcpxml"), "utf8");
-    // The other Mac's brimm-video, or a hand, moves Reel 1's crop in a list this one can read.
-    const at = join(found.folder, "reels.json");
-    const reels = JSON.parse(readFileSync(at, "utf8"));
-    rmSync(at);
-    writeFile(at, JSON.stringify({ ...reels, candidates: reels.candidates.map((c) => (c.n === 1 ? { ...c, ranges: c.ranges.map((r) => ({ ...r, crop: { ...r.crop, x: 0 } })) } : c)) }, null, 2) + "\n");
-    const now = { ...found, record: reread(found) };
-    const made = await reelTimeline(now, now.record.reels.find((r) => r.n === 1), t.ctx);
-    assert.equal(made.xml, v0);
-    t.done();
   });
 });
 
@@ -1019,24 +686,6 @@ describe("ask's late checks: the record says whose a file is (PR 19's check of 0
     assert.deepEqual(filesProblems(p.found.folder, readEpisode(p.found.folder).record), []);
     p.t.done();
   });
-  it("leaves a preview gone that the record in force no longer lists, and says so", async () => {
-    const p = askable();
-    const preview = join(p.found.folder, "previews", "reel-3.mp4");
-    p.t.ctx.deps.wait = ((wait) => async (ms) => {
-      if (ms === LATE) {
-        rmSync(preview);
-        const record = readEpisode(p.found.folder).record;
-        const files = { ...record.files };
-        delete files["previews/reel-3.mp4"];
-        writeFile(join(p.found.folder, "record", `${String(record.rev + 1).padStart(4, "0")}.json`), JSON.stringify({ ...record, rev: record.rev + 1, writer: { commit: "c709b57", on: "Laptop" }, files }, null, 2) + "\n");
-      }
-      return wait(ms);
-    })(p.t.ctx.deps.wait);
-    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 0, readResult(p.t.home, FOLDER, "ask").failed.join(" | "));
-    assert.ok(!existsSync(preview));
-    assert.ok(readResult(p.t.home, FOLDER, "ask").failed.includes("previews/reel-3.mp4 is gone, and the record no longer lists it, so the check of its copies left it out."), readResult(p.t.home, FOLDER, "ask").failed.join(" | "));
-    p.t.done();
-  });
 });
 
 describe("a list this Mac's own put-back kept, and picks that need no list (PR 19's check of 0ab7850, E5, E6, E9, E12, E13)", () => {
@@ -1074,24 +723,6 @@ describe("a list this Mac's own put-back kept, and picks that need no list (PR 1
     const kept = join(p.t.home, "BRIMM Video Work", FOLDER, "put back", "reels.json");
     assert.equal(readResult(p.t.home, FOLDER, "ask").next, `reels.json in the episode is this run's new list, which its record does not list. The one it lists is kept at ${kept}: ask Jason to put it back.`);
     p.t.done();
-  });
-  it("picks a Reel whose project is written and listed, though the listed reels.json is gone", async () => {
-    const { t, found } = phase3();
-    assert.equal(await pick({ t, found }, 1), 0, t.said());
-    rmSync(join(found.folder, "reels.json"));
-    assert.equal(await editMain(["reel", "drop", "Pricing", "1"], t.ctx.deps), 0, t.said());
-    assert.equal(await pick({ t, found }, 1), 0, t.said());
-    t.done();
-  });
-  it("picks a clip Reel of an episode imported before phase 3, after ask added a list that is now gone", async () => {
-    const t = setup({ programs: { CLAUDE: claudeSays([{ from: "p4", to: "p5", hook: "What this is about", why: "It says it." }]), SWIFT: () => ({ code: 0, stderr: "", stdout: "[]" }) } });
-    t.ctx.deps.tools = { ...t.ctx.deps.tools, claude: "CLAUDE", swift: "SWIFT" };
-    t.ctx.deps.runGuarded = async (cmd, args) => ({ ...(await t.ctx.deps.run(cmd, args)), overMemory: false, outOfTime: false, peak: 0, stopped: "" });
-    const found = episodeFor(t, { record: { ...PICKED, reels: [{ ...PICKED.reels[0], status: "candidate" }] }, files: { "Pricing talk.mp4": "the raw video", "Pricing talk.cut-plan.json": PHASE_3.files["Pricing talk.cut-plan.json"], "Pricing talk.reel-1.mp4": "clip one", "Pricing talk.reel-1.srt": "1\n00:00:00,000 --> 00:00:02,600\n So the first thing you need to do is know your\n\n" } });
-    assert.equal(await editMain(["ask", "--now", FOLDER], t.ctx.deps), 0);
-    rmSync(join(found.folder, "reels.json"));
-    assert.equal(await pick({ t, found }, 1), 0, t.said());
-    t.done();
   });
   it("says the episode changed, not that the list is stale, when the other Mac's ask lands while Claude answers", async () => {
     const p = askable();
@@ -1174,7 +805,7 @@ describe("ask's late check and put-back, pinned (PR 19's check of 2d4c8af, F3, F
   };
   it("copies in again a file gone when no record can be read, as with a conflicted copy of another file", async () => {
     const p = askable();
-    const preview = join(p.found.folder, "previews", "reel-3.mp4");
+    const preview = join(p.found.folder, "reels.json");
     p.t.ctx.deps.wait = ((wait) => async (ms) => {
       if (ms === LATE) {
         rmSync(preview);
@@ -1232,59 +863,7 @@ describe("ask's late check and put-back, pinned (PR 19's check of 2d4c8af, F3, F
     assert.ok(readResult(p.t.home, FOLDER, "ask").failed.includes("A newer record of this episode is still coming, so reels.json was left as it is."), readResult(p.t.home, FOLDER, "ask").failed.join(" | "));
     p.t.done();
   });
-  /** An episode imported before phase 3, with no list, whose ask's record cannot be written: so its put is undone, taking
-      away the new list and preview. `during` runs at the put-back's wait, given the episode and this run's own preview. */
-  const oldUndone = async (during) => {
-    const t = setup({ programs: { CLAUDE: claudeSays([{ from: "p4", to: "p5", hook: "What this is about", why: "It says it." }]), SWIFT: () => ({ code: 0, stderr: "", stdout: "[]" }) } });
-    t.ctx.deps.tools = { ...t.ctx.deps.tools, claude: "CLAUDE", swift: "SWIFT" };
-    t.ctx.deps.runGuarded = async (cmd, args) => ({ ...(await t.ctx.deps.run(cmd, args)), overMemory: false, outOfTime: false, peak: 0, stopped: "" });
-    const found = episodeFor(t, { record: { ...PICKED, reels: [PICKED.reels[0]] }, files: { "Pricing talk.mp4": "the raw video", "Pricing talk.cut-plan.json": PHASE_3.files["Pricing talk.cut-plan.json"], "Pricing talk.reel-1.mp4": "clip one", "Pricing talk.reel-1.srt": "1\n00:00:00,000 --> 00:00:02,600\n So the first thing you need to do is know your\n\n" } });
-    const preview = join(found.folder, "previews", "reel-2.mp4");
-    let ours = "";
-    t.ctx.deps.clone = ((clone) => (from, to) => {
-      if (to === preview) ours = readFileSync(from, "utf8");
-      if (to.includes("/record/")) throw new Error("Operation not permitted");
-      clone(from, to);
-    })(t.ctx.deps.clone);
-    t.ctx.deps.wait = ((wait) => async (ms) => {
-      if (ms === LATE) await during(found, preview, ours);
-      return wait(ms);
-    })(t.ctx.deps.wait);
-    const code = await editMain(["ask", "--now", FOLDER], t.ctx.deps);
-    return { t, found, preview, code, result: readResult(t.home, FOLDER, "ask") };
-  };
-  it("waits, and takes away again a preview Dropbox brought back, when every file of the undone put was new (F6, F11)", async () => {
-    const r = await oldUndone((found, preview, ours) => writeFile(preview, ours));
-    assert.ok(r.t.waits.includes(LATE));
-    assert.ok(!existsSync(r.preview));
-    r.t.done();
-  });
-  it("leaves a preview that came back but is not this run's (F6)", async () => {
-    const r = await oldUndone((found, preview) => writeFile(preview, "the laptop's preview"));
-    assert.equal(readFileSync(r.preview, "utf8"), "the laptop's preview");
-    r.t.done();
-  });
-  it("leaves a preview that came back when a record lists it (F6)", async () => {
-    const r = await oldUndone((found, preview, ours) => {
-      writeFile(preview, ours);
-      laptopRecord(found, 2, { "previews/reel-2.mp4": Buffer.byteLength(ours) });
-    });
-    assert.ok(existsSync(r.preview));
-    r.t.done();
-  });
-  it("does not say nothing was changed when a preview that came back cannot be taken away again (F11)", async () => {
-    let previews = "";
-    const r = await oldUndone((found, preview, ours) => {
-      writeFile(preview, ours);
-      previews = dirname(preview);
-      chmodSync(previews, 0o555);
-    });
-    chmodSync(previews, 0o755);
-    assert.ok(r.result.failed.includes("previews/reel-2.mp4 could not be taken away again: " + r.result.failed.find((f) => f.startsWith("previews/reel-2.mp4 could not be taken away again: ")).slice("previews/reel-2.mp4 could not be taken away again: ".length)), r.result.failed.join(" | "));
-    assert.ok(!r.result.failed.includes("Nothing was changed in the episode."), r.result.failed.join(" | "));
-    r.t.done();
-  });
-  it("names the kept list in reels and in picking a Reel too, after this Mac's own put-back lost it (F7, F11)", async () => {
+  it("names the kept list in reels too, after this Mac's own put-back lost it (F7, F11)", async () => {
     const p = askable();
     const at = join(p.found.folder, "reels.json");
     p.t.ctx.deps.clone = ((clone) => (from, to) => {
@@ -1296,77 +875,48 @@ describe("ask's late check and put-back, pinned (PR 19's check of 2d4c8af, F3, F
     const said = () => p.t.said().split("\n").pop();
     assert.equal(await editMain(["reels", "Pricing", "--no-play"], p.t.ctx.deps), 1);
     assert.equal(said(), `reels.json is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. The one its record lists is kept at ${kept}: ask Jason to put it back.`);
-    assert.equal(await pick(p, 2), 1);
-    assert.equal(said(), `reels.json is missing from this episode, though its record lists it, so no Reel is picked: its project could not be made. The one its record lists is kept at ${kept}: ask Jason to put it back.`);
     p.t.done();
   });
-  it("needs the list to pick a Reel whose listed project is gone (F11)", async () => {
-    const { t, found } = phase3();
-    assert.equal(await pick({ t, found }, 1), 0, t.said());
-    assert.equal(await editMain(["reel", "drop", "Pricing", "1"], t.ctx.deps), 0, t.said());
-    rmSync(join(found.folder, "edit", "reel-1.v0.fcpxml"));
-    rmSync(join(found.folder, "reels.json"));
-    assert.equal(await pick({ t, found }, 1), 1);
-    t.done();
+});
+
+describe("reels.json gone, and a copy not kept (F7: the kept branches, on reels.json)", () => {
+  it("reels says it cannot show the candidates and to say it again once Dropbox has the list back, when this Mac kept no copy", async () => {
+    const p = askable();
+    rmSync(join(p.found.folder, "reels.json"));
+    assert.equal(await editMain(["reels", "Pricing", "--no-play"], p.t.ctx.deps), 1);
+    assert.equal(p.t.said().split("\n").pop(), "reels.json is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. Say this again once Dropbox has it back.");
+    p.t.done();
+  });
+  it("lists a candidate ask added with no preview line: a new candidate has none, which is no failure", async () => {
+    const p = askable();
+    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 0);
+    assert.equal(await editMain(["reels", "Pricing", "--no-play"], p.t.ctx.deps), 0);
+    assert.match(p.t.said(), /\n3\. /);
+    assert.doesNotMatch(p.t.said(), /No preview/);
+    p.t.done();
+  });
+  it("does not name a copy an earlier run kept, when this run put the list back and kept none", async () => {
+    const p = askable();
+    const at = join(p.found.folder, "reels.json");
+    const before = readFileSync(at, "utf8");
+    const stale = join(p.t.home, "BRIMM Video Work", FOLDER, "put back", "reels.json");
+    makeDir(dirname(stale), { recursive: true });
+    writeFile(stale, "an earlier list");
+    p.t.ctx.deps.clone = ((clone) => (from, to) => {
+      if (to.includes("/record/")) throw new Error("No space left on device");
+      clone(from, to);
+    })(p.t.ctx.deps.clone);
+    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
+    const next = readResult(p.t.home, FOLDER, "ask").next;
+    assert.equal(next, "The Reel candidates are as they were.");
+    assert.doesNotMatch(next, /kept at/);
+    assert.equal(readFileSync(at, "utf8"), before);
+    p.t.done();
   });
 });
 
 describe("ask's put-back, pinned (PR 19's check of 0ab7850, E2, E4, E11, E15)", () => {
   const LATE = 15 * 60 * 1000;
-  it("takes away again a new preview Dropbox brought back after the put was undone", async () => {
-    const p = askable();
-    const preview = join(p.found.folder, "previews", "reel-3.mp4");
-    let ours = "";
-    p.t.ctx.deps.clone = ((clone) => (from, to) => {
-      if (to === preview) ours = readFileSync(from, "utf8");
-      if (to.includes("/record/")) throw new Error("Operation not permitted");
-      clone(from, to);
-    })(p.t.ctx.deps.clone);
-    p.t.ctx.deps.wait = ((wait) => async (ms) => {
-      if (ms === LATE) writeFile(preview, ours);
-      return wait(ms);
-    })(p.t.ctx.deps.wait);
-    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
-    assert.ok(!existsSync(preview));
-    p.t.done();
-  });
-  it("does not name a copy an earlier run kept, when the list is gone after this run kept none", async () => {
-    const p = askable();
-    const stale = join(p.t.home, "BRIMM Video Work", FOLDER, "put back", "reels.json");
-    makeDir(dirname(stale), { recursive: true });
-    writeFile(stale, "an earlier list");
-    p.t.ctx.deps.clone = ((clone) => (from, to) => {
-      if (to.endsWith("reel-3.mp4")) {
-        // The preview cannot be put in, and Dropbox takes the list away meanwhile: this run kept no copy of it.
-        rmSync(join(p.found.folder, "reels.json"), { force: true });
-        throw new Error("No space left on device");
-      }
-      clone(from, to);
-    })(p.t.ctx.deps.clone);
-    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
-    assert.equal(readResult(p.t.home, FOLDER, "ask").next, "reels.json is not in the episode now.");
-    p.t.done();
-  });
-  it("leaves a list as it was, and says nothing changed, when its delete is refused and nothing was put in over it", async () => {
-    const p = askable();
-    const at = join(p.found.folder, "reels.json");
-    const before = readFileSync(at, "utf8");
-    p.t.ctx.deps.clone = ((clone) => (from, to) => {
-      clone(from, to);
-      // Once the preview is in, the episode's folder refuses every delete, as the File Provider can.
-      if (to.endsWith("reel-3.mp4")) chmodSync(p.found.folder, 0o555);
-    })(p.t.ctx.deps.clone);
-    try {
-      assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
-    } finally {
-      chmodSync(p.found.folder, 0o755);
-    }
-    const failed = readResult(p.t.home, FOLDER, "ask").failed;
-    assert.equal(readFileSync(at, "utf8"), before);
-    assert.ok(!failed.some((f) => /could not be put back/.test(f)), failed.join(" | "));
-    assert.ok(failed.includes("Nothing was changed in the episode."), failed.join(" | "));
-    p.t.done();
-  });
 });
 
 describe("ask's late checks decide whose a file is by its words (PR 19's check of dfe3aab, D4, D5, D9, D11, D13)", () => {
@@ -1454,23 +1004,6 @@ describe("ask's late checks decide whose a file is by its words (PR 19's check o
   });
 });
 
-describe("reels, pick and push of an episode whose listed reels.json is gone (PR 19's check of dfe3aab, D3)", () => {
-  it("say the list is missing, not that the Reels are clips the import cut", async () => {
-    const { t, found } = phase3();
-    rmSync(join(found.folder, "reels.json"));
-    assert.equal(await editMain(["reels", "Pricing", "--no-play"], t.ctx.deps), 1);
-    assert.equal(t.said(), "reels.json is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. Say this again once Dropbox has it back.");
-    const picking = phase3();
-    rmSync(join(picking.found.folder, "reels.json"));
-    assert.equal(await pick(picking, 1), 1);
-    assert.equal(picking.t.said(), "reels.json is missing from this episode, though its record lists it, so no Reel is picked: its project could not be made. Say this again once Dropbox has it back.");
-    assert.equal(reread(picking.found).rev, 1);
-    assert.deepEqual(await reelTimeline(found, found.record.reels[1], t.ctx), { why: "reels.json is missing from this episode, though its record lists it." });
-    t.done();
-    picking.t.done();
-  });
-});
-
 describe("ask, of a recording with no picture (PR 19's review)", () => {
   it("refuses, since a recording with no picture gets no Reels", async () => {
     const p = askable();
@@ -1509,22 +1042,19 @@ describe("ask's late checks copy nothing once the other Mac has the episode (PR 
   it("leaves what is not whole after a good put, says so, and is not ok, when the laptop opened it during the wait", async () => {
     const p = askable();
     const at = join(p.found.folder, "reels.json");
-    const preview = join(p.found.folder, "previews", "reel-3.mp4");
     p.t.ctx.deps.wait = ((wait) => async (ms) => {
       if (ms === LATE) {
         laptopOpens(p.found);
         const cut = readFileSync(at, "utf8").slice(0, 40);
         rmSync(at);
         writeFile(at, cut);
-        rmSync(preview);
       }
       return wait(ms);
     })(p.t.ctx.deps.wait);
     assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
     assert.equal(readFileSync(at, "utf8").length, 40);
-    assert.ok(!existsSync(preview));
     const failed = readResult(p.t.home, FOLDER, "ask").failed;
-    for (const f of ["previews/reel-3.mp4", "reels.json"]) assert.ok(failed.includes(`${f} is not as this Mac put it when its copies were checked, and Sallie's laptop has ${NAME} open now, so it was not copied in again. This Mac's copy is kept at ${join(p.t.home, "BRIMM Video Work", FOLDER, "put back", f)}.`), failed.join(" | "));
+    for (const f of ["reels.json"]) assert.ok(failed.includes(`${f} is not as this Mac put it when its copies were checked, and Sallie's laptop has ${NAME} open now, so it was not copied in again. This Mac's copy is kept at ${join(p.t.home, "BRIMM Video Work", FOLDER, "put back", f)}.`), failed.join(" | "));
     p.t.done();
   });
   it("copies nothing back at the put-back's late check either, when the laptop opened it during that wait", async () => {
@@ -1615,7 +1145,7 @@ describe("ask's late checks copy nothing once the other Mac has the episode (PR 
   });
   it("sees her claim though a conflicted copy is in the folder, and copies nothing in (claim-latecheck-2)", async () => {
     const p = askable();
-    const preview = join(p.found.folder, "previews", "reel-3.mp4");
+    const preview = join(p.found.folder, "reels.json");
     p.t.ctx.deps.wait = ((wait) => async (ms) => {
       if (ms === LATE) {
         laptopOpens(p.found);
@@ -1630,7 +1160,7 @@ describe("ask's late checks copy nothing once the other Mac has the episode (PR 
   });
   it("sees her claim in a conflicted copy of a record, and copies nothing in (claim-latecheck-2)", async () => {
     const p = askable();
-    const preview = join(p.found.folder, "previews", "reel-3.mp4");
+    const preview = join(p.found.folder, "reels.json");
     p.t.ctx.deps.wait = ((wait) => async (ms) => {
       if (ms === LATE) {
         const record = readEpisode(p.found.folder).record;
@@ -1646,7 +1176,7 @@ describe("ask's late checks copy nothing once the other Mac has the episode (PR 
   it("copies nothing in once her claim is seen after this run's record goes back in (claim-latecheck-3)", async () => {
     const p = askable();
     const own = join(p.found.folder, "record", "0002.json");
-    const preview = join(p.found.folder, "previews", "reel-3.mp4");
+    const preview = join(p.found.folder, "reels.json");
     let waited = false;
     p.t.ctx.deps.clone = ((clone) => (from, to) => {
       clone(from, to);
@@ -1663,29 +1193,6 @@ describe("ask's late checks copy nothing once the other Mac has the episode (PR 
     assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
     assert.ok(existsSync(own));
     assert.ok(!existsSync(preview));
-    p.t.done();
-  });
-  it("names a preview of this run's that came back under her claim, and does not say nothing was changed (claim-latecheck-4)", async () => {
-    const p = askable();
-    const preview = join(p.found.folder, "previews", "reel-3.mp4");
-    let ours = "";
-    p.t.ctx.deps.clone = ((clone) => (from, to) => {
-      if (to === preview) ours = readFileSync(from, "utf8");
-      if (to.includes("/record/")) throw new Error("Operation not permitted");
-      clone(from, to);
-    })(p.t.ctx.deps.clone);
-    p.t.ctx.deps.wait = ((wait) => async (ms) => {
-      if (ms === LATE) {
-        laptopOpens(p.found);
-        writeFile(preview, ours);
-      }
-      return wait(ms);
-    })(p.t.ctx.deps.wait);
-    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
-    assert.ok(existsSync(preview));
-    const failed = readResult(p.t.home, FOLDER, "ask").failed;
-    assert.ok(failed.includes(`previews/reel-3.mp4 is this run's, and no record lists it, but Sallie's laptop has ${NAME} open now, so it was left as it is.`), failed.join(" | "));
-    assert.ok(!failed.includes("Nothing was changed in the episode."), failed.join(" | "));
     p.t.done();
   });
   it("calls a list she put in under her claim hers, as her record lists it, and keeps no copy of this run's (PR 19, G3)", async () => {
@@ -1738,7 +1245,7 @@ describe("ask's late checks copy nothing once the other Mac has the episode (PR 
   });
   it("does not count a claim in a conflicted copy of a record older than the one in force (G4)", async () => {
     const p = askable();
-    const preview = join(p.found.folder, "previews", "reel-3.mp4");
+    const preview = join(p.found.folder, "reels.json");
     p.t.ctx.deps.wait = ((wait) => async (ms) => {
       if (ms === LATE) {
         const first = JSON.parse(readFileSync(join(p.found.folder, "record", "0001.json"), "utf8"));
@@ -1805,7 +1312,7 @@ describe("ask, reels and an episode the other Mac has open (phase 1b's claim)", 
     const record = JSON.parse(readFileSync(at, "utf8"));
     writeFile(at, JSON.stringify({ ...record, editing: { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00" } }, null, 2) + "\n");
   };
-  const held = `Sallie's laptop has ${NAME} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.`;
+  const held = `Sallie's laptop has ${NAME} open. Carry on there. Nothing was changed.`;
   it("ask refuses, both parts, and asks nothing", async () => {
     const p = askable();
     openOnLaptop(p.found);

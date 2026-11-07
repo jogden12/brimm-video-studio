@@ -18,9 +18,9 @@ import { isRunning } from "./run.js";
 export const CHECKING_FILE = "finish.checking.json";
 /** The note of a finish whose late check found a problem after its hand-off was written. */
 export const PROBLEM_FILE = "finish.problem.json";
-/** The places a finish takes originals from, in the order they are said: the HyperFrames app's exports are in Downloads, and Final
-    Cut's Shares and exports in From Final Cut. */
-export const PLACES = ["Downloads", "From Final Cut"];
+/** The places a finish takes originals from: the HyperFrames app's exports are in Downloads. A marker an older finish left may name
+    another place: it is none now. */
+export const PLACES = ["Downloads"];
 
 const checkingFile = (home, folder) => join(episodeWork(home, folder), CHECKING_FILE);
 const problemFile = (home, folder) => join(episodeWork(home, folder), PROBLEM_FILE);

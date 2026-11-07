@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findTools } from "../run.js";
-import { stillsArgs, needsReframe, speakerPlace, cropFor, cropsFor, UPRIGHT, shownWidth, uprightPosition, verticalArgs, clipArgs, REEL_MIN, REEL_MAX, STORY_MAX, fitReel, storyParts, clipNames, storyCuts, stretchesOf } from "../reframe.js";
+import { stillsArgs, speakerPlace, cropFor, cropsFor, UPRIGHT, shownWidth, uprightPosition, verticalArgs, clipArgs, REEL_MIN, REEL_MAX, STORY_MAX, fitReel, storyParts, clipNames, storyCuts, stretchesOf } from "../reframe.js";
 
 const WIDE = { width: 1920, height: 1080 };
 /** A face box whose middle is `centre` of the way across the picture. `size` is its width, as a share of the picture's. */
@@ -28,16 +28,6 @@ describe("the stills the faces are looked for in", () => {
   });
 });
 
-describe("whether a video needs a new shape", () => {
-  it("does when its picture is wider than it is tall", () => {
-    assert.equal(needsReframe({ width: 1920, height: 1080 }), true);
-    assert.equal(needsReframe({ width: 1081, height: 1080 }), true);
-  });
-  it("is left as it is when it is already vertical or square", () => {
-    assert.equal(needsReframe({ width: 1080, height: 1920 }), false);
-    assert.equal(needsReframe({ width: 1080, height: 1080 }), false);
-  });
-});
 
 describe("where the speaker is across the picture", () => {
   // The boxes here are made of halves, quarters and eighths, which a computer keeps exactly, so that a middle is compared as it is.

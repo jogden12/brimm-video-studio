@@ -29,16 +29,7 @@ const written = (due, of = "") => `The hand-off${of} is written, and Studio chec
 const STILL = {
   spell: 'finish is running for this episode. Say "how far is it?", and try again when it is done.',
   finish: 'finish is running for this episode. Say "how far is it?"',
-  release: 'finish is running for Pricing: what to charge?. Say "how far is it?", and hand it over when it is done. Nothing was handed over.',
   kind: "finish is running for 2026-10-14 Pricing talk (Mac Studio) already. Say it again when it has finished."
-};
-/** The layer commands, each with words that take it as far as the stop. */
-const LAYERS = {
-  captions: ["captions", FOLDER, "off"],
-  text: ["text", FOLDER, "add", "lower-third", "--at", "0:01", "--line", "Sallie Ogden"],
-  graphic: ["graphic", FOLDER, "add", "chart.png", "--at", "0:01"],
-  preset: ["preset", FOLDER, "--look", "bright"],
-  cut: ["cut", FOLDER, "remove", "--words", "know your costs"]
 };
 const SPELL = ["spell", FOLDER, "add", "Pricing", "Prycing"];
 const KIND = ["kind", FOLDER, "raw", "--private", "no", "--again", "--not-a-session"];
@@ -81,20 +72,6 @@ describe("handing the video off again, while a finish waits for its late check",
     assert.ok(heard.again.said.includes(`${written(heard.due)} Say "hand off the Reels" again then.`), heard.again.text);
     w.t.done();
   });
-  it("is stopped in the words of the Final Cut way for a finish from Final Cut's files", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: { ...EDITED, version: 3, kind: "raw", answer: ANSWERED, reading: READ("raw"), offers: OFFERS } });
-    t.shared(`${PROJECT.main}.mp4`, 2000);
-    t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    t.shared(`${PROJECT["reel 1"]}.mov`, 2000);
-    t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 3000);
-    t.shared(`${PROJECT["reel 2"]}.mov`, 2000);
-    assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
-    const heard = await whileChecking({ t, found }, { again: ["finish", FOLDER, "--yes", "--no-hand-edits", "reel 2"] });
-    assert.equal(heard.again.code, 1, heard.again.text);
-    assert.ok(heard.again.said.includes(`${written(heard.due)} Say finish again then.`), heard.again.text);
-    t.done();
-  });
   it("is stopped in the words it had while the finish still copies", async () => {
     const w = await exported();
     let copying = null;
@@ -103,44 +80,6 @@ describe("handing the video off again, while a finish waits for its late check",
     }, 5000);
     assert.equal(await editMain(["finish", "--now", FOLDER], w.t.ctx.deps), 0, w.t.said());
     assert.ok(copying.said.includes(STILL.finish), copying.text);
-    w.t.done();
-  });
-});
-
-describe("handing the episode over to the other Mac, while a finish waits for its late check", () => {
-  it("is stopped with the hand-off written and when Studio checks, to hand it over then, and says nothing was handed over", async () => {
-    const w = await exported();
-    const heard = await whileChecking(w, { over: ["release", FOLDER] });
-    assert.deepEqual([heard.over.code, heard.over.text], [1, `${written(heard.due, " of Pricing: what to charge?")} Hand it over then. Nothing was handed over.`]);
-    w.t.done();
-  });
-  it("is stopped in the words it had while the finish still copies", async () => {
-    const w = await exported();
-    let copying = null;
-    atWait(w.t, async () => {
-      copying = await on(seeing(w), "release", FOLDER);
-    }, 5000);
-    assert.equal(await editMain(["finish", "--now", FOLDER], w.t.ctx.deps), 0, w.t.said());
-    assert.equal(copying.text, STILL.release);
-    w.t.done();
-  });
-});
-
-describe("a change to the timeline's layers, while a finish waits for its late check", () => {
-  it("is stopped with the hand-off written and when Studio checks, to try again then, for each of the layer commands", async () => {
-    const w = await exported();
-    const heard = await whileChecking(w, LAYERS);
-    for (const name of Object.keys(LAYERS)) assert.deepEqual([heard[name].code, heard[name].text], [1, `${written(heard.due)} Try again then.`], name);
-    w.t.done();
-  });
-  it("is stopped in the words it had while the finish still copies", async () => {
-    const w = await exported();
-    let copying = null;
-    atWait(w.t, async () => {
-      copying = await on(seeing(w), ...LAYERS.captions);
-    }, 5000);
-    assert.equal(await editMain(["finish", "--now", FOLDER], w.t.ctx.deps), 0, w.t.said());
-    assert.equal(copying.text, STILL.spell);
     w.t.done();
   });
 });
@@ -209,15 +148,13 @@ describe("the stops, while a read run waits for its own late check (R1d)", () =>
     if (early) writeFileSync(resultFile(w.t.home, FOLDER, "read"), JSON.stringify({ version: 1, command: "read", started: ended - 1000, ended, ok: true, made: [], failed: [], next: "", early: true, pid: process.pid }));
     return { w, at: clockAt(ended + LATE_CHECK_MS) };
   }
-  const NAMED = { release: "Pricing: what to charge?", kind: FOLDER, ask: FOLDER };
+  const NAMED = { kind: FOLDER, ask: FOLDER };
   it("say when Studio checks Dropbox's copies, from the run's early result, in each command's own words", async () => {
     const { w, at } = reading();
     const says = (argv) => on(seeing(w, { tools: { claude: "claude" } }), ...argv);
     const first = await says(["finish", FOLDER, "--yes"]);
     assert.equal(first.code, 1, first.text);
     assert.ok(first.said.includes(`Claude's reading is written, and Studio checks Dropbox's copies at ${at}. Say "hand it off" again then.`), first.text);
-    const release = await says(["release", FOLDER]);
-    assert.deepEqual([release.code, release.text], [1, `Claude's reading of ${NAMED.release} is written, and Studio checks Dropbox's copies at ${at}. Hand it over then. Nothing was handed over.`]);
     for (const [what, argv] of [["kind", KIND], ["ask", ["ask", FOLDER]]]) {
       const heard = await says(argv);
       assert.deepEqual([heard.code, heard.text], [1, `Claude's reading of ${NAMED[what]} is written, and Studio checks Dropbox's copies at ${at}. Say it again then.`], what);
@@ -238,7 +175,7 @@ describe("the stops, while a read run waits for its own late check (R1d)", () =>
   });
   it("say their generic words with no early result of that run", async () => {
     const { w } = reading(false);
-    for (const argv of [["release", FOLDER], KIND, ["ask", FOLDER]]) {
+    for (const argv of [KIND, ["ask", FOLDER]]) {
       const heard = await on(seeing(w, { tools: { claude: "claude" } }), ...argv);
       assert.equal(heard.code, 1);
       assert.doesNotMatch(heard.text, /Claude's reading/);

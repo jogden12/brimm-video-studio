@@ -410,13 +410,13 @@ describe("reel --client-agreed: refused before any dialog, in this order", () =>
     theirs.t.done();
     const running = agreeMac();
     mkdirSync(episodeWork(running.t.home, FOLDER), { recursive: true });
-    writeFileSync(lockOf(running.t.home, FOLDER), JSON.stringify({ pid: 4242, command: "push" }));
+    writeFileSync(lockOf(running.t.home, FOLDER), JSON.stringify({ pid: 4242, command: "finish" }));
     const before = snapshot(running.t);
     const d = dialogs(running.t, running.found, agreed(), { alive: (pid) => pid === 4242 });
     const r = await d.ask(...agree(2));
     assert.equal(r.code, 1);
     assert.equal(r.said.length, 1);
-    assert.match(r.said[0], /^push is running for .* already\. Say it again when it has finished\.$/);
+    assert.match(r.said[0], /^finish is running for .* already\. Say it again when it has finished\.$/);
     assert.doesNotMatch(r.text, secret);
     assert.deepEqual([d.asked.length, snapshot(running.t), existsSync(noteOf(running.t))], [0, before, false]);
     running.t.done();
@@ -500,9 +500,9 @@ describe("reel --client-agreed: after her click it checks again, and writes noth
   it("when a run started at work on the session while the dialog was open", async () => {
     const mac = agreeMac();
     const { t } = mac;
-    await stopped(mac, /^Not noted: push is running for .* already\. Say it again when it has finished\.$/, () => {
+    await stopped(mac, /^Not noted: finish is running for .* already\. Say it again when it has finished\.$/, () => {
       mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
-      writeFileSync(lockOf(t.home, FOLDER), JSON.stringify({ pid: 4242, command: "push" }));
+      writeFileSync(lockOf(t.home, FOLDER), JSON.stringify({ pid: 4242, command: "finish" }));
     }, { deps: { alive: (pid) => pid === 4242 } });
     t.done();
   });

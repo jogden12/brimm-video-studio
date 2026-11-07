@@ -16,7 +16,7 @@ import { projectOnAnotherMac } from "../app.js";
 import { REEL_COPY_KINDS, madeInApp, openReelInApp, openReelWords, reelAsked, reelStretch, reelWhy } from "../app-reel.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { episodeFault, layoutOf, localStamp, newEpisode, newPlannedEpisode } from "../episode.js";
-import { reelEntries, reelsFile } from "../reels.js";
+import { reelEntries, reelsFile } from "../reel-candidates.js";
 import { episodeWork } from "../settings.js";
 import { workCopyLockOf } from "../workcopy.js";
 import { reelCopyKey, reelCopyPaths } from "../workcopy.js";

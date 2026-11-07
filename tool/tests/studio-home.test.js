@@ -77,7 +77,7 @@ describe("with BRIMM_VIDEO_HOME set", () => {
       const shown = run("settings.js", ["show"], env);
       assert.equal(shown.status, 0, shown.stdout + shown.stderr);
       assert.ok(shown.stdout.includes(`in ${settingsFile(t.scratch)}:`), shown.stdout);
-      assert.ok(shown.stdout.includes(`Work in Final Cut:  ${workFolder(t.scratch)}`), shown.stdout);
+      assert.ok(shown.stdout.includes(`Work folder:  ${workFolder(t.scratch)}`), shown.stdout);
       const set = run("settings.js", ["set", "--import", "light"], env);
       assert.equal(set.status, 0, set.stdout + set.stderr);
       assert.equal(readSettings(t.scratch).settings.import, "light");

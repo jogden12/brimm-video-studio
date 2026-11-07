@@ -2,7 +2,7 @@
 // short form of a Mac's name, and the names a push gives its project and its timeline. Nothing here touches a disk.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { fileSafe, episodeFolderName, machineSlug, shortId, projectName, timelineFile, eventName } from "../names.js";
+import { fileSafe, episodeFolderName, machineSlug, shortId, timelineFile } from "../names.js";
 
 describe("the file-safe form of a name", () => {
   it("has a dash for each character Dropbox calls incompatible", () => {
@@ -46,10 +46,6 @@ describe("the names a push gives", () => {
   it("has the short id, the last six characters of the episode's id", () => {
     assert.equal(shortId("e-20261014-3fa9c1"), "3fa9c1");
   });
-  it("names a project by the file-safe name, the part, the version and the short id", () => {
-    assert.equal(projectName({ name: "Pricing: what to charge?", part: "main", v: 3, id: "e-20261014-3fa9c1" }), "Pricing- what to charge- main v3 3fa9c1");
-    assert.equal(projectName({ name: "Pricing talk", part: { reel: 2 }, v: 1, id: "e-20261014-3fa9c1" }), "Pricing talk reel 2 v1 3fa9c1");
-  });
   it("names the timeline kept in edit/ by the part, the version and the Mac, and the import's own as version 0", () => {
     assert.equal(timelineFile({ part: "main", v: 0 }), "edit/main.v0.fcpxml");
     assert.equal(timelineFile({ part: "main", v: 3, machine: "Mac Studio" }), "edit/main.v3.mac-studio.fcpxml");
@@ -65,11 +61,5 @@ describe("the short form of a Mac's name", () => {
   });
   it("has no dash at either end", () => {
     assert.equal(machineSlug(" -Studio 2- "), "studio-2");
-  });
-});
-
-describe("the event a push puts its project in", () => {
-  it("is the episode folder's name, for every push of the episode, main or Reel", () => {
-    assert.equal(eventName("2026-10-13 Talk (Mac Studio)"), "2026-10-13 Talk (Mac Studio)");
   });
 });

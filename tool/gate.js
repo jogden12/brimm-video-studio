@@ -13,8 +13,8 @@ import { isPlannedRecord, kindOf, shownName } from "./episode.js";
 /** The commands that name no episode: their output is built from labels alone, and is not gated here. */
 export const UNSCOPED = ["episodes", "status", "behind", "retry", "guide"];
 /** The commands that run for a video not yet answered: `kind` answers it, `leave` leaves it, `which` says which it is, `show`
-    opens a copy of it on this Mac, `release` hands it over to the other Mac, and `resolve` sorts out its conflicted copies. */
-export const UNANSWERED = ["kind", "leave", "which", "show", "release", "resolve"];
+    opens a copy of it on this Mac, and `resolve` sorts out its conflicted copies. */
+export const UNANSWERED = ["kind", "leave", "which", "show", "resolve"];
 /** The commands that run for a session not cleared, with this Mac's training gate on or off: those, and `name`. */
 export const SESSION = [...UNANSWERED, "name"];
 /** The commands that run for a planned episode (isPlannedRecord), beside those that name no episode: `plan`, which shows and sets its
@@ -170,7 +170,7 @@ export function gateFor(command, record, { teachingsOn = false, lapsed = false, 
 /** Why `command` may not run for a video held as a session: one that is not a session itself, nor gated, but one of whose other
     versions (finish.js linksOf, sessionsBeside: its version set as the hand-off writers read it) is a client or group session whose
     mark is not cleared. It fails closed, as for a session: only the commands of UNANSWERED run, which answer it (`kind`, as a session
-    too), say which it is, open a copy of it, hand it over or sort out a conflict; every other is refused, in HELD's words, until it
+    too), say which it is, open a copy of it or sort out a conflict; every other is refused, in HELD's words, until it
     is answered as a session itself or that mark is cleared. "" when it may run; a command that names no episode is not gated. */
 export function heldGateFor(command) {
   if (UNSCOPED.includes(command) || UNANSWERED.includes(command)) return "";

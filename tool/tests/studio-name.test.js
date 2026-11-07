@@ -86,7 +86,7 @@ const ALLOWED = [
   { file: "gate.js", exact: "not for brimm-video", why: "the same stored answer state, compared with" },
   { file: "edit.js", exact: "not for brimm-video", why: "the same stored answer state" },
   { file: "finish.js", has: "brimm-video reels", why: "the format id of reels.json, a file on disk older Macs read" },
-  { file: "reels.js", has: "brimm-video reels", why: "the format id of reels.json, a file on disk older Macs read" },
+  { file: "reel-candidates.js", has: "brimm-video reels", why: "the format id of reels.json, a file on disk older Macs read" },
   { file: "teachings.js", has: "brimm-video teachings", why: "the format id of a session's teachings file on disk" },
   { file: "detached.js", has: "brimm-video.log", why: "the tool's log file name, as the launch agent writes it" },
   { file: "places.js", has: "brimm-video.log", why: "the tool's log file name" },

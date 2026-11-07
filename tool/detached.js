@@ -158,9 +158,7 @@ export function releaseEpisodeLock(lock, text) {
 
 /** Run `work` as the detached run of `command` for the episode `folder`: it takes the episode's lock (one left by a run that
     died is taken over), keeps the Mac awake while this process runs (`keepAwake`), awaits `work()`, which resolves
-    { ok, made, failed, next }, writes the result file whole, and lets the lock go, whatever happened. The bring of a take-over
-    that brought every file also resolves `takeOver`, { by, since, next }: the claim it was for, and what to say next while
-    that claim stands, which the result keeps. Resolves the result, or { running } naming the command whose run holds the lock, when another run is at
+    { ok, made, failed, next }, writes the result file whole, and lets the lock go, whatever happened. Resolves the result, or { running } naming the command whose run holds the lock, when another run is at
     work on the episode: then nothing is done. `alive` and `now` are the Mac's own unless a test gives others. `clean` is what
     each line of the result is written as, which `status` prints into Sallie's chat: for a video not yet answered, or a session,
     the line with nothing of the video's names in it (edit.js), and for any other the line as it is. An error of its own, as a
@@ -208,7 +206,6 @@ export async function runDetached({ home, folder, command, lock: own, keepAwake 
   const result = resultOf(done);
   // The footage copies a working copy's run could not make (edit.js workcopy): the run's own result is the video's, and they cost it nothing, but the open of the project reads them (app.js placeFootage).
   if (Array.isArray(done.footageFailed) && done.footageFailed.length) result.footageFailed = done.footageFailed.map(clean);
-  if (done.takeOver) result.takeOver ={ ...done.takeOver, ...(done.takeOver.next ? { next: clean(done.takeOver.next) } : {}) };
   let failure = null;
   try {
     writeWhole(resultFile(home, folder, command), JSON.stringify(result, null, 2) + "\n");

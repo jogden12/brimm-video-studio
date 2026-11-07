@@ -1,4 +1,4 @@
-// Running a program that could run away, under a watchdog: ffmpeg making a Reel's preview. On 2026-10-14 an ffmpeg asked for a
+// Running a program that could run away, under a watchdog: ffmpeg. On 2026-10-14 an ffmpeg asked for a
 // preview of a stretch that lay past the end of its video grew its memory without end, about 4 GB a second, and took the Mac
 // Studio to 101 GB before it was killed by hand. An import runs unattended, and on Sallie's laptop there are 16 GB. So such a
 // program is run in a group of its own, its memory is looked at every 50 ms, and the whole group is killed outright when the

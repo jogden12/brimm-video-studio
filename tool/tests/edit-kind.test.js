@@ -337,8 +337,9 @@ describe("kind: the claim", () => {
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no", "--again");
     assert.deepEqual([r.code, r.said], [1, ["Pricing talk is being answered on Sallie's laptop. Nothing was changed."]]);
     assert.deepEqual([t.started.length, reread(found).kind], [started, "finished"]);
-    // It lets go, as today, and the other Mac's answer then goes through.
-    assert.equal((await on(laptop.deps, "release", LABEL)).code, 0);
+    // Once the other Mac lets go (a record with nobody editing, as an older Studio's hand-over wrote it), this Mac's answer goes through.
+    const held = reread(found);
+    writeFileSync(recordFile(found.folder, held.rev + 1), recordText({ ...held, editing: null, rev: held.rev + 1, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
     const after = await on(t.ctx.deps, "kind", "Pricing talk", "raw", "--private", "no", "--again");
     assert.equal(after.code, 0, after.text);
     assert.equal(reread(found).kind, "raw");
@@ -1408,7 +1409,7 @@ describe("a video left alone, in the gate's own words", () => {
   it("is refused by ask and by open in words that do not say it is waiting for its answer", async () => {
     const t = setup();
     const found = waiting(t, { answer: { ...ANSWER, state: "not for brimm-video" } });
-    for (const name of ["ask", "open", "reels", "push", "finish", "name"]) {
+    for (const name of ["ask", "open", "reels", "spell", "finish", "name"]) {
       const words = name === "name" ? [LABEL, "A name"] : [LABEL];
       const r = await on(t.ctx.deps, name, ...words);
       assert.deepEqual([r.code, r.said], [1, [LEFT]], name);
@@ -1613,7 +1614,7 @@ describe("kind and leave: one answer at a time on a Mac (fix round 1, 1)", () =>
 });
 
 describe("kind: a session lets the video go (fix round 1, 2)", () => {
-  it("leaves the video with nobody editing it, so that the other Mac's name and release are not refused for the claim", async () => {
+  it("leaves the video with nobody editing it, so that the other Mac's name is not refused for the claim", async () => {
     const t = setup();
     const found = waiting(t);
     const laptop = otherMac(t);
@@ -1621,8 +1622,6 @@ describe("kind: a session lets the video go (fix round 1, 2)", () => {
     assert.equal(marked.code, 0, marked.text);
     const label = reread(found).name.text;
     assert.equal(reread(found).editing, null);
-    const released = await on(t.ctx.deps, "release", label);
-    assert.deepEqual(released.said, [`This Mac does not have ${label} open, so there is nothing to hand over.`]);
     const named = await on(t.ctx.deps, "name", label, "A name of her own");
     assert.equal(named.code, 0, named.text);
     t.done();

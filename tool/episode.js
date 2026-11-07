@@ -728,14 +728,9 @@ export const heldElsewhere = (record, machine) => (record.editing && record.edit
     named as everything edit.js prints names it (shownName). */
 export const heldText = (record, machine) => {
   const held = heldElsewhere(record, machine);
-  return held ? `${held.by} has ${shownName(record)} open. Open it here first (say "take it over" if they are done with it). Nothing was changed.` : "";
+  return held ? `${held.by} has ${shownName(record)} open. Carry on there. Nothing was changed.` : "";
 };
 
 /** The record with `machine` editing it since `at`. */
 export const claimed = (record, machine, at) => ({ ...record, editing: { by: machine, since: at } });
 
-/** The record let go at `at` by the Mac `by`: nobody is editing it, and `files`, the files the episode holds now with their
-    sizes, are kept as what it held then, so that the other Mac's `open` can wait until they have all arrived. `answers` are
-    what that Mac said of each part it pushed last, by its key ("main", "reel 2"): { v, said }, where `said` is "no changes"
-    or "changes stay on <Mac>", which the other Mac's push takes in place of asking (spec section 4). */
-export const released = (record, files, { at = localStamp(), by, answers = {} } = {}) => ({ ...record, editing: null, released: { at, by, files, answers } });

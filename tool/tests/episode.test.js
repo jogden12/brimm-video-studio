@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RECORD_DIR, RECORD_VERSION, NEWEST_VERSION, recordFile, newEpisode, episodeFault, faultFor, recordText, readEpisode, writeEpisode, conflictedCopies, conflictedOf, conflictedBy, CONFLICT_FORMS, filesProblems, lastWritten, undone, heldElsewhere, claimed, released, newId, localStamp, shown, isDay } from "../episode.js";
+import { RECORD_DIR, RECORD_VERSION, NEWEST_VERSION, recordFile, newEpisode, episodeFault, faultFor, recordText, readEpisode, writeEpisode, conflictedCopies, conflictedOf, conflictedBy, CONFLICT_FORMS, filesProblems, lastWritten, undone, heldElsewhere, claimed, newId, localStamp, shown, isDay } from "../episode.js";
 import { writtenFile } from "../settings.js";
 
 const AT = "2026-10-14T09:12:00-05:00";
@@ -490,15 +490,14 @@ describe("who is editing an episode", () => {
     assert.equal(heldElsewhere(RECORD, "Mac Studio"), null);
     assert.equal(RECORD.editing, null);
   });
-  it("is nobody once the claim is let go, and the record keeps the files the episode held then, with their sizes", () => {
-    const held = claimed(RECORD, "Sallie's laptop", "2026-10-14T13:40:00-05:00");
+  it("reads the record an older Studio left when it handed the episode over: nobody editing, and the files it held then, with their sizes", () => {
+    // `release` is gone (Phase 2, F5), but its records are never rewritten: `released` stays a valid field.
     const files = { ...RECORD.files, "edit/main.v1.sallies-laptop.fcpxml": 9400 };
     const answers = { main: { v: 1, said: "no changes" } };
-    const letGo = released(held, files, { at: "2026-10-14T16:05:00-05:00", by: "Sallie's laptop", answers });
-    assert.deepEqual([letGo.editing, letGo.released], [null, { at: "2026-10-14T16:05:00-05:00", by: "Sallie's laptop", files, answers }]);
+    const letGo = { ...claimed(RECORD, "Sallie's laptop", "2026-10-14T13:40:00-05:00"), editing: null, released: { at: "2026-10-14T16:05:00-05:00", by: "Sallie's laptop", files, answers } };
+    assert.equal(heldElsewhere(letGo, "Mac Studio"), null);
     assert.equal(episodeFault(letGo), "");
-    assert.match(released(held, files, { by: "Sallie's laptop" }).released.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/);
-    assert.deepEqual(released(held, files, { by: "Sallie's laptop" }).released.answers, {});
+    assert.notEqual(episodeFault({ ...letGo, released: { at: "2026-10-14T16:05:00-05:00", files: { "a.mov": -1 } } }), "");
   });
 });
 

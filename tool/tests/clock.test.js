@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { wordsOf, pausesOf, phrasesOf } from "../cuts.js";
 import { secondsOf, clockText, clockOf, clockOfRanges, rawAt, timelineAt, lengthOf, wordsAt, momentOf, heardWords, insideTheirTime, cutsOn, cutNear } from "../clock.js";
-import { fcpxml } from "../fcpxml.js";
+import { readFileSync } from "node:fs";
 import { TOLD, PAUSES } from "./fixtures.js";
 
 const RAW = wordsOf(TOLD);
@@ -11,7 +11,8 @@ const RAW = wordsOf(TOLD);
 const WORDS = heardWords(RAW, phrasesOf(RAW, pausesOf(PAUSES)));
 /** The main video's kept pieces in the made-up recording, as its cut plan gives them. */
 const MAIN = [{ start: 5.87, end: 9.838 }, { start: 13.383, end: 16.53 }, { start: 19.214, end: 21.297 }];
-const FACTS = { duration: 23.423, frameRate: "30000/1001", width: 1280, height: 720 };
+/** Final Cut files of the days of Final Cut, which clockOf still reads: the main video's three kept pieces, and the same with the first piece starting at 5.88 s. */
+const fileOf = (name) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
 
 describe("a time as a person gives it", () => {
   it("is minutes and seconds, hours too, or seconds alone", () => {
@@ -25,7 +26,7 @@ describe("a time as a person gives it", () => {
 
 describe("the clock of a timeline", () => {
   it("is read off a Final Cut file BRIMM Video Studio wrote, each clip's place on the timeline and its stretch of the video", () => {
-    const clock = clockOf(fcpxml({ video: "/v/a.mp4", facts: FACTS, ranges: MAIN }));
+    const clock = clockOf(fileOf("clock-main.fcpxml"));
     assert.equal(clock.length, 3);
     assert.ok(Math.abs(clock[1].at - 3.971) < 0.001 && Math.abs(clock[1].from - 13.38) < 0.001, JSON.stringify(clock));
     // Each clip is whole frames of the video: 119, 94 and 62 at 29.97 a second.
@@ -100,7 +101,7 @@ describe("a moment a person gives", () => {
   it("is a time on a clip's first frame of a pushed file, though the frame starts a little before its kept piece", () => {
     // A kept piece from 5.88 s: the push starts its clip on frame 176 at 29.97 a second, 5.8725 s, half a frame before it.
     const pieces = [{ start: 5.88, end: 9.838 }, ...MAIN.slice(1)];
-    const pushed = clockOf(fcpxml({ video: "/v/a.mp4", facts: FACTS, ranges: pieces }));
+    const pushed = clockOf(fileOf("clock-pushed.fcpxml"));
     assert.deepEqual(momentOf({ ...given, on: "main v1", clock: pushed, ranges: pieces, time: "0:00" }), { at: 5.88 });
     // A time a tenth of a second and more into what is cut now is still refused.
     const watched = clockOfRanges([{ start: 5.75, end: 9.838 }, ...MAIN.slice(1)]);

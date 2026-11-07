@@ -379,7 +379,7 @@ export function cutSuggestions(plan, transcript) {
 const middle = (word) => (word.start + word.end) / 2;
 const wordsIn = (transcript, { start, end }) => transcript.filter((word) => middle(word) >= start && middle(word) <= end);
 
-/** brimm/reel-suggestions.json (5.8): each Reel candidate of reels.json (reels.js reelCandidates), {n, title, why, first, last,
+/** brimm/reel-suggestions.json (5.8): each Reel candidate of reels.json (reel-candidates.js reelCandidates), {n, title, why, first, last,
     stretches}: its title and why Claude picked it, its first and last words, and its stretches in seconds of the recording, each
     with the ids of the first and last words it holds (null when it holds none). */
 export function reelSuggestions(candidates, transcript) {
@@ -787,9 +787,8 @@ const HYPERFRAMES_JSON = {
 const SCRIPTS = { dev: "hyperframes preview", check: "hyperframes check", render: "hyperframes render" };
 const jsonText = (value) => `${JSON.stringify(value, null, 2)}\n`;
 /** What `.claude/settings.json` holds in a project of that kind ("main", which a Reel's is too, or "clip"): the pin's table of denied commands
-    and the environment (5.5). A project rebuilt from a snapshot makes the file again from it, since a snapshot leaves out names that start
-    with a dot (snapshot.js). */
-export const settingsText = (kind) => jsonText(settingsFor(kind));
+    and the environment (5.5). */
+const settingsText = (kind) => jsonText(settingsFor(kind));
 
 /** The footage a main project is given (PR H5b), [{ path, from }]: the copies with no sound of a plan's b-roll and screen recordings that may go in
     (join.js footageToUse), each `path` the name its cue gives it in media/ (FOOTAGE_PATH) and once, each `from` the whole path of the copy to move
@@ -957,8 +956,6 @@ export function writeProject(dir, files, { fs = nodeFs } = {}) {
       if (typeof value === "string") fs.writeFileSync(to, value);
       else if (value && "copy" in value) {
         fs.copyFileSync(value.copy, to);
-        // A file copied with a time keeps it (mtimeMs), as a project rebuilt from a snapshot has the times its files had.
-        if (Number.isFinite(value.mtimeMs)) fs.utimesSync(to, value.mtimeMs / 1000, value.mtimeMs / 1000);
       }
       else if (value && "link" in value) fs.symlinkSync(value.link, to);
       else throw new Error(`writeProject: ${path} is neither a text nor a file to copy, link or move`);

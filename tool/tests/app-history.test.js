@@ -294,7 +294,7 @@ describe("what was done in HyperFrames (what-happened)", () => {
   it("says the project is on the other Mac, and ends with 1, when it was made there and is not here", (c) => {
     const w = world(c, { made: false, on: "Sallie's laptop", turns: null });
     assert.equal(run(w), 1);
-    assert.deepEqual(w.said, ["The HyperFrames project for Pricing talk is on Sallie's laptop, with everything done in it, so there is nothing to look at on this Mac. Ask Jason."]);
+    assert.deepEqual(w.said, ["The HyperFrames project of Pricing talk is on Sallie's laptop. Carry on there."]);
     // A project of the other Mac's whose folder is here is looked at, whichever Mac made it.
     const here = world(c, { on: "Sallie's laptop", turns: fixture("app-history.jsonl") });
     assert.equal(run(here), 0);
@@ -386,7 +386,7 @@ describe("the versions HyperFrames has kept (versions)", () => {
   it("says the project is on the other Mac, and ends with 1 and runs nothing, when it was made there and is not here", (c) => {
     const w = world(c, { made: false, on: "Sallie's laptop" });
     assert.equal(run(w), 1);
-    assert.deepEqual([w.said, w.runs()], [["The HyperFrames project for Pricing talk is on Sallie's laptop, with everything done in it, so there is nothing to look at on this Mac. Ask Jason."], []]);
+    assert.deepEqual([w.said, w.runs()], [["The HyperFrames project of Pricing talk is on Sallie's laptop. Carry on there."], []]);
   });
   it("says it cannot list the versions right now, and ends with 0, when the command line refuses, prints what is not JSON, prints entries none of which can be read, exits with a status other than 0, times out or cannot be started", (c) => {
     const timedOut = Object.assign(new Error("spawnSync node ETIMEDOUT"), { code: "ETIMEDOUT" });
@@ -430,7 +430,7 @@ describe("app-history.js", () => {
   it("writes nothing, imports no connector, and runs the pinned command line only through the spawn it is given", () => {
     const source = readFileSync(new URL("../app-history.js", import.meta.url), "utf8");
     assert.doesNotMatch(source, /writeFileSync|appendFileSync|mkdirSync|renameSync|rmSync|unlinkSync|copyFileSync|chmodSync|symlinkSync|rmdirSync|utimesSync|truncateSync/);
-    assert.deepEqual([...source.matchAll(/from "([^"]+)"/g)].map((m) => m[1]).sort(), ["./app.js", "./hyperframes.js", "./settings.js", "node:child_process", "node:fs", "node:path"]);
+    assert.deepEqual([...source.matchAll(/from "([^"]+)"/g)].map((m) => m[1]).sort(), ["./app.js", "./hyperframes.js", "./kinds.js", "./settings.js", "node:child_process", "node:fs", "node:path"]);
     assert.doesNotMatch(source, /\bfetch\(|\beval\(|\brequire\(|\bimport\(|npx/);
     assert.equal(source.match(/spawnSync/g).length, 2, "imported, and the default of the spawn it is given");
   });

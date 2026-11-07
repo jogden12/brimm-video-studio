@@ -630,7 +630,7 @@ describe("free: it looks again at each path just before it goes", () => {
 });
 
 describe("free: what makes it refuse, before it takes anything", () => {
-  const HELD = "Sallie's laptop has Pricing talk open. Open it here first (say \"take it over\" if they are done with it). Nothing was changed.";
+  const HELD = "Sallie's laptop has Pricing talk open. Carry on there. Nothing was changed.";
   const QUIT = "Quit HyperFrames first, then ask again. Nothing was taken away.";
   const CANT_TELL = "I can't tell whether HyperFrames is open. Quit it if it is, then ask again. Nothing was taken away.";
   it("refuses while the other Mac has the episode, in the words every command that changes an episode uses", async (c) => {

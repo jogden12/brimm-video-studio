@@ -26,19 +26,19 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
     const said = block.join(" ").replace(/\s+/g, " ");
     assert.ok(said.includes("A finished video whose hand-off is written is told to hand off the Reels once a Reel is exported from HyperFrames that the hand-off does not hold."), said);
     // What it said before is still said: the raw video, the iPhone clip and the Final Cut way.
-    for (const words of ["A raw video and an iPhone clip are followed through HyperFrames", "and once it is exported, to hand it off", "A raw video that goes the Final Cut way keeps its Final Cut steps"]) assert.ok(said.includes(words), words);
+    for (const words of ["A raw video and an iPhone clip are followed through HyperFrames", "and once it is exported, to hand it off", "A raw video that was edited in Final Cut before is told so, and to open it in HyperFrames, from the recording"]) assert.ok(said.includes(words), words);
   });
   it("says in the README's rows for guide what the stage is, when, where it comes, and what it leaves out", () => {
     const first = row('| `guide ["<video>"]`');
     for (const words of [
       "A finished video whose hand-off is written is followed one step further (plan PR 16)",
       "has an export that `finish \"<episode>\" reels` would take now",
-      "for the Reel projects alone (in Downloads, by the records in the project's `renders/`, or in what the other Mac released)",
+      "for the Reel projects alone (in Downloads or by the records in the project's `renders/`)",
       "or two that began in one minute, which `finish` asks the final one of",
       'it says which Reels are exported and to say "hand off the Reels", ahead of the BRIMM Ops page\'s steps and of done',
       "A Reel open and not exported, one already in the hand-off, an export older than the project's last change and a Downloads folder this Mac will not let be read are no such stage",
       // A Reel project on the other Mac: `finish` would take its export, and the guide does not look, for the reason it gives the main video (review F3).
-      "A Reel project that is not on this Mac is not looked at either, though `finish … reels` would take its export from Downloads or from what the other Mac released: as for the main video, the guide reads Downloads only for a project that is here, and `app` says what is on the other Mac.",
+      "A Reel project that is not on this Mac is not looked at either, though `finish … reels` would take its export from Downloads: as for the main video, the guide reads Downloads only for a project that is here, and `app` says what is on the other Mac.",
       // Where `finish` would go no further and a look that costs no other read can tell (review F1, F2a and F2c), and the two refusals it does not look for (F2b, F2d).
       "Nor is it said where `finish … reels` would go no further and a look that costs no other read can tell: another run (a bring, a read or an ask) is at work on the episode, the other Mac has it open, the chain of its versions has a gap, Dropbox undid this Mac's last change to its record, the hand-off on file cannot be added to, or the record lacks the Reel; while a finish copies it says so instead, where a Reel waits (where none does it is the page's step, as at any other time, also while the finish only waits for its late check; and a Reel exported while it waits has the Reels' stage again, saying to say \"hand off the Reels\" after the time of the check",
       "a hand-off that went to the page under another id and a Reel number another version of the video gave under the same id: `finish` says each in its own words, ending \"Ask Jason\", and the guide goes on saying the stage until he has settled it",
@@ -63,7 +63,7 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
       assert.ok(guide.trimEnd().split("\n").length <= 30, `${which}: ${guide.split("\n").length} lines`);
       const next = guide.split("\n").find((line) => line.startsWith("- Any other next step:"));
       assert.ok(next && next.includes(run) && !next.includes("Shall I hand"), `${which}: ${next}`);
-      assert.ok(next.indexOf('"Shall I open it in HyperFrames?"') < next.indexOf('"Shall I show it in Final Cut?"') && next.indexOf("as the table below says.") < next.indexOf(run), `${which}: the offers stay, and the run follows them`);
+      assert.ok(next.indexOf('"Shall I open it in HyperFrames?"') >= 0 && next.includes("also for a video it says was edited in Final Cut before") && next.indexOf("as the table below says.") < next.indexOf(run), `${which}: the offers stay, and the run follows them`);
       assert.ok(skill.split("\n").length < 270, `${which}: ${skill.split("\n").length} lines`);
     }
     // The two skills' sections on the guide, and their rows and section on handing off, are the same words.

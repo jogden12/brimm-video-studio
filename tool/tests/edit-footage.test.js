@@ -1192,12 +1192,12 @@ describe("kind, leave and the gate, with a part and a video with no sound", () =
     assert.equal(isPart(reread(found)), true);
     t.done();
   });
-  it("leaves a part to the commands that open a video waiting: which, show, release and resolve run, and every other is refused as waiting", async () => {
+  it("leaves a part to the commands that open a video waiting: which, show and resolve run, and every other is refused as waiting", async () => {
     const t = setup();
     await planned(t);
     video(t, 1);
     await on(depsOf(t), "footage", labelOf(1), TITLE, "talking", "--client", "no");
-    for (const words of [["open", labelOf(1)], ["app", labelOf(1)], ["push", labelOf(1)], ["finish", labelOf(1)], ["ask", labelOf(1)], ["reels", labelOf(1)], ["spell", labelOf(1)], ["plan", labelOf(1)]]) {
+    for (const words of [["open", labelOf(1)], ["app", labelOf(1)], ["finish", labelOf(1)], ["ask", labelOf(1)], ["reels", labelOf(1)], ["spell", labelOf(1)], ["plan", labelOf(1)]]) {
       const r = await on(depsOf(t), ...words);
       assert.deepEqual([r.code, r.said], [1, ["This video is waiting for its answer: say what it is first."]], words.join(" "));
     }

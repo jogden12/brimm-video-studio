@@ -276,7 +276,7 @@ describe("resolve", () => {
     // Every other command finds it too, and refuses it at once, as episodeFor does, naming the conflict: not later, when it
     // comes to write, and with nothing written into the episode before then.
     const before = filesOf(found);
-    for (const argv of [["open", "know your costs"], ["push", "know your costs", "reel", "1", "--no-hand-edits"]]) {
+    for (const argv of [["open", "know your costs"], ["spell", "know your costs", "add", "Sallie", "Sally"]]) {
       const r = await on(t.ctx.deps, ...argv);
       assert.equal(r.code, 1, argv.join(" "));
       assert.match(r.text, CONFLICT_REFUSAL, argv.join(" "));

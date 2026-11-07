@@ -10,8 +10,9 @@ import { editMain, finishEpisode } from "../edit.js";
 import { localStamp, recordFile, recordText } from "../episode.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED } from "../exports.js";
 import { finishNow } from "../finish.js";
-import { reelsFile } from "../reels.js";
+import { reelsFile } from "../reel-candidates.js";
 import { episodeWork, writeSettings } from "../settings.js";
+import { NOT_SET_UP as APP_NOT_SET_UP } from "../app.js";
 import { EDITED, FOLDER, PROJECT, episodeFor, reread, setup } from "./episodes.js";
 import { EPISODE } from "./phase4.js";
 import { FOUND, MAIN, REEL2, TAKEN, changeAt, entry, exportOf, ms, named, world } from "./exports-world.js";
@@ -45,17 +46,34 @@ describe("D1. finish goes the way the record says", () => {
     plain(w.t.said().split("\n"));
     w.t.done();
   });
-  it("goes the Final Cut way, untouched, for a raw video with pushes and no project, on a Mac set up for the app too", async () => {
-    const t = setup();
-    writeSettings(t.home, { app: "hyperframes" });
-    t.ctx.settings = { ...t.ctx.settings, app: "hyperframes" };
-    const found = episodeFor(t, { record: EDITED });
-    t.shared(`${PROJECT.main}.mp4`, 2000);
-    t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    assert.equal(await finishEpisode(t.ctx, found, { without: ["reel 1", "reel 2"] }), 0);
-    assert.match(t.said(), /The main video: Pricing- what to charge- main v5 3fa9c1\.mp4, from From Final Cut, with its export Pricing- what to charge- main v5 3fa9c1\.fcpxmld\./);
-    assert.match(t.said(), /Say "yes, finish it" to start\.$/);
-    t.done();
+  it("stops an episode edited in Final Cut before (a push, no project) as a raw video never opened in HyperFrames, in HyperFrames' words, on a Mac set up for the app or not, and looks for nothing in From Final Cut", async () => {
+    for (const set of [true, false]) {
+      const t = setup();
+      if (set) {
+        writeSettings(t.home, { app: "hyperframes" });
+        t.ctx.settings = { ...t.ctx.settings, app: "hyperframes" };
+      }
+      const found = episodeFor(t, { record: EDITED });
+      // A Share and an export in From Final Cut, as the Final Cut days left them: nothing of them is taken or named.
+      t.shared(`${PROJECT.main}.mp4`, 2000);
+      t.shared(`${PROJECT.main}.fcpxmld`, 3000);
+      assert.equal(await finishEpisode(t.ctx, found, { yes: true }), 1, String(set));
+      assert.deepEqual(t.said().split("\n"), [set ? NEVER_OPENED : APP_NOT_SET_UP], String(set));
+      assert.deepEqual([t.started, reread(found).rev], [[], found.record.rev], String(set));
+      t.done();
+    }
+  });
+  it("finishes an episode edited in Final Cut before from the export of its HyperFrames project in Downloads, and never looks at a Share in From Final Cut", async () => {
+    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
+    const w = world({ projects: ["main"], over: { main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed: pushes } } });
+    w.t.shared(`${PROJECT.main}.mp4`, 2000);
+    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
+    exportOf(w, "main");
+    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0, w.t.said());
+    assert.doesNotMatch(w.t.said(), /Final Cut|Share/);
+    assert.equal(w.t.started.length, 1);
+    assert.deepEqual(w.asked().parts.map((p) => [p.key, p.project, p.video.where, p.export]), [["main", MAIN, "Downloads", null]]);
+    w.t.done();
   });
   it("stops a raw video that was never opened in HyperFrames, on a Mac set up for the app, in HyperFrames' words", async () => {
     const w = world({ projects: null });
@@ -65,12 +83,20 @@ describe("D1. finish goes the way the record says", () => {
     plain([NEVER_OPENED]);
     w.t.done();
   });
-  it("stops that video in Final Cut's words on a Mac that is not set up for the app, as it always did", async () => {
+  it("finishes a short video from before the switch (no answer, a push, a main project the app opened) from its export in Downloads", async () => {
+    const push = { v: 1, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/main.v1.mac-studio.fcpxml" };
+    const w = world({ kind: "short video", projects: ["main"], over: { answer: null, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed: [push] } } });
+    exportOf(w, "main");
+    assert.equal(await finishEpisode(w.t.ctx, w.found, {}), 0, w.t.said());
+    assert.match(w.t.said(), /The main video: .*from Downloads/);
+    assert.match(w.t.said(), /Hand-off question: /);
+    assert.doesNotMatch(w.t.said(), /never opened|Final Cut/);
+    w.t.done();
+  });
+  it("says that this Mac isn't set up for HyperFrames, as the guide does, to a never-opened video on a Mac whose app is off", async () => {
     const w = world({ projects: null, set: false });
     assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1);
-    const lines = w.t.said().split("\n");
-    assert.equal(lines[0], 'The main video was never shown in Final Cut. Say "show it in Final Cut" first, then Share it.');
-    assert.match(lines.at(-1), /^Looked in /);
+    assert.deepEqual(w.t.said().split("\n"), [APP_NOT_SET_UP]);
     w.t.done();
   });
   it("takes a project kept for an earlier kind for no project in use", async () => {
@@ -177,14 +203,6 @@ describe("D2. the answers: take, final and without", () => {
     assert.deepEqual(w.asked().parts.map((p) => p.key), ["main"]);
     w.t.done();
   });
-  it("takes the Final Cut answer about hand edits for nothing", async () => {
-    const w = world({ projects: ["main"] });
-    exportOf(w, "main");
-    const told = await on(w.t.ctx.deps, "finish", FOLDER, "--no-hand-edits", "main", "--yes");
-    assert.equal(told.code, 0, told.text);
-    assert.equal(w.asked().parts[0].noHandEdits, false);
-    w.t.done();
-  });
 });
 
 describe("D3. what finish refuses, and Downloads", () => {
@@ -192,7 +210,7 @@ describe("D3. what finish refuses, and Downloads", () => {
     const w = world({ over: { editing: { by: "Sallie's laptop", since: "2026-10-20T14:00:00-05:00" } } });
     exportOf(w, "main");
     assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1);
-    assert.match(w.t.said(), /^Sallie's laptop has Pricing: what to charge\? open\. Open it here first/);
+    assert.match(w.t.said(), /^Sallie's laptop has Pricing: what to charge\? open\. Carry on there\./);
     assert.deepEqual([w.t.started, existsSync(join(w.work, "finish.asked.json"))], [[], false]);
     w.t.done();
   });
@@ -262,7 +280,7 @@ describe("D3. what finish refuses, and Downloads", () => {
     assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1);
     const lines = w.t.said().split("\n");
     assert.equal(lines[1], 'The main video has no export yet. Export it from HyperFrames on This Mac, as MP4, then say "hand it off" again. If HyperFrames is still exporting it, say it again when the export is done.');
-    assert.equal(lines.at(-1), `Looked in Downloads and in what the other Mac released for exports of: ${MAIN}, ${REEL2}.`);
+    assert.equal(lines.at(-1), `Looked in Downloads for exports of: ${MAIN}, ${REEL2}.`);
     assert.deepEqual(w.t.started, []);
     plain(lines.slice(0, 2));
     w.t.done();
@@ -333,45 +351,6 @@ describe("D4. a Reel's place in the record", () => {
     assert.match(w.t.said(), /The record has no Reel 2 for its HyperFrames project: ask Jason\./);
     w.t.done();
   });
-  // Review, minor 4: in an episode whose main video went the Final Cut way, a Reel with a project is still a Reel of HyperFrames': the stop for
-  // a Reel the record does not hold, and the words a Reel with no title is expected to start with, are decided by the part, not the episode.
-  const FC_MAIN = { preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed: [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }] };
-  const sharedMain = (w) => {
-    w.t.shared(`${PROJECT.main}.mp4`, 2000);
-    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-  };
-  it("refuses a Reel project the record holds no Reel for, in an episode whose main video went the Final Cut way too", async () => {
-    const w = world({ projects: ["reel 2"], over: { main: FC_MAIN, reels: EPISODE.record.reels.filter((r) => r.n !== 2) } });
-    sharedMain(w);
-    exportOf(w, "reel 2");
-    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1);
-    assert.match(w.t.said(), /The record has no Reel 2 for its HyperFrames project: ask Jason\./);
-    assert.deepEqual(w.t.started, []);
-    w.t.done();
-  });
-  it("asks the title of such a Reel with the suggestion's first words, as for a raw video, and not the cut plan's", async () => {
-    const candidate = { n: 2, start: 13.38, end: 21.287, ranges: [{ start: 13.38, end: 21.287 }], seconds: 7.907, title: "", reason: "It makes one point.", point: "Know your costs.", first: "So the first thing you need", last: "know your costs", words: "So the first thing you need to do is know your costs.", phrases: ["p7"], preview: null };
-    const w = world({ projects: ["reel 2"], over: { main: FC_MAIN, reels: reelsWith("") } });
-    const list = JSON.stringify(reelsFile({ video: "Pricing talk.mp4", by: "read", made: "2026-10-20T12:00:00-05:00", candidates: [candidate] }));
-    writeFileSync(join(w.found.folder, "reels.json"), list);
-    const base = reread(w.found);
-    writeFileSync(recordFile(w.found.folder, base.rev + 1), recordText({ ...base, rev: base.rev + 1, files: { ...base.files, "reels.json": Buffer.byteLength(list) } }));
-    sharedMain(w);
-    exportOf(w, "reel 2");
-    assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: reread(w.found) }, {}), 0);
-    assert.equal(w.t.said().split("\n").at(-1), 'Reel 2 has no title on screen. Say what it says: it starts "So the first thing you need".');
-    w.t.done();
-  });
-  it("leaves a dropped Reel with a project out of a Final Cut episode's finish too, beside the Reels made in HyperFrames", async () => {
-    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
-    const w = world({ projects: ["reel 2"], over: { reels: DROPPED, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed: pushes } } });
-    w.t.shared(`${PROJECT.main}.mp4`, 2000);
-    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    exportOf(w, "reel 2");
-    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0);
-    assert.deepEqual(w.asked().parts.map((p) => p.key), ["main"]);
-    w.t.done();
-  });
 });
 
 describe("D5. a Reel made by `app … reel N`, in the record as plan PR 5 writes it", () => {
@@ -432,33 +411,14 @@ describe("D5. a Reel made by `app … reel N`, in the record as plan PR 5 writes
     assert.deepEqual(w.t.started, []);
     w.t.done();
   });
-  it("takes it the same way for an episode whose main video went the Final Cut way, and asks for no Share of it", async () => {
-    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
-    const w = world({ projects: ["reel 2"], over: { main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed: pushes } } });
-    w.t.shared(`${PROJECT.main}.mp4`, 2000);
-    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    const reel = exportOf(w, "reel 2");
-    assert.equal(await finishEpisode(w.t.ctx, w.found, {}), 0);
-    assert.deepEqual(w.t.said().split("\n"), [
-      `The main video: ${PROJECT.main}.mp4, from From Final Cut, with its export ${PROJECT.main}.fcpxmld.`, REEL_LINE, 'Say "yes, finish it" to start.'
-    ]);
-    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0);
-    const asked = w.asked();
-    assert.equal(asked.source, undefined);
-    assert.deepEqual(asked.parts.map((p) => [p.key, p.project, p.video.where, p.video.name, p.export && p.export.name]), [
-      ["main", undefined, "From Final Cut", `${PROJECT.main}.mp4`, `${PROJECT.main}.fcpxmld`], ["reel 2", REEL2, "Downloads", reel.name, null]
-    ]);
-    assert.deepEqual([asked.parts[1].fromSuggestion, asked.parts[1].expected], [2, REEL2_OPENING]);
-    w.t.done();
-  });
-  it("keeps a Reel the last finish finished in a Final Cut episode, once, whether or not other Reels were made in HyperFrames", async () => {
-    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
+  it("keeps a Reel the last finish finished in the days of Final Cut (it has no project), once, beside the Reels made in HyperFrames", async () => {
     const reelPush = { v: 1, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v1.mac-studio.fcpxml", project: PROJECT["reel 1"] };
-    const finished = { revision: 1, at: "2026-10-20T14:10:00-05:00", on: "Mac Studio", handoff: "final/x.brimm-ops.json", parts: { main: { v: 5, file: `final/${PROJECT.main}.mp4`, bytes: 5, seconds: 10, source: { bytes: 5, mtimeMs: 1 }, noHandEdits: true }, "reel 1": { v: 1, file: `final/${PROJECT["reel 1"]}.mov`, bytes: 5, seconds: 7, source: { bytes: 5, mtimeMs: 1 }, noHandEdits: true } } };
-    const w = world({ projects: ["reel 2"], over: { finished, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, base: null, pushed: pushes }, reels: [{ ...EPISODE.record.reels[0], status: "finished", pushed: [reelPush] }, EPISODE.record.reels[1]] } });
+    const finished = { revision: 1, at: "2026-10-20T14:10:00-05:00", on: "Mac Studio", handoff: "final/x.brimm-ops.json", parts: { main: { v: 1, file: `final/${named(MAIN, "13.56")}`, bytes: 5, seconds: 10, source: { bytes: 5, mtimeMs: 1 }, project: MAIN }, "reel 1": { v: 1, file: `final/${PROJECT["reel 1"]}.mov`, bytes: 5, seconds: 7, source: { bytes: 5, mtimeMs: 1 }, noHandEdits: true } } };
+    const w = world({ projects: ["main", "reel 2"], over: { finished, reels: [{ ...EPISODE.record.reels[0], status: "finished", pushed: [reelPush] }, EPISODE.record.reels[1]] } });
     exportOf(w, "reel 2");
-    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0);
-    assert.deepEqual(w.asked().parts.map((p) => [p.key, p.kept]), [["main", true], ["reel 1", true], ["reel 2", false]]);
+    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0, w.t.said());
+    assert.deepEqual(w.asked().parts.map((p) => [p.key, p.kept]), [["main", true], ["reel 2", false], ["reel 1", true]]);
+    assert.doesNotMatch(w.t.said(), /Final Cut|Share/);
     w.t.done();
   });
   it("stops a raw video that has a Reel project and no main project, in the words for a main video never opened, whether or not this Mac is set up", async () => {
@@ -466,7 +426,7 @@ describe("D5. a Reel made by `app … reel N`, in the record as plan PR 5 writes
       const w = world({ projects: ["reel 2"], set });
       exportOf(w, "reel 2");
       assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 1, String(set));
-      assert.deepEqual(w.t.said().split("\n"), [NEVER_OPENED], String(set));
+      assert.deepEqual(w.t.said().split("\n"), [set ? NEVER_OPENED : APP_NOT_SET_UP], String(set));
       assert.deepEqual(w.t.started, [], String(set));
       w.t.done();
     }

@@ -40,7 +40,7 @@ function exported(w, key, opts) {
   return got;
 }
 
-/** Every name a line may hold: the projects', the files of the made-up Downloads and of what the other Mac released, and a project's renders. */
+/** Every name a line may hold: the projects', the files of the made-up Downloads and of an older hand-over's folder, and a project's renders. */
 function namesIn(w) {
   const files = (dir) => {
     try {

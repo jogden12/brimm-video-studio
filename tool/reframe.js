@@ -20,9 +20,6 @@ export const STILL_EVERY = EVERY;
     last frame before 6 seconds. Without it, it is the last frame before 5. */
 export const stillsArgs = (video, folder, every = EVERY) => ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", video, "-an", "-vf", `fps=1/${every}:round=down,scale=640:-2`, "-q:v", "4", join(folder, "%04d.jpg")];
 
-/** Does a video need a new shape for a Reel? Only a picture wider than it is tall. A vertical or square one is left as it is. */
-export const needsReframe = (facts) => facts.width > facts.height;
-
 /** A box the face finder printed, if it has the numbers to work with: where it is across the picture and how large it is. */
 const isBox = (box) => box !== null && typeof box === "object" && [box.x, box.w, box.h].every(Number.isFinite);
 

@@ -47,9 +47,9 @@ const taught = (t) => ({ ...t.ctx.deps, settings: { ...t.ctx.settings, sessionTe
 /** What each command is given to name the made-up episode, as Claude runs it. */
 const ASKED = {
   kind: [FOLDER, "finished", "--private", "no"], leave: [FOLDER], which: [FOLDER], read: ["--now", FOLDER, "--kind", "finished", "--rev", "1"],
-  workcopy: ["--now", FOLDER], open: [FOLDER], app: [FOLDER], push: [FOLDER], bring: ["--now", FOLDER], name: [FOLDER, "A new name"], title: [FOLDER], reel: ["drop", FOLDER, "1"], reels: [FOLDER, "--no-play"],
-  ask: [FOLDER], finish: [FOLDER], release: [FOLDER], show: [FOLDER, "transcript"], resolve: [FOLDER], spell: [FOLDER], logo: [FOLDER, "on"],
-  captions: [FOLDER, "reel", "1", "on"], text: [FOLDER], graphic: [FOLDER], preset: [FOLDER], cut: [FOLDER, "remove", "--words", "x"],
+  workcopy: ["--now", FOLDER], open: [FOLDER], app: [FOLDER], bring: ["--now", FOLDER], name: [FOLDER, "A new name"], title: [FOLDER], reel: ["drop", FOLDER, "1"], reels: [FOLDER, "--no-play"],
+  ask: [FOLDER], finish: [FOLDER], show: [FOLDER, "transcript"], resolve: [FOLDER], spell: [FOLDER],
+  graphic: [FOLDER, "ideas"],
   teachings: [FOLDER], principles: [FOLDER], ideas: [FOLDER], free: [FOLDER],
   // `refs` names an episode only in `refs use`, which is the form walked here: `refs` and `refs look` name none, and are never gated (tests/edit-refs.test.js).
   refs: ["use", FOLDER, "blue carousel"],
@@ -122,7 +122,7 @@ describe("the gate walks every command that names an episode", () => {
       const found = episodeFor(t, { record: SESSION_RECORD });
       const before = filesIn(found);
       const r = await on(t.ctx.deps, name, ...ASKED[name]);
-      if (["kind", "leave", "which", "show", "release", "resolve", "name"].includes(name)) assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${name}: ${r.text}`);
+      if (["kind", "leave", "which", "show", "resolve", "name"].includes(name)) assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${name}: ${r.text}`);
       else {
         const why = ["finish", "reel", "read", "teachings", "principles", "ideas"].includes(name) ? TEACHINGS_OFF : NOT_FOR_SESSION;
         assert.deepEqual([r.code, r.said], [1, [why]], name);
@@ -170,7 +170,7 @@ describe("the gate walks every command that names an episode", () => {
     }
   });
   it("lets a session through the commands of its list, with teachings on or off", async () => {
-    for (const name of ["kind", "leave", "which", "show", "release", "resolve", "name"]) {
+    for (const name of ["kind", "leave", "which", "show", "resolve", "name"]) {
       for (const deps of [(t) => t.ctx.deps, taught]) {
         const t = setup();
         episodeFor(t, { record: SESSION_RECORD });
@@ -190,7 +190,7 @@ describe("the gate walks every command that names an episode", () => {
       }
     }
   });
-  it("leaves the commands that name no episode, and the old spelling of free, which says a Final Cut library is held back and names no episode, alone", async () => {
+  it("leaves the commands that name no episode, and the old spelling of free, which says the help and names no episode, alone", async () => {
     const t = setup();
     episodeFor(t, { record: UNANSWERED_RECORD });
     const free = await on(t.ctx.deps, "free", FOLDER, "library");
@@ -214,8 +214,8 @@ describe("the gate refuses before the command reads anything", () => {
     }
     return { t, found };
   }
-  it("reads no file of the episode but its record, and says the gate's words, for open, ask and push", async () => {
-    for (const ask of [["open", FOLDER], ["ask", FOLDER], ["push", FOLDER], ["finish", FOLDER], ["spell", FOLDER], ["reels", FOLDER], ["title", FOLDER]]) {
+  it("reads no file of the episode but its record, and says the gate's words, for open, ask and spell", async () => {
+    for (const ask of [["open", FOLDER], ["ask", FOLDER], ["finish", FOLDER], ["spell", FOLDER], ["reels", FOLDER], ["title", FOLDER]]) {
       const { t, found } = unreadable();
       let r;
       const reads = await readDuring(async () => {
@@ -229,7 +229,7 @@ describe("the gate refuses before the command reads anything", () => {
     }
   });
   it("reads no file of the episode but its record for a session either", async () => {
-    for (const ask of [["open", FOLDER], ["ask", FOLDER], ["push", FOLDER], ["reels", FOLDER]]) {
+    for (const ask of [["open", FOLDER], ["ask", FOLDER], ["spell", FOLDER], ["reels", FOLDER]]) {
       const { t, found } = unreadable(SESSION_RECORD);
       let r;
       const reads = await readDuring(async () => {
@@ -612,7 +612,7 @@ describe("the gate, a record Dropbox is still bringing over", () => {
   });
   it("refuses them on a record of the switch's layout, though this Mac does not do the light import", async () => {
     for (const record of [FINISHED_RECORD, SESSION_RECORD, CLEARED_RECORD, UNANSWERED_RECORD]) {
-      for (const name of ["open", "ask", "show", "resolve", "release", "push"]) {
+      for (const name of ["open", "ask", "show", "resolve", "spell"]) {
         const t = setup();
         const found = episodeFor(t, { record });
         PENDING_FILE(found);

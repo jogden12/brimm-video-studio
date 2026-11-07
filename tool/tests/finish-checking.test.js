@@ -15,7 +15,7 @@ import { CHECKING_FILE } from "../finish-check.js";
 import { lockOf } from "../detached.js";
 import { progressFolder, reporter } from "../progress.js";
 import { episodeWork } from "../settings.js";
-import { EDITED, FOLDER, PROJECT, episodeFor, reread, setup } from "./episodes.js";
+import { FOLDER, reread } from "./episodes.js";
 import { atWait } from "./checking-world.js";
 import { exportOf, fw, probeFor } from "./exports-world.js";
 
@@ -44,18 +44,6 @@ async function hyperframes() {
   exportOf(w, "reel 2");
   assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0, w.t.said());
   return { w, found: { ...w.found, record: reread(w.found) } };
-}
-/** The made-up edit finished the Final Cut way: each part Shared and exported into From Final Cut, finish asked with a yes. */
-async function finalCut() {
-  const t = setup();
-  const found = episodeFor(t, { record: EDITED });
-  t.shared(`${PROJECT.main}.mp4`, 2000);
-  t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-  t.shared(`${PROJECT["reel 1"]}.mov`, 2000);
-  t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 3000);
-  t.shared(`${PROJECT["reel 2"]}.mov`, 2000);
-  assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
-  return { t, found: { ...found, record: reread(found) } };
 }
 /** A progress reporter that writes down every call it is given, in order (`calls`, each as [what, ...what it was given], and an end also
     says whether the marker was on the disk of the Mac `home` then), and as lists: the steps it was told (`listed`), each step with how
@@ -93,33 +81,6 @@ describe("the marker of a finish that waits for its late check", () => {
     assert.equal(result.ok, true, result.failed.join(" "));
     assert.deepEqual(during.marker, { version: 1, nonce: NONCE, revision: 1, due: during.now + LATE_CHECK_MS, took: ["Downloads"] });
     assert.deepEqual([during.revision, during.handoff, during.shown], [1, true, [["-R", join(found.folder, "final", HANDOFF)]]], "the record holds the finish, and the hand-off is in final/ and shown");
-    w.t.done();
-  });
-  it("names the place the originals were taken from: From Final Cut for a Final Cut finish", async () => {
-    const { t, found } = await finalCut();
-    let during = null;
-    whileLate(t, () => {
-      during = markerOf(t.home);
-    });
-    const result = await finishNow(t.ctx, found, { nonce: NONCE });
-    assert.equal(result.ok, true, result.failed.join(" "));
-    assert.deepEqual([during.revision, during.took], [1, ["From Final Cut"]]);
-    t.done();
-  });
-  it("names both places when the main video is from Final Cut and a Reel from HyperFrames' export", async () => {
-    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
-    const w = fw({ projects: ["reel 2"], over: { main: { ...EDITED.main, pushed: pushes } } });
-    w.t.shared(`${PROJECT.main}.mp4`, 2000);
-    w.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    exportOf(w, "reel 2");
-    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0, w.t.said());
-    let during = null;
-    whileLate(w.t, () => {
-      during = markerOf(w.t.home);
-    });
-    const result = await finishNow(w.t.ctx, { ...w.found, record: reread(w.found) }, { nonce: NONCE });
-    assert.equal(result.ok, true, result.failed.join(" "));
-    assert.deepEqual(during.took, ["Downloads", "From Final Cut"]);
     w.t.done();
   });
   it("names no place when the finish took no original away, as a second finish with no new export, which keeps every part", async () => {
@@ -260,27 +221,12 @@ describe("the marker is taken away when the run ends, however it ends", () => {
 });
 
 describe("the panel's steps for a finish", () => {
-  it("are five, whether the finish waits for HyperFrames' exports, for Final Cut's files or for both: the check of the copies is none of them", async () => {
+  it("are five, and the first waits for HyperFrames' exports: the check of the copies is none of them", async () => {
     const { w, found } = await hyperframes();
     const exports = panel(w.t.home);
     assert.equal((await finishNow(w.t.ctx, found, { nonce: NONCE, progress: exports })).ok, true);
-    const cut = await finalCut();
-    const files = panel(cut.t.home);
-    assert.equal((await finishNow(cut.t.ctx, cut.found, { nonce: NONCE, progress: files })).ok, true);
-    const pushes = [{ v: 5, at: "2026-10-20T10:00:00-05:00", on: "Mac Studio", file: "edit/x.v5.mac-studio.fcpxml", project: PROJECT.main }];
-    const both = fw({ projects: ["reel 2"], over: { main: { ...EDITED.main, pushed: pushes } } });
-    both.t.shared(`${PROJECT.main}.mp4`, 2000);
-    both.t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    exportOf(both, "reel 2");
-    assert.equal(await finishEpisode(both.t.ctx, both.found, { yes: true }), 0, both.t.said());
-    const mixed = panel(both.t.home);
-    assert.equal((await finishNow(both.t.ctx, { ...both.found, record: reread(both.found) }, { nonce: NONCE, progress: mixed })).ok, true);
     assert.deepEqual(exports.seen.listed, [FIVE("Waiting for HyperFrames' exports")]);
-    assert.deepEqual(files.seen.listed, [FIVE("Waiting for Final Cut's files")]);
-    assert.deepEqual(mixed.seen.listed, [FIVE("Waiting for the finished videos")]);
     w.t.done();
-    cut.t.done();
-    both.t.done();
   });
   it("are begun in order, each by its name alone, and the last of them is the copying into the episode", async () => {
     const { w, found } = await hyperframes();
@@ -305,16 +251,6 @@ describe("the run's bar in the panel, once the hand-off is written and the marke
     assert.deepEqual(progress.seen.calls.at(-2), ["end", true, true]);
     assert.deepEqual(progress.seen.ended, [true]);
     w.t.done();
-  });
-  it("is ended there too by a finish from Final Cut's files", async () => {
-    const { t, found } = await finalCut();
-    const progress = panel(t.home);
-    waitNoted(t, progress);
-    const result = await finishNow(t.ctx, found, { nonce: NONCE, progress });
-    assert.equal(result.ok, true, result.failed.join(" "));
-    assert.deepEqual(progress.seen.calls.map(([what]) => what).slice(-3), ["step", "end", "the wait for the late check"]);
-    assert.deepEqual(progress.seen.calls.at(-2), ["end", true, true]);
-    t.done();
   });
   it("is not ended again, nor brought back, by a late check that fails after it left: the notice and the note tell that, and the bar does not", async () => {
     const { w, found } = await hyperframes();

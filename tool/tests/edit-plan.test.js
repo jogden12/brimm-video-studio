@@ -14,7 +14,6 @@ import { newPlannedEpisode, readEpisode, recordFile, localStamp } from "../episo
 import { holdingEpisode } from "../filing.js";
 import { fileSafe } from "../names.js";
 import { referencesFolder, runsFolder } from "../settings.js";
-import { keptSnapshots, listedBy } from "../snapshot.js";
 import { freeEpisode } from "../free.js";
 import { matchVersion } from "../versions.js";
 import { uneditedFolder } from "../unedited.js";
@@ -680,9 +679,9 @@ describe("plan, the plan in plain words", () => {
 describe("a planned episode in Episodes, and the commands that are not plan", () => {
   /** A command's words for each command that is not in the gate's lists for a plan, by the words that name the plan. */
   const ASKED = {
-    kind: [TITLE, "raw", "--private", "no"], leave: [TITLE], which: [TITLE], read: ["--now", TITLE, "--kind", "raw", "--rev", "1"], workcopy: ["--now", TITLE], open: [TITLE], app: [TITLE], push: [TITLE],
+    kind: [TITLE, "raw", "--private", "no"], leave: [TITLE], which: [TITLE], read: ["--now", TITLE, "--kind", "raw", "--rev", "1"], workcopy: ["--now", TITLE], open: [TITLE], app: [TITLE],
     bring: ["--now", TITLE], title: [TITLE], reel: ["drop", TITLE, "1"], reels: [TITLE, "--no-play"], ask: [TITLE], finish: [TITLE], release: [TITLE], show: [TITLE, "transcript"], resolve: [TITLE], free: [TITLE],
-    spell: [TITLE], logo: [TITLE, "on"], captions: [TITLE, "reel", "1", "on"], text: [TITLE], graphic: [TITLE], preset: [TITLE], cut: [TITLE, "remove", "--words", "x"], teachings: [TITLE], principles: [TITLE], ideas: [TITLE],
+    spell: [TITLE], graphic: [TITLE, "ideas"], teachings: [TITLE], principles: [TITLE], ideas: [TITLE],
     refs: ["use", TITLE, "blue carousel"],
     // A plan is no video, so it is no footage for a plan (PR H5a): the gate says it isn't made from its footage yet.
     footage: [TITLE, "Another plan", "talking", "--client", "no"]
@@ -789,8 +788,8 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     assert.deepEqual((await on(light(t), "guide")).said.slice(1), ["Nothing is under way. To start, put the video in your drop folder."]);
     t.done();
   });
-  it("leaves every other command as it was: the made-up episode's status, release, free and show say the same with a plan beside it", async () => {
-    const asks = [["status"], ["status", FOLDER], ["release", FOLDER], ["free", FOLDER], ["show", FOLDER, "plan"], ["name", FOLDER, "Another"], ["reels", FOLDER, "--no-play"], ["resolve", FOLDER]];
+  it("leaves every other command as it was: the made-up episode's status, free and show say the same with a plan beside it", async () => {
+    const asks = [["status"], ["status", FOLDER], ["free", FOLDER], ["show", FOLDER, "plan"], ["name", FOLDER, "Another"], ["reels", FOLDER, "--no-play"], ["resolve", FOLDER]];
     const said = async (withPlan) => {
       const { t } = episode();
       if (withPlan) await planned(t);
@@ -897,13 +896,11 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     assert.ok(!/Too many SKUs/.test(refused.text), refused.text);
     t.done();
   });
-  it("has no snapshot and nothing for free to take away: it is passed over by both", async () => {
+  it("has nothing for free to take away: it is passed over", async () => {
     const t = setup();
     const folder = await planned(t);
     await set(t, "--line", "One.");
     const record = recordOf(t);
-    assert.deepEqual(keptSnapshots(record.files, () => true), { keep: [], drop: [] });
-    assert.deepEqual(listedBy(folder, Object.keys(record.files)), Object.fromEntries(Object.keys(record.files).map((path) => [path, "Mac Studio"])));
     const said = [];
     const ctx = { home: t.home, machine: "Mac Studio", root: t.root, alive: () => false, say: (line) => said.push(line), stat: (path) => statSync(path, { throwIfNoEntry: false }) };
     const code = await freeEpisode(ctx, { found: { name: nameOf(t), folder }, record }, { running: async () => false });

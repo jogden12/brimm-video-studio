@@ -12,7 +12,7 @@ import { wordsIn } from "./app.js";
 import { keptWords } from "./clock.js";
 import { spelled } from "./final-transcript.js";
 import { inMain } from "./handoff.js";
-import { REELS_FILE, readReels } from "./reels.js";
+import { REELS_FILE, readReels } from "./reel-candidates.js";
 
 const text = (value) => (typeof value === "string" ? value.trim() : "");
 const isRange = (r) => r !== null && typeof r === "object" && Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start;

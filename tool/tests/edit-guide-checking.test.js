@@ -186,24 +186,6 @@ describe("the guide while the Reels of a finished video are handed off, the fini
   });
 });
 
-describe("the guide while a finish of the Final Cut way waits for its late check", () => {
-  it("gives the page's step, and the line names From Final Cut as the place the originals are taken from", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: { ...EDITED, version: 3, kind: "raw", answer: ANSWERED, reading: READ("raw"), offers: OFFERS } });
-    t.shared(`${PROJECT.main}.mp4`, 2000);
-    t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    t.shared(`${PROJECT["reel 1"]}.mov`, 2000);
-    t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 3000);
-    t.shared(`${PROJECT["reel 2"]}.mov`, 2000);
-    assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
-    const heard = await whileChecking({ t, found }, { next: ["guide", "3fa9c1"] });
-    assert.equal(heard.next.code, 0, heard.next.text);
-    assert.deepEqual(heard.next.said.slice(0, 1), [`${NAMED}: ${TAKEN}${ONLINE}`]);
-    assert.equal(heard.next.said.at(-1), check(heard.due, "what it took out of From Final Cut"));
-    t.done();
-  });
-});
-
 describe("the guide after a late check found a problem that she had been told she could go on from", () => {
   const LEAD = 'The check of its copies in Dropbox found a problem. Say "how far is it?" to see what.';
   const STEP = [`${NAMED}: ${LEAD} ${TAKEN}${ONLINE}`, `Then: ${KIT}`, "Step: taken"];

@@ -1,65 +1,89 @@
-// finish, the detached part (finish.js): wait for Final Cut's files, check them, transcribe each finished video again, cut
+// finish, the detached part (finish.js): wait for HyperFrames' exports, check them, transcribe each finished video again, cut
 // Story parts from a finished Reel, copy everything into the episode's final/ by the Dropbox rule, write the hand-off and
-// the record, show the hand-off, and after the late check empty From Final Cut of what it took. In a made-up episode
-// (episodes.js), with stand-ins for ffprobe, ffmpeg, the transcriber and open.
+// the record, show the hand-off, and after the late check remove from Downloads what it took. In a made-up episode
+// (episodes.js), with stand-ins for ffprobe, ffmpeg, the transcriber and open. What the quick part would have written in
+// finish.asked.json is written here by hand (asked below), so that these tests are of the detached part alone; the quick part's own
+// are edit-finish-app.test.js's, and finish-app.test.js has the detached part in the world of exports-world.js.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs, { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { editMain, finishEpisode } from "../edit.js";
-import { finishNow, finishFinished, letGoClaim, suggestionsFrom, expectedWords, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, handoffTarget, highestNumberOf, numbersTakenWords, writesV2For, linksOf, handedOff, cannotFinish } from "../finish.js";
+import * as finishModule from "../finish.js";
+import { finishNow, finishFinished, letGoClaim, suggestionsFrom, lastRevision, chainOf, chainGap, chainGapWords, nextRevision, handoffIdOf, handoffTarget, highestNumberOf, numbersTakenWords, writesV2For, linksOf, handedOff, cannotFinish } from "../finish.js";
 import { handoffFault } from "../handoff.js";
-import { handoffFaultV2 } from "../handoff-v2.js";
+import { handoffFaultV2, onPictureOf } from "../handoff-v2.js";
 import { recordFile, recordText, acceptRev } from "../episode.js";
 import { clearRuns } from "../filing.js";
 import { noProgress } from "../progress.js";
-import { episodeWork, runsFolder, writeSettings } from "../settings.js";
+import { downloadsFolder, episodeWork, runsFolder, writeSettings } from "../settings.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
-import { fromFinalCutFolder } from "../settings.js";
 import { tidyTranscript } from "../shared/transcript.js";
-import { setup, episodeFor, episodeAs, reread, listAll, EDITED, NAME, NOT_YET, PROJECT, SRT, FOLDER, ID, partOf } from "./episodes.js";
+import { setup, episodeFor, episodeAs, reread, listAll, EDITED, EXPORTED, NAME, NOT_YET, PROJECT, SRT, FOLDER, ID, askedFor, partOf } from "./episodes.js";
 import { probed } from "./fixtures.js";
+import { fw, exportOf } from "./exports-world.js";
 import { OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
 
 const HANDOFF = "Pricing- what to charge-.brimm-ops.json";
 /** What final/ holds after the made-up edit is finished. */
 const FINAL = [
   HANDOFF,
-  `${PROJECT.main}.fcpxmld/Info.fcpxml`, `${PROJECT.main}.mp4`, `${PROJECT.main}.srt`, `${PROJECT.main}.transcript.txt`, `${PROJECT.main}.words.json`,
-  `${PROJECT["reel 1"]}.fcpxmld/Info.fcpxml`, `${PROJECT["reel 1"]}.mov`, `${PROJECT["reel 1"]}.srt`, `${PROJECT["reel 1"]}.transcript.txt`, `${PROJECT["reel 1"]}.words.json`,
+  `${PROJECT.main}.mp4`, `${PROJECT.main}.srt`, `${PROJECT.main}.transcript.txt`, `${PROJECT.main}.words.json`,
+  `${PROJECT["reel 1"]}.mov`, `${PROJECT["reel 1"]}.srt`, `${PROJECT["reel 1"]}.transcript.txt`, `${PROJECT["reel 1"]}.words.json`,
   `${PROJECT["reel 2"]}.mov`, `${PROJECT["reel 2"]}.srt`, `${PROJECT["reel 2"]}.story-1.mp4`, `${PROJECT["reel 2"]}.story-2.mp4`, `${PROJECT["reel 2"]}.transcript.txt`, `${PROJECT["reel 2"]}.words.json`
 ].sort();
 
-/** The made-up edit, Shared and exported, and finish asked with a yes: Reel 2 was never exported and had no hand edits. */
-async function asked(t, record = EDITED) {
+/** A main project in use, as `app` leaves it. The quick part goes the HyperFrames way for a record that has one, and tells a raw video
+    without one that it was never opened in HyperFrames, before it looks at anything else. */
+const IN_APP = { version: 4, app: { toolchain: "0.8.208", projects: [{ key: "main", name: "Pricing- what to charge- main 3fa9c1", madeAt: "2026-10-20T13:00:00-05:00", on: "Mac Studio", from: { file: "Pricing talk.mp4", bytes: 13, modified: "2026-10-14T09:00:00-05:00" }, workingCopy: { bytes: 16, seconds: 23.423, fps: 30 }, opened: ["2026-10-20T13:00:00-05:00"], handover: false, fromSuggestion: null, state: "opened" }] } };
+/** The made-up edit, exported from HyperFrames into Downloads, and what the quick part writes for it. */
+async function asked(t, record = EDITED, { only = Object.keys(EXPORTED) } = {}) {
   const found = episodeFor(t, { record });
-  t.shared(`${PROJECT.main}.mp4`, 2000);
-  t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-  t.shared(`${PROJECT["reel 1"]}.mov`, 2000);
-  t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 3000);
-  t.shared(`${PROJECT["reel 2"]}.mov`, 2000);
-  assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 0);
-  return { ...found, record: reread(found) };
+  const exports = Object.fromEntries(Object.entries(EXPORTED).filter(([key]) => only.includes(key)));
+  for (const name of Object.values(exports)) t.exported(name, 2000);
+  return askedFor(t, found, { exports });
 }
+/** A file in Downloads made again: other bytes, a later time. */
+const madeAgain = (t, name, text = "an export made again") => {
+  const at = join(downloadsFolder(t.home), name);
+  writeFileSync(at, text);
+  const when = new Date(t.now() + 60000);
+  utimesSync(at, when, when);
+};
 /** The transcriber's calls, by the part whose sound they read. */
 const heardOf = (t) => t.calls.filter((c) => c.cmd === "WHISPER").map((c) => partOf(c.args[c.args.indexOf("-f") + 1]));
 
-describe("the words a part is expected to start with", () => {
-  const plan = { phrases: [
-    { id: "p1", start: 1, end: 3, keep: true, text: "Welcome to the show." },
-    { id: "p2", start: 3.5, end: 6, keep: true, text: "So the first thing is costs." },
-    { id: "p3", start: 6.5, end: 8, keep: true, text: "And prices." }
-  ] };
-  it("are the first phrase the record's own cuts leave, on the main video and on a Reel", () => {
-    const record = { main: { cuts: [{ id: "c1", keep: false, from: 1, to: 3 }] }, reels: [{ n: 2, from: 3.5, to: 8, cuts: [{ id: "c1", keep: false, from: 3.5, to: 6 }] }] };
-    assert.equal(expectedWords({ key: "main" }, record, plan), "So the first thing is costs.");
-    assert.equal(expectedWords({ key: "reel 2", reel: 2 }, record, plan), "And prices.");
+describe("the words a HyperFrames part is expected to start with", () => {
+  it("are checked by firstWordsMatch from exports.js, for the part's `expected`, and finish.js has no cut plan to make them from", () => {
+    assert.equal("expectedWords" in finishModule, false);
+  });
+  it("a HyperFrames part whose export opens with other words than part.expected is asked about, and finishes all the same", async () => {
+    const w = fw({ captions: { "reel 2": SRT["reel 2"] } });
+    exportOf(w, "main");
+    exportOf(w, "reel 2");
+    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0, w.t.said());
+    const part = w.asked().parts.find((p) => p.key === "reel 2");
+    assert.equal(part.expected, "So the first thing you need to do is know your costs.");
+    const result = await finishNow(w.t.ctx, { ...w.found, record: reread(w.found) });
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.ok(result.next.includes('Reel 2 starts with "Welcome to the show. Today we are... Let me do that again.", where "So the first thing you need to do is know your costs." was expected: check by eye that it is the right video.'), result.next);
+    w.t.done();
+  });
+  it("a part whose export opens with the words it is expected to start with says nothing of them", async () => {
+    const w = fw();
+    exportOf(w, "main");
+    exportOf(w, "reel 2");
+    assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0, w.t.said());
+    const result = await finishNow(w.t.ctx, { ...w.found, record: reread(w.found) });
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.doesNotMatch(result.next, /starts with|was expected/);
+    w.t.done();
   });
 });
 
 describe("finish, the detached part", () => {
-  it("finishes the episode: final/ holds each video, its transcripts, the Story parts, the exports and the hand-off", async () => {
+  it("finishes the episode: final/ holds each video, its transcripts, the Story parts and the hand-off", async () => {
     const t = setup();
     const found = await asked(t);
     const result = await finishNow(t.ctx, found);
@@ -94,20 +118,14 @@ describe("finish, the detached part", () => {
     assert.equal(await editMain(["kind", FOLDER, "raw", "--private", "no", "--again"], t.ctx.deps), 0, t.said());
     const corrected = reread(found);
     assert.equal(corrected.finished, null);
-    const stays = FINAL.filter((file) => /\.(mp4|mov)$/.test(file) || file.includes(".fcpxmld/"));
+    const stays = FINAL.filter((file) => /\.(mp4|mov)$/.test(file));
     for (const file of stays) assert.ok(existsSync(join(found.folder, "final", file)) && `final/${file}` in corrected.files, file);
     assert.deepEqual(t.inFinal(found), stays);
-    // Finished again from new Shares: every part is made again, each kept file replaced, and the hand-off is the next revision. A video
+    // Finished again from new exports: every part is made again, each kept file replaced, and the hand-off is the next revision. A video
     // answered as raw is handed off as version 2 (version 1 knows no kind but an episode and a short video).
     writeSettings(t.home, { handoffVersion: 2 });
     t.ctx.settings = { ...t.ctx.settings, handoffVersion: 2 };
-    t.shared(`${PROJECT.main}.mp4`, 2000);
-    t.shared(`${PROJECT.main}.fcpxmld`, 3000);
-    t.shared(`${PROJECT["reel 1"]}.mov`, 2000);
-    t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 3000);
-    t.shared(`${PROJECT["reel 2"]}.mov`, 2000);
-    assert.equal(await finishEpisode(t.ctx, { ...found, record: corrected }, { yes: true, noHandEdits: ["reel 2"] }), 0, t.said());
-    const again = await finishNow(t.ctx, { ...found, record: reread(found) });
+    const again = await finishNow(t.ctx, askedFor(t, { ...found, record: corrected }));
     assert.equal(again.ok, true, again.failed.join(" "));
     const made = t.inFinal(found);
     assert.deepEqual(made.filter((file) => !file.endsWith(".brimm-ops.json")), FINAL.filter((file) => file !== HANDOFF));
@@ -116,14 +134,15 @@ describe("finish, the detached part", () => {
     assert.equal(reread(found).finished.revision, 2);
     t.done();
   });
-  it("records the finish: its revision, each part's file and what keeps its edit, the Reels finished, the files listed", async () => {
+  it("records the finish: its revision, each part's file and its project, the Reels finished, the files listed", async () => {
     const t = setup();
     const found = await asked(t);
     await finishNow(t.ctx, found);
     const record = reread(found);
     assert.equal(record.finished.revision, 1);
-    assert.equal(record.finished.parts.main.export, `final/${PROJECT.main}.fcpxmld`);
-    assert.equal(record.finished.parts["reel 2"].noHandEdits, true);
+    // A part says its project, and neither an export of the edit nor "no hand edits": the project is the edit.
+    assert.deepEqual([record.finished.parts.main.project, record.finished.parts["reel 2"].project], [PROJECT.main, PROJECT["reel 2"]]);
+    assert.deepEqual(["export", "noHandEdits"].filter((key) => key in record.finished.parts.main || key in record.finished.parts["reel 2"]), []);
     assert.deepEqual(record.reels.map((r) => r.status), ["finished", "finished", "candidate"]);
     assert.deepEqual(record.reels[0].final, { file: `final/${PROJECT["reel 1"]}.mov`, seconds: 7.7 });
     for (const file of FINAL) assert.ok(record.files[`final/${file}`] > 0, file);
@@ -148,10 +167,10 @@ describe("finish, the detached part", () => {
     for (const c of parts) assert.ok(c.args[c.args.indexOf("-i") + 1].endsWith(`${PROJECT["reel 2"]}.mov`));
     t.done();
   });
-  it("waits for a file Final Cut is still writing, and reads its sound only when it is whole", async () => {
+  it("waits for an export HyperFrames is still writing, and reads its sound only when it is whole", async () => {
     const t = setup();
     const found = await asked(t);
-    const main = join(fromFinalCutFolder(t.home), `${PROJECT.main}.mp4`);
+    const main = join(downloadsFolder(t.home), `${PROJECT.main}.mp4`);
     let grows = 3;
     const wait = t.ctx.deps.wait;
     t.ctx.deps.wait = async (ms) => {
@@ -170,7 +189,7 @@ describe("finish, the detached part", () => {
     assert.deepEqual(sizes, [statSync(join(found.folder, "final", `${PROJECT.main}.mp4`)).size]);
     t.done();
   });
-  it("waits while ffprobe cannot read a Share still being written, whose index Final Cut writes last", async () => {
+  it("waits while ffprobe cannot read an export still being written", async () => {
     let refusals = 4;
     const t = setup({ programs: { FFPROBE: (args) => {
       const file = args[args.length - 1];
@@ -187,7 +206,7 @@ describe("finish, the detached part", () => {
   it("stops after ten minutes of a file still growing, in plain words, and copies nothing", async () => {
     const t = setup();
     const found = await asked(t);
-    const main = join(fromFinalCutFolder(t.home), `${PROJECT.main}.mp4`);
+    const main = join(downloadsFolder(t.home), `${PROJECT.main}.mp4`);
     const wait = t.ctx.deps.wait;
     t.ctx.deps.wait = async (ms) => {
       t.grow(main, 1000);
@@ -195,7 +214,7 @@ describe("finish, the detached part", () => {
     };
     const result = await finishNow(t.ctx, found);
     assert.equal(result.ok, false);
-    assert.match(result.failed[0], /Pricing- what to charge- main v5 3fa9c1\.mp4 is still being written by Final Cut\. Say finish again when its Share is done\./);
+    assert.match(result.failed[0], /Pricing- what to charge- main v5 3fa9c1\.mp4 is still being written\. Say "hand it off" again when HyperFrames has finished exporting it\./);
     assert.deepEqual(t.inFinal(found), []);
     assert.deepEqual(heardOf(t), []);
     t.done();
@@ -216,22 +235,6 @@ describe("finish, the detached part", () => {
     assert.equal(reread(found).finished, null);
     t.done();
   });
-  it("says, for a person to check by eye, a video whose first words are not those of its part, and finishes all the same", async () => {
-    const t = setup({ programs: { WHISPER: (args) => {
-      const base = args[args.indexOf("-of") + 1];
-      const part = partOf(args[args.indexOf("-f") + 1]);
-      const srt = part === "main" ? "1\n00:00:00,000 --> 00:00:03,000\n Okay, where was I? Right.\n\n2\n00:00:03,000 --> 00:00:11,800\n So the first thing you need to do is know your costs.\n\n" : SRT[part];
-      writeFileSync(base + ".srt", srt);
-      if (args.includes("-ojf")) writeFileSync(base + ".json", JSON.stringify({ transcription: [] }));
-      return { code: 0, stderr: "" };
-    } } });
-    const found = await asked(t);
-    const result = await finishNow(t.ctx, found);
-    assert.equal(result.ok, true, result.failed.join(" "));
-    assert.match(result.next, /The main video starts with "Okay, where was I\? Right\.", where "Welcome to the show\." was expected: check by eye that it is the right video\./);
-    assert.match(result.next, /Word times are missing for /);
-    t.done();
-  });
   it("on a second finish, transcribes only the Reel that changed, keeps the rest, and raises the revision", async () => {
     const t = setup();
     const found = await asked(t);
@@ -239,11 +242,9 @@ describe("finish, the detached part", () => {
     const first = JSON.parse(readFileSync(join(found.folder, "final", HANDOFF), "utf8"));
     t.calls.length = 0;
     t.clones.length = 0;
-    t.shared(`${PROJECT["reel 1"]}.mov`, 9000, "a longer finished video");
-    t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 9500);
+    t.exported(`${PROJECT["reel 1"]}.mov`, 9000, "a longer finished video");
     const again = { ...found, record: reread(found) };
-    assert.equal(await finishEpisode(t.ctx, again, { yes: true }), 0);
-    const result = await finishNow(t.ctx, { ...found, record: reread(found) });
+    const result = await finishNow(t.ctx, askedFor(t, again, { kept: ["main", "reel 2"] }));
     assert.equal(result.ok, true, result.failed.join(" "));
     assert.deepEqual([...new Set(heardOf(t))], ["reel 1"]);
     const second = JSON.parse(readFileSync(join(found.folder, "final", HANDOFF), "utf8"));
@@ -262,29 +263,13 @@ describe("finish, the detached part", () => {
     assert.equal(readFileSync(join(found.folder, "final", `${PROJECT["reel 1"]}.mov`), "utf8"), "a longer finished video");
     t.done();
   });
-  it("empties From Final Cut of what it took only after a clean late check, at least 15 minutes after the last copy", async () => {
-    const t = setup();
-    const found = await asked(t);
-    const result = await finishNow(t.ctx, found);
-    assert.equal(result.ok, true, result.failed.join(" "));
-    assert.ok(t.waits.reduce((sum, ms) => sum + ms, 0) >= LATE_CHECK_MS);
-    assert.deepEqual(readdirSync(fromFinalCutFolder(t.home)), []);
-    const kept = setup();
-    const held = await asked(kept);
-    const after = await finishNow(kept.ctx, held, { lateCheck: () => ["Pricing- what to charge- main v5 3fa9c1.mp4 is not whole in final (it is missing)."] });
-    assert.match(after.failed.join(" "), /is not whole in final/);
-    assert.equal(readdirSync(fromFinalCutFolder(kept.home)).length, 5);
-    t.done();
-    kept.done();
-  });
-  it("offers, at the end, to make the episode online-only and how to free render files, and never to delete its library", async () => {
+  it("offers, at the end, to make the episode online-only, and says nothing of Final Cut or of any library", async () => {
     const t = setup();
     const found = await asked(t);
     const result = await finishNow(t.ctx, found);
     const next = result.next;
     assert.match(next, /make the episode's folder online-only: in Finder, Control-click it and choose Make online-only\./);
-    assert.match(next, /File > Delete Generated Library Files/);
-    assert.doesNotMatch(next, /free the space|delete its Final Cut library/);
+    assert.doesNotMatch(next, /Final Cut|Delete Generated Library Files|free the space|delete its Final Cut library/);
     t.done();
   });
   it("never writes the hand-off with a made-up title: a finished Reel with none stops the finish, and is named", async () => {
@@ -307,52 +292,6 @@ describe("finish, the detached part", () => {
       return wait(ms);
     };
   };
-  /** A file in From Final Cut made again: other bytes, a later time. */
-  const madeAgain = (t, name, text = "a newer Share, made again") => {
-    const at = join(fromFinalCutFolder(t.home), name);
-    writeFileSync(at, text);
-    const when = new Date(t.now() + 60000);
-    utimesSync(at, when, when);
-  };
-  it("keeps in From Final Cut a file made again while it waited for the late check, and says so", async () => {
-    const t = setup();
-    const found = await asked(t);
-    whileLate(t, () => madeAgain(t, `${PROJECT.main}.mp4`));
-    const result = await finishNow(t.ctx, found);
-    assert.equal(result.ok, true, result.failed.join(" "));
-    assert.equal(readFileSync(join(fromFinalCutFolder(t.home), `${PROJECT.main}.mp4`), "utf8"), "a newer Share, made again");
-    assert.match(result.next, /Pricing- what to charge- main v5 3fa9c1\.mp4 changed in From Final Cut after it was taken, so it is kept there\./);
-    assert.deepEqual(readdirSync(fromFinalCutFolder(t.home)), [`${PROJECT.main}.mp4`]);
-    t.done();
-  });
-  it("keeps an export bundle when any file in it changed after it was taken", async () => {
-    const t = setup();
-    const found = await asked(t);
-    whileLate(t, () => {
-      const info = join(fromFinalCutFolder(t.home), `${PROJECT.main}.fcpxmld`, "Info.fcpxml");
-      writeFileSync(info, "<fcpxml version=\"1.11\"/>\n");
-      const when = new Date(t.now() + 60000);
-      utimesSync(info, when, when);
-    });
-    const result = await finishNow(t.ctx, found);
-    assert.equal(result.ok, true, result.failed.join(" "));
-    assert.ok(existsSync(join(fromFinalCutFolder(t.home), `${PROJECT.main}.fcpxmld`, "Info.fcpxml")));
-    assert.match(result.next, /Pricing- what to charge- main v5 3fa9c1\.fcpxmld changed in From Final Cut after it was taken, so it is kept there\./);
-    t.done();
-  });
-  it("puts a copy that went missing back from what it took, never from a file made again since", async () => {
-    const t = setup();
-    const found = await asked(t);
-    const copied = join(found.folder, "final", `${PROJECT.main}.mp4`);
-    whileLate(t, () => {
-      rmSync(copied);
-      madeAgain(t, `${PROJECT.main}.mp4`);
-    });
-    const result = await finishNow(t.ctx, found);
-    assert.equal(result.ok, true, result.failed.join(" "));
-    assert.equal(readFileSync(copied, "utf8"), "a finished video");
-    t.done();
-  });
   it("checks the record it wrote at the late check too, and writes it again when Dropbox took it away", async () => {
     const t = setup();
     const found = await asked(t);
@@ -362,7 +301,7 @@ describe("finish, the detached part", () => {
     assert.equal(reread(found).finished.revision, 1);
     t.done();
   });
-  it("never puts its record back over one the other Mac wrote under the same number, and keeps From Final Cut", async () => {
+  it("never puts its record back over one the other Mac wrote under the same number", async () => {
     const t = setup();
     const found = await asked(t);
     const ours = recordFile(found.folder, found.record.rev + 1);
@@ -374,12 +313,11 @@ describe("finish, the detached part", () => {
     const result = await finishNow(t.ctx, found);
     assert.equal(readFileSync(ours, "utf8"), theirs);
     assert.equal(result.ok, false);
-    assert.match(result.failed.join(" "), /The episode's record no longer holds this finish: the other Mac changed it\. Say finish again\./);
-    assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, 5);
+    assert.match(result.failed.join(" "), /The episode's record no longer holds this finish: the other Mac changed it\. Say "hand it off" again\./);
     t.done();
   });
-  it("leaves its record alone when a higher one is there, and deletes from From Final Cut only when that one holds this finish", async () => {
-    for (const [holds, kept] of [[false, 5], [true, 0]]) {
+  it("leaves its record alone when a higher one is there, and goes on only when that one holds this finish", async () => {
+    for (const holds of [false, true]) {
       const t = setup();
       const found = await asked(t);
       const ours = recordFile(found.folder, found.record.rev + 1);
@@ -390,12 +328,11 @@ describe("finish, the detached part", () => {
       });
       const result = await finishNow(t.ctx, found);
       assert.equal(existsSync(ours), false, "its own record is not put back under a higher one");
-      assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, kept);
       assert.equal(result.ok, holds, result.failed.join(" "));
       t.done();
     }
   });
-  it("keeps From Final Cut, and says to finish again, when Dropbox made a conflicted copy of its record", async () => {
+  it("says to hand it off again when Dropbox made a conflicted copy of its record", async () => {
     const t = setup();
     const found = await asked(t);
     const ours = recordFile(found.folder, found.record.rev + 1);
@@ -407,8 +344,7 @@ describe("finish, the detached part", () => {
     });
     const result = await finishNow(t.ctx, found);
     assert.equal(result.ok, false);
-    assert.match(result.failed.join(" "), /Say finish again/);
-    assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, 5);
+    assert.match(result.failed.join(" "), /Say "hand it off" again/);
     t.done();
   });
   it("takes a video's facts from the copy it took, which is what goes into final/", async () => {
@@ -443,7 +379,7 @@ describe("finish, the detached part", () => {
     assert.equal(existsSync(left), false);
     t.done();
   });
-  it("stops before it copies anything when a Share changed while it was being transcribed", async () => {
+  it("stops before it copies anything when an export changed while it was being transcribed", async () => {
     let changed = false;
     let t = null;
     t = setup({ programs: { WHISPER: (args) => {
@@ -458,31 +394,8 @@ describe("finish, the detached part", () => {
     const found = await asked(t);
     const result = await finishNow(t.ctx, found);
     assert.equal(result.ok, false);
-    assert.match(result.failed.join(" "), /Pricing- what to charge- main v5 3fa9c1\.mp4 changed in From Final Cut while finish was working on it\. Say finish again\./);
+    assert.match(result.failed.join(" "), /Pricing- what to charge- main v5 3fa9c1\.mp4 changed in Downloads while finish was working on it\. Say "hand it off" again\./);
     assert.deepEqual(t.inFinal(found), []);
-    assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, 5);
-    t.done();
-  });
-  it("never deletes a part it took from what the other Mac released, nor another episode's Share", async () => {
-    const t = setup();
-    const found = episodeFor(t, { record: EDITED });
-    const released = join(found.folder, "edit", "from-final-cut");
-    mkdirSync(released, { recursive: true });
-    writeFileSync(join(released, `${PROJECT.main}.mp4`), "a finished video");
-    mkdirSync(join(released, `${PROJECT.main}.fcpxmld`), { recursive: true });
-    writeFileSync(join(released, `${PROJECT.main}.fcpxmld`, "Info.fcpxml"), "<fcpxml/>\n");
-    const later = new Date(Date.parse("2026-10-20T14:00:05-05:00"));
-    utimesSync(join(released, `${PROJECT.main}.fcpxmld`), later, later);
-    t.shared(`${PROJECT["reel 1"]}.mov`, 2000);
-    t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 3000);
-    t.shared(`${PROJECT["reel 2"]}.mov`, 2000);
-    t.shared("Another episode main v1 9a8b7c.mp4", 1000);
-    assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 0);
-    const result = await finishNow(t.ctx, { ...found, record: reread(found) });
-    assert.equal(result.ok, true, result.failed.join(" "));
-    assert.ok(existsSync(join(released, `${PROJECT.main}.mp4`)));
-    assert.ok(existsSync(join(released, `${PROJECT.main}.fcpxmld`, "Info.fcpxml")));
-    assert.deepEqual(readdirSync(fromFinalCutFolder(t.home)), ["Another episode main v1 9a8b7c.mp4"]);
     t.done();
   });
   it("never uses a hand-off's revision twice, even when the record of the last one was never written", async () => {
@@ -502,8 +415,7 @@ describe("finish, the detached part", () => {
     assert.equal(first.ok, false);
     assert.equal(JSON.parse(readFileSync(join(found.folder, "final", HANDOFF), "utf8")).revision, 1);
     const again = { ...found, record: reread(found) };
-    assert.equal(await finishEpisode(t.ctx, again, { yes: true, noHandEdits: ["reel 2"] }), 0);
-    const second = await finishNow(t.ctx, { ...found, record: reread(found) });
+    const second = await finishNow(t.ctx, askedFor(t, again));
     assert.equal(second.ok, true, second.failed.join(" "));
     assert.equal(JSON.parse(readFileSync(join(found.folder, "final", HANDOFF), "utf8")).revision, 2);
     assert.equal(reread(found).finished.revision, 2);
@@ -522,7 +434,7 @@ describe("finish, the detached part", () => {
     const t = setup();
     const found = await asked(t);
     await finishNow(t.ctx, found);
-    t.shared(`${PROJECT["reel 2"]}.mov`, 9000, "a shorter finished Reel");
+    t.exported(`${PROJECT["reel 2"]}.mov`, 9000, "a shorter finished Reel");
     const run = t.ctx.deps.run;
     t.ctx.deps.run = async (cmd, args, more) => {
       if (cmd === "FFPROBE" && args[args.length - 1].includes(PROJECT["reel 2"])) {
@@ -532,8 +444,7 @@ describe("finish, the detached part", () => {
       if (cmd === "WHISPER" && args.includes("-ojf") && partOf(args[args.indexOf("-f") + 1]) === "reel 2") return { code: 134, stderr: "", signal: "SIGABRT" };
       return run(cmd, args, more);
     };
-    assert.equal(await finishEpisode(t.ctx, { ...found, record: reread(found) }, { yes: true, noHandEdits: ["reel 2"] }), 0);
-    const result = await finishNow(t.ctx, { ...found, record: reread(found) });
+    const result = await finishNow(t.ctx, askedFor(t, { ...found, record: reread(found) }, { kept: ["main", "reel 1"] }));
     assert.equal(result.ok, true, result.failed.join(" "));
     const record = reread(found);
     for (const stale of [`${PROJECT["reel 2"]}.story-1.mp4`, `${PROJECT["reel 2"]}.story-2.mp4`, `${PROJECT["reel 2"]}.words.json`]) {
@@ -571,10 +482,9 @@ describe("finish, the detached part", () => {
     found = await asked(t);
     const result = await finishNow(t.ctx, found);
     assert.equal(result.ok, false);
-    assert.match(result.failed.join(" "), /The episode changed while finish was working, so nothing was copied into final\/\. Say finish again\./);
+    assert.match(result.failed.join(" "), /The episode changed while finish was working, so nothing was copied into final\/\. Say "hand it off" again\./);
     assert.ok(!existsSync(join(found.folder, "final")));
     assert.deepEqual(t.calls.filter((c) => c.cmd === "/usr/bin/open"), [], "the hand-off is not shown when the record was not written");
-    assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, 5, "From Final Cut keeps every file");
     t.done();
   });
 });
@@ -1448,7 +1358,6 @@ describe("finish, with hand-off version 2", () => {
     assert.deepEqual(episodesTree(t), before, "nothing in final/, and the record as it was");
     assert.equal(existsSync(join(found.folder, "final")), false);
     assert.deepEqual(t.calls.filter((c) => c.cmd === "/usr/bin/open"), []);
-    assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, 5, "From Final Cut keeps every file");
     t.done();
   });
   it("refuses a new version whose first version names it as its own earlier version, by its name as edit.js names it, and writes nothing", async () => {
@@ -1480,11 +1389,8 @@ describe("finish, again, once the setting says 1 after a finish that wrote versi
     assert.deepEqual([handoffIn(found).version, handoffIn(found).video.id, handoffIn(found).revision], [2, FIRST, 4]);
     // The setting goes back to 1, and Reel 1 is Shared again.
     handoffVersion(t, 1);
-    t.shared(`${PROJECT["reel 1"]}.mov`, 9000, "a longer finished video");
-    t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 9500);
-    assert.equal(await finishEpisode(t.ctx, { ...found, record: reread(found) }, { yes: true }), 0, t.said());
-    assert.doesNotMatch(t.said(), /Approve a title/);
-    const result = await finishNow(t.ctx, { ...found, record: reread(found) });
+    t.exported(`${PROJECT["reel 1"]}.mov`, 9000, "a longer finished video");
+    const result = await finishNow(t.ctx, askedFor(t, { ...found, record: reread(found) }, { kept: ["main", "reel 2"] }));
     assert.equal(result.ok, true, result.failed.join(" "));
     const handoff = handoffIn(found);
     assert.deepEqual([handoff.version, handoff.video.id, handoff.revision, handoffFaultV2(handoff), "episode" in handoff], [2, FIRST, 5, "", false]);
@@ -1496,10 +1402,8 @@ describe("finish, again, once the setting says 1 after a finish that wrote versi
     handoffVersion(t, 1);
     const found = await asked(t);
     assert.equal((await finishNow(t.ctx, found)).ok, true);
-    t.shared(`${PROJECT["reel 1"]}.mov`, 9000, "a longer finished video");
-    t.shared(`${PROJECT["reel 1"]}.fcpxmld`, 9500);
-    assert.equal(await finishEpisode(t.ctx, { ...found, record: reread(found) }, { yes: true }), 0, t.said());
-    assert.equal((await finishNow(t.ctx, { ...found, record: reread(found) })).ok, true);
+    t.exported(`${PROJECT["reel 1"]}.mov`, 9000, "a longer finished video");
+    assert.equal((await finishNow(t.ctx, askedFor(t, { ...found, record: reread(found) }, { kept: ["main", "reel 2"] }))).ok, true);
     const handoff = handoffIn(found);
     assert.deepEqual([handoff.version, handoff.episode.id, handoff.revision, handoffFault(handoff)], [1, ID, 2, ""]);
     t.done();
@@ -1580,7 +1484,6 @@ describe("finish, for a session and for a video not yet answered", () => {
           assert.deepEqual(t.calls, [], `${how}: no program was run`);
           assert.deepEqual(t.clones, [], how);
           assert.deepEqual(t.opened, [], how);
-          assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, 5, `${how}: From Final Cut keeps every file`);
           t.done();
         }
       }
@@ -1616,7 +1519,7 @@ describe("finish, for a video of any kind marked a session, not cleared", () => 
     handoffVersion(t, 1);
     writeSettings(t.home, { sessionTeachings: TEACHINGS });
     const found = episodeFor(t, { record: { ...EDITED, kind: "short video", label: LABEL, session: MARK } });
-    for (const name of [`${PROJECT.main}.mp4`, `${PROJECT.main}.fcpxmld`, `${PROJECT["reel 1"]}.mov`, `${PROJECT["reel 2"]}.mov`]) t.shared(name, 2000);
+    for (const name of [`${PROJECT.main}.mp4`, `${PROJECT["reel 1"]}.mov`, `${PROJECT["reel 2"]}.mov`]) t.exported(name, 2000);
     const before = episodesTree(t);
     const r = await command(t, "finish", LABEL, "--yes");
     assert.deepEqual([r.code, r.text], [1, sessionWords(LABEL)]);
@@ -1625,7 +1528,6 @@ describe("finish, for a video of any kind marked a session, not cleared", () => 
     assert.equal(reread(found).rev, found.record.rev);
     assert.deepEqual(t.inFinal(found), []);
     assert.deepEqual([t.started, t.calls, t.clones, t.opened], [[], [], [], []]);
-    assert.equal(readdirSync(fromFinalCutFolder(t.home)).length, 4, "From Final Cut keeps every file");
     t.done();
   });
   it("refuses the detached finish of it too, before anything is waited for or copied", async () => {
@@ -1927,11 +1829,11 @@ describe("a hand-off of a video one of whose versions is a client or group sessi
         const t = setup();
         handoffVersion(t, 2);
         if (earlier) firstCut(t, as);
-        const found = episodeFor(t, { record: { ...EDITED, ...(earlier ? { versionOf: FIRST } : {}), label: LABEL } });
+        const found = episodeFor(t, { record: { ...EDITED, ...IN_APP, ...(earlier ? { versionOf: FIRST } : {}), label: LABEL } });
         if (!earlier) later(t, SECOND, ID, as);
-        for (const name of [`${PROJECT.main}.mp4`, `${PROJECT.main}.fcpxmld`, `${PROJECT["reel 1"]}.mov`, `${PROJECT["reel 2"]}.mov`]) t.shared(name, 2000);
+        for (const name of [`${PROJECT.main}.mp4`, `${PROJECT["reel 1"]}.mov`, `${PROJECT["reel 2"]}.mov`]) t.exported(name, 2000);
         const how = `${earlier ? "earlier" : "later"}: ${what}`;
-        assert.equal(await finishEpisode(t.ctx, found, { yes: true, noHandEdits: ["reel 2"] }), 1, how);
+        assert.equal(await finishEpisode(t.ctx, found, { yes: true }), 1, how);
         assert.deepEqual(t.said().split("\n"), [refusedAs(SHOWN)], how);
         assert.deepEqual(t.started, [], how);
         assert.equal(reread(found).rev, found.record.rev, `${how}: no claim was written`);
@@ -1965,7 +1867,7 @@ describe("a hand-off of a video one of whose versions is a client or group sessi
     for (const [label, who] of [[LABEL, LABEL], [null, `a client or group session (${ID.slice(-6)})`]]) {
       const t = setup();
       handoffVersion(t, 2);
-      const found = await asked(t, { ...EDITED, ...(label ? { label } : {}), ...OPEN });
+      const found = await asked(t, { ...EDITED, ...IN_APP, ...(label ? { label } : {}), ...OPEN });
       // It is marked only after finish was asked.
       writeFileSync(recordFile(found.folder, found.record.rev), recordText({ ...reread(found), ...MARKED }));
       const before = episodesTree(t);
@@ -1974,8 +1876,8 @@ describe("a hand-off of a video one of whose versions is a client or group sessi
       assert.doesNotMatch(result.failed.join(" "), /Pricing|\.mp4|\.mov/, `${who}: no name`);
       assert.deepEqual(episodesTree(t), before, `${who}: nothing in final/, and the record as it was`);
       // The quick part refuses it so too, at once.
-      const said = t.said().split("\n").length;
-      assert.equal(await finishEpisode(t.ctx, { ...found, record: reread(found) }, { yes: true, noHandEdits: ["reel 2"] }), 1, who);
+      const said = t.said() ? t.said().split("\n").length : 0;
+      assert.equal(await finishEpisode(t.ctx, { ...found, record: reread(found) }, { yes: true }), 1, who);
       assert.deepEqual(t.said().split("\n").slice(said), [sessionWords(who)], who);
       t.done();
     }
@@ -2125,7 +2027,7 @@ describe("a hand-off of a video whose versions now lead to another id than the o
     const t = setup();
     handoffVersion(t, 2);
     firstCut(t);
-    const found = await asked(t, { ...EDITED, label: LABEL });
+    const found = await asked(t, { ...EDITED, ...IN_APP, label: LABEL });
     assert.equal((await finishNow(t.ctx, found)).ok, true);
     assert.equal(handoffIn(found).video.id, ID);
     // Her answer is given again: the video is a new version of the first cut.
@@ -2134,8 +2036,8 @@ describe("a hand-off of a video whose versions now lead to another id than the o
     const before = episodesTree(t);
     const r = await command(t, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.deepEqual([r.code, r.text], [1, moved(ID, FIRST)]);
-    const said = t.said().split("\n").length;
-    t.shared(`${PROJECT["reel 1"]}.mov`, 9000, "a longer finished video");
+    const said = t.said() ? t.said().split("\n").length : 0;
+    t.exported(`${PROJECT["reel 1"]}.mov`, 9000, "a longer finished video");
     assert.equal(await finishEpisode(t.ctx, { ...found, record: reread(found) }, { yes: true }), 1);
     assert.deepEqual(t.said().split("\n").slice(said), [moved(ID, FIRST)], "at once: no part line, no folder");
     assert.deepEqual(episodesTree(t), before, "final/ and the record as they were");
@@ -2396,7 +2298,7 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
     const found = video(t, { kind: "raw" });
     const before = episodesTree(t);
     const done = await finishFinished(t.ctx, found, { record: found.record });
-    assert.deepEqual(done, { why: `${SHOT} is a raw video: its hand-off is made when it is finished in Final Cut. Nothing was written.` });
+    assert.deepEqual(done, { why: `${SHOT} is a raw video: its hand-off is made when it is finished in HyperFrames. Nothing was written.` });
     assert.deepEqual(episodesTree(t), before);
     t.done();
   });
@@ -2622,21 +2524,27 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
   });
 });
 
-const LEGACY_ADD = '"Sallie" is spelled "Sally" now, in every timeline\'s captions. Say "show it in Final Cut" to see it. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If the main video shows captions on screen, they keep the old spelling until it is shown in Final Cut, Shared and finished again.';
-// A short video as today's import makes one is shown in Final Cut, and finished there: its spell says what every Final Cut video's
-// says, with the way to see it, and what is kept until it is Shared again.
+const LEGACY_ADD = '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If the main video shows captions on screen, they keep the old spelling. Say "open it in HyperFrames" to edit it there, from the recording.';
+// A short video as today's import makes one, whose record is from the Final Cut days (its finished parts name no project): its spell says
+// the HyperFrames words, as every video's does now, and nothing of Final Cut.
 describe("spell, after a finish, for a short video as today's import makes one", () => {
-  it("says what a Final Cut video's spell says: the way to see it in Final Cut, and the hand-off made again", async () => {
+  it("says the HyperFrames words for a part the Final Cut days finished, and the hand-off made again", async () => {
     for (const version of [undefined, 2]) {
       const t = setup();
       if (version) handoffVersion(t, version);
-      const found = await asked(t, { ...EDITED, kind: "short video" });
-      assert.equal((await finishNow(t.ctx, found)).ok, true);
+      const found = await asked(t, { ...EDITED, kind: "short video", reels: [] }, { only: ["main"] });
+      const done = await finishNow(t.ctx, found);
+      assert.equal(done.ok, true, done.failed.join(" "));
+      // The record as the Final Cut days left it: each finished part says its edit was kept by no hand edits, and names no project.
+      const now = reread(found);
+      const parts = Object.fromEntries(Object.entries(now.finished.parts).map(([key, { project, ...part }]) => [key, { ...part, noHandEdits: true }]));
+      writeFileSync(recordFile(found.folder, now.rev + 1), recordText({ ...now, rev: now.rev + 1, finished: { ...now.finished, parts } }));
       const add = await command(t, "spell", FOLDER, "add", "Sallie", "Sally");
       assert.deepEqual([add.code, add.text], [0, LEGACY_ADD]);
       const drop = await command(t, "spell", FOLDER, "drop", "Sallie");
       assert.equal(drop.code, 0, drop.text);
-      assert.match(drop.text, /^"Sallie" is as the transcriber writes it again\. Say "show it in Final Cut" to see it\. /);
+      assert.match(drop.text, /^"Sallie" is as the transcriber writes it again\. /);
+      assert.doesNotMatch(add.text + drop.text, /Final Cut|timeline|show it/);
       t.done();
     }
   });
