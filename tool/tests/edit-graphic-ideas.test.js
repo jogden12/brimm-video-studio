@@ -15,7 +15,7 @@ import { setup, episodeFor, reread, FOLDER } from "./episodes.js";
 import { withRules } from "./skill-rows.js";
 import { projectCues } from "../project.js";
 import { graphicCuesOf, graphicCuesOfPlan, graphicCuesOfRecord, GRAPHIC_CUE_KINDS, REEL_CUES_MOST } from "../graphic-cues.js";
-import { clockText } from "../clock.js";
+import { stamp } from "../shared/text.js";
 
 async function on(deps, ...argv) {
   const said = [];
@@ -73,7 +73,7 @@ describe("graphic ideas", () => {
     assert.deepEqual([r.code, r.text], [0, [
       "Claude's ideas for graphics on the main video: 3, with times on the video.",
       `Idea 1, 0:06 to 0:07: The show's name in the lower third. Over "Welcome to the show."`,
-      'Idea 2, 0:14 to 0:16: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."',
+      'Idea 2, 0:13 to 0:16: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."',
       'Idea 3, 0:17 to 0:19: The word "important" in the corner. Over "It is very, very important."'
     ].join("\n")]);
     t.done();
@@ -84,7 +84,7 @@ describe("graphic ideas", () => {
     const kept = { ...plan, phrases: plan.phrases.map((ph) => (ph.id === "p6" ? { ...ph, keep: true } : ph)), claude: { graphicCues: [cue(1, "p6", "So the", "A pause card.")] } };
     const { t } = episode({ version: 3, kind: "raw", answer: ANSWERED }, {}, { ...EPISODE, files: { ...EPISODE.files, "Pricing talk.cut-plan.json": JSON.stringify(kept) } });
     const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
-    assert.equal(r.text.split("\n")[1], 'Idea 1, 0:12 to 0:13: A pause card. Over "So the"', r.text);
+    assert.equal(r.text.split("\n")[1], 'Idea 1, 0:12 to 0:12: A pause card. Over "So the"', r.text);
     t.done();
   });
   it("needs no Final Cut file: with the rough cut not in the record, and no file in the folder, the cues are listed", async () => {
@@ -111,8 +111,8 @@ describe("graphic ideas", () => {
     const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas", "reel", "2");
     assert.deepEqual([r.code, r.text], [0, [
       "Claude's ideas for graphics on Reel 2: 2, with times on Reel 2.",
-      'Idea 2, 0:00 to 0:03: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."',
-      'Idea 3, 0:04 to 0:05: The word "important" in the corner. Over "It is very, very important."'
+      'Idea 2, 0:00 to 0:02: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."',
+      'Idea 3, 0:03 to 0:05: The word "important" in the corner. Over "It is very, very important."'
     ].join("\n")]);
     t.done();
   });
@@ -194,7 +194,7 @@ const CUES = [
   cue(3, "p8", "very important", 'The word "important" in the corner'),
   cue(4, "p9", "the moon landing", "A picture of the moon.", "graphic", 4)
 ];
-const rawWithCues = (cues = CUES, record = {}) => episode({ version: 3, kind: "raw", answer: ANSWERED, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed: [ROUGH], base: null }, ...record }, {}, withCues(cues));
+const rawWithCues = (cues = CUES, record = {}, made = withCues(cues)) => episode({ version: 3, kind: "raw", answer: ANSWERED, main: { preset: null, cuts: [], texts: [], graphics: [], logo: false, pushed: [ROUGH], base: null }, ...record }, {}, made);
 
 describe("graphic ideas, from graphic cues", () => {
   it("lists a raw video's cues with times on the video, each by its number, or not found", async () => {
@@ -204,7 +204,7 @@ describe("graphic ideas, from graphic cues", () => {
       "Claude's ideas for graphics on the main video: 4, with times on the video.",
       `Idea 1, 0:06 to 0:07: The show's name in the lower third. Over "Welcome to the show"`,
       'Idea 2, 0:15 to 0:16: A chart of what it costs to run the business. Over "know your costs"',
-      'Idea 3, 0:18 to 0:19: The word "important" in the corner. Over "very important"',
+      'Idea 3, 0:18 to 0:18: The word "important" in the corner. Over "very important"',
       'Idea 4: A picture of the moon. Its words, "the moon landing", were not found in the video.'
     ].join("\n")]);
     t.done();
@@ -223,8 +223,8 @@ describe("graphic ideas, from graphic cues", () => {
     const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas", "reel", "2");
     assert.deepEqual([r.code, r.text], [0, [
       "Claude's ideas for graphics on Reel 2: 2, with times on Reel 2.",
-      'Idea 2, 0:02 to 0:03: A chart of what it costs to run the business. Over "know your costs"',
-      'Idea 3, 0:05 to 0:05: The word "important" in the corner. Over "very important"'
+      'Idea 2, 0:02 to 0:02: A chart of what it costs to run the business. Over "know your costs"',
+      'Idea 3, 0:04 to 0:05: The word "important" in the corner. Over "very important"'
     ].join("\n")]);
     t.done();
   });
@@ -242,7 +242,7 @@ describe("graphic ideas, from graphic cues", () => {
   it("lists the ideas of an older plan as it always did, when the plan holds no graphic cues", async () => {
     const { t } = raw();
     const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
-    assert.equal(r.text.split("\n")[2], 'Idea 2, 0:14 to 0:16: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."');
+    assert.equal(r.text.split("\n")[2], 'Idea 2, 0:13 to 0:16: A chart of what it costs to run the business. Over "So the first thing you need to do is know your costs."');
     t.done();
   });
   it("is refused for a video waiting for its answer and for a session, by the gate, before any words are read", async () => {
@@ -275,7 +275,7 @@ describe("graphic ideas, for a video made from a plan (PR H5b)", () => {
       "The graphics of its video guide: 4, with times on the video.",
       `Idea 1, 0:06 to 0:07: Her show's name. Over "Welcome to the show"`,
       'Idea 2, 0:15 to 0:16: A chart of costs. Over "know your costs"',
-      'Idea 3, 0:14 to 0:14: Sallie at her desk. Over "so the first thing"',
+      'Idea 3, 0:13 to 0:14: Sallie at her desk. Over "so the first thing"',
       'Idea 4: Her dashboard. Its words, "the moon landing", were not found in the video.'
     ]);
     t.done();
@@ -376,6 +376,35 @@ describe("the README on ideas for graphics", () => {
   });
 });
 
+// --- The seconds shown whole, as HyperFrames and a video player show them (check 83) ---
+
+/** The made-up episode with the words of "Welcome to the show" (the second time, p4) moved to start and end where a test says. */
+const welcomeAt = (start, end) => {
+  const base = withCues(CUES);
+  const files = { ...base.files };
+  const file = JSON.parse(files["Pricing talk.words.json"]);
+  const second = file.words.findIndex((w, i) => /^welcome/i.test(w.w) && file.words.slice(0, i).some((x) => /^welcome/i.test(x.w)));
+  file.words[second] = { ...file.words[second], start };
+  file.words[second + 3] = { ...file.words[second + 3], end };
+  files["Pricing talk.words.json"] = JSON.stringify(file);
+  return rawWithCues(CUES, {}, { ...base, files });
+};
+
+describe("graphic ideas show whole seconds passed, as HyperFrames does", () => {
+  it("lists words that start at 18.63 s and end at 20.36 s as 0:18 to 0:20, not 0:19", async () => {
+    const { t } = welcomeAt(18.63, 20.36);
+    const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
+    assert.match(r.text, /Idea 1, 0:18 to 0:20: /, r.text);
+    t.done();
+  });
+  it("lists a time of 15.9999999999 s as 0:16: float noise does not take a second off", async () => {
+    const { t } = welcomeAt(15.9999999999, 17.5);
+    const r = await on(t.ctx.deps, "graphic", "Pricing", "ideas");
+    assert.match(r.text, /Idea 1, 0:16 to 0:17: /, r.text);
+    t.done();
+  });
+});
+
 // --- Parity: the list gives the seconds the project's own cue file gives (F2 fix 1) ---
 
 /** The ideas a list printed: { n, start } for each, `start` as printed (null for a cue whose words were not found). */
@@ -387,7 +416,7 @@ const printed = (text) => text.split("\n").filter((l) => /^Idea \d+[,:]/.test(l)
 const projectList = (found, extra) => {
   const read = (name) => JSON.parse(readFileSync(join(found.folder, name), "utf8"));
   return projectCues({ words: read("Pricing talk.words.json").words, plan: read("Pricing talk.cut-plan.json"), spellings: found.record.spellings, ...extra })
-    .map((c) => ({ n: c.n, start: c.at ? clockText(c.at.start) : null }));
+    .map((c) => ({ n: c.n, start: c.at ? stamp(Math.round(c.at.start * 1000) / 1000) : null }));
 };
 const planOf = (found) => JSON.parse(readFileSync(join(found.folder, "Pricing talk.cut-plan.json"), "utf8"));
 const reelOf = (found, n) => JSON.parse(readFileSync(join(found.folder, "reels.json"), "utf8")).candidates.find((c) => c.n === n);

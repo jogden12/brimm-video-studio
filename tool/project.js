@@ -343,33 +343,40 @@ export const transcriptJson = (words, spellings = []) => {
 };
 
 /** brimm/cut-suggestions.json (5.8): what the cut plan cuts, as the rules decided and Claude changed them, in time order:
-    {n, from, to, start, end, kind, why, by}. A phrase with words is given by the ids of its first and last words in
-    transcript.json and those words' times. The plan's phrases split the episode's words in order (cuts.js phrasesOf), and a
-    word's id is its place in them, so each phrase's words are found by counting, never by their times, which two words can
-    share. A plan that does not hold the transcript's words, as many of them, is refused: its ids would be wrong. A cut that
-    holds no words (a silence: the opening, a shortened pause) is listed too, by its time alone, with `from` and `to` null.
-    `by` is who decided the plan, "rules" unless the plan says otherwise. */
+    {n, from, to, start, end, kind, why, by}. There is one suggestion for each cut range of the plan (cuts.js rangesOf), with the
+    range's own `start`, `end`, `kind` and `why`: a cut that holds words covers the whole range, never only its words' own times,
+    which a transcriber can stretch over a stretch with no words in it. `from` and `to` are the ids in transcript.json of the first
+    and last words of the range's phrases that hold words, or null for a cut that holds none (a silence: the opening, a shortened
+    pause). The plan's phrases split the episode's words in order (cuts.js phrasesOf), and a word's id is its place in them, so each
+    phrase's words are found by counting, never by their times, which two words can share. A plan that does not hold the
+    transcript's words, as many of them, is refused: its ids would be wrong. A plan with no ranges (older data) gives each cut
+    phrase that holds words, with its words' times. `by` is who decided the plan, "rules" unless the plan says otherwise. */
 export function cutSuggestions(plan, transcript) {
   const phrases = Array.isArray(plan?.phrases) ? plan.phrases : [];
   const count = (phrase) => (Array.isArray(phrase.words) ? phrase.words.length : 0);
   const held = phrases.reduce((sum, phrase) => sum + count(phrase), 0);
   if (phrases.length && held !== transcript.length) throw new Error(`cutSuggestions: the cut plan holds ${held} words and the transcript ${transcript.length}: they must be the same words`);
-  const found = [];
+  const by = plan?.by || "rules";
+  // Where each phrase's words are among the transcript's, by counting.
+  const places = new Map();
   let at = 0;
   for (const phrase of phrases) {
-    const n = count(phrase);
-    if (phrase.keep === false && n > 0) {
-      const first = transcript[at];
-      const last = transcript[at + n - 1];
-      found.push({ from: first.id, to: last.id, start: first.start, end: last.end, kind: phrase.kind, why: phrase.why, by: plan.by || "rules" });
-    }
-    at += n;
+    places.set(phrase.id, [at, at + count(phrase) - 1]);
+    at += count(phrase);
   }
-  // The cuts that hold no words (the silence before the first words, a long pause shortened) have no ids to give: they go by their times.
-  const said = new Set(phrases.filter((phrase) => count(phrase) > 0).map((phrase) => phrase.id));
-  for (const range of Array.isArray(plan?.ranges) ? plan.ranges : []) {
-    if (range.keep !== false || (Array.isArray(range.phrases) ? range.phrases : []).some((id) => said.has(id))) continue;
-    found.push({ from: null, to: null, start: range.start, end: range.end, kind: range.kind, why: range.why, by: plan.by || "rules" });
+  const found = [];
+  if (Array.isArray(plan?.ranges) && plan.ranges.length) {
+    for (const range of plan.ranges.filter((r) => r.keep === false)) {
+      const said = (Array.isArray(range.phrases) ? range.phrases : []).map((id) => places.get(id)).filter((place) => place && place[1] >= place[0]);
+      const first = said.length ? transcript[Math.min(...said.map(([a]) => a))] : null;
+      const last = said.length ? transcript[Math.max(...said.map(([, b]) => b))] : null;
+      found.push({ from: first?.id ?? null, to: last?.id ?? null, start: range.start, end: range.end, kind: range.kind, why: range.why, by });
+    }
+  } else {
+    for (const phrase of phrases) {
+      const [a, b] = places.get(phrase.id);
+      if (phrase.keep === false && b >= a) found.push({ from: transcript[a].id, to: transcript[b].id, start: transcript[a].start, end: transcript[b].end, kind: phrase.kind, why: phrase.why, by });
+    }
   }
   const suggestions = found.map((cut, i) => ({ i, cut })).sort((x, y) => x.cut.start - y.cut.start || x.i - y.i).map(({ cut }, i) => ({ n: i + 1, ...cut }));
   return { version: 1, clock: "recording", suggestions };
@@ -664,7 +671,7 @@ function brimmRules(kind, short = false, crop = null, footage = false, explainer
     episode ? AI_PEOPLE : NO_GENERATED_PEOPLE,
     `- **Commands never run here.** Never run these HyperFrames commands, however they are spelled (\`npx hyperframes …\`, \`hyperframes …\`): ${inWords(barredList("denied"))}. Never run \`npm run publish\` either. ${inWords(barredList("edit"))} are Studio's to run, never this project's.`,
     heygen ? HEYGEN_WORDS_RULE : "- **The words.** Every word said, with its time and its id, is in `transcript.json`, made on this Mac. Use it, and never transcribe again.",
-    `- **Cutting.** Cut whole phrases at pauses, never in the middle of a word.${kind === "main" ? " When she asks to clean up retakes, propose the cuts in `brimm/cut-suggestions.json` first: those with word ids by their ids, and those with `from` and `to` null (silence) by their `start` and `end` times, the opening first." : ""}`,
+    `- **Cutting.** Cut whole phrases at pauses, never in the middle of a word.${kind === "main" ? " When she asks to clean up retakes, propose the cuts in \`brimm/cut-suggestions.json\` first, each from its \`start\` to its \`end\`, the opening first: \`from\` and \`to\` name the words a cut holds, and are null for a silence." : ""}`,
     ...(kind === "main" ? cues : []),
     ...(kind === "reel" ? [REEL_GRAPHIC_CUES_RULE] : []),
     ...(kind === "main" ? [short ? SHORT_VIDEO_NO_NEW_PROJECTS : `- **Reels.** The Reels Studio suggests are in \`brimm/reel-suggestions.json\`, by their word ids. ${REELS_ARE_STUDIOS}`] : []),
@@ -694,7 +701,7 @@ const ABOUT = {
   "package.json": "the scripts `npm run dev`, `npm run check` and `npm run render`",
   ".claude/settings.json": "the commands denied here, and the variables the agent runs with",
   "brimm/facts.json": "what this project is, for Studio",
-  "brimm/cut-suggestions.json": "the cuts Studio suggests, by word ids, or by time for silence",
+  "brimm/cut-suggestions.json": "the cuts Studio suggests, each by its times, with the words it holds",
   "brimm/reel-suggestions.json": "the Reels Studio suggests, by word ids",
   "brimm/graphic-cues.json": "the graphics Studio suggests, each on the words it goes with, by word ids",
   "brimm/face-track.json": "where the faces are in this Reel, for the upright crop",
