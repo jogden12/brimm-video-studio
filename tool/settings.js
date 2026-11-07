@@ -14,7 +14,7 @@
 // settings of the switch later, but never the drop folder: it says to switch that with the installer, and changes nothing.
 // A Mac may also watch a drop folder of its own, picked on it (dropPath, whatever the file says of the import, since every import is
 // light): --drop-folder, checked by dropFolderFault. The settings also hold the exports folder it looks in besides Downloads
-// (exportsPath, --exports-folder), and --switch-back goes back to a drop folder in Dropbox. Where a folder is, in Finder's words,
+// (exportsPath, --exports-folder, checked by exportsFolderFault), and --switch-back goes back to a drop folder in Dropbox. Where a folder is, in Finder's words,
 // and whether it is in a cloud folder are found here too.
 //
 //   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
@@ -30,10 +30,12 @@
 //                           [--allow skill|mcp-tool|tool <name>]… [--print]
 //   node settings.js user-deny
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { waitingToCut } from "./cuts.js";
 import { textWriter } from "./dropbox.js";
 import { homeRefusal, programHome, studioHome } from "./home.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, gatedReadRules, studioFiles, studioFolder, workshopFolder, writeStudio } from "./studio.js";
@@ -324,19 +326,25 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                its short id ("a client or group session (3fa9c1)"), never by its own file.
                                --drop-folder picks a drop folder of this Mac's own instead (a whole path, made when missing,
                                whose parent is there, whatever the file says of the import, which is light): not
-                               BRIMM Video's folders, BRIMM Video Work (but for Drop in it), her chat's folders, Zoom's,
-                               Downloads or the exports folder.
-                               --exports-folder says where HyperFrames' exports are looked for besides Downloads: never
-                               the drop folder, a folder inside it or one that holds it, whether the drop folder is in
-                               Dropbox or on this Mac. On a Mac with a drop folder of its own, --drop goes back to one in
-                               Dropbox only with --switch-back
+                               BRIMM Video's folders, BRIMM VIDEO Transfer, BRIMM VIDEO MacBook, BRIMM Video Work (but for Drop in
+                               it), her chat's folders, Zoom's, Downloads or the exports folder; nor one that holds a video
+                               already, which would be imported at once, or cannot be read, unless it is the one this Mac
+                               watches now. A folder another Mac has marked, or the transcript tool watches, is not counted
+                               here: install.sh refuses it next, in its own words.
+                               --exports-folder says where HyperFrames' exports are looked for besides Downloads, a cloud
+                               folder too: never the drop folder, a folder inside it or one that holds it, whether the drop
+                               folder is in Dropbox or on this Mac; and not Episodes, References, Drop or Unedited Video in
+                               BRIMM Video, BRIMM Video Work, BRIMM VIDEO Transfer, BRIMM VIDEO MacBook, a folder the
+                               transcript tool watches, her chat's folders, Zoom's, Studio's settings folder or a drop folder
+                               a Mac has marked, nor a folder inside one. On a Mac with a drop folder of its own, --drop goes
+                               back to one in Dropbox only with --switch-back
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
                                [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the
                                teachings from sessions, shown as (not shown), and then the import it will be (always light),
                                the drop folder as it is now and as it will be, and the exports folder it will be, a line
                                each; then, each only when it applies, whether the drop folder is in a cloud folder (and
-                               which) and whether macOS asks once about reading it; and, when the folder watched changes, the
+                               which) and whether macOS may ask about reading it; and, when the folder watched changes, the
                                old one's whole path; or why it would refuse it. Nothing is written. install.sh asks this
                                before it changes anything
   node settings.js set [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--exports-folder "<whole path>"] [--app hyperframes|off] [--app-handover on|off]
@@ -455,11 +463,14 @@ export function cloudFolder(path, home) {
   return "";
 }
 
-/** Whether macOS asks once whether node may read the folder `path`: it is under Desktop or Documents, or on another disk. */
+/** Whether macOS may ask whether node may read the folder `path`, and again after node is updated: it is under Desktop or Documents,
+    in iCloud Drive (~/Library/Mobile Documents) or a folder in ~/Library/CloudStorage (Dropbox's among them), or on another disk.
+    By its real path. */
 export function needsFilesAccess(path, home) {
   const h = realOf(home);
   const real = fold(realOf(path));
   if (underFolded(real, fold(join(h, "Desktop"))) || underFolded(real, fold(join(h, "Documents"))) || underFolded(real, "/volumes")) return true;
+  if (real.startsWith(`${fold(join(h, "Library", "CloudStorage"))}/`) || underFolded(real, fold(join(h, "Library", "Mobile Documents")))) return true;
   const deviceOf = (p) => {
     for (let at = p; ; at = dirname(at)) {
       try {
@@ -505,12 +516,39 @@ function sameOrNested(a, b) {
   return underFolded(x, y) || underFolded(y, x);
 }
 
-/** What is wrong with a folder picked as this Mac's drop folder, in plain words: "" when nothing is. It is refused when it is, is
-    inside, or holds Episodes, References, Drop or Unedited Video in BRIMM Video (`root`); ~/BRIMM Video Work, but for Drop in it; her
-    chat's folder or the workshop; Zoom's recordings folder (`zoom`); Downloads; or the exports folder (`exports`); when it is not a
-    whole path; and when the folder that is to hold it is not there. Compared by real paths, letter case folded. */
-export function dropFolderFault(path, { home, root, exports = downloadsFolder(home), zoom = join(home, "Documents", "Zoom") }) {
+/** The transcript tool's folders beside BRIMM Video, by name: the Mac Studio's agent watches the first; Jason's MacBook's watches
+    the second while he is away, and its file is taken away, not turned off, when he is back. Neither is a drop folder, and nor is a
+    folder in either, whether or not a launch agent's file lists it. */
+const TRANSCRIPT_FOLDERS = ["BRIMM VIDEO Transfer", "BRIMM VIDEO MacBook"];
+
+/** The label of the transcript tool's launch agent, whose file in LaunchAgents (and that file turned off, by its name) lists the
+    folders it watches. */
+const TRANSCRIBE_LABEL = "com.thebrimm.transcribe";
+
+/** The endings lib.js's private ARRIVING gives a file a browser or a sync program has not finished, kept in step by hand, since
+    lib.js is brimm-operations' copy and is not changed here (settings.test.js holds that isMedia leaves out each). */
+const ARRIVING_END = /\.(part|download|crdownload|tmp)$/i;
+
+/** Whether a path has a `.` or `..` part, which node's `resolve` takes away by the spelling alone while macOS walks it on the disk,
+    through a link and only through folders that are there: the two may then name different folders, so such a path is refused, never
+    resolved. */
+const hasDots = (path) => path.split("/").some((part) => part === "." || part === "..");
+
+/** What is wrong with a folder picked as this Mac's drop folder, in plain words: "" when nothing is. It is refused when it is not a
+    whole path or has a `.` or `..` part; when it is, is inside, or holds Episodes, References, Drop or Unedited Video in BRIMM Video
+    (`root`), BRIMM VIDEO Transfer or BRIMM VIDEO MacBook beside it (the transcript tool's), ~/BRIMM Video Work, but for Drop in it,
+    her chat's folder or the workshop, Zoom's recordings folder (`zoom`), Downloads, or the exports folder (`exports`); and when the
+    folder that is to hold it is not there. Compared by real paths, letter case folded. Then, last, in this order: "" when it is the
+    folder this Mac watches now (`current`, by real path: it is then not read at all); "" when `machine` is given and the folder is
+    marked by another Mac, and "" when it is the folder the transcript tool's launch agent lists (`transcripts`): install.sh refuses
+    those next, in lines of its own that say whose the folder is, and their recordings are theirs to take (this Mac's import leaves
+    a Zoom download in a light-import Mac's drop folder, and the transcript tool files its own); else the folder is read, and it is
+    refused when it cannot be, and when it holds a video the import would take, a file still arriving (`Clip.mov.download`) counted
+    as the video it will be. Dot files such as .DS_Store and the marker are none. Only `planned` passes `current`, `machine` and
+    `transcripts`. */
+export function dropFolderFault(path, { home, root, exports = downloadsFolder(home), zoom = join(home, "Documents", "Zoom"), current, machine, transcripts = [] }) {
   if (typeof path !== "string" || !isAbsolute(path)) return "the drop folder must be a whole path";
+  if (hasDots(path)) return "the drop folder must be named by a whole path with no . or .. in it";
   const me = fold(realOf(resolve(path)));
   const real = (p) => fold(realOf(p));
   const holds = (p) => underFolded(real(p), me);
@@ -522,6 +560,9 @@ export function dropFolderFault(path, { home, root, exports = downloadsFolder(ho
   }
   // Anything else in BRIMM Video (Assets, which every call may read, or a new folder) is not gated whole: none is a drop folder.
   if (inside(root)) return "the drop folder cannot be BRIMM Video, or inside it, or hold it";
+  for (const name of TRANSCRIPT_FOLDERS) {
+    if (inside(join(dirname(root), name)) || holds(join(dirname(root), name))) return cannot(name);
+  }
   const work = workFolder(home);
   if ((inside(work) && !inside(defaultDropFolder(home))) || holds(work)) return "the drop folder cannot be BRIMM Video Work, or inside it but for Drop, or hold it";
   for (const [what, folder] of [["BRIMM Video Studio", studioFolder(home)], ["BRIMM Video Workshop", workshopFolder(home)], ["Zoom's recordings", zoom], ["Downloads", downloadsFolder(home)], ["the exports folder", exports]]) {
@@ -536,11 +577,115 @@ export function dropFolderFault(path, { home, root, exports = downloadsFolder(ho
     }
   }
   try {
-    if (!statSync(path).isDirectory()) return "the drop folder is not a folder";
+    if (!statSync(resolve(path)).isDirectory()) return "the drop folder is not a folder";
   } catch {
     // Not there yet: the installer makes it.
   }
+  // The folder this Mac watches now holds videos that wait for its import: it is taken again, and not read.
+  if (typeof current === "string" && real(resolve(current)) === me) return "";
+  // Another Mac's folder (install.sh's marker line) and the transcript tool's (its transcript line) are refused next, saying whose
+  // they are: their recordings are not counted here.
+  if (typeof machine === "string") {
+    try {
+      const marker = join(resolve(path), MARKER);
+      if (statSync(marker, { throwIfNoEntry: false })?.isFile() && readFileSync(marker, "utf8").split("\n")[0] !== machine) return "";
+    } catch {
+      // A marker that cannot be read is no sign: the folder is read as any other.
+    }
+  }
+  if (transcripts.some((folder) => real(resolve(folder)) === me)) return "";
+  let names = [];
+  try {
+    names = readdirSync(resolve(path));
+  } catch (e) {
+    if (e.code !== "ENOENT") return `the drop folder could not be read (${e.code || "an error"}), so what it holds is not known. Make it readable (in System Settings, under Privacy & Security, Files and Folders, allow the app this runs in, if it was refused), then run this again`;
+  }
+  // What the import takes once each file still arriving has arrived (it takes a name the moment it stops arriving).
+  const videos = waitingToCut([...new Set(names.map((name) => name.replace(ARRIVING_END, "")))]).length;
+  if (videos === 1) return "the drop folder holds a video already, which would be imported as soon as the folder is watched. Pick a new, empty folder instead, or take the video out first";
+  if (videos > 1) return `the drop folder holds ${videos} videos already, which would be imported as soon as the folder is watched. Pick a new, empty folder instead, or take the videos out first`;
   return "";
+}
+
+/** The folders the transcript tool's launch agent lists on this Mac (WatchPaths), from its file in ~/Library/LaunchAgents and, unless
+    `off` is false, from that file turned off by its name (.plist.off, by-hand check 88), which comes back on by the name alone;
+    the file that is on first. Read as install.sh's watched() reads them, through plutil (`plutil` is a stand-in in a test): a file
+    that is not there is not asked about, and one that cannot be read, or that lists no array of whole paths, lists none. Nothing is
+    written. */
+export function transcriptFolders(home, plutil = spawnSync, { off = true, on = true } = {}) {
+  const folders = [];
+  for (const name of [...(on ? [`${TRANSCRIBE_LABEL}.plist`] : []), ...(off ? [`${TRANSCRIBE_LABEL}.plist.off`] : [])]) {
+    const file = join(home, "Library", "LaunchAgents", name);
+    if (!lstatSync(file, { throwIfNoEntry: false })) continue;
+    try {
+      const made = plutil("/usr/bin/plutil", ["-extract", "WatchPaths", "json", "-o", "-", "--", file], { encoding: "utf8", timeout: 5000 });
+      if (!made || made.error || made.status !== 0) continue;
+      const listed = JSON.parse(made.stdout);
+      if (Array.isArray(listed)) folders.push(...listed.filter((f) => typeof f === "string" && isAbsolute(f)));
+    } catch {
+      // A file that cannot be read lists none.
+    }
+  }
+  return folders;
+}
+
+/** What is wrong with a folder named as the exports folder, in plain words: "" when nothing is. HyperFrames' exports are looked for
+    there, and an export saved in a folder a tool watches is taken in as a new video, and one in a folder of Studio's, her chat's or
+    Zoom's is read as theirs. So it is refused, by real paths, letter case folded, when it is not a whole path or has a `.` or `..`
+    part (exports.js reads it through the disk, as the import reads the drop folder); when it is, holds or is inside the drop folder
+    (`drop`: EXPORTS_IN_DROP, first); when it is, or is inside, Episodes, References, Drop or Unedited Video in BRIMM Video (`root`),
+    Drop in BRIMM Video Work, BRIMM Video Work itself (and so every episode's video/ in it), Studio's settings folder
+    (~/Library/Application Support/BRIMM Video), BRIMM VIDEO Transfer or BRIMM VIDEO MacBook beside BRIMM Video, a folder the
+    transcript tool's launch agent lists (`transcripts`, on or turned off), her chat's folder or the workshop, or Zoom's recordings
+    (`zoom`); and when a Mac has marked it, or a folder that holds it, as its own drop folder: the marker stays where a Mac put it
+    after that Mac moves to another drop folder, and the refusal names the folder that holds it, as the disk spells it (where the
+    exports folder is reached through a link, as Downloads is on the Mac Studio, that is not one of the typed path's parents). A
+    folder that holds one of these lower down (BRIMM Video itself, The BRIMM DB, a folder holding a marked one) and BRIMM Video's other
+    folders (Assets, HyperFrames, a new one) are not refused, and nor is a cloud folder. The look for a marker never goes inside the
+    Downloads folder in the home folder: macOS guards it, and a look inside it brings a question to the app that runs the installer
+    (Terminal, under the Move app), whose design promises none; and no Mac's drop folder can be there, since it is on this Mac's own
+    disk and dropFolderFault refuses a drop folder that is, is inside or holds it. */
+export function exportsFolderFault(path, { home, root, drop, zoom = join(home, "Documents", "Zoom"), transcripts = [] }) {
+  if (typeof path !== "string" || !isAbsolute(path)) return "the exports folder must be a whole path";
+  if (hasDots(path)) return "the exports folder must be named by a whole path with no . or .. in it";
+  if (sameOrNested(path, drop)) return EXPORTS_IN_DROP;
+  const me = realOf(resolve(path));
+  const inside = (p) => underFolded(fold(me), fold(realOf(resolve(p))));
+  const cannot = (what) => `the exports folder cannot be ${what}, or inside it`;
+  for (const name of ["Episodes", "References", "Drop", "Unedited Video"]) {
+    if (inside(join(root, name))) return cannot(`${name} in BRIMM Video`);
+  }
+  if (inside(defaultDropFolder(home))) return cannot("Drop in BRIMM Video Work");
+  if (inside(workFolder(home))) return cannot("BRIMM Video Work");
+  if (inside(dirname(settingsFile(home)))) return cannot("Studio's settings folder");
+  for (const name of TRANSCRIPT_FOLDERS) {
+    if (inside(join(dirname(root), name))) return cannot(name);
+  }
+  if (transcripts.some((folder) => inside(folder))) return cannot("a folder the transcript tool watches");
+  if (inside(studioFolder(home))) return cannot("BRIMM Video Studio");
+  if (inside(workshopFolder(home))) return cannot("BRIMM Video Workshop");
+  // Zoom's folder is under Documents by default, which macOS guards: its real path is asked only when the exports folder could be in
+  // or under Documents (by its real path or as spelt), or Zoom's folder is elsewhere.
+  const docs = fold(join(realOf(home), "Documents"));
+  const zoomMaybe = !underFolded(fold(resolve(zoom)), docs) || underFolded(fold(me), docs) || underFolded(fold(resolve(path)), fold(resolve(zoom)));
+  if (zoomMaybe && inside(zoom)) return cannot("Zoom's recordings");
+  const guarded = fold(join(realOf(home), "Downloads"));
+  for (let at = me; ; at = dirname(at)) {
+    if (!underFolded(fold(at), guarded) && existsSync(join(at, MARKER))) {
+      let owner = "";
+      try {
+        owner = readFileSync(join(at, MARKER), "utf8").split("\n")[0];
+      } catch {
+        // A marker that cannot be read names no Mac.
+      }
+      const mac = owner && !machineFault(owner) ? owner : "a Mac";
+      const kept = "its marker, .brimm-watched-by, stays there when that Mac moves to another drop folder";
+      return at === me
+        ? `the exports folder cannot be a drop folder, and ${mac} has marked ${at} as its own (${kept})`
+        : `the exports folder cannot be inside a drop folder, and ${mac} has marked ${at}, which holds it, as its own (${kept})`;
+    }
+    if (dirname(at) === at) return "";
+  }
 }
 
 /** The settings `write` would write, checked: { settings, fields } (the fields it was told), or { code, said } with the lines it
@@ -550,7 +695,7 @@ export function dropFolderFault(path, { home, root, exports = downloadsFolder(ho
     folder, of its Mac, in its BRIMM Video) is not the one the settings would name: a new --drop, and a new --root or --machine
     too; and the old folder looked at, with the statuses and late checks of its Mac in its BRIMM Video, is the file's. `now` is a
     time, for the status files. */
-function planned(home, rest, now) {
+function planned(home, rest, now, plutil = spawnSync) {
   const told = fieldsToldBy(rest);
   if (!told.fields) return { code: told.code, said: [told.said] };
   let held;
@@ -571,16 +716,30 @@ function planned(home, rest, now) {
   const remove = switchBack && wasLocal ? ["dropPath"] : [];
   const fields = picked !== undefined ? { ...told.fields, dropPath: picked } : told.fields;
   // The folder picked, or the one this Mac has when the exports folder changes under it, must be one a drop folder may be.
+  // The transcript tool's launch agent is read once, for both checks below: its file turned off too for the exports folder, and its
+  // file that is on alone for the drop folder, which is what install.sh's own refusal reads.
+  const listedOn = transcriptFolders(home, plutil, { off: false });
+  const transcripts = [...listedOn, ...transcriptFolders(home, plutil, { on: false })];
   const toCheck = picked ?? (wasLocal && !remove.length && told.fields.exportsPath !== undefined ? held.dropPath : undefined);
   if (toCheck !== undefined) {
-    const why = dropFolderFault(toCheck, { home, root: told.fields.root, exports: exportsFolderOf({ ...held, ...told.fields }, home), zoom: zoomFolderOf(held, home) });
+    const why = dropFolderFault(toCheck, {
+      home, root: told.fields.root, exports: exportsFolderOf({ ...held, ...told.fields }, home), zoom: zoomFolderOf(held, home),
+      current: wasLocal ? held.dropPath : undefined, machine: told.fields.machine, transcripts: listedOn
+    });
     if (why) return { code: 1, said: [`Not written: ${why}.`] };
   }
   const { settings, fault } = afterWrite(held, fields, remove);
   if (fault) return { code: 1, said: [`This Mac's settings could not be written (${fault}). ${MEND_SETTING}`] };
   // And whatever the drop folder is, in Dropbox or this Mac's own, and whichever option moved it or the exports folder (--exports-folder,
-  // --drop, --switch-back), the exports folder the settings would name may not be, be inside or hold it, as `set` refuses it.
-  if (sameOrNested(exportsFolderOf(settings, home), dropFolderOf(settings, home))) return { code: 1, said: [`Not written: ${EXPORTS_IN_DROP}.`] };
+  // --drop, --switch-back, or none), the exports folder the settings would name (told, kept, or Downloads when none is) may not be what
+  // exportsFolderFault refuses, as `set` refuses it. When this run named no exports folder, a second line names the one refused, kept
+  // from before or Downloads, since install.sh stops before the summary line that would name it. The nested one stays alone: it comes
+  // with a drop folder the run names or moves.
+  const exportsWhy = exportsFolderFault(exportsFolderOf(settings, home), { home, root: settings.root, drop: dropFolderOf(settings, home), zoom: zoomFolderOf(settings, home), transcripts });
+  if (exportsWhy) {
+    const unnamed = told.fields.exportsPath === undefined && exportsWhy !== EXPORTS_IN_DROP;
+    return { code: 1, said: [`Not written: ${exportsWhy}.`, ...(unnamed ? [`The exports folder is ${exportsFolderOf(settings, home)}, ${typeof settings.exportsPath === "string" ? "kept from before" : "as none is set"}: name another with --exports-folder.`] : [])] };
+  }
   // The drop folder is Unedited Video until the file says Drop; or a whole path, on a Mac with one of its own.
   const dropWord = (s) => (isLocal(s) ? s.dropPath : s.drop === "Drop" ? "Drop" : "Unedited Video");
   const from = dropWord(held);
@@ -637,8 +796,8 @@ const afterwards = (result, next) => (typeof result.then === "function" ? result
 
 /** `write`: the settings it is told, checked (planned) and then written. Gives the number it ends with, or a promise of it when
     the drop folder changes. */
-function write(home, rest, say, now) {
-  return afterwards(planned(home, rest, now), (result) => {
+function write(home, rest, say, now, plutil) {
+  return afterwards(planned(home, rest, now, plutil), (result) => {
     if (!result.fields) {
       for (const line of result.said) say(line);
       return result.code;
@@ -656,11 +815,11 @@ function write(home, rest, say, now) {
 /** `plan`: the settings `write` would write, whole, as JSON (the emails of the accounts of the teachings from sessions shown as
     "(not shown)"), then the import it will be (always "light": every import is light, whatever an old file still says), the drop
     folder now and as it will be and the exports folder it will be, each on a line of its own, then, each only when it applies, that
-    the drop folder is in a cloud folder and that macOS asks once about reading it, and, when the folder watched changes, the old
+    the drop folder is in a cloud folder and that macOS may ask about reading it, and, when the folder watched changes, the old
     one's whole path, the one checked, on a line after them; and nothing written; or the lines `write` would refuse by. Gives the
     number it ends with, or a promise of it when the drop folder changes. */
-function plan(home, rest, say, now) {
-  return afterwards(planned(home, rest, now), (result) => {
+function plan(home, rest, say, now, plutil) {
+  return afterwards(planned(home, rest, now, plutil), (result) => {
     if (!result.fields) {
       for (const line of result.said) say(line);
       return result.code;
@@ -679,7 +838,7 @@ function plan(home, rest, say, now) {
     say(`The drop folder is now: ${result.from}`);
     say(`The drop folder will be: ${result.to}`);
     say(`The exports folder will be: ${exportsFolderOf(result.settings, home)}`);
-    // A drop folder of this Mac's own: whether it is in a cloud folder, and whether macOS asks once about reading it.
+    // A drop folder of this Mac's own: whether it is in a cloud folder, and whether macOS may ask about reading it.
     if (isLocal(result.settings)) {
       const cloud = cloudFolder(result.settings.dropPath, home);
       if (cloud) say(`The drop folder is in a cloud folder: ${cloud}`);
@@ -743,7 +902,7 @@ function localTime(d) {
 
 /** `set`: the settings of the switch it is told, changed and checked, each change said. A setting that is as it is told is
     left, and said to be. A change of the drop folder is refused, since the installer makes it: nothing is changed. */
-function set(home, rest, say) {
+function set(home, rest, say, plutil = spawnSync) {
   const told = pairsOf(rest, { ...OF_SET(), "--drop-folder": "--drop-folder" });
   if (!told || !Object.keys(told).length) {
     say(HELP);
@@ -779,12 +938,12 @@ function set(home, rest, say) {
     say(`The drop folder is switched by the installer, which makes the new folder, marks it and points the import at it, after it has checked the old one. To see what it would do: ./install.sh --print --machine "${got.settings.machine}" ${option} "${got.settings.root}"`);
     return 1;
   }
-  // An exports folder may not be, hold or be inside the drop folder: every export would be imported as a new video.
+  // An exports folder may not be what exportsFolderFault refuses, as write checks the one it is told: the drop folder or a folder
+  // nested with it (every export would be imported as a new video), a folder a tool watches, and so on. Only the one it is told is
+  // checked here: a kept one is plan's and write's to check.
   const exportsTo = values["--exports-folder"];
   if (exportsTo !== undefined) {
-    const why = local
-      ? dropFolderFault(got.settings.dropPath, { home, root: got.settings.root, exports: exportsTo, zoom: zoomFolderOf(got.settings, home) })
-      : sameOrNested(exportsTo, dropFolderOf(got.settings, home)) ? EXPORTS_IN_DROP : "";
+    const why = exportsFolderFault(exportsTo, { home, root: got.settings.root, drop: dropFolderOf(got.settings, home), zoom: zoomFolderOf(got.settings, home), transcripts: transcriptFolders(home, plutil) });
     if (why) {
       say(`Not changed: ${why}.`);
       return 1;
@@ -1203,7 +1362,7 @@ function mark(rest, say, clone, home) {
     `tmp` and `uid` Claude Code's temp folder and this Mac user's id, which a test gives as its own. The home folder is the one HOME names, as for the
     launch agent and in a shell, and the Mac's own word for it when HOME names none; or the one BRIMM_VIDEO_HOME names (home.js), and a
     BRIMM_VIDEO_HOME that is not a whole path ends it with 2. */
-export function settingsMain(argv, { home, say = (line) => process.stdout.write(`${line}\n`), clone, now = new Date(), openMinimum = OPEN_LOCK_CLAUDE, freePort = freeLocalPort, tmp, uid, env = process.env } = {}) {
+export function settingsMain(argv, { home, say = (line) => process.stdout.write(`${line}\n`), clone, now = new Date(), openMinimum = OPEN_LOCK_CLAUDE, freePort = freeLocalPort, tmp, uid, env = process.env, plutil = spawnSync } = {}) {
   const [command, ...rest] = argv;
   if (command === "--help" || command === "-h") {
     say(HELP);
@@ -1217,9 +1376,9 @@ export function settingsMain(argv, { home, say = (line) => process.stdout.write(
     }
     home = studioHome();
   }
-  if (command === "write") return write(home, rest, say, now);
-  if (command === "plan") return plan(home, rest, say, now);
-  if (command === "set") return set(home, rest, say);
+  if (command === "write") return write(home, rest, say, now, plutil);
+  if (command === "plan") return plan(home, rest, say, now, plutil);
+  if (command === "set") return set(home, rest, say, plutil);
   if (command === "sessions") return sessions(home, rest, say, now);
   if (command === "show" && !rest.length) return show(home, say, now);
   if (command === "marker") return mark(rest, say, clone, home);

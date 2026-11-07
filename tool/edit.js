@@ -103,7 +103,7 @@ import { SHOWN_MARKER, addShown, cantOpen, clearShownIn, freeShownName, madeShow
 import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sessionByFollowUp } from "./receipts.js";
 import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, footageFailed, guidanceOf, isMain as inUse, mediaOf, notWholeYet, openInApp, plainName, projectOnAnotherMac } from "./app.js";
 import { VOICEOVER, projectCues } from "./project.js";
@@ -834,7 +834,10 @@ function importLines(ctx, fits = () => true) {
     Mac, so which of its folders it watches is not known here, and both are listed, Drop/<Mac> and Unedited Video/<Mac>, whichever
     there are: a video is never hidden, though one left in a folder that Mac no longer watches shows as waiting. (A marker in
     Drop/<Mac> is no sign that it watches it: it stays after a switch back, and after a run that was refused once it was made.)
-    The Macs are the folders in either parent. A Mac with a drop folder of its own (settings.js isLocal) lists only that folder. */
+    The Macs are the folders in either parent. A Mac with a drop folder of its own (settings.js isLocal) lists only that folder. On any
+    other Mac, this Mac's own folder comes first always, whether or not either parent can be read or its name is found in them: when
+    macOS does not let this Mac's chat look in Dropbox it cannot read Drop either, and no folder would be looked at, and so none could
+    be said to be shut (Phase 3, L1c). */
 function dropFolders(ctx) {
   // A Mac with a drop folder of its own watches that one alone, which is on this Mac: another Mac's is not looked for here.
   if (isLocal(ctx.settings)) return [{ mac: ctx.machine, folder: dropFolderOf(ctx.settings, ctx.home) }];
@@ -845,8 +848,8 @@ function dropFolders(ctx) {
       return [];
     }
   };
-  const macs = [...new Set([...inRoot("Unedited Video"), ...inRoot("Drop")])].sort((a, b) => (a === ctx.machine ? -1 : b === ctx.machine ? 1 : a.localeCompare(b)));
-  return macs.flatMap((mac) => (mac === ctx.machine ? [dropFolder(ctx.root, mac, ctx.settings.drop)] : ["Drop", "Unedited Video"].map((parent) => dropFolder(ctx.root, mac, parent))).map((folder) => ({ mac, folder })));
+  const others = [...new Set([...inRoot("Unedited Video"), ...inRoot("Drop")])].filter((mac) => mac !== ctx.machine).sort((a, b) => a.localeCompare(b));
+  return [{ mac: ctx.machine, folder: dropFolder(ctx.root, ctx.machine, ctx.settings.drop) }, ...others.flatMap((mac) => ["Drop", "Unedited Video"].map((parent) => ({ mac, folder: dropFolder(ctx.root, mac, parent) })))];
 }
 
 /** The label a status of the Mac `machine` gives the video `video` in its drop folder, of a light import (Part L), or "". */
@@ -1081,11 +1084,15 @@ export async function episodes(ctx) {
   // import is light, and a video waiting there may be a session, its file named for a client (Phase 3, L1d).
   const statuses = readStatusesIn(statusReadFolders(ctx), ctx.now());
   const waiting = [];
+  // macOS's refusal of this Mac's own folder (EPERM, which System Settings can lift) is said; a folder its own permissions shut
+  // (EACCES), one that is not there and another Mac's are passed over (Phase 3, L1c).
+  let unreadable = false;
   for (const { mac, folder } of dropFolders(ctx)) {
     let names = [];
     try {
       names = readdirSync(folder).filter(isMedia).sort();
     } catch (e) {
+      if (mac === ctx.machine && e.code === "EPERM") unreadable = true;
       continue;
     }
     for (const video of names) {
@@ -1109,6 +1116,7 @@ export async function episodes(ctx) {
     say("Waiting in the drop folders:");
     for (const line of waiting) say(line);
   }
+  if (unreadable) say(dropUnreadable(dropWords(ctx.settings, ctx.machine, ctx.home)));
   // The imports, from their status files.
   const imports = importLines(ctx);
   if (imports.length) {
@@ -1753,10 +1761,13 @@ export async function retry(ctx, rest) {
   }
   const drop = dropFolderOf(ctx.settings, ctx.home);
   let videos = [];
+  let refused = false;
   try {
     videos = readdirSync(drop).filter(isMedia).sort();
   } catch (e) {
-    // The drop folder is not there, or cannot be read: it holds nothing that can be imported.
+    // The drop folder is not there, or cannot be read: it holds nothing that can be imported. But when macOS refuses it (EPERM) or
+    // its own permissions do (EACCES), that is what is said, never that it is empty (Phase 3, L1c).
+    refused = e.code === "EPERM" || e.code === "EACCES";
   }
   const statuses = readStatusesIn(statusReadFolders(ctx), ctx.now());
   const labelOf = (v) => labelIn(statuses, v, ctx.machine);
@@ -1766,6 +1777,10 @@ export async function retry(ctx, rest) {
   // An episode a version of a session holds is held as a session too (episodeAt's `held`), and named so.
   const gatedAs = gatedAsOf(linksOf(ctx.root));
   const video = videos.find((v) => plainly(v) === plainly(said) || plainly(basename(v, extname(v))) === plainly(said)) || videos.find((v) => labelOf(v) && spaced(labelOf(v)) === spaced(said));
+  if (!video && refused) {
+    say(dropUnreadable(dropWords(ctx.settings, ctx.machine, ctx.home)));
+    return 1;
+  }
   if (!video) {
     const held = videos.map((v) => labelOf(v) || unlabelled(v, sizeOf(v)));
     say(`No video in this Mac's drop folder fits "${said}". ${videos.length ? `It holds: ${listed(held)}.` : "It is empty."}`);
@@ -6156,18 +6171,22 @@ function panelRuns(ctx) {
     says, else at its ctime. How long is left comes from this Mac's panel, for this Mac's own video alone: a run there under the
     label of the other Mac's video is this Mac's, and says nothing of that one: as of when the panel last wrote the run, with the
     time since taken off. And when it should be Ready, from the same run (guide.js readyIn), on this Mac's clock to the nearest
-    minute (clockNear). */
+    minute (clockNear). Gives { videos, unreadable }: `unreadable` is whether macOS does not let this Mac's chat look in this Mac's own drop
+    folder (EPERM: a folder its own permissions shut, EACCES, or one that is not there is passed over, as another Mac's is), which
+    the overview says under the drop folder's line (Phase 3, L1c). */
 function guideDrops(ctx) {
   const now = ctx.now();
   const statuses = readStatusesIn(statusReadFolders(ctx), now);
   const seen = readSeen(ctx.home);
   const runs = panelRuns(ctx);
   const videos = [];
+  let unreadable = false;
   for (const { mac, folder } of dropFolders(ctx)) {
     let names = [];
     try {
       names = readdirSync(folder).filter(isMedia).sort();
     } catch (e) {
+      if (mac === ctx.machine && e.code === "EPERM") unreadable = true;
       continue;
     }
     for (const video of names) {
@@ -6196,7 +6215,7 @@ function guideDrops(ctx) {
       videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null, source: { mac, file: video, bytes: found.size } });
     }
   }
-  return apart(videos, clockAt);
+  return { videos: apart(videos, clockAt), unreadable };
 }
 
 /** What Studio does at the late check of a finish, as one sentence: when it checks Dropbox's copies (`due`, ms, as this Mac's clock
@@ -6211,7 +6230,7 @@ function checkSentence({ due, took }) {
     are stopped until it is made (stoppedWords): a spelling and handing the video off again. */
 const ON_THE_CHECK = "You do not need to wait for it. A spelling and handing it off again wait until then.";
 
-/** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old }. Each item (guide.js Item) is a
+/** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old, unreadable }. Each item (guide.js Item) is a
     video in a drop folder, or an answered video, with what was read of it and its one next step, from her notes on this Mac
     (guide-note.js) and the time now. An episode with no record that can be read, one a newer brimm-video wrote, an archived one
     and one she left alone are passed over; one from before the switch, which has no answer, is counted in `old`, and not guided.
@@ -6232,7 +6251,8 @@ function guideItems(ctx) {
   // The parts of the plans (PR H5a) are read from Episodes once for the pass too, by the first plan that has parts to count and then given to every
   // other, so that a pass costs the same whatever the number of plans (footage.js partsReader).
   const footageIn = partsReader(ctx.root);
-  const items = guideDrops(ctx).map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
+  const drops = guideDrops(ctx);
+  const items = drops.videos.map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
   let old = 0;
   for (const name of folders(ctx)) {
     const e = episodeAt(ctx, name, links);
@@ -6255,7 +6275,7 @@ function guideItems(ctx) {
     if (h && (!best || h.revision > best.facts.handoff.revision || (h.revision === best.facts.handoff.revision && h.at > best.facts.handoff.at))) newest.set(h.id, item);
   }
   const own = (item) => !item.next.done && item.next.stage !== "ops";
-  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item || own(item)), old };
+  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item || own(item)), old, unreadable: drops.unreadable };
 }
 
 /** A folder opened in Finder for the guide, as `which` opens QuickTime Player, and said as `what` is, in Finder words (`words`).
@@ -6355,8 +6375,8 @@ function noteFinished(ctx, { facts }) {
 
 /** The guide's overview of what guideItems read: this Mac's drop folder in Finder's words, each video under way with its one next
     step, and how many videos from before the switch it does not guide. */
-function sayOverview(ctx, { items, old }) {
-  for (const line of overviewLines({ drop: dropWords(ctx.settings, ctx.machine, ctx.home), items, old })) ctx.say(line);
+function sayOverview(ctx, { items, old, unreadable = false }) {
+  for (const line of overviewLines({ drop: dropWords(ctx.settings, ctx.machine, ctx.home), items, old, unreadable })) ctx.say(line);
   return 0;
 }
 
@@ -6431,8 +6451,9 @@ export async function guideCommand(ctx, rest) {
     ctx.say(HELP);
     return 2;
   }
-  const { items, old } = guideItems(ctx);
-  if (!rest.length) return sayOverview(ctx, { items, old });
+  const read = guideItems(ctx);
+  const { items } = read;
+  if (!rest.length) return sayOverview(ctx, read);
   const found = findIn(items, rest[0]);
   if (found.why) return refuse(ctx, found.why);
   if (form === "show") return showForStep(ctx, found.item);
