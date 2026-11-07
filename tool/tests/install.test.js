@@ -2413,7 +2413,7 @@ describe("the full import is gone (Phase 2, F4)", { skip: notAMac }, () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
     const root = join(dir, "The BRIMM DB", "BRIMM Video");
     mkdirSync(root, { recursive: true });
-    for (const args of [["--machine", "Mac Studio", "--import", "full", root], ["--import", "full", "/Volumes/Work/Unedited video"], ["--machine", "Mac Studio", "--drop", "Drop", "--import", "full", root]]) {
+    for (const args of [["--machine", "Mac Studio", "--import", "full", root], ["--import", "full", "/Volumes/Work/Unedited video"], ["--machine", "Mac Studio", "--drop", "Drop", "--import", "full", root], ["--machine", "Mac Studio", "--drop", "Drop", "--switch-back", "--import", "full", root]]) {
       const r = ask("--print", ...args);
       assert.deepEqual([r.status, r.out], [2, "The full import is gone: this Mac imports lightly.\n"], args.join(" "));
       assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);

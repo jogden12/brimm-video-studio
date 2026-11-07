@@ -15,8 +15,9 @@
 #   ./install.sh --machine "Mac Studio" "/path/to/The BRIMM DB/BRIMM Video"
 #                                    set this Mac up for episodes: it watches its own drop folder, BRIMM Video/Unedited
 #                                    Video/<this Mac>, or BRIMM Video/Drop/<this Mac> once its settings name Drop (--drop,
-#                                    below), which is made, with a marker that names this Mac, and each video dropped there
-#                                    is imported into BRIMM Video/Episodes. This Mac's settings are written in
+#                                    below), which is made, with a marker that names this Mac, or the folder it picked on its own
+#                                    disk (--drop-folder, below), whose videos' files are kept in BRIMM Video Work. Each video
+#                                    dropped there is imported into BRIMM Video/Episodes. This Mac's settings are written in
 #                                    ~/Library/Application Support/BRIMM Video/settings.json. With --print, nothing is made.
 #                                    It says whether Xcode's command line tools, Homebrew and
 #                                    Claude Code's sign-in are here, what Jason does by hand for any that is not, and whether
@@ -192,7 +193,8 @@ if [[ -n "$switch_missing" ]]; then
 fi
 # The full import is gone (Phase 2, "Final Cut retired"): every import is the light one, so --import full is refused, whatever else
 # is told, and nothing is changed.
-for (( i = 1; i < ${#switch_options[@]}; i += 2 )); do
+# Each element is looked at, not each pair: --switch-back has no value after it, so the pairs would not line up.
+for (( i = 1; i < ${#switch_options[@]}; i += 1 )); do
   if [[ "${switch_options[i]}" == "--import" && "${switch_options[i+1]}" == "full" ]]; then
     say "The full import is gone: this Mac imports lightly."
     exit 2
@@ -705,7 +707,9 @@ else
   for f in "${folders[@]}"; do say "  Folder to watch for unedited video:  $f"; done
 fi
 # swift finds the speaker's face for a Reel's crop. It comes with Xcode's command line tools, and nothing here installs it.
-say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here, so a Reel is cropped at the centre of the picture. To get it: xcode-select --install")"
+swift_more=""
+[[ -n "$local_drop" ]] && swift_more=" Without it Studio cannot tell when Dropbox has uploaded a recording's copy in Original files, so the recordings stay on this Mac."
+say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here, so a Reel is cropped at the centre of the picture.$swift_more To get it: xcode-select --install")"
 # For one of the two Macs, what it has of what the tool needs, and what Jason does by hand when something is not here. Nothing
 # here installs Xcode's command line tools, Homebrew or Claude Code, or signs in to Claude.
 autoload -Uz is-at-least
