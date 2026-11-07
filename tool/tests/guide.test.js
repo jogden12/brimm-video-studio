@@ -251,6 +251,7 @@ const STAGE_ROWS = [
   [APP({ local: true, copy: { left: 180, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made, about 3 minutes left. Say "open it in HyperFrames": it opens by itself when it is ready.'],
   [APP({ local: true, copy: { left: null, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made. It usually takes about 4 minutes. Say "open it in HyperFrames": it opens by itself when it is ready.'],
   [APP({ local: true, copy: { left: null, usual: null } }), "making-copy", 'The video for HyperFrames is being made. Say "open it in HyperFrames": it opens by itself when it is ready.'],
+  [APP({ local: true, copy: { left: null, usual: null, opening: true } }), "making-copy", "It opens in HyperFrames by itself in a moment."],
   [CLIP({ local: true, copy: { left: 120, usual: null } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames": it opens by itself when it is ready.'],
   [APP({ local: false, copy: { left: 180, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made, about 3 minutes left. Say "open it in HyperFrames" when it is done.'],
   // On a Mac whose settings have the app off nothing opens a project, so a clip is not told to open one.

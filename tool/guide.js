@@ -360,7 +360,9 @@ export function waitWords({ checkAt, readyAt, inSeconds }) {
 
 /** The video for HyperFrames being made, and what to say when it is done: how long is left when the panel's run says, else how long it
     usually takes, by the speed this Mac measured, else no time. */
-function copyStep({ left, usual, wait }, local = false) {
+function copyStep({ left, usual, wait, opening }, local = false) {
+  // The copy is made and `app --when-ready` is about to open it: nothing is left for her to say.
+  if (opening) return toDo("making-copy", "It opens in HyperFrames by itself in a moment.");
   // A video kept on this Mac opens by itself once its video is made (Phase 3, L7), and waits for no check of Dropbox's.
   const say = local ? 'Say "open it in HyperFrames": it opens by itself when it is ready.' : 'Say "open it in HyperFrames" when it is done.';
   // Waiting for Dropbox's late check (plan R1a): when it will be ready with the wait in it, else when the check is made.

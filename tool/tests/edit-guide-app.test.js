@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { KEPT, NOT_SET_UP } from "../app.js";
-import { lockOf, takeEpisodeLock } from "../detached.js";
+import { lockOf, takeEpisodeLock, whenReadyLockOf } from "../detached.js";
 import { HELP } from "../edit.js";
 import { COPY_STEP } from "../guide.js";
 import { fileId, writePending } from "../filing.js";
@@ -22,6 +22,8 @@ import { WORK_COPY_WAIT_STEP, workCopyLockOf } from "../workcopy.js";
 import { FOLDER, ID, episodeAs, listAll, reread } from "./episodes.js";
 import { ANSWERED, entry, exportOf } from "./exports-world.js";
 import { OFFERS, READ, depsOf, guideWorld } from "./guide-world.js";
+import { makeLocal } from "./local-world.js";
+import { episodeWork } from "../settings.js";
 import { PLAIN, RAW as RAW_RECORD, atWork, on, world as copyWorld } from "./workcopy-world.js";
 const HAND_OFF_LINE = "Hand-off question: I found your export. Hand it off?";
 
@@ -294,6 +296,15 @@ describe("the guide while the video for HyperFrames is made", () => {
     mkdirSync(dirname(workCopyLockOf(w.t.home, other)), { recursive: true });
     assert.equal(takeEpisodeLock(workCopyLockOf(w.t.home, other), "workcopy", () => true).taken, true);
     assert.equal(await line(w), says(OPEN));
+    w.t.done();
+  });
+  it("B0-F7 a video kept on this Mac, between its copy's end and the open by itself, is still at the copy's step and is not asked to say it again", async () => {
+    const w = guideWorld({ projects: null });
+    makeLocal(w);
+    mkdirSync(episodeWork(w.t.home, FOLDER), { recursive: true });
+    w.t.ctx.deps.alive = (pid) => pid === process.pid;
+    assert.equal(takeEpisodeLock(whenReadyLockOf(w.t.home, FOLDER), "when-ready", () => true).taken, true);
+    assert.equal(await line(w), says("It opens in HyperFrames by itself in a moment."));
     w.t.done();
   });
   it("says where to export when the Mac picked an exports folder that is not Downloads (L1b)", async () => {

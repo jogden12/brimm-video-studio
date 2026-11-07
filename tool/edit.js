@@ -6160,7 +6160,12 @@ function guideReading(ctx, e, r, kind, running, rates) {
     late-wait.js waitFacts): when Dropbox has checked its copies and when the copy will be ready after that, or null when it waits for nothing. */
 function guideCopy(ctx, e, r, rates) {
   const run = runningRun(ctx.home, e.name, ctx.alive, workCopyLockOf(ctx.home, e.name));
-  if (!run) return null;
+  if (!run) {
+    // Between the copy's end and the project's being opened, the `app --when-ready` run she was told of is still at work: for a video kept on this Mac
+    // that is still the copy's step, so that she is not asked to say it again.
+    const opening = keptOnAMac(r) && runningRun(ctx.home, e.name, ctx.alive, whenReadyLockOf(ctx.home, e.name));
+    return opening ? { left: null, usual: null, wait: null, opening: true } : null;
+  }
   const panel = panelRuns(ctx).find((p) => p.pid === run.pid);
   const since = panel && Number.isFinite(panel.updated) ? Math.max(0, ctx.now() - panel.updated) / 1000 : 0;
   const fresh = (s) => (Number.isFinite(s) && s - since > 0 ? Math.round(s - since) : null);
