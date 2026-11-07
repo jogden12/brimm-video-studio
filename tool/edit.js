@@ -1307,7 +1307,7 @@ async function claimAndBring(ctx, found, record, { again, by = "", notYet = null
       return { code: 1 };
     }
     record = after.record;
-    if (!(await (ctx.deps.online || online)())) say("This Mac seems to be offline: the other Mac will not see that you have it until this one is back online.");
+    if (!keptOnAMac(record) && !(await (ctx.deps.online || online)())) say("This Mac seems to be offline: the other Mac will not see that you have it until this one is back online.");
   }
   return { record };
 }
@@ -1497,14 +1497,36 @@ async function appWhenReady(ctx, rest) {
   const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "when-ready", lock: whenReadyLockOf(ctx.home, found.name), alive: ctx.alive, ...keep }, async () => {
     const limit = workCopyLimits(found.read.record.video && found.read.record.video.seconds).limit;
     const began = ctx.now();
-    const busy = () => runningCommand(ctx.home, found.name, ctx.alive, workCopyLockOf(ctx.home, found.name)) || runningCommand(ctx.home, found.name, ctx.alive);
-    while (busy() && ctx.now() - began < limit) await wait(WHEN_READY_LOOK_MS);
-    const now = readEpisode(found.folder);
-    const record = now.record;
+    const copyLock = workCopyLockOf(ctx.home, found.name);
+    const ownRecord = () => {
+      const again = readEpisode(found.folder);
+      return again.record && !again.newer ? { found: { folder: found.folder, name: found.name, record: again.record }, record: again.record } : null;
+    };
+    // The copy's run is started just before this one, and may not have taken its lock yet: it is not decided that the copy failed until that run has been seen at work,
+    // or its result shows it ended after this run began.
+    let seen = false;
+    let busyWith = "";
+    for (;;) {
+      const copying = Boolean(runningCommand(ctx.home, found.name, ctx.alive, copyLock));
+      busyWith = runningCommand(ctx.home, found.name, ctx.alive);
+      if (copying) seen = true;
+      const ended = readResult(ctx.home, found.name, WORK_COPY_COMMAND);
+      const decided = seen || copyIsMade(ctx, ownRecord() ?? { found, record: found.read.record }) || (ended && ended.early !== true && ended.ended >= began);
+      if (!copying && !busyWith && decided) break;
+      if (ctx.now() - began >= limit) break;
+      await wait(WHEN_READY_LOOK_MS);
+    }
+    const mine = ownRecord();
+    const record = mine ? mine.record : null;
     const name = record ? record.name.text : found.read.record.name.text;
-    if (!record || now.newer || !copyIsMade(ctx, { found: { folder: found.folder, name: found.name, record }, record })) {
+    if (!record || !copyIsMade(ctx, mine)) {
       notify(couldntBeMade(name));
       return { ok: false, made: [], failed: ["The video for HyperFrames was not made, so it was not opened."], next: "" };
+    }
+    if (busyWith) {
+      // The copy is made, but another run (a reading) still holds the episode and the time is up: it is opened when she asks.
+      notify(`The video for HyperFrames of ${name} is made, but it could not open by itself yet. Say "open ${name} in HyperFrames".`);
+      return { ok: false, made: [], failed: ["Another run was still at work on it, so it was not opened."], next: "" };
     }
     // The copy is made: the episode's lock is taken now, and what `app` does is done.
     const said = [];
@@ -1516,7 +1538,7 @@ async function appWhenReady(ctx, rest) {
       notify(couldntBeMade(name));
       return { ok: false, made: [], failed: ["Another run was at work on it, so it was not opened."], next: "" };
     }
-    if (!opened.ok) notify(said[0] || couldntBeMade(name));
+    if (!opened.ok) notify(said.length ? said.join(" ") : couldntBeMade(name));
     return { ok: opened.ok, made: opened.made, failed: opened.failed, next: "" };
   });
   if (result.taking || result.running) {
@@ -1756,6 +1778,8 @@ export async function status(ctx, rest) {
       const own = Boolean(r) && r.early === true && Boolean(run) && r.command === command && r.pid === run.pid;
       const atWork = Boolean(r) && (r.command === command || (copying && r.command === WORK_COPY_COMMAND));
       if (!r || (atWork && !own)) continue;
+      // The run that waited to open it and the run that opened it are one thing to her: said once, by the opening (Phase 3, L7).
+      if (r.command === "when-ready" && r.ok) continue;
       // What to say next names the episode as it was then, and says to open it, which the gate refuses now: for a gated one it is
       // left out.
       lines.push(ranLine(ctx, shown, r, clean, isGated(e) ? "" : r.next, own, voicing));

@@ -587,6 +587,14 @@ describe("kind --clear-session: what changed while the dialog was open (the clai
     assert.deepEqual([recordsOf(found), gated(reread(found)), t.started, t.waits, existsSync(logOf(t)), existsSync(answerLock(t))], [before, true, [], [85000], false, false]);
     t.done();
   });
+  it("a session kept on this Mac is never too late: it waits for no claim, so a click 85 seconds in clears it all the same (Phase 3, L7)", async () => {
+    const t = setup();
+    const found = sessionOf(t, { version: 6, local: { on: "Mac Studio" } });
+    const d = dialogs(t, found, CLEAR_IT, { during: () => t.ctx.deps.wait(85000) });
+    const r = await d.ask(...clearing("raw"));
+    assert.deepEqual([r.code, r.said.includes(TOO_LONG), reread(found).session.cleared !== null, t.waits.includes(CLAIM_WAIT_MS)], [0, false, true, false]);
+    t.done();
+  });
   it("clears all the same when she clicks as late as 80 seconds in, which is the last the claim's wait fits", async () => {
     const t = setup();
     const found = sessionOf(t);

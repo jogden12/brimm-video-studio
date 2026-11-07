@@ -8,11 +8,11 @@
 // Player, Finder and the notice are stand-ins. Every name in it is made up.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CLAIM_WAIT_MS, READ_POLL_MS, editMain } from "../edit.js";
 import { episodeFault, localStamp, newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
-import { settingsFile, writeSettings } from "../settings.js";
+import { episodeFilesFolder, settingsFile, writeSettings } from "../settings.js";
 import { readResult, resultFile, lockOf, takeEpisodeLock, releaseEpisodeLock } from "../detached.js";
 import { requestFor } from "../readings.js";
 import { replaceSpeakers, EDITS } from "../sessions.js";
@@ -312,6 +312,19 @@ describe("teachings --transcript-only", () => {
 });
 
 describe("teachings: the claim, her ask, and the reading started", () => {
+  it("a session kept on this Mac is asked for with no claim written or waited for: one write, and the reading of that record (Phase 3, L7)", async () => {
+    const mac = sessionMac({ over: { version: 6, local: { on: "Mac Studio" } } });
+    const own = episodeFilesFolder(mac.t.home, FOLDER);
+    mkdirSync(own, { recursive: true });
+    for (const rel of listAll(mac.found.folder).filter((r) => !r.startsWith("record/"))) renameSync(join(mac.found.folder, rel), join(own, rel));
+    const r = await on(mac.t.ctx.deps, "teachings", LABEL);
+    assert.deepEqual(r.said, [STILL]);
+    assert.equal(mac.t.waits.includes(CLAIM_WAIT_MS), false);
+    const record = reread(mac.found);
+    assert.deepEqual([record.rev, record.session.teachings, record.editing], [2, "asked", null]);
+    assert.deepEqual(mac.t.started.map(([, args]) => args.slice(1)), [readArgs(2)]);
+    mac.t.done();
+  });
   it("claims the session as kind does, records the ask, and starts the session's reading of that record", async () => {
     const mac = sessionMac();
     const r = await on(mac.t.ctx.deps, "teachings", LABEL);

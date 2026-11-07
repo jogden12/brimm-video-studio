@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CLAIM_WAIT_MS, editMain } from "../edit.js";
-import { lockOf, takeEpisodeLock } from "../detached.js";
+import { lockOf, readResult, takeEpisodeLock } from "../detached.js";
 import { whenReadyLockOf } from "../app.js";
 import { COPY_STEP } from "../guide.js";
 import { addRates, progressFolder } from "../progress.js";
@@ -178,7 +178,68 @@ describe("app --when-ready", () => {
       freed = await on(t.ctx.deps, "free", FOLDER);
     };
     await run(t);
-    assert.doesNotMatch(freed.text, /running|being made/i);
+    assert.equal(freed.code, 0, freed.text);
+    assert.doesNotMatch(freed.text, /running|being made|isn't|not /i);
+    t.done();
+  });
+  it("started just after the copy was asked for, it waits for the copy's run to be seen rather than posting the notice at once", async () => {
+    const { t, paths } = kept();
+    let turns = 0;
+    const wait = t.ctx.deps.wait;
+    t.ctx.deps.wait = async (ms) => {
+      await wait(ms);
+      turns += 1;
+      // Nothing at work on the first look: the copy's run has not taken its lock yet. It does, then it ends with the copy made.
+      if (turns === 1) atWork(t, "workcopy");
+      if (turns === 2) {
+        madeCopy(paths);
+        rmSync(workCopyLockOf(t.home, FOLDER), { force: true });
+      }
+      assert.deepEqual(t.notices, []);
+    };
+    const r = await run(t);
+    assert.equal(r.code, 0, r.text);
+    assert.equal(turns, 2);
+    assert.deepEqual(t.notices, []);
+    t.done();
+  });
+  it("a copy that is made while another run still holds the episode at the limit is not called unmade: she is told to ask again", async () => {
+    const { t, paths } = kept();
+    madeCopy(paths);
+    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+    assert.equal(takeEpisodeLock(lockOf(t.home, FOLDER), "read", () => true).taken, true);
+    t.ctx.deps.alive = (pid) => pid === process.pid;
+    const r = await run(t);
+    assert.equal(r.code, 1);
+    assert.deepEqual(t.notices, [`The video for HyperFrames of ${NAME} is made, but it could not open by itself yet. Say "open ${NAME} in HyperFrames".`]);
+    t.done();
+  });
+  it("posts the whole refusal when the project could not be opened", async () => {
+    const { t, paths } = kept();
+    madeCopy(paths);
+    writeFileSync(join(t.home, "hyperframes-stand-in.json"), JSON.stringify({ open: "not-installed" }));
+    const r = await run(t);
+    assert.equal(r.code, 1);
+    const failed = readResult(t.home, FOLDER, "app").failed;
+    assert.ok(failed.length >= 1);
+    assert.deepEqual(t.notices, [failed.join(" ")]);
+    t.done();
+  });
+  it("shows one open in 'how far is it?', not two", async () => {
+    const { t, paths } = kept();
+    madeCopy(paths);
+    assert.equal((await run(t)).code, 0);
+    const said = (await on(t.ctx.deps, "status")).text;
+    assert.equal((said.match(/opening it in HyperFrames/g) || []).length, 1, said);
+    assert.doesNotMatch(said, /waiting to open it/);
+    t.done();
+  });
+  it("a local app with the video made says nothing of the other Mac when this Mac is offline", async () => {
+    const { t, paths } = kept();
+    madeCopy(paths);
+    t.ctx.deps.online = async () => false;
+    const r = await on(t.ctx.deps, "app", FOLDER);
+    assert.doesNotMatch(r.text, /offline|other Mac/i);
     t.done();
   });
   it("is for a video kept on this Mac: any other is told the help and nothing is done", async () => {
