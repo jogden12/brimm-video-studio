@@ -19,7 +19,8 @@ import { lockOf, resultFile, takeEpisodeLock } from "../detached.js";
 import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 import { chainGapWords } from "../finish.js";
 import { writePending } from "../filing.js";
-import { writeStatus } from "../importing.js";
+import { writeStatusIn } from "../importing.js";
+import { importingFolder } from "../settings.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { sessionLabel } from "../kinds.js";
 import { notSessionCardOf } from "../receipts.js";
@@ -781,7 +782,7 @@ describe("kind: the working copy (plan PR 4)", () => {
     const found = waiting(t);
     writePending(t.home, { version: 1, id: ID, name: FOLDER, folder: join(t.root, "Episodes", FOLDER), video: "Pricing talk.mp4", bytes: 1, seconds: 120, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt" });
     // The other Mac's import of the video is at work, so the reading still waits for the check (plan R1c).
-    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Pricing talk.mp4", bytes: found.record.video.bytes, seconds: 120, step: "Waiting for its late check", at: AT, label: LABEL }, (to, text) => writeFileSync(to, text));
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Pricing talk.mp4", bytes: found.record.video.bytes, seconds: 120, step: "Waiting for its late check", at: AT, label: LABEL }, (to, text) => writeFileSync(to, text));
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     assert.match(r.said[0], /^Answered\. Claude reads it at /);
     assert.deepEqual(startedBy(t), [readArgs("raw", 3), COPY_ARGS]);
@@ -884,7 +885,7 @@ describe("kind: a raw reading waits for the import's late check", () => {
   }
   /** The other Mac's import of the made-up video, at work: its late check is not this Mac's to keep in step (plan R1c), so a reading
       waits for it, and says when. */
-  const elsewhere = (t, found) => writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Pricing talk.mp4", bytes: found.record.video.bytes, seconds: 120, step: "Waiting for its late check", at: AT, label: LABEL }, (to, text) => writeFileSync(to, text));
+  const elsewhere = (t, found) => writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Pricing talk.mp4", bytes: found.record.video.bytes, seconds: 120, step: "Waiting for its late check", at: AT, label: LABEL }, (to, text) => writeFileSync(to, text));
   it("23. is waited for as a raw answer with no check while this Mac's own late check is still to come: the reading and the copy are started, and the words are the reading's", async () => {
     const t = setup();
     appOn(t);
@@ -924,7 +925,7 @@ describe("kind: a raw reading waits for the import's late check", () => {
     appOn(t);
     const found = waiting(t);
     const bytes = found.record.video.bytes;
-    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Pricing talk.mp4", bytes, seconds: 120, step: "Waiting for its late check", at: AT, label: LABEL }, (to, text) => writeFileSync(to, text));
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Pricing talk.mp4", bytes, seconds: 120, step: "Waiting for its late check", at: AT, label: LABEL }, (to, text) => writeFileSync(to, text));
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     assert.deepEqual(r.said, [`Answered. Claude reads it at ${clockAt(Date.parse(AT) + CLAIM_WAIT_MS + LATE_CHECK_MS)}, when the import has checked its copies.`]);
     assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [readArgs("raw", 3), COPY_ARGS]);

@@ -216,14 +216,16 @@ export async function waitWhole(paths, { wait = (ms) => new Promise((r) => setTi
     `(to, text, { replace })`, which writes `text` whole in the folder `work`, under a name of its own each time, puts it in
     at `to` (cloneIn, or replaceIn when `replace` is true), and then deletes its work copy. With `keep`, the work copy stays,
     for the late check, and goes with the run's own folder. The writer gives back the file as the late check takes it,
-    `{ from, to, bytes }`, and throws as cloneIn does. `opts` are cloneIn's. */
-export function textWriter({ work, keep = false, ...opts }) {
+    `{ from, to, bytes }`, and throws as cloneIn does. `onCopy({ from, to, bytes })`, when given, is called once the work copy is written whole
+    and before it is put in (a local import tells the late check of the first record here, Phase 3, L3). `opts` are cloneIn's. */
+export function textWriter({ work, keep = false, onCopy, ...opts }) {
   return (to, text, { replace = false } = {}) => {
     mkdirSync(work, { recursive: true });
     written += 1;
     const from = join(work, `${process.pid}-${written}-${basename(to)}`);
     writeFileSync(from, text);
     try {
+      if (onCopy) onCopy({ from, to, bytes: statSync(from).size });
       (replace ? replaceIn : cloneIn)(from, to, opts);
       return { from, to, bytes: statSync(from).size };
     } finally {

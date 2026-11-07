@@ -14,7 +14,8 @@ import { dirname, join } from "node:path";
 import { COMMAND_NAMES, contextFor, editMain, findEpisode } from "../edit.js";
 import { newEpisode, readEpisode, recordFile, recordText, shownName } from "../episode.js";
 import { episodeWork, workFolder, writeSettings } from "../settings.js";
-import { readStatuses, writeStatus } from "../importing.js";
+import { readStatusesIn, writeStatusIn } from "../importing.js";
+import { importingFolder } from "../settings.js";
 import { readResult, resultFile, runDetached } from "../detached.js";
 import { sessionLabel, withoutNames } from "../kinds.js";
 import { fileSafe } from "../names.js";
@@ -67,9 +68,9 @@ function today(setting) {
   const drop = join(t.root, "Unedited Video", "Mac Studio");
   mkdirSync(drop, { recursive: true });
   writeFileSync(join(drop, "Pricing talk again.mov"), "video");
-  writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: "Pricing talk again.mov", bytes: 5, seconds: null, step: "Writing the transcript", at: "2026-10-20T14:00:00-05:00", failed: "the transcriber stopped (Pricing talk again.mov: Invalid data)" }, writeText);
-  writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 2, import: "a1b2", video: "Other talk.mov", bytes: 9, seconds: 60, step: "Writing the transcript", at: "2026-10-20T14:58:00-05:00" }, writeText);
-  writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 3, import: "c3d4", video: "Third talk.mov", bytes: 9, seconds: 60, step: "Late check", at: "2026-10-20T13:00:00-05:00", problem: "Third talk.srt is not whole in Dropbox." }, writeText);
+  writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: "Pricing talk again.mov", bytes: 5, seconds: null, step: "Writing the transcript", at: "2026-10-20T14:00:00-05:00", failed: "the transcriber stopped (Pricing talk again.mov: Invalid data)" }, writeText);
+  writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 2, import: "a1b2", video: "Other talk.mov", bytes: 9, seconds: 60, step: "Writing the transcript", at: "2026-10-20T14:58:00-05:00" }, writeText);
+  writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 3, import: "c3d4", video: "Third talk.mov", bytes: 9, seconds: 60, step: "Late check", at: "2026-10-20T13:00:00-05:00", problem: "Third talk.srt is not whole in Dropbox." }, writeText);
   const work = episodeWork(t.home, FOLDER);
   mkdirSync(join(work, `${FOLDER}.fcpbundle`), { recursive: true });
   writeFileSync(join(work, `${FOLDER}.fcpbundle`, "CurrentVersion.flexolibrary"), "a library");
@@ -249,7 +250,7 @@ function failedStatus(t, video = SECOND, label = SECOND_LABEL) {
   const drop = join(t.root, "Unedited Video", "Mac Studio");
   mkdirSync(drop, { recursive: true });
   if (!existsSync(join(drop, video))) writeFileSync(join(drop, video), "video");
-  writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video, bytes: statSync(join(drop, video)).size, seconds: null, step: "Reading the sound", at: "2026-10-20T14:00:00-05:00", label, failed: `the sound could not be read from the file (${join(drop, video)}: Invalid data found when processing input)` }, writeText);
+  writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video, bytes: statSync(join(drop, video)).size, seconds: null, step: "Reading the sound", at: "2026-10-20T14:00:00-05:00", label, failed: `the sound could not be read from the file (${join(drop, video)}: Invalid data found when processing input)` }, writeText);
 }
 
 /** A result a run left for the episode in `folder` before it was answered, as bring writes one, naming the files it brought by
@@ -1010,7 +1011,7 @@ describe("the import statuses, status and retry, of a light import", () => {
     failedStatus(t);
     const r = await on(depsOf(t), "retry", SECOND_LABEL.toLowerCase());
     assert.deepEqual([r.code, r.said], [0, [`${SECOND_LABEL} is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`]]);
-    assert.deepEqual(readStatuses(t.root), []);
+    assert.deepEqual(readStatusesIn([importingFolder(t.root)]), []);
     t.done();
   });
   it("retry names what the drop folder holds by labels and sizes alone when nothing fits", async () => {
@@ -1030,7 +1031,7 @@ describe("the import statuses, status and retry, of a light import", () => {
     const drop = join(t.root, "Unedited Video", "Mac Studio");
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, ZOOM), "zoom");
-    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, video: ZOOM, bytes: 4, seconds: null, step: "Held", at: AT, held: "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer." }, writeText);
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, video: ZOOM, bytes: 4, seconds: null, step: "Held", at: AT, held: "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer." }, writeText);
     const r = await on(depsOf(t), "retry", ZOOM);
     assert.deepEqual([r.code, r.said], [1, ["A Zoom download of 4 bytes in this Mac's drop folder is held: Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer."]]);
     t.done();
@@ -1043,7 +1044,7 @@ describe("the import statuses, status and retry, of a light import", () => {
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, VIDEO), "video");
     // Its import stopped on this Mac before its late check: its status, with its label, is still there.
-    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: VIDEO, bytes: 5, seconds: 120, step: "Filing", at: "2026-10-20T13:00:00-05:00", label: LABEL }, writeText);
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: VIDEO, bytes: 5, seconds: 120, step: "Filing", at: "2026-10-20T13:00:00-05:00", label: LABEL }, writeText);
     const r = await on(depsOf(t), "retry", LABEL);
     assert.deepEqual([r.code, r.said], [0, [`${LABEL} is imported, as ${LABEL} (a1b2c3). Its import stopped on this Mac, and has no check of its copies left to make here, so the status that held the episode is taken away.`]]);
     // With no status left, the video in the drop folder is named by what it is and its size, and the episode by its label.
@@ -1118,7 +1119,7 @@ describe("the light import's log, status files and notices", () => {
     for (const fail of ["sound", "whisper"]) {
       const t = setup();
       const { logs, notes } = await importLightly(t, VIDEO, { fail });
-      const statuses = readStatuses(t.root).map(({ status }) => status);
+      const statuses = readStatusesIn([importingFolder(t.root)]).map(({ status }) => status);
       assert.equal(statuses.length, 1, fail);
       assert.equal(statuses[0].label, LABEL, fail);
       assert.ok(statuses[0].failed, fail);
@@ -1134,7 +1135,7 @@ describe("the light import's log, status files and notices", () => {
       if (cmd === "FFPROBE") mkdirSync(join(dirname(args[args.indexOf("-o") + 1]), "made", `${STEM}.words.json`), { recursive: true });
     };
     const { logs, notes } = await importLightly(t, VIDEO, { before });
-    const statuses = readStatuses(t.root).map(({ status }) => status);
+    const statuses = readStatusesIn([importingFolder(t.root)]).map(({ status }) => status);
     assert.deepEqual(statuses.map((s) => [s.label, s.failed]), [[LABEL, "the work stopped (EISDIR)"]]);
     assert.equal(existsSync(join(lightFolder(t), "record")), false);
     assert.ok(logs.includes(`${LABEL}: failed. the work stopped (EISDIR).`), logs.join("\n"));
@@ -1147,7 +1148,7 @@ describe("the light import's log, status files and notices", () => {
       if (to.endsWith(".json") && to.includes("/record/")) throw new Error(`${to} could not be cloned: it is not on the same disk`);
       copyFileSync(from, to);
     } } });
-    const statuses = readStatuses(t.root).map(({ status }) => status);
+    const statuses = readStatusesIn([importingFolder(t.root)]).map(({ status }) => status);
     assert.equal(statuses.length, 1);
     assert.match(statuses[0].failed, /^it could not be filed into Episodes: /);
     assert.doesNotMatch(statuses[0].failed, /\//, statuses[0].failed);
@@ -1167,7 +1168,7 @@ describe("the light import's log, status files and notices", () => {
         writeFileSync(srt, "1\n");
       }
     }, clock: () => Date.parse("2026-10-20T15:00:00") + clock } });
-    const statuses = readStatuses(t.root).map(({ status }) => status);
+    const statuses = readStatusesIn([importingFolder(t.root)]).map(({ status }) => status);
     assert.equal(statuses.length, 1);
     assert.ok(statuses[0].problem, JSON.stringify(statuses[0]));
     assert.doesNotMatch(statuses[0].problem, /\//, statuses[0].problem);
@@ -1361,7 +1362,7 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     const drop = join(t.root, "Unedited Video", "Mac Studio");
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, VIDEO), "video");
-    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9w", video: VIDEO, bytes: 5, seconds: 120, step: "Waiting for its late check", at: "2026-10-20T14:59:00-05:00", label: LABEL }, writeText);
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9w", video: VIDEO, bytes: 5, seconds: 120, step: "Waiting for its late check", at: "2026-10-20T14:59:00-05:00", label: LABEL }, writeText);
     return t;
   }
   it("names the other Mac's waiting videos by their labels, or their sizes, and never by their files", async () => {
@@ -1389,7 +1390,7 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     mkdirSync(drop, { recursive: true });
     clientEpisode(t);
     for (const name of [VIDEO, SECOND, "Pricing talk again.mov"]) writeFileSync(join(drop, name), "video");
-    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 1, import: "k3j9x", video: SECOND, bytes: 5, seconds: null, step: "Reading the sound", at: AT, label: SECOND_LABEL, failed: "the sound could not be read" }, writeText);
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 1, import: "k3j9x", video: SECOND, bytes: 5, seconds: null, step: "Reading the sound", at: AT, label: SECOND_LABEL, failed: "the sound could not be read" }, writeText);
     const r = await on(depsOf(t), "retry", "nothing fits this");
     assert.deepEqual(r.said, [`No video in this Mac's drop folder fits "nothing fits this". It holds: ${SECOND_LABEL}, a video of 5 bytes and a video of 5 bytes.`]);
     t.done();
@@ -1406,10 +1407,10 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     // there, and a third is being imported.
     const drop = join(t.root, "Unedited Video", "Mac Studio");
     writeFileSync(join(drop, VIDEO), "video");
-    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9w", video: VIDEO, bytes: 5, seconds: 120, step: "Waiting for its late check", at: "2026-10-20T14:59:00-05:00", label: LABEL }, writeText);
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9w", video: VIDEO, bytes: 5, seconds: 120, step: "Waiting for its late check", at: "2026-10-20T14:59:00-05:00", label: LABEL }, writeText);
     failedStatus(t);
     writeFileSync(join(drop, `${STEM} part 3.mov`), "video");
-    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9z", video: `${STEM} part 3.mov`, bytes: 5, seconds: null, step: "Writing the transcript", at: "2026-10-20T14:58:00-05:00", label: "Video of 20 Oct, 14:58 (Mac Studio)" }, writeText);
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9z", video: `${STEM} part 3.mov`, bytes: 5, seconds: null, step: "Writing the transcript", at: "2026-10-20T14:58:00-05:00", label: "Video of 20 Oct, 14:58 (Mac Studio)" }, writeText);
     // This Mac brought its files over once, before it was a video waiting for its answer, and has a library of it.
     oldResult(t);
     library(t);
@@ -1515,7 +1516,7 @@ describe("every Mac names quietly, whatever its file says of the import, with it
     const zoom = "GMT20261020-150000_Recording Jane Doe.mp4";
     for (const setting of ["full", undefined]) {
       const t = setup();
-      writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: zoom, bytes: 5, seconds: null, step: "Reading the sound", at: "2026-10-20T14:00:00-05:00", failed: `the sound could not be read from ${zoom}` }, writeText);
+      writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: zoom, bytes: 5, seconds: null, step: "Reading the sound", at: "2026-10-20T14:00:00-05:00", failed: `the sound could not be read from ${zoom}` }, writeText);
       for (const argv of [["episodes"], ["status"]]) {
         const said = (await on(dropboxMac(t, setting), ...argv)).said;
         assert.ok(said.some((line) => line.startsWith("  A Zoom download of 5 bytes: its import failed on Mac Studio")), `${setting} ${argv}\n${said.join("\n")}`);

@@ -13,7 +13,7 @@ import { clockTime, dueAt, holdingEpisode, readPendings } from "./filing.js";
 import { linksOf } from "./finish.js";
 import { gatedAsOf, gatedName } from "./gate.js";
 import { unlabelled } from "./kinds.js";
-import { importState, readStatuses } from "./importing.js";
+import { importState, readStatusesIn } from "./importing.js";
 import { importingFolder, pendingFolder, sameFolder } from "./settings.js";
 
 /** The code of an error, as the only thing said of it: its message may hold a path, and a path may hold a client's file name. */
@@ -63,7 +63,7 @@ function namesIn(folder) {
     and two alike are both said; a failed, problem, owed or running one is counted, apart by whether its video is still in the
     old folder. A status is never named by its own file's name; and
     what it says of why it failed is left out, as it may hold a file's name. */
-export function heldInOld({ root, machine, folder, home, now = Date.now() }) {
+export function heldInOld({ root, statusFolders = [importingFolder(root)], machine, folder, home, now = Date.now() }) {
   // How a video the episode `holding` (holdingEpisode's) holds is named where edit.js would not name it by its file: "" when no
   // episode holds it, or edit.js would name it by its file. The versions of a video are read once, when first asked for.
   const namedAs = gatedAsOf(linksOf(root));
@@ -76,9 +76,18 @@ export function heldInOld({ root, machine, folder, home, now = Date.now() }) {
   const inFolder = namesIn(folder);
   if (inFolder.code) unreadable.push(`  The old folder, ${folder}, could not be read (${inFolder.code}), so what it holds is not known.`);
   const videos = (inFolder.names || []).filter(isMedia).sort();
-  const importing = namesIn(importingFolder(root));
-  if (importing.code) unreadable.push(`  The import status files, in ${importingFolder(root)}, could not be read (${importing.code}), so whether an import failed is not known.`);
-  const mine = importing.code ? [] : readStatuses(root, now).map((s) => s.status).filter((status) => status && status.machine === machine);
+  // The status files are read where the settings the switch is from keep them: a Mac with a drop folder of its own, its own folder and
+  // Episodes/.importing, else Episodes/.importing alone. A folder that cannot be read is said, and none of its statuses is known.
+  const found = [];
+  for (const where of statusFolders) {
+    const importing = namesIn(where);
+    if (importing.code) unreadable.push(`  The import status files, in ${where}, could not be read (${importing.code}), so whether an import failed is not known.`);
+    else found.push(...readStatusesIn([where], now));
+  }
+  const mine = found.map((s) => s.status).filter((status) => status && status.machine === machine);
+  // The folder each status is in, for the lines that say where only a status file holds a failed import.
+  const statusIn = new Map(found.filter((s) => s.status).map((s) => [s.status, s.folder]));
+  const goneIn = new Set();
   // The lines of the kinds whose advice takes a file out of the old folder (work: failed and waiting; kept) are lists, not sets: two
   // videos named alike, by what they are and their size, are both said.
   const lines = [];
@@ -125,11 +134,12 @@ export function heldInOld({ root, machine, folder, home, now = Date.now() }) {
       const count = counts[isFailed ? "failed" : "problem"];
       count[0] += 1;
       if (here) count[1] += 1;
+      else if (isFailed) goneIn.add(statusIn.get(status));
       continue;
     }
     if (isFailed) {
       // A failed import whose video has since been taken out of the folder cannot be tried again: only its status file holds it.
-      const gone = here ? "" : `, and its video is not in the old folder now: only its status file, in ${importingFolder(root)}, holds this, and a person takes it away by hand`;
+      const gone = here ? "" : `, and its video is not in the old folder now: only its status file, in ${statusIn.get(status)}, holds this, and a person takes it away by hand`;
       lines.push(`  ${name || status.video}: its import failed${gone}.`);
     } else {
       // A late check that found a problem makes itself again from the video in the old folder, which is why the video stays there.
@@ -142,7 +152,7 @@ export function heldInOld({ root, machine, folder, home, now = Date.now() }) {
   const still = (m) => (m === 0 ? "none have" : m === 1 ? "1 has" : `${m} have`);
   const [failed, failedHere] = counts.failed;
   // A failed import whose video is gone is cleared only by taking its status file away, which is said as the named form says it.
-  const onlyStatus = `only its status file, in ${importingFolder(root)}, holds`;
+  const onlyStatus = `only its status file, in ${[...goneIn].join(" or ")}, holds`;
   if (failed === 1) lines.push(`  1 import failed, and its video is ${failedHere ? "still in the old folder" : `not in the old folder now: ${onlyStatus} this, and a person takes it away by hand`}.`);
   else if (failed) lines.push(`  ${failed} imports failed, of which ${still(failedHere)} the video still in the old folder${failed > failedHere ? `; of each whose video is gone, ${onlyStatus} it, and a person takes it away by hand` : ""}.`);
   const [problems, problemsHere] = counts.problem;

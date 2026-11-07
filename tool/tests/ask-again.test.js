@@ -332,7 +332,8 @@ describe("ask, when something fails half-way (from the review)", () => {
 
 // What ask refuses, before anything is asked: each case both in the quick part, which starts nothing, and in the detached
 // part, which asks Claude nothing and changes nothing.
-import { writeStatus } from "../importing.js";
+import { writeStatusIn } from "../importing.js";
+import { importingFolder } from "../settings.js";
 import { writePending } from "../filing.js";
 import { NEWEST_VERSION, acceptRev, readEpisode, filesProblems, writeEpisode } from "../episode.js";
 import { askBlocked } from "../unedited.js";
@@ -1368,7 +1369,7 @@ describe("ask, what it refuses (from the review)", () => {
   });
   it("refuses while the import is still at work on the episode, its late check to come", async () => {
     const p = askable();
-    writeStatus(p.t.root, { version: 1, machine: "Mac Studio", pid: 4242, import: "k3x9", video: "Pricing talk.mp4", bytes: p.found.record.video.bytes, seconds: 23.423, step: "Waiting for the late check", at: new Date(p.t.now()).toISOString() }, writeFile);
+    writeStatusIn(importingFolder(p.t.root), { version: 1, machine: "Mac Studio", pid: 4242, import: "k3x9", video: "Pricing talk.mp4", bytes: p.found.record.video.bytes, seconds: 23.423, step: "Waiting for the late check", at: new Date(p.t.now()).toISOString() }, writeFile);
     const r = await askedBoth(p);
     const why = `The import of this episode has not finished on Mac Studio yet: it is at "Waiting for Dropbox's check of its copies". Say it again when it has.`;
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
@@ -1379,13 +1380,13 @@ describe("ask, what it refuses (from the review)", () => {
   it("is not held by another video's import", async () => {
     const p = askable();
     const status = { version: 1, machine: "Mac Studio", pid: 4242, import: "k3x9", seconds: 23.423, step: "Waiting for the late check" };
-    writeStatus(p.t.root, { ...status, video: "Another talk.mp4", bytes: 9, at: new Date(p.t.now()).toISOString() }, writeFile);
+    writeStatusIn(importingFolder(p.t.root), { ...status, video: "Another talk.mp4", bytes: 9, at: new Date(p.t.now()).toISOString() }, writeFile);
     assert.equal(await editMain(["ask", "Pricing"], p.t.ctx.deps), 0);
     p.t.done();
   });
   it("refuses while an import that stopped has its late check still to make, which would put its own files back (PR 19's review)", async () => {
     const p = askable();
-    writeStatus(p.t.root, { version: 1, machine: "Laptop", pid: 4242, import: "k3x9", seconds: 23.423, step: "Waiting for the late check", video: "Pricing talk.mp4", bytes: p.found.record.video.bytes, at: new Date(p.t.now() - 11 * 60 * 1000).toISOString() }, writeFile);
+    writeStatusIn(importingFolder(p.t.root), { version: 1, machine: "Laptop", pid: 4242, import: "k3x9", seconds: 23.423, step: "Waiting for the late check", video: "Pricing talk.mp4", bytes: p.found.record.video.bytes, at: new Date(p.t.now() - 11 * 60 * 1000).toISOString() }, writeFile);
     const r = await askedBoth(p);
     const why = 'The import of this episode stopped on Laptop before the check of its copies was made. On Laptop, say "try it again" for Pricing talk.mp4, then say this again.';
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
@@ -1405,7 +1406,7 @@ describe("ask, what it refuses (from the review)", () => {
   });
   /** A late check this Mac owes of the episode's import, as the import keeps it, with `more` laid over it. */
   const owe = (p, more = {}) => writePending(p.t.home, { version: 1, id: p.found.record.id, name: FOLDER, folder: p.found.folder, video: "Pricing talk.mp4", bytes: p.found.record.video.bytes, seconds: 23.423, drop: "/nowhere/Pricing talk.mp4", work: "/nowhere", entries: [], lastCopy: p.t.now() - 20 * 60 * 1000, root: p.t.root, machine: "Mac Studio", planTxt: "Pricing talk.cut-plan.txt", ...more });
-  const importing = (p, more = {}, minutesAgo = 1) => writeStatus(p.t.root, { version: 1, machine: "Mac Studio", pid: 4242, import: "k3x9", seconds: 23.423, step: "Waiting for its late check", video: "Pricing talk.mp4", bytes: p.found.record.video.bytes, at: new Date(p.t.now() - minutesAgo * 60 * 1000).toISOString(), ...more }, writeFile);
+  const importing = (p, more = {}, minutesAgo = 1) => writeStatusIn(importingFolder(p.t.root), { version: 1, machine: "Mac Studio", pid: 4242, import: "k3x9", seconds: 23.423, step: "Waiting for its late check", video: "Pricing talk.mp4", bytes: p.found.record.video.bytes, at: new Date(p.t.now() - minutesAgo * 60 * 1000).toISOString(), ...more }, writeFile);
   it("says the import is at work, on the Mac that imports, while it waits for its own late check (PR 19's re-review, N13)", async () => {
     const p = askable();
     owe(p);

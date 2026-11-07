@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { STALE_MS, statusName, statusFault, writeStatus, readStatuses, statusesOf, isStatusFileOf, dueOf, removeStatus, importState, holdsVideo, leftByCrash } from "../importing.js";
+import { STALE_MS, statusName, statusFault, writeStatusIn, readStatusesIn, statusesIn, isStatusFileOf, dueOf, removeStatusIn, importState, holdsVideo, leftByCrash } from "../importing.js";
 
 const NOW = Date.parse("2026-10-14T09:30:00-05:00");
 const STATUS = { version: 1, machine: "Mac Studio", pid: 4242, video: "Pricing talk.mp4", bytes: 1823400112, seconds: 1834.27, step: "Making the rough cut", at: "2026-10-14T09:29:00-05:00" };
@@ -40,20 +40,20 @@ describe("an import's status file", () => {
   });
   it("is written whole through the rule's text writer, as a new file with the next number, and the one before is deleted", () => {
     const t = setup();
-    const first = writeStatus(t.root, STATUS, t.writeText);
+    const first = writeStatusIn(t.folder, STATUS, t.writeText);
     assert.deepEqual([first, t.names()], [join(t.folder, "Pricing talk.mp4 (Mac Studio) 1.json"), ["Pricing talk.mp4 (Mac Studio) 1.json"]]);
     assert.equal(readFileSync(first, "utf8"), JSON.stringify(STATUS, null, 2) + "\n");
-    writeStatus(t.root, { ...STATUS, step: "Making the upright version" }, t.writeText);
-    const last = writeStatus(t.root, { ...STATUS, step: "Filing" }, t.writeText);
+    writeStatusIn(t.folder, { ...STATUS, step: "Making the upright version" }, t.writeText);
+    const last = writeStatusIn(t.folder, { ...STATUS, step: "Filing" }, t.writeText);
     assert.deepEqual(t.names(), ["Pricing talk.mp4 (Mac Studio) 3.json"]);
     assert.deepEqual([JSON.parse(readFileSync(last, "utf8")).step, t.written.length], ["Filing", 3]);
     t.done();
   });
   it("keeps the two Macs' status files of one video apart", () => {
     const t = setup();
-    writeStatus(t.root, STATUS, t.writeText);
-    writeStatus(t.root, STATUS, t.writeText);
-    writeStatus(t.root, { ...STATUS, machine: "Sallie's laptop" }, t.writeText);
+    writeStatusIn(t.folder, STATUS, t.writeText);
+    writeStatusIn(t.folder, STATUS, t.writeText);
+    writeStatusIn(t.folder, { ...STATUS, machine: "Sallie's laptop" }, t.writeText);
     assert.deepEqual(t.names(), ["Pricing talk.mp4 (Mac Studio) 2.json", "Pricing talk.mp4 (Sallie's laptop) 1.json"]);
     t.done();
   });
@@ -87,7 +87,7 @@ describe("an import's status file", () => {
       [{ ...STATUS, held: 3 }, "why the video is held cannot be read"]
     ];
     for (const [status, why] of broken) assert.equal(statusFault(status), why);
-    assert.throws(() => writeStatus(t.root, { ...STATUS, step: "" }, t.writeText), { message: "the import's status was not written, because it names no step" });
+    assert.throws(() => writeStatusIn(t.folder, { ...STATUS, step: "" }, t.writeText), { message: "the import's status was not written, because it names no step" });
     assert.deepEqual([t.written, existsSync(join(t.root, "Episodes"))], [[], false]);
     t.done();
   });
@@ -96,13 +96,13 @@ describe("an import's status file", () => {
 describe("the status files, read back", () => {
   it("are listed by name, each with its number and whether it has gone unwritten for 10 minutes", () => {
     const t = setup();
-    writeStatus(t.root, ago(1, { video: "b talk.mov" }), t.writeText);
-    writeStatus(t.root, ago(10, { video: "a talk.mp4" }), t.writeText);
-    assert.deepEqual(readStatuses(t.root, NOW), [
-      { file: join(t.folder, "a talk.mp4 (Mac Studio) 1.json"), status: ago(10, { video: "a talk.mp4" }), stale: true, n: 1 },
-      { file: join(t.folder, "b talk.mov (Mac Studio) 1.json"), status: ago(1, { video: "b talk.mov" }), stale: false, n: 1 }
+    writeStatusIn(t.folder, ago(1, { video: "b talk.mov" }), t.writeText);
+    writeStatusIn(t.folder, ago(10, { video: "a talk.mp4" }), t.writeText);
+    assert.deepEqual(readStatusesIn([t.folder], NOW), [
+      { file: join(t.folder, "a talk.mp4 (Mac Studio) 1.json"), status: ago(10, { video: "a talk.mp4" }), stale: true, n: 1, folder: t.folder },
+      { file: join(t.folder, "b talk.mov (Mac Studio) 1.json"), status: ago(1, { video: "b talk.mov" }), stale: false, n: 1, folder: t.folder }
     ]);
-    assert.deepEqual(readStatuses(t.root, NOW - 60000).map((s) => s.stale), [false, false]);
+    assert.deepEqual(readStatusesIn([t.folder], NOW - 60000).map((s) => s.stale), [false, false]);
     assert.equal(STALE_MS, 10 * 60 * 1000);
     t.done();
   });
@@ -112,34 +112,34 @@ describe("the status files, read back", () => {
     writeFileSync(join(t.folder, "Pricing talk.mp4 (Mac Studio) 4.json"), JSON.stringify(ago(2, { step: "Making the rough cut" })));
     writeFileSync(join(t.folder, "Pricing talk.mp4 (Mac Studio) 5.json"), JSON.stringify(ago(1, { step: "Filing" })));
     writeFileSync(join(t.folder, "Pricing talk.mp4 (Sallie's laptop) 2.json"), JSON.stringify(ago(1, { machine: "Sallie's laptop" })));
-    const read = readStatuses(t.root, NOW);
+    const read = readStatusesIn([t.folder], NOW);
     assert.deepEqual(read.map((r) => [r.status.machine, r.n, r.status.step]), [["Mac Studio", 5, "Filing"], ["Sallie's laptop", 2, "Making the rough cut"]]);
     t.done();
   });
   it("tell a Mac's name with brackets in it from the video's", () => {
     const t = setup();
-    writeStatus(t.root, ago(1, { video: "Talk (final).mp4", machine: "Sallie's MacBook Pro (M4, 2024)" }), t.writeText);
-    writeStatus(t.root, ago(1, { video: "Talk (final).mp4", machine: "Sallie's MacBook Pro (M4, 2024)" }), t.writeText);
-    assert.deepEqual(readStatuses(t.root, NOW).map((r) => [r.status.video, r.status.machine, r.n]), [["Talk (final).mp4", "Sallie's MacBook Pro (M4, 2024)", 2]]);
+    writeStatusIn(t.folder, ago(1, { video: "Talk (final).mp4", machine: "Sallie's MacBook Pro (M4, 2024)" }), t.writeText);
+    writeStatusIn(t.folder, ago(1, { video: "Talk (final).mp4", machine: "Sallie's MacBook Pro (M4, 2024)" }), t.writeText);
+    assert.deepEqual(readStatusesIn([t.folder], NOW).map((r) => [r.status.video, r.status.machine, r.n]), [["Talk (final).mp4", "Sallie's MacBook Pro (M4, 2024)", 2]]);
     assert.deepEqual(t.names(), ["Talk (final).mp4 (Sallie's MacBook Pro (M4, 2024)) 2.json"]);
     t.done();
   });
   it("are none when there is no folder for them", () => {
     const t = setup();
-    assert.deepEqual(readStatuses(t.root, NOW), []);
+    assert.deepEqual(readStatusesIn([t.folder], NOW), []);
     t.done();
   });
   it("list one that cannot be read with why, and leave out hidden files and files that are not statuses", () => {
     const t = setup();
-    writeStatus(t.root, ago(1), t.writeText);
+    writeStatusIn(t.folder, ago(1), t.writeText);
     writeFileSync(join(t.folder, "Cut short.mp4 (Mac Studio) 1.json"), JSON.stringify(STATUS).slice(0, 40));
     writeFileSync(join(t.folder, "Old.mp4 (Mac Studio) 1.json"), JSON.stringify({ ...STATUS, version: 2 }));
     writeFileSync(join(t.folder, ".DS_Store"), "");
     writeFileSync(join(t.folder, "notes.txt"), "not a status");
-    assert.deepEqual(readStatuses(t.root, NOW), [
-      { file: join(t.folder, "Cut short.mp4 (Mac Studio) 1.json"), status: null, stale: false, n: 1, why: "it could not be read (it is not whole)" },
-      { file: join(t.folder, "Old.mp4 (Mac Studio) 1.json"), status: null, stale: false, n: 1, why: "it could not be read (it is version 2, and this BRIMM Video Studio reads version 1)" },
-      { file: join(t.folder, "Pricing talk.mp4 (Mac Studio) 1.json"), status: ago(1), stale: false, n: 1 }
+    assert.deepEqual(readStatusesIn([t.folder], NOW), [
+      { file: join(t.folder, "Cut short.mp4 (Mac Studio) 1.json"), status: null, stale: false, n: 1, folder: t.folder, why: "it could not be read (it is not whole)" },
+      { file: join(t.folder, "Old.mp4 (Mac Studio) 1.json"), status: null, stale: false, n: 1, folder: t.folder, why: "it could not be read (it is version 2, and this BRIMM Video Studio reads version 1)" },
+      { file: join(t.folder, "Pricing talk.mp4 (Mac Studio) 1.json"), status: ago(1), stale: false, n: 1, folder: t.folder }
     ]);
     t.done();
   });
@@ -148,18 +148,18 @@ describe("the status files, read back", () => {
 describe("one video's statuses, from the Macs that may hold it", () => {
   it("gives the statuses of the video from the named Macs, of any state", () => {
     const t = setup();
-    writeStatus(t.root, ago(1), t.writeText);
-    writeStatus(t.root, ago(600, { machine: "Sallie's laptop" }), t.writeText);
-    writeStatus(t.root, ago(1, { video: "Other.mp4" }), t.writeText);
-    writeStatus(t.root, ago(1, { machine: "Jason's MacBook" }), t.writeText);
-    const got = statusesOf(t.root, "Pricing talk.mp4", ["Mac Studio", "Sallie's laptop"], NOW);
+    writeStatusIn(t.folder, ago(1), t.writeText);
+    writeStatusIn(t.folder, ago(600, { machine: "Sallie's laptop" }), t.writeText);
+    writeStatusIn(t.folder, ago(1, { video: "Other.mp4" }), t.writeText);
+    writeStatusIn(t.folder, ago(1, { machine: "Jason's MacBook" }), t.writeText);
+    const got = statusesIn([t.folder], "Pricing talk.mp4", ["Mac Studio", "Sallie's laptop"], NOW);
     assert.deepEqual(got, { statuses: [ago(1), ago(600, { machine: "Sallie's laptop" })], unreadable: [] });
-    assert.deepEqual(statusesOf(t.root, "Never imported.mov", ["Mac Studio"], NOW), { statuses: [], unreadable: [] });
+    assert.deepEqual(statusesIn([t.folder], "Never imported.mov", ["Mac Studio"], NOW), { statuses: [], unreadable: [] });
     t.done();
   });
   it("gives nothing when there is no folder for them", () => {
     const t = setup();
-    assert.deepEqual(statusesOf(t.root, "Pricing talk.mp4", ["Mac Studio"], NOW), { statuses: [], unreadable: [] });
+    assert.deepEqual(statusesIn([t.folder], "Pricing talk.mp4", ["Mac Studio"], NOW), { statuses: [], unreadable: [] });
     t.done();
   });
   it("lists a file named for the video that cannot be read, and none named for another", () => {
@@ -168,8 +168,8 @@ describe("one video's statuses, from the Macs that may hold it", () => {
     writeFileSync(join(t.folder, "Pricing talk.mp4 (Mac Studio) k3j9x 4.json"), "{not json");
     writeFileSync(join(t.folder, "Other.mp4 (Mac Studio) 1.json"), "{not json");
     writeFileSync(join(t.folder, "Pricing talk.mp4 (Jason's MacBook) 2.json"), "{not json");
-    writeStatus(t.root, ago(1), t.writeText);
-    const got = statusesOf(t.root, "Pricing talk.mp4", ["Mac Studio", "Sallie's laptop"], NOW);
+    writeStatusIn(t.folder, ago(1), t.writeText);
+    const got = statusesIn([t.folder], "Pricing talk.mp4", ["Mac Studio", "Sallie's laptop"], NOW);
     assert.deepEqual(got.unreadable, [join(t.folder, "Pricing talk.mp4 (Mac Studio) k3j9x 4.json")]);
     assert.deepEqual(got.statuses, [ago(1)]);
     t.done();
@@ -249,19 +249,19 @@ describe("a status that a crash left behind", () => {
 describe("taking a status file away", () => {
   it("removes every file of one video and one Mac, leaves the other Mac's, and does nothing when there is none", () => {
     const t = setup();
-    writeStatus(t.root, STATUS, t.writeText);
+    writeStatusIn(t.folder, STATUS, t.writeText);
     writeFileSync(join(t.folder, "Pricing talk.mp4 (Mac Studio) 7.json"), JSON.stringify(STATUS));
-    writeStatus(t.root, { ...STATUS, machine: "Sallie's laptop" }, t.writeText);
-    removeStatus(t.root, "Pricing talk.mp4", "Mac Studio");
+    writeStatusIn(t.folder, { ...STATUS, machine: "Sallie's laptop" }, t.writeText);
+    removeStatusIn(t.folder, "Pricing talk.mp4", "Mac Studio");
     assert.deepEqual(t.names(), ["Pricing talk.mp4 (Sallie's laptop) 1.json"]);
-    removeStatus(t.root, "Pricing talk.mp4", "Mac Studio");
-    removeStatus(t.root, "Never imported.mov", "Mac Studio");
+    removeStatusIn(t.folder, "Pricing talk.mp4", "Mac Studio");
+    removeStatusIn(t.folder, "Never imported.mov", "Mac Studio");
     assert.deepEqual(t.names(), ["Pricing talk.mp4 (Sallie's laptop) 1.json"]);
     t.done();
   });
   it("does nothing when there is no folder for them", () => {
     const t = setup();
-    removeStatus(t.root, "Pricing talk.mp4", "Mac Studio");
+    removeStatusIn(t.folder, "Pricing talk.mp4", "Mac Studio");
     assert.equal(existsSync(t.folder), false);
     t.done();
   });
@@ -270,15 +270,57 @@ describe("taking a status file away", () => {
 describe("what the lead's review of PR 11 found in the status files", () => {
   it("18. keeps two imports of one name apart by each import's own id, and takes away one's own alone", () => {
     const t = setup();
-    writeStatus(t.root, { ...STATUS, import: "aaa" }, t.writeText);
-    writeStatus(t.root, { ...STATUS, import: "aaa", step: "Filing" }, t.writeText);
-    writeStatus(t.root, { ...STATUS, import: "bbb", failed: "the transcriber stopped" }, t.writeText);
+    writeStatusIn(t.folder, { ...STATUS, import: "aaa" }, t.writeText);
+    writeStatusIn(t.folder, { ...STATUS, import: "aaa", step: "Filing" }, t.writeText);
+    writeStatusIn(t.folder, { ...STATUS, import: "bbb", failed: "the transcriber stopped" }, t.writeText);
     assert.deepEqual(t.names(), ["Pricing talk.mp4 (Mac Studio) aaa 2.json", "Pricing talk.mp4 (Mac Studio) bbb 1.json"]);
-    assert.deepEqual(readStatuses(t.root, NOW).map((r) => [r.status.import, r.status.step, r.status.failed]), [["aaa", "Filing", undefined], ["bbb", "Making the rough cut", "the transcriber stopped"]]);
-    removeStatus(t.root, "Pricing talk.mp4", "Mac Studio", "aaa");
+    assert.deepEqual(readStatusesIn([t.folder], NOW).map((r) => [r.status.import, r.status.step, r.status.failed]), [["aaa", "Filing", undefined], ["bbb", "Making the rough cut", "the transcriber stopped"]]);
+    removeStatusIn(t.folder, "Pricing talk.mp4", "Mac Studio", "aaa");
     assert.deepEqual(t.names(), ["Pricing talk.mp4 (Mac Studio) bbb 1.json"]);
-    removeStatus(t.root, "Pricing talk.mp4", "Mac Studio");
+    removeStatusIn(t.folder, "Pricing talk.mp4", "Mac Studio");
     assert.deepEqual(t.names(), []);
     t.done();
+  });
+});
+
+describe("the status files in more than one folder (Phase 3, L3)", () => {
+  const ownOf = (t) => join(t.dir, "support", "importing");
+  it("a status call on any other folder throws, for a write, a read, a look at one video and a removal", () => {
+    const t = setup();
+    const other = join(t.root, "Episodes", "Status files");
+    for (const call of [
+      () => writeStatusIn(other, STATUS, t.writeText),
+      () => readStatusesIn([t.folder, other], NOW),
+      () => statusesIn([other], "Pricing talk.mp4", ["Mac Studio"], NOW),
+      () => removeStatusIn(other, "Pricing talk.mp4", "Mac Studio", "")
+    ]) assert.throws(call, /not a folder of import status files/);
+    assert.deepEqual([t.written, existsSync(other)], [[], false]);
+    t.done();
+  });
+  it("takes a folder called importing as well as .importing, and each entry says which folder it was read in", () => {
+    const t = setup();
+    const own = ownOf(t);
+    writeStatusIn(own, ago(1, { video: "a talk.mov" }), t.writeText);
+    writeStatusIn(t.folder, ago(1, { video: "b talk.mov", machine: "Sallie's laptop" }), t.writeText);
+    const read = readStatusesIn([own, t.folder], NOW);
+    assert.deepEqual(read.map((r) => [r.status.video, r.folder]), [["a talk.mov", own], ["b talk.mov", t.folder]]);
+    assert.equal(readStatusesIn([own], NOW).length, 1);
+    t.done();
+  });
+  it("looks at one video across the folders, and removes from the folder it is given alone", () => {
+    const t = setup();
+    const own = ownOf(t);
+    writeStatusIn(own, ago(1), t.writeText);
+    writeStatusIn(t.folder, ago(1, { machine: "Sallie's laptop" }), t.writeText);
+    assert.deepEqual(statusesIn([own, t.folder], "Pricing talk.mp4", ["Mac Studio", "Sallie's laptop"], NOW).statuses.map((s) => s.machine).sort(), ["Mac Studio", "Sallie's laptop"]);
+    removeStatusIn(own, "Pricing talk.mp4", "Sallie's laptop", "");
+    assert.deepEqual(t.names(), ["Pricing talk.mp4 (Sallie's laptop) 1.json"]);
+    removeStatusIn(own, "Pricing talk.mp4", "Mac Studio", "");
+    assert.deepEqual(readdirSync(own), []);
+    t.done();
+  });
+  it("the old names are gone, so a call left on one fails", async () => {
+    const mod = await import("../importing.js");
+    for (const old of ["writeStatus", "readStatuses", "statusesOf", "removeStatus"]) assert.equal(mod[old], undefined, old);
   });
 });

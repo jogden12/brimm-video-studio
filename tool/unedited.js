@@ -46,14 +46,14 @@ import { stillsArgs } from "./reframe.js";
 import { reelCandidates, reelsFile, readReels, mergeCandidates, REELS_FILE } from "./reel-candidates.js";
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, LATE_CHECK_MS } from "./dropbox.js";
-import { episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
-import { readSettings, runsFolder, episodeWork, episodesFolder } from "./settings.js";
+import { episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, statusWriteFolder, statusReadFolders, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
+import { readSettings, runsFolder, episodeWork, episodesFolder, importingFolder, importingFolderOf, statusFoldersOf, isLocal } from "./settings.js";
 import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf } from "./episode.js";
 import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
 import { fingerprintOf, matchVersion } from "./versions.js";
 import { LEFT, leftAlone, sessionNotCleared } from "./gate.js";
 import { STUDIO_NAME } from "./name.js";
-import { readStatuses, importState, shownStep } from "./importing.js";
+import { readStatusesIn, importState, shownStep } from "./importing.js";
 import { fileAt, folderAt } from "./where.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
@@ -446,7 +446,7 @@ export function versionIn(root, mine, { log = () => {}, whole = isWhole, home = 
     label of each record in Episodes under `root`, and of each status of this Mac, `machine`, in Episodes/.importing. The
     status of this same import, of the video `video` with the import id `importId`, is left out, so that an import tried again
     keeps its label. A record or a status that cannot be read gives none. */
-function labelsGiven(root, machine, { video, importId }) {
+function labelsGiven(root, machine, folders, { video, importId }) {
   const taken = [];
   let names = [];
   try {
@@ -458,7 +458,7 @@ function labelsGiven(root, machine, { video, importId }) {
     const { record } = readEpisode(join(episodesFolder(root), n), { pastCopies: true });
     if (record && typeof record.label === "string" && record.label) taken.push(record.label);
   }
-  for (const { status } of readStatuses(root)) {
+  for (const { status } of readStatusesIn(folders)) {
     if (!status || status.machine !== machine || !status.label) continue;
     if (status.video === video && (status.import || "") === importId) continue;
     taken.push(status.label);
@@ -533,6 +533,18 @@ async function workOn(file, deps) {
   }
   // What the video in the drop folder is when its import begins, so that one put in its place meanwhile is told apart.
   const arrived = episode && !into ? fileId(file) : null;
+  // A Mac with a drop folder of its own names the episode's folder from Episodes, so before any work it must be able to list it: an error but its not
+  // being there leaves the video for the next look, as a video still arriving is, with no status, one line in the log and the drop file left.
+  if (episode && episode.local && !into) {
+    try {
+      readdirSync(episodesFolder(episode.root));
+    } catch (e) {
+      if (e.code !== "ENOENT") {
+        log(`${shown}: Episodes could not be read (${e.code || "an error"}), so this video is looked at again later.`);
+        return { ok: false, name, arriving: true, message: "Episodes could not be read" };
+      }
+    }
+  }
   // An episode's record waits for her answer (spec 2026-10-22, section 1). Her screen may be shared, so the progress
   // panel and every notice name the video by its label, made of the Mac and the moment it was dropped, and never by its file:
   // `shown`. The label's short form, the one kept, holds no length, so it is known before the video is read. The moment is when
@@ -542,7 +554,7 @@ async function workOn(file, deps) {
   const noted = quiet && arrived ? readSeen(episode.home)[seenKey(name, arrived)] : null;
   const dropped = noted && Number.isFinite(noted.at) ? new Date(noted.at) : deps.now ? deps.now() : new Date();
   const unnumbered = quiet ? labelFor({ seconds: 0, machine: episode.machine, at: localStamp(dropped) }).short : "";
-  const label = quiet ? numbered(unnumbered, labelsGiven(episode.root, episode.machine, { video: name, importId: importIdOf(arrived) })) : "";
+  const label = quiet ? numbered(unnumbered, labelsGiven(episode.root, episode.machine, statusReadFolders(episode), { video: name, importId: importIdOf(arrived) })) : "";
   if (quiet) {
     shown = label;
     hide.keep.push(label);
@@ -562,7 +574,7 @@ async function workOn(file, deps) {
   // run holds the plan's lock, and the guide says it is at work.
   if (episode && !into) {
     const writeText = textWriter({ work: join(work, "status"), ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}) });
-    progress = statusReporter(progress, { root: episode.root, machine: episode.machine, video: name, bytes: sizeOf(file), importId: importIdOf(arrived), label, writeText, log, ...(deps.every ? { every: deps.every } : {}), ...(deps.cancel ? { cancel: deps.cancel } : {}) });
+    progress = statusReporter(progress, { folder: statusWriteFolder(episode), machine: episode.machine, video: name, bytes: sizeOf(file), importId: importIdOf(arrived), label, writeText, log, ...(deps.every ? { every: deps.every } : {}), ...(deps.cancel ? { cancel: deps.cancel } : {}) });
   }
   deps = { ...deps, log, files, progress };
   /** Keep the late check of the episode just filed (`filed`) on this Mac's own disk, so that a run stopped first leaves it for the next. */
@@ -575,6 +587,18 @@ async function workOn(file, deps) {
     } catch (e) {
       log(`${shown}: copied into Dropbox, but its late check could not be kept (${e.code || e.message}), so it is not made, and the video stays in the drop folder.`);
     }
+  };
+  /** What follows an episode's filing. A Mac with a drop folder of its own has filed the video on this Mac and has no late check to wait for: its
+      status is taken away (its record is in Dropbox, and the drop file is gone or held by its episode), and the run's folder is kept only for the
+      hook that was told of the record's work copy. Any other Mac keeps the run's folder and its late check. */
+  const afterFiling = (filed) => {
+    if (episode.local && !into) {
+      progress.drop();
+      keepWork = Boolean(deps.onRecordCopy);
+      return;
+    }
+    keepWork = true;
+    keepLateCheck(filed);
   };
   const fail = (given) => {
     const why = plain(given);
@@ -615,8 +639,7 @@ async function workOn(file, deps) {
       try {
         // No sound is read, no transcript, plan or words are made, and so there are no retakes, no guess and no fingerprint to match.
         filed = fileEpisode({ file, made: [], at: files.at, facts, printed, kind: null, read: null, reels: [], work, dropFile: arrived, label, ...lightFields({ name, facts, plan: null, words: [], root: episode.root }, { log, whole, home: episode.home }) }, deps);
-        keepWork = true;
-        keepLateCheck(filed);
+        afterFiling(filed);
       } catch (e) {
         if (e.code === "DROP_CHANGED") {
           log(`${shown}: it changed in the drop folder while it was imported, so this import is stopped, and the new file is imported on its own.`);
@@ -743,9 +766,8 @@ async function workOn(file, deps) {
         filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: into ? (kind === "short video" ? "short video" : "raw") : null, read: null, reels: [], work, dropFile: arrived, label, ...(into ? { into } : {}), ...lightFields({ name, facts, plan, words: planned.words || [], root: episode.root, matching: !into }, { log, whole, home: episode.home }) }, deps);
         const match = filed.record.answer ? filed.record.answer.match : null;
         if (match) log(`${shown}: its words are those of the episode ${match}, so her card offers it as a new version of that one.`);
-        keepWork = true;
         // The late check is kept on this Mac's own disk, so a run stopped before it leaves it for the next run.
-        keepLateCheck(filed);
+        afterFiling(filed);
       } catch (e) {
         if (e.code === "DROP_CHANGED") {
           // Nothing of it was put into Dropbox. The new file is imported on its own, as another recording.
@@ -1232,8 +1254,8 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
     or its status says it stopped on either Mac before its late check, which that Mac makes when its import next runs, or
     at once when told to "try it again" (edit.js retry). "" when none holds it. Nothing that puts files into the episode goes
     on meanwhile: the import's late check would meet files it did not put there, and put its own back over them. */
-export function importHolds({ root, home, machine, record, now = Date.now() }) {
-  return importHold({ root, home, machine, record, now }).why;
+export function importHolds({ root, statusFolders, home, machine, record, now = Date.now() }) {
+  return importHold({ root, statusFolders, home, machine, record, now }).why;
 }
 
 /** importHolds, with whether the hold clears by itself and what holds it: { why, waits, state }. It `waits` while an import of
@@ -1245,11 +1267,11 @@ export function importHolds({ root, home, machine, record, now = Date.now() }) {
     owes the late check, and its own import, `importing`, is at work and makes it, before its time or after), "owed" (this Mac
     owes it and no import is at work to make it), "stopped" (a status of an import that stopped), or "" when none holds it,
     as { why: "", waits: false, state: "" }. `importing` is whether this Mac's launch agent run is at work now. */
-export function importHold({ root, home, machine, record, now = Date.now(), importing = false }) {
+export function importHold({ root, statusFolders = [importingFolder(root)], home, machine, record, now = Date.now(), importing = false }) {
   const video = record.video.file;
   const said = (text) => String(text).replace(/\.$/, "");
   const again = (on) => `say "try it again" for ${video} on ${on}, then say this again`;
-  const statuses = readStatuses(root, now).map((s) => s.status).filter((s) => s && s.video === video && s.bytes === record.video.bytes);
+  const statuses = readStatusesIn(statusFolders, now).map((s) => s.status).filter((s) => s && s.video === video && s.bytes === record.video.bytes);
   const state = (want) => statuses.find((s) => importState(s, now) === want);
   const held = (why, waits = false, kind = "") => ({ why, waits, state: kind });
   const running = state("running");
@@ -1320,7 +1342,7 @@ export function listGone({ folder, record, home }) {
     - a recording with no picture, as its cut plan says, which gets no Reels;
     - a list of candidates that cannot be read, as one a newer brimm-video wrote, which a new one would be written over;
     - an import told to go by the rules alone, as the list says (`rulesOnly`). */
-export function askBlocked({ folder, record, root, home, machine, now = Date.now(), whole = isWhole }) {
+export function askBlocked({ folder, record, root, statusFolders, home, machine, now = Date.now(), whole = isWhole }) {
   if (kindOf(record) === null) return { why: leftAlone(record) ? LEFT : "This video is waiting for its answer: say what it is first." };
   // A session is known by its kind or by its mark, and only a mark cleared by her click lets Claude read it, by the gate's own rule
   // (gate.js sessionNotCleared): a record of kind "session" with no mark at all is refused too.
@@ -1331,7 +1353,7 @@ export function askBlocked({ folder, record, root, home, machine, now = Date.now
   if (open) return { why: open };
   const gone = undone(record, home);
   if (gone) return { why: gone };
-  const held = importHolds({ root, home, machine, record, now });
+  const held = importHolds({ root, statusFolders, home, machine, record, now });
   if (held) return { why: held };
   const name = record.video.file;
   const plan = `${basename(name, extname(name))}.cut-plan.json`;
@@ -1364,7 +1386,7 @@ export function askBlocked({ folder, record, root, home, machine, now = Date.now
 export async function askAgain({ folder, record }, deps) {
   const { log = () => {} } = deps;
   const as = "The Reel candidates are as they were.";
-  const blocked = askBlocked({ folder, record, root: deps.settings.root, home: deps.home || studioHome(), machine: deps.settings.machine, now: deps.now ? deps.now() : Date.now(), whole: deps.isWhole || isWhole });
+  const blocked = askBlocked({ folder, record, root: deps.settings.root, statusFolders: statusFoldersOf(deps.settings, deps.home || studioHome()), home: deps.home || studioHome(), machine: deps.settings.machine, now: deps.now ? deps.now() : Date.now(), whole: deps.isWhole || isWhole });
   if (blocked.why) return { ok: false, made: [], failed: [blocked.why], next: as };
   const name = record.video.file;
   const video = join(folder, name);
@@ -1462,7 +1484,9 @@ export async function uneditedFolder(dir, deps) {
     // When this is this Mac's drop folder, each video is made into an episode, and checked again 15 minutes after it was
     // copied into Dropbox (filing.js).
     if (episodic) {
-      const episode = { root: settings.root, machine: settings.machine, checkout: settings.checkout, home };
+      // A Mac with a drop folder of its own writes its statuses on its own disk and reads those and Episodes/.importing, where another
+      // Mac may still write (settings.js); it files each video on this Mac, with only the first record in Dropbox (filing.js).
+      const episode = { root: settings.root, machine: settings.machine, checkout: settings.checkout, home, local: isLocal(settings), statuses: importingFolderOf(settings, home), statusFolders: statusFoldersOf(settings, home) };
       const withEpisode = { ...deps, episode };
       return await importEpisodes(dir, withEpisode, (name) => uneditedFile(join(dir, name), { ...withEpisode, outDir: "", watched: dir }));
     }

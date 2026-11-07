@@ -32,7 +32,7 @@ import { stampedText } from "./lib.js";
 import { stretchesOf, fitReel } from "./reframe.js";
 import { reelsFile, reelEntries, REELS_FILE } from "./reel-candidates.js";
 import { readEpisode, writeEpisode, localStamp, kindOf, shownName, heldElsewhere, undone, recordNumbers } from "./episode.js";
-import { commitOf, thisCheckout } from "./filing.js";
+import { commitOf, thisCheckout, statusReadFolders } from "./filing.js";
 import { keepCheckInStep, ownCheckOnly } from "./late-wait.js";
 import { gated } from "./gate.js";
 import { highestNumberOf } from "./finish.js";
@@ -317,7 +317,7 @@ export async function readEpisodeNow(ctx, found, deps) {
   if (replaces) {
     let waited = 0;
     for (;;) {
-      const hold = importHold({ root: ctx.root, home, machine: ctx.machine, record, now: now() });
+      const hold = importHold({ root: ctx.root, statusFolders: statusReadFolders(ctx), home, machine: ctx.machine, record, now: now() });
       if (!hold.why) break;
       // This Mac's own check is all that holds it, and every file is as the import filed it: no wait. The reading takes its files out of
       // the check when it puts them in (keepCheckInStep), and the check is still made of every other file.

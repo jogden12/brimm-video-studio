@@ -381,12 +381,13 @@ export const shown = (at) => String(at || "").slice(0, 16).replace("T", " ");
     The fields of layout 3 are in the record only when they are given: the `answer` (the card's question, with the guess, what
     the import saw, and the episode whose words it matched), the `label` that names the video until it is answered, the
     `fingerprint` of its words, and `versionOf`, the id of the episode it is a new version of, which the import never gives:
-    her answer sets it. A record made without them is a record of layout 1.
+    her answer sets it. A record made without them is a record of layout 1. `local` ({ on: the Mac }) is given for a video filed on a Mac with a
+    drop folder of its own (Phase 3, L3): its files are then kept on that Mac, and the record is at layout 6.
     The video was recorded on the day its file says, when it says one, and otherwise on the day of the import. Its name is
     the video's own, without its ending, until a person gives it one. A video with a picture and no sound (the import gives
     `video.sound` false, PR H5a) says so in its record: `video.sound` is false; a video that has its sound says nothing of it.
     Its rev is 0 until writeEpisode first writes it. */
-export function newEpisode({ id, machine, at, video, kind, writer, files = {}, title = null, reels = [], answer = null, label = "", fingerprint = "", versionOf = null }) {
+export function newEpisode({ id, machine, at, video, kind, writer, files = {}, title = null, reels = [], answer = null, label = "", fingerprint = "", versionOf = null, local = null }) {
   const made = video.created ? new Date(video.created) : null;
   const dated = made !== null && Number.isFinite(made.getTime()) && made.getFullYear() >= FIRST_YEAR;
   const record = {
@@ -411,7 +412,8 @@ export function newEpisode({ id, machine, at, video, kind, writer, files = {}, t
     ...(answer ? { answer } : {}),
     ...(label ? { label } : {}),
     ...(fingerprint ? { fingerprint } : {}),
-    ...(versionOf ? { versionOf } : {})
+    ...(versionOf ? { versionOf } : {}),
+    ...(local ? { local } : {})
   };
   return { ...record, version: layoutOf(record) };
 }

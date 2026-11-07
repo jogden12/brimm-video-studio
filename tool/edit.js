@@ -63,7 +63,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
-import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf } from "./settings.js";
+import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf, importingFolderOf, statusFoldersOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
@@ -71,9 +71,9 @@ import { startDetached, runDetached, runningCommand, runningRun, readResult, tak
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { fileSafe, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reel-candidates.js";
-import { readStatuses, importState, removeStatus, shownStep } from "./importing.js";
+import { readStatusesIn, importState, removeStatusIn, shownStep } from "./importing.js";
 import { localSource, projectWaits, readingCheckAt, readingWaitsUntil, waitFacts } from "./late-wait.js";
-import { fileId, heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt } from "./filing.js";
+import { fileId, heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt, statusReadFolders } from "./filing.js";
 import { HAND_OFF_ASK, REELS_ASK, finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, matchedSession, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
 import { BRINGING, REEL_KEY, exportAgainWords, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
 import { checkingNow, problemFlagged } from "./finish-check.js";
@@ -387,6 +387,10 @@ export function contextFor(deps = {}) {
     machine: settings.machine,
     root: settings.root,
     episodes: episodesFolder(settings.root),
+    // Where this Mac writes the statuses of its imports, and where every one is read (settings.js): its own folder and Episodes/.importing on a Mac
+    // with a drop folder of its own, else Episodes/.importing alone.
+    statuses: importingFolderOf(settings, home),
+    statusFolders: statusFoldersOf(settings, home),
     home,
     // Only the names are taken out: any other path in a line stays readable.
     say: (line) => {
@@ -813,7 +817,7 @@ export function ageText(ms) {
     which carries its video's label (Part L), is named by its label, and any other by what it is and its size, and why it failed or what its late check found is said
     with no path or name of its file in it (withoutNames). */
 function importLines(ctx, fits = () => true) {
-  return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && fits(s.status.label || s.status.video) && importState(s.status, ctx.now()) !== "held").map(({ status }) => {
+  return readStatusesIn(statusReadFolders(ctx), ctx.now()).filter((s) => s.status && fits(s.status.label || s.status.video) && importState(s.status, ctx.now()) !== "held").map(({ status }) => {
     const state = importState(status, ctx.now());
     // A status with no label is named by what it is and its size, never by its file, on every Mac (Phase 3, L1d).
     const who = status.label || capital(unlabelled(status.video, status.bytes));
@@ -1074,7 +1078,7 @@ export async function episodes(ctx) {
   }
   // The videos in each Mac's drop folder. Every Mac names them as the light import does, whatever its file says of the import: every
   // import is light, and a video waiting there may be a session, its file named for a client (Phase 3, L1d).
-  const statuses = readStatuses(ctx.root, ctx.now());
+  const statuses = readStatusesIn(statusReadFolders(ctx), ctx.now());
   const waiting = [];
   for (const { mac, folder } of dropFolders(ctx)) {
     let names = [];
@@ -1086,7 +1090,7 @@ export async function episodes(ctx) {
     for (const video of names) {
       const found = ctx.stat(join(folder, video));
       if (!found) continue;
-      const held = heldBy({ root: ctx.root, video, bytes: found.size, now: ctx.now(), gatedAs: gatedAsOf(links) });
+      const held = heldBy({ root: ctx.root, statusFolders: statusReadFolders(ctx), video, bytes: found.size, now: ctx.now(), gatedAs: gatedAsOf(links) });
       // How long it has waited is from when this Mac's import first saw it (seen.json): the file's own dates are kept by a copy,
       // and macOS moves its birth time back with them. When this Mac has not seen it, as in the other Mac's drop folder, from
       // its ctime, when it came into the folder, which a tag or a preview set since then makes later.
@@ -1705,7 +1709,7 @@ export async function status(ctx, rest) {
 function lateCheckOwed(ctx, video, held, who = video, plain = (text) => text) {
   const { say } = ctx;
   const owed = readPendings(ctx.home).find((p) => p.video === video && p.machine === ctx.machine && resolve(p.root) === resolve(ctx.root));
-  const stopped = readStatuses(ctx.root, ctx.now()).filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine && importState(s.status, ctx.now()) === "stopped");
+  const stopped = readStatusesIn(statusReadFolders(ctx), ctx.now()).filter((s) => s.status && s.status.video === video && s.status.machine === ctx.machine && importState(s.status, ctx.now()) === "stopped");
   // The episode is named as listedAs names it: a gated one by its label and short id, and never by its folder.
   const name = owed ? listedAs(ctx, episodeAt(ctx, owed.name)) : (/already imported as (.*?)\. It stays/.exec(held) || [])[1] || "an episode";
   if (!owed && !stopped.length) {
@@ -1713,7 +1717,7 @@ function lateCheckOwed(ctx, video, held, who = video, plain = (text) => text) {
     return 1;
   }
   if (!owed) {
-    for (const { status } of stopped) removeStatus(ctx.root, video, ctx.machine, status.import || "");
+    for (const { status, folder } of stopped) removeStatusIn(folder, video, ctx.machine, status.import || "");
     say(`${who} is imported, as ${name}. Its import stopped on this Mac, and has no check of its copies left to make here, so the status that held the episode is taken away.`);
     return 0;
   }
@@ -1760,7 +1764,7 @@ export async function retry(ctx, rest) {
   } catch (e) {
     // The drop folder is not there, or cannot be read: it holds nothing that can be imported.
   }
-  const statuses = readStatuses(ctx.root, ctx.now());
+  const statuses = readStatusesIn(statusReadFolders(ctx), ctx.now());
   const labelOf = (v) => labelIn(statuses, v, ctx.machine);
   const sizeOf = (v) => (statSync(join(drop, v), { throwIfNoEntry: false }) || { size: 0 }).size;
   // No video is named by its file, on any Mac, whatever its file says of the import (every import is light; Phase 3, L1d), as `episodes`
@@ -1795,7 +1799,7 @@ export async function retry(ctx, rest) {
     say(`${who} is being imported now, at ${shownStep(running.status.step)}. The panel shows how far it is.`);
     return 1;
   }
-  for (const { status } of again) removeStatus(ctx.root, video, ctx.machine, status.import || "");
+  for (const { status, folder } of again) removeStatusIn(folder, video, ctx.machine, status.import || "");
   const how = (status) => {
     const state = importState(status, ctx.now());
     if (state === "failed") return `which failed: ${plain(String(status.failed).replace(/\.$/, ""))}`;
@@ -3298,7 +3302,7 @@ function askRefusal(ctx, found, record) {
   if (running === "ask") return { why: 'Claude is being asked already. Say "how far is it?" to see how far it has got.' };
   if (running) return { why: stoppedWords(ctx, found, record, { generic: `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.`, again: "Say it again then.", of: ` of ${calledAs(ctx, found)}` }) };
   if (!(ctx.deps.tools || findPrograms()).claude) return { why: NO_CLAUDE_CODE };
-  return askBlocked({ folder: found.folder, record, root: ctx.root, home: ctx.home, machine: ctx.machine, now: ctx.now(), whole: ctx.isWhole });
+  return askBlocked({ folder: found.folder, record, root: ctx.root, statusFolders: statusReadFolders(ctx), home: ctx.home, machine: ctx.machine, now: ctx.now(), whole: ctx.isWhole });
 }
 
 /** What to do about a reels.json the record lists that is gone: put back the copy this Mac kept of it (keptList), or wait for
@@ -3448,7 +3452,7 @@ async function waitForImport(ctx, { found, record, wait, progress, log, kinds = 
   let shown = false;
   try {
     for (;;) {
-      const hold = importHold({ root: ctx.root, home: ctx.home, machine: ctx.machine, record, now: ctx.now() });
+      const hold = importHold({ root: ctx.root, statusFolders: statusReadFolders(ctx), home: ctx.home, machine: ctx.machine, record, now: ctx.now() });
       if (!hold.why) return { record };
       if (!hold.waits) return { why: hold.why };
       // This Mac still owes the late check, and holds the file the import came from: the copy is read from it, now, and the check goes on
@@ -6146,7 +6150,7 @@ function panelRuns(ctx) {
     minute (clockNear). */
 function guideDrops(ctx) {
   const now = ctx.now();
-  const statuses = readStatuses(ctx.root, now);
+  const statuses = readStatusesIn(statusReadFolders(ctx), now);
   const seen = readSeen(ctx.home);
   const runs = panelRuns(ctx);
   const videos = [];

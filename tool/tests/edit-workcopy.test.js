@@ -15,7 +15,8 @@ import { lockOf, readResult, resultFile } from "../detached.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { NEWEST_VERSION, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
-import { removeStatus, writeStatus } from "../importing.js";
+import { removeStatusIn, writeStatusIn } from "../importing.js";
+import { importingFolder } from "../settings.js";
 import { READ_HOLD_MS, READ_LOOK_MS } from "../reading.js";
 import { pendingFolder } from "../settings.js";
 import { importHold } from "../unedited.js";
@@ -269,9 +270,9 @@ describe("workcopy: it waits for the import's late check, as the reading does", 
   /** The import makes its late check, and takes its pending one away. */
   const checkMade = (t) => rmSync(join(pendingFolder(t.home), `${ID}.json`), { force: true });
   /** An import of the video at work on the other Mac, as its status says it, written at the start of the test's clock. */
-  const importAt = (t, found, over = {}) => writeStatus(t.root, { version: 1, machine: OTHER_MAC, pid: 7, import: "k3j9x", video: VIDEO, bytes: found.record.video.bytes, seconds: 23.423, step: "Waiting for its late check", at: AT, label: "Video of 20 Oct, 15:00 (Mac Studio)", ...over }, (to, text) => writeFileSync(to, text));
+  const importAt = (t, found, over = {}) => writeStatusIn(importingFolder(t.root), { version: 1, machine: OTHER_MAC, pid: 7, import: "k3j9x", video: VIDEO, bytes: found.record.video.bytes, seconds: 23.423, step: "Waiting for its late check", at: AT, label: "Video of 20 Oct, 15:00 (Mac Studio)", ...over }, (to, text) => writeFileSync(to, text));
   /** The import has finished: its status is taken away. */
-  const importDone = (t) => removeStatus(t.root, VIDEO, OTHER_MAC, "k3j9x");
+  const importDone = (t) => removeStatusIn(importingFolder(t.root), VIDEO, OTHER_MAC, "k3j9x");
   /** Have the stand-in wait do `then` on every wait of `ms` milliseconds, before it has moved the clock. */
   const onWaits = (t, ms, then) => {
     const wait = t.ctx.deps.wait;
@@ -397,7 +398,7 @@ describe("workcopy: it waits for the import's late check, as the reading does", 
       ["a late check that found a problem", (t, found) => owedWithLocal(t, found, { over: { problem: "Pricing talk.srt is not whole in Dropbox." } })],
       ["an import that failed", (t, found) => {
         owedWithLocal(t, found);
-        writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: VIDEO, bytes: found.record.video.bytes, seconds: 23.423, step: "Waiting for its late check", at: AT, label: "x", failed: "ffprobe could not read it." }, (to, text) => writeFileSync(to, text));
+        writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: VIDEO, bytes: found.record.video.bytes, seconds: 23.423, step: "Waiting for its late check", at: AT, label: "x", failed: "ffprobe could not read it." }, (to, text) => writeFileSync(to, text));
       }]
     ];
     for (const [what, set] of CASES) {
