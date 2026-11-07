@@ -367,7 +367,7 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - Then the cloud question, unless `DROP_KEPT` is yes (the installer gets no drop option), or `CLOUD_OK_FOR` already holds this drop folder's real path. A y sets `CLOUD_OK_FOR`, and nothing is written. When the Warning line itself already holds the sessions sentence (L1c), the app does not add its own.
   - Then Claude Code's lines as today, with `tries` counted only after `claude update` or the Claude app's update.
 - **`privacy_notes`**, said before the real install's question:
-  - always the Downloads line. Its words follow Phase 3's L5 answer (spec, finding 10); until then, the spec's words;
+  - always the Downloads line, naming Claude Code and node (spec, step 4; finding 10 settled 7 Nov). Its exact words are what Phase 3's session sends once L1c and L5 are built; until then, the spec's draft;
   - the drop folder's line, decided by `studio_says cloudFolder` first: Dropbox gives the line only on a Mac set up fresh (`SET_UP_FRESH`). Any other cloud gives it, and otherwise it comes when `studio_says needsFilesAccess` is `yes`;
   - the exports folder's line on the same rule, or when `EXPORTS_PASSED_OVER` is set.
 

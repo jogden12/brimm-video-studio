@@ -129,9 +129,9 @@ Each pick is checked by the app's own checks (below) right after it is made. The
 ### 4. Before the real install
 
 - **Privacy questions.** Before the real install's question, the app says which questions macOS may still ask. It decides by asking Studio's own `needsFilesAccess` and `cloudFolder` (`settings.js`, through node), never by its own list.
-  - **On every run:** "Studio looks in Downloads for exports, whatever is picked. macOS may ask once whether Claude Code may access files in your Downloads folder, the first time the chat on this Mac looks for an export. Choose Allow."
-    - Phase 3's L5 moves the deleting in Downloads into the launch agent, so node will be asked too.
-    - The line's final words follow what Phase 3's session sends once L5 is settled (finding 10).
+  - **On every run:** "Studio looks in Downloads for exports, whatever is picked. macOS may ask once whether Claude Code may access files in your Downloads folder, the first time the chat on this Mac hands off a video and looks for its export. It may then ask once whether node may, about 15 minutes later, when Studio deletes that export from Downloads after its copies in Dropbox are checked. Choose Allow each time."
+    - Settled 7 November (finding 10, Jason: "Yes, let it delete"). From Phase 3's L5 on, the launch agent's node (`/opt/homebrew/bin/node`) reads Downloads and deletes the export there, on each MacBook and on the Mac Studio. So the line names node as well as Claude Code.
+    - The words above are a draft. Studio's own `  Files and Folders:` line keeps its start and gets new words in L1c and L5. The app's line takes the exact text Phase 3's session sends when those are built.
   - **Dropbox is decided first,** by `cloudFolder`: L1c's `needsFilesAccess` will also cover `~/Library/CloudStorage`, Dropbox included.
   - **For a drop folder under Desktop or Documents, in iCloud Drive or another cloud folder, or on another disk:** "macOS may also ask whether node may read <folder>, at the first import, and whether Claude Code may, the first time the chat on this Mac looks there ("what's waiting?"). Choose Allow each time. A Don't Allow is undone in System Settings › Privacy & Security › Files and Folders, under that name. macOS may ask node again after Homebrew updates it, and until someone clicks Allow, Studio sees no video dropped there." Terminal's own question came already, at the app's check that the folder is empty.
   - **Dropbox** brings these questions only on a Mac set up fresh. On a moved Mac, node and Claude Code read Dropbox already.
@@ -542,7 +542,7 @@ The findings:
 
 One more goes with this version:
 
-10. **Downloads and the launch agent.** If L5 moves the delete from Downloads into the launch agent, then node, not only Claude Code, will need to be let into Downloads. The app's Downloads line names Claude Code alone.
+10. **Downloads and the launch agent.** If L5 moves the delete from Downloads into the launch agent, then node, not only Claude Code, will need to be let into Downloads. The app's Downloads line names Claude Code alone. **Settled 7 November:** Jason, "Yes, let it delete". The Downloads line now names node too (step 4).
 
 ## Not here
 
@@ -581,3 +581,4 @@ One more goes with this version:
 1. **Which exports folder a y takes:** "Downloads". The suggestion stays Downloads. A Dropbox folder is still one c away, picked or made in the chooser.
 2. **Whether each MacBook's move waits until this lands, after all of Phase 3:** "yes, wait". The moves (checks 80 and 74) come after this is merged. Check 73, the build, still waits for his word that the app is ready.
 3. **Pushing this branch as a draft pull request, design and plan only:** "yes". It merges only after Phase 3.
+4. **Whether the launch agent's node deletes the export in Downloads** (finding 10, through Phase 3's session): "Yes, let it delete". Claude Code looks for the export at the hand-off, and node deletes it about 15 minutes later, so the app's Downloads line names both.
