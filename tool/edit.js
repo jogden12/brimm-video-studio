@@ -1523,7 +1523,11 @@ async function appWhenReady(ctx, rest) {
     // or its result shows it ended after this run began.
     let seen = false;
     let busyWith = "";
-    for (;;) {
+    // The lock the copy's run takes is one for the main video, a Reel's and the footage: the run that ended may have been a Reel's. When it ends and the main video's
+    // copy is not made and did not fail, it is asked for once, and waited for in its turn.
+    let asked = false;
+    const lookForCopy = async () => {
+     for (;;) {
       const copying = Boolean(runningCommand(ctx.home, found.name, ctx.alive, copyLock));
       busyWith = runningCommand(ctx.home, found.name, ctx.alive);
       if (copying) seen = true;
@@ -1534,6 +1538,18 @@ async function appWhenReady(ctx, rest) {
       if (!copying && !busyWith && decided) break;
       if (ctx.now() - began >= limit) break;
       await wait(WHEN_READY_LOOK_MS);
+     }
+    };
+    await lookForCopy();
+    if (!asked && ctx.now() - began < limit) {
+      const then = ownRecord();
+      const failed = readResult(ctx.home, found.name, WORK_COPY_COMMAND);
+      if (then && !copyIsMade(ctx, then) && !(failed && failed.early !== true && failed.ok === false && failed.ended >= began - WHEN_READY_JUST_BEFORE_MS) && !runningCommand(ctx.home, found.name, ctx.alive, copyLock)) {
+        asked = true;
+        requestWorkCopy(ctx, { folder: found.name });
+        seen = false;
+        await lookForCopy();
+      }
     }
     const mine = ownRecord();
     const record = mine ? mine.record : null;

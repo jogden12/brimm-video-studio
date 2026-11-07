@@ -184,6 +184,20 @@ describe("app --when-ready", () => {
     assert.doesNotMatch(freed.text, /running|being made|isn't|not /i);
     t.done();
   });
+  it("B0-F26 the lock that ended was a Reel's copy: the main video's copy is asked for once, and not called failed", async () => {
+    const { t } = kept();
+    atWork(t, "workcopy");
+    const wait = t.ctx.deps.wait;
+    let turns = 0;
+    t.ctx.deps.wait = async (ms) => {
+      await wait(ms);
+      turns += 1;
+      if (turns === 1) rmSync(workCopyLockOf(t.home, FOLDER), { force: true });
+    };
+    await run(t);
+    assert.equal(argsOf(t).filter((a) => a[0] === "workcopy").length, 1, JSON.stringify(argsOf(t)));
+    t.done();
+  });
   it("B0-F27 a copy that failed and ended just before this run began is taken as decided at once, not waited for the copy's whole limit", async () => {
     const { t } = kept();
     mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
