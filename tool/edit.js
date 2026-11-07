@@ -450,9 +450,9 @@ const recordShaped = (r) => typeof r.id === "string" && Number.isInteger(r.versi
     - A record file numbered above the one read, which Dropbox is still bringing over or this code rejects, may be a video corrected
       to a session or not answered: on a Mac that does the light import, or when the record read is of the switch's layout (3), it
       refuses every command. With today's settings and records it is passed over, as it always was.
-    - An episode kept on another Mac (keptOn: a record it is known by holds `local`, and its Mac is not this one; Phase 3, L2, D3) is
-      changed only there: every command is refused, in where.js ON_OTHER_MAC's one line, which names it as every line does and names that
-      Mac, before anything else of it is asked or read, whatever this Mac's training gate says.
+    - An episode kept on another Mac (keptOn: a record it is known by holds `local` on another Mac, and none holds it on this one; Phase 3,
+      L2, D3) is changed only there: every command is refused, in where.js ON_OTHER_MAC's one line, which names it as every line does and
+      names that Mac, before anything else of it is asked or read, whatever this Mac's training gate says.
     - A conflicted episode is refused when any one of its records is, so that a copy not answered, or a session's, is not got round
       by the record in force. A copy that is not shaped as a record (recordShaped) is not asked.
     - A video held as a session (`e.held`: one of its other versions is a session not cleared) runs only what gate.js heldGateFor
@@ -548,8 +548,16 @@ const gatedRecord = (e) => e.records.filter(recordShaped).find(gated) || (e.held
 /** The Mac the episode `e` is kept on, when it is not this one (Phase 3, L2; D3): any record it is known by that holds `local` on another Mac
     (where.js onOtherMac) says so, a conflicted copy's too, as the gate asks every record; "" when none does. A copy that is not shaped as a
     record is not asked. Such an episode is changed only on that Mac: findEpisode's gate refuses every command that names it (gateOf), and
-    `episodes` and the guide say it is there (episodeLines, guideFacts). */
-const keptOn = (ctx, e) => e.records.filter(recordShaped).map((r) => onOtherMac(ctx, r)).find(Boolean) || "";
+    `episodes` and the guide say it is there (episodeLines, guideFacts).
+    But "" too when any of those records says it is kept on this Mac: a record and its conflicted copy that say two Macs (each Mac marked it
+    its own at once) are sorted out on either, by `resolve`, as any conflicted copy is, and every other command is refused there by the
+    conflict itself, as `episodes` and the guide say it is (review R0-F3); a Mac that none of them names refuses every command. */
+const keptOn = (ctx, e) => {
+  const shaped = e.records.filter(recordShaped);
+  // A record kept on this Mac: its `local` names a Mac, and where.js onOtherMac says that Mac is not another.
+  const here = (r) => r.local !== null && typeof r.local === "object" && typeof r.local.on === "string" && r.local.on !== "" && onOtherMac(ctx, r) === "";
+  return shaped.some(here) ? "" : shaped.map((r) => onOtherMac(ctx, r)).find(Boolean) || "";
+};
 
 // isLabelled, heldName, gatedName and gatedAsOf, how a gated record or one held as a session is named, are gate.js's: the
 // installer's check of the old drop folder (switch.js) names a video by them too.
@@ -955,19 +963,21 @@ export const unreadWords = (named, read) => (read && read.code === "NONE"
     the episodes `episodes` lists, and through `links` (finish.js linksOf, read once by `episodes`) the versions of that video. An
     episode whose record cannot be read is named as listedAs names it, and so is one a newer brimm-video wrote. A planned episode (PR H4)
     has no video to give a length, and is said by plan.js plannedLine: its title, the day it was planned, what it waits for and its id.
-    An episode kept on another Mac (keptOn; Phase 3, L2, D3) is said to be there, in the guide's words, under its line; the lines of her card
-    are not said of a video of it waiting for her answer, since every command that would answer it is refused here; and none of its own files,
-    kept on that Mac, is looked for here (episode.js fileProblems), while its files in Dropbox are. On the Mac that keeps it, its own files are
-    looked for in its video/ folder there (where.js folderAt). */
+    An episode kept on another Mac (keptOn; Phase 3, L2, D3), one with a conflicted copy included, is said by its line, from its record in
+    force, and under it to be there, in the guide's words; the lines of her card are not said of a video of it waiting for her answer, since
+    every command that would answer it is refused here; and nothing of its files is said here, neither a conflicted copy, a script changed by
+    hand nor a file not whole: that Mac says each and sorts it out, where the commands that would do it run (review R0-F6). On the Mac that
+    keeps it, its own files are looked for in its video/ folder there (where.js folderAt), and its files in Dropbox in its folder there
+    (episode.js fileProblems). */
 function episodeLines(ctx, e, left, all, links) {
   const r = e.read.record;
   if (e.newer) return [`  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
-  if (!r && listedAs(ctx, e) === e.name) return [`  ${e.name}`, `    ${readTrouble(e.read)}`];
+  const there = keptOn(ctx, e);
+  if (!r && !there && listedAs(ctx, e) === e.name) return [`  ${e.name}`, `    ${readTrouble(e.read)}`];
   if (!e.inForce) return [`  ${unreadWords(capital(listedAs(ctx, e)), e.read)}`];
   const record = e.inForce;
   const lines = [];
   const clean = cleanFor(ctx, e);
-  const there = keptOn(ctx, e);
   if (isGated(e)) {
     const named = gatedRecord(e);
     const held = e.held && !gated(named);
@@ -976,7 +986,7 @@ function episodeLines(ctx, e, left, all, links) {
     const long = record.video ? ` ${stamp(record.video.seconds)}` : "";
     lines.push(`  ${gatedName(named, e.held)}: ${long ? what : what.replace(/, of$/, "")}${long}, id ${String(named.id).slice(-6)}`);
     if (!left && recordKind(named) === null && !there) lines.push(...cardLines(named, gatedName(named, e.held), all, links));
-    if (!r) lines.push(`    ${clean(readTrouble(e.read))}`);
+    if (!r && !there) lines.push(`    ${clean(readTrouble(e.read))}`);
   } else if (isPlannedRecord(record)) {
     // A planned episode (PR H4) has no video to give a length: it is said by its title and what it waits for.
     lines.push(`  ${plannedLine(record)}`);
@@ -988,6 +998,7 @@ function episodeLines(ctx, e, left, all, links) {
   if (record.editing) lines.push(`    Editing: ${record.editing.by}, since ${shownAt(record.editing.since)}`);
   if (record.title && !isGated(e)) lines.push(`    Title: ${record.title.text}${record.title.approved ? "" : " (recommended)"}`);
   if (record.finished) lines.push(`    Finished: revision ${record.finished.revision}, on ${record.finished.on}`);
+  if (there) return lines;
   // A script file changed outside the chat is said in its own plain line, not as "Not right" (plan-script.js; review changes R5).
   const handEdited = scriptHandEdited(e.folder, record);
   const looked = { machine: ctx.machine, localFolder: folderAt(ctx, { folder: e.folder, record }, "local") };
