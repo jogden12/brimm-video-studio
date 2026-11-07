@@ -1827,6 +1827,31 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("says plainly, for a drop folder on this Mac, that the status files were not made in Dropbox, when write refuses after the marker: its own lines run alone in zsh (L9)", { skip: noZsh }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-write-local-"));
+    try {
+      writeFileSync(join(dir, "node"), `#!/bin/sh\nif [ "$2" = write ]; then echo "Not written: the drop folder is not for the settings."; exit 1; fi\n`);
+      chmodSync(join(dir, "node"), 0o755);
+      const block = piece('if [[ -n "$machine" ]]; then\n  mkdir -p "$root/Episodes" "$root/References"', '\nfi\n');
+      const script = `set -euo pipefail\nsay() { print -r -- "$@"; }\nnode="${dir}/node"\nHERE=settings\nmachine="Mac Studio"\nlocal_drop=yes\nroot="${dir}/BRIMM Video"\nWORK="${dir}/Work"\ndrop="${dir}/Work/Drop"\nCHECKOUT=/x\nswitch_args=()\nstudio_why=""\nmkdir -p "$drop"\n${block}\nprint -r -- went on`;
+      const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+      assert.equal(r.status, 1, r.stderr + r.stdout);
+      assert.ok(r.stdout.includes(`The settings were not written, so they and the launch agent are as they were. This run did make ${dir}/Work/Drop and its marker, and the folders for Episodes and for the reference pictures, which a later run uses. Deal with what is said above, then run this again.\n`), r.stdout);
+      assert.ok(!/status files/.test(r.stdout), r.stdout);
+      assert.equal(existsSync(join(dir, "BRIMM Video", "Episodes", ".importing")), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("words its header so that every import is light is said of all the options, and its closing lines tell a picked folder's import in its own words, the old three for a folder in Dropbox: read, not run (L9)", () => {
+    const text = readFileSync(INSTALL, "utf8");
+    const help = text.slice(0, text.indexOf("set -euo pipefail")).replace(/\n# ?/g, " ").replace(/\s+/g, " ");
+    assert.ok(help.includes("or with --switch-local the default, Drop in BRIMM Video Work. Whatever the settings say of the import, every import is light."), help);
+    assert.ok(!help.includes("It takes the light import"), help);
+    const closing = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
+    assert.ok(closing.includes('  if [[ -n "$local_drop" ]]; then\n    say "It is imported on this Mac: its files are kept in a folder of its own in BRIMM Video Work, and its record is written in"\n    say "$root/Episodes, in a folder named for the day, the video and this Mac. The video is taken out of the drop folder once the"\n    say "record is written, and Studio checks the record in Dropbox by itself about 15 minutes later. Then,"\n  else\n'), closing);
+    assert.ok(closing.includes('    say "It is imported into $root/Episodes, in a folder of its own named for the day, the video and this Mac. Its files are"\n    say "copied into Dropbox and checked again 15 minutes later, and only then is the video taken out of the drop folder. Then,"\n  fi\n'), closing);
+  });
   it("tells, in the README, how to have Claude asked again: without --rules-only for a folder, and with --machine, where readings stay off, node settings.js set --readings on", () => {
     const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
     const line = readme.split("\n").find((l) => l.startsWith("Add `--rules-only` to that line"));

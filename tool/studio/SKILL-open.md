@@ -27,6 +27,8 @@ The card's words are a proposal, for Jason and Sallie to settle.
 
 A video `episodes` lists with "It is on <Mac>. Carry on there." under it waits for her on that Mac: ask no card for it here, and tell her so.
 
+When a command answers `"<video>" is on <Mac>: carry on there. Nothing was changed.`, the video is kept on that Mac: tell her so in plain words, and that nothing was changed. That is no refusal for Jason: never say "ask Jason" for it.
+
 When `episodes` prints `Planned card: {…}` under a video waiting for her answer, ask it first, on one `AskUserQuestion` exactly as that line gives it, word for word: never word it yourself.
 On an answer that starts "Footage for", ask `Part card: {…}` next, as given, then run `footage "<label>" "<title>" talking --client no`: the plan's title from her answer, screen or b-roll in place of talking as she chose, `--client yes` when she says it shows a client, a client's name or their work, and, when it says which shot, the number she gives you in the chat as `--shot <n>`.
 On "No", go on to the card below; for a video whose lines say "No sound", tell her it can only be footage for a planned video, and run `leave "<label>"`.
@@ -61,6 +63,7 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 
 - Which first: A video waiting for her answer comes first, whatever she said. Then, when she said she has a new video, that one: say in one line how many others are under way, and that "what's next?" picks them up. When she asked what's next or where she was, the newest under way, and the others in one line.
 - A new video: ask on one `AskUserQuestion`: "Is this video a private session with a client or a group?": "Yes", "No", "It is a Zoom download". Yes: if its file's name holds the client's name, she renames it first. Then, for Yes or No, `guide drop`: tell her her drop folder is open in Finder, in the words it gives, and to drag the video in.
+- How a video gets to the drop folder: a clip from her iPhone, "Send it to this Mac with AirDrop. It lands in Downloads: drag it from there into your drop folder."; a finished video from her editor in Dropbox, "Hold Option while you drag it into your drop folder, so Dropbox keeps its copy." Say these words as they are.
 - A Zoom download, before she drops it or held in her drop folder: `guide drop zoom`, and tell her to drag it there.
 - "I've dropped it" / "Is it ready?": `guide wait`, and tell her where it is in one line, with any time it gives. If it is still on its way, offer to tell her here when it's ready. If nothing listed is coming in, being imported or waiting for her answer, ask where she dropped it, then run `guide wait` again.
 - "Tell me when it's ready" / "Let me know when Claude has read it", or her yes to that offer: run `guide "<video>" tell` in the background (the Bash tool's run_in_background), once per video, never Monitor. Say "I'll tell you here; the Mac doing the work shows a notice too," and carry on with her.
@@ -68,6 +71,7 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 - After a command that starts work in the background (`finish` once she has said yes, `kind` when Claude reads on, opening an episode in HyperFrames when its video is being made, `ask`): tell her in plain words how long it takes, as the command says, with its time, and that she can carry on; never send her to the progress panel to watch it.
 - Then, without asking her, run `guide "<video>" tell` in the background (the Bash tool's run_in_background), once per video, never Monitor, and say "I'll tell you here when it is done." When it ends, tell her its one line in plain words, and its next step. For a finish that is that the hand-off is ready, which is shown in Finder, and then the BRIMM Ops page's step; the finish goes on checking Dropbox's copies for a quarter of an hour, which she need not wait for.
 - If it says the finish wrote no hand-off, or that Claude's reading did not finish, tell her so, and offer to run `status` to see why. Making a Reel ("Make Reel 2") is the exception: the guide does not see a Reel's video being made, so tell her what it says, and that "how far is it?" says when it is done.
+- A video kept on this Mac: the finish ends at the hand-off, and Studio checks Dropbox's copies by itself about 15 minutes later; nothing she does waits for it, a spelling included.
 - A video waiting for her answer: the card, as above. If she said "Yes" to the first question in this chat, tell her to choose "Client or group session" and "Yes".
 - Any other next step: say it in one or two sentences, offer to do the BRIMM Video Studio part ("Shall I open it in HyperFrames?" when it says to open it there, also for a video it says was edited in Final Cut before), and run it only on her yes, as the table below says. Once it says she has exported it, or a Reel of a finished video, do not offer: run `finish` at once, as the "Hand it off" and "Hand off the Reels" rules say.
 - While it says the video for HyperFrames is being made, offer to tell her here when it is done (`guide "<video>" tell`, as above), and say only "I'll tell you here": no notice is posted for it. When it gives the time of her last request in HyperFrames, say it.
@@ -177,7 +181,7 @@ When BRIMM Video Studio says a session's words are in a file for this chat alone
 
 | She says | Run |
 |---|---|
-| "Its teachings" / "Get the teachings of <label>" | `teachings "<label>"`. If it refuses (not turned on for this Mac yet, turned on more than 90 days ago, or another account signed in), tell her plainly that its teachings cannot be read on this Mac now, and to ask Jason: never say which account |
+| "Its teachings" / "Get the teachings of <label>" | `teachings "<label>"`. If it refuses (not turned on for this Mac yet, turned on more than 90 days ago, or another account signed in), tell her plainly that its teachings cannot be read on this Mac now, and to ask Jason: never say which account; but for "carry on there", say that |
 | "The transcript only" | `teachings "<label>" --transcript-only` |
 | "Show me the principles" / "Show me the Reel ideas" | `principles "<label>"` / `ideas "<label>"`: show her each item exactly as BRIMM Video Studio printed it, never summarised, as above; then ask her what to keep, change or drop |
 | "Keep 1 and 3" / "Drop 2" / "Change 3" | `principles "<label>" keep 1 3` / `principles "<label>" drop 2` / `principles "<label>" edit 3 --name "<words>"`, or `--category`, `--description` or `--example_application` in place of `--name`, in her words. |
@@ -201,6 +205,8 @@ More on these rows. Each rule starts with the row it belongs to:
 
 ## Keeping an episode's folder on this Mac
 
+These two steps are only for an episode from before the switch, and on a Mac whose drop folder is in Dropbox. A video kept on this Mac needs neither: its files are in its folder on this Mac, and after its hand-off Studio copies its recording into Dropbox, in Original files, by itself, and takes the Mac's copy away once Dropbox says it is uploaded. She does nothing for it. If the guide says its recording stays on this Mac, tell her so, and to ask Jason.
+
 1. At the first open of an episode on this Mac: in Finder, Control-click the episode's folder and choose Make available offline (`open` says where).
 2. When the finish is done and the hand-off is on the BRIMM Ops page, and Dropbox shows the folder is up to date: in Finder, Control-click the episode's folder and choose Make online-only, to free space on her laptop.
 
@@ -217,4 +223,5 @@ More on these rows. Each rule starts with the row it belongs to:
    When she says the words on the main video's picture are right, her yes is all it needs; when she changes or drops a line, give the lines as she wants them with `--on-screen "<words>"`, once for each line, in the order they appear, each quoted by the rule at the top of this file (a line with both an apostrophe and a straight double quote cannot be passed: ask her to say that line another way), and `--no-on-screen` when nothing is on screen.
    Never add `--yes` before she has said yes to what `finish` just said.
 4. If it says this Mac does not let it look in the Downloads folder or in her exports folder, tell her what it says: she allows it once, in System Settings. When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page. Once `--yes` has started it, tell her what it says of when the hand-off will be ready and that she can carry on, and go on as "Guide her" says for work in the background: `guide "<episode>" tell` tells her here when the hand-off is ready, and the finish goes on checking Dropbox's copies a quarter of an hour longer, which she need not wait for.
+   For a video kept on this Mac, Studio checks them by itself about 15 minutes later, and nothing she does waits for it.
 5. An iPhone clip she answered is handed off the same way once she has opened it in HyperFrames and exported it. If `finish` asks whether to hand it off as it is, ask her, and for yes run `finish "<video>" --as-it-is`. A hand-off already written from the clip as it was filmed stays as it is: an edited version needs HyperFrames first.

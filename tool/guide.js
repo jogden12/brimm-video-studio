@@ -230,6 +230,9 @@ const DAY_MS = 86400000;
 
 /** What the overview says with no video under way. */
 export const NOTHING_UNDER_WAY = "Nothing is under way. To start, put the video in your drop folder.";
+/** What the overview adds, on a Mac with a drop folder of its own and nothing under way, for a clip from her iPhone: AirDrop puts it in
+    Downloads (on the Mac Studio, a link into Dropbox), and Studio touches it only once it is in the drop folder (Phase 3, D7). */
+export const AIRDROP = "A clip from your iPhone? Send it to this Mac with AirDrop. It lands in Downloads: drag it from there into your drop folder.";
 /** What the guide says when no video fits what she said. It never says her words again: they may hold a client's name. */
 export const NO_FIT = 'No video under way fits that. Say "what\'s next?" to see the ones that are.';
 
@@ -577,13 +580,14 @@ export function findIn(items, said) {
 /** The overview's lines: this Mac's drop folder in Finder words, when this Mac does not let it look in that folder (`unreadable`) the
     line that says so (dropUnreadable), each video under way with its next step, and the lines edit.js adds of its own for it (`also`)
     under that, and, when there are any, how many videos from before the switch it does not guide. With `unreadable` and none under way
-    it does not say that nothing is: "put the video in your drop folder" would have her drop it again. */
-export function overviewLines({ drop, items, old, unreadable = false }) {
+    it does not say that nothing is: "put the video in your drop folder" would have her drop it again. On a Mac with a drop folder of its own
+    (`local`), with none under way, it also says how a clip from her iPhone gets there (AIRDROP). */
+export function overviewLines({ drop, items, old, unreadable = false, local = false }) {
   const under = ordered(items.filter(({ next }) => !next.done));
   return [
     `Your drop folder: ${drop}`,
     ...(unreadable ? [dropUnreadable(drop)] : []),
-    ...(under.length ? ["Under way:", ...under.flatMap(({ facts, next, also = [] }) => [`  ${facts.name}: ${next.text}`, ...also.map((line) => `    ${line}`)])] : unreadable ? [] : [NOTHING_UNDER_WAY]),
+    ...(under.length ? ["Under way:", ...under.flatMap(({ facts, next, also = [] }) => [`  ${facts.name}: ${next.text}`, ...also.map((line) => `    ${line}`)])] : unreadable ? [] : local ? [NOTHING_UNDER_WAY, AIRDROP] : [NOTHING_UNDER_WAY]),
     ...(old > 0 ? [`${old} ${old === 1 ? "video" : "videos"} from before the switch ${old === 1 ? "is" : "are"} not guided.`] : [])
   ];
 }

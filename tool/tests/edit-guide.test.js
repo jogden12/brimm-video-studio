@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { editMain, HELP } from "../edit.js";
 import { readGuideNotes, writeGuideNotes, guideFile } from "../guide-note.js";
-import { NOT_SET_UP, OPS_PAGE, dropUnreadable } from "../guide.js";
+import { NOT_SET_UP, OPS_PAGE, dropUnreadable, AIRDROP } from "../guide.js";
 import { watched } from "./watched-fs.js";
 import { localStamp, readEpisode, recordFile, recordText } from "../episode.js";
 import { removeStatusIn, writeStatusIn } from "../importing.js";
@@ -408,7 +408,7 @@ describe("guide opens a folder, the page, or a file's place in Finder", () => {
     // A video in her laptop's folder in Dropbox is not looked for here; one in the picked folder is.
     mkdirSync(join(t.root, "Drop", "Sallie's laptop"), { recursive: true });
     writeFileSync(join(t.root, "Drop", "Sallie's laptop", "Theirs.mov"), "video");
-    assert.deepEqual((await on(own(), "guide")).said, [`Your drop folder: ${WORDS}`, "Nothing is under way. To start, put the video in your drop folder."]);
+    assert.deepEqual((await on(own(), "guide")).said, [`Your drop folder: ${WORDS}`, "Nothing is under way. To start, put the video in your drop folder.", AIRDROP]);
     writeFileSync(join(picked, "Mine.mov"), "video");
     const r = await on(own(), "guide");
     assert.equal(r.said[0], `Your drop folder: ${WORDS}`);
@@ -440,7 +440,7 @@ describe("guide opens a folder, the page, or a file's place in Finder", () => {
     // A folder its own permissions shut (EACCES), or one that is not there (ENOENT), is passed over as before.
     for (const code of ["EACCES", "ENOENT"]) {
       r = await run(own, [picked], code, "guide");
-      assert.deepEqual(r.said, [`Your drop folder: ${WORDS}`, NOTHING], code);
+      assert.deepEqual(r.said, [`Your drop folder: ${WORDS}`, NOTHING, AIRDROP], code);
       r = await run(own, [picked], code, "episodes");
       assert.ok(!r.said.some((l) => l.startsWith("This Mac does not let")), r.said.join("\n"));
     }

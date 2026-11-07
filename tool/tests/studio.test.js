@@ -766,7 +766,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     assert.ok(rowOf('"Hand off the Reels" / "Add the Reels to the hand-off"').includes('When `--yes` starts it, tell her what it says of when the hand-off will be ready, and go on as "Guide her" says for work in the background.'));
     assert.ok(rowOf('"Ask Claude again for Reels"').includes('go on as "Guide her" says for work in the background'));
     const step = sectionOf(skill, "## In HyperFrames, to hand it off").split("\n").find((line) => line.startsWith("4. "));
-    assert.ok(step.includes('Once `--yes` has started it, tell her what it says of when the hand-off will be ready and that she can carry on, and go on as "Guide her" says for work in the background: `guide "<episode>" tell` tells her here when the hand-off is ready, and the finish goes on checking Dropbox\'s copies a quarter of an hour longer, which she need not wait for.'), step);
+    assert.ok(step.includes('Once `--yes` has started it, tell her what it says of when the hand-off will be ready and that she can carry on, and go on as "Guide her" says for work in the background: `guide "<episode>" tell` tells her here when the hand-off is ready, and the finish goes on checking Dropbox\'s copies a quarter of an hour longer, which she need not wait for'), step);
     assert.ok(step.includes("When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page."), "the old sentence stays");
   });
   it("tells her what to offer at the guide's HyperFrames steps, that the video for HyperFrames posts no notice, and offers HyperFrames for a raw video edited in Final Cut before (plan PR 10, Phase 2)", () => {
@@ -1543,6 +1543,45 @@ describe("her skill tells her what Studio says when this Mac does not let it loo
       assert.ok(text.indexOf("## Guide her") < text.indexOf(lines[at]) && text.indexOf(lines[at]) < text.indexOf("## What she says, and what to run"), name);
       for (const clause of ["in place of asking where she dropped it", "do not run `guide wait` again until", "the app she talks to Claude in"]) assert.ok(lines[at].includes(clause), clause);
       assert.ok(sectionOf(text, "## Guide her").trimEnd().split("\n").length <= 30, name);
+    });
+  }
+});
+
+describe("her skill's words for the local working folder, in both locks (Phase 3, L9)", () => {
+  const SKILLS = Object.fromEntries(["SKILL.md", "SKILL-open.md"].map((name) => [name, readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8")]));
+  for (const [name, text] of Object.entries(SKILLS)) {
+    describe(name, () => {
+      it("tells her how a video reaches the drop folder: AirDrop for a clip, Option-drag for her editor's video", () => {
+        const guide = sectionOf(text, "## Guide her");
+        const at = guide.split("\n").find((line) => line.startsWith("- How a video gets to the drop folder:"));
+        assert.ok(at, name);
+        assert.ok(at.includes("Send it to this Mac with AirDrop. It lands in Downloads: drag it from there into your drop folder."), at);
+        assert.ok(at.includes("Hold Option while you drag it into your drop folder, so Dropbox keeps its copy."), at);
+        assert.ok(guide.trimEnd().split("\n").length <= 30, `${guide.split("\n").length} lines`);
+      });
+      it("says what a finish of a video kept on this Mac does about Dropbox's check, in both places", () => {
+        const lines = text.split("\n");
+        const guideAt = lines.findIndex((line) => line.startsWith("- If it says the finish wrote no hand-off"));
+        assert.ok(guideAt >= 0 && lines[guideAt + 1] === "- A video kept on this Mac: the finish ends at the hand-off, and Studio checks Dropbox's copies by itself about 15 minutes later; nothing she does waits for it, a spelling included.", name);
+        const stepAt = lines.findIndex((line) => line.startsWith("4. ") && line.includes("a quarter of an hour longer, which she need not wait for."));
+        assert.ok(stepAt >= 0 && lines[stepAt + 1] === "   For a video kept on this Mac, Studio checks them by itself about 15 minutes later, and nothing she does waits for it.", name);
+      });
+      it("takes a video on the other Mac for what it is, never for a refusal to send to Jason", () => {
+        const line = text.split("\n").find((l) => l.includes("is on <Mac>: carry on there. Nothing was changed."));
+        assert.ok(line && line.includes("never say \"ask Jason\""), name);
+        assert.ok(text.split("\n").find((l) => l.startsWith('| "Its teachings"')).includes('but for "carry on there", say that'), name);
+      });
+      it("keeps Make available offline and Make online-only for an episode from before the switch, and says the recording moves by itself", () => {
+        const keeping = sectionOf(text, "## Keeping an episode's folder on this Mac");
+        assert.match(keeping, /only for an episode from before the switch, and on a Mac whose drop folder is in Dropbox/);
+        assert.match(keeping, /needs neither/);
+        assert.match(keeping, /Original files/);
+        assert.match(keeping, /Make available offline/);
+        assert.match(keeping, /Make online-only/);
+      });
+      it("keeps the export row of L1b", () => {
+        assert.ok(text.includes("in the exports folder this Mac was set up with"), name);
+      });
     });
   }
 });
