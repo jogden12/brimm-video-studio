@@ -1421,7 +1421,7 @@ const APP_QUESTIONS = ["what-happened", "versions"];
       HyperFrames";
     - openInApp, given the episode as the claim left it. It resolves the code this command ends with, and gives the record its
       project, which is written as every command writes a record (save). Whenever the app opened, a line it says names the
-      app's buttons that Studio cannot control (architecture 3.3 and 5.9), and a line after it, when this Mac picked an exports folder that is not Downloads, says where to export; when the app did not open, it does not.
+      app's buttons that Studio cannot control (architecture 3.3 and 5.9), and a line after it, when this Mac picked an exports folder that is not Downloads, says where to export; a video kept on this Mac hears both before HyperFrames opens it by itself (openByItself), even if the copy then fails; when the app did not open and nothing was promised, it does not.
     `ctx.deps.app` holds what a test gives openInApp in place of its defaults (cli, node, guidance, chat, spawn, env).
     `app "<episode>" reel <n>` opens Reel `n` instead (appReel).
     `app "<episode>" what-happened` and `app "<episode>" versions` (plan PR 6) are questions about the project, not an opening of it:

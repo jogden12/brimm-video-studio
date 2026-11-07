@@ -20,7 +20,7 @@
 //     is made;
 //   - and Claude's reading must be in the episode's record: the project is written from it (the cut plan and the Reel suggestions), and
 //     nothing writes it again afterwards, so a project made while `read` is still at work on it would keep an unfinished reading for
-//     good. Until the record holds the current reading nothing is made, and she is told to say it again when it has finished. Once it
+//     good. Until the record holds the current reading nothing is made, and she is told to say it again when it has finished (a video kept on this Mac is told that HyperFrames opens it by itself once it has read it and its video is made). Once it
 //     does, the project is made even while the reading's own late check is still to come (plan R1d), if the words, the Reel
 //     suggestions and the cut plan are each at the size the record lists (readListed; else she is told some files are not whole yet,
 //     and claimAndBring says so before it claims anything). Only a new project waits for the reading: one made before is opened as it
@@ -30,7 +30,7 @@
 //     variables of its own, with her chat handed to the app only when handoverAllowed says it may be (5.6);
 //   - what the command line printed is said in her words, and, whenever the app opened, a line names the app's buttons that
 //     Studio cannot control (BUTTONS; 3.3 and 5.9), and after it, when this Mac picked an exports folder that is not Downloads, a
-//     line says where to export, in Finder's words (Phase 3, L1b); the lines of a plan's footage, if any, come after it. The record gets the project and the time it was opened
+//     line says where to export, in Finder's words (Phase 3, L1b); a video kept on this Mac hears both before HyperFrames opens it by itself (openByItself); the lines of a plan's footage, if any, come after it. The record gets the project and the time it was opened
 //     (7.1). A record that could not be written ends the run with 1, and the project it was for stays on this Mac.
 // A project that was made is kept whether or not the app opened: nothing here takes one away.
 //
@@ -473,7 +473,7 @@ function adoptProject(ctx, { found, record, at, projects }) {
       to say it again when it is done (0). A project made before has taken the copy into itself and left only its facts, which
       is why openInApp looks for that project first.
     - While Claude's reading of the episode is at work and not yet in the record (`projectWaits` "reading"), nothing is made: the project
-      is written from the reading, and nothing writes it again later. She is told to say it again when it has finished (0). With the
+      is written from the reading, and nothing writes it again later. She is told to say it again when it has finished (0), or, for a video kept on this Mac, that HyperFrames opens it by itself after the reading and the copy. With the
       reading in the record ("verify": the read run is at its own late check, or this Mac still owes the import's) the words, the Reel
       suggestions and the cut plan are read through `readListed`, and a file not at the size the record lists makes nothing (0, in
       `notWholeYet`'s words). The working copy
