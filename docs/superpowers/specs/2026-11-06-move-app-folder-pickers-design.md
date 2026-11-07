@@ -1,6 +1,6 @@
 # The Move to Studio app picks the drop folder and the exports folder (design)
 
-6 November 2026. A draft for Jason's approval: nothing is built until he approves it. Branch `claude/studio-move-app-folders`, from main 673f770.
+6 November 2026. Jason answered its questions on 7 November (below). Nothing is built until he approves the build. Branch `claude/studio-move-app-folders`, from main 673f770.
 
 It needs Phase 3's installer options, so it is built and merged after Phase 3. Those options are L1 (af3d75a) and L1b (c125ae7) on `claude/studio-local-folder`, reviewed and not merged; L1c and L9 are coming. Phase 3's plan is `docs/superpowers/plans/2026-11-06-local-working-folder-plan.md` on that branch. Its rulings D4, D7, D8, D10, D11 and D12 are cited here by number.
 
@@ -546,7 +546,7 @@ One more goes with this version:
 
 ## Not here
 
-- **Moving a MacBook again.** A MacBook moved by a build from before this design keeps its drop folder in Dropbox. A later build stops at step 3 ("This app does not move it") on a checkout at another commit. Switching that Mac is then `install.sh --drop-folder …` by hand. Question 2 asks whether the moves should wait.
+- **Moving a MacBook again.** A MacBook moved by a build from before this design keeps its drop folder in Dropbox. A later build stops at step 3 ("This app does not move it") on a checkout at another commit. Switching that Mac is then `install.sh --drop-folder …` by hand. Jason answered "yes, wait" (7 November): the moves wait for this.
 - **HyperFrames' own export folder.** The app can't set it. The person chooses the folder in HyperFrames' Export dialog. Check 46 records what the dialog does.
 - **Which folders Studio allows** (D11, D12). That is Phase 3's, but for the app's own checks above.
 - **Anything on the Mac Studio**, but the try mode. A move there is refused, as today.
@@ -555,7 +555,7 @@ One more goes with this version:
 
 1. **y takes the suggested folder, and c opens the chooser.** Return alone stops, as every question in the app does. When y would give a refused folder again, only c is offered.
 2. **The drop folder leaves Dropbox at the move**, on both MacBooks (D8). The app counts the old Dropbox drop folder at the end of the run. You delete it by hand once it is empty, and take it out of Finder's sidebar.
-3. **The suggestions:** BRIMM Video Work › Drop for videos (Phase 3's default), and Downloads for exports (Question 1).
+3. **The suggestions:** BRIMM Video Work › Drop for videos (Phase 3's default), and Downloads for exports (Jason: "Downloads").
 4. **Studio's installer checks each pick, through its print.** The app holds a few checks of its own:
    - no line break;
    - a new drop folder Terminal can look in, and empty;
@@ -576,11 +576,8 @@ One more goes with this version:
 17. **The end of the run counts the old Dropbox drop folder once, and never waits.** Deleting it waits for the By-Hand count at 0. A stop never counts it, so a stop can always stop.
 18. **A folder picked on a run that stopped is held to the empty check, like any new pick**, to match L1c.
 
-## Questions for Jason
+## Jason's answers (7 November)
 
-1. **Which exports folder should a y take?** A Dropbox folder is one c away in either case: the person makes or picks it in the chooser.
-   - Downloads (recommended). Studio deletes each export it took from Downloads after Dropbox's check of the copy in `final/`.
-   - A fixed folder in Dropbox. It is shared, but each export is then in Dropbox twice, there and in `final/`, and Studio never deletes it. You would name the folder, and it must be there before the move: neither the app nor the installer makes an exports folder, and nothing here writes into Dropbox.
-2. **Should each MacBook's move wait until this lands?**
-   - Yes (recommended). The drop folder then leaves Dropbox at the move, as D8 plans.
-   - No. A MacBook moved before this keeps `Drop › <Mac>` in Dropbox until its drop folder is switched by hand.
+1. **Which exports folder a y takes:** "Downloads". The suggestion stays Downloads. A Dropbox folder is still one c away, picked or made in the chooser.
+2. **Whether each MacBook's move waits until this lands, after all of Phase 3:** "yes, wait". The moves (checks 80 and 74) come after this is merged. Check 73, the build, still waits for his word that the app is ready.
+3. **Pushing this branch as a draft pull request, design and plan only:** "yes". It merges only after Phase 3.
