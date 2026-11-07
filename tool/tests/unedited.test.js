@@ -1532,6 +1532,24 @@ describe("the late check of an episode's import", () => {
     assert.ok(t.logs.some((line) => line.startsWith(`Video of 13 Oct, 10:00 (Mac Studio): the late check passed: every file of its episode, e-20261013-`) && line.endsWith(", is whole in Dropbox. The video is taken out of the drop folder.")), t.logs.join("\n"));
     t.done();
   });
+  it("B1-F2 a Mac on a Dropbox drop folder whose folder is missing makes no check and no folder: it only says there is none", async () => {
+    const t = timed();
+    t.put("Talk.mov");
+    let held = null;
+    t.hooks.push(() => {
+      if (!held && pendings(t).length) held = pendings(t)[0];
+    });
+    await uneditedFolder(t.drop, t.deps);
+    assert.ok(held, "a late check was waited for");
+    writePending(t.home, held);
+    rmSync(t.root, { recursive: true, force: true });
+    t.logs.length = 0;
+    const code = await uneditedFolders([t.drop], t.deps);
+    assert.equal(code, 2);
+    assert.deepEqual(t.logs, [`There is no folder at ${t.drop}.`]);
+    assert.equal(existsSync(t.episodes), false);
+    t.done();
+  });
   it("copies a file in again when Dropbox has taken it away before the late check", async () => {
     const t = timed();
     t.put("Talk.mov");
