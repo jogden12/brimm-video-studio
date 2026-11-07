@@ -174,7 +174,7 @@ export function opsText(handoff, step, again, note, local = false) {
       the app (HyperFrames) on.
     - For a raw video: `placeholder`, while its name is still to be given; `editedInFinalCut`, when a part of it was shown in Final Cut
       once (an episode from the Final Cut days: its record lists a push); and `finishRunning` (an iPhone clip's too).
-    - `checking`, for a video whose finish has written its hand-off and shown it and now only waits for its late check (finish-check.js),
+    - `checking`, for a video in Dropbox whose finish has written its hand-off and shown it and now only waits for its late check (finish-check.js; null for a video kept on a Mac, whose check is made behind by the launch agent, Phase 3, L5),
       and is otherwise `finishRunning`: { due, took, at }, `due` the time the check is made (ms), `at` the same as this Mac's clock says
       it ("15:20") and `took` the places the finish took originals from ("Downloads"); null for any other. She need not
       wait for the check, so a raw video, an iPhone clip or a finished video is not at its finish running then: the stage is the one it

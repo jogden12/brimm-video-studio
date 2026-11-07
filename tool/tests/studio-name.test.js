@@ -91,7 +91,8 @@ const ALLOWED = [
   { file: "detached.js", has: "brimm-video.log", why: "the tool's log file name, as the launch agent writes it" },
   { file: "places.js", has: "brimm-video.log", why: "the tool's log file name" },
   { file: "places.js", has: "brimm-video-claude-check.log", why: "the check's log file name" },
-  { file: "edit.js", has: "brimm-video.log", why: "the tool's log file name" }
+  { file: "edit.js", has: "brimm-video.log", why: "the tool's log file name" },
+  { file: "filing.js", has: "brimm-video.log", why: "the tool's log file name, as edit.js toolLog writes it (logTo)" }
 ];
 
 // The contract with BRIMM Ops (the hand-off files and their `madeBy`) and the copies from brimm-operations: not walked.
