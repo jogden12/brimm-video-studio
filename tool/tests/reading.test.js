@@ -1351,7 +1351,7 @@ describe("a raw reading starts at once while this Mac's own late check is to com
       `Something went wrong on this Mac before Claude's reading of ${NAME} could be put in, so nothing it read was put in.`,
       `The rough cut of ${NAME} is kept on this Mac, in BRIMM Video Work, as "${basename(renderOf(t))}".`
     ]);
-    assert.equal(readResult(t.home, FOLDER, "read").next, "Nothing was changed. Say what it is again, with --again, to have Claude read it.");
+    assert.equal(readResult(t.home, FOLDER, "read").next, "Nothing was changed. Tell me what it is again, and Claude reads it again.");
     assert.equal(existsSync(lockOfCheck(t)), false);
     assert.equal("reading" in readPendingsOf(t), false);
     assert.ok(logs.some((l) => l.includes("EACCES")) || r.text.includes("EACCES"), "the code is in the log");

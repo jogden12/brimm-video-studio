@@ -18,7 +18,7 @@ export const PLAN_FILES = Object.freeze(["video guide.md", "shot list.md", "tele
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 /** Whether a record keeps its own files on a Mac: it holds `local`. */
-const keptOnAMac = (record) => isObject(record) && isObject(record.local);
+export const keptOnAMac = (record) => isObject(record) && isObject(record.local);
 /** A Mac as a sentence says it (kinds.js spokenMac, which a test holds this to): "the Mac Studio", and a Mac named for its owner as it is. */
 const spoken = (mac) => (/['’]s\b/.test(mac) ? mac : `the ${mac}`);
 
@@ -51,3 +51,10 @@ export function onOtherMac(ctx, record) {
 /** What every command that names an episode kept on another Mac says on this one, and all it says: the episode as every line names it (`name`:
     its name, a plan by its title, a session or a video not yet answered by its label), and the Mac it is on (`mac`). */
 export const ON_OTHER_MAC = (name, mac) => `"${name}" is on ${spoken(mac)}: carry on there. Nothing was changed.`;
+
+/** What a file of an episode's own, kept on this Mac, is called in what is said of it: by its role, never by its path. */
+export function roleOf(file) {
+  const roles = [[/\.(mov|mp4|m4v)$/i, "recording"], [/\.rough-cut\.srt$/, "rough cut's captions"], [/\.srt$/, "captions"], [/\.transcript\.txt$/, "transcript"], [/\.words\.json$/, "words"], [/\.cut-plan\.json$/, "cut plan"], [/\.edit-notes\.txt$/, "notes"], [/^reels\.json$|\.reel-suggestions\.txt$/, "Reel suggestions"], [/\.principles\.json$/, "teachings"]];
+  const found = roles.find(([pattern]) => pattern.test(file));
+  return found ? found[1] : "file";
+}

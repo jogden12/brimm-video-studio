@@ -15,6 +15,7 @@ import { isMedia } from "./lib.js";
 import { LATE_CHECK_MS, cloneFile, cloneIn, lateCheck, onSameDisk, replaceIn, textWriter } from "./dropbox.js";
 import { RECORD_DIR, newEpisode, newId, localStamp, readEpisode, recordCopies, recordNumbers, writeEpisode, shownName } from "./episode.js";
 import { episodeFolderName, fileSafe } from "./names.js";
+import { putHereNow } from "./put-here.js";
 import { dropFolderOf, episodeFilesFolder, episodeWork, episodesFolder, importingFolder, pendingFolder, runsFolder, seenFile, workFolder } from "./settings.js";
 // detached.js takes caffeinate and thisCheckout from here: each is used only when called, as kinds.js's are, so the cycle costs nothing at load.
 import { releaseEpisodeLock, takeEpisodeLock } from "./detached.js";
@@ -170,6 +171,8 @@ export function fileEpisode({ file, made, at, facts, printed, kind, read, reels 
   const opts = { ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log };
   // A Mac with a drop folder of its own files the video on this Mac, with only the first record in Dropbox.
   if (episode.local && !into) return fileLocal({ file, made, at, facts, printed, kind, read, reels, work, dropFile, answer, label, fingerprint }, deps);
+  // A video made for a plan kept on this Mac (the join's, or a HeyGen voice) is filed into the plan's video/ here, with only its record in Dropbox.
+  if (into && into.local) return fileIntoPlanHere({ file, made, at, facts, printed, kind, work, fingerprint, into }, deps);
   const video = basename(file);
   const bytes = statSync(file).size;
   const day = deps.today ? deps.today() : localDay();
@@ -231,6 +234,37 @@ export function fileEpisode({ file, made, at, facts, printed, kind, read, reels 
   const reused = found.reused ? ", in the folder an import that stopped had made" : "";
   log(label ? `${label}: filed into Episodes as ${record.id}${reused}.` : `${video}: filed into Episodes as "${found.name}"${reused}.`);
   return { name: found.name, path, record, entries };
+}
+
+/** File a video made for a plan kept on this Mac (`into.local`: Phase 3, L4) into the plan's own video/ folder here, with putHere (put-here.js): the video and the
+    files made of it are written whole, the plan's record is written last as the video it waits to be (`into.change`, called with the record a new episode
+    would have had), with the rev the plan was read at, and nothing else goes into Dropbox. No late check is kept: there is nothing in Dropbox to check. Throws,
+    saying why, when it could not be done, with every file taken away again. Gives back { name, path, record, entries }, `entries` being empty. */
+function fileIntoPlanHere({ file, made, at, facts, printed, kind, work, fingerprint, into }, deps) {
+  const { episode, log = () => {} } = deps;
+  const opts = { ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log };
+  const video = basename(file);
+  const bytes = statSync(file).size;
+  const list = [{ rel: video, from: file }, ...made.map((to) => ({ rel: relative(dirname(file), to).split(sep).join("/"), from: at(to) }))];
+  const files = Object.fromEntries(list.map(({ rel, from }) => [rel, statSync(from).size]));
+  const writer = { commit: deps.commit || commitOf(episode.checkout), on: episode.machine };
+  const first = newEpisode({
+    id: into.record.id,
+    machine: episode.machine,
+    at: localStamp(deps.now ? deps.now() : new Date()),
+    video: { file: video, bytes, seconds: facts.duration, created: createdOf(printed), ...(facts.sound === false ? { sound: false } : {}) },
+    kind,
+    writer,
+    files,
+    fingerprint
+  });
+  const next = into.change(first);
+  // A video with no sound takes no kind (PR H5b, ruling 5), and no caller of `into` may give it one.
+  if (next.kind !== null && next.video && next.video.sound === false) throw new Error("a video with no sound takes no kind, so it is not filed as one");
+  const put = putHereNow({ folder: into.folder, record: into.record }, list, { ...opts, home: episode.home, work: join(work, "record"), writer, change: (record) => ({ ...next, files: { ...record.files, ...next.files } }), expectRev: into.record.rev, now: deps.now ? deps.now().getTime() : Date.now() });
+  if (!put.put) throw new Error(put.why);
+  log(`${shownName(put.record)}: filed into its own folder on this Mac.`);
+  return { name: basename(into.folder), path: into.folder, record: put.record, entries: [] };
 }
 
 /** Write the file at `from` whole at `to` on this Mac's own disk: copied under a name of its own beside it, looked at (it must be `from`'s size),

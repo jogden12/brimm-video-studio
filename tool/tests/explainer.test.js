@@ -24,7 +24,7 @@ import { FONTS, explainerHtml, projectFiles } from "../project.js";
 
 import { NO_RECEIPT, PLANNED_Q, cardOf, footageOption, formOf, notSessionCardOf, plannedCardOf, receiptFrom, voiceoverOption, writeReceipt } from "../receipts.js";
 import { fileSafe } from "../names.js";
-import { downloadsFolder, episodeWork, writeSettings } from "../settings.js";
+import { downloadsFolder, episodeFilesFolder, episodeWork, writeSettings } from "../settings.js";
 import { localDay } from "../shared/text.js";
 import { setup, episodeAs, reread, listAll, toldOf } from "./episodes.js";
 import { MINIMUM } from "./open-world.js";
@@ -1551,6 +1551,21 @@ describe("the join run with --voice: the HeyGen voice taken in (PR H6)", () => {
     assert.deepEqual(main.workingCopy, { bytes: size, seconds: 182, fps: 30 });
     assert.deepEqual([main.from.file, main.from.bytes], ["HeyGen voice 1.wav", size]);
     assert.equal(changedSince(main, { found: { folder }, record: now }), false, "the voice is the one the project was made with");
+    t.done();
+  });
+  it("on a Mac with a drop folder of its own, marks the plan local before it files the voice, which is in the plan's video/ and not in Dropbox, with no pending (Phase 3, L4)", async () => {
+    const t = world();
+    const { folder } = await heygenOpened(t);
+    voiceMade(t);
+    const plan = planOf(t);
+    const r = await run(t, { settings: { ...t.ctx.settings, dropPath: join(t.home, "BRIMM Video Work", "Drop") } });
+    assert.equal(r.code, 0, resultOf(t).failed.join(" | "));
+    const now = readEpisode(folder).record;
+    assert.deepEqual([now.local, now.rev, isFromPlan(now), episodeFault(now)], [{ on: "Mac Studio" }, plan.rev + 2, true, ""]);
+    assert.ok(existsSync(join(episodeFilesFolder(t.home, nameOf(t)), "HeyGen voice 1.wav")));
+    assert.ok(!existsSync(join(folder, "HeyGen voice 1.wav")));
+    assert.deepEqual(readPendings(t.home), []);
+    assert.deepEqual(t.kicks, []);
     t.done();
   });
   it("asks for Claude's reading, for its spellings, and for no working copy, asks the launch agent to make the late check, and posts its notice; its late check is kept", async () => {

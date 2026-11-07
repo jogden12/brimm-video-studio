@@ -47,14 +47,15 @@ import { reelCandidates, reelsFile, readReels, mergeCandidates, REELS_FILE } fro
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, LATE_CHECK_MS } from "./dropbox.js";
 import { episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, statusWriteFolder, statusReadFolders, importEpisodes, writePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
-import { readSettings, runsFolder, episodeWork, episodesFolder, importingFolder, importingFolderOf, statusFoldersOf, isLocal } from "./settings.js";
+import { readSettings, runsFolder, episodeWork, episodesFolder, importingFolder, importingFolderOf, statusFoldersOf, isLocal, episodeFilesFolder } from "./settings.js";
 import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf } from "./episode.js";
 import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
 import { fingerprintOf, matchVersion } from "./versions.js";
 import { LEFT, leftAlone, sessionNotCleared } from "./gate.js";
 import { STUDIO_NAME } from "./name.js";
 import { readStatusesIn, importState, shownStep } from "./importing.js";
-import { fileAt, folderAt } from "./where.js";
+import { fileAt, folderAt, keptOnAMac } from "./where.js";
+import { putHereNow } from "./put-here.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
     transcript tool's own numbers. */
@@ -595,6 +596,11 @@ async function workOn(file, deps) {
     if (episode.local && !into) {
       progress.drop();
       keepWork = Boolean(deps.onRecordCopy);
+      return;
+    }
+    // A video made for a plan kept on this Mac was filed into the plan's video/ here: nothing is in Dropbox to check, and the run's folder goes.
+    if (into && into.local) {
+      keepWork = false;
       return;
     }
     keepWork = true;
@@ -1239,6 +1245,11 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
   return { put: true, problems, notes, kept: keptNow };
 }
 
+/** Put files into an episode kept on this Mac (put-here.js): see there. Async for its callers' sake; it waits for nothing. */
+export async function putHere(found, files, opts = {}) {
+  return putHereNow(found, files, opts);
+}
+
 /** Ask Claude again for an episode's Reel candidates (edit.js ask, detached): with the import's own request and locked-down
     call, of the cut plan the import wrote. Only its clips are taken: the rough cut is made, so its decisions are not applied,
     and its clips are read on the plan as it is. The faces are found again for the crops. A new candidate has no preview: only the Final
@@ -1269,6 +1280,9 @@ export function importHolds({ root, statusFolders, home, machine, record, now = 
     as { why: "", waits: false, state: "" }. `importing` is whether this Mac's launch agent run is at work now. */
 export function importHold({ root, statusFolders = [importingFolder(root)], home, machine, record, now = Date.now(), importing = false }) {
   const video = record.video.file;
+  // An episode kept on this Mac has its files here, so no late check of Dropbox's holds anything of it, and its import has filed it whole before its
+  // record was written (Phase 3, L4, D4): nothing holds it, and what is waited for is the reading's own (late-wait.js projectWaits).
+  if (keptOnAMac(record)) return { why: "", waits: false, state: "" };
   const said = (text) => String(text).replace(/\.$/, "");
   const again = (on) => `say "try it again" for ${video} on ${on}, then say this again`;
   const statuses = readStatusesIn(statusFolders, now).map((s) => s.status).filter((s) => s && s.video === video && s.bytes === record.video.bytes);
@@ -1432,6 +1446,16 @@ export async function askAgain({ folder, record }, deps) {
     const now = readEpisode(folder);
     const nowListed = existsSync(join(own, REELS_FILE)) ? readFileSync(join(own, REELS_FILE), "utf8") : null;
     if (!now.record || now.record.rev !== record.rev || nowListed !== listed) return { ok: false, made: [], failed: [...said, "This episode changed while Claude was asked, so nothing was changed. Ask again."], next: as };
+    // An episode kept on this Mac gets its list in its video/ folder here, with nothing to check afterwards (putHere).
+    if (keptOnAMac(record)) {
+      const put = await putHere({ folder, record }, [{ rel: REELS_FILE, from: files.at(reelsAt) }], {
+        ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), home: deps.home || studioHome(), work: join(work, "record"), log,
+        writer: { commit: deps.commit || (deps.settings ? commitOf(thisCheckout()) : "unknown"), on: deps.settings ? deps.settings.machine : "unknown" },
+        change: (r) => ({ ...r, reels: entries }), expectRev: record.rev, now: deps.now ? deps.now() : Date.now()
+      });
+      if (!put.put) return { ok: false, made: [], failed: [...said, ...merged.ignored, `${put.why}.`, "Nothing was changed in the episode."], next: as };
+      return { ok: true, made: merged.added.map((c) => `Reel ${c.n}`), failed: [...said, ...merged.ignored], next: "Say \"show me the Reels\" to see them." };
+    }
     const into = await intoEpisode(video, [reelsAt], work, { ...deps, files }, { change: (r) => ({ ...r, reels: entries }), expectRev: record.rev });
     const failed = [...said, ...merged.ignored, ...into.problems.map((p) => `${p}.`), ...into.notes.map((n) => `${n}.`)];
     // When the put was undone, no Reel was made; and when reels.json could not be put back, the list is not as it was.

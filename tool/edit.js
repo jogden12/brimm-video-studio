@@ -121,7 +121,7 @@ import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
-import { ON_OTHER_MAC, fileAt, filePlace, folderAt, onOtherMac } from "./where.js";
+import { ON_OTHER_MAC, fileAt, filePlace, folderAt, onOtherMac, roleOf } from "./where.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -932,7 +932,8 @@ export function cardLinesFor(named, label, others, links, { notASession = false 
   // Zoom, has no picture, has a session's words in it (its Maybe line is a session's) or is held beside a session.
   const maybe = maybeOf(named, others, links);
   const blocked = Boolean((maybe && maybe.session) || links.sessionsBeside(named, null).length > 0);
-  const lines = footageCards({ record: named, label, records: others.map((e) => e.inForce).filter(Boolean), blocked });
+  // A plan kept on another Mac (Phase 3, L4) is filmed there: this Mac's card never offers it.
+  const lines = footageCards({ record: named, label, records: others.filter((e) => !e.away).map((e) => e.inForce).filter(Boolean), blocked });
   // A video with no sound has no card: it can be footage for a planned video, or be left, and takes no kind. Nothing Claude reads of it is said.
   if (named.video && named.video.sound === false) return [...lines, NO_SOUND];
   lines.push(`    Card: ${JSON.stringify(cardFor(named, label, others, links))}`);
@@ -1176,13 +1177,6 @@ function offlineStep(ctx, found) {
 
 /** What fileProblems and filesProblems are given to look for a record's own files where they are (episode.js): this Mac, and the folder of its own files here. */
 const lookedFor = (ctx, found, record) => ({ machine: ctx.machine, localFolder: folderAt(ctx, { folder: found.folder, record }, "local") });
-
-/** What a file of an episode's own, kept on this Mac, is called in what is said of it: by its role, never by its path. */
-function roleOf(file) {
-  const roles = [[/\.(mov|mp4|m4v)$/i, "recording"], [/\.rough-cut\.srt$/, "rough cut's captions"], [/\.srt$/, "captions"], [/\.transcript\.txt$/, "transcript"], [/\.words\.json$/, "words"], [/\.cut-plan\.json$/, "cut plan"], [/\.edit-notes\.txt$/, "notes"], [/^reels\.json$|\.reel-suggestions\.txt$/, "Reel suggestions"], [/\.principles\.json$/, "teachings"]];
-  const found = roles.find(([pattern]) => pattern.test(file));
-  return found ? found[1] : "file";
-}
 
 /** What is wrong with an episode's files, in the words of the Mac that says it: `dropbox`, the lines for a file in Dropbox (filesProblems), and
     `mac`, the lines for a file kept on this Mac that is not whole in its video/ folder: "<name>'s <role> is not whole on this Mac. Ask Jason." */
@@ -2638,6 +2632,8 @@ function recordDifferences(a, b) {
     return rows;
   };
   const who = (r) => (r.editing ? r.editing.by : "nobody");
+  // Where a side keeps the episode's files (Phase 3, L4), in plain words: the Mac its `local` names, else Dropbox.
+  const keptWords = (r) => (r.local && typeof r.local.on === "string" && r.local.on !== "" ? spokenMac(r.local.on) : "Dropbox");
   const title = (r) => (r.title ? `"${r.title.text}"${r.title.approved ? ", approved" : ", not approved"}` : "none");
   const shownIn = (pushed) => (Array.isArray(pushed) && pushed.length ? `shown ${pushed.map((p) => `v${p.v} on ${p.on}`).join(", ")}` : "not shown");
   const reel = (r, n) => {
@@ -2657,7 +2653,7 @@ function recordDifferences(a, b) {
   // Claude's reading, but for the account it was read on, which is never said into the chat.
   const reading = (r) => (r.reading !== null && typeof r.reading === "object" && !Array.isArray(r.reading) ? Object.fromEntries(Object.entries(r.reading).filter(([k]) => k !== "account")) : r.reading);
   const others = [
-    ...fields(a, b, ["version", "rev", "writer", "editing", "name", "title", "reels", "main", "finished", "released", "files", "planned"]).map((k) => [`${k[0].toUpperCase()}${k.slice(1)}`, as(k === "reading" ? reading(a) : a[k]), as(k === "reading" ? reading(b) : b[k])]),
+    ...fields(a, b, ["version", "rev", "writer", "editing", "name", "title", "reels", "main", "finished", "released", "files", "planned", "local"]).map((k) => [`${k[0].toUpperCase()}${k.slice(1)}`, as(k === "reading" ? reading(a) : a[k]), as(k === "reading" ? reading(b) : b[k])]),
     ...fields(a.main, b.main, ["pushed"]).map((k) => [`The main video's ${k}`, as(a.main && a.main[k]), as(b.main && b.main[k])]),
     ...ns.flatMap((n) => fields(reelOf(a, n), reelOf(b, n), ["n", "status", "pushed"]).map((k) => [`Reel ${n}'s ${k}`, as((reelOf(a, n) || {})[k]), as((reelOf(b, n) || {})[k])]))
   ];
@@ -2665,6 +2661,7 @@ function recordDifferences(a, b) {
     ["Who has it open", who(a), who(b)],
     ["Name", `"${a.name && a.name.text}"`, `"${b.name && b.name.text}"`],
     ["Title", title(a), title(b)],
+    ["Kept on", keptWords(a), keptWords(b)],
     ...plannedRows(),
     ...ns.map((n) => [`Reel ${n}`, reel(a, n), reel(b, n)]),
     ["The main video", shownIn(a.main && a.main.pushed), shownIn(b.main && b.main.pushed)],
@@ -2675,7 +2672,7 @@ function recordDifferences(a, b) {
     ...sizes("Handed-over file", a.released && a.released.files, b.released && b.released.files)
   ].filter(([, x, y]) => x !== y);
   const names = gated(a) || gated(b) ? namesOf(a.video && a.video.file, b.video && b.video.file) : null;
-  const shown = (what) => ["Who has it open", "Finished", "Handed over", "The main video"].includes(what) || what.startsWith("File ") || what.startsWith("Handed-over file ");
+  const shown = (what) => ["Who has it open", "Kept on", "Finished", "Handed over", "The main video"].includes(what) || what.startsWith("File ") || what.startsWith("Handed-over file ");
   // What each side is, and its session mark, in words of brimm-video's own that name nothing, so that she sees which side holds the
   // answer or the mark that keeping the other would drop (resolveIn refuses that).
   const kindWords = (r) => (recordKind(r) === null ? (leftAlone(r) ? "left alone" : "not answered yet") : KIND_SAID[recordKind(r)]);
@@ -2869,6 +2866,17 @@ async function resolveIn(ctx, found, keep) {
   if (isRecord && copyRecord && !sameRecord(record, copyRecord)) {
     const why = keptOverWhy(keep === "B" ? copyRecord : record, keep === "B" ? record : copyRecord);
     if (why) return refuse(ctx, why);
+    // Sides that keep the episode's files in different places (Phase 3, L4): keeping either leaves the other's files behind. So when either side lists a
+    // file kept on a Mac it is for Jason. A plan lists none of its own (its three files are in Dropbox): keeping either side is allowed, and the side kept
+    // says which Mac it is filmed on, unless a part of it is kept on another Mac than that one, whose footage would then be left behind.
+    const placeOf = (r) => (r.local && typeof r.local.on === "string" ? r.local.on : null);
+    const listsLocal = (r) => Object.keys(r.files || {}).some((rel) => filePlace(r, rel) === "local");
+    if (placeOf(record) !== placeOf(copyRecord)) {
+      const kept = keep === "B" ? copyRecord : record;
+      const keptMac = kept.local && typeof kept.local.on === "string" ? kept.local.on : null;
+      const behind = (record.planned || copyRecord.planned) && partsOfPlan(ctx.root, record.id, { newer: true }).some((part) => part.record?.local?.on && part.record.local.on !== keptMac);
+      if ([record, copyRecord].some(listsLocal) || behind) return refuse(ctx, `The two sides keep ${name}'s files in different places, so keeping ${keep} could leave files behind. ${NEEDS_JASON}`);
+    }
   }
   const aHere = existsSync(at(of));
   if (!isRecord && keep === "A" && !aHere) return refuse(ctx, `A, ${of}, is not there, so it cannot be kept. Say B. If that is not what you want, tell Jason.`);
