@@ -12,7 +12,7 @@
 // work. That look is switch.js's, which reads the status files and the episodes, and this file reaches it by a dynamic import:
 // importing.js and filing.js import this file, and a static import here would make the three a cycle. `set` changes the
 // settings of the switch later, but never the drop folder: it says to switch that with the installer, and changes nothing.
-// A Mac may also watch a drop folder of its own, picked on it (dropPath, with the light import): --drop-folder, checked by
+// A Mac may also watch a drop folder of its own, picked on it (dropPath; every import is light, so whatever the file says of the import): --drop-folder, checked by
 // dropFolderFault, the exports folder it looks in besides Downloads (exportsPath, --exports-folder), and --switch-back to go back
 // to a drop folder in Dropbox. Where it is, in Finder's words, and whether it is in a cloud folder are found here too.
 //
@@ -70,9 +70,6 @@ export const seenFile = (home) => join(home, "Library", "Application Support", "
 /** Where this Mac keeps the late checks it has still to make, so a run that is stopped leaves them for the next. */
 export const pendingFolder = (home) => join(home, "Library", "Application Support", "BRIMM Video", "pending");
 
-/** What a drop folder of this Mac's own needs of the import (a picked folder is for the light import alone), as settingsFault says it. */
-const LOCAL_NEEDS_LIGHT = "a drop folder of this Mac's own takes the light import";
-
 /** Whether this Mac's drop folder is its own, picked on this Mac, and not one in BRIMM Video in Dropbox: its settings hold a
     dropPath. Every new path of Phase 3 branches on this; `drop` stays in the settings, unread while dropPath is there. */
 export const isLocal = (s) => typeof s?.dropPath === "string";
@@ -92,6 +89,11 @@ export function statusFoldersOf(s, home) {
 }
 /** Where HyperFrames' exports are looked for besides Downloads: the settings' exportsPath, else Downloads. */
 export const exportsFolderOf = (s, home) => (typeof s?.exportsPath === "string" ? s.exportsPath : downloadsFolder(home));
+/** The exports folder in Finder's words when it is not Downloads (told apart by real path: on the Mac Studio Downloads is a link), else "". */
+export const exportsWords = (s, home) => {
+  const folder = exportsFolderOf(s, home);
+  return sameFolder(folder, downloadsFolder(home)) ? "" : folderWords(folder, home);
+};
 
 /** What is wrong with a name for a Mac, in plain words: "" when nothing is. The name is the name of the Mac's drop folder, and
     goes into the names of episode folders, so it is a name of 40 characters at most that a folder in Dropbox can carry. */
@@ -157,7 +159,6 @@ export function settingsFault(s) {
   if (s.drop !== undefined && s.drop !== "Unedited Video" && s.drop !== "Drop") return 'the drop folder must be "Unedited Video" or "Drop"';
   if (isSet(s.dropPath) && (typeof s.dropPath !== "string" || !isAbsolute(s.dropPath))) return "the path to the drop folder is not a whole path";
   if (isSet(s.exportsPath) && (typeof s.exportsPath !== "string" || !isAbsolute(s.exportsPath))) return "the path to the exports folder is not a whole path";
-  if (isLocal(s) && s.import !== "light") return LOCAL_NEEDS_LIGHT;
   if (s.sessionTeachings !== undefined && s.sessionTeachings !== null && s.sessionTeachings !== false && !teachingsWhole(s.sessionTeachings)) {
     return "the setting for teachings from sessions is neither off (null or false) nor what node settings.js sessions --teachings on writes";
   }
@@ -321,7 +322,7 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                version of such a session is named by the episode's label or, with none, by what it is and
                                its short id ("a client or group session (3fa9c1)"), never by its own file.
                                --drop-folder picks a drop folder of this Mac's own instead (a whole path, made when missing,
-                               whose parent is there, and only with the light import): not BRIMM Video's folders, BRIMM Video
+                               whose parent is there, whatever the file says of the import, which is light): not BRIMM Video's folders, BRIMM Video
                                Work (but for Drop in it), her chat's folders, Zoom's, Downloads or the exports folder.
                                --exports-folder says where HyperFrames' exports are looked for besides Downloads. On a Mac
                                with a drop folder of its own, --drop goes back to one in Dropbox only with --switch-back
@@ -471,7 +472,12 @@ export function needsFilesAccess(path, home) {
 export function folderWords(path, home) {
   const cut = (p, dir) => (p === dir || p.startsWith(`${dir}/`) ? p.slice(dir.length).split("/").filter(Boolean) : null);
   for (const [p, h] of [[resolve(path), resolve(home)], [realOf(path), realOf(home)]]) {
-    const cloud = cut(p, join(h, "Library", "CloudStorage"));
+    // Finder names a folder in iCloud Drive "iCloud Drive" and one on another disk by the disk's name, not by the path's own folders.
+    const icloud = cut(p, join(h, "Library", "Mobile Documents", "com~apple~CloudDocs"));
+    if (icloud) return ["iCloud Drive", ...icloud].join(" › ");
+    const disk = cut(p, "/Volumes");
+    if (disk && disk.length) return disk.join(" › ");
+    const cloud =cut(p, join(h, "Library", "CloudStorage"));
     if (cloud && cloud.length) return [cloud[0].split("-")[0], ...cloud.slice(1)].join(" › ");
     const inHome = cut(p, h);
     if (inHome) return inHome.length ? `${inHome.join(" › ")}, in your home folder` : "your home folder";
@@ -558,7 +564,6 @@ function planned(home, rest, now) {
     if (why) return { code: 1, said: [`Not written: ${why}.`] };
   }
   const { settings, fault } = afterWrite(held, fields, remove);
-  if (fault === LOCAL_NEEDS_LIGHT) return { code: 1, said: [`Not written: ${fault}.`] };
   if (fault) return { code: 1, said: [`This Mac's settings could not be written (${fault}). ${MEND_SETTING}`] };
   // The drop folder is Unedited Video until the file says Drop; or a whole path, on a Mac with one of its own.
   const dropWord = (s) => (isLocal(s) ? s.dropPath : s.drop === "Drop" ? "Drop" : "Unedited Video");
@@ -650,7 +655,8 @@ function plan(home, rest, say, now) {
     say(JSON.stringify(shown, null, 2));
     // The import it would be, and the drop folder as it is and as it would be, each on a line of its own, for install.sh, which
     // reads them without parsing JSON.
-    say(`The import will be: ${result.settings.import === "full" ? "full" : "light"}`);
+    // Every import is light (Phase 2), whatever an old file still says.
+    say("The import will be: light");
     say(`The drop folder is now: ${result.from}`);
     say(`The drop folder will be: ${result.to}`);
     say(`The exports folder will be: ${exportsFolderOf(result.settings, home)}`);

@@ -296,6 +296,15 @@ describe("the guide while the video for HyperFrames is made", () => {
     assert.equal(await line(w), says(OPEN));
     w.t.done();
   });
+  it("says where to export when the Mac picked an exports folder that is not Downloads (L1b)", async () => {
+    const w = guideWorld();
+    atWork(w.t, "workcopy");
+    const picked = join(w.t.home, "Movies", "Exports");
+    const settings = { ...depsOf(w).settings, exportsPath: picked };
+    assert.equal(await line(w, { settings }), says('Edit it in HyperFrames. When you are done, export it as MP4. Export it on This Mac, into Movies › Exports, in your home folder. Then say "hand it off".'));
+    assert.equal(await line(w, { settings: { ...settings, exportsPath: join(w.t.home, "Downloads") } }), says(edit()));
+    w.t.done();
+  });
   it("is not making it once a project is here: a Reel's video at work beside it is not the main video's", async () => {
     const w = guideWorld();
     atWork(w.t, "workcopy");

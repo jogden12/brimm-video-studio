@@ -448,6 +448,15 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
     assert.equal(nextFor({ ...BASE, ...APP({ editedInFinalCut: true, app: false }) }, NONE, NOW).stage, "app-off");
     assert.equal(nextFor({ ...BASE, ...APP({ editedInFinalCut: true, way: "hyperframes", project: PROJECT() }) }, NONE, NOW).stage, "in-app");
   });
+  it("names the exports folder in the export step when it is not Downloads (L1b), and says the old words otherwise", () => {
+    const words = "Movies › Exports, in your home folder";
+    const n = nextFor({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm", exportsWords: words }) }) }, NONE, NOW);
+    assert.equal(n.stage, "in-app");
+    assert.equal(n.text, `Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it as MP4. Export it on This Mac, into ${words}. Then say "hand it off".`);
+    for (const exportsWords of [undefined, ""]) {
+      assert.equal(nextFor({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT({ exportsWords }) }) }, NONE, NOW).text, 'Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, then say "hand it off".');
+    }
+  });
   it("shows none of the new stages once a hand-off is written: the BRIMM Ops page's step comes, as it did", () => {
     for (const [over, kind] of [
       [APP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "raw"], [APP({ way: "hyperframes", project: PROJECT() }), "raw"], [APP({ copy: { left: 5, usual: null } }), "raw"],

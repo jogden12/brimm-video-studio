@@ -197,6 +197,16 @@ const WHOLE = { ...newEpisode({ id: "e-20261028-3fa9c1", machine: "Mac Studio", 
 const unreadable = (next) => episodeFault({ ...WHOLE, app: next.app });
 
 describe("app: opening an episode in HyperFrames", () => {
+  it("names the exports folder after the buttons line when the Mac picked one that is not Downloads (L1b), and says nothing more for Downloads", async (c) => {
+    const e = episode(c);
+    e.ctx.settings = { ...e.ctx.settings, exportsPath: join(e.home, "Movies", "Exports") };
+    assert.equal(await run(e), 0);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS, "Export it on This Mac, into Movies › Exports, in your home folder."]);
+    const same = episode(c);
+    same.ctx.settings = { ...same.ctx.settings, exportsPath: join(same.home, "Downloads") };
+    assert.equal(await run(same), 0);
+    assert.deepEqual(same.said, ["It's open in HyperFrames.", BUTTONS]);
+  });
   it("makes the project from the working copy, opens it with the pinned command line in PR 1's environment, and records it", async (c) => {
     const e = episode(c);
     assert.equal(await run(e), 0);

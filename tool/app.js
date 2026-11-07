@@ -60,7 +60,7 @@ import { graphicCuesOfPlan, graphicCuesOfRecord } from "./graphic-cues.js";
 import { VOICEOVER, projectCues, projectFiles, projectName, writeProject } from "./project.js";
 import { refNamesOf, withReferences } from "./references.js";
 import { REELS_FILE } from "./reel-candidates.js";
-import { appHandoverOn, episodeWork } from "./settings.js";
+import { appHandoverOn, episodeWork, exportsWords } from "./settings.js";
 import { teleprompterText } from "./sentences.js";
 import { studioFolder } from "./studio.js";
 import { clockAt } from "./unedited.js";
@@ -755,7 +755,12 @@ export function openOnly(ctx, { record, dir }, { cli, spawn = spawnSync, env = p
   if (wanted && read.opened && !read.handedOver) ctx.say(Object.hasOwn(STAYS, handover.why) ? STAYS[handover.why] : STAYS_OTHERWISE);
   // The buttons Studio cannot control are named whenever the app opened, after the opening and whatever is said of her chat. The app
   // is open whether or not the record can be written, so the reminder does not wait for it.
-  if (read.opened) ctx.say(BUTTONS);
+  if (read.opened) {
+    ctx.say(BUTTONS);
+    // Where to export, when this Mac picked an exports folder that is not Downloads (Phase 3, L1b), in Finder's words.
+    const into = exportsWords(ctx.settings, home);
+    if (into) ctx.say(`Export it on This Mac, into ${into}.`);
+  }
   return read;
 }
 

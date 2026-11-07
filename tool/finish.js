@@ -30,7 +30,7 @@ import { readEpisode, writeEpisode, localStamp, recordFile, heldElsewhere, kindO
 import { gated, sessionNotCleared } from "./gate.js";
 import { REELS_FILE, readReels } from "./reel-candidates.js";
 import { fileSafe } from "./names.js";
-import { downloadsFolder, episodeWork, episodesFolder, runsFolder } from "./settings.js";
+import { downloadsFolder, episodeWork, episodesFolder, runsFolder, sameFolder } from "./settings.js";
 import { noProgress } from "./progress.js";
 import { runProgram } from "./run.js";
 import { cantOpen, revealed } from "./reveal.js";
@@ -951,8 +951,10 @@ export async function finishNow(ctx, found, deps = {}) {
         // originals): the app's own record, which can be written in a project by the app's agent, or her word, may have led to a file
         // with another name, and that is left where it is. An export from another folder, or from the
         // project's renders is never removed.
-        // What finish.asked.json says of the place is not taken on trust for a removal: the file must be in this Mac's Downloads folder.
-        if (part.video.where === "Downloads" && resolve(part.video.dir) === resolve(downloadsFolder(ctx.home)) && isExportOf(part.video.name, part.project)) taken.push({ path: part.path, snap: part.snap, name: part.video.name, place: "Downloads" });
+        // What finish.asked.json says of the place is not taken on trust for a removal: the file must be in this Mac's Downloads folder, told
+        // by its real path (a link to it is it; the Mac Studio's Downloads is a link). An export from the exports folder this Mac picked,
+        // where="the exports folder", is never removed: that folder may be shared (Phase 3, D12).
+        if (part.video.where === "Downloads" && sameFolder(part.video.dir, downloadsFolder(ctx.home)) && isExportOf(part.video.name, part.project)) taken.push({ path: part.path, snap: part.snap, name: part.video.name, place: "Downloads" });
         for (const ending of [".srt", ".transcript.txt", ".words.json"]) {
           const from = join(part.dir, stem(part.name) + ending);
           if (existsSync(from)) put(from, stem(part.name) + ending);

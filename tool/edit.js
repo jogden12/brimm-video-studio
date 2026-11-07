@@ -63,7 +63,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
-import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, isLocal, studioAllowOf } from "./settings.js";
+import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, isLocal, studioAllowOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
@@ -2050,7 +2050,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   /** What is said of each part, and then of what was passed over, before the stops and the asks. */
   const lines = [];
   // HyperFrames' exports, in Downloads (exports.js), for the projects of the record.
-  const seen = exportsFound({ home: ctx.home, name: found.name, record, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
+  const seen = exportsFound({ home: ctx.home, exports: exportsFolderOf(ctx.settings, ctx.home), name: found.name, record, zone: ctx.deps.zone, readdir: ctx.deps.readdir });
   if (seen.unreadable) return refuse(ctx, DOWNLOADS_UNREADABLE);
   // A finished video has no main project, so no part is made for the main video and nothing asks for one.
   const looked = lookForExports(forReels ? { ...seen.input, parts: seen.input.parts.filter((part) => part.reel) } : seen.input, answers);
@@ -5849,7 +5849,7 @@ function guideProject(ctx, e, r, downloads) {
   const [newest] = toldTurns(turnsOf(historyTail(dir)), { tz: ctx.deps.app?.tz }, 1);
   let exported = false;
   try {
-    const seen = exportsFound({ home: ctx.home, name: e.name, record: { ...r, app: { ...r.app, projects: [main] } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads });
+    const seen = exportsFound({ home: ctx.home, exports: exportsFolderOf(ctx.settings, ctx.home), name: e.name, record: { ...r, app: { ...r.app, projects: [main] } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads });
     if (!seen.unreadable) {
       // An export she is asked to choose between (two began in one minute) is an export waiting to be handed off: `finish` asks which.
       const looked = lookForExports(seen.input, {});
@@ -5858,7 +5858,7 @@ function guideProject(ctx, e, r, downloads) {
   } catch (err) {
     exported = false;
   }
-  return { opened: Array.isArray(main.opened) && main.opened.length > 0, last: newest ? turnTime(newest.ms, { tz: ctx.deps.app?.tz, now: ctx.now() }) : "", exported };
+  return { opened: Array.isArray(main.opened) && main.opened.length > 0, last: newest ? turnTime(newest.ms, { tz: ctx.deps.app?.tz, now: ctx.now() }) : "", exported, exportsWords: exportsWords(ctx.settings, ctx.home) };
 }
 
 /** The Reels of a finished video that were exported from HyperFrames and are not in its hand-off, for the guide (plan PR 16; guide.js VideoFacts
@@ -5886,7 +5886,7 @@ function guideReels(ctx, e, r, downloads) {
   const based = reelsBase(e.folder, r, { isWhole: ctx.isWhole, read: regularJson });
   if (!based.onFile && !based.coming) return [];
   try {
-    const seen = exportsFound({ home: ctx.home, name: e.name, record: { ...r, app: { ...r.app, projects: here } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads });
+    const seen = exportsFound({ home: ctx.home, exports: exportsFolderOf(ctx.settings, ctx.home), name: e.name, record: { ...r, app: { ...r.app, projects: here } }, zone: ctx.deps.zone, readdir: ctx.deps.readdir, listDownloads: downloads });
     if (seen.unreadable) return [];
     const looked = lookForExports(seen.input, {});
     const numberOf = (key) => Number(key.slice(5));

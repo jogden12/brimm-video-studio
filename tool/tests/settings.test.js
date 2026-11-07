@@ -2372,7 +2372,6 @@ describe("what --help says of write, plan and set", () => {
 
 describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
   const AT = new Date("2026-11-06T10:00:00-05:00");
-  const NEEDS_LIGHT = "Not written: a drop folder of this Mac's own takes the light import.";
   const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   /** A Mac whose BRIMM Video is in a made-up Dropbox in its home folder, with the folders a drop folder may be picked in. */
   function mac(held = {}) {
@@ -2397,8 +2396,9 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
       assert.equal(settingsFault({ ...base, dropPath: "/Users/s/Desktop/Drop", exportsPath: "/Users/s/Exports" }), "");
       assert.equal(settingsFault({ ...base, dropPath: "Desktop/Drop" }), "the path to the drop folder is not a whole path");
       assert.equal(settingsFault({ ...base, exportsPath: "Exports" }), "the path to the exports folder is not a whole path");
-      assert.equal(settingsFault({ ...base, dropPath: "/Users/s/Drop", import: "full" }), "a drop folder of this Mac's own takes the light import");
-      assert.equal(settingsFault({ ...base, dropPath: "/Users/s/Drop", import: undefined }), "a drop folder of this Mac's own takes the light import");
+      // L1b: every import is light, so a drop folder of its own needs no import setting.
+      assert.equal(settingsFault({ ...base, dropPath: "/Users/s/Drop", import: "full" }), "");
+      assert.equal(settingsFault({ ...base, dropPath: "/Users/s/Drop", import: undefined }), "");
       assert.equal(settingsFault({ ...base, dropPath: null, exportsPath: null, import: "full" }), "");
     });
     it("is local when the settings hold a dropPath, and finds the folders from them", () => {
@@ -2437,7 +2437,9 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
     it("says a folder in Finder's words", () => {
       assert.equal(folderWords("/Users/s/BRIMM Video Work/Drop", "/Users/s"), "BRIMM Video Work › Drop, in your home folder");
       assert.equal(folderWords("/Users/s/Library/CloudStorage/Dropbox-X/The BRIMM DB/In", "/Users/s"), "Dropbox › The BRIMM DB › In");
-      assert.equal(folderWords("/Volumes/Big/Drop", "/Users/s"), "Volumes › Big › Drop");
+      assert.equal(folderWords("/Volumes/Big/Drop", "/Users/s"), "Big › Drop");
+      assert.equal(folderWords("/Users/s/Library/Mobile Documents/com~apple~CloudDocs/Exports", "/Users/s"), "iCloud Drive › Exports");
+      assert.equal(folderWords("/Volumes/Backup/Exports", "/Users/s"), "Backup › Exports");
     });
   });
 
@@ -2524,20 +2526,35 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
       }
       t.done();
     });
-    it("refuses a drop folder of its own with the full import, saying so (Phase 2: --import full is gone, a file that still says full is refused)", async () => {
+    it("takes a drop folder of its own whatever the file says of the import (L1b)", async () => {
       const t = mac({ import: "full" });
       const before = t.held();
-      // Phase 2: --import full is refused outright, whatever else is told.
+      // Phase 2: --import full is refused outright, whatever else is told, and nothing is written.
       assert.equal(await t.run("write", ...t.told, "--import", "full", "--drop-folder", t.desktop), 2);
       assert.deepEqual(t.said, ["The full import is gone: this Mac imports lightly."]);
-      t.said.length = 0;
-      assert.equal(await t.run("write", ...t.told, "--drop-folder", t.desktop), 1);
-      assert.deepEqual(t.said, [NEEDS_LIGHT]);
       assert.equal(t.held(), before);
+      t.said.length = 0;
+      // A file that still says "full" takes a drop folder of its own, and keeps what it said.
+      assert.equal(await t.run("plan", ...t.told, "--drop-folder", t.desktop), 0);
+      assert.ok(t.said.includes("The import will be: light"), t.said.join("\n"));
+      assert.ok(!t.said.includes("The import will be: full"));
+      assert.equal(t.held(), before);
+      assert.equal(await t.run("write", ...t.told, "--drop-folder", t.desktop), 0);
+      assert.equal(t.read().dropPath, t.desktop);
+      assert.equal(t.read().import, "full");
+      // A file with no import setting takes one too, and still has none.
+      const none = mac();
+      const bare = JSON.parse(none.held());
+      delete bare.import;
+      writeFileSync(none.file, JSON.stringify(bare, null, 2) + "\n");
+      assert.equal(await none.run("write", ...none.told, "--drop-folder", none.desktop), 0);
+      assert.equal(none.read().dropPath, none.desktop);
+      assert.equal(none.read().import, undefined);
       const local = mac({ dropPath: join(t.home, "Desktop", "Drop") });
       assert.equal(await local.run("write", ...local.told, "--import", "full"), 2);
       assert.deepEqual(local.said, ["The full import is gone: this Mac imports lightly."]);
       local.done();
+      none.done();
       t.done();
     });
     it("refuses a drop folder the faults refuse, and the two ways of naming one together", async () => {

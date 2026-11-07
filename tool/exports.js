@@ -15,7 +15,7 @@ import { KEPT, isMain } from "./app.js";
 import { historyTail } from "./app-history.js";
 import { isDay } from "./episode.js";
 import { turnsOf } from "./hyperframes.js";
-import { downloadsFolder, episodeWork } from "./settings.js";
+import { downloadsFolder, episodeWork, folderWords } from "./settings.js";
 import { isHdr } from "./workcopy.js";
 
 /** The endings of a video that is taken as an export. A WebM is read and mentioned, and never taken (8.1). */
@@ -185,7 +185,7 @@ const endingOf = (name) => ((/\.([A-Za-z0-9]+)$/.exec(String(name)) || [])[1] ||
 const taking = (file) => TAKEN_ENDINGS.includes(file.ending);
 
 /** Where a file is, as a person is told it: the places an export can be found in. */
-const FROM = { Downloads: "from Downloads", "another folder": "from another folder", renders: "HyperFrames' own render" };
+const FROM = { Downloads: "from Downloads", "the exports folder": "from the exports folder", "another folder": "from another folder", renders: "HyperFrames' own render" };
 
 /** Files as a person is told them: by name. */
 function shown(files) {
@@ -214,6 +214,13 @@ function candidatesOf(part, input, zone) {
   for (const file of input.downloads.files) {
     const read = exportNameOf(file.name);
     if (read && nfc(read.project) === nfc(part.project)) add({ ...file, dir: input.downloads.dir, where: "Downloads", via: "name", ending: read.ending, began: beganAt(read, zone) });
+  }
+  // The folder this Mac picked for exports, when it is not Downloads (exportsFound leaves it out when they are one folder).
+  if (input.exports) {
+    for (const file of input.exports.files) {
+      const read = exportNameOf(file.name);
+      if (read && nfc(read.project) === nfc(part.project)) add({ ...file, dir: input.exports.dir, where: "the exports folder", via: "name", ending: read.ending, began: beganAt(read, zone) });
+    }
   }
   return out.filter((candidate) => candidate.bytes > 0);
 }
@@ -274,7 +281,10 @@ export function lookForExports(input, answers = {}) {
     if (take[key] !== undefined) {
       const said = nfc(take[key]);
       const notAnExport = () => asks.push(`"${take[key]}" is not an export of ${label}. ${exports.length ? `The ones there are: ${shown(once(exports))}.` : "There is none there."} Which is the final one?`);
-      const listed = input.downloads.files.map((file) => ({ ...file, dir: input.downloads.dir, where: "Downloads", ending: endingOf(file.name) })).filter((file) => taking(file) && file.bytes > 0);
+      const listed = [
+        ...input.downloads.files.map((file) => ({ ...file, dir: input.downloads.dir, where: "Downloads", ending: endingOf(file.name) })),
+        ...(input.exports ? input.exports.files.map((file) => ({ ...file, dir: input.exports.dir, where: "the exports folder", ending: endingOf(file.name) })) : [])
+      ].filter((file) => taking(file) && file.bytes > 0);
       const named = once([...exports, ...listed, ...renders.filter(taking)]).filter((file) => nfc(file.name) === said);
       if (!named.length) notAnExport();
       const [chosen] = named;
@@ -338,7 +348,8 @@ export function lookForExports(input, answers = {}) {
     }
   }
   const names = input.parts.map((part) => part.project);
-  return { parts: out, asks, stops, mentions, looked: `Looked in Downloads for exports of: ${names.join(", ")}.`, tied };
+  const lookedIn = input.exports ? `Downloads and in the exports folder, ${input.exports.words},` : "Downloads";
+  return { parts: out, asks, stops, mentions, looked: `Looked in ${lookedIn} for exports of: ${names.join(", ")}.`, tied };
 }
 
 // --- What is read from the disk ---
@@ -398,7 +409,7 @@ function videosIn(dir, readdir) {
 /** What a project's renders/ holds of exports: { recorded, renders }. `recorded` are the files its records name (each record that is
     complete, whose name gives the second the export began, and whose `exportedTo` is a video file that is there), each as
     { name, dir, where, bytes, mtimeMs, began }; `renders` are the videos in renders/ that no record names. */
-function recordsIn(dir, downloads, zone) {
+function recordsIn(dir, downloads, zone, exports = null) {
   const folder = join(dir, "renders");
   let names = [];
   try {
@@ -418,7 +429,8 @@ function recordsIn(dir, downloads, zone) {
     if (!when || !ENDINGS.includes(endingOf(told.exportedTo)) || !isFile(told.exportedTo)) continue;
     const found = statSync(told.exportedTo);
     const inDownloads = sameFolder(dirname(told.exportedTo), downloads);
-    recorded.push({ name: basename(told.exportedTo), dir: inDownloads ? downloads : dirname(told.exportedTo), where: inDownloads ? "Downloads" : "another folder", bytes: found.size, mtimeMs: found.mtimeMs, began: beganAt(when, zone) });
+    const inExports = !inDownloads && exports !== null && sameFolder(dirname(told.exportedTo), exports);
+    recorded.push({ name: basename(told.exportedTo), dir: inDownloads ? downloads : inExports ? exports : dirname(told.exportedTo), where: inDownloads ? "Downloads" : inExports ? "the exports folder" : "another folder", bytes: found.size, mtimeMs: found.mtimeMs, began: beganAt(when, zone) });
   }
   const renders = [];
   for (const name of names) {
@@ -442,10 +454,14 @@ export function downloadsOnce({ home, readdir = readdirSync }) {
     the record (not a project kept for an earlier kind, and not one of a Reel the record says is dropped), whether its folder is on this Mac, when it last changed (projectChange), the
     files its records name and the renders in its renders/ that none does; and the videos in Downloads. `home` is this Mac's home,
     `name` the episode's folder name. Gives { input, unreadable }: `input` is what lookForExports is given, and `unreadable` is true when this Mac will
-    not let Downloads be read. `readdir` lists a folder as readdirSync does, for a test to give another. `listDownloads`, when it is given
+    not let Downloads be read. `exports` is the exports folder this Mac picked (settings.js exportsFolderOf): when it is not Downloads, by their
+    real paths, its videos are listed too, as `input.exports` ({ dir, words, files }, `words` in Finder's words); when it is, it is left out, so
+    that one folder is listed once and its files keep `where: "Downloads"`. `readdir` lists a folder as readdirSync does, for a test to give another. `listDownloads`, when it is given
     (downloadsOnce), lists Downloads in its place: so that a caller that asks for many videos reads the folder once. Nothing is written. */
-export function exportsFound({ home, name, record, zone = LOCAL_ZONE, readdir = readdirSync, listDownloads = null }) {
+export function exportsFound({ home, exports = null, name, record, zone = LOCAL_ZONE, readdir = readdirSync, listDownloads = null }) {
   const downloads = downloadsFolder(home);
+  // The exports folder this Mac picked (settings.js exportsFolderOf), looked in besides Downloads; once, when they are one folder.
+  const picked = typeof exports === "string" && exports !== "" && !sameFolder(exports, downloads) ? exports : null;
   const work = episodeWork(home, name);
   const projects = Array.isArray(record.app && record.app.projects) ? record.app.projects : [];
   const main = projects.find(isMain);
@@ -459,13 +475,14 @@ export function exportsFound({ home, name, record, zone = LOCAL_ZONE, readdir = 
     const here = dir !== "" && isFolder(dir);
     return {
       key, label, ...(reel ? { reel } : {}), project: project.name, ...(here ? { dir } : {}), fromSuggestion: project.fromSuggestion ?? null, here, mac: project.on,
-      changed: here ? projectChange(dir) : null, ...(here ? recordsIn(dir, downloads, zone) : { recorded: [], renders: [] })
+      changed: here ? projectChange(dir) : null, ...(here ? recordsIn(dir, downloads, zone, picked) : { recorded: [], renders: [] })
     };
   });
   const seen = listDownloads ? listDownloads() : videosIn(downloads, readdir);
+  const there = picked ? videosIn(picked, readdir) : null;
   return {
     unreadable: seen.unreadable,
-    input: { parts, downloads: { dir: downloads, files: seen.files }, finished: record.finished || null, zone }
+    input: { parts, downloads: { dir: downloads, files: seen.files }, ...(picked ? { exports: { dir: picked, words: folderWords(picked, home), files: there.files } } : {}), finished: record.finished || null, zone }
   };
 }
 

@@ -5,7 +5,7 @@
 // disk for each part and a Downloads folder in the test's own home), with stand-ins for ffprobe, ffmpeg, the transcriber and open.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { finishEpisode } from "../edit.js";
 import { finishNow } from "../finish.js";
@@ -571,6 +571,74 @@ describe("E6. the late check, and what is removed from Downloads", () => {
     assert.deepEqual([existsSync(main.path), existsSync(reel.path), existsSync(renders)], [true, true, true]);
     assert.equal(existsSync(join(found.folder, "final", MAIN_FILE)), true);
     assert.equal(existsSync(join(found.folder, "final", REEL_FILE)), true);
+    w.t.done();
+  });
+  // L1b: the exports folder this Mac picked.
+  it("keeps an export it took from the picked exports folder, and removes the one it took from Downloads, as before", async () => {
+    const w = fw();
+    const picked = join(w.t.home, "Movies", "Picked");
+    w.t.ctx.settings = { ...w.t.ctx.settings, exportsPath: picked };
+    const main = exportOf(w, "main", { folder: picked, record: false });
+    const reel = exportOf(w, "reel 2");
+    const found = await asked(w);
+    assert.equal(w.asked().parts[0].video.where, "the exports folder");
+    const result = await finishNow(w.t.ctx, found);
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.deepEqual([existsSync(main.path), existsSync(reel.path)], [true, false]);
+    assert.equal(existsSync(join(found.folder, "final", MAIN_FILE)), true);
+    assert.equal(existsSync(join(found.folder, "final", REEL_FILE)), true);
+    w.t.done();
+  });
+  it("takes an export as from Downloads, and removes it after the check, when the exports folder is Downloads or a link to it", async () => {
+    for (const via of ["itself", "a link"]) {
+      const w = fw();
+      const link = join(w.t.home, "Exports link");
+      symlinkSync(w.downloads, link);
+      w.t.ctx.settings = { ...w.t.ctx.settings, exportsPath: via === "itself" ? w.downloads : link };
+      const main = exportOf(w, "main");
+      const reel = exportOf(w, "reel 2");
+      const found = await asked(w);
+      assert.deepEqual(w.asked().parts.map((p) => p.video.where), ["Downloads", "Downloads"], via);
+      const result = await finishNow(w.t.ctx, found);
+      assert.equal(result.ok, true, result.failed.join(" "));
+      assert.deepEqual([existsSync(main.path), existsSync(reel.path)], [false, false], via);
+      w.t.done();
+    }
+  });
+  it("removes an export from Downloads that it reached through a link, though the told place is the link's real path", async () => {
+    const w = fw();
+    const main = exportOf(w, "main");
+    exportOf(w, "reel 2");
+    const found = await asked(w);
+    const told = w.asked();
+    const real = join(w.t.home, "Real Downloads");
+    mkdirSync(real);
+    for (const name of readdirSync(w.downloads)) writeFileSync(join(real, name), readFileSync(join(w.downloads, name)));
+    rmSync(w.downloads, { recursive: true });
+    symlinkSync(real, w.downloads);
+    for (const part of told.parts) part.video.dir = real;
+    writeFileSync(join(w.work, "finish.asked.json"), JSON.stringify(told));
+    const result = await finishNow(w.t.ctx, found);
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.equal(existsSync(join(real, MAIN_FILE)), false, main.path);
+    w.t.done();
+  });
+  it("brings a placeholder in the picked exports folder over, as one in Downloads is brought", async () => {
+    const w = fw();
+    const picked = join(w.t.home, "Movies", "Picked");
+    w.t.ctx.settings = { ...w.t.ctx.settings, exportsPath: picked };
+    const main = exportOf(w, "main", { folder: picked, record: false });
+    exportOf(w, "reel 2");
+    const found = await asked(w);
+    const brought = [];
+    w.t.ctx.isWhole = (path) => path !== main.path || brought.includes(path);
+    w.t.ctx.deps.readAll = async (path) => {
+      brought.push(path);
+    };
+    const result = await finishNow(w.t.ctx, found);
+    assert.equal(result.ok, true, result.failed.join(" "));
+    assert.deepEqual(brought, [main.path]);
+    assert.equal(existsSync(join(found.folder, "final", MAIN_FILE)), true);
     w.t.done();
   });
   // Review, minor 6: what finish.asked.json says of where a file came from is not taken on trust when a file is removed: it must be in the

@@ -1610,6 +1610,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
       ["{", '  "version": 1', "}"],
       ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Elsewhere", "The exports folder will be: /x/Downloads"],
       ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
+      ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads"],
       ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: Downloads"],
       ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads", "The old drop folder: /x/old", "The drop folder needs Files and Folders access"],
       ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads", "The drop folder is in a cloud folder: Dropbox"],
@@ -1623,7 +1624,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
       assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
     }
     // What it says whole is read: its own three lines, and the settings above them are what is shown.
-    const good = askWith({ onPath: { node: answers(["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads"]) } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
+    const good = askWith({ onPath: { node: answers(["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads"]) } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
     assert.equal(good.status, 0, good.out);
     assert.deepEqual(shown(good), { version: 1 });
     assert.ok(good.out.includes(`\n  Its drop folder, to make in Dropbox and watch:  ${d.root}/Drop/Mac Studio\n`), good.out);

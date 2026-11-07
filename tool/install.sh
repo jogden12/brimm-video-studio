@@ -543,7 +543,7 @@ if [[ "$machined" == "yes" ]]; then
           unreadable="yes"
         fi
       done
-      if [[ "$import_name" != ("light"|"full") || "$old_drop_name" != ("Drop"|"Unedited Video"|/*) || "$drop_name" != ("Drop"|"Unedited Video"|/*) ||
+      if [[ "$import_name" != "light" || "$old_drop_name" != ("Drop"|"Unedited Video"|/*) || "$drop_name" != ("Drop"|"Unedited Video"|/*) ||
             "$exports_folder" != /* || ( -n "$old_folder" && "$old_folder" != /* ) || ( ( -n "$cloud_name" || -n "$files_access" ) && "$drop_name" != /* ) ]]; then
         unreadable="yes"
       fi

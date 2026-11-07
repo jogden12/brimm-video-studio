@@ -715,6 +715,54 @@ describe("C2 (on a disk). exportsFound: the projects of the record, their record
     assert.equal(got.released, undefined);
     w.done();
   });
+  // L1b: the exports folder this Mac picked.
+  it("looks in the picked exports folder and in Downloads, and says both, in Finder's words", () => {
+    const w = made();
+    w.project(P_MAIN);
+    const picked = join(w.home, "Movies", "Exports");
+    mkdirSync(picked, { recursive: true });
+    const name = `${P_MAIN} 2026-10-20 13.56.mp4`;
+    w.put(join(picked, name), 10, "in the folder");
+    const got = w.asked(recordOf(entry("main", P_MAIN)), { exports: picked });
+    assert.equal(got.input.exports.dir, picked);
+    assert.deepEqual(got.input.exports.files.map((f) => f.name), [name]);
+    const looked = lookForExports(got.input);
+    assert.deepEqual(looked.parts.map((p) => [p.key, p.video && p.video.name, p.video && p.video.where, p.video && p.video.dir]), [["main", name, "the exports folder", picked]]);
+    assert.match(looked.parts[0].line, /from the exports folder/);
+    assert.equal(looked.looked, `Looked in Downloads and in the exports folder, Movies › Exports, in your home folder, for exports of: ${P_MAIN}.`);
+    // An export in Downloads is still found, and keeps its place.
+    rmSync(join(picked, name));
+    const other = `${P_MAIN} 2026-10-20 13.58.mp4`;
+    w.put(join(w.downloads, other), 20, "in downloads");
+    const again = lookForExports(w.asked(recordOf(entry("main", P_MAIN)), { exports: picked }).input);
+    assert.deepEqual(again.parts.map((p) => [p.video.name, p.video.where]), [[other, "Downloads"]]);
+    w.done();
+  });
+  it("lists one folder once when the exports folder is Downloads, or a link to it", () => {
+    const w = made();
+    w.project(P_MAIN);
+    w.put(join(w.downloads, `${P_MAIN} 2026-10-20 13.56.mp4`), 10);
+    for (const exports of [undefined, null, w.downloads]) assert.equal(w.asked(recordOf(entry("main", P_MAIN)), { exports }).input.exports, undefined);
+    const link = join(w.home, "Exports link");
+    symlinkSync(w.downloads, link);
+    const got = w.asked(recordOf(entry("main", P_MAIN)), { exports: link });
+    assert.equal(got.input.exports, undefined);
+    const looked = lookForExports(got.input);
+    assert.deepEqual(looked.parts.map((p) => [p.video.where, p.video.dir]), [["Downloads", w.downloads]]);
+    assert.equal(looked.looked, `Looked in Downloads for exports of: ${P_MAIN}.`);
+    w.done();
+  });
+  it("tells a file its record names in the picked folder from one in another folder", () => {
+    const w = made();
+    const dir = w.project(P_MAIN);
+    const picked = join(w.home, "Movies", "Exports");
+    mkdirSync(picked, { recursive: true });
+    w.put(join(picked, "final.mp4"), 10);
+    writeFileSync(join(dir, "renders", `${P_MAIN}_2026-10-20_13-56-40.meta.json`), meta("main.meta.json", picked).replace(/[^/"]+2026-10-20 13\.56\.mp4/, "final.mp4"));
+    const [part] = w.asked(recordOf(entry("main", P_MAIN)), { exports: picked }).input.parts;
+    assert.deepEqual(part.recorded.map((r) => [r.name, r.dir, r.where]), [["final.mp4", picked, "the exports folder"]]);
+    w.done();
+  });
   it("takes a Downloads folder that is not there for empty", () => {
     const w = made();
     rmSync(w.downloads, { recursive: true });

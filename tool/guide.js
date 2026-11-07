@@ -1,7 +1,8 @@
 // The guide in her Claude folder (spec 2026-10-25): where a video has got, from her drop folder to the BRIMM Ops page's cascade,
 // and the one next step for it, in her own words. brimm-video cannot see the BRIMM Ops page, so her note on this Mac keeps the
 // steps she has done there, by the hand-off's id.
-// Everything here is pure: it reads and writes nothing, and edit.js gives it what it read.
+// Everything here reads and writes nothing from the disk but folderWords (settings.js), which looks at a folder's real path to say where it is
+// in Finder's words (dropWords, and edit.js's exportsWords for the export step); edit.js gives it all else it read.
 import { spokenMac } from "./kinds.js";
 import { aboutLeft } from "./progress.js";
 import { folderWords, isLocal } from "./settings.js";
@@ -364,7 +365,13 @@ const FROM_FINAL_CUT = 'It was edited in Final Cut before. Studio doesn\'t use F
 function appStep(facts) {
   const project = facts.project;
   if (project && project.exported) return toDo("exported", 'You have exported it. Say "hand it off" and I will check what you exported.');
-  if (project && project.opened) return toDo("in-app", `Edit it in HyperFrames.${project.last ? ` Your last request there was ${project.last}.` : ""} When you are done, export it on This Mac, as MP4, then say "hand it off".`);
+  // When this Mac picked an exports folder that is not Downloads (project.exportsWords, in Finder's words), she is told where to export.
+  if (project && project.opened) {
+    const last = project.last ? ` Your last request there was ${project.last}.` : "";
+    return toDo("in-app", project.exportsWords
+      ? `Edit it in HyperFrames.${last} When you are done, export it as MP4. Export it on This Mac, into ${project.exportsWords}. Then say "hand it off".`
+      : `Edit it in HyperFrames.${last} When you are done, export it on This Mac, as MP4, then say "hand it off".`);
+  }
   if (!facts.app) return toDo("app-off", APP_NOT_SET_UP);
   if (!project && facts.copy) return copyStep(facts.copy);
   // An episode from the Final Cut days: its Final Cut edits are not carried over, and it is made from the recording.
