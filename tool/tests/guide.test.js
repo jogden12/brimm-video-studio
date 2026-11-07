@@ -548,6 +548,11 @@ describe("the next step for a video or a session kept on another Mac (Phase 3, L
     ]) assert.deepEqual(shown(nextFor({ ...BASE, ...over, ...KEPT }, NONE, NOW)), ON_STUDIO, JSON.stringify(over));
     assert.deepEqual(shown(nextFor({ ...BASE, ...KEPT, mac: "Sallie's laptop" }, NONE, NOW)), { stage: "on-other-mac", text: "It is on Sallie's laptop. Carry on there." });
   });
+  it("stays that Mac's after a hand-off when it has a conflict or is held beside a session (keeperFirst), for a video and for a session", () => {
+    assert.deepEqual(shown(nextFor({ ...BASE, ...KEPT, keeperFirst: true, handoff: OPS_HANDOFF }, NONE, NOW)), ON_STUDIO);
+    assert.deepEqual(shown(nextFor({ ...BASE, ...RAW(), ...KEPT, keeperFirst: true, handoff: { ...OPS_HANDOFF, kind: "raw" } }, NONE, NOW)), ON_STUDIO);
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), ...KEPT, keeperFirst: true, handoff: { ...OPS_HANDOFF, kind: "session" } }, NONE, NOW)), ON_STUDIO);
+  });
   it("is a session's that Mac's too: its choice, its reading, its items, its hand-off and its empty revision are all made there", () => {
     for (const over of [
       SESSION({ choice: null }), SESSION({ choice: null, teachingsOn: false }), { ...SESSION(), reading: "running" }, { ...SESSION({ teachingsOn: false }), reading: "none" }, { ...SESSION(), reading: "failed" },

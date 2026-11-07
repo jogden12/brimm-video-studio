@@ -352,6 +352,27 @@ describe("a handed-off episode kept on the Mac Studio whose first steps are stil
       w.done();
     }
   });
+  it("keeps the Mac Studio's step first for a handed-off session whose record has a conflicted copy: no page step, show and done refused, episodes agrees", async () => {
+    const w = world();
+    try {
+      const found = KEPT.session.make(w);
+      const record = handedOffAs(found, { name: "Session, 2026-10-20", kind: "session", over: { session: { ...found.record.session, teachings: "asked" } } });
+      conflictedRecord(found, { inForce: { session: record.session, finished: record.finished }, copy: { session: record.session, finished: record.finished, title: { text: "Another", approved: false } } });
+      const step = `${KEPT.session.said} (${KEPT.session.short}): It is on the Mac Studio. Carry on there.`;
+      const guide = await on(w.macbook, "guide", KEPT.session.said);
+      assert.deepEqual([guide.code, guide.said], [0, [step]], guide.text);
+      assert.doesNotMatch(guide.text, /BRIMM Ops page|Take the/, guide.text);
+      for (const argv of [["guide", KEPT.session.said, "show"], ["guide", KEPT.session.said, "done", "taken"]]) {
+        const r = await on(w.macbook, ...argv);
+        assert.equal(r.code, 1, argv.join(" ") + r.text);
+        assert.match(r.text, /nothing to show|not noted|Nothing/i, argv.join(" ") + r.text);
+        assert.deepEqual(w.opened, [], argv.join(" "));
+      }
+      assert.equal(underLine(await on(w.macbook, "episodes"), KEPT.session.line), ON_LINE);
+    } finally {
+      w.done();
+    }
+  });
   it("says only where a session handed off with its teachings is, as the guide gives the BRIMM Ops page's step", async () => {
     const w = world();
     try {

@@ -317,7 +317,8 @@ function opsStep(facts, notes, now) {
 /** The next step for a session. Its hand-off's BRIMM Ops steps come first, so that the withdrawal of a session after all comes
     before anything else of it, transcript only included. At its empty revision, once the withdrawal is noted, its own steps
     follow, until its own hand-off is written. A session kept on another Mac (`onOtherMac`, Phase 3 L2) is on that Mac for every step
-    of its own, its empty revision included: only its hand-off's steps on the BRIMM Ops page, and transcript only, are said here as they are. */
+    of its own, its empty revision included: only its hand-off's steps on the BRIMM Ops page, and transcript only, are said here as they are, but for a session with a conflict or held
+    beside a session (`keeperFirst`), whose step stays that Mac's even after a hand-off. */
 function sessionNext(facts, notes, now) {
   const session = facts.session;
   const there = facts.onOtherMac ? toDo("on-other-mac", `It is on ${spokenMac(facts.mac)}. Carry on there.`) : null;
@@ -433,7 +434,8 @@ function filmStep({ route, voice, footage = "", joining = false, joinFailed = fa
 /** The next step for a finished episode, a raw one or a short video: Claude's reading, the spellings, a raw video's edit and
     finish, then its hand-off's BRIMM Ops steps. A raw video and an iPhone clip are edited in HyperFrames (appStep). A planned episode
     is told to film (filmStep) before anything else. A video or a plan kept on another Mac (`onOtherMac`, Phase 3 L2) is changed only there:
-    until its hand-off is written its step is on that Mac, before anything else; its hand-off's steps on the BRIMM Ops page are hers on any Mac.
+    until its hand-off is written its step is on that Mac, before anything else; its hand-off's steps on the BRIMM Ops page are hers on any Mac,
+    but not while it has a conflict or is held beside a session (`keeperFirst`): then it stays "Carry on there." after a hand-off too.
     `onOtherMac` is the fact edit.js gives when its record says it is kept on another Mac (its `local`), with that Mac in `mac`, and is absent or
     false otherwise; edit.js says such a video is waiting for her answer, in a conflict or held as a session on that Mac alone. sessionNext
     takes the same fact. */

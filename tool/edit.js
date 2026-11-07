@@ -1018,7 +1018,8 @@ const keeperFirst = (e) => e.read.code === "CONFLICTED" || Boolean(e.held && !ga
     by its records alone, so that `episodes` says "Carry on there." under it only where the guide does (review R1-F4). Never for a video she left
     alone (`left`), which has no step; always for a video waiting for her answer, which is answered there; for a session, while its empty
     revision is owed, and otherwise until a hand-off of its own is written, unless her choice is its transcript only; for any other video and a
-    plan, until its hand-off is written, after which the BRIMM Ops page's steps are hers on any Mac. Her notes on this Mac are not read: while
+    plan, until its hand-off is written, after which the BRIMM Ops page's steps are hers on any Mac, except for an episode with a conflict or held beside a session (keeperFirst),
+    which keeps "Carry on there." even after a hand-off. Her notes on this Mac are not read: while
     the page's step for a session's empty revision is still hers, the guide says that step first, and the session's own steps there after it. */
 function stepThere(e, left) {
   if (left) return false;
@@ -5982,7 +5983,8 @@ function guideSession(ctx, e, r) {
     A planned episode (PR H4) has no video, no reading and no project to look at: it is named by its title and short id, found by those
     and by its folder, and its one fact is `planned`, { route, voice }, which gives it the guide's stage `film`.
     An episode kept on another Mac (keptOn; Phase 3, L2, D3) has `onOtherMac`, with that Mac in `mac`: it is changed only there, so the guide's
-    step for it is there until a hand-off is written, whose steps on the BRIMM Ops page she takes on any Mac. Nothing of its own files, which
+    step for it is there until a hand-off is written, whose steps on the BRIMM Ops page she takes on any Mac, unless it has a conflict or is held
+    beside a session (`keeperFirst`): then its step stays there after a hand-off too. Nothing of its own files, which
     are on that Mac, is read here (its reading's teachings, its project, its copy, its parts), and it is not said to be waiting for her answer, in
     a conflict or held as a session here: each of those is said and sorted out on that Mac. */
 function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
