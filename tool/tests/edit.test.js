@@ -210,10 +210,10 @@ describe("node edit.js episodes", () => {
     const r = await t.run("episodes");
     assert.ok(r.text.includes([
       "Imports:",
-      "  A.mov: being imported on Mac Studio, at Making the rough cut",
-      "  B.mov: stopped on Sallie's laptop at Making the rough cut, 30 minutes ago",
-      "  C.mov: its import failed on Mac Studio: the transcriber stopped",
-      "  D.mov: copied in on Mac Studio. Dropbox found a problem with a copy of it: Talk.rough-cut.mp4 is short"
+      "  A video of 5 bytes: being imported on Mac Studio, at Making the rough cut",
+      "  A video of 5 bytes: stopped on Sallie's laptop at Making the rough cut, 30 minutes ago",
+      "  A video of 5 bytes: its import failed on Mac Studio: the transcriber stopped",
+      "  A video of 5 bytes: copied in on Mac Studio. Dropbox found a problem with a copy of it: Talk.rough-cut.mp4 is short"
     ].join("\n")), r.text);
     t.done();
   });
@@ -367,7 +367,7 @@ describe("node edit.js bring, status and retry", () => {
       "Running on this Mac:",
       "  Budget.mov: Making the rough cut (step 5 of 8), 40%",
       "Imports:",
-      "  Budget.mov: being imported on Mac Studio, at Making the rough cut",
+      "  A video of 5 bytes: being imported on Mac Studio, at Making the rough cut",
       `${FOLDER}: finish is running.`,
       `${FOLDER}: bring ended 1 minute ago. Made: Talk.mov. Not done: Talk.srt is still not whole. Say open again.`
     ]);

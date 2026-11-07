@@ -57,13 +57,13 @@ function namesIn(folder) {
     by its label or else its short id, one held as a session by its label or else as "a video" with its short id; under either
     import, and never counted. A video whose holder cannot be told (Episodes itself cannot be read, or an episode that could be
     the video's, in a folder named for it, cannot be) is named by what it is and its size, "A video of 1.2 GB", under either
-    import (kinds.js unlabelled). Any other video, or status, that has no label is not named by its file when `light` says the
-    import is the light one (it does on every Mac since Phase 3, L1d: settings.js passes none, and `light` is true unless a test says not) (its name may be a client's, and nothing about an unanswered video, its file name included, is to
-    reach a chat): a waiting or kept one, whose advice takes a file out of the old folder, is named by what it is and its size,
+    import (kinds.js unlabelled). Any other video, or status, that has no label is not named by its file, on any Mac whatever its
+    settings say of the import (Phase 3, L1d; its name may be a client's, and nothing about an unanswered video, its file name
+    included, is to reach a chat): a waiting or kept one, whose advice takes a file out of the old folder, is named by what it is and its size,
     and two alike are both said; a failed, problem, owed or running one is counted, apart by whether its video is still in the
-    old folder. Under today's import it is named by its video's file name. A status is never named by its own file's name; and
+    old folder. A status is never named by its own file's name; and
     what it says of why it failed is left out, as it may hold a file's name. */
-export function heldInOld({ root, machine, folder, light = true, home, now = Date.now() }) {
+export function heldInOld({ root, machine, folder, home, now = Date.now() }) {
   // How a video the episode `holding` (holdingEpisode's) holds is named where edit.js would not name it by its file: "" when no
   // episode holds it, or edit.js would name it by its file. The versions of a video are read once, when first asked for.
   const namedAs = gatedAsOf(linksOf(root));
@@ -85,7 +85,7 @@ export function heldInOld({ root, machine, folder, light = true, home, now = Dat
   const problem = new Set();
   const named = new Set();
   const trouble = mine.filter((s) => ["failed", "problem"].includes(importState(s, now))).sort((a, b) => a.video.localeCompare(b.video));
-  // The counts of the ones with no label under the light import, and how many of each have their video in the old folder: that
+  // The counts of the ones with no label, and how many of each have their video in the old folder: that
   // decides what is to be done about them. When the old folder could not be read, nothing is known of it, and none is said gone.
   const counts = { failed: [0, 0], problem: [0, 0] };
   let problemHere = false;
@@ -103,10 +103,10 @@ export function heldInOld({ root, machine, folder, light = true, home, now = Dat
   const owedFor = (video, bytes) => pendings.find((p) => p.video === video && p.bytes === bytes && p.machine === machine && sameFolder(String(p.root), root));
   const imported = new Set();
   let importedCounted = 0;
-  /** The line of a video owed a late check, `pending`, named `name`, or counted when it has no name under the light import. */
+  /** The line of a video owed a late check, `pending`, named `name`, or counted when it has no name. */
   const owe = (name, video, pending) => {
-    if (!name && light) importedCounted += 1;
-    else imported.add(`  ${name || video}: already imported; its late check is still to come (due at ${clockTime(dueAt(pending))}).`);
+    if (!name) importedCounted += 1;
+    else imported.add(`  ${name}: already imported; its late check is still to come (due at ${clockTime(dueAt(pending))}).`);
   };
   for (const status of trouble) {
     named.add(status.video);
@@ -121,7 +121,7 @@ export function heldInOld({ root, machine, folder, light = true, home, now = Dat
       owe(name, status.video, owedNow);
       continue;
     }
-    if (light && !name) {
+    if (!name) {
       const count = counts[isFailed ? "failed" : "problem"];
       count[0] += 1;
       if (here) count[1] += 1;
@@ -153,9 +153,9 @@ export function heldInOld({ root, machine, folder, light = true, home, now = Dat
   const kept = [];
   const running = new Set();
   let runningCounted = 0;
-  // Under the light import, a waiting or kept video with no label is named by what it is and its size, never by its file: its
+  // A waiting or kept video with no label is named by what it is and its size, never by its file: its
   // advice takes a file out of the old folder, and a count would not say which.
-  const unnamed = (video, bytes) => (light ? capital(unlabelled(video, bytes)) : video);
+  const unnamed = (video, bytes) => capital(unlabelled(video, bytes));
   for (const video of videos.filter((v) => !named.has(v))) {
     // A video that cannot be looked at (a link that goes round in a circle) is a video all the same, whose size is not known.
     let bytes;
@@ -177,8 +177,8 @@ export function heldInOld({ root, machine, folder, light = true, home, now = Dat
       kept.push(`  ${label || unnamed(video, bytes)}: already imported, and nothing of this Mac's import will take it out of the old folder: its late check has passed, or it is a copy of an imported video.`);
     } else if (mine.some((s) => s.video === video && s.bytes === bytes && importState(s, now) === "running")) {
       // This Mac's import is at work on it now, and will make its late check from this video: it is to be waited for and left there.
-      if (!label && light) runningCounted += 1;
-      else running.add(`  ${label || video}: it is being imported now.`);
+      if (!label) runningCounted += 1;
+      else running.add(`  ${label}: it is being imported now.`);
     } else lines.push(`  ${label || unnamed(video, bytes)}: waits in ${folder}.`);
   }
   if (runningCounted) running.add(runningCounted === 1 ? "  1 video is being imported now." : `  ${runningCounted} videos are being imported now.`);

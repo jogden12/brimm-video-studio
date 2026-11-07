@@ -7,9 +7,9 @@
     "Waiting in the drop folders:",
     "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: its import failed on Mac Studio: the transcriber stopped (the video: Invalid data). Say \"try it again\" to import it again.",
     "Imports:",
-    "  Other talk.mov: being imported on Sallie's laptop, at Writing the transcript",
-    "  Pricing talk again.mov: its import failed on Mac Studio: the transcriber stopped (Pricing talk again.mov: Invalid data)",
-    "  Third talk.mov: copied in on Mac Studio. Dropbox found a problem with a copy of it: Third talk.srt is not whole in Dropbox.",
+    "  A video of 9 bytes: being imported on Sallie's laptop, at Writing the transcript",
+    "  A video of 5 bytes: its import failed on Mac Studio: the transcriber stopped (the video: Invalid data)",
+    "  A video of 9 bytes: copied in on Mac Studio. Dropbox found a problem with a copy of it: the video.srt is not whole in Dropbox.",
     "On this Mac:",
     "  Free on the disk: 300 GB"
   ],
@@ -53,9 +53,9 @@
   "status": [
     0,
     "Imports:",
-    "  Other talk.mov: being imported on Sallie's laptop, at Writing the transcript",
-    "  Pricing talk again.mov: its import failed on Mac Studio: the transcriber stopped (Pricing talk again.mov: Invalid data)",
-    "  Third talk.mov: copied in on Mac Studio. Dropbox found a problem with a copy of it: Third talk.srt is not whole in Dropbox.",
+    "  A video of 9 bytes: being imported on Sallie's laptop, at Writing the transcript",
+    "  A video of 5 bytes: its import failed on Mac Studio: the transcriber stopped (the video: Invalid data)",
+    "  A video of 9 bytes: copied in on Mac Studio. Dropbox found a problem with a copy of it: the video.srt is not whole in Dropbox.",
     "2026-10-14 Pricing talk (Mac Studio): bring ended 2 hours ago. Made: Pricing talk.srt. Not done: Pricing talk.mp4 is still not whole. Some files of Pricing: what to charge? are not here yet. Say \"open Pricing: what to charge?\" to try again."
   ],
   "status 2026-10-14 Pricing talk (Mac Studio)": [
@@ -65,7 +65,7 @@
   "status Pricing": [
     0,
     "Imports:",
-    "  Pricing talk again.mov: its import failed on Mac Studio: the transcriber stopped (Pricing talk again.mov: Invalid data)",
+    "  A video of 5 bytes: its import failed on Mac Studio: the transcriber stopped (the video: Invalid data)",
     "2026-10-14 Pricing talk (Mac Studio): bring ended 2 hours ago. Made: Pricing talk.srt. Not done: Pricing talk.mp4 is still not whole. Some files of Pricing: what to charge? are not here yet. Say \"open Pricing: what to charge?\" to try again."
   ],
   "status Pricing: what to charge?": [

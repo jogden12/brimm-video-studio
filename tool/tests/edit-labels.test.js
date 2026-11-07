@@ -411,7 +411,7 @@ describe("findEpisode, for a video named by its label", () => {
     // A file where an episode's folder should be: its folder cannot be read as one.
     writeFileSync(join(t.root, "Episodes", LIGHT_FOLDER), "not a folder");
     assert.equal(findEpisode(ctxOf(t), "nothing fits this").why, `No episode fits "nothing fits this". The episodes are: an episode of 2026-10-20 from the Mac Studio whose record cannot be read.`);
-    for (const setting of ["full", undefined]) assert.equal(findEpisode(ctxOf(t, setting), "nothing fits this").why, `No episode fits "nothing fits this". The episodes are: an episode of 2026-10-20 from the Mac Studio whose record cannot be read.`, `${setting}: quietly whatever the import (L1d)`);
+    for (const setting of ["full", ""]) assert.equal(findEpisode(ctxOf(t, setting), "nothing fits this").why, `No episode fits "nothing fits this". The episodes are: an episode of 2026-10-20 from the Mac Studio whose record cannot be read.`, `${setting}: quietly whatever the import (L1d)`);
     t.done();
   });
 });
@@ -1508,6 +1508,20 @@ describe("every Mac names quietly, whatever its file says of the import, with it
       const said = (await on(dropboxMac(t, setting), "episodes")).said;
       assert.deepEqual(said.slice(0, 2), ["Episodes, newest first:", "  An episode of 2026-10-20 from the Mac Studio whose record cannot be read: ask Jason."], String(setting));
       assert.doesNotMatch(said.join("\n"), SECRET, String(setting));
+      t.done();
+    }
+  });
+  it("names a status with no label quietly in the Imports lines of episodes and status, with no file name in its why", async () => {
+    const zoom = "GMT20261020-150000_Recording Jane Doe.mp4";
+    for (const setting of ["full", undefined]) {
+      const t = setup();
+      writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: zoom, bytes: 5, seconds: null, step: "Reading the sound", at: "2026-10-20T14:00:00-05:00", failed: `the sound could not be read from ${zoom}` }, writeText);
+      for (const argv of [["episodes"], ["status"]]) {
+        const said = (await on(dropboxMac(t, setting), ...argv)).said;
+        assert.ok(said.some((line) => line.startsWith("  A Zoom download of 5 bytes: its import failed on Mac Studio")), `${setting} ${argv}\n${said.join("\n")}`);
+        assert.doesNotMatch(said.join("\n"), SECRET, `${setting} ${argv}`);
+        assert.ok(!said.join("\n").includes(zoom), `${setting} ${argv}`);
+      }
       t.done();
     }
   });

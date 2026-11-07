@@ -62,7 +62,7 @@ import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
-import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
+import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
@@ -565,7 +565,7 @@ const keptOn = (ctx, e) => {
 /** How the record of the episode `found` (findEpisode's) is named in what a command says of it: as gatedName names it. */
 const namedAs = (found, record) => gatedName(record, Boolean(found && found.held));
 
-/** An episode whose record cannot be read at all, as it is named on a Mac that does the light import: by the day and the Mac its
+/** An episode whose record cannot be read at all, as it is named on every Mac: by the day and the Mac its
     folder's name begins and ends with (names.js episodeFolderName), as "an episode of 2026-10-22 from the Mac Studio whose
     record cannot be read", and never by the rest, which is the video's file's name. */
 function unreadName(name) {
@@ -649,7 +649,7 @@ const lateClean = (ctx) => (text) => {
 /** What is said of the episode `found` when its record cannot be gone on with, as `found.read` says why (a conflicted copy, a
     folder that cannot be read): "<said>: <why>.", as always, where `said` is the folder as the command was given it. But a
     gated episode is named by its label and short id, and its why names no file of its video; one a newer brimm-video wrote is
-    named by its short id; and on a Mac that does the light import, one with no record that can be read at all is named by its
+    named by its short id; and, on every Mac, one with no record that can be read at all is named by its
     day and Mac alone, and Jason is asked. */
 function notRead(ctx, found, said = found.name) {
   const e = episodeAt(ctx, found.name);
@@ -782,9 +782,6 @@ export function findEpisode(ctx, said, { plannedAs } = {}) {
   if (fits.length === 1) {
     const e = fits[0];
     hideNames(ctx, e);
-    // A record of the switch's layout (3) or a later one may be a light import's, whose folder and file are named for a client:
-    // an error nobody foresaw names none of it (editMain).
-    if (ctx.hidden && e.records.some((r) => recordShaped(r) && ofTheSwitch(r))) ctx.hidden.switched = true;
     return gateOf(ctx, e, known(e), named, e.inForce) || holdWords(ctx, e) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
   }
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => listedAs(ctx, e)))}. Say which.` };
@@ -810,13 +807,14 @@ export function ageText(ms) {
     late check. Only those whose video `fits`, when it is given: by its label when it has one, and otherwise by its file's
     name, so that words of a file's name never tell which label is its. A video that is held in
     the drop folder, not imported, is no import: the list of the videos waiting says why it waits. A light import's status,
-    which carries its video's label (Part L), is named by its label, and why it failed or what its late check found is said
+    which carries its video's label (Part L), is named by its label, and any other by what it is and its size, and why it failed or what its late check found is said
     with no path or name of its file in it (withoutNames). */
 function importLines(ctx, fits = () => true) {
   return readStatuses(ctx.root, ctx.now()).filter((s) => s.status && fits(s.status.label || s.status.video) && importState(s.status, ctx.now()) !== "held").map(({ status }) => {
     const state = importState(status, ctx.now());
-    const who = status.label || status.video;
-    const plain = (text) => (status.label ? withoutNames(text, namesOf(status.video), [status.label]) : text);
+    // A status with no label is named by what it is and its size, never by its file, on every Mac (Phase 3, L1d).
+    const who = status.label || capital(unlabelled(status.video, status.bytes));
+    const plain = (text) => withoutNames(text, namesOf(status.video), status.label ? [status.label] : []);
     if (state === "failed") return `  ${who}: its import failed on ${status.machine}: ${plain(status.failed)}`;
     if (state === "problem") return `  ${who}: copied in on ${status.machine}. Dropbox found a problem with a copy of it: ${plain(status.problem)}`;
     if (state === "stopped") return `  ${who}: stopped on ${status.machine} at ${shownStep(status.step)}, ${ageText(ctx.now() - Date.parse(status.at))} ago`;
@@ -1051,8 +1049,8 @@ const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boole
     yet answered, or a session, is named by its label (episodeLines), with the lines of her card under one not yet answered
     (cardLines), and one she has left alone is listed apart, under a heading of its own. A video waiting in a drop folder that
     a light import's status gives a label, or that a gated episode holds, is named by its label, or by what it is and its size,
-    and why it waits holds no name of its file, on either Mac; on a Mac that does the light import, or that has a drop folder of
-    its own whatever its file says of the import, every video waiting is; any other, on a Mac that does not, as always. */
+    and why it waits holds no name of its file, on either Mac; on every Mac, whatever its file says of the import, every video
+    waiting is. */
 export async function episodes(ctx) {
   const { say } = ctx;
   // The versions of a video are read from Episodes once: for the episodes a version of a session holds, and the cards' matches.
@@ -1721,8 +1719,7 @@ function lateCheckOwed(ctx, video, held, who = video, plain = (text) => text) {
     it (Part L), whatever its case and spacing. Refused when an episode holds it already (but see lateCheckOwed), and while its
     import is running. Its status files from this Mac are taken away, and the launch agent is asked to look (kickstart).
     A video with a label is named by it in every line, and why its import failed is said with no path or name of its file in
-    it; on a Mac that does the light import, or that has a drop folder of its own, a video with none is named by what it is and
-    its size, and never by its file. */
+    it; on every Mac, a video with none is named by what it is and its size, and never by its file. */
 export async function retry(ctx, rest) {
   const { say } = ctx;
   const said = rest.join(" ").trim();

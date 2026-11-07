@@ -1707,7 +1707,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  A video of 5 bytes: waits in ${old}.`, ADVICE, KEPT_LINE("A video of 6 bytes"), KEPT]);
       t.done();
     });
-    it("says a video an episode holds, when this Mac owes it a late check, is imported and its late check is still to come, by when, and to run the installer again after it", async () => {
+    it("says a video an episode holds, when this Mac owes it a late check, is imported and its late check is still to come, and to run the installer again after it", async () => {
       const t = mac();
       const old = t.folder();
       put(old, "Budget.mov", "123456");
@@ -2032,6 +2032,9 @@ describe("node settings.js write and plan, with the settings of the switch", () 
         chmodSync(shut, 0o000);
         try {
           assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, `  ${said}: waits in ${old}.`, ADVICE], folder);
+          // Owed a late check: named, with its time, when its holder is unknown; counted, with none, when it is not.
+          owe(t, folder, "Talk.mov", 5, old);
+          assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, folder.includes("Budget") ? "  1 video is already imported, and its late check is still to come." : `  ${said}: already imported; its late check is still to come (due at ${due}).`, LATE], folder);
         } finally {
           chmodSync(shut, 0o755);
         }
