@@ -11,7 +11,8 @@ import { fileId, lateCheckLockOf, readPendings, takeLateCheckLock, writePending 
 import { LOCK_LOOK_MS, LOCK_WAIT_MS, keepCheckInStep, lateCheckAt, localSource, ownCheckOnly, projectWaits, readingCheckAt, readingWaitsUntil } from "../late-wait.js";
 import { lockOf, resultFile, takeEpisodeLock } from "../detached.js";
 import { pendingFolder } from "../settings.js";
-import { writeStatus } from "../importing.js";
+import { writeStatusIn } from "../importing.js";
+import { importingFolder } from "../settings.js";
 
 const ID = "e-20261014-3fa9c1";
 const NOW = 1_800_000_000_000;
@@ -150,7 +151,7 @@ const NAME = "2026-10-14 Pricing talk (Mac Studio)";
 /** An import status of the video, written `ago` milliseconds before NOW, with `over` laid on it. */
 function status(s, over = {}) {
   const { ago = 0, ...rest } = over;
-  writeStatus(s.root, { version: 1, machine: "Mac Studio", pid: process.pid, import: "x", video: "Pricing talk.mp4", bytes: 40, seconds: 5, step: "Waiting for its late check", at: new Date(NOW - ago).toISOString(), ...rest }, (to, text) => writeFileSync(to, text));
+  writeStatusIn(importingFolder(s.root), { version: 1, machine: "Mac Studio", pid: process.pid, import: "x", video: "Pricing talk.mp4", bytes: 40, seconds: 5, step: "Waiting for its late check", at: new Date(NOW - ago).toISOString(), ...rest }, (to, text) => writeFileSync(to, text));
 }
 const REPLACED = ["Pricing talk.cut-plan.json", "Pricing talk.cut-plan.txt", "Pricing talk.rough-cut.srt", "Pricing talk.rough-cut.transcript.txt"];
 /** The entries a light import's pending names: the video, the srt, the words, the record and the four files a raw reading replaces,

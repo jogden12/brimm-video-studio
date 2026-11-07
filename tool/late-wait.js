@@ -12,8 +12,8 @@
 import { statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { LATE_CHECK_MS } from "./dropbox.js";
-import { dueAt, readPendings, releaseLateCheckLock, sameFile, settleReading, takeLateCheckLock, writePending } from "./filing.js";
-import { holdsVideo, importState, readStatuses } from "./importing.js";
+import { dueAt, readPendings, releaseLateCheckLock, sameFile, settleReading, takeLateCheckLock, writePending, statusReadFolders } from "./filing.js";
+import { holdsVideo, importState, readStatusesIn } from "./importing.js";
 import { currentReading, shownName } from "./episode.js";
 import { readResult, runningCommand, runningRun } from "./detached.js";
 import { clockAt, importHold } from "./unedited.js";
@@ -62,7 +62,7 @@ export function lateCheckAt(ctx, record) {
   const now = ctx.now();
   const owed = owedFor(ctx, record);
   if (owed) return Math.max(dueAt(owed), now);
-  const working = readStatuses(ctx.root, now).map((s) => s.status).find((s) => s && s.video === record.video.file && s.bytes === record.video.bytes && importState(s, now) === "running");
+  const working = readStatusesIn(statusReadFolders(ctx), now).map((s) => s.status).find((s) => s && s.video === record.video.file && s.bytes === record.video.bytes && importState(s, now) === "running");
   return working ? now + LATE_CHECK_MS : null;
 }
 
@@ -77,7 +77,7 @@ export const LOCK_WAIT_MS = 2 * 60 * 1000;
 export function ownCheckOnly(ctx, record) {
   if (!owedFor(ctx, record)) return false;
   const now = ctx.now();
-  return readStatuses(ctx.root, now).map((s) => s.status).filter((s) => s && s.video === record.video.file && s.bytes === record.video.bytes && holdsVideo(s, now)).every((s) => s.machine === ctx.machine && importState(s, now) === "running");
+  return readStatusesIn(statusReadFolders(ctx), now).map((s) => s.status).filter((s) => s && s.video === record.video.file && s.bytes === record.video.bytes && holdsVideo(s, now)).every((s) => s.machine === ctx.machine && importState(s, now) === "running");
 }
 
 /** When a reading of the episode with `record` can begin, in milliseconds, or null when it can begin now: the import's late check holds
@@ -121,7 +121,7 @@ export async function keepCheckInStep(ctx, { name, record, paths }, { wait, log 
     // Under the lock the pending is read again: the check may have been made, or found a problem, while the lock was waited for.
     let fresh = readPendings(ctx.home).find(same);
     if (!fresh) return { none: true };
-    if (fresh.problem) return { why: importHold({ root: ctx.root, home: ctx.home, machine: ctx.machine, record, now: ctx.now() }).why || `Dropbox found a problem with a copy of this episode: ${String(fresh.problem).replace(/\.$/, "")}.` };
+    if (fresh.problem) return { why: importHold({ root: ctx.root, statusFolders: statusReadFolders(ctx), home: ctx.home, machine: ctx.machine, record, now: ctx.now() }).why || `Dropbox found a problem with a copy of this episode: ${String(fresh.problem).replace(/\.$/, "")}.` };
     // A mark an earlier reading left (it stopped while it put its files in) is settled first, by the record, as the check settles it.
     if (fresh.reading) {
       const settled = settleReading(fresh, { home: ctx.home, log });

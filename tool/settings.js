@@ -603,7 +603,7 @@ function planned(home, rest, now) {
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")
     .then(({ heldInOld }) => {
-      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable, lateChecks } = heldInOld({ root: oldRoot, machine: oldMachine, folder: oldFolder, home, now: Number(now) });
+      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable, lateChecks } = heldInOld({ root: oldRoot, statusFolders: statusFoldersOf({ ...held, root: oldRoot, machine: oldMachine }, home), machine: oldMachine, folder: oldFolder, home, now: Number(now) });
       if (![work, running, problem, imported, kept, unreadable, lateChecks].some((lines) => lines.length)) return { settings, fields, remove, from, to, old: oldFolder };
       // What it is not done for: work in the old folder; else that folder, or its status files, could not be looked at; else this
       // Mac's own late checks could not be read, the old folder having been.

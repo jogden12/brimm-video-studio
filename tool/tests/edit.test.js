@@ -391,6 +391,23 @@ describe("node edit.js bring, status and retry", () => {
     assert.deepEqual([readdirSync(join(t.episodes, ".importing")), kicked, t.started], [[], 1, []]);
     t.done();
   });
+  it("on a Mac with a drop folder of its own, status shows a failed import from its local status, and retry takes that status away (Phase 3, L3)", async () => {
+    const t = setup();
+    const picked = join(t.home, "BRIMM Video Work", "Drop");
+    mkdirSync(picked, { recursive: true });
+    writeSettings(t.home, { drop: "Drop", dropPath: picked });
+    writeFileSync(join(picked, "Talk.mov"), "video");
+    const own = join(t.home, "Library", "Application Support", "BRIMM Video", "importing");
+    mkdirSync(own, { recursive: true });
+    writeFileSync(join(own, "Talk.mov (Mac Studio) 1.json"), JSON.stringify({ version: 1, machine: "Mac Studio", pid: 4242, video: "Talk.mov", bytes: 5, seconds: 120, step: "Filing", at: new Date(NOW - 30 * 60000).toISOString(), failed: "the transcriber stopped" }));
+    assert.ok((await t.run("status")).said.includes("  A video of 5 bytes: its import failed on Mac Studio: the transcriber stopped"));
+    let kicked = 0;
+    t.deps.kickstart = () => (kicked += 1);
+    const r = await t.run("retry", "talk");
+    assert.deepEqual([r.code, r.said], [0, ["A video of 5 bytes in this Mac's drop folder is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."]]);
+    assert.deepEqual([readdirSync(own), kicked, readdirSync(t.episodes)], [[], 1, []]);
+    t.done();
+  });
   it("retry refuses while the import is running", async () => {
     const t = setup();
     writeFileSync(join(drop(t), "Talk.mov"), "video");

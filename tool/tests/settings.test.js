@@ -1620,7 +1620,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       const old = t.folder();
       put(old, "Talk.mov");
       t.status("Talk.mov", { failed: "the transcriber stopped" });
-      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  1 import failed, and its video is still in the old folder.", ADVICE]);
+      assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  1 import failed, and its video is still in the old folder.", "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again."]);
       t.done();
     });
     it("leaves alone what is not this Mac's, or is not trouble: another Mac's failed import, an import at work, one that stopped, a video held on purpose", async () => {
@@ -2158,7 +2158,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       const one = mac({ import: "light" });
       put(one.folder(), "C.mov");
       one.status("C.mov", { failed: "x" });
-      assert.deepEqual(await refused(one, "--drop", "Drop"), [HEAD, "  1 import failed, and its video is still in the old folder.", ADVICE]);
+      assert.deepEqual(await refused(one, "--drop", "Drop"), [HEAD, "  1 import failed, and its video is still in the old folder.", "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again."]);
       one.status("D.mov", { problem: "y" });
       one.status("E.mov", { problem: "y" });
       put(one.folder(), "E.mov");
@@ -2700,6 +2700,26 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
       const after = t.read();
       assert.equal(Object.hasOwn(after, "dropPath"), false);
       assert.equal(after.drop, "Drop");
+      t.done();
+    });
+    it("a switch back from a picked folder reads the local status folder: a failed import there is refused in the words of the old folder's work, and nothing is written (Phase 3, L3)", async () => {
+      const t = mac({ drop: "Drop" });
+      mkdirSync(t.desktop, { recursive: true });
+      writeSettings(t.home, { dropPath: t.desktop });
+      writeFileSync(join(t.desktop, "Talk.mov"), "video");
+      const own = importingFolderOf({ root: t.root, dropPath: t.desktop }, t.home);
+      mkdirSync(own, { recursive: true });
+      writeFileSync(join(own, "Talk.mov (Mac Studio) 1.json"), JSON.stringify({ version: 1, machine: "Mac Studio", pid: 4242, video: "Talk.mov", bytes: 5, seconds: 120, step: "Filing", at: AT.toISOString(), failed: "it could not be filed into Episodes" }));
+      const before = t.held();
+      assert.equal(await t.run("write", ...t.told, "--drop", "Drop", "--switch-back"), 1);
+      assert.deepEqual(t.said.slice(0, 3), [`Not written: the drop folder would change from ${t.desktop} to Drop, and work is not finished in the old one:`, "  1 import failed, and its video is still in the old folder.", "Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again."]);
+      assert.equal(t.held(), before);
+      // With the video gone, only its status file in the local folder holds the failed import, and the line says where.
+      rmSync(join(t.desktop, "Talk.mov"));
+      t.said.length = 0;
+      assert.equal(await t.run("write", ...t.told, "--drop", "Drop", "--switch-back"), 1);
+      assert.equal(t.said[1], `  1 import failed, and its video is not in the old folder now: only its status file, in ${own}, holds this, and a person takes it away by hand.`);
+      assert.equal(t.held(), before);
       t.done();
     });
     it("leaves a run with no drop option on a Mac with a drop folder of its own as it is, whatever the folder holds", async () => {
