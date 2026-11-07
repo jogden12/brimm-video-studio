@@ -963,12 +963,13 @@ export const unreadWords = (named, read) => (read && read.code === "NONE"
     the episodes `episodes` lists, and through `links` (finish.js linksOf, read once by `episodes`) the versions of that video. An
     episode whose record cannot be read is named as listedAs names it, and so is one a newer brimm-video wrote. A planned episode (PR H4)
     has no video to give a length, and is said by plan.js plannedLine: its title, the day it was planned, what it waits for and its id.
-    An episode kept on another Mac (keptOn; Phase 3, L2, D3), one with a conflicted copy included, is said by its line, from its record in
-    force, and under it to be there, in the guide's words; the lines of her card are not said of a video of it waiting for her answer, since
-    every command that would answer it is refused here; and nothing of its files is said here, neither a conflicted copy, a script changed by
-    hand nor a file not whole: that Mac says each and sorts it out, where the commands that would do it run (review R0-F6). On the Mac that
-    keeps it, its own files are looked for in its video/ folder there (where.js folderAt), and its files in Dropbox in its folder there
-    (episode.js fileProblems). */
+    An episode kept on another Mac (keptOn; Phase 3, L2, D3), one with a conflicted copy included, is said by its line as any episode is (a
+    gated one by the record the gate names it by), and under it to be there: "It is on <Mac>.", with the guide's step "Carry on there." while
+    that step is on that Mac (stepThere; review R1-F4); the lines of her card are not said of a video of it waiting for her answer, since every
+    command that would answer it is refused here; and nothing of its files is said here, neither a conflicted copy, a script changed by hand
+    nor a file not whole: that Mac says each and sorts it out, where the commands that would do it run (review R0-F6). On the Mac that keeps
+    it, its own files are looked for in its video/ folder there (where.js folderAt), and its files in Dropbox in its folder there (episode.js
+    fileProblems). */
 function episodeLines(ctx, e, left, all, links) {
   const r = e.read.record;
   if (e.newer) return [`  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
@@ -994,7 +995,7 @@ function episodeLines(ctx, e, left, all, links) {
     const kind = record.kind === "short video" ? "a short video" : "an episode";
     lines.push(`  ${record.name.text}${record.name.placeholder ? " (a placeholder name)" : ""}: ${kind} of ${stamp(record.video.seconds)}, in ${e.name}, id ${record.id.slice(-6)}`);
   }
-  if (there) lines.push(`    It is on ${spokenMac(there)}. Carry on there.`);
+  if (there) lines.push(`    It is on ${spokenMac(there)}.${stepThere(e, left) ? " Carry on there." : ""}`);
   if (record.editing) lines.push(`    Editing: ${record.editing.by}, since ${shownAt(record.editing.since)}`);
   if (record.title && !isGated(e)) lines.push(`    Title: ${record.title.text}${record.title.approved ? "" : " (recommended)"}`);
   if (record.finished) lines.push(`    Finished: revision ${record.finished.revision}, on ${record.finished.on}`);
@@ -1007,9 +1008,31 @@ function episodeLines(ctx, e, left, all, links) {
   return lines;
 }
 
+/** Whether the guide's own step for the episode `e`, kept on another Mac, is on that Mac (guide.js videoNext and sessionNext, by `onOtherMac`),
+    by its records alone, so that `episodes` says "Carry on there." under it only where the guide does (review R1-F4). Never for a video she left
+    alone (`left`), which has no step; always for a video waiting for her answer, which is answered there; for a session, while its empty
+    revision is owed, and otherwise until a hand-off of its own is written, unless her choice is its transcript only; for any other video and a
+    plan, until its hand-off is written, after which the BRIMM Ops page's steps are hers on any Mac. Her notes on this Mac are not read: while
+    the page's step for a session's empty revision is still hers, the guide says that step first, and the session's own steps there after it. */
+function stepThere(e, left) {
+  if (left) return false;
+  const named = isGated(e) ? gatedRecord(e) : e.inForce;
+  if (recordKind(named) === null && !isPlannedRecord(named)) return true;
+  const r = e.inForce;
+  const finished = r.finished !== null && typeof r.finished === "object" ? r.finished : null;
+  if (recordKind(r) !== "session") return !finished;
+  const session = r.session !== null && typeof r.session === "object" ? r.session : {};
+  if (revisionOwed(r)) return true;
+  if (finished && finished.revision !== session.emptyRevision) return false;
+  return session.teachings !== "transcript only";
+}
+
 /** The episodes `episodes` lists (episodeAt), newest first: every folder in Episodes with a record, but an archived one, and but a part (PR H5a):
-    a dropped video that is footage for a planned video is said with its plan (`plan "<planned>"`), and is listed nowhere else. */
-const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived) && !isPart(e.inForce));
+    a dropped video that is footage for a planned video is said with its plan (`plan "<planned>"`), and is listed nowhere else. An archived one
+    is known by the record read whole, so that one with a conflicted copy is listed with its conflict, to be sorted out; but one kept on another
+    Mac (keptOn), whose conflict is said and sorted out on that Mac alone, is left out by its record in force, as the guide leaves it out (review
+    R1-F5). */
+const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived) && !(e.inForce && e.inForce.archived && keptOn(ctx, e)) && !isPart(e.inForce));
 
 /** Whether an episode is a video she has left alone, not for brimm-video: its gated record says so. */
 const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boolean(gatedRecord(e).answer) && gatedRecord(e).answer.state === "not for brimm-video";

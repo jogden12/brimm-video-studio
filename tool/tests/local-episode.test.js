@@ -110,6 +110,20 @@ const KEPT = {
   }
 };
 
+/** The raw video `found` (KEPT.raw's) handed off on the Mac Studio: its hand-off in final/, and its record 2 saying so. */
+function handedOff(found) {
+  const handoff = "final/Pricing talk.brimm-ops.json";
+  mkdirSync(join(found.folder, "final"), { recursive: true });
+  writeFileSync(join(found.folder, handoff), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: found.record.id, kind: "raw", name: "Pricing talk" }, main: { file: "Pricing talk.mov" } }));
+  writeFileSync(recordFile(found.folder, 2), recordText({ ...found.record, rev: 2, finished: { revision: 1, at: "2026-10-20T13:00:00-05:00", on: STUDIO, handoff, parts: {} } }));
+}
+
+/** A video she left alone, not for BRIMM Video Studio (`leave`), kept on the Mac Studio, as `episodes` lists it there. */
+const LEFT = {
+  line: "  Video of 20 Oct, 13:00 (Mac Studio): a video of 0:42, id eeeeee",
+  make: (t) => kept(t, { id: "e-20261020-eeeeee", name: "2026-10-20 IMG_0050 (Mac Studio)", stem: "IMG_0050", record: { answer: { state: "not for brimm-video", guess: "raw", seen: "wide, 0:42", came: "camera", match: null, by: "Sallie Ogden", on: STUDIO, at: "2026-10-20T08:00:00-05:00" }, label: "Video of 20 Oct, 13:00 (Mac Studio)" } })
+};
+
 /** Run a command of edit.js on a Mac, by its deps: { code, said, text }. */
 async function on(deps, ...argv) {
   const said = [];
@@ -117,8 +131,14 @@ async function on(deps, ...argv) {
   return { code, said, text: said.join("\n") };
 }
 
-/** Every file of the world but the MacBook's own home, whole, by its path: Dropbox (the root) and the Mac Studio's home and work. */
-const shared = (w) => Object.fromEntries(listAll(w.dir).filter((rel) => !rel.startsWith("home-macbook/")).map((rel) => [rel, readFileSync(join(w.dir, rel), "utf8")]));
+/** The homes of the Macs a test runs commands on besides the Mac Studio, by their folders in the world: Jason's MacBook's, and Sallie's laptop's. */
+const OTHER_HOMES = ["home-macbook", "home-laptop"];
+
+/** Every file of the world but the other Macs' own homes, whole, by its path: Dropbox (the root) and the Mac Studio's home and work. */
+const shared = (w) => Object.fromEntries(listAll(w.dir).filter((rel) => !OTHER_HOMES.some((home) => rel.startsWith(`${home}/`))).map((rel) => [rel, readFileSync(join(w.dir, rel), "utf8")]));
+
+/** Her two skills (studio/SKILL.md and SKILL-open.md), as written. */
+const SKILLS = ["SKILL.md", "SKILL-open.md"].map((name) => readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8"));
 
 /** What each command is given to name the episode in the folder `folder`, as Claude runs it (edit-gate.test.js's ASKED). */
 const askedOf = (folder) => ({
@@ -136,23 +156,24 @@ const DETACHED = (folder) => [["ask", "--now", folder], ["finish", "--now", fold
 /** The result each detached run the gate ended leaves on this Mac, by its command, with the words `status` names that run by. */
 const RESULTS = { ask: "ask", bring: "bring", finish: "finish", join: "making the video from its footage", read: "read", workcopy: "making the video for HyperFrames" };
 
-/** Walk every command that names an episode, and the detached runs, on the MacBook (`w.macbook`), for the episode kept on the Mac Studio in the
-    folder `found.name`: each says `line`, the gate's one line, and ends 1, and runs, starts and writes nothing in Dropbox or on the Mac Studio. On
-    the MacBook, each detached run leaves its result in the same words, as `status` lists it there, refusing nothing. `what` names the episode in
-    what a failure says. */
-async function walkOn(w, found, line, what) {
+/** Walk every command that names an episode, and the detached runs, on another Mac (by default the MacBook: `w.macbook`, whose home is
+    `w.macbookHome`; a test gives another as `deps` and `home`, a folder of OTHER_HOMES), for the episode kept on the Mac Studio in the folder
+    `found.name`: each says `line`, the gate's one line, and ends 1, and runs, starts and writes nothing in Dropbox or on the Mac Studio. On that
+    Mac, each detached run leaves its result in the same words, as `status` lists it there, refusing nothing. `what` names the episode in what a
+    failure says. */
+async function walkOn(w, found, line, what, { deps = w.macbook, home = w.macbookHome } = {}) {
   const before = shared(w);
   for (const argv of [...SCOPED.map((name) => [name, ...askedOf(found.name)[name]]), ...DETACHED(found.name)]) {
-    const r = await on(w.macbook, ...argv);
+    const r = await on(deps, ...argv);
     assert.deepEqual([r.code, r.said], [1, [line]], `${what}: ${argv.join(" ")}`);
     assert.deepEqual([w.started, w.calls, w.opened], [[], [], []], `${what}: ${argv.join(" ")}`);
     assert.deepEqual(shared(w), before, `${what}: ${argv.join(" ")} wrote nothing in Dropbox or on the Mac Studio`);
   }
-  // On the MacBook, only what each detached run the gate ended leaves: its result, in the same words.
-  assert.deepEqual(listAll(w.macbookHome), Object.keys(RESULTS).map((command) => join("BRIMM Video Work", found.name, `${command}.result.json`)), what);
-  for (const rel of listAll(w.macbookHome)) assert.deepEqual(JSON.parse(readFileSync(join(w.macbookHome, rel), "utf8")).failed, [line], `${what}: ${rel}`);
+  // On that Mac, only what each detached run the gate ended leaves: its result, in the same words.
+  assert.deepEqual(listAll(home), Object.keys(RESULTS).map((command) => join("BRIMM Video Work", found.name, `${command}.result.json`)), what);
+  for (const rel of listAll(home)) assert.deepEqual(JSON.parse(readFileSync(join(home, rel), "utf8")).failed, [line], `${what}: ${rel}`);
   // `status` names no episode to refuse: it lists each of those results, ended and not done, in the gate's words.
-  const status = await on(w.macbook, "status");
+  const status = await on(deps, "status");
   assert.equal(status.code, 0, `${what}: ${status.text}`);
   assert.equal(status.said.length, Object.keys(RESULTS).length, `${what}: ${status.text}`);
   for (const run of Object.values(RESULTS)) assert.equal(status.said.filter((said) => said.includes(`: ${run} ended `) && said.endsWith(`Not done: ${line}`)).length, 1, `${what}: ${run}\n${status.text}`);
@@ -222,6 +243,10 @@ describe("an episode kept on the Mac Studio, on another Mac (Jason's MacBook, on
       assert.equal(r.said.filter((line) => line === ON).length, Object.keys(KEPT).length, r.text);
       assert.doesNotMatch(r.text, /missing|not all here|not the one Studio saved|Card/, r.text);
       assert.doesNotMatch(r.text, /IMG_0043|Jane Doe/, "nothing of a gated video's file is said");
+      // Her chat asks no card for the video waiting for her answer: both her skills name the very line said under it, with its Mac as <Mac>
+      // (review R1-F1; studio.test.js pins their sentence).
+      const under = after(KEPT.waiting.line).trim().replace("the Mac Studio", "<Mac>");
+      for (const skill of SKILLS) assert.ok(skill.includes(`A video \`episodes\` lists with "${under}" under it waits for her on that Mac: ask no card for it here`), under);
     } finally {
       w.done();
     }
@@ -245,15 +270,39 @@ describe("an episode kept on the Mac Studio, on another Mac (Jason's MacBook, on
   it("has the guide take her step on the BRIMM Ops page there once a hand-off is written: the page is hers on any Mac", async () => {
     const w = world();
     try {
-      const found = KEPT.raw.make(w);
-      const handoff = "final/Pricing talk.brimm-ops.json";
-      mkdirSync(join(found.folder, "final"), { recursive: true });
-      writeFileSync(join(found.folder, handoff), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: found.record.id, kind: "raw", name: "Pricing talk" }, main: { file: "Pricing talk.mov" } }));
-      writeFileSync(recordFile(found.folder, 2), recordText({ ...found.record, rev: 2, finished: { revision: 1, at: "2026-10-20T13:00:00-05:00", on: STUDIO, handoff, parts: {} } }));
+      handedOff(KEPT.raw.make(w));
       const r = await on(w.macbook, "guide", "Pricing talk");
       assert.equal(r.code, 0, r.text);
       assert.match(r.said[0], /^Pricing talk \(3fa9c1\): On the BRIMM Ops page: Drag the hand-off onto Episodes\./);
       assert.equal(r.said.at(-1), "Step: taken");
+    } finally {
+      w.done();
+    }
+  });
+  it("is listed by `episodes` with only where it is once the guide's step for it is not there: handed off, left alone, or a session kept to its transcript", async () => {
+    // Review R1-F4. The guide gives a video handed off the BRIMM Ops page's steps, hers on any Mac, and a video she left alone and a session whose
+    // choice is its transcript only no step at all: `episodes` says where each is, and never "Carry on there.", which is the guide's step alone.
+    const w = world();
+    try {
+      handedOff(KEPT.raw.make(w));
+      const session = KEPT.session.make(w);
+      writeFileSync(recordFile(session.folder, 2), recordText({ ...session.record, rev: 2, session: { ...session.record.session, teachings: "transcript only" } }));
+      LEFT.make(w);
+      const r = await on(w.macbook, "episodes");
+      assert.equal(r.code, 0, r.text);
+      const under = (start) => {
+        const at = r.said.indexOf(start);
+        assert.ok(at >= 0, `${start}\n${r.text}`);
+        return r.said.slice(at + 1, at + 3);
+      };
+      assert.deepEqual(under(KEPT.raw.line), ["    It is on the Mac Studio.", "    Finished: revision 1, on Mac Studio"], r.text);
+      assert.equal(under(KEPT.session.line)[0], "    It is on the Mac Studio.", r.text);
+      assert.equal(under(LEFT.line)[0], "    It is on the Mac Studio.", r.text);
+      assert.ok(r.said.indexOf("Left alone, not for BRIMM Video Studio:") < r.said.indexOf(LEFT.line), r.text);
+      assert.doesNotMatch(r.text, /Carry on there/, r.text);
+      // The guide says none of them is on the Mac Studio as a step: the page's step for the one handed off, and nothing of the other two.
+      const guide = await on(w.macbook, "guide");
+      assert.doesNotMatch(guide.text, /Carry on there|Session, 2026-10-20|Video of 20 Oct, 13:00/, guide.text);
     } finally {
       w.done();
     }
@@ -282,6 +331,10 @@ describe("an episode kept on the Mac Studio with a conflicted copy, or a script 
     { what: "a raw video whose record and its conflicted copy are both kept there", episode: "raw", make: (found) => conflictedRecord(found, {}) },
     { what: "a raw video whose conflicted copy alone is kept there", episode: "raw", make: (found) => conflictedRecord(found, { inForce: { local: null } }) },
     { what: "a raw video whose record in force alone is kept there", episode: "raw", make: (found) => conflictedRecord(found, { copy: { local: null } }) },
+    // A copy is read as it is, never through episode.js faultFor, so a damaged or hand-edited one may hold a `local` that names no Mac: it says
+    // the episode is kept on no Mac, this one included, and lets nothing through here (edit.js keptOn; review R1-F6).
+    { what: "a raw video whose conflicted copy's `local` names no Mac", episode: "raw", make: (found) => conflictedRecord(found, { copy: { local: {} } }) },
+    { what: "a raw video whose conflicted copy's `local` names an empty Mac", episode: "raw", make: (found) => conflictedRecord(found, { copy: { local: { on: "" } } }) },
     { what: "a video waiting for her answer whose record and its conflicted copy are both kept there", episode: "waiting", make: (found) => conflictedRecord(found, {}) },
     { what: "a plan whose script in Dropbox has a conflicted copy", episode: "plan", make: (found) => writeFileSync(join(found.folder, "teleprompter (Mac Studio's conflicted copy 2026-10-20).txt"), "Too many SKUs sink a shop.\n") },
     { what: "a plan whose script in Dropbox was changed by hand", episode: "plan", make: (found) => writeFileSync(join(found.folder, "teleprompter.txt"), "Too many SKUs will sink a small shop, and fast.\n") }
@@ -304,6 +357,26 @@ describe("an episode kept on the Mac Studio with a conflicted copy, or a script 
       }
     });
   }
+  it("leaves out a plan she dropped there whose record has a conflicted copy, as the guide does, while the Mac Studio lists its conflict", async () => {
+    // Review R1-F5. A dropped plan is archived: the guide passes it over on either Mac by its record in force, and `episodes` leaves an archived
+    // episode out. The Mac Studio still lists its folder and conflict, to be sorted out there; here nothing of it is said.
+    const w = world();
+    try {
+      const found = KEPT.plan.make(w);
+      conflictedRecord(found, { inForce: { archived: { at: "2026-10-20T10:00:00-05:00" } }, copy: { archived: { at: "2026-10-20T10:00:01-05:00" } } });
+      const listed = await on(w.macbook, "episodes");
+      assert.equal(listed.code, 0, listed.text);
+      assert.ok(listed.said.includes("No episodes yet."), listed.text);
+      assert.doesNotMatch(listed.text, /Too many SKUs|cccccc|It is on/, listed.text);
+      const guide = await on(w.macbook, "guide");
+      assert.equal(guide.code, 0, guide.text);
+      assert.doesNotMatch(guide.text, /Too many SKUs|cccccc/, guide.text);
+      const there = await on(w.studio, "episodes");
+      assert.deepEqual(listedLines(there), ["  2026-10-20 Too many SKUs (Mac Studio)", `    Dropbox has kept a conflicted copy in this episode: record/0002 (Mac Studio's conflicted copy 2026-10-20).json. Two Macs changed the same file before Dropbox could bring one change across, and which to keep is for a person to say. Nothing is changed until one is kept. Say "sort out the conflict".`], there.text);
+    } finally {
+      w.done();
+    }
+  });
 });
 
 describe("a plan whose record and its conflicted copy say it is kept on two Macs", () => {
@@ -317,8 +390,12 @@ describe("a plan whose record and its conflicted copy say it is kept on two Macs
   };
   /** Every file of Dropbox (the root), whole, by its path. */
   const inDropbox = (w) => Object.fromEntries(listAll(w.root).map((rel) => [rel, readFileSync(join(w.root, rel), "utf8")]));
+  /** What a command says of the plan on a Mac one of its records names, when the gate lets it through for a plan: the conflict's words. */
+  const CONFLICT = `2026-10-20 Too many SKUs (Mac Studio): Dropbox has kept a conflicted copy in this episode: record/0002 (Jason's MacBook's conflicted copy 2026-10-20).json. Two Macs changed the same file before Dropbox could bring one change across, and which to keep is for a person to say. Nothing is changed until one is kept. Say "sort out the conflict".`;
+  /** The commands but `resolve` that the gate lets through for a plan (gate.test.js): each is refused by the conflict itself. */
+  const THROUGH = ["plan", "name", "app", "join"];
   for (const [mac, deps] of [["the Mac Studio", (w) => w.studio], ["Jason's MacBook", (w) => w.macbook]]) {
-    it(`has ${mac}, which one of them names, sort the conflict out, refuse every other command by the conflict, and say so in the guide and \`episodes\``, async () => {
+    it(`has ${mac}, which one of them names, sort the conflict out, refuse the commands a plan lets through by the conflict and every other command, never as on another Mac, and say so in the guide and \`episodes\``, async () => {
       const w = world();
       try {
         const found = split(w);
@@ -327,48 +404,62 @@ describe("a plan whose record and its conflicted copy say it is kept on two Macs
         assert.equal(resolved.code, 0, resolved.text);
         assert.match(resolved.text, /^Dropbox kept two versions of record\/0002\.json in Too many SKUs:/, resolved.text);
         assert.match(resolved.text, /Say which to keep: A or B\.$/, resolved.text);
-        // Every other command is refused, by the conflict or by what the gate says of a plan, and never as on another Mac.
+        // The commands a plan lets through are refused by the conflict, in its words; every other by what the gate says of a plan; none as on
+        // another Mac.
         for (const argv of [...SCOPED.filter((name) => name !== "resolve").map((name) => [name, ...askedOf(found.name)[name]]), ...DETACHED(found.name)]) {
           const r = await on(deps(w), ...argv);
-          assert.equal(r.code, 1, `${argv.join(" ")}: ${r.text}`);
+          if (THROUGH.includes(argv[0])) assert.deepEqual([r.code, r.said], [1, [CONFLICT]], argv.join(" "));
+          else assert.equal(r.code, 1, `${argv.join(" ")}: ${r.text}`);
           assert.doesNotMatch(r.text, / is on (the Mac Studio|Jason's MacBook)/, argv.join(" "));
           assert.deepEqual([w.started, w.calls, w.opened], [[], [], []], argv.join(" "));
         }
         assert.deepEqual(inDropbox(w), before, "nothing was written in Dropbox");
-        // Refused as any episode with a conflicted copy is, on its own Mac: by its folder, with the conflict's words.
+        // Found by its title too, as any episode with a conflicted copy is on its own Mac: named by its folder, with the conflict's words.
         const named = await on(deps(w), "plan", "Too many SKUs");
-        assert.deepEqual([named.code, named.said], [1, [`2026-10-20 Too many SKUs (Mac Studio): Dropbox has kept a conflicted copy in this episode: record/0002 (Jason's MacBook's conflicted copy 2026-10-20).json. Two Macs changed the same file before Dropbox could bring one change across, and which to keep is for a person to say. Nothing is changed until one is kept. Say "sort out the conflict".`]]);
+        assert.deepEqual([named.code, named.said], [1, [CONFLICT]]);
         const guide = await on(deps(w), "guide", "Too many SKUs");
         assert.deepEqual([guide.code, guide.said], [0, ['Too many SKUs (cccccc): Dropbox kept two copies of a change to it. Say "sort out the conflict".']]);
         const listed = await on(deps(w), "episodes");
-        assert.deepEqual(listedLines(listed), ["  2026-10-20 Too many SKUs (Mac Studio)", `    Dropbox has kept a conflicted copy in this episode: record/0002 (Jason's MacBook's conflicted copy 2026-10-20).json. Two Macs changed the same file before Dropbox could bring one change across, and which to keep is for a person to say. Nothing is changed until one is kept. Say "sort out the conflict".`], listed.text);
+        assert.deepEqual(listedLines(listed), ["  2026-10-20 Too many SKUs (Mac Studio)", `    ${CONFLICT.slice(CONFLICT.indexOf("Dropbox has kept"))}`], listed.text);
       } finally {
         w.done();
       }
     });
   }
-  it("is kept on one Mac again once she keeps a side: kept on Jason's MacBook, the side that says the Mac Studio leaves it to the Mac Studio", async () => {
+  // A plan before its join keeps no file on a Mac (its three files are in Dropbox), so either side may be kept on either Mac: the side kept says
+  // which Mac carries on with it, and the other Mac then refuses it in the one line.
+  for (const [mac, deps, side, keeper, other] of [
+    ["Jason's MacBook", (w) => w.macbook, "A", STUDIO, MACBOOK],
+    ["Jason's MacBook", (w) => w.macbook, "B", MACBOOK, STUDIO],
+    ["the Mac Studio", (w) => w.studio, "A", STUDIO, MACBOOK],
+    ["the Mac Studio", (w) => w.studio, "B", MACBOOK, STUDIO]
+  ]) {
+    it(`is kept on one Mac again once she keeps a side on ${mac}: keeping ${side}, the side that says ${keeper}, leaves it to ${keeper}`, async () => {
+      const w = world();
+      try {
+        const found = split(w);
+        assert.equal((await on(deps(w), "resolve", "Too many SKUs")).code, 0);
+        const kept = await on(deps(w), "resolve", "Too many SKUs", "--keep", side);
+        assert.equal(kept.code, 0, kept.text);
+        assert.equal(readEpisode(found.folder).record.local.on, keeper);
+        const macOf = { [STUDIO]: w.studio, [MACBOOK]: w.macbook };
+        const there = await on(macOf[other], "plan", "Too many SKUs");
+        assert.deepEqual([there.code, there.said], [1, [ON_OTHER_MAC("Too many SKUs", keeper)]]);
+        const here = await on(macOf[keeper], "plan", "Too many SKUs");
+        assert.equal(here.code, 0, here.text);
+      } finally {
+        w.done();
+      }
+    });
+  }
+  it("has a Mac neither names (Sallie's laptop) refuse every command in the one line, naming the Mac its record in force keeps it on, and write nothing", async () => {
     const w = world();
     try {
       const found = split(w);
-      assert.equal((await on(w.macbook, "resolve", "Too many SKUs")).code, 0);
-      const kept = await on(w.macbook, "resolve", "Too many SKUs", "--keep", "A");
-      assert.equal(kept.code, 0, kept.text);
-      assert.equal(readEpisode(found.folder).record.local.on, STUDIO);
-      const there = await on(w.macbook, "plan", "Too many SKUs");
-      assert.deepEqual([there.code, there.said], [1, [ON_OTHER_MAC("Too many SKUs", STUDIO)]]);
-      const here = await on(w.studio, "plan", "Too many SKUs");
-      assert.equal(here.code, 0, here.text);
-    } finally {
-      w.done();
-    }
-  });
-  it("has a Mac neither names (Sallie's laptop) refuse every command in the one line, naming the Mac its record in force keeps it on", async () => {
-    const w = world();
-    try {
-      const found = split(w);
-      const laptop = { ...w.macbook, home: join(w.dir, "home-laptop"), settings: { ...w.macbook.settings, machine: "Sallie's laptop" } };
-      for (const argv of [["resolve", found.name], ["plan", "Too many SKUs"], ["open", found.name]]) {
+      const home = join(w.dir, "home-laptop");
+      const laptop = { ...w.macbook, home, settings: { ...w.macbook.settings, machine: "Sallie's laptop" } };
+      await walkOn(w, found, ON_OTHER_MAC("Too many SKUs", STUDIO), "a plan kept on two Macs, on Sallie's laptop", { deps: laptop, home });
+      for (const argv of [["resolve", "Too many SKUs"], ["plan", "Too many SKUs"], ["open", "cccccc"]]) {
         const r = await on(laptop, ...argv);
         assert.deepEqual([r.code, r.said], [1, [ON_OTHER_MAC("Too many SKUs", STUDIO)]], argv.join(" "));
       }

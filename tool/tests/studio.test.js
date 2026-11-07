@@ -1493,6 +1493,21 @@ describe("her skill asks Studio's cards as Studio printed them, in short rules, 
       });
     });
   }
+  it("asks no card for a video `episodes` says is on another Mac, in a line of its own, the same in both locks, before any card (Phase 3 L2; review R1-F1)", () => {
+    // On a Mac that does not keep a video waiting for her answer, `episodes` says the line below under it and prints no card for it, since every
+    // command that would answer it is refused there (local-episode.test.js holds the line to what `episodes` prints): her chat asks no card for it,
+    // the planned card included, and tells her it waits for her on that Mac.
+    const SENTENCE = 'A video `episodes` lists with "It is on <Mac>. Carry on there." under it waits for her on that Mac: ask no card for it here, and tell her so.';
+    for (const [name, text] of Object.entries(SKILLS)) {
+      assert.equal(text.split(SENTENCE).length, 2, `${name}: the sentence is there once`);
+      assert.ok(text.split("\n").includes(SENTENCE), `${name}: a line of its own`);
+      const at = text.indexOf(SENTENCE);
+      assert.ok(text.indexOf("## The card") < at && at < text.indexOf("## Guide her"), `${name}: where the cards are described`);
+      // Before the planned card, and before the line of a video waiting for her answer that her card is asked under (the open lock's `Card: {…}`).
+      const waiting = text.indexOf("`episodes` names a video waiting for her answer by its label");
+      assert.ok(waiting > 0 && at < text.indexOf("Planned card: {…}") && at < waiting, `${name}: before the first card she is asked`);
+    }
+  });
   it("has the twin hold the same rules, word for word, in the same order", () => {
     const place = (text) => Object.values(RULES).map((rule) => text.indexOf(rule));
     const lineOf = (text, start) => text.split("\n").find((line) => line.startsWith(start));
