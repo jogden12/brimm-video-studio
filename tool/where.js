@@ -11,10 +11,10 @@ import { statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { episodeFilesFolder } from "./settings.js";
 
-/** The folders of an episode's folder in Dropbox whose files stay in Dropbox on a record with `local`: its records, the hand-off's (final/), what
-    is set aside there (history/) and the recordings copied in after the hand-off (Original files/, D6). */
 /** The folder of an episode in Dropbox that keeps the recordings copied in after the hand-off (D6). */
 export const ORIGINALS_FOLDER = "Original files";
+/** The folders of an episode's folder in Dropbox whose files stay in Dropbox on a record with `local`: its records, the hand-off's (final/), what
+    is set aside there (history/) and the recordings copied in after the hand-off (Original files/, D6). */
 const DROPBOX_FOLDERS = ["record", "final", "history", ORIGINALS_FOLDER];
 /** A plan's three files, made before any footage and kept in its folder in Dropbox (plan.js PLAN_FILE_NAMES, which a test holds this to). */
 export const PLAN_FILES = Object.freeze(["video guide.md", "shot list.md", "teleprompter.txt"]);

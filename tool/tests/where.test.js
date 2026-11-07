@@ -1,7 +1,7 @@
 // Where an episode's files are (Phase 3, L2; design D1 and D2): a record that holds `local` keeps its own files on the Mac `local.on`, in its
 // work folder's video/, and its folder in Dropbox keeps record/, final/, history/, Original files/ and a plan's three files. A file's place is
 // its name. where.js says the place of each file, the folder of each place and the path of each file, and which Mac a record is kept on when
-// it is not this one. It is pure: nothing here reads or writes a file.
+// it is not this one. Its places are pure; recordingAt and recordingStat look at files, and W1 and W2 use a temp folder of their own for that.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
