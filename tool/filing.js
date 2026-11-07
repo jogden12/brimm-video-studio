@@ -16,7 +16,7 @@ import { LATE_CHECK_MS, cloneFile, cloneIn, isWhole, lateCheck, onSameDisk, repl
 import { RECORD_DIR, recordFile, conflictedCopies, conflictedOf, lastWritten, newEpisode, newId, localStamp, readEpisode, recordCopies, recordNumbers, writeEpisode, shownName } from "./episode.js";
 import { episodeFolderName, fileSafe } from "./names.js";
 import { putHereNow } from "./put-here.js";
-import { dropFolderOf, episodeFilesFolder, episodeWork, episodesFolder, importingFolder, pendingFolder, runsFolder, seenFile, workFolder } from "./settings.js";
+import { downloadsFolder, dropFolderOf, episodeFilesFolder, episodeWork, episodesFolder, importingFolder, pendingFolder, runsFolder, sameFolder, seenFile, workFolder } from "./settings.js";
 // detached.js takes caffeinate and thisCheckout from here: each is used only when called, as kinds.js's are, so the cycle costs nothing at load.
 import { releaseEpisodeLock, runningCommand, takeEpisodeLock } from "./detached.js";
 // finish-ended.js takes its result from detached.js: used only when called, like detached.js's own names.
@@ -27,6 +27,9 @@ import { isRunning } from "./run.js";
 import { isZoomName, namesOf, withoutNames, zoomTimeOf } from "./kinds.js";
 import { gated, gatedAsOf, withShortId } from "./gate.js";
 import { keptOnAMac } from "./where.js";
+// finish.js, finish-check.js and finish-ended.js each import this file, directly or through detached.js: their names are used only inside functions.
+import { linksOf } from "./finish.js";
+import { clearChecking, clearProblem, flagProblem, problemNotice } from "./finish-check.js";
 import { randomUUID } from "node:crypto";
 
 /** How long a recording must be to be an episode, in seconds. One that is shorter is a short video. */
@@ -1204,6 +1207,216 @@ export function checkRecord(p, deps) {
 }
 
 CHECKS.record = checkRecord;
+
+/** The finish's own record, put back when Dropbox lost it (ruling 12), alone: synchronous, and the caller holds the episode's late-check lock. `p.record` is the entry the
+    finish wrote. Gives { put, problems }. */
+export function putOwnRecordBack(p, { isWhole: whole = isWhole, opts }) {
+  const rec = p.record;
+  const own = rec.to;
+  const number = basename(own);
+  const log = (opts && opts.log) || (() => {});
+  const gone = `its record ${number} is not in Dropbox, and its copy on this Mac is gone, so it could not be put back.`;
+  try {
+    const above = recordNumbers(p.folder).some((n) => n > p.rev);
+    const found = statSync(own, { throwIfNoEntry: false });
+    const back = (how) => {
+      if (!existsSync(rec.from)) return { put: false, problems: [gone] };
+      mkdirSync(dirname(own), { recursive: true });
+      how(rec.from, own, opts);
+      log(`${whoOf(p)}: its record ${number} was lost in Dropbox, so it is put back from its copy on this Mac.`);
+      return { put: true, problems: [] };
+    };
+    if (!found) return above ? { put: false, problems: [] } : back(cloneIn);
+    if (!whole(own)) return { put: false, problems: [] };
+    let read = null;
+    try {
+      read = JSON.parse(readFileSync(own, "utf8"));
+    } catch (err) {
+      read = null;
+    }
+    const reads = read !== null && typeof read === "object" && read.rev === p.rev;
+    if (!reads) return above ? { put: false, problems: [] } : back(replaceIn);
+    const ours = existsSync(rec.from) ? sameBytes(own, rec.from) : read.id === p.id && Boolean(read.finished) && read.finished.revision === p.revision;
+    return ours ? { put: false, problems: [] } : { put: false, problems: [`its record ${number} was lost in Dropbox, and a later change took its number.`] };
+  } catch (err) {
+    return { put: false, problems: [`its record ${number} could not be put back in Dropbox (${err.code || "an error"}).`] };
+  }
+}
+
+/** Put back a finish's record that Dropbox lost, before a command builds on the record before it (ruling 35): true when it put a record back. Synchronous; asks the episode's
+    late-check lock once, as "write", and never waits for it. */
+export function ownRecordBack(ctx, { name, folder, record }) {
+  const sameEp = (p) => p.id === record.id && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root);
+  const owed = (p) => sameEp(p) && p.rev > record.rev && (p.copied === true || recordHolds(p, { isWhole: ctx.isWhole }) === true);
+  if (!readPendingsOf(ctx.home, "final").some(owed)) return false;
+  let held = null;
+  try {
+    held = takeLateCheckLock(ctx.home, name, "write", ctx.alive);
+  } catch (err) {
+    return false;
+  }
+  if (!held) return false;
+  let any = false;
+  try {
+    for (const p of readPendingsOf(ctx.home, "final").filter(owed)) {
+      const fresh = readPendingAt(ctx.home, pendingKeyOf(p));
+      if (!fresh || !owed(fresh)) continue;
+      if (putOwnRecordBack(fresh, { isWhole: ctx.isWhole, opts: ruleOpts({ ...(ctx.deps || {}), log: logTo(ctx.home) }) }).put) any = true;
+    }
+  } finally {
+    releaseLateCheckLock(held);
+  }
+  return any;
+}
+
+/** Make the check of a finish's copies in final/ (algorithm C), under the episode's late-check lock, with the pending read again: the copies the record in force lists are put back
+    when Dropbox lost or changed them, a file it lists at another size is left, and the exports the finish took from Downloads are deleted only when every copy is whole and
+    the record in force still holds the part each was taken for. Synchronous. */
+export function checkFinal(p, deps) {
+  const home = deps.episode.home;
+  const clock = deps.clock;
+  const log = deps.log || (() => {});
+  const once = deps.once || log;
+  const opts = ruleOpts({ ...deps, log });
+  const whole = deps.isWhole || isWhole;
+  const who = whoOf(p);
+  let shown = who;
+  let q = p;
+  const otherProblem = () => readPendingsOf(home, "final").some((x) => pendingKeyOf(x) !== pendingKeyOf(q) && x.id === q.id && x.machine === q.machine && resolve(x.root) === resolve(q.root) && x.problem);
+  const putAway = () => {
+    try {
+      clearChecking(home, q.name, q.revision);
+      if (!otherProblem()) clearProblem(home, q.name);
+      removePending(home, q);
+      if (typeof q.work === "string") rmSync(q.work, { recursive: true, force: true });
+      return true;
+    } catch (err) {
+      once(`${shown}: its check is made, but it could not be put away (${err.code || "an error"}). The next run looks at it again.`);
+      return false;
+    }
+  };
+  const wait = (line, pend = q) => {
+    writePending(home, { ...pend, nextLook: clock() + WAIT_LOOK_MS, lookUntil: Number.isFinite(pend.lookUntil) ? pend.lookUntil : clock() + WAIT_LOOK_FOR_MS });
+    once(line);
+  };
+  // 1. The folder (ruling 16).
+  const unreadable = () => wait(`${who}: its check waits: its folder in Episodes cannot be read now. It is looked at again later.`);
+  const goneAway = () => {
+    if (!putAway()) return;
+    log(FOLDER_GONE(who));
+    (deps.notify || (() => {}))(FOLDER_GONE(who));
+  };
+  let list;
+  try {
+    list = readdirSync(episodesFolder(p.root));
+  } catch (err) {
+    return unreadable();
+  }
+  try {
+    const folder = list.includes(basename(p.folder)) ? statSync(p.folder, { throwIfNoEntry: false }) : undefined;
+    if (!(folder && folder.isDirectory())) return goneAway();
+  } catch (err) {
+    return unreadable();
+  }
+  // 2. Whether the finish's record reached Dropbox (ruling 11).
+  const held = p.copied === true ? true : recordHolds(p, { isWhole: whole });
+  if (held === false) {
+    if (putAway()) log(`${who}: its finish stopped before its record was written, so the check of its copies is not made.`);
+    return;
+  }
+  if (held === null) return wait(`${who}: its check waits: whether its record reached Dropbox cannot be told now. It is looked at again later.`);
+  // 3. The finish's own record, when Dropbox lost it (ruling 12).
+  let problems = [];
+  if (p.record) problems = putOwnRecordBack(p, { isWhole: whole, opts }).problems;
+  // 4. A writer's mark, settled by the record.
+  if (p.reading) {
+    const settled = settleReading(p, { home, log });
+    if (settled.later) return wait(`${who}: its check waits: a write stopped while it put its files in, and the episode's record cannot be read now. It is looked at again later.`, p);
+    q = settled.pending;
+  }
+  // 5. The record in force.
+  const read = readEpisode(q.folder);
+  if (!read.record || read.newer || (recordNumbers(q.folder)[0] || 0) > read.record.rev) return wait(`${who}: its check waits: the episode's record cannot be read now. It is looked at again later.`);
+  // 6. The gate (ruling 15): while it holds the video, nothing is put back and no export is deleted.
+  const links = linksOf(q.root);
+  const named = withShortId(gatedAsOf(links)(read.record), read.record);
+  if (gated(read.record)) {
+    if (putAway()) log(`${named}: it is held as a session now, so nothing of its hand-off is put back into Dropbox, and its exports stay in Downloads.`);
+    return;
+  }
+  if (links.sessionsBeside(read.record, q.folder).length > 0) {
+    writePending(home, { ...(({ nextLook, ...rest }) => rest)(q), lookUntil: Number.isFinite(q.lookUntil) ? q.lookUntil : clock() });
+    once(`${named}: another version of it is a session not cleared, so nothing of its hand-off is put back into Dropbox yet, and its exports stay in Downloads.`);
+    return;
+  }
+  shown = shownName(read.record);
+  // 7. Each copy, by table J against the files the record in force lists.
+  const listed = read.record.files || {};
+  const left = new Set();
+  for (const e of q.entries) {
+    const judged = judgeEntry(e, q.folder, listed, whole);
+    if (judged.left) {
+      left.add(e.to);
+      continue;
+    }
+    if (!judged.put) continue;
+    const problem = putEntryBack(e, judged.put, { opts, log, shown });
+    if (problem) problems.push(problem);
+  }
+  // 8. Problems: kept, noted, and posted the first time.
+  if (problems.length) {
+    for (const problem of problems) log(`${shown}: the check of its copies in final/ found a problem: ${problem}`);
+    try {
+      flagProblem(home, q.name, clock());
+    } catch (err) {
+      // The note costs nothing but itself.
+    }
+    if (!q.problem && !Number.isFinite(q.told)) (deps.notify || (() => {}))(problemNotice(shown));
+    if (q.took.length) log(`${shown}: the exports it took are kept in Downloads, because a copy in final/ was not whole.`);
+    const { wasProblem, nextLook, ...rest } = q;
+    writePending(home, { ...rest, problem: problems.join(" ") });
+    return;
+  }
+  // 9. Every copy is whole: a finish may have come while the copies were read.
+  if (finishAtWork(home, q.name, deps.alive, clock())) {
+    writePending(home, { ...q, nextLook: clock() + LOCK_AGAIN_MS });
+    once(`${shown}: its check waits until the finish at work on it ends.`);
+    return;
+  }
+  const finished = read.record.finished;
+  for (const t of q.took) {
+    try {
+      if (!statSync(t.path, { throwIfNoEntry: false })) continue;
+      if (t.place !== "Downloads" || !sameFolder(dirname(t.path), downloadsFolder(home))) {
+        log(`${shown}: ${t.name} was not taken from Downloads, so it is left where it is.`);
+        continue;
+      }
+      const mine = q.entries.find((e) => e.to === join(q.folder, "final", t.name));
+      const part = finished && finished.parts ? finished.parts[t.key] : undefined;
+      const holds = mine && !left.has(mine.to) && part && part.file === `final/${t.name}` && part.source && part.source.bytes === t.snap.size && part.source.mtimeMs === t.snap.mtimeMs;
+      if (!holds) {
+        log(`${shown}: the hand-off in force no longer holds ${t.name}, so it is left in Downloads.`);
+        continue;
+      }
+      const now = statSync(t.path);
+      if (now.size !== t.snap.size || now.mtimeMs !== t.snap.mtimeMs) {
+        log(`${shown}: ${t.name} changed in Downloads after it was taken, so it is kept there.`);
+        continue;
+      }
+      rmSync(t.path, { recursive: true, force: true });
+      log(`${shown}: ${t.name} is taken out of Downloads.`);
+    } catch (err) {
+      log(`${shown}: ${t.name} could not be looked at or taken out of Downloads (${err.code || "an error"}), so it is kept there. Delete it there by hand.`);
+    }
+  }
+  // 10. Put away.
+  if (putAway()) {
+    log(`${shown}: the check of its copies in final/ passed: every copy the record lists is whole in Dropbox.`);
+    if (left.size) log(left.size === 1 ? `${shown}: 1 of its copies in final/ is from a later write, so the check leaves it as it is.` : `${shown}: ${left.size} of its copies in final/ are from a later write, so the check leaves them as they are.`);
+  }
+}
+
+CHECKS.final = checkFinal;
 
 /** A time of day as a person reads it, "10:15". */
 export const clockTime = (ms) => new Date(ms).toTimeString().slice(0, 5);

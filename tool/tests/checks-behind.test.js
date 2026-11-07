@@ -4,11 +4,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { flagProblem, markChecking, problemFlagged } from "../finish-check.js";
+import { lockOf, takeEpisodeLock } from "../detached.js";
 import * as filing from "../filing.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { episodeWork, pendingFolder, runsFolder } from "../settings.js";
-import { acceptRev, recordFile, recordText } from "../episode.js";
+import { acceptRev, localStamp, recordFile, recordText } from "../episode.js";
 import { HANDOFF, ID, L, LABEL, MAC, MP4, NAME, SRT, cloneOf, ctxOf, deadLock, holdFinal, holdImport, holdRecord, liveLock, mine, recordOf, run, runs, world } from "./checks-world.js";
 
 const base = (kind, over = {}) => ({ version: 1, ...(kind ? { kind } : {}), id: ID, name: NAME, folder: "/x", root: "/r", machine: MAC, entries: [], work: null, lastCopy: L, ...over });
@@ -1033,4 +1035,721 @@ describe("a local import's first record, checked behind (L5)", () => {
       h.w.done();
     }
   });
+});
+
+describe("the check of a local finish's copies in final/ (L5)", () => {
+  const AT = L + M15 + 1;
+  const PROBLEM = 'The check of Talk\'s copies in Dropbox found a problem: say "how far is it?"';
+  const stash = (w) => ({ home: w.home, name: NAME });
+  const marker = (w, over = {}) => markChecking(w.home, NAME, { nonce: "", revision: 1, due: L + M15, took: ["Downloads"], ...over });
+  const markerThere = (w) => existsSync(join(episodeWork(w.home, NAME), "finish.checking.json"));
+  const gone = (w, h) => !existsSync(join(pendingFolder(w.home), h.key)) && !existsSync(h.work);
+  const twentyOne = "x".repeat(21);
+  const withWorld = async (fn) => {
+    const w = world();
+    try {
+      return await fn(w);
+    } finally {
+      w.done();
+    }
+  };
+  const rec = (h, n) => JSON.parse(readFileSync(recordFile(h.folder, n), "utf8"));
+  const session = { marked: "2026-11-06T10:05:00-06:00", on: MAC, teachings: null, cleared: null };
+
+  it("C1 puts back a missing copy, then deletes the export", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    rmSync(h.files.srt);
+    marker(w);
+    const r = await run(w, AT);
+    assert.equal(readFileSync(h.files.srt, "utf8"), SRT);
+    assert.equal(existsSync(h.exportPath), false);
+    assert.ok(gone(w, h));
+    assert.equal(markerThere(w), false);
+    for (const line of ["Talk: Talk main.srt in final/ was not whole in Dropbox (it is not there), so it is put back from its copy on this Mac.", "Talk: Talk main.mp4 is taken out of Downloads.", "Talk: the check of its copies in final/ passed: every copy the record lists is whole in Dropbox."]) assert.ok(r.logs.includes(line), r.logs.join("|"));
+  }));
+
+  it("C2 leaves a file the record in force lists at another size", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    h.later((r) => ({ files: { ...r.files, "final/Talk.brimm-ops.json": 21 }, finished: { ...r.finished, revision: 2 } }));
+    writeFileSync(h.files.handoff, twentyOne);
+    const r = await run(w, AT);
+    assert.equal(readFileSync(h.files.handoff, "utf8"), twentyOne);
+    assert.ok(r.logs.includes("Talk: 1 of its copies in final/ is from a later write, so the check leaves it as it is."));
+    assert.equal(existsSync(h.exportPath), false);
+  }));
+
+  it("C3 leaves a file the record in force no longer lists", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    h.later((r) => { const files = { ...r.files }; delete files["final/Talk main.srt"]; return { files }; });
+    rmSync(h.files.srt);
+    await run(w, AT);
+    assert.equal(existsSync(h.files.srt), false);
+  }));
+
+  it("C4 deletes the Downloads export only when every copy is whole and it is unchanged", async () => {
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L, { workCopies: false });
+      rmSync(h.files.srt);
+      const r = await run(w, AT);
+      assert.ok(existsSync(h.exportPath));
+      assert.ok(r.logs.includes("Talk: the exports it took are kept in Downloads, because a copy in final/ was not whole."));
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      const later = new Date(statSync(h.exportPath).mtimeMs + 1000);
+      utimesSync(h.exportPath, later, later);
+      const r = await run(w, AT);
+      assert.ok(existsSync(h.exportPath));
+      assert.ok(r.logs.includes("Talk: Talk main.mp4 changed in Downloads after it was taken, so it is kept there."));
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      await run(w, AT);
+      assert.equal(existsSync(h.exportPath), false);
+    });
+  });
+
+  it("C5 deletes the export after a later revision that keeps its part, and keeps it after one that took the part again", async () => {
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      h.later((r) => ({ finished: { ...r.finished, revision: 2 } }));
+      await run(w, AT);
+      assert.equal(existsSync(h.exportPath), false);
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      h.later((r) => ({ finished: { ...r.finished, revision: 2, parts: { main: { ...r.finished.parts.main, source: { bytes: 10, mtimeMs: h.M + 1000 } } } } }));
+      const r = await run(w, AT);
+      assert.ok(existsSync(h.exportPath));
+      assert.ok(r.logs.includes("Talk: the hand-off in force no longer holds Talk main.mp4, so it is left in Downloads."));
+    });
+  });
+
+  it("C6 never deletes an original that was not taken from Downloads", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    filing.writePending(w.home, { ...h.pending, took: [{ ...h.pending.took[0], place: "the exports folder" }] });
+    const r = await run(w, AT);
+    assert.ok(existsSync(h.exportPath));
+    assert.ok(r.logs.includes("Talk: Talk main.mp4 was not taken from Downloads, so it is left where it is."));
+  }));
+
+  it("C6b keeps an export it cannot look at, and still completes", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    const dir = join(w.home, "Downloads");
+    chmodSync(dir, 0o000);
+    try {
+      const r = await run(w, AT);
+      assert.ok(r.logs.some((l) => l.startsWith("Talk: Talk main.mp4 could not be looked at or taken out of Downloads (EACCES), so it is kept there. Delete it there by hand.")), r.logs.join("|"));
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+    assert.ok(existsSync(h.exportPath));
+    assert.ok(gone(w, h));
+  }));
+
+  it("C7 flags a problem as today", () => withWorld(async (w) => {
+    const h = holdFinal(w, L, { workCopies: false });
+    rmSync(h.files.mp4);
+    const first = await run(w, AT);
+    assert.deepEqual(first.notices, [PROBLEM]);
+    assert.equal(problemFlagged(w.home, NAME), true);
+    const p = filing.readPendingAt(w.home, h.key);
+    assert.equal(p.problem, "Talk main.mp4 in final/ is not whole in Dropbox (it is not there), and its copy on this Mac is gone, so it could not be put back.");
+    assert.equal(p.problem.includes(w.dir), false);
+    assert.deepEqual(first.waits, []);
+    const second = await run(w, AT + 1000);
+    assert.deepEqual(second.notices, []);
+    assert.ok(second.logs.some((l) => l.includes("found a problem: Talk main.mp4 in final/ is not whole")));
+  }));
+
+  it("C8 takes the note away once a check of the episode passes and no other has a problem", () => withWorld(async (w) => {
+    const one = holdFinal(w, L, { problem: "x", workCopies: false });
+    rmSync(one.files.srt);
+    flagProblem(w.home, NAME, L);
+    const two = holdFinal(w, L + 1000, { revision: 2, episode: false });
+    const first = await run(w, AT);
+    assert.deepEqual(first.notices, []);
+    assert.equal(readFileSync(one.files.srt, "utf8"), SRT);
+    assert.ok(filing.readPendingAt(w.home, one.key));
+    assert.equal(filing.readPendingAt(w.home, two.key), null);
+    assert.equal(problemFlagged(w.home, NAME), true);
+    await run(w, AT + 1000);
+    assert.equal(filing.readPendingAt(w.home, one.key), null);
+    assert.equal(problemFlagged(w.home, NAME), false);
+  }));
+
+  it("C9 drops a pending for a revision the record never held", () => withWorld(async (w) => {
+    const h = holdFinal(w, L, { copied: false, recordWritten: false });
+    rmSync(h.files.srt);
+    const r = await run(w, AT);
+    assert.ok(gone(w, h));
+    assert.equal(existsSync(h.files.srt), false);
+    assert.ok(existsSync(h.exportPath));
+    assert.ok(r.logs.includes("an episode (ab0001): its finish stopped before its record was written, so the check of its copies is not made."));
+  }));
+
+  it("C10 a finish killed after its record but before it noted it still has its check made", () => withWorld(async (w) => {
+    const h = holdFinal(w, L, { copied: false });
+    rmSync(h.files.srt);
+    await run(w, AT);
+    assert.equal(readFileSync(h.files.srt, "utf8"), SRT);
+    assert.equal(existsSync(h.exportPath), false);
+  }));
+
+  it("C11 waits when the record cannot be read, looking again every five minutes for an hour", async () => {
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      const copy = join(h.folder, "record", "0002 (Sallie's laptop's conflicted copy 2026-11-06).json");
+      writeFileSync(copy, "{}");
+      const r = await run(w, AT);
+      const p = filing.readPendingAt(w.home, h.key);
+      assert.ok(p.nextLook && p.lookUntil);
+      assert.equal(r.logs.filter((l) => l === "an episode (ab0001): its check waits: the episode's record cannot be read now. It is looked at again later.").length, 1);
+      assert.ok(r.waits.reduce((a, b) => a + b, 0) >= filing.WAIT_LOOK_FOR_MS - filing.WAIT_LOOK_MS);
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      const copy = join(h.folder, "record", "0002 (Sallie's laptop's conflicted copy 2026-11-06).json");
+      writeFileSync(copy, "{}");
+      let n = 0;
+      await run(w, AT, { onWait: (ms, c) => { n += 1; if (n === 2) rmSync(copy); c.add(ms); } });
+      assert.equal(filing.readPendingAt(w.home, h.key), null);
+      assert.equal(existsSync(h.exportPath), false);
+    });
+  });
+
+  it("C12 puts the finish's own record back when it is gone and no later record is there, and then judges by it", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    const text = readFileSync(h.pending.record.from, "utf8");
+    rmSync(recordFile(h.folder, 2));
+    rmSync(h.files.srt);
+    const r = await run(w, AT);
+    assert.equal(readFileSync(recordFile(h.folder, 2), "utf8"), text);
+    assert.equal(readFileSync(h.files.srt, "utf8"), SRT);
+    assert.ok(r.logs.includes("an episode (ab0001): its record 0002.json was lost in Dropbox, so it is put back from its copy on this Mac."), r.logs.join("|"));
+    assert.ok(r.logs.some((l) => l.includes("Talk main.srt in final/ was not whole")));
+  }));
+
+  it("C13 never puts the finish's record back over a record of that number, and calls the number taken a problem", async () => {
+    for (const workCopies of [true, false]) {
+      await withWorld(async (w) => {
+        const h = holdFinal(w, L, { workCopies });
+        const other = rec(h, 2);
+        writeFileSync(recordFile(h.folder, 2), recordText({ ...other, finished: { ...other.finished, revision: 5 } }));
+        const was = readFileSync(recordFile(h.folder, 2), "utf8");
+        const r = await run(w, AT);
+        assert.equal(readFileSync(recordFile(h.folder, 2), "utf8"), was);
+        assert.deepEqual(r.notices, [PROBLEM]);
+        assert.equal(problemFlagged(w.home, NAME), true);
+        assert.equal(filing.readPendingAt(w.home, h.key).problem, "its record 0002.json was lost in Dropbox, and a later change took its number.");
+        assert.ok(existsSync(h.exportPath));
+        assert.ok(r.logs.includes("Talk: the exports it took are kept in Downloads, because a copy in final/ was not whole."));
+        assert.equal(r.logs.some((l) => l.includes("passed")), false);
+      });
+    }
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      writeFileSync(recordFile(h.folder, 2), readFileSync(h.pending.record.from, "utf8"));
+      const r = await run(w, AT);
+      assert.deepEqual(r.notices, []);
+      assert.ok(gone(w, h));
+    });
+  });
+
+  it("C14 waits when it cannot tell whether its record was written", () => withWorld(async (w) => {
+    const h = holdFinal(w, L, { copied: false });
+    writeFileSync(recordFile(h.folder, 2), "{ half");
+    const r = await run(w, AT);
+    const p = filing.readPendingAt(w.home, h.key);
+    assert.ok(p.nextLook && p.lookUntil);
+    assert.equal(r.logs.filter((l) => l === "an episode (ab0001): its check waits: whether its record reached Dropbox cannot be told now. It is looked at again later.").length, 1);
+  }));
+
+  it("C15 puts nothing back for a video the gate holds, and deletes no export, and no line names it by its name as a video", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    h.later(() => ({ session }));
+    rmSync(h.files.srt);
+    const lock = liveLock(w, NAME, "write");
+    let first = true;
+    const r = await run(w, AT, { onWait: (ms, c) => { if (first) { filing.releaseLateCheckLock(lock); first = false; } c.add(ms); } });
+    assert.equal(existsSync(h.files.srt), false);
+    assert.ok(existsSync(h.exportPath));
+    assert.ok(gone(w, h));
+    assert.ok(r.logs.includes("an episode (ab0001): its check waits a moment: a write is putting its files in."));
+    assert.ok(r.logs.includes("a client or group session (ab0001): it is held as a session now, so nothing of its hand-off is put back into Dropbox, and its exports stay in Downloads."), r.logs.join("|"));
+    assert.equal(r.logs.some((l) => l.includes("Talk")), false);
+  }));
+
+  const beside = (w) => {
+    const other = join(w.root, "Episodes", "2026-11-06 Talk again (Mac Studio)", "record", "0001.json");
+    mkdirSync(dirname(other), { recursive: true });
+    writeFileSync(other, recordText(recordOf({ id: "e-20261106-cd0002", rev: 1, over: { versionOf: ID, session } })));
+    return other;
+  };
+
+  it("C15b a video held beside a session is not checked until that session is cleared (C26)", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    rmSync(h.files.srt);
+    const other = beside(w);
+    const line = "a video (ab0001): another version of it is a session not cleared, so nothing of its hand-off is put back into Dropbox yet, and its exports stay in Downloads.";
+    const r = await run(w, AT);
+    assert.equal(existsSync(h.files.srt), false);
+    assert.ok(existsSync(h.exportPath));
+    const p = filing.readPendingAt(w.home, h.key);
+    assert.equal(p.lookUntil, AT);
+    assert.ok(existsSync(h.work));
+    assert.deepEqual(r.waits, []);
+    assert.equal(r.logs.filter((l) => l === line).length, 1);
+    assert.equal(r.logs.some((l) => l.includes("Talk")), false);
+    const again = await run(w, AT + 1000);
+    assert.equal(again.logs.filter((l) => l === line).length, 1);
+    // C26: the session beside it is cleared.
+    writeFileSync(join(dirname(other), "0002.json"), recordText(recordOf({ id: "e-20261106-cd0002", rev: 2, over: { versionOf: ID, session: { ...session, cleared: { at: "2026-11-06T10:30:00-06:00", on: MAC, to: "private", confirmed: "dialog" } } } })));
+    const third = await run(w, AT + 2000);
+    assert.equal(readFileSync(h.files.srt, "utf8"), SRT);
+    assert.equal(existsSync(h.exportPath), false);
+    assert.ok(gone(w, h));
+    assert.ok(third.logs.some((l) => l.includes("passed")));
+  }));
+
+  it("C16 never makes a gone episode folder again, says so in one short notice, and waits while Episodes cannot be listed", async () => {
+    const GONE = "The folder of an episode (ab0001) is gone from Episodes, so the check of its copies in Dropbox is not made. Ask Jason.";
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      rmSync(h.folder, { recursive: true });
+      const r = await run(w, AT);
+      assert.equal(existsSync(h.folder), false);
+      assert.ok(existsSync(h.exportPath));
+      assert.ok(gone(w, h));
+      assert.deepEqual(r.notices, [GONE]);
+      assert.equal(r.logs.filter((l) => l === GONE).length, 1);
+      assert.equal(r.logs.some((l) => l.includes("Talk")), false);
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      const episodes = join(w.root, "Episodes");
+      renameSync(episodes, `${episodes}.away`);
+      try {
+        const r = await run(w, AT);
+        assert.ok(existsSync(h.work));
+        assert.ok(filing.readPendingAt(w.home, h.key).lookUntil);
+        assert.ok(existsSync(h.exportPath));
+        assert.deepEqual(r.notices, []);
+        assert.equal(r.logs.filter((l) => l.includes("its check waits: its folder in Episodes cannot be read now")).length, 1);
+        assert.equal(existsSync(episodes), false);
+      } finally {
+        renameSync(`${episodes}.away`, episodes);
+      }
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      rmSync(h.folder, { recursive: true });
+      const dir = join(pendingFolder(w.home), "final");
+      chmodSync(dir, 0o555);
+      let first;
+      try {
+        first = await run(w, AT);
+      } finally {
+        chmodSync(dir, 0o755);
+      }
+      assert.deepEqual(first.notices, []);
+      assert.ok(first.logs.some((l) => l.includes("its check is made, but it could not be put away (EACCES)")), first.logs.join("|"));
+      assert.ok(filing.readPendingAt(w.home, h.key));
+      const next = await run(w, AT + 1000);
+      assert.deepEqual(next.notices, [GONE]);
+    });
+  });
+
+  it("C17 a check stopped after it took the export out and before it put its pending away is made again", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    marker(w);
+    rmSync(h.exportPath);
+    const r = await run(w, AT);
+    assert.equal(r.logs.some((l) => l.includes("Talk main.mp4 is taken out of Downloads")), false);
+    assert.ok(gone(w, h));
+    assert.equal(markerThere(w), false);
+  }));
+
+  it("C18 puts back a copy of its size whose bytes are not the ones written", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    writeFileSync(h.files.srt, "1\nHo.\n\n");
+    const r = await run(w, AT);
+    assert.equal(readFileSync(h.files.srt, "utf8"), SRT);
+    assert.ok(r.logs.some((l) => l.includes("(its bytes are not the ones written)")));
+  }));
+
+  it("C19 takes a placeholder copy at its size as whole, and does not read it", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    writeFileSync(h.files.srt, "1\nHo.\n\n");
+    await run(w, AT, { isWhole: (p) => p !== h.files.srt });
+    assert.equal(readFileSync(h.files.srt, "utf8"), "1\nHo.\n\n");
+    assert.equal(existsSync(h.exportPath), false);
+  }));
+
+  it("C20 takes a copy at its size whose work copy is gone as whole", () => withWorld(async (w) => {
+    const h = holdFinal(w, L, { workCopies: false });
+    await run(w, AT);
+    assert.equal(existsSync(h.exportPath), false);
+    assert.equal(filing.readPendingAt(w.home, h.key), null);
+  }));
+
+  it("C21 waits when a folder of the episode cannot be searched", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    const dir = join(h.folder, "final");
+    rmSync(h.files.srt);
+    chmodSync(dir, 0o000);
+    try {
+      const r = await run(w, AT);
+      assert.ok(filing.readPendingAt(w.home, h.key).lookUntil);
+      assert.equal(r.logs.filter((l) => l.includes("the episode's record cannot be read now")).length, 1);
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+    assert.equal(existsSync(h.files.srt), false);
+  }));
+
+  it("C22 a later hand-off that takes the lost copy out of a check with a problem reopens it, and both are made in the run", async () => {
+    for (const lookUntil of [false, true]) {
+      await withWorld(async (w) => {
+        const one = holdFinal(w, L, { workCopies: false });
+        if (lookUntil) filing.writePending(w.home, { ...one.pending, lookUntil: L });
+        rmSync(one.files.mp4);
+        holdRecord(w, L + 30 * 60000, { id: "e-20261106-ab0002", name: "2026-11-06 Other (Mac Studio)" });
+        let n = 0;
+        const r = await run(w, AT, {
+          onWait: async (ms, c) => {
+            n += 1;
+            if (n === 1) {
+              const step = await filing.takeOutOfCheck(ctxOf(w, { now: () => c.now() }), { name: NAME, record: rec(one, 2), paths: [one.files.mp4], rev: 3 }, { wait: async () => {} });
+              assert.deepEqual(step.end({ put: true }), { reopened: true });
+              holdFinal(w, c.now(), { revision: 2, episode: false });
+            }
+            c.add(ms);
+          }
+        });
+        assert.deepEqual(r.notices, [PROBLEM]);
+        assert.equal(problemFlagged(w.home, NAME), false);
+        assert.deepEqual(filing.readPendingsOf(w.home, "final"), []);
+      });
+    }
+  });
+
+  it("C23 flags a problem with the launch agent's deps, which carry no clock and no alive", () => withWorld(async (w) => {
+    const h = holdFinal(w, Date.now() - 20 * 60000, { workCopies: false });
+    rmSync(h.files.mp4);
+    const r = await run(w, 0, { clock: undefined, alive: undefined, wokeAt: () => null });
+    assert.equal(problemFlagged(w.home, NAME), true);
+    assert.equal(r.notices.length, 1);
+    assert.equal(r.logs.some((l) => l.includes("could not be made")), false);
+  }));
+
+  it("C24 drops a pending whose record's number holds another writer's record of its revision", () => withWorld(async (w) => {
+    const h = holdFinal(w, L, { copied: false, recordWritten: false });
+    rmSync(h.files.srt);
+    writeFileSync(recordFile(h.folder, 2), recordText(recordOf({ rev: 2, over: { name: { text: "Talk too", placeholder: false }, finished: { revision: 1, at: "x", on: MAC, handoff: "final/Talk.brimm-ops.json", parts: {} } } })));
+    const r = await run(w, AT);
+    assert.ok(gone(w, h));
+    assert.equal(existsSync(h.files.srt), false);
+    assert.ok(existsSync(h.exportPath));
+    assert.ok(r.logs.some((l) => l.includes("its finish stopped before its record was written")));
+  }));
+
+  it("C25 keeps the export, as no longer held, when the record in force has no finish", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    h.later(() => ({ finished: null }));
+    const r = await run(w, AT);
+    assert.ok(existsSync(h.exportPath));
+    assert.ok(r.logs.includes("Talk: the hand-off in force no longer holds Talk main.mp4, so it is left in Downloads."));
+    assert.equal(r.logs.some((l) => l.includes("could not be looked at")), false);
+    assert.ok(gone(w, h));
+  }));
+
+  it("C27 takes the note away before it removes the pending, so a check that cannot remove it leaves no note behind", () => withWorld(async (w) => {
+    const h = holdFinal(w, L, { problem: "x" });
+    flagProblem(w.home, NAME, L);
+    marker(w);
+    const dir = join(pendingFolder(w.home), "final");
+    chmodSync(dir, 0o555);
+    let r;
+    try {
+      r = await run(w, AT);
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+    assert.equal(problemFlagged(w.home, NAME), false);
+    assert.equal(markerThere(w), false);
+    assert.ok(filing.readPendingAt(w.home, h.key));
+    assert.equal(r.logs.filter((l) => l === "Talk: its check is made, but it could not be put away (EACCES). The next run looks at it again.").length, 1, r.logs.join("|"));
+  }));
+
+  it("F4 makes a record's and a final's checks of one episode in one run", () => withWorld(async (w) => {
+    const rh = holdRecord(w, L);
+    const fh = holdFinal(w, L);
+    const r = await run(w, AT);
+    assert.ok(!existsSync(join(pendingFolder(w.home), rh.key)) && !existsSync(join(pendingFolder(w.home), fh.key)));
+    assert.ok(!existsSync(rh.work) && !existsSync(fh.work));
+    assert.equal(existsSync(join(episodeWork(w.home, NAME), "late-check.lock")), false);
+    assert.ok(r.logs.includes(`${LABEL}: its first record is whole in Dropbox.`));
+    assert.ok(r.logs.some((l) => l.includes("the check of its copies in final/ passed")));
+  }));
+
+  it("F5 makes an import's, a record's and a final's checks due at once, each under its own episode's lock", () => withWorld(async (w) => {
+    holdImport(w, "X.mov", L);
+    const rh = holdRecord(w, L);
+    const fh = holdFinal(w, L, { id: "e-20261106-ab0002", name: "2026-11-06 Other (Mac Studio)" });
+    await run(w, AT);
+    assert.deepEqual(filing.readEveryPending(w.home), []);
+    assert.ok(!existsSync(rh.work) && !existsSync(fh.work));
+    assert.deepEqual(w.statuses(), []);
+  }));
+
+  it("F12 makes two final pendings of one episode, one after the other, in one run", () => withWorld(async (w) => {
+    const one = holdFinal(w, L);
+    const two = holdFinal(w, L + 1000, { revision: 2, episode: false });
+    await run(w, AT);
+    assert.deepEqual(filing.readEveryPending(w.home), []);
+    assert.ok(!existsSync(one.work) && !existsSync(two.work));
+    assert.equal(existsSync(one.exportPath), false);
+    assert.equal(existsSync(join(episodeWork(w.home, NAME), "late-check.lock")), false);
+  }));
+
+  it("T14 ownRecordBack puts back a held finish's lost record before a command builds on the record before it, and nothing else", async () => {
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      rmSync(recordFile(h.folder, 2));
+      assert.equal(filing.ownRecordBack(ctxOf(w), { name: NAME, folder: h.folder, record: rec(h, 1) }), true);
+      assert.equal(readFileSync(recordFile(h.folder, 2), "utf8"), readFileSync(h.pending.record.from, "utf8"));
+      assert.equal(existsSync(join(episodeWork(w.home, NAME), "late-check.lock")), false);
+      assert.ok(readFileSync(join(w.home, "Library", "Logs", "brimm-video.log"), "utf8").includes("an episode (ab0001): its record 0002.json was lost in Dropbox, so it is put back from its copy on this Mac."));
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L, { copied: false, recordWritten: false });
+      assert.equal(filing.ownRecordBack(ctxOf(w), { name: NAME, folder: h.folder, record: rec({ folder: h.folder }, 1) }), false);
+      assert.equal(existsSync(recordFile(h.folder, 2)), false);
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      assert.equal(filing.ownRecordBack(ctxOf(w), { name: NAME, folder: h.folder, record: rec(h, 2) }), false);
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      rmSync(recordFile(h.folder, 2));
+      const lock = liveLock(w, NAME, "late check");
+      assert.equal(filing.ownRecordBack(ctxOf(w), { name: NAME, folder: h.folder, record: rec(h, 1) }), false);
+      assert.equal(existsSync(recordFile(h.folder, 2)), false);
+      assert.ok(existsSync(join(episodeWork(w.home, NAME), "late-check.lock")));
+      filing.releaseLateCheckLock(lock);
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L, { workCopies: false });
+      rmSync(recordFile(h.folder, 2));
+      assert.equal(filing.ownRecordBack(ctxOf(w), { name: NAME, folder: h.folder, record: rec({ folder: h.folder }, 1) }), false);
+      assert.equal(existsSync(recordFile(h.folder, 2)), false);
+    });
+  });
+});
+
+describe("a writer and the check, in each order (L5)", () => {
+  const AT = L + M15 + 1;
+  const twentyOne = "x".repeat(21);
+  const withWorld = async (fn) => {
+    const w = world();
+    try {
+      return await fn(w);
+    } finally {
+      w.done();
+    }
+  };
+  const markOf = (w, rev = 3) => ({ pid: 999999, at: L, to: [join(w.root, "Episodes", NAME, "final", "Talk.brimm-ops.json")], nonce: "n", rev });
+
+  it("W1 puts off a due check while a writer holds its lock, and makes it once it is let go, leaving the writer's file", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    const lock = liveLock(w, NAME, "write");
+    let n = 0;
+    const r = await run(w, AT, {
+      onWait: (ms, c) => {
+        n += 1;
+        if (n === 2) {
+          writeFileSync(h.files.handoff, twentyOne);
+          h.later((rec2) => ({ files: { ...rec2.files, "final/Talk.brimm-ops.json": 21 } }));
+          filing.writePending(w.home, { ...h.pending, entries: h.pending.entries.filter((e) => e.to !== h.files.handoff) });
+          filing.releaseLateCheckLock(lock);
+        }
+        c.add(ms);
+      }
+    });
+    assert.equal(readFileSync(h.files.handoff, "utf8"), twentyOne);
+    assert.deepEqual(r.waits, [filing.LOCK_AGAIN_MS, filing.LOCK_AGAIN_MS]);
+    assert.equal(r.logs.filter((l) => l === "an episode (ab0001): its check waits a moment: a write is putting its files in.").length, 1);
+  }));
+
+  it("W2 settles a dead writer's mark by its record's number: a writer whose record was written keeps its files", async () => {
+    for (const [bytes, sameSize] of [[twentyOne, false], ["x".repeat(16), true]]) {
+      await withWorld(async (w) => {
+        const h = holdFinal(w, L, { mark: markOf(w) });
+        writeFileSync(h.files.handoff, bytes);
+        h.later((r) => (sameSize ? { name: { text: "Talk", placeholder: false } } : { files: { ...r.files, "final/Talk.brimm-ops.json": 21 } }));
+        deadLock(w, NAME);
+        const r = await run(w, AT);
+        assert.equal(readFileSync(h.files.handoff, "utf8"), bytes);
+        assert.ok(r.logs.includes("an episode (ab0001): a write stopped while it put its files in. Its check leaves out 1 file the record says is that write's."), r.logs.join("|"));
+        assert.equal(existsSync(join(episodeWork(w.home, NAME), "late-check.lock")), false);
+      });
+    }
+  });
+
+  it("W3 keeps every marked entry when the writer's record was not written, and puts the finish's file back over the stopped write's", async () => {
+    for (const bytes of [twentyOne, "x".repeat(16)]) {
+      await withWorld(async (w) => {
+        const h = holdFinal(w, L, { mark: markOf(w) });
+        writeFileSync(h.files.handoff, bytes);
+        deadLock(w, NAME);
+        await run(w, AT);
+        assert.equal(readFileSync(h.files.handoff, "utf8"), HANDOFF);
+      });
+    }
+  });
+
+  it("W4 leaves a dead writer's mark, and waits, when the record cannot be read", () => withWorld(async (w) => {
+    const h = holdFinal(w, L, { mark: markOf(w) });
+    writeFileSync(join(h.folder, "record", "0003 (Sallie's laptop's conflicted copy 2026-11-06).json"), "{}");
+    const r = await run(w, AT);
+    const p = filing.readPendingAt(w.home, h.key);
+    assert.ok(p.reading && p.nextLook && p.lookUntil);
+    assert.equal(r.logs.filter((l) => l === "an episode (ab0001): its check waits: a write stopped while it put its files in, and the episode's record cannot be read now. It is looked at again later.").length, 1);
+  }));
+
+  it("W5 takes over a lock a dead check left, and makes the check", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    deadLock(w, NAME, "late check");
+    await run(w, AT);
+    assert.equal(filing.readPendingAt(w.home, h.key), null);
+    assert.equal(existsSync(join(episodeWork(w.home, NAME), "late-check.lock")), false);
+  }));
+
+  it("W6 puts off, at the per-minute timer, a check a writer's lock holds, and throws nothing", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    rmSync(h.files.srt);
+    writeFileSync(join(w.drop, "B.mov"), "b");
+    const lock = liveLock(w, NAME, "write");
+    let tick = null;
+    let seen = null;
+    const r = runs(w, L);
+    r.deps.every = (fn) => { tick = fn; return 1; };
+    r.deps.cancel = () => {};
+    r.deps.wait = async (ms) => { if (lock) filing.releaseLateCheckLock(lock); r.setNow(r.now() + ms); };
+    await filing.importEpisodes(w.drop, r.deps, async (name) => {
+      r.setNow(AT);
+      assert.doesNotThrow(() => tick());
+      seen = { pending: Boolean(filing.readPendingAt(w.home, h.key)), srt: existsSync(h.files.srt) };
+      return { ok: true, name };
+    });
+    assert.deepEqual(seen, { pending: true, srt: false });
+    assert.equal(readFileSync(h.files.srt, "utf8"), SRT);
+    assert.equal(filing.readPendingAt(w.home, h.key), null);
+  }));
+
+  it("W7 a check of a new kind that throws is said by its code, left for the next run, and stops nothing else", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    const rh = holdRecord(w, L, { id: "e-20261106-ab0002", name: "2026-11-06 Other (Mac Studio)", there: "none" });
+    const text = readFileSync(rh.from, "utf8");
+    const r = await run(w, AT, { checks: { final: () => { throw Object.assign(new Error("x"), { code: "EACCES" }); } } });
+    assert.equal(r.logs.filter((l) => l === "an episode (ab0001): its check could not be made (EACCES). The next run makes it again.").length, 1);
+    assert.ok(filing.readPendingAt(w.home, h.key));
+    assert.equal(readFileSync(rh.to, "utf8"), text);
+    assert.equal(existsSync(join(episodeWork(w.home, NAME), "late-check.lock")), false);
+  }));
+
+  it("W8 pins ruling 20's cost: after a stopped writer, a record-only write that took its number leaves the writer's files unchecked", () => withWorld(async (w) => {
+    const h = holdFinal(w, L, { mark: markOf(w) });
+    writeFileSync(h.files.handoff, twentyOne);
+    deadLock(w, NAME);
+    h.later(() => ({ name: { text: "Talk too", placeholder: false } }));
+    const r = await run(w, AT);
+    assert.equal(readFileSync(h.files.handoff, "utf8"), twentyOne);
+    assert.ok(r.logs.some((l) => l.includes("a write stopped while it put its files in")));
+  }));
+
+  it("W9 puts off a check while a live finish run holds the episode's lock, and makes it once the run ends", async () => {
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      const lock = lockOf(w.home, NAME);
+      mkdirSync(dirname(lock), { recursive: true });
+      assert.equal(takeEpisodeLock(lock, "finish", mine).taken, true);
+      let n = 0;
+      const seen = [];
+      const r = await run(w, AT, {
+        onWait: (ms, c) => {
+          n += 1;
+          if (n === 1) seen.push([existsSync(join(episodeWork(w.home, NAME), "late-check.lock")), existsSync(h.exportPath)]);
+          if (n === 2) rmSync(lock);
+          c.add(ms);
+        }
+      });
+      assert.deepEqual(r.waits, [filing.LOCK_AGAIN_MS, filing.LOCK_AGAIN_MS]);
+      assert.deepEqual(seen, [[false, true]]);
+      assert.equal(r.logs.filter((l) => l === "an episode (ab0001): its check waits until the finish at work on it ends.").length, 1);
+      assert.equal(existsSync(h.exportPath), false);
+      assert.equal(filing.readPendingAt(w.home, h.key), null);
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      mkdirSync(episodeWork(w.home, NAME), { recursive: true });
+      writeFileSync(lockOf(w.home, NAME), JSON.stringify({ pid: 999999, command: "finish", nonce: "x" }));
+      const r = await run(w, AT);
+      assert.deepEqual(r.waits, []);
+      assert.equal(existsSync(h.exportPath), false);
+    });
+  });
+
+  it("W9b puts off a check for a minute after her yes to a finish whose run has not taken its lock yet", async () => {
+    const asked = (w, ago) => {
+      mkdirSync(episodeWork(w.home, NAME), { recursive: true });
+      writeFileSync(join(episodeWork(w.home, NAME), "finish.asked.json"), JSON.stringify({ version: 1, at: localStamp(new Date(AT - ago)), rev: 2, parts: [] }));
+    };
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      asked(w, 30000);
+      const r = await run(w, AT);
+      assert.ok(r.waits.length >= 3);
+      assert.equal(r.logs.filter((l) => l.includes("its check waits until the finish at work on it ends")).length, 1);
+      assert.equal(existsSync(h.exportPath), false);
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      asked(w, 30000);
+      writeFileSync(join(episodeWork(w.home, NAME), "finish.result.json"), JSON.stringify({ ok: true, started: AT - 29000, ended: AT - 10000 }));
+      const r = await run(w, AT);
+      assert.deepEqual(r.waits, []);
+      assert.equal(existsSync(h.exportPath), false);
+    });
+    await withWorld(async (w) => {
+      const h = holdFinal(w, L);
+      asked(w, 120000);
+      const r = await run(w, AT);
+      assert.deepEqual(r.waits, []);
+      assert.equal(existsSync(h.exportPath), false);
+    });
+  });
+
+  it("W10 asks again under its lock before it deletes an export, when her yes came while it read the copies", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    rmSync(h.files.srt);
+    let asked = false;
+    const isWhole = () => {
+      if (!asked) {
+        asked = true;
+        mkdirSync(episodeWork(w.home, NAME), { recursive: true });
+        writeFileSync(join(episodeWork(w.home, NAME), "finish.asked.json"), JSON.stringify({ version: 1, at: localStamp(new Date(AT)), rev: 2, parts: [] }));
+      }
+      return true;
+    };
+    const r = await run(w, AT, { isWhole });
+    assert.equal(readFileSync(h.files.srt, "utf8"), SRT);
+    assert.equal(r.logs.filter((l) => l === "Talk: its check waits until the finish at work on it ends.").length, 1);
+    assert.equal(r.logs.filter((l) => l === "an episode (ab0001): its check waits until the finish at work on it ends.").length, 1);
+    assert.equal(existsSync(h.exportPath), false);
+    assert.equal(filing.readPendingAt(w.home, h.key), null);
+    assert.equal(existsSync(join(episodeWork(w.home, NAME), "late-check.lock")), false);
+  }));
 });

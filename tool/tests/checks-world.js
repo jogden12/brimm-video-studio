@@ -160,6 +160,8 @@ export function holdFinal(w, at, { id = ID, name = NAME, revision = 1, copied = 
     M = statSync(exportPath).mtimeMs;
   }
   const rec2 = recordOf({ id, rev: 2, over: { files: { "Talk.mov": 10, "final/Talk main.mp4": 10, "final/Talk main.srt": 7, "final/Talk.brimm-ops.json": 16 }, finished: { revision, at: "2026-11-06T09:59:00-06:00", on: MAC, handoff: "final/Talk.brimm-ops.json", parts: { main: { v: 0, file: "final/Talk main.mp4", bytes: 10, seconds: 12, source: { bytes: 10, mtimeMs: M }, project: "Talk main" } } } } });
+  // For an episode already there, the finish's record is the one in the folder: its work copy holds that text.
+  const rec2Text = !episode && existsSync(recordFile(folder, 2)) ? readFileSync(recordFile(folder, 2), "utf8") : recordText(rec2);
   const files = { mp4: join(finalDir, "Talk main.mp4"), srt: join(finalDir, "Talk main.srt"), handoff: join(finalDir, "Talk.brimm-ops.json") };
   if (episode) {
     put(recordFile(folder, 1), recordText(recordOf({ id, rev: 1 })));
@@ -173,7 +175,7 @@ export function holdFinal(w, at, { id = ID, name = NAME, revision = 1, copied = 
     put(from("Talk main.mp4"), MP4);
     put(from("Talk main.srt"), SRT);
     put(from("Talk.brimm-ops.json"), HANDOFF);
-    put(join(work, "r", "0002.json"), recordText(rec2));
+    put(join(work, "r", "0002.json"), rec2Text);
   }
   const entries = [
     { from: from("Talk main.mp4"), to: files.mp4, bytes: 10 },
@@ -183,7 +185,7 @@ export function holdFinal(w, at, { id = ID, name = NAME, revision = 1, copied = 
   const took = exported ? [{ path: exportPath, snap: { size: 10, mtimeMs: M }, name: "Talk main.mp4", place: "Downloads", key: "main" }] : [];
   const pending = {
     version: 1, kind: "final", id, name, folder, root: w.root, machine: MAC, revision, rev: 2, entries, took, work, lastCopy: at,
-    record: { from: join(work, "r", "0002.json"), to: recordFile(folder, 2), bytes: Buffer.byteLength(recordText(rec2)) },
+    record: { from: join(work, "r", "0002.json"), to: recordFile(folder, 2), bytes: Buffer.byteLength(rec2Text) },
     ...(copied ? { copied: true } : {}), ...(mark ? { reading: mark } : {}), ...(problem ? { problem } : {})
   };
   writePending(w.home, pending);
