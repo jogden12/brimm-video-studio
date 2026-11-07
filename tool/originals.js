@@ -7,7 +7,7 @@
 // declaration (bound before any module of the cycle runs), which filing.js' CHECKS names at its top level.
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { cloneIn, isWhole, replaceIn, sameBytes, textWriter, uploadedOf } from "./dropbox.js";
+import { cloneIn, isWhole, makeOnlineOnly, replaceIn, sameBytes, textWriter, uploadedOf } from "./dropbox.js";
 import { acceptRev, isFromPlan, isPart, kindOf, lastWritten, readEpisode, recordNumbers, shownName, undone, writeEpisode } from "./episode.js";
 import { FOLDER_GONE, LOCK_AGAIN_MS, WAIT_LOOK_FOR_MS, WAIT_LOOK_MS, askAgent, commitOf, dueAt, fileId, judgeEntry, logTo, putOwnRecordBack, ruleOpts, readEveryPending, readPendingAt, recordHolds, removePending, sameFile, settleReading, writePending } from "./filing.js";
 import { linksOf, matchedSession } from "./finish.js";
@@ -350,6 +350,7 @@ export function checkOriginal(p, deps) {
     mkdirSync(episodeWork(home, p.name), { recursive: true });
     const took = takeEpisodeLock(lockOf(home, p.name), ORIGINALS_COMMAND, alive);
     if (!took.taken) return putOff();
+    let deleted = false;
     try {
       // 9. Under the lock: the gate again with a fresh look (a session mark may have come while the copy was read and the flag asked), and the Mac's copy is deleted if it is still the one that was copied.
       const latest = readEpisode(p.folder);
@@ -367,8 +368,20 @@ export function checkOriginal(p, deps) {
         return;
       }
       if (putAway()) log(`${shown}: Dropbox has its copy in Original files uploaded, so the recording is taken off this Mac.`);
+      deleted = true;
     } finally {
       releaseEpisodeLock(lockOf(home, p.name), took.text);
     }
+    if (!deleted) return;
+    // Then Dropbox is asked to free the Mac's disk, with no lock held: its copy is a clone of the one just deleted, sharing its blocks. Never a problem, a notice or a retry.
+    let made = null;
+    let why = "no answer";
+    try {
+      made = (deps.onlineOnly || ((path, said) => makeOnlineOnly(path, { swift: (deps.tools && deps.tools.swift) || "", said })))(e.to, (m) => { if (m) why = String(m); });
+    } catch (err) {
+      why = (err && err.message) || why;
+    }
+    if (made === true) log(`${shown}: its recording in Original files is made online-only.`);
+    else log(`${shown}: its recording in Original files could not be made online-only (${why}); it stays on this Mac's disk until Dropbox frees it.`);
   }
 }

@@ -1018,7 +1018,7 @@ describe("L6: after the recording's move", () => {
     const now = readEpisode(found.folder).record;
     const ctx = { home: w.home, root: w.root, machine: STUDIO, now: () => at, agentRunning: () => false, kickstart: () => {} };
     let at = w.now();
-    const deps = () => ({ episode: { root: w.root, machine: STUDIO, home: w.home, checkout: "/checkout" }, commit: "c709b57", log: () => {}, notify: () => {}, clock: () => at, alive: () => false, clone: w.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: () => true });
+    const deps = () => ({ episode: { root: w.root, machine: STUDIO, home: w.home, checkout: "/checkout" }, commit: "c709b57", log: () => {}, notify: () => {}, clock: () => at, alive: () => false, clone: w.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: () => true, onlineOnly: () => true });
     oweOriginals(ctx, { folder: found.folder, record: now });
     const key = `original/${now.id}.json`;
     checkOriginal(readPendingAt(w.home, key), deps());
@@ -1073,7 +1073,7 @@ describe("L6: after the recording's move", () => {
     const record = readEpisode(found.folder).record;
     let at = w.now();
     const ctx = { home: w.home, root: w.root, machine: STUDIO, now: () => at, agentRunning: () => false, kickstart: () => {} };
-    const deps = () => ({ episode: { root: w.root, machine: STUDIO, home: w.home, checkout: "/checkout" }, commit: "c709b57", log: () => {}, notify: () => {}, clock: () => at, alive: () => false, clone: w.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: () => true });
+    const deps = () => ({ episode: { root: w.root, machine: STUDIO, home: w.home, checkout: "/checkout" }, commit: "c709b57", log: () => {}, notify: () => {}, clock: () => at, alive: () => false, clone: w.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: () => true, onlineOnly: () => true });
     oweOriginals(ctx, { folder: found.folder, record });
     checkOriginal(readPendingAt(w.home, `original/${record.id}.json`), deps());
     at += LATE_CHECK_MS;
@@ -1244,7 +1244,7 @@ describe("L6: the words of the move", () => {
     const at = w.now();
     const ctx = { home: w.home, root: w.root, machine: STUDIO, now: () => at, agentRunning: () => false, kickstart: () => {} };
     oweOriginals(ctx, { folder: found.folder, record });
-    checkOriginal(readPendingAt(w.home, `original/${record.id}.json`), { episode: { root: w.root, machine: STUDIO, home: w.home, checkout: "/checkout" }, commit: "c709b57", log: () => {}, notify: () => {}, clock: () => at, alive: () => false, clone: w.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: () => true });
+    checkOriginal(readPendingAt(w.home, `original/${record.id}.json`), { episode: { root: w.root, machine: STUDIO, home: w.home, checkout: "/checkout" }, commit: "c709b57", log: () => {}, notify: () => {}, clock: () => at, alive: () => false, clone: w.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: () => true, onlineOnly: () => true });
     return { ...found, record: readEpisode(found.folder).record };
   }
   const SESSION_MARK = { kind: "session", answer: { ...ANSWERED, private: "yes" }, session: { marked: "2026-10-20T08:00:00-05:00", on: STUDIO, teachings: null, cleared: null } };

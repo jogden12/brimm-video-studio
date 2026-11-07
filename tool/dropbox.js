@@ -283,3 +283,23 @@ export function uploadedOf(path, { swift = "", exec = execFileSync, timeoutMs = 
     return null;
   }
 }
+
+/** The helper that asks Dropbox to make a file online-only (evictUbiquitousItem): online-only.swift, beside the tool. */
+export const ONLINE_ONLY = fileURLToPath(new URL("./online-only.swift", import.meta.url));
+/** How long the helper may take: swift compiles it each time. */
+export const ONLINE_ONLY_TIMEOUT_MS = 20 * 1000;
+
+/** Asks Dropbox to make the file at `path` online-only: true or false from the helper's document, or null when that cannot be told (no swift, a timeout, a failure, an
+    answer that is not the helper's JSON). On false, `said` is given the helper's error text. Synchronous: it never gives a promise. */
+export function makeOnlineOnly(path, { swift = "", exec = execFileSync, timeoutMs = ONLINE_ONLY_TIMEOUT_MS, said = () => {} } = {}) {
+  if (!swift) return null;
+  try {
+    const out = exec(swift, [ONLINE_ONLY, path], { encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"] });
+    const doc = JSON.parse(String(out).trim());
+    if (!doc || (doc.onlineOnly !== true && doc.onlineOnly !== false)) return null;
+    if (doc.onlineOnly === false && typeof doc.error === "string") said(doc.error);
+    return doc.onlineOnly;
+  } catch (e) {
+    return null;
+  }
+}
