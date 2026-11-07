@@ -1793,7 +1793,7 @@ export async function status(ctx, rest) {
     // A video kept on this Mac is checked behind its finish (Phase 3, L5): the check is said while no finish is at work on it, and late once its time is more than
     // five minutes past; the run at work, if any, is said after it; and then the problem a check found (rulings 22 and 29). One from before the switch is as today.
     const onThisMac = Boolean(e.inForce) && keptOnAMac(e.inForce);
-    const checking = e.inForce && (onThisMac ? command !== "finish" : command === "finish") ? checkingNow(ctx.home, folder, e.inForce, ctx.alive) : null;
+    const checking = e.inForce && (onThisMac ? command !== "finish" && !isGated(e) : command === "finish") ? checkingNow(ctx.home, folder, e.inForce, ctx.alive) : null;
     if (checking) {
       const late = onThisMac && ctx.now() > checking.due + 5 * 60 * 1000;
       lines.push(late ? `${shown}: the hand-off is written. Studio's check of Dropbox's copies was due at ${clockAt(checking.due)}, and is made as soon as it can be.${checking.took.length ? " The export stays in Downloads until then." : ""}` : `${shown}: the hand-off is written. ${checkSentence(checking)}`);

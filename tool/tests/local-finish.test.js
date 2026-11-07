@@ -216,6 +216,15 @@ describe("the finish of a video kept on this Mac (L5)", () => {
     w.t.done();
   });
 
+  it("B0-F20 status does not say the export is taken out of Downloads once the video was answered as a session", async () => {
+    const w = await finished();
+    const k = await on(seeing(w), "kind", FOLDER, "session", "--private", "yes", "--again");
+    assert.equal(k.code, 0, k.text);
+    const r = await on(seeing(w), "status");
+    assert.equal(r.said.some((l) => l.includes("takes the export out of Downloads") || l.includes("The export stays in Downloads until then")), false, r.text);
+    w.t.done();
+  });
+
   it("L21 a spelling right after a hand-off puts back the captions Dropbox cut short, and is said again", async () => {
     const SAID = "A copy of Pricing: what to charge? in final/ was not whole in Dropbox, so it is put back, and nothing was changed. Say it again in a minute.";
     for (const how of ["short", "same size", "gone"]) {
