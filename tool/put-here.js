@@ -2,7 +2,7 @@
 // files a joined video into a plan with it, and both are sync underneath: nothing here waits.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { textWriter } from "./dropbox.js";
+import { cloneFile, onSameDisk, textWriter } from "./dropbox.js";
 import { localStamp, readEpisode, undone, writeEpisode } from "./episode.js";
 import { studioHome } from "./home.js";
 import { episodeFilesFolder, runsFolder } from "./settings.js";
@@ -79,7 +79,8 @@ export function putHereNow(found, files, opts = {}) {
       const to = join(own, entries[i].tmp);
       mkdirSync(dirname(to), { recursive: true });
       rmSync(to, { force: true });
-      (sameDisk && !sameDisk(from, dirname(to)) ? copyFileSync : clone || copyFileSync)(from, to);
+      // A clone on one disk (cp -c), a whole copy otherwise: never a move out of the run's own folder.
+      ((sameDisk || onSameDisk)(from, dirname(to)) ? clone || cloneFile : copyFileSync)(from, to);
       const size = statSync(from).size;
       if (statSync(to).size !== size) throw new Error(`${entries[i].rel} could not be put into the episode's folder on this Mac: it is ${statSync(to).size} bytes there, not ${size}`);
       if (!entries[i].rel.startsWith("history/")) sizes[entries[i].rel] = size;
