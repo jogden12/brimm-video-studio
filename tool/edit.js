@@ -105,7 +105,7 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, footageFailed, guidanceOf, isMain as inUse, mediaOf, notWholeYet, openInApp, plainName, projectOnAnotherMac } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, copyAtWork, copyIsMade, footageFailed, guidanceOf, isMain as inUse, mediaOf, notWholeYet, openByItself, openInApp, plainName, projectOnAnotherMac, whenReadyLockOf } from "./app.js";
 import { VOICEOVER, projectCues } from "./project.js";
 import { openVoiceProject, voiceProjectWhy } from "./explainer.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelNotWholeYet, reelStretch, reelWhy } from "./app-reel.js";
@@ -113,7 +113,7 @@ import { historyTail, mainProjectDir, toldTurns, turnTime, versionsOf, whatHappe
 import { recordingPlacementsIn, timelineTranscript } from "./on-timeline.js";
 import { freeEpisode } from "./free.js";
 import { PIN, cliPath, toolchainDiffers, toolchainHolds, turnsOf } from "./hyperframes.js";
-import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeFootageCopies, makeWorkCopy, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
+import { REEL_FACES_MS, WORK_COPY_COMMAND, WORK_COPY_STEP, WORK_COPY_WAIT_STEP, canNotBeUsed, makeFootageCopies, makeWorkCopy, requestWorkCopy, workCopyLimits, workCopyLockOf } from "./workcopy.js";
 import { lookAt, referencesAsked, sayReferences, useIn } from "./references.js";
 import { PLAN_FILE_NAMES, newPlan, planAsked, planFilesFrom, planFor, plannedLine, textArg } from "./plan.js";
 import { HAND_EDITED, scriptHandEdited } from "./plan-script.js";
@@ -121,7 +121,7 @@ import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
-import { ON_OTHER_MAC, fileAt, filePlace, folderAt, onOtherMac, roleOf } from "./where.js";
+import { ON_OTHER_MAC, fileAt, filePlace, folderAt, keptOnAMac, onOtherMac, roleOf } from "./where.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -1287,7 +1287,8 @@ async function claimAndBring(ctx, found, record, { again, by = "", notYet = null
   }
   if (!record.editing || record.editing.by !== ctx.machine) {
     if ((await save(ctx, { ...found, record }, claimed(record, ctx.machine, localStamp(new Date(ctx.now()))), "")) !== 0) return { code: 1 };
-    await (ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))))(CLAIM_WAIT_MS);
+    // Another Mac never sees a video kept on this one (D3), so there is no claim of its to wait for (Phase 3, L7).
+    if (!keptOnAMac(record)) await (ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))))(CLAIM_WAIT_MS);
     const after = readEpisode(found.folder);
     if (!after.record) {
       say(notRead(ctx, { ...found, read: after }));
@@ -1415,6 +1416,8 @@ const APP_QUESTIONS = ["what-happened", "versions"];
     refuses them. `versions` needs the pinned command line (NO_COMMAND_LINE); `what-happened` reads a
     file in the project and does not. `ctx.deps.app` holds what a test gives them too (cli, node, spawn, tz). */
 export async function app(ctx, rest) {
+  // The detached run `app` starts for a video kept on this Mac whose video for HyperFrames is being made: it is in no help, as `workcopy --now` is not.
+  if (rest[0] === "--when-ready") return appWhenReady(ctx, rest);
   const { words, flags } = flagsOf(rest, []);
   // No flag is app's: `--take-over` is none, and the help is said with nothing claimed.
   if (Object.keys(flags).length) {
@@ -1451,10 +1454,76 @@ export async function app(ctx, rest) {
   if (elsewhere) return refuse(ctx, projectIsElsewhere(got.record.name.text, elsewhere));
   const clip = clipWords(ctx, { found, record: got.record }, "main", got.record.name.text);
   if (clip) return refuse(ctx, clip);
+  // A video kept on this Mac whose video for HyperFrames is being made opens by itself when it is done (Phase 3, L7): nothing is claimed or asked for.
+  if (copyAtWork(ctx, { found, record: got.record })) return openByItself(ctx, { found, record: got.record });
   const claim = await claimAndBring(ctx, found, got.record, { again: openInAppWords(got.record.name.text), by: APP_ASKED, notYet: () => notWholeYet(got.record.name.text) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
   return openInApp(ctx, { found, record }, { env: ctx.deps.env, ...ctx.deps.app, cli, plan: (given) => planProject(ctx, given), save: (next) => save(ctx, { ...found, record }, next) });
+}
+
+/** How often `app --when-ready` looks at whether the video for HyperFrames is made, in milliseconds. */
+const WHEN_READY_LOOK_MS = 2000;
+/** The notice posted when the video for HyperFrames of a video kept on this Mac could not be made, so that nothing opened by itself. */
+const couldntBeMade = (name) => `The video for HyperFrames of ${name} couldn't be made. Say "open ${name} in HyperFrames" to try again; if it says this again, ask Jason.`;
+
+/** `app --when-ready "<episode folder>"`, the detached run `app` starts for a video kept on this Mac whose video for HyperFrames is being made (Phase 3,
+    L7): it is in no help, as `workcopy --now` is not, and without a folder, or for any other video, it prints the help and ends 2. It takes a lock of
+    its own (app.js whenReadyLockOf), never the episode's, and waits with it while the working copy's run, or another run on the episode, is at work (at
+    most the copy's own limit, workcopy.js workCopyLimits), so that `free`, a move and all her other commands are not refused for it. Then, when the
+    video for HyperFrames is made, it takes the episode's lock and does what `app` does (the project made, the app asked); when it is not (the copy
+    failed, or took too long), it opens nothing and posts a notice. It claims nothing. Resolves 0 when it opened the project and 1 otherwise. */
+async function appWhenReady(ctx, rest) {
+  if (rest.length !== 2 || !rest[1]) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const found = findEpisode(ctx, rest[1]);
+  if (!found.read || !found.read.record) {
+    ctx.say(found.why || notRead(ctx, found, rest[1]));
+    return 1;
+  }
+  if (found.read.newer) {
+    ctx.say(newerWhy(found.read.record));
+    return 1;
+  }
+  if (!keptOnAMac(found.read.record)) {
+    ctx.say(HELP);
+    return 2;
+  }
+  const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+  const notify = ctx.deps.notify || banner;
+  const keep = ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {};
+  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "when-ready", lock: whenReadyLockOf(ctx.home, found.name), alive: ctx.alive, ...keep }, async () => {
+    const limit = workCopyLimits(found.read.record.video && found.read.record.video.seconds).limit;
+    const began = ctx.now();
+    const busy = () => runningCommand(ctx.home, found.name, ctx.alive, workCopyLockOf(ctx.home, found.name)) || runningCommand(ctx.home, found.name, ctx.alive);
+    while (busy() && ctx.now() - began < limit) await wait(WHEN_READY_LOOK_MS);
+    const now = readEpisode(found.folder);
+    const record = now.record;
+    const name = record ? record.name.text : found.read.record.name.text;
+    if (!record || now.newer || !copyIsMade(ctx, { found: { folder: found.folder, name: found.name, record }, record })) {
+      notify(couldntBeMade(name));
+      return { ok: false, made: [], failed: ["The video for HyperFrames was not made, so it was not opened."], next: "" };
+    }
+    // The copy is made: the episode's lock is taken now, and what `app` does is done.
+    const said = [];
+    const opened = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "app", alive: ctx.alive, ...keep }, async () => {
+      const code = await app({ ...ctx, say: (line) => (said.push(line), ctx.say(line)) }, [found.name]);
+      return { ok: code === 0, made: code === 0 ? ["the project, opened in HyperFrames"] : [], failed: code === 0 ? [] : said.slice(), next: "" };
+    });
+    if (opened.running || opened.taking) {
+      notify(couldntBeMade(name));
+      return { ok: false, made: [], failed: ["Another run was at work on it, so it was not opened."], next: "" };
+    }
+    if (!opened.ok) notify(said[0] || couldntBeMade(name));
+    return { ok: opened.ok, made: opened.made, failed: opened.failed, next: "" };
+  });
+  if (result.taking || result.running) {
+    ctx.say("It opens in HyperFrames by itself already.");
+    return 1;
+  }
+  return result.ok ? 0 : 1;
 }
 
 /** `app "<episode>" reel <n>`: open Reel `n` of the episode in the HyperFrames app, making its project first (app-reel.js
@@ -1608,7 +1677,7 @@ const VOICE_RUN_SAID = "taking in its voice";
 /** How a result names the run that left it, where the name of its command is not a word a person says: the working copy's run
     (workcopy.js) is "making the video for HyperFrames", and the join's (join.js; PR H5b) "making the video from its footage". Every other
     command is named by its own word. */
-const RUN_SAID = { [WORK_COPY_COMMAND]: "making the video for HyperFrames", join: "making the video from its footage" };
+const RUN_SAID = { [WORK_COPY_COMMAND]: "making the video for HyperFrames", join: "making the video from its footage", "when-ready": "waiting to open it in HyperFrames", app: "opening it in HyperFrames" };
 
 /** `status ["<words>"]`: what is running on this Mac (each run's step, from the progress panel's files), the imports in
     Episodes/.importing/, and for each episode on this Mac the detached run at work on it and what each one left, with what to
@@ -4780,7 +4849,8 @@ function clearedAfterClick(ctx, found, record, plan, began) {
   const why = answerWhy(ctx, found, now.record, plan);
   if (why) return why;
   const holds = record.editing && record.editing.by === ctx.machine;
-  return !holds && ctx.now() - began + CLAIM_WAIT_MS > COMMAND_BUDGET_MS ? TOO_LATE : "";
+  // A video kept on this Mac waits for no claim (Phase 3, L7), so no click is too late for one.
+  return !holds && !keptOnAMac(record) && ctx.now() - began + CLAIM_WAIT_MS > COMMAND_BUDGET_MS ? TOO_LATE : "";
 }
 
 /** Add `line` to this Mac's tool log, ~/Library/Logs/brimm-video.log, the file detached runs write to (spawnDetached); its folder
@@ -4852,7 +4922,8 @@ async function answerKind(ctx, found, plan, began) {
   // The claim, as open makes it. The record read again is the one the answer is written on. A clearing that stops here says first
   // that nothing was cleared, and lets go of the claim it wrote when a record was written on top of it.
   let base = record;
-  if (!record.editing || record.editing.by !== ctx.machine) {
+  // A video kept on this Mac is answered on this Mac alone (D3), so no claim is written or waited for: the answer is the one write (Phase 3, L7).
+  if (!keptOnAMac(record) && (!record.editing || record.editing.by !== ctx.machine)) {
     const claim = await claimAndWait(ctx, found, record, { again: "Say your answer again.", held: (by) => beingAnswered(name, by), changed: changedMeanwhile(name), said: stop, ...(plan.clearSession ? { onChanged: (on) => letGoClaimWritten(ctx, found, on) } : {}) });
     if (!claim.record) return claim.code;
     base = claim.record;
@@ -5706,7 +5777,7 @@ async function askTeachings(ctx, found, began) {
   const first = why(record);
   if (first) return refuse(ctx, first);
   let base = record;
-  if (!record.editing || record.editing.by !== ctx.machine) {
+  if (!keptOnAMac(record) && (!record.editing || record.editing.by !== ctx.machine)) {
     const claim = await claimAndWait(ctx, found, record, { again: "Say it again.", held: (by) => `${by} has ${name} open, so its teachings were not asked for. Say it again once it is let go there.`, changed: `${name} changed meanwhile: say it again.` });
     if (!claim.record) return claim.code;
     base = claim.record;

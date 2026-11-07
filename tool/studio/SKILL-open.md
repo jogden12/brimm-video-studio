@@ -135,6 +135,7 @@ Each rule starts with the row it belongs to.
 - "It was a session after all": When it says its words have already gone to Claude, tell her so, and to tell Jason; when it says it showed a new revision in Finder, tell her to drop it on the BRIMM Ops page.
 - "Open the Pricing episode": If it is bringing files over first, wait until "how far is it?" says the bring has ended, then run `open "<episode>"` again; if it says some files are not here, tell her why, in plain words, and try again only when she says to.
 - "Open it in HyperFrames": If it is bringing files over first, wait until "how far is it?" says the bring has ended, then run `app "<episode>"` again; if it says some files are not here, tell her why, in plain words, and try again only when she says to.
+- "Open it in HyperFrames": If it says HyperFrames opens it by itself, tell her so in its words and stop; do not run it again, and do not ask her to say it again.
 - "Open it in HyperFrames": If it says the project is on another Mac, tell her so in its words; nothing was claimed.
 - "What did I do in HyperFrames?": If it says nothing has been done yet, tell her so; if it says the project is on another Mac, tell her so and to ask Jason. It claims nothing, so run it whoever has the episode open.
 - "What versions are there?": To go back to one she asks the assistant in HyperFrames ("go back to before the music"), which keeps the history: BRIMM Video Studio never changes it, so never offer to go back here.

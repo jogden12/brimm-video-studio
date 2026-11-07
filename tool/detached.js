@@ -251,3 +251,13 @@ export function spawnDetached(cmd, args, { spawn: start = spawn, env = process.e
 export function startDetached(ctx, { command, folder, args = [] }) {
   ctx.start(process.execPath, [join(thisCheckout(), "tool", "edit.js"), command, "--now", folder, ...args]);
 }
+
+/** The lock of an `app --when-ready` run (Phase 3, L7) for the episode `folder`: held as long as the run waits for the video for HyperFrames, which the
+    episode's own lock is not, so that nothing she says meanwhile is refused for it. */
+export const whenReadyLockOf = (home, folder) => join(episodeWork(home, folder), "when-ready.lock");
+
+/** Start `app --when-ready <folder>`, the run that opens an episode kept on this Mac in HyperFrames once its video is ready: the same edit.js as
+    startDetached starts, and the folder itself, with no `--now`. */
+export function startWhenReady(ctx, folder) {
+  ctx.start(process.execPath, [join(thisCheckout(), "tool", "edit.js"), "app", "--when-ready", folder]);
+}

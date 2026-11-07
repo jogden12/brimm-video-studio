@@ -659,7 +659,7 @@ describe("L2c: every reader of an episode kept on the Mac Studio finds its files
       mkdirSync(dirname(cliPath(w.home)), { recursive: true });
       writeFileSync(cliPath(w.home), "");
       const r = await on({ ...w.studio, settings: { ...w.studio.settings, app: "hyperframes" } }, "app", NAME);
-      assert.match(r.text, /The video for HyperFrames is being made\./, r.text);
+      assert.match(r.text, /Its video for HyperFrames is being made\. HyperFrames opens it by itself/, r.text);
       assert.doesNotMatch(r.text, NOT_THE_DROPBOX_WAY, r.text);
       assert.doesNotMatch(r.text, /command line isn't on this Mac/, r.text);
     } finally {

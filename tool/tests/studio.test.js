@@ -306,6 +306,7 @@ describe("her folder's settings", () => {
     const app = withRules(skill, bare);
     assert.equal(app.slice(app.indexOf("If it is bringing files over first")), [
       'If it is bringing files over first, wait until "how far is it?" says the bring has ended, then run `app "<episode>"` again; if it says some files are not here, tell her why, in plain words, and try again only when she says to.',
+      "If it says HyperFrames opens it by itself, tell her so in its words and stop; do not run it again, and do not ask her to say it again.",
       "If it says the project is on another Mac, tell her so in its words; nothing was claimed."
     ].join(" "));
     // The two rows are twins and neither runs the other's command: this one runs app, in its form, and never open.

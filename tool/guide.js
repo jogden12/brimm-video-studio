@@ -357,12 +357,14 @@ export function waitWords({ checkAt, readyAt, inSeconds }) {
 
 /** The video for HyperFrames being made, and what to say when it is done: how long is left when the panel's run says, else how long it
     usually takes, by the speed this Mac measured, else no time. */
-function copyStep({ left, usual, wait }) {
+function copyStep({ left, usual, wait }, local = false) {
+  // A video kept on this Mac opens by itself once its video is made (Phase 3, L7), and waits for no check of Dropbox's.
+  const say = local ? 'Say "open it in HyperFrames": it opens by itself when it is ready.' : 'Say "open it in HyperFrames" when it is done.';
   // Waiting for Dropbox's late check (plan R1a): when it will be ready with the wait in it, else when the check is made.
-  if (left == null && wait) return toDo("making-copy", `The video for HyperFrames is being made. ${waitWords(wait)} Say "open it in HyperFrames" when it is done.`);
+  if (left == null && wait && !local) return toDo("making-copy", `The video for HyperFrames is being made. ${waitWords(wait)} ${say}`);
   const time = left != null ? `, ${aboutLeft(left)} left` : "";
   const often = left == null && usual != null ? ` It usually takes ${aboutLeft(usual)}.` : "";
-  return toDo("making-copy", `The video for HyperFrames is being made${time}.${often} Say "open it in HyperFrames" when it is done.`);
+  return toDo("making-copy", `The video for HyperFrames is being made${time}.${often} ${say}`);
 }
 
 /** The one line her words keep of Final Cut: for an episode edited there before. */
@@ -385,7 +387,7 @@ function appStep(facts) {
     return toDo("in-app", `Edit it in HyperFrames.${last} When you are done, export it on This Mac, as MP4${into}, then say "hand it off".`);
   }
   if (!facts.app) return toDo("app-off", APP_NOT_SET_UP);
-  if (!project && facts.copy) return copyStep(facts.copy);
+  if (!project && facts.copy) return copyStep(facts.copy, facts.local === true);
   // An episode from the Final Cut days: its Final Cut edits are not carried over, and it is made from the recording.
   if (facts.editedInFinalCut && facts.way === "unopened") return toDo("open-app", FROM_FINAL_CUT);
   return toDo("open-app", 'Say "open it in HyperFrames" to edit it there.');
@@ -483,7 +485,7 @@ function videoNext(facts, notes, now) {
   // Once the app has opened its project it is edited there; before, the video for the app is made first, on a Mac set up for the app, while
   // no project is here: a video at work beside a project is not the main video's (a Reel's holds the same lock), as for a raw video (appStep;
   // plan PR 17, the review of PR 10, M3).
-  if (clip) return facts.way === "hyperframes" ? appStep(facts) : facts.app && facts.copy && !facts.project ? copyStep(facts.copy) : clipStep(facts);
+  if (clip) return facts.way === "hyperframes" ? appStep(facts) : facts.app && facts.copy && !facts.project ? copyStep(facts.copy, facts.local === true) : clipStep(facts);
   if (!facts.v2) return toDo("waits-v2", WAITS_V2);
   return toDo("handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.');
 }

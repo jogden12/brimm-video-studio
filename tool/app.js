@@ -48,7 +48,7 @@ import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, r
 import { basename, dirname, extname, join } from "node:path";
 import { chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
 import { programHome } from "./home.js";
-import { readResult, runningCommand } from "./detached.js";
+import { readResult, runningCommand, startWhenReady, whenReadyLockOf } from "./detached.js";
 import { isFromPlan, kindOf, localStamp } from "./episode.js";
 import { sessionNotCleared } from "./gate.js";
 import { copyIn as copyTakes, waitWords } from "./guide.js";
@@ -84,6 +84,8 @@ export const KEPT = "kept for an earlier kind";
 /** What she is told, in words that hold no path, no flag and no command name. The three exported ones are said of a Reel's project in
     the same words (app-reel.js, plan PR 5); the other two, which tell her what to say again, have a Reel's own there. */
 export const noWords = (name, local = false) => local ? `${name}'s words are not whole on this Mac. Ask Jason.` : `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Dropbox may still be bringing them: say it again in a few minutes. If it says this again, tell Jason.`;
+/** The lock of an `app --when-ready` run, held while it waits for the video for HyperFrames of an episode kept on this Mac (detached.js). */
+export { whenReadyLockOf };
 const beingMade = (name, ready = "") => `The video for HyperFrames is being made.${ready} Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
 /** When the video for HyperFrames will be ready, as a clock time and in minutes, for the line that says it is being made: from the speed
     this Mac measured of making one (guide.js copyIn, which the guide's "It usually takes" is made of) and the recording's length, as
@@ -95,6 +97,35 @@ function readyAt(ctx, record) {
   if (wait) return ` ${waitWords(wait)}`;
   return seconds === null ? "" : ` It is ready about ${clockAt(ctx.now() + seconds * 1000)}, in ${aboutLeft(seconds)}.`;
 }
+/** What she is told of a video kept on this Mac whose video for HyperFrames is being made: HyperFrames opens it by itself (Phase 3, L7), about when this Mac
+    measured the copy would be done, else when it is ready. */
+const opensByItself = (ctx, record) => {
+  const seconds = copyTakes(readRates(progressFolder(ctx.home)), record.video && record.video.seconds);
+  return `Its video for HyperFrames is being made. HyperFrames opens it by itself ${seconds === null ? "when it is ready" : `about ${clockAt(ctx.now() + seconds * 1000)}`}.`;
+};
+/** Say that HyperFrames opens a video kept on this Mac by itself, and start the run that does it (`app --when-ready`) unless one is at work already:
+    resolves 0. Claims nothing and writes no record. */
+export function openByItself(ctx, { found, record }) {
+  if (!runningCommand(ctx.home, found.name, ctx.alive, whenReadyLockOf(ctx.home, found.name))) startWhenReady(ctx, found.name);
+  ctx.say(opensByItself(ctx, record));
+  return 0;
+}
+/** Whether `app` on the episode `found` has only to wait for the video for HyperFrames, which a run of the working copy is making now: a video kept on this
+    Mac, with no main project of its own on disk yet and no copy made. Then nothing is claimed and nothing is asked for. */
+export function copyAtWork(ctx, { found, record }) {
+  if (!keptOnAMac(record) || !runningCommand(ctx.home, found.name, ctx.alive, workCopyLockOf(ctx.home, found.name))) return false;
+  const earlier = (record.app?.projects ?? []).find(isMain);
+  if (earlier && plainName(earlier.name) && existsSync(join(episodeWork(ctx.home, found.name), earlier.name))) return false;
+  return !copyIsMade(ctx, { found, record });
+}
+/** Whether the video for HyperFrames of the episode `found` is made: its video and its facts are both there (`app --when-ready` goes on once they are). */
+export function copyIsMade(ctx, { found, record }) {
+  const raw = statOf(fileOf(ctx, found, record.video.file));
+  if (raw === undefined) return false;
+  const copy = copyPathsOf(ctx.home, found.name, record, raw);
+  return existsSync(copy.video) && existsSync(copy.facts);
+}
+
 /** Claude's reading of a raw video waits for the import's late check as well (reading.js): while that is still to come, when the reading
     starts is said with it (plan R1a). */
 function stillReading(ctx, record) {
@@ -472,6 +503,7 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   const reading = wait === "reading";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     requestWorkCopy(ctx, { folder: found.name });
+    if (keptOnAMac(record) && !reading) return { code: openByItself(ctx, { found, record }) };
     ctx.say(reading ? stillReading(ctx, record) : beingMade(record.name.text, readyAt(ctx, record)));
     return { code: 0 };
   }
@@ -558,6 +590,7 @@ function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
   const made = factsIn(copy.facts);
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     requestWorkCopy(ctx, { folder: found.name });
+    if (keptOnAMac(record)) return { code: openByItself(ctx, { found, record }) };
     ctx.say(beingMade(name, readyAt(ctx, record)));
     return { code: 0 };
   }

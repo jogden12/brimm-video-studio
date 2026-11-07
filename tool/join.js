@@ -627,5 +627,10 @@ export function afterJoin(ctx, found, started, notify = banner) {
       ctx.say(`${title}: the launch agent could not be asked to make the check of its copies (${String(e.message).replace(/\.$/, "")}). It is made when the Mac's import next runs.`);
     }
   }
+  // A video kept on this Mac whose video for HyperFrames is being made opens by itself once it is ready, when she asks for it (Phase 3, L7).
+  if (started.explainer !== true && copyAsked && here) {
+    notify(`Ready: "${title}" is made from its footage. Say "open ${title} in HyperFrames": it opens by itself once its video is ready.`);
+    return;
+  }
   notify(started.explainer === true ? `Ready: "${title}" has its voice. In Claude, say "what's next?"` : `Ready: "${title}" is made from its footage.${copyAsked && !here ? opensAt(ctx, wrote.record) : ""} In Claude, say "what's next?"`);
 }

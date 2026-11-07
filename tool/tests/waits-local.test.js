@@ -108,7 +108,7 @@ describe("kind, a raw answer of a video kept on this Mac", () => {
     owe(t);
     const r = await on(t.ctx.deps, "kind", LABEL, "raw", "--private", "no");
     assert.deepEqual([r.code, r.said], [0, [STILL(LABEL)]]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["read", "--now", FOLDER, "--kind", "raw", "--rev", "3"], ["workcopy", "--now", FOLDER]]);
+    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["read", "--now", FOLDER, "--kind", "raw", "--rev", "2"], ["workcopy", "--now", FOLDER]]);
     t.done();
   });
 });

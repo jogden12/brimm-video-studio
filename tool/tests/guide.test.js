@@ -247,6 +247,12 @@ const STAGE_ROWS = [
   [APP({ copy: { left: null, usual: null, wait: { checkAt: "17:15", readyAt: "", inSeconds: null } } }), "making-copy", 'The video for HyperFrames is being made. Dropbox checks its copies at 17:15 first. Say "open it in HyperFrames" when it is done.'],
   [APP({ copy: { left: 90, usual: null, wait: { checkAt: "17:15", readyAt: "17:26", inSeconds: 660 } } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames" when it is done.'],
   [CLIP({ copy: { left: 120, usual: null } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames" when it is done.'],
+  // Phase 3, L7: a video kept on this Mac opens by itself once its video is made, so the step says so; one from before the switch is told as it was.
+  [APP({ local: true, copy: { left: 180, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made, about 3 minutes left. Say "open it in HyperFrames": it opens by itself when it is ready.'],
+  [APP({ local: true, copy: { left: null, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made. It usually takes about 4 minutes. Say "open it in HyperFrames": it opens by itself when it is ready.'],
+  [APP({ local: true, copy: { left: null, usual: null } }), "making-copy", 'The video for HyperFrames is being made. Say "open it in HyperFrames": it opens by itself when it is ready.'],
+  [CLIP({ local: true, copy: { left: 120, usual: null } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames": it opens by itself when it is ready.'],
+  [APP({ local: false, copy: { left: 180, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made, about 3 minutes left. Say "open it in HyperFrames" when it is done.'],
   // On a Mac whose settings have the app off nothing opens a project, so a clip is not told to open one.
   [CLIP({ copy: { left: null, usual: null }, app: false, v2: false }), "waits-v2", V1],
   [APP({ way: "hyperframes", project: PROJECT(), elsewhere: true, mac: "Mac Studio" }), "open-elsewhere", "It is open on the Mac Studio. Carry on there."],
