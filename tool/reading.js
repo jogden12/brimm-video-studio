@@ -24,7 +24,7 @@
 // asked, and again just before the call, the record must still be the answer the run was started for. The log and the result
 // name the episode by its name and id, and never quote Claude's reply or the transcript.
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
-import { basename, dirname, extname, join } from "node:path";
+import { basename, dirname, extname, join, relative, sep } from "node:path";
 import { requestFor, readReading, reelCuesRequest, reelPhraseLines, readReelCues } from "./readings.js";
 import { applyDecisions, clipRanges, notesText, pausesOfPlan } from "./notes.js";
 import { keptSpans, roughRate, roughCaptions, planText, probeArgs, factsOf, streamsOf } from "./cuts.js";
@@ -38,7 +38,7 @@ import { gated } from "./gate.js";
 import { highestNumberOf } from "./finish.js";
 import { episodeWork, runsFolder, readSettings } from "./settings.js";
 import { fileSafe, shortId } from "./names.js";
-import { askOnce, roughCut, intoEpisode, filesOf, importHold, sameVideo, CLAUDE_MODEL, CLAUDE_TRIES, AGAIN_MS } from "./unedited.js";
+import { askOnce, roughCut, intoEpisode, putHere, filesOf, importHold, sameVideo, CLAUDE_MODEL, CLAUDE_TRIES, AGAIN_MS } from "./unedited.js";
 import { noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { lastLine } from "./run.js";
@@ -46,7 +46,7 @@ import { stamp } from "./shared/text.js";
 import { checkNames } from "./sessions.js";
 import { namesOf, withoutNames } from "./kinds.js";
 import { TEACHINGS_FORMAT, accountWhy, teachingsWhy, teachingsFiles, earlierTeachings, sessionSeen, seenFrom, planOf, teachingsText, ideasText } from "./teachings.js";
-import { fileAt, folderAt } from "./where.js";
+import { fileAt, folderAt, keptOnAMac } from "./where.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -67,7 +67,7 @@ const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
 /** What a reading of another kind says of a session, which is read only for its teachings, through `teachings`. */
 const SESSION_LATER = "A session is read only for its teachings, which come in a later step.";
 /** What to say next when nothing was read, and Claude may be asked again. */
-const AGAIN = "Nothing was changed. Say what it is again, with --again, to have Claude read it.";
+const AGAIN = "Nothing was changed. Tell me what it is again, and Claude reads it again.";
 /** The same, for a session, whose teachings are asked for again. */
 const AGAIN_TEACHINGS = "Nothing was changed. Ask for its teachings again to have Claude read it.";
 /** The notice a reading posts on this Mac once what it read is in the episode, and what to say next. */
@@ -314,7 +314,8 @@ export async function readEpisodeNow(ctx, found, deps) {
   // clip's replaces no file: it changes the record alone (its graphic cues are kept in the record's reading, and its cut plan is left as
   // the import wrote it), so it never waits.
   const replaces = kind === "raw" || (kind === "finished" && [REELS_FILE, `${stem}.reel-suggestions.txt`].some((rel) => existsSync(fileOf(ctx, found, rel))));
-  if (replaces) {
+  // An episode kept on this Mac has its files here (where.js): no late check of Dropbox's holds them, and nothing waits for one (D4).
+  if (replaces && !keptOnAMac(record)) {
     let waited = 0;
     for (;;) {
       const hold = importHold({ root: ctx.root, statusFolders: statusReadFolders(ctx), home, machine: ctx.machine, record, now: now() });
@@ -610,6 +611,13 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   const intoLog = (line) => log(line.startsWith(`${file}: `) ? `${named}: ${line.slice(file.length + 2)}` : `${named}: ${line}`);
   // Nothing of it is in the episode, nor opened: the rough cut stays on this Mac, named as the episode is named.
   const kept = render ? [`The rough cut of ${name} is kept on this Mac, in BRIMM Video Work, as "${basename(render.to)}".`] : [];
+  // An episode kept on this Mac is put into its video/ here (putHere): nothing waits for Dropbox, and no late check is kept in step.
+  if (keptOnAMac(record)) {
+    const put = await putLocal(ctx, found, deps, { record, madeAt, files, work, change, onPut, log: intoLog });
+    if (!put.put) return { ok: false, made: [], failed: [...failed, ...put.problems, ...kept], next: AGAIN };
+    log(`${named}: read.`);
+    return { ok: okNow(), made, failed: [...failed], next: saidNext };
+  }
   // This Mac's own late check of the import takes the files it is about to put in out of its list as they go in, under a lock it also
   // takes (plan R1c), so that it never puts the import's older file back over one the reading wrote.
   const step = await keepCheckInStep(ctx, { name: found.name, record, paths: madeAt }, { wait: deps.wait || ((ms_) => new Promise((done) => setTimeout(done, ms_))), log: (line) => log(`${named}: ${line}`) }).catch((e) => {
@@ -633,6 +641,22 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   if (!into.put) return { ok: false, made: [], failed: [...failed, ...problems, ...kept], next: AGAIN };
   log(`${named}: read.`);
   return { ok: !into.problems.length && okNow(), made, failed: [...failed, ...problems], next: saidNext };
+}
+
+/** Put what a reading wrote (`madeAt`, the paths it means to write, each made whole in `files`) into an episode kept on this Mac, by putHere: each file into
+    its video/ folder, the replaced ones set aside in video/history/, the record last. `onPut` is called once they are in. Resolves { put: true } or { put:
+    false, problems }, the problems in plain words. Nothing waits, and no late check is kept in step or made. */
+async function putLocal(ctx, found, deps, { record, madeAt, files, work, change, onPut, log }) {
+  const folder = found.folder;
+  const writer = { commit: deps.commit || commitOf(thisCheckout()), on: ctx.machine };
+  const opts = { ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}) };
+  const put = await putHere({ folder, record }, madeAt.map((to) => ({ rel: relative(folder, to).split(sep).join("/"), from: files.at(to) })), {
+    ...opts, home: ctx.home, work: join(work, "record"), writer, change, expectRev: record.rev, log, now: ctx.now(),
+    ...(deps.onRecordCopy ? { onRecordCopy: deps.onRecordCopy } : {})
+  });
+  if (!put.put) return { put: false, problems: [sentence(put.why), "Nothing was changed in the episode."] };
+  await onPut();
+  return { put: true };
 }
 
 /** What a session's reading writes of what Claude read (`read`), by the rule, and the result it ends with (see readEpisodeNow):
@@ -701,6 +725,16 @@ async function writtenSession(ctx, found, deps, { record, read, at, account, wor
   // The rule's own lines name the video's file first: the reading names the session by its name and id.
   const file = record.video.file;
   const intoLog = (line) => log(line.startsWith(`${file}: `) ? `${named}: ${line.slice(file.length + 2)}` : `${named}: ${line}`);
+  if (keptOnAMac(record)) {
+    const put = await putLocal(ctx, found, deps, { record, madeAt, files, work, change, onPut, log: intoLog });
+    if (!put.put) {
+      const now_ = readEpisode(folder).record;
+      if (now_ && isObject(now_.session) && now_.session.teachings === "transcript only") return { ok: false, made: [], failed: [`You asked for the transcript only of ${name} while Claude read it, so nothing it read was kept.`], next: "" };
+      return { ok: false, made: [], failed: [...put.problems], next: AGAIN_TEACHINGS };
+    }
+    log(`${named}: read.`);
+    return { ok: true, made, failed: [...failed], next: FOUND };
+  }
   const into = await intoEpisode(join(folder, file), madeAt, work, { ...deps, home: ctx.home, settings: ctx.settings, files, log: intoLog }, { change, expectRev: record.rev, onPut });
   const problems = [...into.problems, ...into.notes].map(sentence);
   if (!into.put) {
