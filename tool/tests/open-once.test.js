@@ -198,6 +198,19 @@ describe("app --when-ready", () => {
     assert.equal(argsOf(t).filter((a) => a[0] === "workcopy").length, 1, JSON.stringify(argsOf(t)));
     t.done();
   });
+  it("B0-F28 while Claude is still reading, she is told it opens by itself, not to say it again, whether the copy is made or not", async () => {
+    for (const made of [false, true]) {
+      const { t, paths } = kept();
+      if (made) madeCopy(paths);
+      atWork(t, "read");
+      const r = await on(t.ctx.deps, "app", FOLDER);
+      assert.equal(r.code, 0, r.text);
+      assert.match(r.text, /Claude is still reading it\. HyperFrames opens it by itself/, `made ${made}: ${r.text}`);
+      assert.doesNotMatch(r.text, /again/);
+      assert.ok(argsOf(t).some((a) => a[1] === "--when-ready"), JSON.stringify(argsOf(t)));
+      t.done();
+    }
+  });
   it("B0-F27 a copy that failed and ended just before this run began is taken as decided at once, not waited for the copy's whole limit", async () => {
     const { t } = kept();
     mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });

@@ -105,9 +105,10 @@ const opensByItself = (ctx, record) => {
 };
 /** Say that HyperFrames opens a video kept on this Mac by itself, and start the run that does it (`app --when-ready`) unless one is at work already:
     resolves 0. Claims nothing and writes no record. */
-export function openByItself(ctx, { found, record }) {
+export function openByItself(ctx, { found, record, reading = false }) {
   if (!runningCommand(ctx.home, found.name, ctx.alive, whenReadyLockOf(ctx.home, found.name))) startWhenReady(ctx, found.name);
-  ctx.say(opensByItself(ctx, record));
+  // While Claude is still reading, the run waits for the reading too: she is not asked to say it again.
+  ctx.say(reading ? `Claude is still reading it. HyperFrames opens it by itself once it has read it and its video is made.` : opensByItself(ctx, record));
   // The app will open the project in a detached run whose words go to the log alone: the line about its buttons, and where to export, are said here, in her chat.
   ctx.say(BUTTONS);
   const into = exportsWords(ctx.settings, ctx.home);
@@ -507,11 +508,12 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   const reading = wait === "reading";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
     requestWorkCopy(ctx, { folder: found.name });
-    if (keptOnAMac(record) && !reading) return { code: openByItself(ctx, { found, record }) };
+    if (keptOnAMac(record)) return { code: openByItself(ctx, { found, record, reading }) };
     ctx.say(reading ? stillReading(ctx, record) : beingMade(record.name.text, readyAt(ctx, record)));
     return { code: 0 };
   }
   if (reading) {
+    if (keptOnAMac(record)) return { code: openByItself(ctx, { found, record, reading }) };
     ctx.say(stillReading(ctx, record));
     return { code: 0 };
   }
