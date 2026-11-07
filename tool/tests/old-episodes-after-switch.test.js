@@ -18,10 +18,10 @@ import { readPendings, writePending } from "../filing.js";
 import { newEpisode, readEpisode, layoutOf, recordFile, recordText } from "../episode.js";
 import { fileSafe } from "../names.js";
 import { localDay } from "../shared/text.js";
-import { episodeFilesFolder, pendingFolder, writeSettings } from "../settings.js";
+import { episodeFilesFolder, importingFolder, pendingFolder, writeSettings } from "../settings.js";
 import { workCopyKey, workCopyPaths } from "../workcopy.js";
 import { clockAt } from "../unedited.js";
-import { writeStatus } from "../importing.js";
+import { writeStatusIn } from "../importing.js";
 import { FOLDER, ID, NAME, episodeFor, listAll, otherMac, reread, setup } from "./episodes.js";
 import { fw, exportOf, world as appWorld } from "./exports-world.js";
 import { guideWorld, depsOf as guideDeps } from "./guide-world.js";
@@ -86,7 +86,7 @@ describe("an episode filed before the switch, on a Mac that has switched: a raw 
     const { t, found, due } = owing();
     try {
       // The other Mac's import of the same video is at work: its late check is not this Mac's to keep in step, so the reading waits for it.
-      writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Pricing talk.mp4", bytes: found.record.video.bytes, seconds: 120, step: "Waiting for its late check", at: "2026-10-20T15:00:00-05:00", label: "x" }, (to, text) => writeFileSync(to, text));
+      writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Pricing talk.mp4", bytes: found.record.video.bytes, seconds: 120, step: "Waiting for its late check", at: "2026-10-20T15:00:00-05:00", label: "x" }, (to, text) => writeFileSync(to, text));
       const before = pendingTree(t.home);
       const r = await on(t.ctx.deps, "kind", NAME, "raw", "--private", "no", "--again");
       assert.equal(r.code, 0, r.text);
