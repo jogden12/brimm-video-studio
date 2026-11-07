@@ -244,6 +244,12 @@ describe("app --when-ready", () => {
     assert.doesNotMatch(r.text, /offline|other Mac/i);
     t.done();
   });
+  it("B0-F29 names no video's file when no episode fits the folder it was started for", async () => {
+    const { t } = kept();
+    const r = await on(t.ctx.deps, "app", "--when-ready", "2026-10-20 Jane Doe couples session (Mac Studio)");
+    assert.doesNotMatch(r.text, /Jane Doe|couples session/);
+    t.done();
+  });
   it("is for a video kept on this Mac: any other is told the help and nothing is done", async () => {
     const { t } = world({ record: RAW });
     writeSettings(t.home, { app: "hyperframes" });

@@ -801,7 +801,7 @@ export function findEpisode(ctx, said, { plannedAs } = {}) {
   if (fits.length > 1) return { why: `More than one episode fits "${said}": ${listed(fits.map((e) => listedAs(ctx, e)))}. Say which.` };
   // A detached run is given its episode's folder, which is named for the video's file: when it is gone, or has no whole record,
   // it is named by its day and Mac alone, as that run's log says it.
-  const asked = ctx.asked && ctx.asked.words[0] === "--now" && FOLDER_NAME.test(said) ? unreadName(said) : `"${said}"`;
+  const asked = ctx.asked && ["--now", "--when-ready"].includes(ctx.asked.words[0]) && FOLDER_NAME.test(said) ? unreadName(said) : `"${said}"`;
   return { why: all.length ? `No episode fits ${asked}. The episodes are: ${listed(all.map((e) => listedAs(ctx, e)))}.` : "There are no episodes yet." };
 }
 
