@@ -122,7 +122,7 @@ import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
-import { ON_OTHER_MAC, ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, onOtherMac, recordingAt, recordingStat, roleOf } from "./where.js";
+import { ON_OTHER_MAC, ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, notWholeHere, onOtherMac, recordingAt, recordingStat, roleOf } from "./where.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -1023,7 +1023,7 @@ function episodeLines(ctx, e, left, all, links) {
   // A script file changed outside the chat is said in its own plain line, not as "Not right" (plan-script.js; review changes R5).
   const handEdited = scriptHandEdited(e.folder, record);
   const looked = { machine: ctx.machine, localFolder: folderAt(ctx, { folder: e.folder, record }, "local") };
-  for (const problem of fileProblems(e.folder, record, looked)) if (!(handEdited && problem.file === "teleprompter.txt")) lines.push(`    ${clean(filePlace(record, problem.file) === "local" && keptOnAMac(record) ? `${shownName(record)}'s ${roleOf(problem.file)} is not whole on this Mac. Ask Jason.` : fileProblemWords(problem))}`);
+  for (const problem of fileProblems(e.folder, record, looked)) if (!(handEdited && problem.file === "teleprompter.txt")) lines.push(`    ${clean(filePlace(record, problem.file) === "local" && keptOnAMac(record) ? `${notWholeHere(isGated(e) ? listedAs(ctx, e) : shownName(record), problem.file)}` : fileProblemWords(problem))}`);
   if (handEdited) lines.push(`    ${HAND_EDITED(record)}`);
   return lines;
 }
@@ -1200,7 +1200,7 @@ const lookedFor = (ctx, found, record) => ({ machine: ctx.machine, localFolder: 
 function problemsOf(ctx, found, record) {
   const own = [];
   const dropbox = filesProblems(found.folder, record, { ...lookedFor(ctx, found, record), onMac: (file) => (own.push(file), null) }).filter((line) => line !== null);
-  return { dropbox, mac: own.map((file) => `${shownName(record)}'s ${roleOf(file)} is not whole on this Mac. Ask Jason.`) };
+  return { dropbox, mac: own.map((file) => notWholeHere(shownName(record), file)) };
 }
 
 /** The episode's files that are not whole on this Mac yet, as Dropbox brings them over: by the record's list. */

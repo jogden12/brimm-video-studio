@@ -29,7 +29,7 @@ import { copyIn } from "./guide.js";
 import { waitFacts } from "./late-wait.js";
 import { progressFolder, readRates } from "./progress.js";
 import { requestWorkCopy, workCopyLimits } from "./workcopy.js";
-import { ON_OTHER_MAC, fileAt, keptOnAMac, onOtherMac, roleOf } from "./where.js";
+import { ON_OTHER_MAC, fileAt, keptOnAMac, notWholeHere, onOtherMac } from "./where.js";
 
 export { isFromPlan };
 
@@ -410,7 +410,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       if (keptOnAMac(part.record)) {
         const away = onOtherMac(ctx, part.record);
         if (away) return ON_OTHER_MAC(labelOf(part), away);
-        return ctx.isWhole(path) ? "" : `${labelOf(part)}'s ${roleOf(rel)} is not whole on this Mac. Ask Jason.`;
+        return ctx.isWhole(path) ? "" : notWholeHere(labelOf(part), rel);
       }
       if (!ctx.isWhole(path)) {
         try {

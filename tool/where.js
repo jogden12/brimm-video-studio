@@ -62,6 +62,13 @@ export function roleOf(file) {
   return found ? found[1] : "file";
 }
 
+/** The sentence for a file kept on this Mac that is not whole there: "<name>'s <role> is not whole on this Mac. Ask Jason." A role in the plural (words,
+    captions, notes, Reel suggestions, teachings) takes "are". */
+export function notWholeHere(name, file) {
+  const role = roleOf(file);
+  return `${name}'s ${role} ${role.endsWith("s") ? "are" : "is"} not whole on this Mac. Ask Jason.`;
+}
+
 const statOf = (path) => {
   try {
     return statSync(path, { throwIfNoEntry: false });

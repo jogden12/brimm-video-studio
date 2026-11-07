@@ -48,13 +48,13 @@ import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, sameBytes, startsAlike, LATE_CHECK_MS } from "./dropbox.js";
 import { heldFolderOf, episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, statusWriteFolder, statusReadFolders, importEpisodes, writePending, removePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
 import { readSettings, runsFolder, episodeWork, episodesFolder, importingFolder, importingFolderOf, statusFoldersOf, isLocal, episodeFilesFolder } from "./settings.js";
-import { localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf } from "./episode.js";
+import { shownName, localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf } from "./episode.js";
 import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
 import { fingerprintOf, matchVersion } from "./versions.js";
 import { LEFT, leftAlone, sessionNotCleared } from "./gate.js";
 import { STUDIO_NAME } from "./name.js";
 import { readStatusesIn, importState, shownStep } from "./importing.js";
-import { ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, recordingAt } from "./where.js";
+import { ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, notWholeHere, recordingAt } from "./where.js";
 import { putHereNow } from "./put-here.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
@@ -1399,7 +1399,7 @@ export function askBlocked({ folder, record, root, statusFolders, home, machine,
   const small = [plan, ...(listed ? [REELS_FILE] : [])].filter((rel) => !whole(at(rel)));
   // A file kept on this Mac is not brought by Dropbox: if it is not whole, that is for Jason.
   const kept = small.filter((rel) => filePlace(record, rel) === "local");
-  if (kept.length) return { why: `${kept.join(", ")} is not whole on this Mac, so Claude cannot be asked. Ask Jason.` };
+  if (kept.length) return { why: `${kept.map((rel) => notWholeHere(shownName(record), rel).replace(/ Ask Jason\.$/, "")).join(" ")} Claude cannot be asked. Ask Jason.` };
   if (small.length) return bring(small);
   let facts = null;
   try {

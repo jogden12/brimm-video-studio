@@ -600,9 +600,24 @@ describe("an episode kept on the Mac Studio, on the Mac Studio", () => {
       writeFileSync(words, "");
       const r = await on(w.studio, "episodes");
       // The file is kept on this Mac, where Dropbox brings nothing: it is said as not whole on this Mac, for Jason (B0-F13).
-      const told = r.said.filter((line) => /^    .*'s words is not whole on this Mac\. Ask Jason\.$/.test(line));
+      const told = r.said.filter((line) => /^    .*'s words are not whole on this Mac\. Ask Jason\.$/.test(line));
       assert.equal(told.length, 1, r.text);
       assert.doesNotMatch(r.text, /Dropbox is still bringing|A file of this video/);
+    } finally {
+      w.done();
+    }
+  });
+  it("B1-F7 a file not whole there, of a video held beside a session, is said under the heading's own name, never the client's", async () => {
+    const w = world();
+    try {
+      const found = KEPT.held.make(w);
+      writeFileSync(join(found.video, "Jane Doe pricing.words.json"), "");
+      const r = await on(w.studio, "episodes");
+      const told = r.said.filter((line) => /not whole on this Mac\. Ask Jason\.$/.test(line));
+      assert.equal(told.length, 1, r.text);
+      assert.ok(told[0].startsWith(`    ${KEPT.held.said}`), told[0]);
+      assert.match(told[0], /'s words are not whole/);
+      assert.doesNotMatch(r.text, /Jane|Doe/);
     } finally {
       w.done();
     }
@@ -728,7 +743,7 @@ describe("L2c: every reader of an episode kept on the Mac Studio finds its files
       for (const argv of [["open", found.name], ["finish", found.name]]) {
         const r = await on(hf, ...argv);
         assert.equal(r.code, 1, r.text);
-        assert.match(r.text, /Pricing talk's words is not whole on this Mac\. Ask Jason\./, argv[0]);
+        assert.match(r.text, /Pricing talk's words are not whole on this Mac\. Ask Jason\./, argv[0]);
         assert.doesNotMatch(r.text, /IMG_0042|Dropbox/, `${argv[0]}\n${r.text}`);
       }
     } finally {
@@ -860,7 +875,7 @@ describe("L2c: `resolve … --keep` on the Mac that keeps the episode", () => {
       writeFileSync(join(found.video, "IMG_0042.words.json"), "");
       const shownR = await on(w.studio, "resolve", found.name); assert.equal(shownR.code, 0, shownR.text);
       const r = await on(w.studio, "resolve", found.name, "--keep", "A");
-      assert.match(r.text, /Pricing talk's words is not whole on this Mac\. Ask Jason\./, r.text);
+      assert.match(r.text, /Pricing talk's words are not whole on this Mac\. Ask Jason\./, r.text);
       assert.doesNotMatch(r.text, /IMG_0042|\.\.|Once Dropbox has finished/, r.text);
     } finally {
       w.done();
@@ -936,6 +951,19 @@ describe("L2c round two: the conversions pinned, and a set of versions that neve
       // With the real look at the disk, the plan and the list whole in video/ are not Dropbox's to bring (B0-F14).
       assert.equal(blocked.bring, undefined, JSON.stringify(blocked));
       assert.doesNotMatch(String(blocked.why), /still bringing/);
+    } finally {
+      w.done();
+    }
+  });
+  it("B1-F8 askBlocked, when the plan and the list kept on this Mac are not whole, is for Jason, naming each by its role and never by its path, and brings nothing", () => {
+    const w = world();
+    try {
+      const found = KEPT.raw.make(w);
+      const blocked = askBlocked({ folder: found.folder, record: found.record, root: w.root, home: w.home, machine: STUDIO, now: Date.now(), whole: () => false });
+      assert.equal(blocked.bring, undefined, JSON.stringify(blocked));
+      assert.match(blocked.why, /'s cut plan is not whole on this Mac\./);
+      assert.match(blocked.why, /Claude cannot be asked\. Ask Jason\.$/);
+      assert.doesNotMatch(blocked.why, /\.json|still bringing/);
     } finally {
       w.done();
     }
