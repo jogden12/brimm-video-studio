@@ -16,6 +16,7 @@ import { newEpisode, readEpisode, recordFile, recordText, shownName } from "../e
 import { episodeWork, workFolder, writeSettings } from "../settings.js";
 import { readStatusesIn, writeStatusIn } from "../importing.js";
 import { importingFolder } from "../settings.js";
+import { episodeHolding } from "../filing.js";
 import { readResult, resultFile, runDetached } from "../detached.js";
 import { sessionLabel, withoutNames } from "../kinds.js";
 import { fileSafe } from "../names.js";
@@ -542,6 +543,14 @@ describe("episodes, on a Mac that does the light import", () => {
       "  A Zoom download of 4 bytes, in Sallie's laptop's drop folder, for 0 minutes"
     ]);
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Bloggs/);
+    t.done();
+  });
+  it("B0-F19 says of a video held in a folder this Mac picked for itself that it stays for a person to delete, whatever the holding record says", () => {
+    const t = setup();
+    clientEpisode(t);
+    const line = (local) => episodeHolding({ root: t.root, video: VIDEO, bytes: 5, ...(local ? { local: true } : {}) });
+    assert.match(line(false), /until Dropbox's check of its copies passes, or for a person to delete\.$/);
+    assert.match(line(true), /It stays in the drop folder for you to delete\.$/);
     t.done();
   });
   it("says a video waiting there that a gated episode holds is imported already, by that episode's label", async () => {

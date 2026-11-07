@@ -1107,7 +1107,7 @@ export async function episodes(ctx) {
     for (const video of names) {
       const found = ctx.stat(join(folder, video));
       if (!found) continue;
-      const held = heldBy({ root: ctx.root, statusFolders: statusReadFolders(ctx), video, bytes: found.size, now: ctx.now(), gatedAs: gatedAsOf(links) });
+      const held = heldBy({ root: ctx.root, statusFolders: statusReadFolders(ctx), video, bytes: found.size, now: ctx.now(), gatedAs: gatedAsOf(links), local: isLocal(ctx.settings) });
       // How long it has waited is from when this Mac's import first saw it (seen.json): the file's own dates are kept by a copy,
       // and macOS moves its birth time back with them. When this Mac has not seen it, as in the other Mac's drop folder, from
       // its ctime, when it came into the folder, which a tag or a preview set since then makes later.
@@ -1923,7 +1923,7 @@ export async function retry(ctx, rest) {
   const label = labelOf(video);
   const who = label || `${capital(unlabelled(video, bytes))} in this Mac's drop folder`;
   const plain = (text) => withoutNames(text, namesOf(video), [label]);
-  const held = episodeHolding({ root: ctx.root, video, bytes, gatedAs });
+  const held = episodeHolding({ root: ctx.root, video, bytes, gatedAs, local: isLocal(ctx.settings) });
   if (held) return lateCheckOwed(ctx, video, held, who, plain);
   // Of this Mac's imports of the video, the ones to take again are those that failed, stopped, or found a problem at their
   // late check. One running now is left alone, and when it is the only one, nothing is done.

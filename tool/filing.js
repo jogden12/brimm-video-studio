@@ -501,7 +501,7 @@ export function statusReporter(inner, { folder, machine, video, bytes, importId 
     met in practice. Matching the length as well would mean an ffprobe of every video in the drop folder at every run.
     `statusFolders` are the folders its statuses are read in (settings.js statusFoldersOf): this Mac's own and Episodes/.importing, where another Mac
     may still write; Episodes/.importing alone when none is given. */
-export function heldBy({ root, statusFolders = [importingFolder(root)], video, bytes, now = Date.now(), gatedAs }) {
+export function heldBy({ root, statusFolders = [importingFolder(root)], video, bytes, now = Date.now(), gatedAs, local = false }) {
   // A status that failed or found a problem says most, then one that says the video is held, then an episode that holds the
   // video, then an import running. A running import, and a hold, keep only a video of their own size: one dropped again under
   // the same name, as a corrected export, is another recording.
@@ -513,7 +513,7 @@ export function heldBy({ root, statusFolders = [importingFolder(root)], video, b
   if (problem) return `copied in, but Dropbox found a problem with a copy of it: ${String(problem.problem).replace(/\.$/, "")}.`;
   const left = held.find((status) => importState(status, now) === "held");
   if (left) return String(left.held);
-  const episode = episodeHolding({ root, video, bytes, gatedAs });
+  const episode = episodeHolding({ root, video, bytes, gatedAs, local });
   if (episode) return episode;
   if (held.length) return `it is being imported on ${held[0].machine}.`;
   return "";
@@ -574,11 +574,11 @@ function cannotTell(folder, read) {
     (holdingEpisode). "" when none does. The episode is named by its folder, but a video not yet answered, or a session, by its
     label and short id (shownName): its folder holds the file's name, which may be a client's. `gatedAs` gives the name of a
     record named so ("" for one named by its folder): edit.js gives one that names a video held as a session so too. */
-export function episodeHolding({ root, video, bytes, gatedAs = (record) => (gated(record) ? shownName(record) : "") }) {
+export function episodeHolding({ root, video, bytes, gatedAs = (record) => (gated(record) ? shownName(record) : ""), local = false }) {
   const held = holdingEpisode({ root, video, bytes });
   if (!held || held.unknown) return "";
   const as = gatedAs(held.record);
-  const stays = held.record.local ? "It stays in the drop folder for you to delete." : "It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.";
+  const stays = held.record.local || local ? "It stays in the drop folder for you to delete." : "It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.";
   return `already imported as ${as ? withShortId(as, held.record) : held.name}. ${stays}`;
 }
 
@@ -1751,7 +1751,7 @@ export async function importEpisodes(dir, deps, importOne) {
       // and none to say failed.
       if (!statSync(join(dir, name), { throwIfNoEntry: false })) continue;
       const id = key(name);
-      let held = heldBy({ root: episode.root, statusFolders: statusReadFolders(episode), video: name, bytes: statSync(join(dir, name), { throwIfNoEntry: false })?.size ?? 0 });
+      let held = heldBy({ root: episode.root, statusFolders: statusReadFolders(episode), video: name, bytes: statSync(join(dir, name), { throwIfNoEntry: false })?.size ?? 0, local: Boolean(episode.local) });
       // A light import takes no Zoom download yet: it is left in the folder, and its status says why.
       if (!held && holdsZoom(name)) held = hold(name, dir, deps, told);
       if (held) {
