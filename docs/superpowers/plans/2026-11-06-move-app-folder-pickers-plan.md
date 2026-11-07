@@ -97,7 +97,8 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
     - A path with a line break ends 3 with one line.
   - **How it starts:**
     - `NSApplication.shared`, then its delegate, then `run()`;
-    - the panel from `applicationDidFinishLaunching`;
+    - `applicationDidFinishLaunching` only schedules the panel (`DispatchQueue.main.async { … runModal … }`) and returns, so the launch's open event is answered at once;
+    - `runModal` is never called before `NSApp.run()`, or inside `applicationWillFinishLaunching` or `applicationDidFinishLaunching` themselves, or LaunchServices can time out (-1712, about a minute) and `open` ends 1 while the panel is still up;
     - the process-id source on a queue of its own;
     - `application(_:open:)` and `application(_:openFiles:)` answer by ignoring the request;
     - its arguments read from `CommandLine.arguments`.
@@ -178,7 +179,8 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
 - **`choose_folder <message> <start>`.**
   - It says the spec's Terminal line, then tries the first way of `CHOOSER_ROUTE`, then the other.
   - The app way runs `open -n -W "$CHOOSER_APP" --args "<message>" "<start>" "<result>" "$$" 2>/dev/null || rc=$?`, with `<result>` in a fresh `mktemp -d`. It reads the file first, and looks at `rc` only when there is none. It takes the path as everything after the first line, less one final newline.
-  - Before the program way follows a failed app way, it waits until `pgrep -f "$CHOOSER_APP/Contents/MacOS/Choose a Folder"` finds nothing, for up to 5 seconds.
+  - When `open` leaves no result file, it polls every 0.5 s while `pgrep -f "$CHOOSER_APP/Contents/MacOS/Choose a Folder"` finds the program, with no time limit. Control-C still goes to the traps, and the helper ends with the script through its process-id watch.
+  - Once the program has gone, it reads the result file again. It tries the program way only when the helper has gone and left no result.
   - The program way runs `"$CHOOSER_APP/Contents/MacOS/Choose a Folder" "<message>" "<start>" 2>/dev/null`, capturing stdout, with `|| rc=$?`. A 3 is the line break.
   - It returns:
     - 0 with `CHOSEN` set to the path made whole (`${path:A}`);
@@ -212,12 +214,19 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - `program`: answers for the stand-in helper's second way: `"<HOME>/…"`, `"cancel"`, `"two"` or `"missing"`;
   - `agentWatches`: a list of folders the stand-in unedited plist's `WatchPaths` name, with `agentLoaded`, true or false.
 - Every home gets `Downloads`.
-- **A second run in the same home.** `moveOn` returns `again(options)`, which runs the move script again in the same home, with the same stand-ins, and returns the same shape.
+- **A second run in the same home.** `moveOn` returns `again(options)`, which runs the move script again in the same home, the same "GitHub" repo and the same clone, and returns the same shape for that run alone.
+  - It takes the per-run options: `answers`, args, `env`, `picks`, `program`, `launchctl`/`launchctlLater`, `agentLoaded`, and `install`'s `print`, `printExit`, `ran`, `ranExit` and `noBackground`.
+  - Every stand-in reads these from files in the test's own folder, which `again` rewrites. None reads them from the committed clone, which step 3 needs clean.
 - **Defaults that keep today's tests meaning what they meant:**
   - the default marks gain `finder=SHA`;
   - a moved Mac's default agent is loaded, with `WatchPaths` naming `Drop › <Mac>`;
   - the stand-in `launchctl` answers `list com.thebrimm.unedited` from `agentLoaded` without touching its counter for `list`.
-- **Today's tests.** Each test whose run reaches step 5 adds the two new answers (`y\ny\n`), and `LABELS` and the option string change. "The old ones still pass" means after these changes, which are listed in the commit.
+- **Today's tests.** Each test whose run reaches step 5 adds the two new answers (`y\ny\n`), and the option string changes. "The old ones still pass" means after these changes, which are listed in the commit.
+  - The `open -R` expectations in today's tests become the suggested `<HOME>/BRIMM Video Work/Drop`, since the stand-in `--yes` now writes `dropPath`.
+  - With `writesSettings`, `dropPath` is written after the new settings, so that it is kept.
+  - `y\ny\n` is added only where the install question is actually asked. Runs that start with the default marks (the installer finished at the pin) keep their answers.
+  - `LABELS` changes move from Task 2 to Task 5, where the report's lines arrive.
+  - In `moveOn`, when the settings have `dropPath` and no `drop`, the made-up drop folder (`.DS_Store`, `.brimm-watched-by`, `dropFiles`, `dropMode`) is made at `dropPath`.
 - **The fake `settings.js` for Studio's checkout:**
   - it has `settings.js`'s own main guard, so importing it runs nothing;
   - `show` prints `  Its drop folder:  <dropPath, or root/drop/machine>` and `  Exports from HyperFrames, looked for in:  <exportsPath, or HOME/Downloads>`;
@@ -247,6 +256,7 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - `Picked: …`;
   - the options.
 - "Cancel asks again; the end of input then stops with nothing run for real".
+- "a pick that arrives after `open` has ended 1 is still taken": a stand-in `open` starts a background stand-in helper that writes the pick about 2 s later, and ends 1 at once. The run takes that pick, and never calls the program.
 - "the first way not shown: the second way is tried". This is checked for `nofile` and for `fail`, then for the second way answering a path, `cancel` and `two`.
 - "neither way shown: asked again, and y takes the suggested folder". The c-alone case is Task 3's.
 - "a name with a space, an apostrophe, an accent and an emoji reaches the installer whole", from the stand-ins' lines in `ran`.
@@ -538,11 +548,16 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - each refusal Phase 3's own install test lists for `dropFolderFault`;
   - the nesting one;
   - L1c's exports refusals;
+  - `References` and `Unedited Video` in BRIMM Video, `~/BRIMM Video Workshop`, `~/Documents/Zoom`, and a pick that is a file, not a folder;
   - a plan made while the old folder holds a video, which must give nothing (a stop).
+
+  Each case row carries its expected words, as `install.test.js` does in "refuses a drop folder it must not watch". The test asserts `deepEqual([await code, said[0]], [1, \`Not written: ${why}.\`])` before it feeds the line to `refused_pick`.
+
+  The old-folder row asserts code 1, and that the first line starts `Not written: the drop folder would change from `. Then it expects nothing (a stop) from `refused_pick`.
 - **Tie 2.** The real `install.sh --print` in a made-up home, for each of these picks. Feed each print to `refused_pick` and `cloud_warning`, and expect the spec's reading:
   - a drop folder in `Library/CloudStorage/Dropbox-X/In`, which gives the Warning with "Dropbox";
   - `Downloads`, which gives a refused pick;
-  - a pick while the old drop folder holds a video, which gives a stop;
+  - a pick while the old drop folder holds a video, which gives a stop: the print's exit code is not 0 and its first line starts `Not written: the drop folder would change from `;
   - a pick holding another Mac's `.brimm-watched-by`, which gives a refused pick;
   - a pick a made-up transcribe plist watches, which gives a refused pick;
   - a pick named `It’s café 🎬 x`, whose name is passed whole in the print's `Its drop folder, on this Mac:` line.
@@ -557,8 +572,10 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - The stand-in chooser waits on a release file.
   - The test writes `y` with no Return. It waits for the echoed `y` in the output, then makes the release file. It waits for the next question's prompt, then writes a lone Return.
   - The run must stop, and its output must hold "Keys typed while the window was open were not taken as answers."
-  - Every wait has a 10-second limit, which fails the test. `cat`'s input is closed at the end, and the child is killed if it is still there.
-  - **A second test** writes Control-C (`\x03`) while the stand-in chooser waits. The run must end with the stop summary, and the stand-in, watching the script's process id, must see it end.
+  - Every wait has a 10-second limit, which fails the test.
+  - **Cleanup.** The child is spawned detached. In a `finally` block the test first makes the release file, then ends `cat`'s input, then kills the whole process group (`process.kill(-pid, "SIGKILL")`).
+  - The stand-in chooser gives up on its own after about 15 s, so a failed wait can neither hang the test file nor leave processes behind.
+  - **A second test** writes Control-C (`\x03`) while the stand-in chooser waits. The run must end with the stop summary. It models the first way as two parts: a waiter like `open -W` in the job's process group, which Control-C ends; and a stand-in helper outside that group, which watches the script's process id and must see it end.
   - Both are skipped where `/usr/bin/script` is missing.
 
 **Steps:**

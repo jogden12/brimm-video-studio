@@ -8,7 +8,7 @@ This is version 5. Each version was attacked before the next:
 - **Version 1** was read by a builder and attacked once.
 - **Version 2** went through a workflow on Opus 5.5: four lenses, two skeptics per serious finding, and a judge on how to show the folder chooser. All 14 serious findings stood.
 - **Version 3** went through a second workflow of the same four lenses: 17 serious findings stood and one was refuted, most of them about the try mode it added.
-- **Version 4 and its plan** went through a third round of six lenses, three on the design and three on the plan. It found 25 serious findings, most of them in the plan. The weekly usage limit stopped its skeptics after 4 of them were checked, and all 4 stood. The round was then paused, to keep the shared extra-usage budget for Phase 3. The other 21 were ruled on here, by reading them against the code; they were not checked by skeptics. Many were the same finding seen by several lenses. The finished skeptics are kept, and the round can be resumed.
+- **Version 4 and its plan** went through a third round of six lenses, three on the design and three on the plan. It found 25 serious findings, most of them in the plan. The weekly usage limit stopped its skeptics after 4 of them were checked, and all 4 stood. The round was then paused, to keep the shared extra-usage budget for Phase 3. The other 21 were ruled on here, by reading them against the code; they were not checked by skeptics. Many were the same finding seen by several lenses. The finished skeptics are kept, and the round can be resumed. Round 3's skeptics were resumed on 7 November after the weekly reset. Against version 5, 20 of its 25 serious findings were refuted (most as already handled), and the last 5 are fixed here.
 
 Every serious finding is in this version or its plan, with most of the minor ones.
 
@@ -242,7 +242,8 @@ A small helper app, `Choose a Folder.app`, inside Move to Studio at `Contents/He
   - It prints the path and ends 0, ends 1 on Cancel, or ends 2 with one sentence on stderr.
   - With no arguments, or a start folder that is not there, it ends 2 and opens no window.
 - **When the first way can't be shown.** No file, an unreadable one, or `open` failing all mean the chooser could not be shown.
-  - The app then tries the second way, but only once no process runs the first way's program. It looks for that program by its path (`pgrep -f`), for up to 5 seconds. So two choosers never show at once.
+  - When `open` leaves no result file, the script polls every 0.5 s while `pgrep -f "$CHOOSER_APP/Contents/MacOS/Choose a Folder"` finds the program, with no time limit. Control-C still goes to the traps, and the helper ends with the script through its process-id watch.
+  - Once the program has gone, the script reads the result file again. It tries the second way only when the helper has gone and left no result. So two choosers never show at once.
   - If the second way fails as well, it says so.
   - The second way ends 3 on a path with a line break, so that this is never mistaken for a chooser that could not be shown.
   - Which way goes first is one constant in `move.zsh`, `CHOOSER_ROUTE`, for the case where the tries show the first way bringing a question from macOS.
@@ -259,7 +260,8 @@ A small helper app, `Choose a Folder.app`, inside Move to Studio at `Contents/He
 - **It goes when the move goes.** It watches the script's process id, so Control-C or a closed Terminal window takes the chooser away. The script's traps need nothing more.
 - **How it starts.**
   - It sets itself up as an app first (`NSApplication.shared`, then its delegate).
-  - It shows the panel from `applicationDidFinishLaunching`, so it has finished launching first.
+  - Its `applicationDidFinishLaunching` only schedules the panel (`DispatchQueue.main.async { … runModal … }`) and returns, so the launch's open event is answered at once.
+  - It never calls `runModal` before `NSApp.run()`, or inside `applicationWillFinishLaunching` or `applicationDidFinishLaunching` themselves. If it did, LaunchServices could time out (-1712, about a minute) and `open` would end 1 while the panel is still up.
   - It watches the process id on a queue of its own, not on the main queue, which the panel holds while it is open.
   - Its delegate answers any request to open a document by ignoring it. It reads its own arguments, and never takes them as files to open.
   - `open`'s own lines, and the second way's stderr, are kept off the screen. The app says its own words.
@@ -373,6 +375,7 @@ Existing steps that describe a drop folder in Dropbox are rewritten, not only ad
     - After stapling, `spctl` accepts the app.
     - The zip holds no `._` entries.
   - **The try mode on the Mac Studio.** Claude starts it through the app (`open … --args --try-chooser`), so Terminal is in front as at a move. Then it starts it again from Terminal with `--second-way`.
+    - Jason keeps one chooser open for two minutes before picking.
     - The test folders are made in one folder on the Desktop, never in BRIMM Video Work, and that folder is deleted afterwards.
     - In the temporary folder, `ls -l` shows the helper's program executable, and `codesign --verify --strict` passes on the copy.
     - For each way, Jason notes:
@@ -478,7 +481,7 @@ Tests come first, in `tool/tests/move-app.test.js`, `tool/tests/move-app-build.t
     - with no settings: BRIMM Video found with no question;
     - with none found: says so, and still asks;
     - `--try-chooser` with `--commit` or `--print`: refused, with exit 2.
-- **Keys thrown away, on a real terminal.** macOS's `/usr/bin/script` refuses input that is a socket, which is what node's pipes are. So the test runs it behind a real pipe (`/bin/sh -c 'cat | /usr/bin/script -q /dev/null /bin/zsh …'`). It waits on the run's output before each key: for the echoed y before it lets the chooser close. Each wait has a time limit, and `cat`'s input is closed at the end. A second test sends Control-C (`\x03`) while the stand-in chooser waits: the run must end with the stop summary, and the stand-in must see the script's process end.
+- **Keys thrown away, on a real terminal.** macOS's `/usr/bin/script` refuses input that is a socket, which is what node's pipes are. So the test runs it behind a real pipe (`/bin/sh -c 'cat | /usr/bin/script -q /dev/null /bin/zsh …'`). It waits on the run's output before each key: for the echoed y before it lets the chooser close. Each wait has a time limit. The child is spawned detached, and a `finally` block makes the release file, ends `cat`'s input, then kills the whole process group. The stand-in chooser gives up on its own after about 15 s. A second test sends Control-C (`\x03`) while the stand-in chooser waits: the run must end with the stop summary, and the stand-in must see the script's process end.
   - A stand-in chooser waits while the test types y with no Return.
   - Then the chooser closes, and the test sends a lone Return. The run must stop, and must have said "Keys typed while the window was open were not taken as answers."
   - The test is skipped where `/usr/bin/script` is missing.
