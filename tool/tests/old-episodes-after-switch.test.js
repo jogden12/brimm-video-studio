@@ -25,7 +25,9 @@ import { writeStatus } from "../importing.js";
 import { FOLDER, ID, NAME, episodeFor, listAll, otherMac, reread, setup } from "./episodes.js";
 import { fw, exportOf, world as appWorld } from "./exports-world.js";
 import { guideWorld, depsOf as guideDeps } from "./guide-world.js";
-import { probed } from "./fixtures.js";
+import { probed, TOLD, PAUSES, SRT } from "./fixtures.js";
+import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, roughCaptions, keptSpans } from "../cuts.js";
+import { rawProbe } from "./phase4.js";
 
 const STUDIO = "Mac Studio";
 
@@ -69,7 +71,7 @@ describe("an episode filed before the switch, on a Mac that has switched: a raw 
       w.t.done();
     }
   });
-  /** The answered finished video of the made-up episode, kept in Dropbox at layout 3 (an episode from before the switch), on a Mac that has switched, with
+  /** The answered finished video of the made-up episode, kept in Dropbox (an episode from before the switch, with no `local`), on a Mac that has switched, with
       the late check of its import still to come: this Mac's, last copy 5 minutes ago. */
   function owing() {
     const t = setup();
@@ -259,6 +261,56 @@ describe("the guide's step after the page's \"taken\" step, on a Mac that has sw
     // Another kind's words, and another step's, are the same either way.
     for (const handoff of [{ kind: "finished", revision: 1 }, { kind: "short video", revision: 1 }]) assert.equal(opsText(handoff, "taken", false, null, true), opsText(handoff, "taken", false, null, false));
     assert.equal(opsText(raw, "kit", false, null, true), opsText(raw, "kit", false, null, false));
+  });
+});
+
+describe("an old raw episode's own reading, on a Mac that has switched", () => {
+  const VIDEO = "Pricing talk.mp4";
+  const HEARD = pausesOf(PAUSES);
+  const WORDS = wordsOf(TOLD);
+  const RULES = cutPlan(phrasesOf(WORDS, HEARD), { duration: 23.423, pauses: HEARD });
+  const FACTS = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0 };
+  const PLAN = { version: 1, video: VIDEO, facts: FACTS, phrases: RULES.phrases, ranges: RULES.ranges, kept: RULES.kept, cut: RULES.cut, pauses: HEARD, by: "rules" };
+  const FILES = {
+    [VIDEO]: "the raw video",
+    "Pricing talk.cut-plan.json": JSON.stringify(PLAN, null, 2) + "\n",
+    "Pricing talk.cut-plan.txt": planText(RULES, "The rules' alone."),
+    "Pricing talk.words.json": JSON.stringify({ video: VIDEO, duration: 23.423, words: WORDS }, null, 2) + "\n",
+    "Pricing talk.srt": SRT,
+    "Pricing talk.transcript.txt": "the transcript",
+    "Pricing talk.rough-cut.srt": roughCaptions(RULES.phrases, keptSpans(RULES.ranges, FACTS.fps)),
+    "Pricing talk.rough-cut.transcript.txt": "the rough cut's transcript"
+  };
+  const REPLY = { decisions: [], notes: "Open on the welcome.", graphicCues: [], clips: [{ from: "p4", to: "p5", hook: "What this is about", why: "It says what the talk is about.", point: "Pricing is the subject." }], spellings: [] };
+  const STATUS = { loggedIn: true, authMethod: "claude.ai", email: "sallie@example.com", orgName: "BRIMM" };
+  it("puts its files into its folder in Dropbox, writes nothing under video/, and waits for its own late check of them (LATE_CHECK_MS)", async () => {
+    const t = setup({
+      programs: {
+        FFPROBE: rawProbe,
+        CLAUDE: (args) => (args.includes("auth") ? { code: 0, stderr: "", stdout: JSON.stringify(STATUS) } : { code: 0, stderr: "", stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify(REPLY) }) })
+      }
+    });
+    try {
+      t.ctx.deps.tools = { ...t.ctx.deps.tools, claude: "CLAUDE" };
+      t.ctx.deps.fontFiles = () => ["Varela-Regular.ttf"];
+      t.ctx.deps.notify = () => {};
+      switchMac(t);
+      const at = "2026-10-20T15:00:00-05:00";
+      const found = episodeFor(t, { record: { version: 3, kind: "raw", answer: { state: "answered", guess: "raw", seen: "wide", came: "camera", match: null, by: STUDIO, on: STUDIO, at, private: "no" }, label: "Video of 14 Oct, 09:12 (Mac Studio)", editing: { by: STUDIO, since: at } }, files: FILES });
+      const before = readFileSync(join(found.folder, "Pricing talk.cut-plan.json"), "utf8");
+      const r = await on(t.ctx.deps, "read", "--now", FOLDER, "--kind", "raw", "--rev", "1");
+      assert.equal(r.code, 0, r.text);
+      // What it read went into the episode's folder in Dropbox, by the rule: its reels.json and cut plan were put in there.
+      assert.ok(existsSync(join(found.folder, "reels.json")));
+      assert.notEqual(readFileSync(join(found.folder, "Pricing talk.cut-plan.json"), "utf8"), before);
+      assert.ok(t.clones.some(([, to]) => to === join(found.folder, "reels.json")), "cloned into Dropbox's folder");
+      assert.equal(reread(found).reading.outcome, "read");
+      assert.equal(reread(found).local, undefined);
+      assert.equal(existsSync(episodeFilesFolder(t.home, FOLDER)), false, "nothing is written under video/");
+      assert.ok(t.waits.includes(LATE_CHECK_MS), `waits: ${t.waits}`);
+    } finally {
+      t.done();
+    }
   });
 });
 
