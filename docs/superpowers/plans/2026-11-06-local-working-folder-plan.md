@@ -82,8 +82,9 @@ Each says why, and what it costs if wrong.
 | Task | What | Size | Needs |
 |---|---|---|---|
 | L1 | The picked drop folder, the settings, and the switch (built: c0e4e46, af3d75a) | M | main |
-| L1b | The exports folder; L1's light-import fault taken away | M | L1 |
+| L1b | The exports folder; L1's light-import fault taken away (built: 66ce351, c125ae7, 7c87194, 4f3f929) | M | L1 |
 | L2 | Layout 6, `where.js`, and the other Mac | M | L1 |
+| L1d | Every Mac names a waiting video quietly | S | L1b, L2 |
 | L2c | Every reader through `fileAt` and `folderAt` | M-L | L2 |
 | L2b | Dropped: Phase 2 removed the code it guarded | — | — |
 | L8 | Episodes from before the switch keep the old way | M | L2c |
@@ -267,6 +268,34 @@ As in Phase 1: one Sonnet builder per task, test first, in its own Agent worktre
 **Words Sallie sees:** `Export it on This Mac, into <folder words>.`, only when the exports folder is not Downloads. Jason's: the refusal `Not written: a drop folder of this Mac's own takes the light import.` is gone.
 
 **Contract touched:** the guide's words, in step with brimm-operations: `appStep`'s export sentence names the picked exports folder when it is not Downloads. **Size:** M.
+
+---
+
+### L1d. Every Mac names a waiting video quietly
+
+**Goal:** Whatever a Mac's settings file says of the import (`"light"`, `"full"` or nothing), Studio names a waiting video, an episode it cannot read and an error nobody foresaw quietly, as the light import does, so a client's name in a file's name never reaches Claude. `lightImport` keeps one job: whether her chat is set up (`NOT_SET_UP`). This is the review session's ruling of 7 Nov 2026 on a Phase 2 leftover, which Jason may overturn: every import has been light since Phase 2, but `namesQuietly` is `lightImport(s) || isLocal(s)`, so a Mac with a drop folder in Dropbox whose file says `"full"`, or has no import line, still names by file name. No Mac is on `"full"` today (the Mac Studio's file says `"light"`, and the Move app passes `--import light`), so this changes nothing on any Mac: it is a safety net.
+
+**Evidence:** `namesQuietly` (settings.js 219) and each place it decides: `gateOf`'s refusal while a newer record is still arriving (`PENDING_WHY`, edit.js 461); `listedAs`'s name for an episode it cannot read (`unreadName`, edit.js 563-572); the waiting list (edit.js 1013-1015); `retry` (edit.js 1686-1688); `editMain`'s filter of an unforeseen error (edit.js 6550-6553); `planned`'s look at the old drop folder (settings.js 607-608, the `light` it gives `heldInOld`). `lightImport` (settings.js 213) at edit.js 6312 (`NOT_SET_UP`) stays. `tool/tests/fixtures/today-says.json` pins today's naming by file name on a Mac whose file says `"full"`. L2 changes `gateOf` and the waiting list's lines: build on L2, and find each place by its function.
+
+**Files:** `tool/settings.js`, `tool/edit.js`; `tool/switch.js` only if `heldInOld`'s `light` becomes true for every caller (then say so in the report, and keep or drop the parameter by what its callers pass); tests `edit-labels.test.js`, `edit-gate.test.js`, `settings.test.js`, the tests of the waiting list and of `retry`, and `tests/fixtures/today-says.json`.
+
+**Interfaces:** `namesQuietly` goes, and each place it decided acts as it does today when it was true. `lightImport(s)` keeps its meaning and is used only for her chat's set-up.
+
+**Failing tests first:** on a Mac whose settings file says `import: "full"`, and on one with no import line, each with a drop folder in Dropbox (no `dropPath`):
+- the waiting list names a waiting video quietly, never by its file name (a Zoom-like file name holding a client's name);
+- an episode whose record cannot be read is named by `unreadName`, not its folder's name;
+- an error nobody foresaw is shown as the light import shows it, never with a file's name in it;
+- `gateOf` refuses with `PENDING_WHY` while a newer record is still arriving;
+- `retry` names quietly;
+- `planned`'s lines about the old drop folder name its videos quietly;
+- and `NOT_SET_UP` is still said on a Mac whose file does not say `"light"`.
+`today-says.json` changes to the quiet names; the commit shows the fixture's change.
+
+**Steps:** the tests, seen failing; take `namesQuietly` and its conditions out; the fixture; the whole suite; commit.
+
+**Words Sallie and Jason see:** none new: the light import's quiet names, now on every Mac.
+
+**Contract touched:** none: the guide's words and the hand-off are unchanged. **Size:** S.
 
 ---
 
