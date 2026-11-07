@@ -1422,7 +1422,7 @@ CHECKS.final = checkFinal;
 export const clockTime = (ms) => new Date(ms).toTimeString().slice(0, 5);
 
 /** The options the rule is given in a run: the clone and the check of one disk a test gives, and the log. */
-const ruleOpts = (deps) => ({ ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log: deps.log || (() => {}) });
+export const ruleOpts = (deps) => ({ ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log: deps.log || (() => {}) });
 
 /** The label of a light import's video, as its statuses carry it, from its late check: { label }, or nothing. */
 const labelOf = (pending) => (pending.label ? { label: pending.label } : {});
