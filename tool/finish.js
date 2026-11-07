@@ -289,7 +289,7 @@ function walk(view, record, folder) {
 }
 
 /** A video's versions, newest first, each as { folder, record }: the record, then every episode it is a version of, by
-    `versionOf`, through the ones answered. `folder` is the record's own episode folder, found by its id when it is not given; `home` is this Mac's, to find the video/ folder of a version kept here.
+    `versionOf`, through the ones answered. `folder` is the record's own episode folder, found by its id when it is not given.
     This only reads: nothing is written into any folder of the chain. */
 export function chainOf(root, record, folder) {
   return linksOf(root).chainOf(record, folder);

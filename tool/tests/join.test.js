@@ -1932,6 +1932,31 @@ describe("from the parts to the project: the join, the copies and the open, run 
     assert.deepEqual(listAll(folder).filter((rel) => /b-roll|screen|footage/.test(rel)), []);
     t.done();
   });
+  it("copies the footage of b-roll and screen parts kept on this Mac, from their video/ folders (L2c)", async () => {
+    const t = world({ probes: longTalk("Take 1"), copy: "120.000000" });
+    writeFileSync(join(t.home, "hyperframes-stand-in.json"), JSON.stringify({ open: "opened" }));
+    await planned(t, { shots: [...SHOT_ARGS, ...CUES] });
+    const talk = part(t, 1, { words: SCRIPT.join(" ").split(" ") });
+    // The footage parts are kept on this Mac (layout 6): their recordings are in video/, none in their folders in Dropbox.
+    const local = (n, as, shot) => {
+      const made = part(t, n, { as, shot, record: { version: 6, local: { on: "Mac Studio" } } });
+      const own = episodeFilesFolder(t.home, made.name);
+      mkdirSync(own, { recursive: true });
+      for (const rel of readdirSync(made.folder).filter((name) => name !== "record")) renameSync(join(made.folder, rel), join(own, rel));
+      return made;
+    };
+    local(2, "b-roll", 2);
+    local(3, "screen", 4);
+    const app = () => appDeps(t, { app: { cli: STAND_IN, node: process.execPath, guidance: GUIDANCE } });
+    assert.equal((await joinRun(t, [talk.record.id])).code, 0);
+    const { finishLate } = await import("../filing.js");
+    const [pending] = readPendings(t.home);
+    finishLate(pending, { episode: { root: t.root, machine: "Mac Studio", home: t.home }, log: () => {}, notify: () => {}, clone: t.ctx.deps.clone, sameDisk: () => true });
+    const made = await on(app(), "workcopy", "--now", FOLDER_NAME(t));
+    assert.equal(made.code, 0, made.text);
+    assert.deepEqual(readdirSync(workCopyDir(t.home, FOLDER_NAME(t))).filter((n) => n.startsWith("footage-") && n.endsWith(".mp4")).map((n) => n.split("-")[1]), ["2", "4"]);
+    t.done();
+  });
   it("keeps, in the record of the video a plan made, nothing a record's own judge would refuse: a record with a kind and no sound is the filing's to refuse, not the judge's", async () => {
     // episode.js faultFor is the judge of a record written and of every record read back from disk (recordIn): a rule in it would make a record
     // already written with a kind and a video with no sound unreadable, so the rule stands in the filing (filing.js fileEpisode's `into`).

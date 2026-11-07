@@ -899,7 +899,8 @@ function maybeOf(named, others, links) {
   if (matchedSession(links, named)) return { session: true };
   const match = typeof answer.match === "string" && answer.match !== named.id ? others.find((e) => !e.newer && e.inForce && recordShaped(e.inForce) && e.inForce.id === answer.match) : undefined;
   // A version never spans two Macs (edits are not handed between Macs; Phase 3, D3): a video kept on another Mac is not offered as one to be a version of.
-  if (match && !match.away && !match.inForce.archived && match.records.filter(recordShaped).every((r) => !gated(r) && recordKind(r) !== "session")
+  const spans = match && links.setOf(links.firstOf(match.inForce)).members.some((one) => onOtherMac({ machine: match.machine }, one.record));
+  if (match && !match.away && !spans && !match.inForce.archived && match.records.filter(recordShaped).every((r) => !gated(r) && recordKind(r) !== "session")
     && !links.gapOf(match.inForce) && !links.chainOf(match.inForce).some((link) => link.record.id === named.id)
     && !links.setOf(links.firstOf(match.inForce)).members.some((one) => links.holdsSession(one))) {
     return { record: match.inForce };
@@ -1042,7 +1043,7 @@ function stepThere(e, left) {
     is known by the record read whole, so that one with a conflicted copy is listed with its conflict, to be sorted out; but one kept on another
     Mac (keptOn), whose conflict is said and sorted out on that Mac alone, is left out by its record in force, as the guide leaves it out (review
     R1-F5). */
-const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived) && !(e.inForce && e.inForce.archived && keptOn(ctx, e)) && !isPart(e.inForce)).map((e) => ({ ...e, away: keptOn(ctx, e) }));
+const listedEpisodes = (ctx, links) => folders(ctx).map((name) => episodeAt(ctx, name, links)).filter((e) => e.read.code !== "NONE" && !(e.read.record && e.read.record.archived) && !(e.inForce && e.inForce.archived && keptOn(ctx, e)) && !isPart(e.inForce)).map((e) => ({ ...e, away: keptOn(ctx, e), machine: ctx.machine }));
 
 /** Whether an episode is a video she has left alone, not for brimm-video: its gated record says so. */
 const isLeft = (e) => isGated(e) && recordKind(gatedRecord(e)) === null && Boolean(gatedRecord(e).answer) && gatedRecord(e).answer.state === "not for brimm-video";
@@ -3014,10 +3015,13 @@ async function resolveIn(ctx, found, keep) {
   // both Macs to refuse in silence (round 2, D: W1, W8).
   const outOfStep = () => {
     const inForceNow = readEpisode(found.folder, { pastCopies: true }).record;
-    const problems = inForceNow ? (({ dropbox, mac }) => [...dropbox, ...mac])(problemsOf(ctx, found, inForceNow)) : [];
-    if (!problems.length) return "";
-    // resolve again would say there is no conflict: open is what says again whether a file is not whole (the final check).
-    return `\nThe files are not as the record now lists them: ${problems.join("; ")}. Once Dropbox has finished, say "open" again; if it still says a file is not whole, ${NEEDS_JASON[0].toLowerCase()}${NEEDS_JASON.slice(1)}`;
+    const { dropbox, mac } = inForceNow ? problemsOf(ctx, found, inForceNow) : { dropbox: [], mac: [] };
+    // resolve again would say there is no conflict: open is what says again whether a file is not whole (the final check). A file kept on
+    // this Mac is not Dropbox's to bring: it is said in this Mac's words, on its own.
+    return [
+      ...(dropbox.length ? [`The files are not as the record now lists them: ${dropbox.join("; ")}. Once Dropbox has finished, say "open" again; if it still says a file is not whole, ${NEEDS_JASON[0].toLowerCase()}${NEEDS_JASON.slice(1)}`] : []),
+      ...mac
+    ].map((line) => `\n${line}`).join("");
   };
   try {
     rmSync(at(copy), { force: true });
@@ -3485,7 +3489,7 @@ async function planFootage(ctx, { found, record, deps }) {
   for (const { part, why } of footageWithheld(record, parts)) deps.log(`${partLabelOf(part)}: its footage is left out of the project: ${why}.`);
   const items = footageToUse(record, parts)
     .filter(({ part }) => typeof part.record.video?.file === "string")
-    .map(({ part, as, shot }) => ({ video: join(part.folder, part.record.video.file), shot, name: `${shownName(record)}, ${SHOT_SAID[as]} for shot ${shot}` }));
+    .map(({ part, as, shot }) => ({ video: fileAt(ctx, part, part.record.video.file), shot, name: `${shownName(record)}, ${SHOT_SAID[as]} for shot ${shot}` }));
   const done = await makeFootageCopies({ home: ctx.home, folder: found.name, items }, { ...deps, isWhole: ctx.isWhole, readAll: ctx.deps.readAll || readThrough });
   return { ...done, next: "" };
 }
@@ -4569,7 +4573,8 @@ function answerWhy(ctx, found, record, plan) {
   if (plan.target) {
     const target = (links.find(plan.target.record.id) || plan.target).record;
     const targetName = shownName(target);
-    const away = onOtherMac(ctx, target);
+    // Not any version of the target's either: a set of versions never spans two Macs.
+    const away = links.setOf(links.firstOf(target)).members.map((one) => onOtherMac(ctx, one.record)).find(Boolean) || onOtherMac(ctx, target);
     if (away) return ON_OTHER_MAC(targetName, away);
     if (links.chainOf(target).some((link) => link.record.id === record.id)) return `${name} cannot be a version of ${targetName}: ${targetName} is already a version of it.`;
     // A chain that loops or runs to an episode not on this Mac cannot be read to its first, and what it holds is not known.
@@ -6272,7 +6277,7 @@ async function showForStep(ctx, { facts, next, folder, record }) {
   const video = next.step === "posted";
   const where = !video ? [record.finished.handoff] : facts.handoff.kind === "raw" ? ["final", facts.handoff.file] : [record.video.file];
   const what = `the ${video ? "video" : "hand-off"} of ${facts.name}`;
-  const path = where.every((part) => typeof part === "string" && part !== "") ? join(folder, ...where) : "";
+  const path = where.every((part) => typeof part === "string" && part !== "") ? fileAt(ctx, { folder, record }, where.join("/")) : "";
   if (!path || !existsSync(path)) return refuse(ctx, `${capital(what)} is not on this Mac: ask Jason.`);
   // On an open-lock Mac the video to post is shown as a clone of it, made only of one whole on this Mac (cloneWhole, as `which`):
   // one that is not, Dropbox is had bring over first, as `show` does.

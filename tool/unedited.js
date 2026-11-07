@@ -54,7 +54,7 @@ import { fingerprintOf, matchVersion } from "./versions.js";
 import { LEFT, leftAlone, sessionNotCleared } from "./gate.js";
 import { STUDIO_NAME } from "./name.js";
 import { readStatuses, importState, shownStep } from "./importing.js";
-import { folderAt } from "./where.js";
+import { fileAt, folderAt } from "./where.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
     transcript tool's own numbers. */
@@ -405,7 +405,7 @@ const LIGHT_PLAN_NOTE = "The times here are the recording's own, from its start.
     nothing is brought down from Dropbox for it, and the log says so, by the episode's label, or its id when it has none. A
     record of before the switch has no fingerprint, and never matches. Nothing is thrown from here: a folder that cannot be
     read is no match. */
-function versionIn(root, mine, { log = () => {}, whole = isWhole, home = null }) {
+export function versionIn(root, mine, { log = () => {}, whole = isWhole, home = null }) {
   let names = [];
   try {
     names = readdirSync(episodesFolder(root)).filter((n) => !n.startsWith(".")).sort();
@@ -614,7 +614,7 @@ async function workOn(file, deps) {
       let filed = null;
       try {
         // No sound is read, no transcript, plan or words are made, and so there are no retakes, no guess and no fingerprint to match.
-        filed = fileEpisode({ file, made: [], at: files.at, facts, printed, kind: null, read: null, reels: [], work, dropFile: arrived, label, ...lightFields({ name, facts, plan: null, words: [], root: episode.root }, { log, whole }) }, deps);
+        filed = fileEpisode({ file, made: [], at: files.at, facts, printed, kind: null, read: null, reels: [], work, dropFile: arrived, label, ...lightFields({ name, facts, plan: null, words: [], root: episode.root }, { log, whole, home: episode.home }) }, deps);
         keepWork = true;
         keepLateCheck(filed);
       } catch (e) {
@@ -740,7 +740,7 @@ async function workOn(file, deps) {
         // the episode whose words it holds, when they match one on this Mac, for her card to offer first. It is a new version of
         // that one only once she says so. The video the join made is filed into its plan instead (`into`), as the kind the rule
         // gives it ("raw", or "short video"), and is nobody's new version.
-        filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: into ? (kind === "short video" ? "short video" : "raw") : null, read: null, reels: [], work, dropFile: arrived, label, ...(into ? { into } : {}), ...lightFields({ name, facts, plan, words: planned.words || [], root: episode.root, matching: !into }, { log, whole }) }, deps);
+        filed = fileEpisode({ file, made: held.filter((f) => files.has(f)), at: files.at, facts: facts || { duration: 0, width: 0, height: 0 }, printed, kind: into ? (kind === "short video" ? "short video" : "raw") : null, read: null, reels: [], work, dropFile: arrived, label, ...(into ? { into } : {}), ...lightFields({ name, facts, plan, words: planned.words || [], root: episode.root, matching: !into }, { log, whole, home: episode.home }) }, deps);
         const match = filed.record.answer ? filed.record.answer.match : null;
         if (match) log(`${shown}: its words are those of the episode ${match}, so her card offers it as a new version of that one.`);
         keepWork = true;
@@ -1336,29 +1336,29 @@ export function askBlocked({ folder, record, root, home, machine, now = Date.now
   const name = record.video.file;
   const plan = `${basename(name, extname(name))}.cut-plan.json`;
   // The episode's own files are in its video/ folder on this Mac when its record keeps them there (where.js).
-  const own = folderAt({ home }, { folder, record }, "local");
-  if (!existsSync(join(own, plan))) return { why: `${name} has no cut plan here, so Claude cannot be asked.` };
+  const at = (rel) => fileAt({ home }, { folder, record }, rel);
+  if (!existsSync(at(plan))) return { why: `${name} has no cut plan here, so Claude cannot be asked.` };
   const lost = listGone({ folder, record, home });
-  if (lost && !existsSync(join(own, REELS_FILE))) return { why: lost };
-  const listed = existsSync(join(own, REELS_FILE));
+  if (lost && !existsSync(at(REELS_FILE))) return { why: lost };
+  const listed = existsSync(at(REELS_FILE));
   const bring = (coming) => ({ why: `Dropbox is still bringing ${coming.join(", ")} over to this Mac. Say "ask Claude again for Reels" again when it is done.`, bring: coming });
   // What the cut plan and the list decide is decided before the video is brought, so it is never brought only to be refused.
   const small = [plan, ...(listed ? [REELS_FILE] : [])].filter((rel) => !whole(join(folder, rel)));
   if (small.length) return bring(small);
   let facts = null;
   try {
-    facts = JSON.parse(readFileSync(join(own, plan), "utf8")).facts || null;
+    facts = JSON.parse(readFileSync(at(plan), "utf8")).facts || null;
   } catch (e) {
     return { why: `The cut plan of ${name} cannot be read (${e instanceof SyntaxError ? "it is not JSON" : e.code || e.message}), so Claude cannot be asked.` };
   }
   if (!facts || !facts.height) return { why: "A recording with no picture gets no Reels." };
   if (listed) {
-    const read = readReels(readFileSync(join(own, REELS_FILE), "utf8"));
+    const read = readReels(readFileSync(at(REELS_FILE), "utf8"));
     if (read.why) return { why: `The list of Reel candidates cannot be read: ${read.why.replace(/\.$/, "")}.` };
     if (read.reels.rulesOnly === true) return { why: `Claude cannot be asked for Reels: ${read.reels.cannotAsk || "its import went by the rules alone"}.` };
     if (lost) return { why: lost };
   }
-  return whole(join(own, name)) ? {} : bring([name]);
+  return whole(at(name)) ? {} : bring([name]);
 }
 
 export async function askAgain({ folder, record }, deps) {
