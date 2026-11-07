@@ -186,6 +186,26 @@ describe("a reading stopped between its renames and its record", () => {
   });
 });
 
+describe("ask, Claude asked again for Reels, of an episode kept on this Mac", () => {
+  it("puts the new list into video/, writes the record last, and writes nothing else into Dropbox", async () => {
+    const { t, found, own } = mac({ kind: "finished", over: { name: { text: NAME, placeholder: false } } });
+    t.ctx.deps.tools = { ...t.ctx.deps.tools, swift: "SWIFT" };
+    const run = t.ctx.deps.run;
+    t.ctx.deps.run = async (cmd, args, asked) => (cmd === "SWIFT" ? { code: 0, stderr: "", stdout: "[]" } : run(cmd, args, asked));
+    t.ctx.deps.runGuarded = async (cmd, args) => ({ ...(await t.ctx.deps.run(cmd, args)), overMemory: false, outOfTime: false, peak: 0, stopped: "" });
+    assert.equal(await editMain(["ask", "--now", FOLDER], t.ctx.deps), 0, JSON.stringify(readResult(t.home, FOLDER, "ask")));
+    assert.ok(existsSync(join(own, "reels.json")));
+    assert.deepEqual(listAll(found.folder).filter((rel) => !rel.startsWith("record/")), []);
+    const record = reread(found);
+    assert.equal(record.rev, 2);
+    assert.equal(record.files["reels.json"], statSync(join(own, "reels.json")).size);
+    assert.ok(record.reels.length > 0);
+    assert.deepEqual(t.waits.filter((ms) => ms === LATE_CHECK_MS), []);
+    assert.deepEqual(readPendings(t.home), []);
+    t.done();
+  });
+});
+
 // --- A local session ---
 
 const SID = "e-20261020-77ab12";

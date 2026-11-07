@@ -1396,6 +1396,9 @@ export function importHolds({ root, statusFolders, home, machine, record, now = 
     as { why: "", waits: false, state: "" }. `importing` is whether this Mac's launch agent run is at work now. */
 export function importHold({ root, statusFolders = [importingFolder(root)], home, machine, record, now = Date.now(), importing = false }) {
   const video = record.video.file;
+  // An episode kept on this Mac has its files here, so no late check of Dropbox's holds anything of it, and its import has filed it whole before its
+  // record was written (Phase 3, L4, D4): nothing holds it, and what is waited for is the reading's own (late-wait.js projectWaits).
+  if (keptOnAMac(record)) return { why: "", waits: false, state: "" };
   const said = (text) => String(text).replace(/\.$/, "");
   const again = (on) => `say "try it again" for ${video} on ${on}, then say this again`;
   const statuses = readStatusesIn(statusFolders, now).map((s) => s.status).filter((s) => s && s.video === video && s.bytes === record.video.bytes);
@@ -1559,6 +1562,16 @@ export async function askAgain({ folder, record }, deps) {
     const now = readEpisode(folder);
     const nowListed = existsSync(join(own, REELS_FILE)) ? readFileSync(join(own, REELS_FILE), "utf8") : null;
     if (!now.record || now.record.rev !== record.rev || nowListed !== listed) return { ok: false, made: [], failed: [...said, "This episode changed while Claude was asked, so nothing was changed. Ask again."], next: as };
+    // An episode kept on this Mac gets its list in its video/ folder here, with nothing to check afterwards (putHere).
+    if (keptOnAMac(record)) {
+      const put = await putHere({ folder, record }, [{ rel: REELS_FILE, from: files.at(reelsAt) }], {
+        ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), home: deps.home || studioHome(), work: join(work, "record"), log,
+        writer: { commit: deps.commit || (deps.settings ? commitOf(thisCheckout()) : "unknown"), on: deps.settings ? deps.settings.machine : "unknown" },
+        change: (r) => ({ ...r, reels: entries }), expectRev: record.rev, now: deps.now ? deps.now() : Date.now()
+      });
+      if (!put.put) return { ok: false, made: [], failed: [...said, ...merged.ignored, `${put.why}.`, "Nothing was changed in the episode."], next: as };
+      return { ok: true, made: merged.added.map((c) => `Reel ${c.n}`), failed: [...said, ...merged.ignored], next: "Say \"show me the Reels\" to see them." };
+    }
     const into = await intoEpisode(video, [reelsAt], work, { ...deps, files }, { change: (r) => ({ ...r, reels: entries }), expectRev: record.rev });
     const failed = [...said, ...merged.ignored, ...into.problems.map((p) => `${p}.`), ...into.notes.map((n) => `${n}.`)];
     // When the put was undone, no Reel was made; and when reels.json could not be put back, the list is not as it was.
