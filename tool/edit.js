@@ -2873,12 +2873,16 @@ async function resolveIn(ctx, found, keep) {
   if (isRecord && copyRecord && !sameRecord(record, copyRecord)) {
     const why = keptOverWhy(keep === "B" ? copyRecord : record, keep === "B" ? record : copyRecord);
     if (why) return refuse(ctx, why);
-    // Sides that keep the episode's files in different places (Phase 3, L4): keeping either leaves the other's files behind, or the plan's parts on a Mac its
-    // record no longer names. So when either side lists a file kept on a Mac, or is a plan, it is for Jason.
+    // Sides that keep the episode's files in different places (Phase 3, L4): keeping either leaves the other's files behind. So when either side lists a
+    // file kept on a Mac it is for Jason. A plan lists none of its own (its three files are in Dropbox): keeping either side is allowed, and the side kept
+    // says which Mac it is filmed on, unless a part of it is kept on another Mac than that one, whose footage would then be left behind.
     const placeOf = (r) => JSON.stringify(r.local ?? null);
     const listsLocal = (r) => Object.keys(r.files || {}).some((rel) => filePlace(r, rel) === "local");
-    if (placeOf(record) !== placeOf(copyRecord) && [record, copyRecord].some((r) => listsLocal(r) || r.planned)) {
-      return refuse(ctx, `The two sides keep ${name}'s files in different places, so keeping either could leave files behind. ${NEEDS_JASON}`);
+    if (placeOf(record) !== placeOf(copyRecord)) {
+      const kept = keep === "B" ? copyRecord : record;
+      const keptMac = kept.local && typeof kept.local.on === "string" ? kept.local.on : null;
+      const behind = (record.planned || copyRecord.planned) && partsOfPlan(ctx.root, record.id, { newer: true }).some((part) => part.record?.local?.on && part.record.local.on !== keptMac);
+      if ([record, copyRecord].some(listsLocal) || behind) return refuse(ctx, `The two sides keep ${name}'s files in different places, so keeping ${keep} could leave files behind. ${NEEDS_JASON}`);
     }
   }
   const aHere = existsSync(at(of));

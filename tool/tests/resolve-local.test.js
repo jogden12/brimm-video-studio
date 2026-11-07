@@ -112,22 +112,50 @@ describe("resolve, a record whose sides keep the files in different places", () 
     assert.equal(readEpisode(folder).record.name.text, "Test A");
     t.done();
   });
-  it("refuses to keep either side of a plan that two Macs marked as filmed on different Macs: its parts are kept on the Mac its record names", async () => {
-    for (const side of ["A", "B"]) {
+  it("keeps either side of a plan that two Macs marked as filmed on different Macs when it has no part yet: it lists no file of its own on a Mac, and the side kept says where it is filmed", async () => {
+    for (const [side, on] of [["A", STUDIO], ["B", MACBOOK]]) {
       const t = setup();
       const folder = conflict(t, { a: STUDIO, b: MACBOOK, plan: true });
       const r = await keep(t.ctx.deps, side);
-      assert.equal(r.code, 1, side);
-      assert.ok(r.text.endsWith(NEEDS_JASON), r.text);
-      assert.equal(readEpisode(folder, { pastCopies: true }).record.rev, 2);
-      assert.deepEqual(readdirSync(join(folder, "record")).filter((n) => n.startsWith("0003")), []);
+      assert.equal(r.code, 0, `${side}: ${r.text}`);
+      assert.equal(readEpisode(folder).record.local.on, on);
       t.done();
     }
   });
-  it("refuses a plan marked on one Mac against the same plan not yet marked, since the parts of the marked one are on that Mac", async () => {
+  it("refuses to keep the side of a plan that says another Mac than the one its part is kept on, whose footage would be left behind, and keeps the side that says the part's Mac", async () => {
+    for (const [side, ok] of [["A", true], ["B", false]]) {
+      const t = setup();
+      const folder = conflict(t, { a: STUDIO, b: MACBOOK, plan: true });
+      part(t, "e-20261020-cccccc", STUDIO);
+      const r = await keep(t.ctx.deps, side);
+      assert.equal(r.code, ok ? 0 : 1, `${side}: ${r.text}`);
+      if (!ok) {
+        assert.ok(r.text.endsWith(NEEDS_JASON), r.text);
+        assert.equal(readEpisode(folder, { pastCopies: true }).record.rev, 2);
+        assert.deepEqual(readdirSync(join(folder, "record")).filter((n) => n.startsWith("0003")), []);
+      } else assert.equal(readEpisode(folder).record.local.on, STUDIO);
+      t.done();
+    }
+  });
+  it("refuses to keep the side of a plan that says no Mac when its part is kept on one", async () => {
     const t = setup();
     conflict(t, { a: STUDIO, b: null, plan: true });
-    for (const side of ["A", "B"]) assert.equal((await keep(t.ctx.deps, side)).code, 1, side);
+    part(t, "e-20261020-cccccc", STUDIO);
+    const r = await keep(t.ctx.deps, "B");
+    assert.equal(r.code, 1, r.text);
+    assert.ok(r.text.endsWith(NEEDS_JASON), r.text);
     t.done();
   });
 });
+
+/** A dropped video answered as footage for the plan `of`, kept on `on`. */
+function part(t, of, on) {
+  const folder = join(t.root, "Episodes", "2026-11-04 Drop 1 (Mac Studio)");
+  mkdirSync(join(folder, "record"), { recursive: true });
+  const made = newEpisode({
+    id: "e-20261104-a11111", machine: STUDIO, at: "2026-11-04T09:00:00-05:00", video: { file: "Take 1.mov", bytes: 5, seconds: 60, created: null, sound: false }, kind: null, writer: WRITER, files: { "Take 1.mov": 5 },
+    label: "Video of 4 Nov, 01:00 (Mac Studio)", answer: { state: "part", guess: null, seen: "wide, 1:00", came: "camera", match: null, by: STUDIO, on: STUDIO, at: "2026-11-04T09:30:00-05:00", private: "no" }, local: { on }
+  });
+  const next = { ...made, rev: 1, partOf: { id: of, as: "b-roll", shot: 2, client: false } };
+  writeFileSync(recordFile(folder, 1), recordText({ ...next, version: layoutOf(next) }));
+}
