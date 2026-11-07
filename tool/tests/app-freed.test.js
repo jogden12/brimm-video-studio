@@ -12,6 +12,12 @@ import { changedSince, openInApp } from "../app.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { episodeWork } from "../settings.js";
 import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
+/** A request for the main video's copy from `app` carries a token (--asked <n>, F3): what is asked for is compared without it (the token is open-once.test.js's). */
+const noAsked = (args) => {
+  const at = args.indexOf("--asked");
+  assert.ok(at === -1 || /^\d+$/.test(args[at + 1]), "the token is a whole number");
+  return at === -1 ? args : [...args.slice(0, at), ...args.slice(at + 2)];
+};
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
 const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
@@ -96,7 +102,7 @@ describe("app: a project whose video has been taken away is not made again, and 
     const before = treeOf(e.project);
     assert.equal(await run(e, e.saved[0]), 0);
     assert.deepEqual(e.said, [BEING_MADE]);
-    assert.deepEqual([e.started, e.runs().length, e.saved.length], [[["workcopy", "--now", FOLDER]], e.opened, 1]);
+    assert.deepEqual([e.started.map(noAsked), e.runs().length, e.saved.length], [[["workcopy", "--now", FOLDER]], e.opened, 1]);
     assert.deepEqual(treeOf(e.project), before);
     assert.deepEqual(readdirSync(episodeWork(e.home, FOLDER)).filter((name) => name.startsWith("Pricing talk main")), ["Pricing talk main 3fa9c1"]);
     plain(e.said);
@@ -113,7 +119,7 @@ describe("app: a project whose video has been taken away is not made again, and 
       mkdirSync(dirname(e.paths.video), { recursive: true });
       half(e);
       assert.equal(await run(e, e.saved[0]), 0);
-      assert.deepEqual([e.said, e.started], [[BEING_MADE], [["workcopy", "--now", FOLDER]]]);
+      assert.deepEqual([e.said, e.started.map(noAsked)], [[BEING_MADE], [["workcopy", "--now", FOLDER]]]);
     }
   });
   it("puts the video back from the working copy made again, moved and not copied, and then opens the same project, recording the copy's size", async (c) => {

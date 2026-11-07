@@ -559,12 +559,13 @@ export const workCopyLockOf = (home, folder) => join(episodeWork(home, folder), 
     (runDetached). `fourK` is the switch for a copy of 4K, which the run is given. `reel` is the number of a Reel, whose stretch of the
     recording the run makes the copy of instead (`--reel <n>`; plan PR 5): a Reel's copy is never of 4K, and it has the same lock, so
     one copy of an episode is made at a time, a Reel's or the video's. `footage` is the copies of a plan's footage alone (`--footage`; PR H5b):
-    its b-roll and screen recordings, made for the first time, or again once the project's open finds one missing. `ctx` is what edit.js gives
+    its b-roll and screen recordings, made for the first time, or again once the project's open finds one missing. `asked` is a token (a whole number, the time of the ask), given by a caller that waits for the main video's copy
+    (`app`, for `app --when-ready`) and written into the run's result as it is: only the main video's copy is ever asked for with one. `ctx` is what edit.js gives
     its commands: { home, alive, start }. The run is this checkout's edit.js, whatever checkout the settings name (startDetached). */
-export function requestWorkCopy(ctx, { folder, fourK = false, reel = 0, footage = false }) {
+export function requestWorkCopy(ctx, { folder, fourK = false, reel = 0, footage = false, asked }) {
   const running = runningCommand(ctx.home, folder, ctx.alive, workCopyLockOf(ctx.home, folder));
   if (running) return { started: false, running };
-  startDetached(ctx, { command: WORK_COPY_COMMAND, folder, args: reel ? ["--reel", String(reel)] : footage ? ["--footage"] : fourK ? ["--4k"] : [] });
+  startDetached(ctx, { command: WORK_COPY_COMMAND, folder, args: reel ? ["--reel", String(reel)] : footage ? ["--footage"] : [...(fourK ? ["--4k"] : []), ...(asked === undefined ? [] : ["--asked", String(asked)])] });
   return { started: true, running: "" };
 }
 

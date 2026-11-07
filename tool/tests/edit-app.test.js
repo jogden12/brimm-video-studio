@@ -21,6 +21,12 @@ import { clockAt } from "../unedited.js";
 import { workCopyKey, workCopyPaths } from "../workcopy.js";
 import { FOLDER, NAME, episodeAs, listAll, reread } from "./episodes.js";
 import { episode } from "./phase4.js";
+/** A request for the main video's copy from `app` carries a token (--asked <n>, F3): what is asked for is compared without it (the token is open-once.test.js's). */
+const noAsked = (args) => {
+  const at = args.indexOf("--asked");
+  assert.ok(at === -1 || /^\d+$/.test(args[at + 1]), "the token is a whole number");
+  return at === -1 ? args : [...args.slice(0, at), ...args.slice(at + 2)];
+};
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
 /** The edit.js of the checkout this code is in, worked out from this file's place: tool/tests/ is beside tool/edit.js. */
@@ -752,7 +758,7 @@ describe("app: Claude's reading is not finished (architecture 4.1)", () => {
     readingAtWork(t);
     const r = await app(t.ctx.deps, FOLDER);
     assert.deepEqual([r.code, r.said], [0, [STILL]]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER]]);
+    assert.deepEqual(t.started.map(([, args]) => noAsked(args.slice(1))), [["workcopy", "--now", FOLDER]]);
     assert.deepEqual([reread(found).app, runsOf(t)], [undefined, []]);
     t.done();
   });
@@ -787,7 +793,7 @@ describe("app: the project, and what is said and recorded of it", () => {
     const { t, found } = world({ copy: false });
     const r = await app(t.ctx.deps, FOLDER);
     assert.deepEqual([r.code, r.said], [0, [`The video for HyperFrames is being made. Say "open ${NAME} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`]]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER]]);
+    assert.deepEqual(t.started.map(([, args]) => noAsked(args.slice(1))), [["workcopy", "--now", FOLDER]]);
     // Claimed, as the plan orders it (the claim, then the copy), and no project is recorded or opened.
     assert.deepEqual([reread(found).rev, reread(found).editing.by, reread(found).app, runsOf(t)], [2, "Mac Studio", undefined, []]);
     t.done();
@@ -798,7 +804,7 @@ describe("app: the project, and what is said and recorded of it", () => {
     addRates(progressFolder(t.home), { [COPY_STEP]: 10 });
     const r = await app(t.ctx.deps, FOLDER);
     assert.deepEqual([r.code, r.said], [0, [`The video for HyperFrames is being made. It is ready about ${clockAt(t.now() + 234000)}, in about 4 minutes. Say "open ${NAME} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`]]);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER]]);
+    assert.deepEqual(t.started.map(([, args]) => noAsked(args.slice(1))), [["workcopy", "--now", FOLDER]]);
     t.done();
   });
   it("asks for the working copy with the edit.js of the checkout this code is in, though this Mac's settings name another checkout", async () => {
@@ -808,7 +814,7 @@ describe("app: the project, and what is said and recorded of it", () => {
     const r = await app(t.ctx.deps, FOLDER);
     assert.equal(r.code, 0, r.text);
     // Most of these tests look at args.slice(1); the program asked for is args[0].
-    assert.deepEqual(t.started.map(([cmd, args]) => [cmd, args[0], ...args.slice(1)]), [[process.execPath, OWN_EDIT_JS, "workcopy", "--now", FOLDER]]);
+    assert.deepEqual(t.started.map(([cmd, args]) => noAsked([cmd, args[0], ...args.slice(1)])), [[process.execPath, OWN_EDIT_JS, "workcopy", "--now", FOLDER]]);
     t.done();
   });
   it("opens the project from the working copy the run it asked for made, and asks for none again: the copy's key is the one app looks for", async () => {
@@ -821,7 +827,7 @@ describe("app: the project, and what is said and recorded of it", () => {
     assert.equal(made.code, 0, made.text);
     const opened = await app(t.ctx.deps, FOLDER);
     assert.deepEqual([opened.code, opened.said], [0, [OPEN, BUTTONS]]);
-    assert.deepEqual(t.started.map(([, more]) => more.slice(1)), [["workcopy", "--now", FOLDER]]);
+    assert.deepEqual(t.started.map(([, more]) => noAsked(more.slice(1))), [["workcopy", "--now", FOLDER]]);
     const project = join(work, reread(found).app.projects[0].name);
     assert.equal(readFileSync(join(project, "media", "recording.mp4"), "utf8"), "a part of a Story");
     t.done();

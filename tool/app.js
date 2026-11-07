@@ -20,7 +20,7 @@
 //     is made;
 //   - and Claude's reading must be in the episode's record: the project is written from it (the cut plan and the Reel suggestions), and
 //     nothing writes it again afterwards, so a project made while `read` is still at work on it would keep an unfinished reading for
-//     good. Until the record holds the current reading nothing is made, and she is told to say it again when it has finished (a video kept on this Mac is told that HyperFrames opens it by itself once it has read it and its video is made). Once it
+//     good. Until the record holds the current reading nothing is made, and she is told to say it again when it has finished (a video kept on this Mac is told that once Claude has read it and its video is made, HyperFrames opens it by itself). Once it
 //     does, the project is made even while the reading's own late check is still to come (plan R1d), if the words, the Reel
 //     suggestions and the cut plan are each at the size the record lists (readListed; else she is told some files are not whole yet,
 //     and claimAndBring says so before it claims anything). Only a new project waits for the reading: one made before is opened as it
@@ -105,10 +105,10 @@ const opensByItself = (ctx, record) => {
 };
 /** Say that HyperFrames opens a video kept on this Mac by itself, and start the run that does it (`app --when-ready`) unless one is at work already:
     resolves 0. Claims nothing and writes no record. */
-export function openByItself(ctx, { found, record, reading = false }) {
-  if (!runningCommand(ctx.home, found.name, ctx.alive, whenReadyLockOf(ctx.home, found.name))) startWhenReady(ctx, found.name);
+export function openByItself(ctx, { found, record, reading = false, asked }) {
+  if (!runningCommand(ctx.home, found.name, ctx.alive, whenReadyLockOf(ctx.home, found.name))) startWhenReady(ctx, found.name, asked);
   // While Claude is still reading, the run waits for the reading too: she is not asked to say it again.
-  ctx.say(reading ? `Claude is still reading it. HyperFrames opens it by itself once it has read it and its video is made.` : opensByItself(ctx, record));
+  ctx.say(reading ? `Claude is still reading it. Once Claude has read it and its video is made, HyperFrames opens it by itself.` : opensByItself(ctx, record));
   // The app will open the project in a detached run whose words go to the log alone: the line about its buttons, and where to export, are said here, in her chat.
   ctx.say(BUTTONS);
   const into = exportsWords(ctx.settings, ctx.home);
@@ -507,8 +507,9 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   const copy = copyPathsOf(home, found.name, record, raw);
   const reading = wait === "reading";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
-    requestWorkCopy(ctx, { folder: found.name });
-    if (keptOnAMac(record)) return { code: openByItself(ctx, { found, record, reading }) };
+    const asked = Math.trunc(ctx.now());
+    const requested = requestWorkCopy(ctx, { folder: found.name, asked });
+    if (keptOnAMac(record)) return { code: openByItself(ctx, { found, record, reading, ...(requested.started ? { asked } : {}) }) };
     ctx.say(reading ? stillReading(ctx, record) : beingMade(record.name.text, readyAt(ctx, record)));
     return { code: 0 };
   }
@@ -595,8 +596,9 @@ function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
   const was = factsIn(join(dir, "brimm", "facts.json"));
   const made = factsIn(copy.facts);
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
-    requestWorkCopy(ctx, { folder: found.name });
-    if (keptOnAMac(record)) return { code: openByItself(ctx, { found, record }) };
+    const asked = Math.trunc(ctx.now());
+    const requested = requestWorkCopy(ctx, { folder: found.name, asked });
+    if (keptOnAMac(record)) return { code: openByItself(ctx, { found, record, ...(requested.started ? { asked } : {}) }) };
     ctx.say(beingMade(name, readyAt(ctx, record)));
     return { code: 0 };
   }

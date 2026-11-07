@@ -131,6 +131,25 @@ describe("workcopy --reel: the command", () => {
   });
 });
 
+describe("workcopy --reel: its result keeps its tag when the run throws (F3)", () => {
+  it("says it was a Reel's copy, and takes no token", async () => {
+    const w = reelWorld();
+    w.t.ctx.deps.runGuarded = async () => {
+      throw new Error("the watchdog broke");
+    };
+    w.t.ctx.deps.readAll = async () => {
+      throw new Error("dropbox broke");
+    };
+    w.t.ctx.isWhole = () => {
+      throw new Error("disk broke");
+    };
+    await on(w.t.ctx.deps, ...ASK);
+    const r = readResult(w.t.home, FOLDER, "workcopy");
+    assert.deepEqual([r.ok, r.copy, "asked" in r], [false, "reel", false]);
+    w.t.done();
+  });
+});
+
 describe("workcopy --reel: the gate asks first, in its own words, as workcopy's does", () => {
   it("refuses a video not yet answered, a video left alone, a session not cleared and a video held beside a session, makes nothing, and leaves a result in those words", async () => {
     const OLD = "e-20261010-a0a0a0";

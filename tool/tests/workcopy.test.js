@@ -1304,6 +1304,14 @@ describe("asking for the working copy", () => {
     assert.deepEqual(requestWorkCopy(ctx, { folder: FOLDER }), { started: true, running: "" });
     assert.deepEqual(started, [[process.execPath, [OWN_EDIT_JS, "workcopy", "--now", FOLDER]]]);
   });
+  it("F3 a main copy asked for with a token gets --asked <n>; without one, and for a Reel or the footage, it gets none", (c) => {
+    const { ctx, started } = asking(c);
+    requestWorkCopy(ctx, { folder: FOLDER, asked: 1700000000000 });
+    requestWorkCopy(ctx, { folder: FOLDER });
+    requestWorkCopy(ctx, { folder: FOLDER, reel: 2, asked: 5 });
+    requestWorkCopy(ctx, { folder: FOLDER, footage: true, asked: 5 });
+    assert.deepEqual(started.map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER, "--asked", "1700000000000"], ["workcopy", "--now", FOLDER], ["workcopy", "--now", FOLDER, "--reel", "2"], ["workcopy", "--now", FOLDER, "--footage"]]);
+  });
   it("starts none for a second request while the first one runs", (c) => {
     const { ctx, home, started } = asking(c, (pid) => pid === process.pid);
     assert.equal(requestWorkCopy(ctx, { folder: FOLDER }).started, true);

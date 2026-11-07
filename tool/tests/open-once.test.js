@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CLAIM_WAIT_MS, editMain } from "../edit.js";
+import { CLAIM_WAIT_MS, WHEN_READY_GRACE_MS, editMain } from "../edit.js";
 import { lockOf, readResult, resultFile, takeEpisodeLock } from "../detached.js";
 import { whenReadyLockOf } from "../app.js";
 import { recordFile, recordText } from "../episode.js";
@@ -63,6 +63,17 @@ function whenReadyAtWork(t) {
   mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
   assert.equal(takeEpisodeLock(whenReadyLockOf(t.home, FOLDER), "when-ready", () => true).taken, true);
   t.ctx.deps.alive = (pid) => pid === process.pid;
+}
+
+/** The token the copy asked for last was given (--asked <n>), or null. */
+const askedOf = (t) => {
+  const asks = argsOf(t).filter((a) => a[0] === "workcopy" && a.includes("--asked"));
+  return asks.length ? Number(asks[asks.length - 1][asks[asks.length - 1].indexOf("--asked") + 1]) : null;
+};
+/** The result a run of a copy leaves (workcopy.result.json), as runDetached writes it: tagged with the copy and, when asked with one, the token. */
+function mainResult(t, { ok, asked, copy = "main", endedAgo = 0, early } = {}) {
+  mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+  writeFileSync(resultFile(t.home, FOLDER, "workcopy"), JSON.stringify({ version: 1, command: "workcopy", copy, ...(asked !== undefined ? { asked } : {}), started: t.now() - endedAgo - 3000, ended: t.now() - endedAgo, ok, made: [], failed: ok ? [] : ["no room"], next: "", ...(early ? { early: true } : {}) }));
 }
 
 describe("kind: an answer for a video kept on this Mac", () => {
@@ -125,7 +136,7 @@ describe("app, while the video for HyperFrames of a video kept on this Mac is be
       assert.equal(r.code, 0, r.text);
       const into = exportsWords(t.ctx.settings, t.home);
       assert.ok(into, "the picked folder is named");
-      assert.deepEqual(r.said, [reading ? "Claude is still reading it. HyperFrames opens it by itself once it has read it and its video is made." : BEING_MADE("when it is ready"), BUTTONS, `Export it on This Mac, into ${into}.`]);
+      assert.deepEqual(r.said, [reading ? "Claude is still reading it. Once Claude has read it and its video is made, HyperFrames opens it by itself." : BEING_MADE("when it is ready"), BUTTONS, `Export it on This Mac, into ${into}.`]);
       t.done();
     }
   });
@@ -152,6 +163,7 @@ describe("app, while the video for HyperFrames of a video kept on this Mac is be
 
 describe("app --when-ready", () => {
   const run = (t) => on(t.ctx.deps, "app", "--when-ready", FOLDER);
+  const runAsked = (t, token) => on(t.ctx.deps, "app", "--when-ready", FOLDER, "--asked", String(token));
   it("waits without the episode's lock for the copy, then makes the project and opens the app once", async () => {
     const { t, found, paths } = kept();
     atWork(t, "workcopy");
@@ -222,7 +234,7 @@ describe("app --when-ready", () => {
     assert.equal(argsOf(t).filter((a) => a[0] === "workcopy").length, 1, JSON.stringify(argsOf(t)));
     t.done();
   });
-  it("B1-F3 the Reel's copy ended with a result (made or failed) and the main copy's run takes its lock a look after it is asked for: nothing is posted, and the project opens", async () => {
+  it("B1-F3 the Reel's copy ended with a result (made or failed): the main copy is asked for with a token of its own, nothing is posted, and the project opens when that token's result is ok", async () => {
     for (const reelOk of [true, false]) {
       const { t, found, paths } = kept();
       atWork(t, "workcopy");
@@ -233,12 +245,13 @@ describe("app --when-ready", () => {
         turns += 1;
         if (turns === 1) {
           rmSync(workCopyLockOf(t.home, FOLDER), { force: true });
-          writeFileSync(resultFile(t.home, FOLDER, "workcopy"), JSON.stringify({ version: 1, command: "workcopy", copy: "reel", started: t.now() - 3000, ended: t.now(), ok: reelOk, made: [], failed: reelOk ? [] : ["no room"], next: "" }));
+          mainResult(t, { ok: reelOk, copy: "reel" });
         }
         // The main copy's run, asked for after the Reel's ended, takes its lock one look later, and makes the copy the look after that.
         if (turns === 3) atWork(t, "workcopy");
         if (turns === 5) {
           madeCopy(paths);
+          mainResult(t, { ok: true, asked: askedOf(t) });
           rmSync(workCopyLockOf(t.home, FOLDER), { force: true });
         }
       };
@@ -250,6 +263,144 @@ describe("app --when-ready", () => {
       t.done();
     }
   });
+  it("T1 a Reel's copy is at work when she asks, it ends ok with the main copy not made, and a failed main result from 5 s earlier is on disk: the main copy is asked for with its own token, no notice, and it opens on that token's ok result", async () => {
+    const { t, found, paths } = kept();
+    mainResult(t, { ok: false, copy: "main", endedAgo: 5000 });
+    atWork(t, "workcopy");
+    const wait = t.ctx.deps.wait;
+    let turns = 0;
+    t.ctx.deps.wait = async (ms) => {
+      await wait(ms);
+      turns += 1;
+      if (turns === 1) {
+        rmSync(workCopyLockOf(t.home, FOLDER), { force: true });
+        mainResult(t, { ok: true, copy: "reel" });
+      }
+      if (turns === 2) {
+        assert.equal(askedOf(t) !== null, true, JSON.stringify(argsOf(t)));
+        atWork(t, "workcopy");
+      }
+      if (turns === 4) {
+        madeCopy(paths);
+        mainResult(t, { ok: true, asked: askedOf(t) });
+        rmSync(workCopyLockOf(t.home, FOLDER), { force: true });
+      }
+      assert.deepEqual(t.notices, []);
+    };
+    const r = await run(t);
+    assert.equal(r.code, 0, r.text);
+    assert.equal(argsOf(t).filter((a) => a[0] === "workcopy").length, 1, JSON.stringify(argsOf(t)));
+    assert.equal(reread(found).app.projects[0].state, "opened");
+    t.done();
+  });
+  it("T2 app asked with token T, and a failed main result without T that ended 5 s before when-ready began is on disk: it is not the answer, and T's ok result with the copy made opens the project", async () => {
+    const { t, found, paths } = kept();
+    const token = t.now();
+    mainResult(t, { ok: false, copy: "main", endedAgo: 5000 });
+    const wait = t.ctx.deps.wait;
+    let turns = 0;
+    t.ctx.deps.wait = async (ms) => {
+      await wait(ms);
+      turns += 1;
+      if (turns === 1) atWork(t, "workcopy");
+      if (turns === 2) {
+        madeCopy(paths);
+        mainResult(t, { ok: true, asked: token });
+        rmSync(workCopyLockOf(t.home, FOLDER), { force: true });
+      }
+      assert.deepEqual(t.notices, []);
+    };
+    const r = await runAsked(t, token);
+    assert.equal(r.code, 0, r.text);
+    assert.equal(argsOf(t).filter((a) => a[0] === "workcopy").length, 0, JSON.stringify(argsOf(t)));
+    assert.equal(reread(found).app.projects[0].state, "opened");
+    t.done();
+  });
+  it("T2b a failed result that is early, a Reel's, or the main's with another token is not the answer to the token", async () => {
+    for (const odd of [{ early: true }, { copy: "reel" }, { asked: 1 }]) {
+      const { t } = kept();
+      const token = t.now();
+      mainResult(t, { ok: false, asked: token, ...odd });
+      const r = await runAsked(t, token);
+      // Not answered: the ask goes unanswered for its grace, then the one own ask is made, and then the notice follows.
+      assert.equal(r.code, 1);
+      assert.equal(argsOf(t).filter((a) => a[0] === "workcopy").length, 1, JSON.stringify(odd));
+      assert.equal(t.notices.length, 1);
+      t.done();
+    }
+  });
+  it("T3 the token's own result failed: exactly one notice and no own ask", async () => {
+    const { t, found } = kept();
+    const token = t.now();
+    mainResult(t, { ok: false, asked: token });
+    const r = await runAsked(t, token);
+    assert.equal(r.code, 1);
+    assert.deepEqual(t.notices, [`The video for HyperFrames of ${NAME} couldn't be made. Say "open ${NAME} in HyperFrames" to try again; if it says this again, ask Jason.`]);
+    assert.deepEqual(argsOf(t), []);
+    assert.equal(existsSync(standInLog(t)), false);
+    assert.equal(reread(found).app, undefined);
+    t.done();
+  });
+  it("T5 the run asked for never shows (no lock, no result): after the grace when-ready makes its one own ask, and when that never shows either, the notice follows its grace", async () => {
+    const { t } = kept();
+    const token = t.now();
+    const began = t.now();
+    const askedAt = [];
+    const wait = t.ctx.deps.wait;
+    t.ctx.deps.wait = async (ms) => {
+      await wait(ms);
+      if (argsOf(t).length && askedAt.length === 0) askedAt.push(t.now());
+    };
+    const r = await runAsked(t, token);
+    assert.equal(r.code, 1);
+    assert.deepEqual(argsOf(t).map((a) => a.slice(0, 3)), [["workcopy", "--now", FOLDER]]);
+    assert.equal(askedOf(t) !== null && askedOf(t) !== token, true);
+    assert.ok(askedAt[0] - began >= WHEN_READY_GRACE_MS && askedAt[0] - began <= WHEN_READY_GRACE_MS + 2000, `${askedAt[0] - began}`);
+    assert.ok(t.now() - askedAt[0] >= WHEN_READY_GRACE_MS - 2000, "the own ask has a grace of its own");
+    assert.equal(t.notices.length, 1);
+    t.done();
+  });
+  it("T6 no token, a main copy at work ends ok before the next look: the project opens and nothing is asked for", async () => {
+    const { t, found, paths } = kept();
+    atWork(t, "workcopy");
+    const wait = t.ctx.deps.wait;
+    t.ctx.deps.wait = async (ms) => {
+      await wait(ms);
+      madeCopy(paths);
+      mainResult(t, { ok: true });
+      rmSync(workCopyLockOf(t.home, FOLDER), { force: true });
+    };
+    const r = await run(t);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(argsOf(t), []);
+    assert.deepEqual(t.notices, []);
+    assert.equal(reread(found).app.projects[0].state, "opened");
+    t.done();
+  });
+  it("T7 openByItself gives when-ready the token only when its request for the copy started a run", async () => {
+    const { t } = kept();
+    const first = await on(t.ctx.deps, "app", FOLDER);
+    assert.equal(first.code, 0, first.text);
+    const token = askedOf(t);
+    assert.equal(token, t.now());
+    assert.deepEqual(argsOf(t), [["workcopy", "--now", FOLDER, "--asked", String(token)], ["app", "--when-ready", FOLDER, "--asked", String(token)]]);
+    t.done();
+    // A copy already at work: nothing is asked for, so the run gets no token.
+    const w = kept();
+    atWork(w.t, "workcopy");
+    await on(w.t.ctx.deps, "app", FOLDER);
+    assert.deepEqual(argsOf(w.t), [WHEN_READY]);
+    w.t.done();
+  });
+  it("a --when-ready that is given anything but the folder, or the folder and --asked with a whole number, is the help and nothing is done", async () => {
+    for (const given of [["--asked"], ["--asked", "x"], ["--asked", "1.5"], ["--asked", "5", "extra"], ["extra"]]) {
+      const { t } = kept();
+      const r = await on(t.ctx.deps, "app", "--when-ready", FOLDER, ...given);
+      assert.equal(r.code, 2, given.join(" "));
+      assert.equal(t.waits.length, 0);
+      t.done();
+    }
+  });
   it("B1-F13 with the reading and the copy both at work, she is told it opens after the reading, not at the copy's time", async () => {
     const { t } = kept();
     atWork(t, "workcopy");
@@ -257,7 +408,7 @@ describe("app --when-ready", () => {
     addRates(progressFolder(t.home), { [COPY_STEP]: 0.1 });
     const r = await on(t.ctx.deps, "app", FOLDER);
     assert.equal(r.code, 0, r.text);
-    assert.match(r.text, /Claude is still reading it\. HyperFrames opens it by itself/, r.text);
+    assert.match(r.text, /Claude is still reading it\. Once Claude has read it and its video is made, HyperFrames opens it by itself\./, r.text);
     assert.doesNotMatch(r.text, /about \d/);
     t.done();
   });
@@ -290,11 +441,11 @@ describe("app --when-ready", () => {
       t.done();
     }
   });
-  it("B1-F3 a failure of the main copy's own run is still the answer: the notice is posted and no second copy is asked for", async () => {
+  it("B1-F3 a failure of the main copy's own run, with the token it was asked with, is the answer: the notice is posted and no second copy is asked for", async () => {
     const { t } = kept();
-    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
-    writeFileSync(resultFile(t.home, FOLDER, "workcopy"), JSON.stringify({ version: 1, command: "workcopy", copy: "main", started: t.now() - 3000, ended: t.now() - 1000, ok: false, made: [], failed: ["no room"], next: "" }));
-    const r = await run(t);
+    const token = t.now();
+    mainResult(t, { ok: false, asked: token, endedAgo: 1000 });
+    const r = await runAsked(t, token);
     assert.equal(r.code, 1);
     assert.equal(t.notices.length, 1);
     assert.equal(argsOf(t).filter((a) => a[0] === "workcopy").length, 0);
@@ -307,17 +458,17 @@ describe("app --when-ready", () => {
       atWork(t, "read");
       const r = await on(t.ctx.deps, "app", FOLDER);
       assert.equal(r.code, 0, r.text);
-      assert.match(r.text, /Claude is still reading it\. HyperFrames opens it by itself/, `made ${made}: ${r.text}`);
+      assert.match(r.text, /Claude is still reading it\. Once Claude has read it and its video is made, HyperFrames opens it by itself\./, `made ${made}: ${r.text}`);
       assert.doesNotMatch(r.text, /again/);
       assert.ok(argsOf(t).some((a) => a[1] === "--when-ready"), JSON.stringify(argsOf(t)));
       t.done();
     }
   });
-  it("B0-F27 a copy that failed and ended just before this run began is taken as decided at once, not waited for the copy's whole limit", async () => {
+  it("B0-F27 a copy that failed with the token it was asked with is taken as decided at once, not waited for the copy's whole limit", async () => {
     const { t } = kept();
-    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
-    writeFileSync(resultFile(t.home, FOLDER, "workcopy"), JSON.stringify({ version: 1, command: "workcopy", started: t.now() - 3000, ended: t.now() - 1000, ok: false, made: [], failed: ["no room"], next: "" }));
-    const r = await run(t);
+    const token = t.now() - 4000;
+    mainResult(t, { ok: false, asked: token, endedAgo: 1000 });
+    const r = await runAsked(t, token);
     assert.equal(r.code, 1);
     assert.ok(t.waits.length < 5, `${t.waits.length} waits`);
     assert.equal(t.notices.length, 1);
@@ -325,6 +476,7 @@ describe("app --when-ready", () => {
   });
   it("started just after the copy was asked for, it waits for the copy's run to be seen rather than posting the notice at once", async () => {
     const { t, paths } = kept();
+    const token = t.now();
     let turns = 0;
     const wait = t.ctx.deps.wait;
     t.ctx.deps.wait = async (ms) => {
@@ -334,11 +486,12 @@ describe("app --when-ready", () => {
       if (turns === 1) atWork(t, "workcopy");
       if (turns === 2) {
         madeCopy(paths);
+        mainResult(t, { ok: true, asked: token });
         rmSync(workCopyLockOf(t.home, FOLDER), { force: true });
       }
       assert.deepEqual(t.notices, []);
     };
-    const r = await run(t);
+    const r = await runAsked(t, token);
     assert.equal(r.code, 0, r.text);
     assert.equal(turns, 2);
     assert.deepEqual(t.notices, []);

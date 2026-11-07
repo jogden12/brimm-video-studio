@@ -104,6 +104,47 @@ describe("workcopy: the command", () => {
   });
 });
 
+describe("workcopy: its result says which copy it was and what asked for it (F3)", () => {
+  it("writes copy and the token it was given into its result, ended well or not", async () => {
+    for (const how of ["works", "fail"]) {
+      const { t } = world({ how });
+      await on(t.ctx.deps, "workcopy", "--now", FOLDER, "--asked", "123");
+      const r = readResult(t.home, FOLDER, "workcopy");
+      assert.deepEqual([r.ok, r.copy, r.asked], [how === "works", "main", 123], how);
+      t.done();
+    }
+  });
+  it("takes a token that is a whole number alone: any other is left out of the result", async () => {
+    for (const given of [["--asked"], ["--asked", "x"], ["--asked", "1.5"], ["--asked", "-3"], ["--asked", "1", "--asked", "2"]]) {
+      const { t } = world();
+      await on(t.ctx.deps, "workcopy", "--now", FOLDER, ...given);
+      const r = readResult(t.home, FOLDER, "workcopy");
+      assert.deepEqual([r.copy, "asked" in r], ["main", false], given.join(" "));
+      t.done();
+    }
+  });
+  it("keeps its tag when the run throws: a main run with a token says main and the token, a footage run says footage", async () => {
+    for (const [argv, expected] of [[["--asked", "123"], { copy: "main", asked: 123 }], [["--footage"], { copy: "footage" }]]) {
+      const { t } = world();
+      t.ctx.deps.runGuarded = async () => {
+        throw new Error("the watchdog broke");
+      };
+      t.ctx.deps.readAll = async () => {
+        throw new Error("dropbox broke");
+      };
+      t.ctx.isWhole = () => {
+        throw new Error("disk broke");
+      };
+      await on(t.ctx.deps, "workcopy", "--now", FOLDER, ...argv);
+      const r = readResult(t.home, FOLDER, "workcopy");
+      assert.equal(r.ok, false);
+      assert.equal(r.copy, expected.copy);
+      assert.equal(r.asked, expected.asked);
+      t.done();
+    }
+  });
+});
+
 describe("workcopy: it runs beside the reading, and one at a time", () => {
   it("runs while the reading holds the episode's lock, and leaves that lock as it found it", async () => {
     const { t, paths, guarded } = world();

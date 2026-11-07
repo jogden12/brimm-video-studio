@@ -28,6 +28,12 @@ import { downloadsFolder, episodeFilesFolder, episodeWork, writeSettings } from 
 import { localDay } from "../shared/text.js";
 import { setup, episodeAs, reread, listAll, toldOf } from "./episodes.js";
 import { MINIMUM } from "./open-world.js";
+/** A request for the main video's copy from `app` carries a token (--asked <n>, F3): what is asked for is compared without it (the token is open-once.test.js's). */
+const noAsked = (args) => {
+  const at = args.indexOf("--asked");
+  assert.ok(at === -1 || /^\d+$/.test(args[at + 1]), "the token is a whole number");
+  return at === -1 ? args : [...args.slice(0, at), ...args.slice(at + 2)];
+};
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -1106,7 +1112,7 @@ describe("app, for an explainer in her voice: the project from sound (PR H6)", (
     const r = await on(depsOf(t), "app", TITLE);
     assert.equal(r.code, 0, r.text);
     assert.match(r.said[0], /^The video for HyperFrames is being made\./);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["workcopy", "--now", nameOf(t)]]);
+    assert.deepEqual(t.started.map(([, args]) => noAsked(args.slice(1))), [["workcopy", "--now", nameOf(t)]]);
     assert.equal(existsSync(join(workOf(t), PROJECT)), false);
     assert.deepEqual(planOf(t).app, undefined);
     t.done();
@@ -1122,7 +1128,7 @@ describe("app, for an explainer in her voice: the project from sound (PR H6)", (
     const asked = await on(depsOf(t), "app", TITLE);
     assert.equal(asked.code, 0, asked.text);
     assert.match(asked.said[0], /^The video for HyperFrames is being made\./);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)).at(-1), ["workcopy", "--now", nameOf(t)]);
+    assert.deepEqual(noAsked(t.started.map(([, args]) => args.slice(1)).at(-1)), ["workcopy", "--now", nameOf(t)]);
     assert.equal((await on(depsOf(t), "workcopy", "--now", nameOf(t))).code, 0);
     const back = await on(depsOf(t), "app", TITLE);
     assert.equal(back.code, 0, back.text);

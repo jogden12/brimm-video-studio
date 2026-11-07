@@ -25,6 +25,12 @@ import { COPY_STEP } from "../guide.js";
 import { addRates, progressFolder } from "../progress.js";
 import { clockAt } from "../unedited.js";
 import { psText } from "./open-world.js";
+/** A request for the main video's copy from `app` carries a token (--asked <n>, F3): what is asked for is compared without it (the token is open-once.test.js's). */
+const noAsked = (args) => {
+  const at = args.indexOf("--asked");
+  assert.ok(at === -1 || /^\d+$/.test(args[at + 1]), "the token is a whole number");
+  return at === -1 ? args : [...args.slice(0, at), ...args.slice(at + 2)];
+};
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
 const CHAT = "5b1f0c8e-2d47-4a93-b6e1-7c9a3f2d8e04";
@@ -343,7 +349,7 @@ describe("app: opening an episode in HyperFrames", () => {
   it("starts the working copy when there is none, says it is being made, and makes no project yet", async (c) => {
     const e = episode(c, { copy: false });
     assert.equal(await run(e), 0);
-    assert.deepEqual(e.started, [["workcopy", "--now", FOLDER]]);
+    assert.deepEqual(e.started.map(noAsked), [["workcopy", "--now", FOLDER]]);
     assert.deepEqual(e.said, ['The video for HyperFrames is being made. Say "open Pricing talk in HyperFrames" again when it is done; "how far is it?" shows how far it has got.']);
     assert.ok(!existsSync(e.project));
     assert.deepEqual([e.saved, e.runs()], [[], []]);
@@ -551,7 +557,7 @@ describe("app: opening an episode in HyperFrames", () => {
       const e = episode(c, { copy: false });
       atWork(e);
       assert.equal(await run(e), 0);
-      assert.deepEqual(e.started, [["workcopy", "--now", FOLDER]]);
+      assert.deepEqual(e.started.map(noAsked), [["workcopy", "--now", FOLDER]]);
       assert.deepEqual(e.said, [STILL]);
       assert.ok(!existsSync(e.project));
       assert.deepEqual([e.saved, e.runs()], [[], []]);

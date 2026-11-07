@@ -17,6 +17,12 @@ import { episodeWork, writeSettings } from "../settings.js";
 import { workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 import { FOLDER, NAME, episodeAs, listAll, reread } from "./episodes.js";
 import { episode } from "./phase4.js";
+/** A request for the main video's copy from `app` carries a token (--asked <n>, F3): what is asked for is compared without it (the token is open-once.test.js's). */
+const noAsked = (args) => {
+  const at = args.indexOf("--asked");
+  assert.ok(at === -1 || /^\d+$/.test(args[at + 1]), "the token is a whole number");
+  return at === -1 ? args : [...args.slice(0, at), ...args.slice(at + 2)];
+};
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
 const GUIDANCE = fileURLToPath(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url));
@@ -340,7 +346,7 @@ describe("free, then app: the video is made again, and the same project is opene
   /** The `workcopy` run that `app` asked for, run as it would run: the command it was started as, in a world of stand-ins. */
   async function madeAgain(t, since) {
     const asked = t.started.slice(since).map(([, args]) => args.slice(1)).filter((args) => args[0] === "workcopy");
-    assert.deepEqual(asked, [["workcopy", "--now", FOLDER]]);
+    assert.deepEqual(asked.map(noAsked), [["workcopy", "--now", FOLDER]]);
     const made = await on(t.ctx.deps, ...asked[0]);
     assert.equal(made.code, 0, made.text);
   }
@@ -354,7 +360,7 @@ describe("free, then app: the video is made again, and the same project is opene
 
     const asked = await plain(w.t.ctx.deps, "app", FOLDER);
     assert.deepEqual([asked.code, asked.said], [0, [`The video for HyperFrames is being made. Say "open ${NAME} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`]]);
-    assert.deepEqual([reread(w.found).app, w.t.started.map(([, args]) => args.slice(1))], [freed.app, [["workcopy", "--now", FOLDER]]]);
+    assert.deepEqual([reread(w.found).app, w.t.started.map(([, args]) => noAsked(args.slice(1)))], [freed.app, [["workcopy", "--now", FOLDER]]]);
     assert.equal(runsOf(w.t).length, runs, "the app was not asked to open a project with no video");
     assert.equal(existsSync(join(w.at, "media", "recording.mp4")), false);
 

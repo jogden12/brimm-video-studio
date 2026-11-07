@@ -1479,19 +1479,27 @@ export async function app(ctx, rest) {
 
 /** How often `app --when-ready` looks at whether the video for HyperFrames is made, in milliseconds. */
 const WHEN_READY_LOOK_MS = 2000;
-/** How long before `app --when-ready` began a failed copy's end still counts as the answer to the request that started it, in milliseconds. */
-const WHEN_READY_JUST_BEFORE_MS = 15000;
+/** How long after a request for the main video's copy `app --when-ready` waits for the run it asked for to show (its lock taken, or its result written), in milliseconds. A request that has shown neither by then is unanswered. */
+export const WHEN_READY_GRACE_MS = 30000;
 /** The notice posted when the video for HyperFrames of a video kept on this Mac could not be made, so that nothing opened by itself. */
 const couldntBeMade = (name) => `The video for HyperFrames of ${name} couldn't be made. Say "open ${name} in HyperFrames" to try again; if it says this again, ask Jason.`;
 
-/** `app --when-ready "<episode folder>"`, the detached run `app` starts for a video kept on this Mac whose video for HyperFrames is being made (Phase 3,
+/** `app --when-ready "<episode folder>" [--asked <n>]`, the detached run `app` starts for a video kept on this Mac whose video for HyperFrames is being made (Phase 3,
     L7): it is in no help, as `workcopy --now` is not, and without a folder, or for any other video, it prints the help and ends 2. It takes a lock of
     its own (app.js whenReadyLockOf), never the episode's, and waits with it while the working copy's run, or another run on the episode, is at work (at
     most the copy's own limit, workcopy.js workCopyLimits), so that `free`, a move and all her other commands are not refused for it. Then, when the
     video for HyperFrames is made, it takes the episode's lock and does what `app` does (the project made, the app asked); when it is not (the copy
-    failed, or took too long), it opens nothing and posts a notice. It claims nothing. Resolves 0 when it opened the project and 1 otherwise. */
+    failed, or took too long), it opens nothing and posts a notice. It claims nothing. Resolves 0 when it opened the project and 1 otherwise.
+    What decides that the copy is made or failed is a token, never a time (F3): `app` asked for the copy at a moment (`--asked <n>`, that moment, a whole
+    number) and the copy's run writes the token it was asked with into its result (runDetached's tag). Only a result of the main video's copy with that token,
+    and not an early one, answers. With no token (a copy run was at work already when `app` was said) no result answers by itself: the run waits while the copy
+    lock is held, and once it is free the copy is made or it is not. When the lock is free, no other run holds the episode, and the copy is not made, this run
+    asks for the main copy itself, once, with a token of its own, and waits for that token's result in the same way. A request whose run was never seen (no lock
+    taken, no result) within WHEN_READY_GRACE_MS is unanswered: the opener's is asked for again by this run, once; this run's own ends the wait, and the notice is posted. */
 async function appWhenReady(ctx, rest) {
-  if (rest.length !== 2 || !rest[1]) {
+  // Only `--when-ready <folder>` and `--when-ready <folder> --asked <n>` (n a whole number) are forms of it.
+  const given = rest.length === 4 && rest[2] === "--asked" && /^\d+$/.test(rest[3]) && Number.isSafeInteger(Number(rest[3])) ? Number(rest[3]) : null;
+  if (!(rest.length === 2 || given !== null) || !rest[1]) {
     ctx.say(HELP);
     return 2;
   }
@@ -1519,45 +1527,39 @@ async function appWhenReady(ctx, rest) {
       const again = readEpisode(found.folder);
       return again.record && !again.newer ? { found: { folder: found.folder, name: found.name, record: again.record }, record: again.record } : null;
     };
-    // The copy's run is started just before this one, and may not have taken its lock yet: it is not decided that the copy failed until that run has been seen at work,
-    // or its result shows it ended after this run began.
+    // Whether a copy's run was seen at work, and whether Claude's reading was seen at work while this run waited: a reading that ended without writing itself
+    // into the record is not opened over.
     let seen = false;
     let busyWith = "";
-    // Whether Claude's reading was seen at work while this run waited: a reading that ended without writing itself into the record is not opened over.
     let sawRead = false;
-    // The lock the copy's run takes is one for the main video, a Reel's and the footage: the run that ended may have been a Reel's. Only the main video's copy
-    // answers this run (a result that says it was a Reel's or the footage's does not). When the run that ended was not the main video's copy and that copy
-    // is not made, it is asked for once, and the second look is decided only by what happens after it was asked for (`since`).
-    const mainResult = () => {
+    // The request this run waits for the answer of: the opener's (`given`, asked at its own token), or this run's own, once. Only this run's own is ever made by it.
+    let ask = given === null ? null : { token: given, at: given };
+    let ownAsked = false;
+    // The copy run's result is one file for the main video, a Reel's and the footage: only the main video's copy with this request's token answers (never a time).
+    const answerOf = (token) => {
       const ended = readResult(ctx.home, found.name, WORK_COPY_COMMAND);
-      return ended && ended.early !== true && ended.copy !== "reel" && ended.copy !== "footage" ? ended : null;
+      return ended && ended.early !== true && ended.copy === "main" && ended.asked === token ? ended : null;
     };
-    const lookForCopy = async ({ since, slack }) => {
-     for (;;) {
+    for (;;) {
       const copying = Boolean(runningCommand(ctx.home, found.name, ctx.alive, copyLock));
       busyWith = runningCommand(ctx.home, found.name, ctx.alive);
       if (copying) seen = true;
       if (busyWith === "read") sawRead = true;
-      const ended = mainResult();
-      // A copy that failed at once may have ended just before this run began (the copy is asked for a moment before this run is started): that result is the answer too.
-      const justEnded = slack && ended && ended.ok === false && ended.ended >= since - WHEN_READY_JUST_BEFORE_MS;
-      const answered = ended && (slack ? ended.ended >= since : ended.started >= since);
-      const decided = seen || copyIsMade(ctx, ownRecord() ?? { found, record: found.read.record }) || Boolean(answered) || Boolean(justEnded);
-      if (!copying && !busyWith && decided) break;
+      if (!copying && !busyWith) {
+        if (copyIsMade(ctx, ownRecord() ?? { found, record: found.read.record })) break;
+        if (ask && answerOf(ask.token)) break;
+        // A request is unanswered when its run was seen and is gone with no result of its own, or when it never showed within the grace.
+        if (!ask || seen || ctx.now() - ask.at >= WHEN_READY_GRACE_MS) {
+          // One own ask at most: when it is unanswered too, or could not be made, the copy is not made.
+          if (ownAsked) break;
+          ownAsked = true;
+          seen = false;
+          const at = Math.trunc(ctx.now());
+          ask = requestWorkCopy(ctx, { folder: found.name, asked: at }).started ? { token: at, at } : null;
+        }
+      }
       if (ctx.now() - began >= limit) break;
       await wait(WHEN_READY_LOOK_MS);
-     }
-    };
-    await lookForCopy({ since: began, slack: true });
-    if (ctx.now() - began < limit) {
-      const then = ownRecord();
-      const failed = mainResult();
-      if (then && !copyIsMade(ctx, then) && !(failed && failed.ok === false && failed.ended >= began - WHEN_READY_JUST_BEFORE_MS) && !runningCommand(ctx.home, found.name, ctx.alive, copyLock)) {
-        const since = ctx.now();
-        requestWorkCopy(ctx, { folder: found.name });
-        seen = false;
-        await lookForCopy({ since, slack: false });
-      }
     }
     const mine = ownRecord();
     const record = mine ? mine.record : null;
@@ -3764,7 +3766,10 @@ async function workcopy(ctx, rest) {
     ctx.say(HELP);
     return 2;
   }
-  const { flags } = flagsOf(rest.slice(2), ["reel"]);
+  const { flags } = flagsOf(rest.slice(2), ["reel", "asked"]);
+  // The token of the request this run answers (`--asked <n>`, from requestWorkCopy): a whole number given once, else ignored.
+  const askedGiven = Array.isArray(flags.asked) && flags.asked.length === 1 ? flags.asked[0] : "";
+  const asked = /^\d+$/.test(askedGiven) && Number.isSafeInteger(Number(askedGiven)) ? Number(askedGiven) : undefined;
   // The Reel's number, as a whole number from 1 and once: any other use of the flag is not a use this run knows.
   let reel = 0;
   if (flags.reel !== undefined) {
@@ -3801,7 +3806,7 @@ async function workcopy(ctx, rest) {
   const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
   const kinds = reel ? REEL_COPY_KINDS : WORK_COPY_KINDS;
   const notFor = reel ? NOT_RAW_OR_FINISHED : NOT_RAW_OR_CLIP;
-  // Which copy this run makes is kept in its result (`copy`), so that `app --when-ready` takes only a failure of the main video's copy for its own answer.
+  // Which copy this run makes, and the token it answers, are the run's tag (runDetached): written into its result whatever the body does, so that `app --when-ready` is answered by its own request alone.
   const copy = reel ? "reel" : footageOnly ? "footage" : "main";
   const body = async () => {
     if (!kinds.includes(recordKind(record))) return { ok: false, made: [], failed: [notFor], next: "" };
@@ -3876,7 +3881,7 @@ async function workcopy(ctx, rest) {
     for (const line of said) deps.log(line);
     return made;
   };
-  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: WORK_COPY_COMMAND, lock: workCopyLockOf(ctx.home, found.name), alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => ({ ...(await body()), copy }));
+  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: WORK_COPY_COMMAND, lock: workCopyLockOf(ctx.home, found.name), alive: ctx.alive, tag: { copy, ...(asked !== undefined ? { asked } : {}) }, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, body);
   if (result.taking || result.running) {
     ctx.say(result.running ? `The video for HyperFrames is being made for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
     return 1;
