@@ -825,6 +825,13 @@ export const LOCK_WAIT_MS = 2 * 60 * 1000;
 /** The sentence a writer says when it could not go on: "held" (the check kept its lock), "unsettled" (an earlier write's mark cannot be settled), "restored" (a
     copy it built on was put back, or changed) and "lost" (one could not be put back). `shown` names the episode; `done` is what was not done, `again` how to ask. */
 export function busyWords(busy, shown, { done, again }) {
+  // With no name (null), the words name no video and no folder: a video becoming a session is spoken of by neither.
+  if (shown === null) {
+    if (busy === "unsettled") return `A change stopped half way, and its record cannot be read now to sort it out, so ${done}. Ask Jason.`;
+    if (busy === "restored") return `A copy in Dropbox was not whole, so it is put back, and ${done}. ${again}`;
+    if (busy === "lost") return `A copy in Dropbox is not whole, and it could not be put back, so ${done}. Ask Jason.`;
+    return `Studio was still checking Dropbox's copies after two minutes, so ${done}. ${again}`;
+  }
   if (busy === "unsettled") return `A change to ${shown} stopped half way, and its record cannot be read now to sort it out, so ${done}. Ask Jason.`;
   if (busy === "restored") return `A copy of ${shown} in final/ was not whole in Dropbox, so it is put back, and ${done}. ${again}`;
   if (busy === "lost") return `A copy of ${shown} in final/ is not whole in Dropbox, and it could not be put back, so ${done}. Ask Jason.`;

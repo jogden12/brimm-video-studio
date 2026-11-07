@@ -5447,7 +5447,7 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { 
     const waitFor = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
     const got = await takeOutOfCheck(ctx, { name: found.name, record: base, paths: [...inFinal.map(pathOf), ...(handoff ? [pathOf(handoff.rel)] : [])], reads: inFinal.map((rel) => ({ path: pathOf(rel), id: null })), rev: base.rev + 1 }, { wait: waitFor, log: logTo(ctx.home) });
     if (got.busy) {
-      ctx.say(busyWords(got.busy, shownName(base), { done: "nothing was changed", again: "Say it again in a minute." }));
+      ctx.say(busyWords(got.busy, quiet ? null : shownName(base), { done: "nothing was changed", again: "Say it again in a minute." }));
       return { code: 1 };
     }
     hold = got;

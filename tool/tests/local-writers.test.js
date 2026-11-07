@@ -108,6 +108,16 @@ describe("the writers take the check's lock on a local episode (L5, L13)", () =>
     return { deps, waits };
   };
 
+  it("B0-F21 a video becoming a session is told the check is busy without its name or a folder", async () => {
+    const w = await localExported("raw");
+    assert.equal(await finishRun(w), 0, w.t.said());
+    filing.takeLateCheckLock(w.t.home, FOLDER, "late check", THIS);
+    const r = await on(seeing(w, { alive: THIS }), "kind", FOLDER, "session", "--private", "yes", "--again");
+    assert.equal(r.code, 1, r.text);
+    assert.match(r.text, /^Studio was still checking Dropbox's copies after two minutes, so nothing was changed\./);
+    assert.doesNotMatch(r.text, /Pricing|final\//);
+    w.t.done();
+  });
   it("L13(a) the spellings' hand-off of a finished video, through importHandoff", async () => {
     const w = await localFinished();
     exportOf(w, "reel 2");
