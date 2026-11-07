@@ -495,6 +495,10 @@ describe("textWriter's onCopy, and sameBytes (L5)", () => {
     assert.deepEqual(calls[0], ["SWIFT", [ONLINE_ONLY, "/x/f.mov"], { encoding: "utf8", timeout: ONLINE_ONLY_TIMEOUT_MS, stdio: ["ignore", "pipe", "ignore"] }]);
     assert.equal(ONLINE_ONLY_TIMEOUT_MS, 20 * 1000);
     assert.equal(typeof makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": true}') }).then, "undefined");
+    const said = [];
+    makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": false, "error": "NSCocoaErrorDomain 256"}'), said: (m) => said.push(m) });
+    makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": true}'), said: (m) => said.push(m) });
+    assert.deepEqual(said, ["NSCocoaErrorDomain 256"]);
     const before = calls.length;
     assert.equal(makeOnlineOnly("/x/f.mov", { swift: "", exec: giving('{"onlineOnly": true}') }), null);
     assert.equal(calls.length, before);

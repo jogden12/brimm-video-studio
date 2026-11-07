@@ -230,7 +230,7 @@ export function depsOf(t, over = {}) {
       said.add(line);
       t.logs.push(line);
     },
-    clone: t.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: () => true, ...over
+    clone: t.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: () => true, onlineOnly: () => true, ...over
   };
 }
 /** The pending of a recording, read again, and checked. */
@@ -739,7 +739,7 @@ describe("L6: through L5's worlds", () => {
     const owed = originalPending(w);
     const own = join(episodeFilesFolder(w.t.home, FOLDER), fileOf(w));
     assert.ok(existsSync(own));
-    const r = await agentRun(w, { at: Math.max(finalP.lastCopy, owed.lastCopy) + 1, over: { checks: CHECKS_ON, uploaded: () => true } });
+    const r = await agentRun(w, { at: Math.max(finalP.lastCopy, owed.lastCopy) + 1, over: { checks: CHECKS_ON, uploaded: () => true, onlineOnly: () => true } });
     assert.equal(existsSync(own), false, r.logs.join("|"));
     assert.ok(existsSync(join(w.found.folder, "Original files", fileOf(w))));
     assert.equal(reread(w.found).files[`Original files/${fileOf(w)}`] > 0, true);
@@ -943,7 +943,7 @@ describe("L6b: the copy in Original files made online-only", () => {
   });
 
   it("a copy that cannot be made online-only is logged, and the check is still done", () => {
-    for (const [onlineOnly, why] of [[() => false, "no answer"], [() => { throw new Error("x"); }, "x"]]) {
+    for (const [onlineOnly, why] of [[() => false, "no answer"], [(path, said) => { said("NSCocoaErrorDomain 256"); return false; }, "NSCocoaErrorDomain 256"], [() => { throw new Error("x"); }, "x"]]) {
       const t = world();
       const found = local(t);
       moveIt(t, found);
@@ -955,5 +955,22 @@ describe("L6b: the copy in Original files made online-only", () => {
       assert.deepEqual(t.notices, []);
       t.done();
     }
+  });
+
+  it("the helper is called after the episode's lock is let go", () => {
+    const t = world();
+    const found = local(t);
+    moveIt(t, found);
+    t.advance(LATE_CHECK_MS);
+    let free = null;
+    look(t, depsOf(t, { onlineOnly: () => {
+      const took = takeEpisodeLock(lockOf(t.home, FOLDER), "probe", (pid) => pid === process.pid);
+      free = took.taken;
+      if (took.taken) releaseEpisodeLock(lockOf(t.home, FOLDER), took.text);
+      return true;
+    } }));
+    assert.equal(free, true);
+    assert.equal(count(t, MADE), 1);
+    t.done();
   });
 });
