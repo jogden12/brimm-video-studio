@@ -902,3 +902,58 @@ describe("L6: the review's fix round", () => {
   });
 });
 
+
+describe("L6b: the copy in Original files made online-only", () => {
+  const MADE = `${SHOWN}: its recording in Original files is made online-only.`;
+  const COULD = (why) => `${SHOWN}: its recording in Original files could not be made online-only (${why}); it stays on this Mac's disk until Dropbox frees it.`;
+
+  it("the check makes the copy in Original files online-only once the Mac's copy is deleted", () => {
+    const t = world();
+    const found = local(t);
+    moveIt(t, found);
+    t.advance(LATE_CHECK_MS);
+    const asked = [];
+    look(t, depsOf(t, { onlineOnly: (path) => { asked.push([path, existsSync(join(found.video, FILE))]); return true; } }));
+    assert.deepEqual(asked, [[originalOf(found), false]]);
+    assert.equal(count(t, MADE), 1);
+    t.done();
+  });
+
+  it("it is never asked while the Mac's copy stays", () => {
+    for (const over of [{ uploaded: () => false }, { uploaded: () => null }, { isWhole: undefined, short: true }]) {
+      const t = world();
+      const found = local(t);
+      moveIt(t, found);
+      t.advance(LATE_CHECK_MS);
+      if (over.short) writeFileSync(originalOf(found), "the");
+      const asked = [];
+      look(t, depsOf(t, { ...over, short: undefined, onlineOnly: (path) => { asked.push(path); return true; } }));
+      assert.equal(existsSync(join(found.video, FILE)), true, Object.keys(over).join());
+      assert.deepEqual(asked, []);
+      t.done();
+    }
+    const t = world();
+    const found = local(t);
+    moveIt(t, found);
+    t.advance(LATE_CHECK_MS);
+    const asked = [];
+    look(t, depsOf(t, { uploaded: () => { writeRecord(found, 4, sessionRecord(found)); return true; }, onlineOnly: (path) => { asked.push(path); return true; } }));
+    assert.deepEqual(asked, []);
+    t.done();
+  });
+
+  it("a copy that cannot be made online-only is logged, and the check is still done", () => {
+    for (const [onlineOnly, why] of [[() => false, "no answer"], [() => { throw new Error("x"); }, "x"]]) {
+      const t = world();
+      const found = local(t);
+      moveIt(t, found);
+      t.advance(LATE_CHECK_MS);
+      look(t, depsOf(t, { onlineOnly }));
+      assert.equal(existsSync(join(found.video, FILE)), false);
+      assert.equal(count(t, COULD(why)), 1);
+      assert.equal(readPendingAt(t.home, `original/${ID}.json`), null);
+      assert.deepEqual(t.notices, []);
+      t.done();
+    }
+  });
+});

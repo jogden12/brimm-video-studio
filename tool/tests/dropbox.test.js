@@ -478,6 +478,28 @@ describe("textWriter's onCopy, and sameBytes (L5)", () => {
     assert.equal(typeof got.then, "undefined");
   });
 
+  it("makeOnlineOnly reads the helper's one JSON document, synchronously", async () => {
+    const { ONLINE_ONLY, ONLINE_ONLY_TIMEOUT_MS, makeOnlineOnly } = await import("../dropbox.js");
+    const calls = [];
+    const giving = (text) => (...args) => {
+      calls.push(args);
+      return text;
+    };
+    const boom = () => {
+      throw new Error("t");
+    };
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": true}\n') }), true);
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": false, "error": "NSCocoaErrorDomain 256"}') }), false);
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving("garbage") }), null);
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: boom }), null);
+    assert.deepEqual(calls[0], ["SWIFT", [ONLINE_ONLY, "/x/f.mov"], { encoding: "utf8", timeout: ONLINE_ONLY_TIMEOUT_MS, stdio: ["ignore", "pipe", "ignore"] }]);
+    assert.equal(ONLINE_ONLY_TIMEOUT_MS, 20 * 1000);
+    assert.equal(typeof makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": true}') }).then, "undefined");
+    const before = calls.length;
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "", exec: giving('{"onlineOnly": true}') }), null);
+    assert.equal(calls.length, before);
+  });
+
   it("U2: anything else is null, and no swift runs nothing", async () => {
     const { uploadedOf } = await import("../dropbox.js");
     const throwing = (e) => () => {
