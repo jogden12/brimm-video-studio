@@ -2,8 +2,9 @@
 // its name is hidden and it is called "a video not yet answered", because it might be a client's session. A planned record is the one
 // exception, since it was made in her chat from words she gave and never from a file, so it cannot be a session. But only a whole one is:
 // a record is treated as answered and not a session only when its answer says "planned", its `planned` is whole, it has no video and it
-// was written at layout 5. A record that only claims to be planned, failing any of those, is gated exactly as a video not yet answered
-// is, and its title is hidden. Every record here that only claims to be planned is such a record, one failing one thing each.
+// was written at layout 5 with no `local`, or at layout 6 with a whole `local` (Phase 3, L2: a plan kept on one Mac). A record that only
+// claims to be planned, failing any of those, is gated exactly as a video not yet answered is, and its title is hidden. Every record here
+// that only claims to be planned is such a record, one failing one thing each.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
@@ -39,6 +40,10 @@ const CLAIMS = {
   "answer planned, at layout 4": planned({ version: 4 }),
   "answer planned, at layout 3": planned({ version: 3 }),
   "answer planned, at layout 6": planned({ version: 6 }),
+  // Phase 3, L2: a plan kept on one Mac is at layout 6 with a whole `local`, and only so.
+  "answer planned, at layout 5 with `local`": planned({ local: { on: "Mac Studio" } }),
+  "answer planned, at layout 6 with a `local` it cannot read": planned({ version: 6, local: {} }),
+  "answer planned, at layout 6 with a `local` that is null": planned({ version: 6, local: null }),
   "answer planned, with no version": (() => { const { version, ...rest } = planned(); return rest; })(),
   "answer planned, with the video undefined": (() => { const { video, ...rest } = planned(); return rest; })(),
   "a `planned` with the answer \"needs your answer\"": planned({ answer: { state: "needs your answer", guess: "raw", seen: "wide, 2:00", came: "camera" } }),

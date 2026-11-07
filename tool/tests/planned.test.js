@@ -71,7 +71,7 @@ describe("a planned episode's record", () => {
     }
   });
   it("is at layout 5 and every other record stays where it was: the layouts 1 to 4, which a Mac on older code reads", () => {
-    assert.deepEqual([RECORD_VERSION, PLANNED_VERSION, NEWEST_VERSION], [4, 5, 5]);
+    assert.deepEqual([RECORD_VERSION, PLANNED_VERSION, NEWEST_VERSION], [4, 5, 6]);
     assert.equal(layoutOf(made()), 5);
     assert.equal(made().version, 5);
     const video = newEpisode({ id: ID, machine: "Mac Studio", at: AT, video: { file: "a.mp4", bytes: 1, seconds: 20, created: null }, kind: "episode", writer: WRITER });
@@ -139,8 +139,8 @@ describe("layout 5 on a Mac on older code", () => {
       t.done();
     }
   });
-  it("is refused, for want of a layout, by a Mac that stands in for layout 4 alone: a record of layout 6 is newer here too", () => {
-    assert.equal(faultFor(NEWEST_VERSION)({ ...made(), version: 6 }), "it is version 6, and this BRIMM Video Studio reads versions 1 to 5");
+  it("is refused, for want of a layout, by a Mac that stands in for layout 4 alone: a record of layout 7 is newer here too", () => {
+    assert.equal(faultFor(NEWEST_VERSION)({ ...made(), version: 7 }), "it is version 7, and this BRIMM Video Studio reads versions 1 to 6");
     assert.equal(faultFor(NEWEST_VERSION)(made()), "");
   });
 });

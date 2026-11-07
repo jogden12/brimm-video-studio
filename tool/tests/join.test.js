@@ -539,6 +539,26 @@ describe("plan … join, for \"that's all the footage\" (PR H5b)", () => {
     assert.ok(existsSync(folder));
     t.done();
   });
+  it("takes a plan kept on one Mac (Phase 3, L2: layout 6 with `local`) as it takes one at layout 5: the run is started for its talking part", async () => {
+    const t = world();
+    const folder = await planned(t);
+    // The plan's record written once more, kept on this Mac, as the import of a Mac with a drop folder of its own will file one.
+    const plan = planOf(t);
+    writeFileSync(recordFile(folder, plan.rev + 1), recordText({ ...plan, rev: plan.rev + 1, version: 6, local: { on: "Mac Studio" } }));
+    assert.deepEqual([planOf(t).version, isPlannedRecord(planOf(t))], [6, true]);
+    const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+    const before = snapshot(t);
+    const r = await on(depsOf(t), "plan", TITLE, "join");
+    assert.deepEqual([r.code, r.said], [0, [JOINING]]);
+    assert.equal(t.started.length, 1);
+    assert.deepEqual(t.started[0][1].slice(1), ["join", "--now", `${dayOf(t)} ${TITLE} (Mac Studio)`, "--parts", one.record.id]);
+    assert.deepEqual(snapshot(t), before);
+    // And `plan "<title>"` shows it, as it shows a plan at layout 5.
+    const shown = await on(depsOf(t), "plan", TITLE);
+    assert.equal(shown.code, 0, shown.text);
+    assert.ok(shown.said.length > 1 && shown.said.some((line) => line.includes(labelOf(1))), shown.text);
+    t.done();
+  });
   it("starts the run with the ids of the talking parts in the order she gave them", async () => {
     const t = world();
     await planned(t);

@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RECORD_DIR, RECORD_VERSION, NEWEST_VERSION, recordFile, newEpisode, episodeFault, faultFor, recordText, readEpisode, writeEpisode, conflictedCopies, conflictedOf, conflictedBy, CONFLICT_FORMS, filesProblems, lastWritten, undone, heldElsewhere, claimed, newId, localStamp, shown, isDay } from "../episode.js";
+import { LOCAL_VERSION, PLANNED_VERSION, fileProblems, isPlannedRecord, layoutOf, newPlannedEpisode } from "../episode.js";
 import { writtenFile } from "../settings.js";
 
 const AT = "2026-10-14T09:12:00-05:00";
@@ -390,6 +391,148 @@ describe("an episode's files, against the list in its record", () => {
       return { size: sizes[found] };
     };
     assert.deepEqual(filesProblems(t.folder, listed, { stat }), ["edit/main.v0.fcpxml is missing"]);
+    t.done();
+  });
+});
+
+describe("the files of an episode kept on one Mac (Phase 3, L2: layout 6)", () => {
+  /** A record kept on the Mac Studio: the recording, its words and the rough cut's captions there, in its video/ folder, and its hand-off's in
+      final/ and a set-aside in history/, in its folder in Dropbox. */
+  const kept = { ...RECORD, version: 6, local: { on: "Mac Studio" }, files: { "IMG.mov": 30, "IMG.words.json": 12, "IMG.rough-cut.srt": 9, "final/IMG.mp4": 20, "history/2026-11-06T10-00-00 IMG.cut-plan.json": 7 } };
+  /** One test's folders: the episode's in Dropbox and its video/ on the Mac, each holding the files given at the sizes given. */
+  const placed = (t, here, there) => {
+    const video = join(t.dir, "BRIMM Video Work", "2026-10-14 Pricing talk (Mac Studio)", "video");
+    for (const [dir, sizes] of [[video, here], [t.folder, there]]) {
+      for (const [path, bytes] of Object.entries(sizes)) {
+        mkdirSync(join(dir, path, ".."), { recursive: true });
+        writeFileSync(join(dir, path), "x".repeat(bytes));
+      }
+    }
+    return video;
+  };
+  it("are looked for on the Mac that holds the episode, each where it is: its own files in its video/, the others in Dropbox", () => {
+    const t = setup();
+    const video = placed(t, { "IMG.mov": 30, "IMG.words.json": 12, "IMG.rough-cut.srt": 9 }, { "final/IMG.mp4": 20, "history/2026-11-06T10-00-00 IMG.cut-plan.json": 7 });
+    assert.deepEqual(fileProblems(t.folder, kept, { machine: "Mac Studio", localFolder: video }), []);
+    assert.deepEqual(filesProblems(t.folder, kept, { machine: "Mac Studio", localFolder: video }), []);
+    t.done();
+  });
+  it("say a file of the Mac's missing, short or another size there, and a file of Dropbox's there", () => {
+    const t = setup();
+    const video = placed(t, { "IMG.mov": 10, "IMG.words.json": 14 }, { "IMG.rough-cut.srt": 9, "history/2026-11-06T10-00-00 IMG.cut-plan.json": 7 });
+    assert.deepEqual(filesProblems(t.folder, kept, { machine: "Mac Studio", localFolder: video }), [
+      "IMG.mov is short: 10 bytes of 30",
+      "IMG.words.json is 14 bytes, not the 12 the record lists",
+      "IMG.rough-cut.srt is missing",
+      "final/IMG.mp4 is missing"
+    ]);
+    t.done();
+  });
+  it("are not looked for on another Mac, where none of the Mac's own files is called missing; the files in Dropbox are looked for as ever", () => {
+    const t = setup();
+    placed(t, {}, { "final/IMG.mp4": 20 });
+    const elsewhere = join(t.dir, "home-jason", "BRIMM Video Work", "2026-10-14 Pricing talk (Mac Studio)", "video");
+    assert.deepEqual(filesProblems(t.folder, kept, { machine: "Jason's MacBook", localFolder: elsewhere }), ["history/2026-11-06T10-00-00 IMG.cut-plan.json is missing"]);
+    const seen = [];
+    const stat = (path) => {
+      seen.push(path);
+      throw Object.assign(new Error("no such file"), { code: "ENOENT" });
+    };
+    fileProblems(t.folder, kept, { stat, machine: "Jason's MacBook", localFolder: elsewhere });
+    assert.deepEqual(seen, [join(t.folder, "final/IMG.mp4"), join(t.folder, "history/2026-11-06T10-00-00 IMG.cut-plan.json")], "nothing of the Mac's own files is measured");
+    t.done();
+  });
+  it("are looked for in Dropbox, as before, for a record without `local`, whatever Mac and folder are given", () => {
+    const t = setup();
+    const { local, ...dropbox } = kept;
+    const video = placed(t, { "IMG.mov": 30 }, { "IMG.words.json": 12, "IMG.rough-cut.srt": 9, "final/IMG.mp4": 20, "history/2026-11-06T10-00-00 IMG.cut-plan.json": 7 });
+    assert.deepEqual(filesProblems(t.folder, dropbox, { machine: "Jason's MacBook", localFolder: video }), ["IMG.mov is missing"]);
+    assert.deepEqual(filesProblems(t.folder, dropbox, { machine: "Mac Studio", localFolder: video }), ["IMG.mov is missing"]);
+    t.done();
+  });
+});
+
+describe("layout 6: an episode kept on one Mac (Phase 3, L2)", () => {
+  const LOCAL = { on: "Mac Studio" };
+  const ANSWER = { state: "needs your answer", guess: "raw", seen: "wide, 0:42", came: "camera" };
+  const PLAN = { ...newPlannedEpisode({ id: "e-20261106-4aa9c2", machine: "Mac Studio", at: AT, title: "Too many SKUs", route: "script", voice: null, writer: WRITER }), rev: 1 };
+  it("is the newest layout, above the planned episode's", () => {
+    assert.deepEqual([RECORD_VERSION, PLANNED_VERSION, LOCAL_VERSION, NEWEST_VERSION], [4, 5, 6, 6]);
+  });
+  it("is the layout of a record that holds `local`, whatever else it holds; a record without it keeps the layout it had", () => {
+    const light = { ...RECORD, kind: null, answer: ANSWER, label: "Video of 6 Nov, 10:00 (Mac Studio)" };
+    const app = { ...RECORD, kind: "raw", answer: { ...ANSWER, state: "answered" }, app: { toolchain: "0.8.208", projects: [] } };
+    for (const [record, before] of [[RECORD, 1], [light, 3], [app, 4], [PLAN, 5]]) {
+      assert.equal(layoutOf(record), before, JSON.stringify(record.kind));
+      assert.equal(layoutOf({ ...record, local: LOCAL }), LOCAL_VERSION, JSON.stringify(record.kind));
+      assert.equal(layoutOf({ ...record, local: null }), before, "a `local` that is null is none");
+    }
+  });
+  it("is written at layout 6 and read back whole, with `editing` and `released: null`, which the old checks on the laptop read", () => {
+    const t = setup();
+    const written = writeEpisode(t.folder, { ...newEpisode(IMPORTED), local: LOCAL }, { expectRev: 0, writeText: t.writeText, writer: WRITER, home: t.home });
+    assert.deepEqual([written.version, written.rev, written.local], [6, 1, LOCAL]);
+    const onDisk = JSON.parse(readFileSync(recordFile(t.folder, 1), "utf8"));
+    assert.equal(onDisk.version, 6);
+    assert.deepEqual(onDisk.local, LOCAL);
+    assert.ok(Object.hasOwn(onDisk, "editing") && onDisk.editing === null, "editing is in it");
+    assert.ok(Object.hasOwn(onDisk, "released") && onDisk.released === null, "released: null is in it");
+    assert.deepEqual(readEpisode(t.folder), { record: written, file: recordFile(t.folder, 1) });
+    // The next change keeps it at 6.
+    const next = writeEpisode(t.folder, { ...written, name: { text: "Pricing with confidence", placeholder: false } }, { expectRev: 1, writeText: t.writeText, writer: WRITER, home: t.home });
+    assert.deepEqual([next.version, readEpisode(t.folder).record.local], [6, LOCAL]);
+    t.done();
+  });
+  it("is read as newer by a Studio that knows layout 5, which never writes it", () => {
+    const t = setup();
+    const written = writeEpisode(t.folder, { ...newEpisode(IMPORTED), local: LOCAL }, { expectRev: 0, writeText: t.writeText, writer: WRITER, home: t.home });
+    const older = readEpisode(t.folder, { known: 5 });
+    assert.deepEqual(older, { record: written, file: recordFile(t.folder, 1), newer: true });
+    assert.equal(faultFor(5)(written), "it is version 6, and this BRIMM Video Studio reads versions 1 to 5");
+    const before = t.files();
+    assert.throws(() => writeEpisode(t.folder, older.record, { expectRev: 1, writeText: t.writeText, writer: WRITER, home: t.home, known: 5 }), { message: "Jason has a newer BRIMM Video Studio. Ask him to update this Mac.", code: "NEWER" });
+    assert.deepEqual([t.files(), t.written.length], [before, 1], "nothing more was written");
+    t.done();
+  });
+  it("takes `local` as its Mac, and once the recording is in Original files, the recording as it was there; `local` missing or null is none", () => {
+    assert.equal(episodeFault({ ...RECORD, version: 6, local: LOCAL }), "");
+    assert.equal(episodeFault({ ...RECORD, version: 6, local: { on: "Mac Studio", original: { file: "IMG_0042.mov", bytes: 1823400112, mtimeMs: 1762444800123.5 } } }), "");
+    for (const version of [1, 4, 5, 6]) {
+      assert.equal(episodeFault({ ...RECORD, version, local: null }), "", String(version));
+      assert.equal(episodeFault({ ...RECORD, version }), "", String(version));
+    }
+  });
+  it("refuses a `local` it cannot read, and a `local` below layout 6", () => {
+    const original = { file: "IMG_0042.mov", bytes: 5, mtimeMs: 1762444800123 };
+    for (const bad of [{}, { on: "" }, { on: 3 }, { on: null }, "Mac Studio", true, [], ["Mac Studio"], { on: "Mac Studio", by: "Sallie" }, { on: "Mac Studio", original: null }, { on: "Mac Studio", original: {} },
+      { on: "Mac Studio", original: { ...original, file: "" } }, { on: "Mac Studio", original: { ...original, file: "video/IMG_0042.mov" } }, { on: "Mac Studio", original: { ...original, bytes: -1 } },
+      { on: "Mac Studio", original: { ...original, bytes: "5" } }, { on: "Mac Studio", original: { ...original, mtimeMs: "now" } }, { on: "Mac Studio", original: { ...original, more: 1 } }]) {
+      assert.equal(episodeFault({ ...RECORD, version: 6, local: bad }), "which Mac holds its files cannot be read", JSON.stringify(bad));
+    }
+    for (const version of [1, 3, 4, 5]) assert.equal(episodeFault({ ...RECORD, version, local: LOCAL }), "which Mac holds its files cannot be read", String(version));
+    // A `local` it cannot read is never written; and a record of layout 5 that holds `local`, as a hand would write it, is not whole: it is passed over.
+    const t = setup();
+    assert.throws(() => writeEpisode(t.folder, { ...newEpisode(IMPORTED), local: {} }, { expectRev: 0, writeText: t.writeText, writer: WRITER, home: t.home }), { message: "the episode's record was not written, because which Mac holds its files cannot be read", code: "FAULT" });
+    assert.deepEqual(t.written, []);
+    t.store({ ...RECORD, version: 5, local: LOCAL });
+    assert.equal(readEpisode(t.folder).code, "NONE");
+    t.done();
+  });
+  it("keeps a plan a plan: a planned record at layout 6 with a whole `local` is one, as at layout 5, and none with a `local` it cannot read or at the wrong layout", () => {
+    const local = { ...PLAN, version: 6, local: LOCAL };
+    assert.equal(episodeFault(local), "");
+    assert.equal(isPlannedRecord(PLAN), true);
+    assert.equal(isPlannedRecord(local), true);
+    assert.equal(isPlannedRecord({ ...local, local: { ...LOCAL, original: { file: "IMG.mov", bytes: 1, mtimeMs: 1 } } }), true);
+    for (const [what, record] of [["layout 6 with no `local`", { ...PLAN, version: 6 }], ["layout 6 with a `local` that is null", { ...PLAN, version: 6, local: null }], ["layout 6 with a `local` it cannot read", { ...PLAN, version: 6, local: {} }],
+      ["layout 5 with `local`", { ...PLAN, local: LOCAL }], ["layout 7 with `local`", { ...PLAN, version: 7, local: LOCAL }]]) {
+      assert.equal(isPlannedRecord(record), false, what);
+    }
+    // Written through writeEpisode, a plan with `local` is at layout 6, and read back a plan.
+    const t = setup();
+    writeEpisode(t.folder, { ...newPlannedEpisode({ id: "e-20261106-4aa9c2", machine: "Mac Studio", at: AT, title: "Too many SKUs", route: "script", voice: null, writer: WRITER }), local: LOCAL }, { expectRev: 0, writeText: t.writeText, writer: WRITER, home: t.home });
+    const read = readEpisode(t.folder).record;
+    assert.deepEqual([read.version, isPlannedRecord(read)], [6, true]);
     t.done();
   });
 });

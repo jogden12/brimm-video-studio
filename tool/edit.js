@@ -121,6 +121,7 @@ import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
+import { ON_OTHER_MAC, folderAt, onOtherMac } from "./where.js";
 
 export const HELP = `The command line for episodes on this Mac. Claude runs it for the person editing.
 
@@ -449,6 +450,9 @@ const recordShaped = (r) => typeof r.id === "string" && Number.isInteger(r.versi
     - A record file numbered above the one read, which Dropbox is still bringing over or this code rejects, may be a video corrected
       to a session or not answered: on a Mac that does the light import, or when the record read is of the switch's layout (3), it
       refuses every command. With today's settings and records it is passed over, as it always was.
+    - An episode kept on another Mac (keptOn: a record it is known by holds `local`, and its Mac is not this one; Phase 3, L2, D3) is
+      changed only there: every command is refused, in where.js ON_OTHER_MAC's one line, which names it as every line does and names that
+      Mac, before anything else of it is asked or read, whatever this Mac's training gate says.
     - A conflicted episode is refused when any one of its records is, so that a copy not answered, or a session's, is not got round
       by the record in force. A copy that is not shaped as a record (recordShaped) is not asked.
     - A video held as a session (`e.held`: one of its other versions is a session not cleared) runs only what gate.js heldGateFor
@@ -458,6 +462,8 @@ function gateOf(ctx, e, records, said, inForce) {
   const refused = (why, more = {}) => ({ why, name: e.name, folder: e.folder, gate: true, ...more });
   if (e.read.newer) return refused(newerWhy(e.read.record), { newer: true });
   if (inForce && (lightImport(ctx.settings) || ofTheSwitch(inForce)) && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
+  const there = keptOn(ctx, e);
+  if (there) return refused(ON_OTHER_MAC(isGated(e) ? gatedName(gatedRecord(e), e.held) : shownName(inForce ?? records.find(recordShaped)), there));
   const on = teachingsOn(ctx.settings, ctx.now());
   const lapsed = teachingsLapsed(ctx.settings, ctx.now());
   for (const record of records.filter(recordShaped)) {
@@ -538,6 +544,12 @@ const isGated = (e) => e.records.filter(recordShaped).some(gated) || e.held;
 /** The record a gated episode is named by: the first of its records that is gated, or for one held as a session, its record in
     force. */
 const gatedRecord = (e) => e.records.filter(recordShaped).find(gated) || (e.held ? e.inForce : undefined);
+
+/** The Mac the episode `e` is kept on, when it is not this one (Phase 3, L2; D3): any record it is known by that holds `local` on another Mac
+    (where.js onOtherMac) says so, a conflicted copy's too, as the gate asks every record; "" when none does. A copy that is not shaped as a
+    record is not asked. Such an episode is changed only on that Mac: findEpisode's gate refuses every command that names it (gateOf), and
+    `episodes` and the guide say it is there (episodeLines, guideFacts). */
+const keptOn = (ctx, e) => e.records.filter(recordShaped).map((r) => onOtherMac(ctx, r)).find(Boolean) || "";
 
 // isLabelled, heldName, gatedName and gatedAsOf, how a gated record or one held as a session is named, are gate.js's: the
 // installer's check of the old drop folder (switch.js) names a video by them too.
@@ -942,7 +954,11 @@ export const unreadWords = (named, read) => (read && read.code === "NONE"
     answer, and not one left alone, are the lines of her card (cardLines), which look for the video a match names among `all`,
     the episodes `episodes` lists, and through `links` (finish.js linksOf, read once by `episodes`) the versions of that video. An
     episode whose record cannot be read is named as listedAs names it, and so is one a newer brimm-video wrote. A planned episode (PR H4)
-    has no video to give a length, and is said by plan.js plannedLine: its title, the day it was planned, what it waits for and its id. */
+    has no video to give a length, and is said by plan.js plannedLine: its title, the day it was planned, what it waits for and its id.
+    An episode kept on another Mac (keptOn; Phase 3, L2, D3) is said to be there, in the guide's words, under its line; the lines of her card
+    are not said of a video of it waiting for her answer, since every command that would answer it is refused here; and none of its own files,
+    kept on that Mac, is looked for here (episode.js fileProblems), while its files in Dropbox are. On the Mac that keeps it, its own files are
+    looked for in its video/ folder there (where.js folderAt). */
 function episodeLines(ctx, e, left, all, links) {
   const r = e.read.record;
   if (e.newer) return [`  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
@@ -951,6 +967,7 @@ function episodeLines(ctx, e, left, all, links) {
   const record = e.inForce;
   const lines = [];
   const clean = cleanFor(ctx, e);
+  const there = keptOn(ctx, e);
   if (isGated(e)) {
     const named = gatedRecord(e);
     const held = e.held && !gated(named);
@@ -958,7 +975,7 @@ function episodeLines(ctx, e, left, all, links) {
     // The record in force of a gated episode is a planned episode's when a conflicted copy of it only claims to be one: it has no video to give a length.
     const long = record.video ? ` ${stamp(record.video.seconds)}` : "";
     lines.push(`  ${gatedName(named, e.held)}: ${long ? what : what.replace(/, of$/, "")}${long}, id ${String(named.id).slice(-6)}`);
-    if (!left && recordKind(named) === null) lines.push(...cardLines(named, gatedName(named, e.held), all, links));
+    if (!left && recordKind(named) === null && !there) lines.push(...cardLines(named, gatedName(named, e.held), all, links));
     if (!r) lines.push(`    ${clean(readTrouble(e.read))}`);
   } else if (isPlannedRecord(record)) {
     // A planned episode (PR H4) has no video to give a length: it is said by its title and what it waits for.
@@ -967,12 +984,14 @@ function episodeLines(ctx, e, left, all, links) {
     const kind = record.kind === "short video" ? "a short video" : "an episode";
     lines.push(`  ${record.name.text}${record.name.placeholder ? " (a placeholder name)" : ""}: ${kind} of ${stamp(record.video.seconds)}, in ${e.name}, id ${record.id.slice(-6)}`);
   }
+  if (there) lines.push(`    It is on ${spokenMac(there)}. Carry on there.`);
   if (record.editing) lines.push(`    Editing: ${record.editing.by}, since ${shownAt(record.editing.since)}`);
   if (record.title && !isGated(e)) lines.push(`    Title: ${record.title.text}${record.title.approved ? "" : " (recommended)"}`);
   if (record.finished) lines.push(`    Finished: revision ${record.finished.revision}, on ${record.finished.on}`);
   // A script file changed outside the chat is said in its own plain line, not as "Not right" (plan-script.js; review changes R5).
   const handEdited = scriptHandEdited(e.folder, record);
-  for (const problem of fileProblems(e.folder, record)) if (!(handEdited && problem.file === "teleprompter.txt")) lines.push(`    ${clean(fileProblemWords(problem))}`);
+  const looked = { machine: ctx.machine, localFolder: folderAt(ctx, { folder: e.folder, record }, "local") };
+  for (const problem of fileProblems(e.folder, record, looked)) if (!(handEdited && problem.file === "teleprompter.txt")) lines.push(`    ${clean(fileProblemWords(problem))}`);
   if (handEdited) lines.push(`    ${HAND_EDITED(record)}`);
   return lines;
 }
@@ -5920,22 +5939,27 @@ function guideSession(ctx, e, r) {
     the pass's one listing of Downloads (exports.js downloadsOnce, made by guideItems): the videos that look in it for an export are given it.
     `footageIn` is the pass's one look at the parts of the plans (footage.js partsReader, made by guideItems): a plan is given its parts by it.
     A planned episode (PR H4) has no video, no reading and no project to look at: it is named by its title and short id, found by those
-    and by its folder, and its one fact is `planned`, { route, voice }, which gives it the guide's stage `film`. */
+    and by its folder, and its one fact is `planned`, { route, voice }, which gives it the guide's stage `film`.
+    An episode kept on another Mac (keptOn; Phase 3, L2, D3) has `onOtherMac`, with that Mac in `mac`: it is changed only there, so the guide's
+    step for it is there until a hand-off is written, whose steps on the BRIMM Ops page she takes on any Mac. Nothing of its own files, which
+    are on that Mac, is read here (its reading's teachings, its project, its copy, its parts), and it is not said to be waiting for her answer, in
+    a conflict or held as a session here: each of those is said and sorted out on that Mac. */
 function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
   const r = e.inForce;
+  const there = keptOn(ctx, e);
   if (isPlannedRecord(r)) {
     // Gated all the same when a conflicted copy of its record is a record that only claims to be planned: then it is named as any gated video is.
     const hidden = isGated(e);
     // Its footage (PR H5a): the parts it has, counted in words, and the labels of those that show a client and wait for the client's agreement.
-    // Nothing of a part is read for a plan the gate holds (a conflicted copy that only claims to be planned).
-    const parts = hidden ? [] : footageIn(r.id);
+    // Nothing of a part is read for a plan the gate holds (a conflicted copy that only claims to be planned), or for a plan kept on another Mac.
+    const parts = hidden || there ? [] : footageIn(r.id);
     // Her "that's all the footage" (PR H5b): the run that makes the video is at work (`joining`), or its last end was a failure and the plan is a
     // plan still (`joinFailed`: a failure before the run at work now is its before, and the guide says the run at work first). Nothing is read for a plan the gate holds.
     const joining = !hidden && runningCommand(ctx.home, e.name, ctx.alive) === "join";
     const joinFailed = !hidden && !joining && readResult(ctx.home, e.name, "join")?.ok === false;
     return {
       name: hidden ? listedAs(ctx, e) : withShortId(shownName(r), r), id: r.id, aliases: [r.id, r.id.slice(-6), hidden ? gatedName(gatedRecord(e), e.held) : shownName(r), ...(hidden ? [] : [e.name])],
-      at: Date.parse(r.imported.at), mac: "", drop: null, conflicted: e.read.code === "CONFLICTED", kind: null, waiting: false, heldAsSession: false, elsewhere: false, handoff: null, source: null,
+      at: Date.parse(r.imported.at), mac: there, drop: null, conflicted: !there && e.read.code === "CONFLICTED", kind: null, waiting: false, heldAsSession: false, elsewhere: false, onOtherMac: Boolean(there), handoff: null, source: null,
       planned: { route: r.planned.route, voice: r.planned.voice, footage: footageCounts(parts), waiting: parts.filter((part) => waitsForClient(part, r.planned)).map((part) => part.record.label || shownName(part.record)), joining, joinFailed, set: r.planned.set !== null, project: Boolean(r.planned.project) }
     };
   }
@@ -5948,8 +5972,9 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
   // The way `finish` goes for a raw video and an iPhone clip (plan PR 10), so that the guide never sends one where `finish` will not take
   // it. What the HyperFrames way reads of the disk (the video being made, the
   // project, its history and exports) is read for those two kinds only, and the project's not once a hand-off is written. A video the
-  // gate holds (a session not cleared whatever its kind, or one held beside a session) has no way, and nothing of it is read (review I2).
-  const way = !hidden && (kind === "raw" || kind === "short video") ? finishWay(ctx, r) : "";
+  // gate holds (a session not cleared whatever its kind, or one held beside a session) has no way, and nothing of it is read (review I2); nor
+  // does a video kept on another Mac, whose project is there.
+  const way = !hidden && !there && (kind === "raw" || kind === "short video") ? finishWay(ctx, r) : "";
   // A finished video's Reels (plan PR 16) are looked for only where `finish "<episode>" reels` would go on, so far as a look that costs no other
   // read can tell: the gate lets the video through, a hand-off is written, the other Mac does not have it open, no run is at work but a finish
   // (the stage of a finish at work is `finish-running`; a bring, a read or an ask is refused by `finish` in "<command> is running"), the chain of
@@ -5957,7 +5982,7 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
   // is finished: her word stands (guide.js nextFor), so what the Reels would say is never said, and looking for them on every pass, `guide wait`'s
   // every 5 seconds and `guide … tell`'s every 15 included, would be wasted (review F6; `notes` are hers, read once for the pass: guideItems). The
   // same holds of the project of a raw video or an iPhone clip, below (plan PR 17): nothing of a video she set aside is read.
-  const looksForReels = !hidden && kind === "finished" && handoff && !notes.finished[r.id] && !away && (running === "" || running === "finish") && !links.gapOf(r, e.folder) && !undone(r, ctx.home);
+  const looksForReels = !hidden && !there && kind === "finished" && handoff && !notes.finished[r.id] && !away && (running === "" || running === "finish") && !links.gapOf(r, e.folder) && !undone(r, ctx.home);
   // A finish at work that has written its hand-off and only waits for its late check (finish-check.js): she need not wait for it. It is
   // asked only of a finish at work, and of no video the gate holds. It is given the time of the check as this Mac's clock says it (`at`), for
   // the step of the Reels that wait for it.
@@ -5974,13 +5999,14 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
     id: r.id,
     aliases: [typeof r.label === "string" ? r.label : "", r.id, r.id.slice(-6), hidden ? gatedName(gatedRecord(e), e.held) : shownName(r), ...(hidden ? [] : [r.name.text, e.name])].filter(Boolean),
     at: Date.parse(r.imported.at),
-    mac: away ? away.by : "",
+    mac: there || (away ? away.by : ""),
     drop: null,
-    conflicted: e.read.code === "CONFLICTED",
+    conflicted: !there && e.read.code === "CONFLICTED",
     kind,
-    waiting: kind === null && r.answer.state === "needs your answer",
-    heldAsSession: e.held && !gated(r),
+    waiting: !there && kind === null && r.answer.state === "needs your answer",
+    heldAsSession: !there && e.held && !gated(r),
     elsewhere: Boolean(away),
+    onOtherMac: Boolean(there),
     readingsOff: ctx.settings.readings === false,
     ...guideReading(ctx, e, r, kind, running, rates),
     offersAnswered: answerOf(r) !== null,
@@ -5998,7 +6024,9 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
     copy: way ? guideCopy(ctx, e, r, rates) : null,
     project: way && !handoff && !notes.finished[r.id] ? guideProject(ctx, e, r, downloads) : null,
     reelsExported: looksForReels ? guideReels(ctx, e, r, downloads) : [],
-    session: kind === "session" ? guideSession(ctx, e, r) : null,
+    // A session kept on another Mac: its choice and whether its empty revision is owed are in its record; its teachings file is on that Mac, and is not
+    // read here (an item it could not see counts as one undecided, as guideSession counts it).
+    session: kind !== "session" ? null : there ? { choice: r.session?.teachings ?? null, teachingsOn: teachingsOn(ctx.settings, ctx.now()), undecided: 1, emptyOwed: revisionOwed(r) } : guideSession(ctx, e, r),
     handoff,
     // For `guide tell` alone, which follows a video from its drop folder into Episodes by it: never said.
     source: r.video && typeof r.video.file === "string" ? { mac: r.imported && r.imported.on, file: r.video.file, bytes: r.video.bytes } : null

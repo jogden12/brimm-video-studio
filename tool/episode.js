@@ -13,6 +13,7 @@ import { basename, dirname, extname, join } from "node:path";
 import { localDay } from "./shared/text.js";
 import { writtenFile } from "./settings.js";
 import { fileSafe } from "./names.js";
+import { filePlace } from "./where.js";
 // gate.js takes kindOf from here: each is used only when called, so neither needs the other to have been read first.
 import { gated } from "./gate.js";
 
@@ -34,12 +35,19 @@ export const RECORD_DIR = "record";
     that would drop them. Layout 5 is written for a planned record, and for a part (PR H5a: a dropped video answered as footage for a
     planned video, which holds `partOf`) alone: every other record stays at layout 4 or below, which is RECORD_VERSION, the newest
     layout of every other record and the one a Mac on older code reads. So a Mac on older code reads a planned record as newer (it has
-    no video, which that Mac would read as an import that has not finished), and a part as newer too, and leaves both alone. */
+    no video, which that Mac would read as an import that has not finished), and a part as newer too, and leaves both alone.
+    Layout 6 (Phase 3, the local working folder; L2) adds `local`: the episode's own files are kept on one Mac, `local.on`, in its work
+    folder's video/, and it is changed only there (where.js says where each file is). It is written for a record that holds `local` alone,
+    whatever else it holds, so a Mac on older code reads every such record as newer and leaves it alone; every other record stays at the
+    layout it had. */
 export const RECORD_VERSION = 4;
-/** The layout of a planned episode's record, and the newest layout this brimm-video reads and writes (NEWEST_VERSION): a record of
-    a higher layout is read for what it says and never written. */
+/** The layout of a planned episode's record (and a part's): a record of a higher layout is read for what it says and never written by a
+    Mac that knows layout 5 alone. */
 export const PLANNED_VERSION = 5;
-export const NEWEST_VERSION = PLANNED_VERSION;
+/** The layout of a record that holds `local` (D2), and the newest layout this BRIMM Video Studio reads and writes (NEWEST_VERSION): a record of
+    a higher layout is read for what it says and never written. */
+export const LOCAL_VERSION = 6;
+export const NEWEST_VERSION = LOCAL_VERSION;
 /** The name of a record file: its number, with four digits. */
 const RECORD_NAME = /^(\d{4})\.json$/;
 /** The record file of one rev, in an episode's folder. */
@@ -240,16 +248,28 @@ const isPlanned = (p) => isObject(p) && PLANNED_ROUTES.includes(p.route) && isTe
   && (p.filmed === null || isTime(p.filmed) || isObject(p.filmed))
   && (p.consent === undefined || (Array.isArray(p.consent) && p.consent.every(isConsent)))
   && (p.project === undefined || (p.route === "explainer" && p.voice === "heygen" && isPlannedProject(p.project)));
+/** The recording as it was on the Mac that holds it, once it is copied into Original files (layout 6, L6): `{ file, bytes, mtimeMs }`, and
+    nothing else: its file's name in the episode's own folder there (one name, no folder), its size and its time. */
+const isOriginal = (o) => isObject(o) && Object.keys(o).length === 3 && isText(o.file) && !/[/\\]/.test(o.file) && o.file !== "." && o.file !== ".."
+  && isCount(o.bytes) && isNumber(o.mtimeMs);
+/** Where an episode's own files are kept (layout 6, D2): `{ on, original? }`, and nothing else. `on` is the Mac that holds them, in its work
+    folder's video/ (where.js), and `original`, once the recording is in Original files, the recording as it was there (isOriginal). */
+const isLocalPlace = (l) => isObject(l) && isText(l.on) && (l.original === undefined || isOriginal(l.original)) && Object.keys(l).every((key) => key === "on" || key === "original");
+/** Whether a record holds `local`, whatever it holds in it: its layout is 6 (layoutOf), and what is in it is checked (faultFor). */
+const holdsLocal = (r) => r.local !== undefined && r.local !== null;
+
 /** Whether a record is a planned episode, whole: the one record with no kind that is not gated (gate.js gated). It is none unless all
     of these hold, and a record that only claims to be planned, failing any, is a video not yet answered to every command:
     - its answer says "planned" and is a planned answer's (isPlannedAnswer);
     - its `planned` is whole (isPlanned);
     - it has no video (`video` is null) and no kind (`kind` is null), since it was made in her chat from words she gave and never
       from a file, so it cannot be a client's or a group's session;
-    - it was written at layout 5, which a Mac on older code reads as newer; and
+    - it was written at layout 5, which a Mac on older code reads as newer, and holds no `local`; or (Phase 3, L2) at layout 6 with a whole
+      `local` (isLocalPlace), a plan kept on one Mac; and
     - it holds no session mark.
     It reads nothing else of the record, and anything that is not an object is none. */
-export const isPlannedRecord = (r) => isObject(r) && r.version === PLANNED_VERSION && r.kind === null && r.video === null && isPlannedAnswer(r.answer) && isPlanned(r.planned)
+export const isPlannedRecord = (r) => isObject(r) && (r.version === PLANNED_VERSION ? !holdsLocal(r) : r.version === LOCAL_VERSION && isLocalPlace(r.local))
+  && r.kind === null && r.video === null && isPlannedAnswer(r.answer) && isPlanned(r.planned)
   && (r.session === undefined || r.session === null);
 
 /** Whether a record is a video made from a plan (PR H5b): the plan's own record, written once more as the video its footage made when she said
@@ -312,8 +332,10 @@ function filesName(r) {
     one that was rendered); otherwise 2 once it holds a layer of phase 4 (a spelling, a text, a graphic, a cut, the logo, a
     preset, a Reel's captions turned off, or the logo's picture); and 1 while it holds none. 4 once it holds `app`, and 5 once it holds
     a plan (`planned`) or what a part is footage for (`partOf`, PR H5a): that is a planned episode's layout, and a part's, and it stays
-    5 whatever else the record comes to hold. */
+    5 whatever else the record comes to hold. 6 once it holds `local` (Phase 3, L2), whatever else it holds: a plan or a part kept on one Mac
+    is at 6 too. */
 export function layoutOf(r) {
+  if (holdsLocal(r)) return LOCAL_VERSION;
   if (isObject(r.planned) || isObject(r.partOf)) return PLANNED_VERSION;
   if (r.app !== undefined && r.app !== null) return 4;
   const layered =(x) => Boolean(x) && (["texts", "graphics", "cuts"].some((k) => Array.isArray(x[k]) && x[k].length > 0) || x.logo === true || Boolean(x.preset) || x.captions === false);
@@ -463,7 +485,9 @@ export const faultFor = (known) => (r) => {
     [optional(r.reading, isReading), "its reading by Claude cannot be read"],
     [optional(r.app, isApp), "its HyperFrames projects cannot be read"],
     [r.planned === undefined || r.planned === null || (isPlanned(r.planned) && r.version >= PLANNED_VERSION), "its plan cannot be read"],
-    [!hasPart || (isPartOf(r.partOf) && r.version >= PLANNED_VERSION && r.kind === null && isObject(r.answer) && r.answer.state === PART_STATE), "which plan it is footage for cannot be read"]
+    [!hasPart || (isPartOf(r.partOf) && r.version >= PLANNED_VERSION && r.kind === null && isObject(r.answer) && r.answer.state === PART_STATE), "which plan it is footage for cannot be read"],
+    // Where its own files are kept (Phase 3, L2): a whole `local`, and only at layout 6 or above, which a Mac on older code reads as newer.
+    [!holdsLocal(r) || (isLocalPlace(r.local) && r.version >= LOCAL_VERSION), "which Mac holds its files cannot be read"]
   ];
   const found = faults.find(([ok]) => !ok);
   return found ? found[1] : "";
@@ -642,17 +666,18 @@ export function undone(record, home) {
     Otherwise the record is written as record/<expectRev + 1>.json, a new file, with that rev and with `writer`, { commit, on },
     through `writeText(to, text)`, the rule's text writer, which never writes over a file; this Mac notes the rev in
     written.json in `home`; and the record is given back as written. Any field this version does not know is written as it
-    was. `pastCopies`, which `resolve` alone gives, writes past the conflicted copies, as it sorts them out one at a time. */
-export function writeEpisode(folder, record, { expectRev, writeText, writer, home, pastCopies = false }) {
+    was. `pastCopies`, which `resolve` alone gives, writes past the conflicted copies, as it sorts them out one at a time. `known` is the
+    newest layout this BRIMM Video Studio writes, as readEpisode's: a test gives an older one, to stand in for a Mac on older code. */
+export function writeEpisode(folder, record, { expectRev, writeText, writer, home, pastCopies = false, known = NEWEST_VERSION }) {
   if (!Number.isInteger(expectRev) || expectRev < 0) throw new Error("the episode's record was not written, because the rev it was read at was not given");
-  if (isObject(record) && Number.isInteger(record.version) && record.version > NEWEST_VERSION) throw Object.assign(new Error("Jason has a newer BRIMM Video Studio. Ask him to update this Mac."), { code: "NEWER" });
+  if (isObject(record) && Number.isInteger(record.version) && record.version > known) throw Object.assign(new Error("Jason has a newer BRIMM Video Studio. Ask him to update this Mac."), { code: "NEWER" });
   const copies = conflictedCopies(folder);
   if (copies.length && !pastCopies) throw Object.assign(new Error(conflictWhy(copies)), { code: "CONFLICTED" });
   if (recordNumbers(folder).some((n) => n > expectRev)) throw Object.assign(new Error("this episode changed on the other Mac: open it again"), { code: "CHANGED" });
   // A record once written at layout 2 or 3 stays there: a Mac that knows only 1 would push its Reels without what layout 2
   // draws, and one that knows only 2 would go on with an episode whose answer or kind it cannot see.
   const next = { ...record, version: Math.max(Number.isInteger(record.version) ? record.version : 1, layoutOf(record)), rev: expectRev + 1, writer };
-  const fault = episodeFault(next);
+  const fault = faultFor(known)(next);
   if (fault) throw Object.assign(new Error(`the episode's record was not written, because ${fault}`), { code: "FAULT" });
   mkdirSync(join(folder, RECORD_DIR), { recursive: true });
   writeText(recordFile(folder, next.rev), recordText(next));
@@ -683,27 +708,36 @@ export function otherNames(folder, path) {
     `kind` is "missing", "short" (smaller than listed) or "different" (larger than listed); `size` is what it is now (null when it is
     not there), `bytes` what the record lists, and `kept` any other name Dropbox may have kept it under. [] when every file is there at
     its size. `stat` is how a file is measured: a test gives a stand-in. (Review changes R4c: a rule about one file reads `file`,
-    never the words.) */
-export function fileProblems(folder, record, { stat = statSync } = {}) {
+    never the words.)
+    A record that holds `local` (Phase 3, L2) keeps its own files on the Mac `local.on` (where.js filePlace): on that Mac each is looked for in
+    `localFolder`, the episode's own folder there (its work folder's video/, where.js folderAt); on any other Mac (`machine`) none is looked
+    for, and none is missing, since it is not kept there. Its files in Dropbox (record/, final/, history/, Original files/ and a plan's) are
+    looked for in `folder`, as every file of a record without `local` is. A caller that gives no `machine` has every file looked for, and one
+    that gives no `localFolder` has each looked for in `folder`, as before. */
+export function fileProblems(folder, record, { stat = statSync, machine, localFolder = folder } = {}) {
   const problems = [];
   for (const [path, bytes] of Object.entries(record.files)) {
     if (path.split("/")[0] === RECORD_DIR) continue;
+    const onTheMac = filePlace(record, path) === "local";
+    if (onTheMac && machine !== undefined && machine !== record.local.on) continue;
+    const dir = onTheMac ? localFolder : folder;
     let size = null;
     try {
-      size = stat(join(folder, path)).size;
+      size = stat(join(dir, path)).size;
     } catch (e) {
       // A file that cannot be measured is not there for any command that needs it.
     }
     if (size === bytes) continue;
-    problems.push({ file: path, kind: size === null ? "missing" : size < bytes ? "short" : "different", size, bytes, kept: otherNames(folder, path) });
+    problems.push({ file: path, kind: size === null ? "missing" : size < bytes ? "short" : "different", size, bytes, kept: otherNames(dir, path) });
   }
   return problems;
 }
 
 /** What is wrong with an episode's files, one line for each file, in plain words for a command's refusal: missing, short, or
-    not the size listed, with any other name Dropbox may have kept it under. [] when every file is there at its size. */
-export function filesProblems(folder, record, { stat = statSync } = {}) {
-  return fileProblems(folder, record, { stat }).map(({ file, kind, size, bytes, kept }) => {
+    not the size listed, with any other name Dropbox may have kept it under. [] when every file is there at its size. It takes the options
+    fileProblems takes. */
+export function filesProblems(folder, record, { stat = statSync, machine, localFolder = folder } = {}) {
+  return fileProblems(folder, record, { stat, machine, localFolder }).map(({ file, kind, size, bytes, kept }) => {
     const as = kept.length ? `, and Dropbox may have kept it as ${kept.join(" or ")}` : "";
     if (kind === "missing") return `${file} is missing${as}`;
     if (kind === "short") return `${file} is short: ${size} bytes of ${bytes}${as}`;

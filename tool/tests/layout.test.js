@@ -50,7 +50,7 @@ describe("the record's layout", () => {
     assert.equal(episodeFault({ ...BASE, brand: { logo: "/Users/x/logo.png" } }), "its logo cannot be read");
     assert.equal(episodeFault({ ...BASE, main: { ...BASE.main, graphics: [{ id: "g1", picture: "media/..", at: 3, for: 2, place: "corner" }] } }), "its main video cannot be read");
     assert.equal(episodeFault({ ...BASE, brand: { logo: "media/." } }), "its logo cannot be read");
-    assert.equal(episodeFault({ ...BASE, version: 6 }), "it is version 6, and this BRIMM Video Studio reads versions 1 to 5");
+    assert.equal(episodeFault({ ...BASE, version: 7 }), "it is version 7, and this BRIMM Video Studio reads versions 1 to 6");
     assert.equal(faultFor(2)({ ...BASE, version: 3 }), "it is version 3, and this BRIMM Video Studio reads versions 1 to 2");
     assert.equal(faultFor(2)({ ...BASE, version: 2 }), "");
   });
@@ -113,9 +113,9 @@ describe("layout 5: the planned episode (PR H4)", () => {
     // The same record with no video, as a record of layout 4 would be: this brimm-video reads it as an unfinished import too, which is why it is layout 5.
     assert.equal(faultFor(RECORD_VERSION)({ ...PLAN, version: 4 }), "its plan cannot be read");
   });
-  it("is the newest layout this BRIMM Video Studio reads: a record of layout 6 is newer here too", () => {
-    assert.equal(NEWEST_VERSION, PLANNED_VERSION);
-    assert.equal(episodeFault({ ...PLAN, version: 6 }), "it is version 6, and this BRIMM Video Studio reads versions 1 to 5");
+  it("is below layout 6, an episode kept on one Mac (Phase 3, L2), the newest layout this BRIMM Video Studio reads: a record of layout 7 is newer here", () => {
+    assert.deepEqual([PLANNED_VERSION, NEWEST_VERSION], [5, 6]);
+    assert.equal(episodeFault({ ...PLAN, version: 7 }), "it is version 7, and this BRIMM Video Studio reads versions 1 to 6");
   });
 });
 
