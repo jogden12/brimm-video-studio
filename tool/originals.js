@@ -12,7 +12,7 @@ import { acceptRev, isFromPlan, isPart, kindOf, lastWritten, readEpisode, record
 import { FOLDER_GONE, LOCK_AGAIN_MS, WAIT_LOOK_FOR_MS, WAIT_LOOK_MS, askAgent, commitOf, dueAt, fileId, judgeEntry, logTo, putOwnRecordBack, ruleOpts, readEveryPending, readPendingAt, recordHolds, removePending, sameFile, settleReading, writePending } from "./filing.js";
 import { linksOf, matchedSession } from "./finish.js";
 import { partsOf } from "./footage.js";
-import { gated, heldName } from "./gate.js";
+import { gated, heldName, withShortId } from "./gate.js";
 import { releaseEpisodeLock, takeEpisodeLock, lockOf, runningRun } from "./detached.js";
 import { episodeFilesFolder, episodeWork, episodesFolder, runsFolder, workFolder } from "./settings.js";
 import { workCopyLockOf } from "./workcopy.js";
@@ -117,7 +117,233 @@ export function oweForgotten({ episode: { root, machine, home }, clock = Date.no
   return { owed };
 }
 
-/** The check of an `original` pending (algorithms M and O): not built yet. */
-export function checkOriginal(pending, deps) {
-  throw new Error("not built");
+const whoOf = (p) => p.label || `an episode (${String(p.id).slice(-6)})`;
+
+/** Make the check of an `original` pending, under the episode's late-check lock (filing.js finishDue), with the pending read again: algorithm M (the move) for one owed, algorithm O
+    (the check, and the Mac's copy taken off) for any other. Synchronous; gives nothing; writes or removes its own pending. A throw that is not caught here is finishDue's.
+    `deps` are filing.js' check deps: `episode` ({ root, machine, home, checkout }), `log`, `notify`, `clock`, `alive`, `once`, `tools`, and `clone`, `sameDisk`, `isWhole`, `commit` and
+    `uploaded` ((path) => true | false | null) when a test gives them. */
+export function checkOriginal(p, deps) {
+  const home = deps.episode.home;
+  const machine = deps.episode.machine;
+  const clock = deps.clock;
+  const alive = deps.alive;
+  const log = deps.log || (() => {});
+  const once = deps.once || log;
+  const notify = deps.notify || (() => {});
+  const whole = deps.isWhole || isWhole;
+  const opts = ruleOpts({ ...deps, log });
+  const rel = `${ORIGINALS_FOLDER}/${p.file}`;
+  const from = join(episodeFilesFolder(home, p.name), p.file);
+  const to = join(p.folder, ORIGINALS_FOLDER, p.file);
+  const who = whoOf(p);
+  let shown = who;
+  const code = (e) => e.code || "an error";
+  const base = ({ problem: _problem, nextLook: _nextLook, lookUntil: _lookUntil, ...rest }) => rest;
+  const putAway = () => {
+    try {
+      removePending(home, p);
+      return true;
+    } catch (e) {
+      once(`${shown}: its check is made, but it could not be put away (${code(e)}). The next run looks at it again.`);
+      return false;
+    }
+  };
+  const wait = (line) => {
+    writePending(home, { ...p, nextLook: clock() + WAIT_LOOK_MS, lookUntil: Number.isFinite(p.lookUntil) ? p.lookUntil : clock() + WAIT_LOOK_FOR_MS });
+    once(line);
+  };
+  const putOff = () => {
+    writePending(home, { ...p, nextLook: clock() + LOCK_AGAIN_MS });
+    once(`${shown}: its recording waits for the run at work on it to end.`);
+  };
+  const problem = (text) => {
+    log(`${shown}: its recording stays on this Mac: ${text}`);
+    if (!p.problem) notify(ORIGINALS_PROBLEM(shown));
+    const { nextLook: _nextLook, ...rest } = p;
+    writePending(home, { ...rest, problem: text });
+  };
+  const goneAway = () => {
+    if (!putAway()) return;
+    log(FOLDER_GONE(who));
+    notify(FOLDER_GONE(who));
+  };
+  // 1. The folder, as the checks of final/ have it.
+  let list;
+  try {
+    list = readdirSync(episodesFolder(p.root));
+  } catch (e) {
+    return wait(`${who}: its check waits: its folder in Episodes cannot be read now. It is looked at again later.`);
+  }
+  try {
+    const folder = list.some((n) => n.normalize("NFC") === basename(p.folder).normalize("NFC")) ? statSync(p.folder, { throwIfNoEntry: false }) : undefined;
+    if (!(folder && folder.isDirectory())) return goneAway();
+  } catch (e) {
+    return wait(`${who}: its check waits: its folder in Episodes cannot be read now. It is looked at again later.`);
+  }
+  // 2. The record in force.
+  const recordLater = `${who}: its check waits: the episode's record cannot be read now. It is looked at again later.`;
+  const unreadable = (found) => !found.record || found.newer || (recordNumbers(p.folder)[0] || 0) > found.record.rev;
+  let read = readEpisode(p.folder);
+  if (unreadable(read)) return wait(recordLater);
+  shown = shownName(read.record);
+  // 3. The gate, asked before anything else is done (ruling 5).
+  const links = linksOf(p.root);
+  const held = asSession(links, { folder: p.folder, record: read.record });
+  const ours = () => {
+    const mine = statSync(from, { throwIfNoEntry: false });
+    const copy = statSync(to, { throwIfNoEntry: false });
+    return Boolean(mine && copy && copy.size === mine.size && (!whole(to) || sameBytes(to, from)));
+  };
+  if (p.owed === true) {
+    if (held) {
+      if (existsSync(to) && !listsOriginal(read.record) && ours()) {
+        try {
+          rmSync(to, { force: true });
+        } catch (e) {
+          log(`${shown}: a copy of its recording in Original files could not be taken away (${code(e)}). Ask Jason.`);
+        }
+      }
+      if (putAway()) log(`${withShortId(heldName(read.record), read.record)}: it is held as a session now, so its recording stays on this Mac.`);
+      return;
+    }
+    return move();
+  }
+  if (held) {
+    if (putAway()) log(ORIGINALS_SESSION(heldName(read.record)));
+    return;
+  }
+  return check();
+
+  /** Algorithm M, steps 4-11. */
+  function move() {
+    // 4. Moved already: a look stopped between its record and its pending.
+    const local = read.record.local;
+    if (listsOriginal(read.record) && typeof local.original === "object" && local.original !== null) {
+      writePending(home, { ...base(p), owed: false, rev: read.record.rev, entries: [{ from, to, bytes: read.record.files[rel] }], macCopy: { size: local.original.bytes, mtimeMs: local.original.mtimeMs }, lastCopy: clock() });
+      return;
+    }
+    // 5. The Mac's copy.
+    const fid = fileId(from);
+    if (!fid) {
+      if (putAway()) log(`${shown}: its recording is no longer on this Mac, so nothing is copied or taken off.`);
+      return;
+    }
+    // 6. The episode's lock, tried once.
+    mkdirSync(episodeWork(home, p.name), { recursive: true });
+    const took = takeEpisodeLock(lockOf(home, p.name), ORIGINALS_COMMAND, alive);
+    if (!took.taken) return putOff();
+    try {
+      // 7. Earlier writes: a stopped writer's mark is settled before this one writes; a held finish's lost record is put back, and its number never taken.
+      const same = (q) => q.id === p.id && q.machine === machine && resolve(String(q.root)) === resolve(String(p.root));
+      for (const q of readEveryPending(home).filter((x) => same(x) && x.reading)) {
+        if (settleReading(q, { home, log }).later) return wait(`${who}: its check waits: a write stopped while it put its files in, and the episode's record cannot be read now. It is looked at again later.`);
+      }
+      const finals = () => readEveryPending(home).filter((x) => same(x) && x.kind === "final" && x.rev > read.record.rev && (x.copied === true || recordHolds(x, { isWhole: whole }) === true));
+      for (const q of finals()) putOwnRecordBack(q, { isWhole: whole, opts });
+      read = readEpisode(p.folder);
+      if (unreadable(read)) return wait(recordLater);
+      if (finals().length) return wait(recordLater);
+      // 8. A change Dropbox undid waits for her command, unless it is this move's own record.
+      if (undone(read.record, home)) {
+        if (Number.isInteger(p.rev) && lastWritten(home, p.id) === p.rev) acceptRev(home, p.id, read.record.rev);
+        else return wait(`${shown}: its recording waits: Dropbox undid this Mac's last change to it, which the next command on it says first. It is looked at again later.`);
+      }
+      // 9. The copy.
+      if (statSync(to, { throwIfNoEntry: false })) {
+        if (!ours()) return problem("Original files in Dropbox holds another file of its name.");
+      } else {
+        try {
+          mkdirSync(dirname(to), { recursive: true });
+          cloneIn(from, to, opts);
+        } catch (e) {
+          return problem(`it could not be copied into Original files (${code(e)}).`);
+        }
+      }
+      // 10. The record, last.
+      const next = { ...read.record, files: { ...read.record.files, [rel]: fid.size }, local: { ...read.record.local, original: { file: p.file, bytes: fid.size, mtimeMs: fid.mtimeMs } } };
+      const work = join(runsFolder(home), `originals-${process.pid}-${clock()}`);
+      let wrote;
+      try {
+        wrote = writeEpisode(p.folder, next, { expectRev: read.record.rev, writeText: textWriter({ work, ...opts }), writer: { commit: deps.commit || commitOf(deps.episode.checkout), on: machine }, home });
+      } catch (e) {
+        if (ours()) {
+          try {
+            rmSync(to, { force: true });
+          } catch (err) {
+            log(`${shown}: a copy of its recording in Original files could not be taken away (${code(err)}). Ask Jason.`);
+          }
+        }
+        return wait(`${shown}: its copy in Original files could not be listed in its record (${code(e)}), so it is taken away again. It is looked at again later.`);
+      } finally {
+        rmSync(work, { recursive: true, force: true });
+      }
+      // 11. The pending, last.
+      writePending(home, { ...base(p), owed: false, rev: wrote.rev, entries: [{ from, to, bytes: fid.size }], macCopy: fid, lastCopy: clock() });
+      log(`${shown}: its recording is copied into Original files in Dropbox. It leaves this Mac once Dropbox has it uploaded.`);
+    } finally {
+      releaseEpisodeLock(lockOf(home, p.name), took.text);
+    }
+  }
+
+  /** Algorithm O, steps 4-9. */
+  function check() {
+    const e = p.entries[0];
+    // 4. Still listed.
+    if (read.record.files[rel] !== e.bytes || !(typeof read.record.local.original === "object" && read.record.local.original !== null)) {
+      writePending(home, { ...base(p), owed: true, lastCopy: clock() });
+      log(`${shown}: the record no longer lists its copy in Original files, so it is listed again.`);
+      return;
+    }
+    // 5. The Mac's copy.
+    if (!statSync(e.from, { throwIfNoEntry: false })) {
+      if (putAway()) log(`${shown}: its recording is no longer on this Mac, so nothing is copied or taken off.`);
+      return;
+    }
+    const changed = () => {
+      if (putAway()) log(`${shown}: its recording on this Mac changed after it was copied into Original files, so it is kept on this Mac.`);
+    };
+    if (!sameFile(e.from, p.macCopy)) return changed();
+    // 6. The copy in Dropbox, by table J.
+    const judged = judgeEntry({ from: e.from, to: e.to, bytes: e.bytes }, p.folder, read.record.files, whole);
+    if (judged.put) {
+      try {
+        mkdirSync(dirname(e.to), { recursive: true });
+        if (existsSync(e.to)) replaceIn(e.from, e.to, opts);
+        else cloneIn(e.from, e.to, opts);
+      } catch (err) {
+        return problem(`its copy in Original files could not be put back in Dropbox (${code(err)}).`);
+      }
+      writePending(home, { ...base(p), lastCopy: clock() });
+      log(`${shown}: its copy in Original files was not whole in Dropbox (${judged.put}), so it is put back from the recording on this Mac.`);
+      return;
+    }
+    // 7. The flag.
+    const asked = deps.uploaded || ((path) => uploadedOf(path, { swift: (deps.tools && deps.tools.swift) || "" }));
+    if (asked(e.to) !== true) {
+      writePending(home, { ...base(p), nextLook: clock() + UPLOAD_LOOK_MS, lookUntil: Number.isFinite(p.lookUntil) ? p.lookUntil : clock() + WAIT_LOOK_FOR_MS });
+      once(`${shown}: Dropbox has not uploaded its copy in Original files yet, so the recording stays on this Mac. It is looked at again later.`);
+      return;
+    }
+    // 8. No run at work on it.
+    const names = [...new Set([p.name, ...(p.of && typeof p.of.name === "string" ? [p.of.name] : [])])];
+    if (names.some((n) => runningRun(home, n, alive, workCopyLockOf(home, n)))) return putOff();
+    mkdirSync(episodeWork(home, p.name), { recursive: true });
+    const took = takeEpisodeLock(lockOf(home, p.name), ORIGINALS_COMMAND, alive);
+    if (!took.taken) return putOff();
+    try {
+      // 9. Under the lock: the Mac's copy is deleted if it is still the one that was copied.
+      if (!sameFile(e.from, p.macCopy)) return changed();
+      try {
+        rmSync(e.from, { force: true });
+      } catch (err) {
+        log(`${shown}: its recording could not be taken off this Mac (${code(err)}), so it stays there.`);
+        putAway();
+        return;
+      }
+      if (putAway()) log(`${shown}: Dropbox has its copy in Original files uploaded, so the recording is taken off this Mac.`);
+    } finally {
+      releaseEpisodeLock(lockOf(home, p.name), took.text);
+    }
+  }
 }

@@ -27,6 +27,8 @@ import { isRunning } from "./run.js";
 import { isZoomName, namesOf, withoutNames, zoomTimeOf } from "./kinds.js";
 import { gated, gatedAsOf, withShortId } from "./gate.js";
 import { keptOnAMac } from "./where.js";
+// originals.js imports this file, as finish.js does: checkOriginal is a function declaration, bound before any module of the cycle runs.
+import { checkOriginal, oweForgotten } from "./originals.js";
 // finish.js, finish-check.js and finish-ended.js each import this file, directly or through detached.js: their names are used only inside functions.
 import { linksOf } from "./finish.js";
 import { clearChecking, clearProblem, flagProblem, problemNotice } from "./finish-check.js";
@@ -1417,6 +1419,7 @@ export function checkFinal(p, deps) {
 }
 
 CHECKS.final = checkFinal;
+CHECKS.original = checkOriginal;
 
 /** A time of day as a person reads it, "10:15". */
 export const clockTime = (ms) => new Date(ms).toTimeString().slice(0, 5);
@@ -1786,6 +1789,12 @@ export async function importEpisodes(dir, deps, importOne) {
   clearRuns(episode.home, alive);
   const before = labelsNow();
   for (const video of clearCrashes({ statusFolders: statusReadFolders(episode), machine: episode.machine, ...(deps.alive ? { alive: deps.alive } : {}) })) log(`${named(video, before)}: an import of it on this Mac stopped before it was done, so it is imported again.`);
+  // A hand-off writer that stopped before it owed its video's recordings (or whose owe could not be written) is made good here (L6).
+  try {
+    oweForgotten({ episode, clock, log });
+  } catch (e) {
+    log(`Recordings owed to Original files could not be looked for (${e.code || "an error"}).`);
+  }
   finishDue(true);
   await importWaiting(true);
   while (changed) {
