@@ -198,6 +198,44 @@ describe("app --when-ready", () => {
     assert.equal(argsOf(t).filter((a) => a[0] === "workcopy").length, 1, JSON.stringify(argsOf(t)));
     t.done();
   });
+  it("B1-F3 the Reel's copy ended with a result (made or failed) and the main copy's run takes its lock a look after it is asked for: nothing is posted, and the project opens", async () => {
+    for (const reelOk of [true, false]) {
+      const { t, found, paths } = kept();
+      atWork(t, "workcopy");
+      const wait = t.ctx.deps.wait;
+      let turns = 0;
+      t.ctx.deps.wait = async (ms) => {
+        await wait(ms);
+        turns += 1;
+        if (turns === 1) {
+          rmSync(workCopyLockOf(t.home, FOLDER), { force: true });
+          writeFileSync(resultFile(t.home, FOLDER, "workcopy"), JSON.stringify({ version: 1, command: "workcopy", copy: "reel", started: t.now() - 3000, ended: t.now(), ok: reelOk, made: [], failed: reelOk ? [] : ["no room"], next: "" }));
+        }
+        // The main copy's run, asked for after the Reel's ended, takes its lock one look later, and makes the copy the look after that.
+        if (turns === 3) atWork(t, "workcopy");
+        if (turns === 5) {
+          madeCopy(paths);
+          rmSync(workCopyLockOf(t.home, FOLDER), { force: true });
+        }
+      };
+      const r = await run(t);
+      assert.equal(r.code, 0, `reel ${reelOk}: ${r.text}`);
+      assert.deepEqual(t.notices, [], `reel ${reelOk}`);
+      assert.equal(argsOf(t).filter((a) => a[0] === "workcopy").length, 1, JSON.stringify(argsOf(t)));
+      assert.equal(reread(found).app.projects[0].state, "opened");
+      t.done();
+    }
+  });
+  it("B1-F3 a failure of the main copy's own run is still the answer: the notice is posted and no second copy is asked for", async () => {
+    const { t } = kept();
+    mkdirSync(episodeWork(t.home, FOLDER), { recursive: true });
+    writeFileSync(resultFile(t.home, FOLDER, "workcopy"), JSON.stringify({ version: 1, command: "workcopy", copy: "main", started: t.now() - 3000, ended: t.now() - 1000, ok: false, made: [], failed: ["no room"], next: "" }));
+    const r = await run(t);
+    assert.equal(r.code, 1);
+    assert.equal(t.notices.length, 1);
+    assert.equal(argsOf(t).filter((a) => a[0] === "workcopy").length, 0);
+    t.done();
+  });
   it("B0-F28 while Claude is still reading, she is told it opens by itself, not to say it again, whether the copy is made or not", async () => {
     for (const made of [false, true]) {
       const { t, paths } = kept();

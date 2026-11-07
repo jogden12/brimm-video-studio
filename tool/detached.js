@@ -188,7 +188,7 @@ export async function runDetached({ home, folder, command, lock: own, keepAwake 
   if (took.taking) return { taking: true };
   if (!took.taken) return { running: took.running };
   const started = now();
-  const resultOf = (done) => ({ version: 1, command, started, ended: now(), ok: Boolean(done.ok), made: (done.made || []).map(clean), failed: (done.failed || []).map(clean), next: done.next ? clean(done.next) : "" });
+  const resultOf = (done) => ({ version: 1, command, started, ended: now(), ok: Boolean(done.ok), ...(["main", "reel", "footage"].includes(done.copy) ? { copy: done.copy } : {}), made: (done.made || []).map(clean), failed: (done.failed || []).map(clean), next: done.next ? clean(done.next) : "" });
   const early = (done) => {
     try {
       writeWhole(resultFile(home, folder, command), JSON.stringify({ ...resultOf(done), early: true, pid: process.pid }, null, 2) + "\n");

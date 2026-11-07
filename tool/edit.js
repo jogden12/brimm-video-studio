@@ -1523,32 +1523,37 @@ async function appWhenReady(ctx, rest) {
     // or its result shows it ended after this run began.
     let seen = false;
     let busyWith = "";
-    // The lock the copy's run takes is one for the main video, a Reel's and the footage: the run that ended may have been a Reel's. When it ends and the main video's
-    // copy is not made and did not fail, it is asked for once, and waited for in its turn.
-    let asked = false;
-    const lookForCopy = async () => {
+    // The lock the copy's run takes is one for the main video, a Reel's and the footage: the run that ended may have been a Reel's. Only the main video's copy
+    // answers this run (a result that says it was a Reel's or the footage's does not). When the run that ended was not the main video's copy and that copy
+    // is not made, it is asked for once, and the second look is decided only by what happens after it was asked for (`since`).
+    const mainResult = () => {
+      const ended = readResult(ctx.home, found.name, WORK_COPY_COMMAND);
+      return ended && ended.early !== true && ended.copy !== "reel" && ended.copy !== "footage" ? ended : null;
+    };
+    const lookForCopy = async ({ since, slack }) => {
      for (;;) {
       const copying = Boolean(runningCommand(ctx.home, found.name, ctx.alive, copyLock));
       busyWith = runningCommand(ctx.home, found.name, ctx.alive);
       if (copying) seen = true;
-      const ended = readResult(ctx.home, found.name, WORK_COPY_COMMAND);
+      const ended = mainResult();
       // A copy that failed at once may have ended just before this run began (the copy is asked for a moment before this run is started): that result is the answer too.
-      const justEnded = ended && ended.early !== true && ended.ok === false && ended.ended >= began - WHEN_READY_JUST_BEFORE_MS;
-      const decided = seen || copyIsMade(ctx, ownRecord() ?? { found, record: found.read.record }) || (ended && ended.early !== true && ended.ended >= began) || Boolean(justEnded);
+      const justEnded = slack && ended && ended.ok === false && ended.ended >= since - WHEN_READY_JUST_BEFORE_MS;
+      const answered = ended && (slack ? ended.ended >= since : ended.started >= since);
+      const decided = seen || copyIsMade(ctx, ownRecord() ?? { found, record: found.read.record }) || Boolean(answered) || Boolean(justEnded);
       if (!copying && !busyWith && decided) break;
       if (ctx.now() - began >= limit) break;
       await wait(WHEN_READY_LOOK_MS);
      }
     };
-    await lookForCopy();
-    if (!asked && ctx.now() - began < limit) {
+    await lookForCopy({ since: began, slack: true });
+    if (ctx.now() - began < limit) {
       const then = ownRecord();
-      const failed = readResult(ctx.home, found.name, WORK_COPY_COMMAND);
-      if (then && !copyIsMade(ctx, then) && !(failed && failed.early !== true && failed.ok === false && failed.ended >= began - WHEN_READY_JUST_BEFORE_MS) && !runningCommand(ctx.home, found.name, ctx.alive, copyLock)) {
-        asked = true;
+      const failed = mainResult();
+      if (then && !copyIsMade(ctx, then) && !(failed && failed.ok === false && failed.ended >= began - WHEN_READY_JUST_BEFORE_MS) && !runningCommand(ctx.home, found.name, ctx.alive, copyLock)) {
+        const since = ctx.now();
         requestWorkCopy(ctx, { folder: found.name });
         seen = false;
-        await lookForCopy();
+        await lookForCopy({ since, slack: false });
       }
     }
     const mine = ownRecord();
@@ -3786,7 +3791,9 @@ async function workcopy(ctx, rest) {
   const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
   const kinds = reel ? REEL_COPY_KINDS : WORK_COPY_KINDS;
   const notFor = reel ? NOT_RAW_OR_FINISHED : NOT_RAW_OR_CLIP;
-  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: WORK_COPY_COMMAND, lock: workCopyLockOf(ctx.home, found.name), alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => {
+  // Which copy this run makes is kept in its result (`copy`), so that `app --when-ready` takes only a failure of the main video's copy for its own answer.
+  const copy = reel ? "reel" : footageOnly ? "footage" : "main";
+  const body = async () => {
     if (!kinds.includes(recordKind(record))) return { ok: false, made: [], failed: [notFor], next: "" };
     // The footage's copies alone (PR H5b): of a video made from a plan, and no wait for the import of its own video, which is not copied.
     if (footageOnly) return isFromPlan(record) ? planFootage(ctx, { found, record, deps }) : { ok: false, made: [], failed: [NOT_FROM_PLAN], next: "" };
@@ -3858,7 +3865,8 @@ async function workcopy(ctx, rest) {
     }
     for (const line of said) deps.log(line);
     return made;
-  });
+  };
+  const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: WORK_COPY_COMMAND, lock: workCopyLockOf(ctx.home, found.name), alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, async () => ({ ...(await body()), copy }));
   if (result.taking || result.running) {
     ctx.say(result.running ? `The video for HyperFrames is being made for ${calledAs(ctx, found)} already.` : `Another run is taking over the lock of ${calledAs(ctx, found)}; try again in a few seconds.`);
     return 1;
