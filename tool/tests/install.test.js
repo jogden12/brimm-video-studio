@@ -1481,7 +1481,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.equal(shown(mended).import, "light");
     d.done();
   });
-  it("refuses to switch while the old folder holds a video, naming it by its file name when the import is today's, and says what to do", () => {
+  it("refuses to switch while the old folder holds a video, naming it by what it is and its size, whatever the import, and says what to do", () => {
     const d = box();
     const old = d.folder("Unedited Video");
     writeFileSync(join(old, "Talk.mov"), "video");
@@ -1489,7 +1489,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const before = d.held();
     refusedWith(ask("--print", "--machine", "Mac Studio", "--drop", "Drop", d.root), [
       "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:",
-      `  Talk.mov: waits in ${old}.`,
+      `  A video of 5 bytes: waits in ${old}.`,
       ADVICE
     ]);
     assert.deepEqual(d.held(), before);
@@ -1497,7 +1497,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.equal(ask("--print", "--machine", "Mac Studio", d.root).status, 0);
     d.done();
   });
-  it("refuses to switch while an import of this Mac failed or its late check found a problem, by the video's file name, or its label, and never by the status file's name", () => {
+  it("refuses to switch while an import of this Mac failed or its late check found a problem, counting each, or by its label, and never by the status file's name", () => {
     const d = box();
     d.status("Budget.mov", { failed: "the sound could not be read for Budget.mov" });
     d.status("Talk.mov", { problem: "Talk.rough-cut.mp4 is short" });
@@ -1508,10 +1508,10 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const gone = ", and its video is not in the old folder now: only its status file, in " + `${d.root}/Episodes/.importing` + ", holds this, and a person takes it away by hand";
     assert.equal(r.out, [
       "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:",
-      `  Budget.mov: its import failed${gone}.`,
       `  Video of 22 Oct, 10:40 (Mac Studio): its import failed${gone}.`,
+      `  1 import failed${gone}.`,
       ADVICE,
-      "  Talk.mov: it was copied in, but its late check found a problem, and its video is not in the old folder now.",
+      "  1 late check found a problem, and its video is not in the old folder now.",
       "A late check needs its video: where the video is no longer in the old folder, the check cannot be made again, and Jason looks at it.",
       "",
       "Nothing was changed.",

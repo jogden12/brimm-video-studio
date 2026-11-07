@@ -679,14 +679,20 @@ describe("the gate, a record Dropbox is still bringing over", () => {
     assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), r.text);
     t.done();
   });
-  it("changes nothing with today's settings and today's records: a record above the one read that is not whole is passed over as before", async () => {
-    for (const record of [{}, { kind: "short video" }]) {
-      for (const name of SCOPED) {
-        const { t, found } = episode(record);
-        PENDING_FILE(found, 2, "{");
-        const r = await on(t.ctx.deps, name, ...ASKED[name]);
-        assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${name}: ${r.text}`);
-        t.done();
+  it("refuses them on a Mac with its drop folder in Dropbox whatever its file says of the import, with today's settings too (L1d)", async () => {
+    // Every Mac names quietly since L1d: a record above the one read that is not whole is no longer passed over for want of a light import.
+    for (const imported of ["full", undefined]) {
+      for (const record of [{}, { kind: "short video" }, { version: 2, spellings: [["Ogdin", "Ogden"]] }]) {
+        for (const name of SCOPED) {
+          const t = setup();
+          const found = episodeFor(t, { record });
+          PENDING_FILE(found, 2, "{");
+          const { import: _, ...rest } = t.ctx.settings;
+          const settings = { ...rest, ...(imported ? { import: imported } : {}) };
+          const r = await on({ ...t.ctx.deps, settings }, name, ...ASKED[name]);
+          assert.deepEqual([r.code, r.said, t.started], [1, [PENDING], []], `${imported} ${found.record.version} ${name}`);
+          t.done();
+        }
       }
     }
   });

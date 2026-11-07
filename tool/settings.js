@@ -211,12 +211,6 @@ export function factsOf(home, s, { tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp
 /** Whether this Mac does the light import, which asks Claude nothing about a video until its person answers. Anything but
     "light" in the import setting, and no setting, is not set up for them: the import itself is light all the same. */
 export const lightImport = (s) => s?.import === "light";
-/** Whether this Mac names a video waiting in a drop folder, an episode whose record cannot be read, and what an error nobody foresaw
-    says, as the light import's rules have it, never by a file's or a folder's own name, which may be a client's, and refuses every
-    command for an episode while a record above the one read is still coming (edit.js gateOf): a Mac whose file says the light import,
-    and a Mac with a drop folder of its own whatever its file says (every import is light since Phase 2, and since Phase 3's L1b a drop
-    folder of a Mac's own no longer needs the file to say so). Whether her chat is set up stays lightImport's. */
-export const namesQuietly = (s) => lightImport(s) || isLocal(s);
 
 /** Whether Claude may read what is taught in a client or group session on this Mac: only when Jason has turned the teachings on
     and it is less than 90 days since. `now` is a time in milliseconds, or a Date. Settings that do not say so (absent, null or
@@ -604,12 +598,12 @@ function planned(home, rest, now) {
   if (either ? sameFolder(oldFolder, newFolder) : !moved && from === to) return { settings, fields, remove, from, to };
   // Named by the folder alone when only the drop folder changes, and by its whole path when the Mac or BRIMM Video do. A video waiting
   // in the old folder is named as under the light import on a switch to or from a drop folder of this Mac's own, whatever the file
-  // says of the import (namesQuietly; every import is light): it may be a session, and its file's name a client's (switch.js heldInOld).
-  const light = namesQuietly(held) || namesQuietly(settings);
+  // says of the import (every import is light): it may be a session, and its file's name a client's (switch.js heldInOld, which names
+  // quietly on every Mac since Phase 3, L1d).
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")
     .then(({ heldInOld }) => {
-      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable, lateChecks } = heldInOld({ root: oldRoot, machine: oldMachine, folder: oldFolder, light, home, now: Number(now) });
+      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable, lateChecks } = heldInOld({ root: oldRoot, machine: oldMachine, folder: oldFolder, home, now: Number(now) });
       if (![work, running, problem, imported, kept, unreadable, lateChecks].some((lines) => lines.length)) return { settings, fields, remove, from, to, old: oldFolder };
       // What it is not done for: work in the old folder; else that folder, or its status files, could not be looked at; else this
       // Mac's own late checks could not be read, the old folder having been.

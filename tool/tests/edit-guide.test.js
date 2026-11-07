@@ -63,6 +63,13 @@ describe("guide on a Mac not on the light import", () => {
     assert.deepEqual([t.opened, t.calls, t.waits], [[], [], []]);
     t.done();
   });
+  it("still says it, whatever else it names quietly: the file's import setting alone sets the chat up (L1d)", async () => {
+    for (const over of [{ import: "full" }, { dropPath: "/x/Drop" }, { import: "full", dropPath: "/x/Drop" }]) {
+      const t = setup();
+      assert.deepEqual(await on({ ...t.ctx.deps, settings: { ...t.ctx.settings, ...over } }, "guide"), { code: 1, said: [NOT_SET_UP] }, JSON.stringify(over));
+      t.done();
+    }
+  });
 });
 
 describe("guide, from the records", () => {

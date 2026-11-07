@@ -862,7 +862,7 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, `${TITLE}.mov`), "video");
     const r = await on(depsOf(t), "episodes");
-    const waiting = r.said.find((line) => line.startsWith(`  ${TITLE}.mov, in Mac Studio's`));
+    const waiting = r.said.find((line) => line.startsWith("  A video of 5 bytes, in the Mac Studio's drop folder"));
     assert.ok(waiting, r.text);
     assert.doesNotMatch(waiting, /already imported/);
     t.done();

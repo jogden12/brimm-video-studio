@@ -63,7 +63,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, ofTheSwitch, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
-import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, namesQuietly, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf } from "./settings.js";
+import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
@@ -448,9 +448,8 @@ const recordShaped = (r) => typeof r.id === "string" && Number.isInteger(r.versi
     - A record of a layout newer than this code is refused for every command that names an episode, in the words episodeFor has
       always used for it, with `newer: true`, so that episodeFor ends the command with the code that command gives such a record.
     - A record file numbered above the one read, which Dropbox is still bringing over or this code rejects, may be a video corrected
-      to a session or not answered: on a Mac that does the light import, or that has a drop folder of its own whatever its file says
-      of the import (settings.js namesQuietly), or when the record read is of the switch's layout (3), it refuses every command.
-      With today's settings and records it is passed over, as it always was.
+      to a session or not answered: on every Mac, whatever its file says of the import (every import is light; Phase 3, L1d), it
+      refuses every command.
     - An episode kept on another Mac (keptOn: a record it is known by holds `local` on another Mac, and none holds it on this one; Phase 3,
       L2, D3) is changed only there: every command is refused, in where.js ON_OTHER_MAC's one line, which names it as every line does and
       names that Mac, before anything else of it is asked or read, whatever this Mac's training gate says.
@@ -462,7 +461,7 @@ function gateOf(ctx, e, records, said, inForce) {
   if (!ctx.asked || UNSCOPED.includes(ctx.asked.command)) return null;
   const refused = (why, more = {}) => ({ why, name: e.name, folder: e.folder, gate: true, ...more });
   if (e.read.newer) return refused(newerWhy(e.read.record), { newer: true });
-  if (inForce && (namesQuietly(ctx.settings) || ofTheSwitch(inForce)) && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
+  if (inForce && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
   const there = keptOn(ctx, e);
   if (there) return refused(ON_OTHER_MAC(isGated(e) ? gatedName(gatedRecord(e), e.held) : shownName(inForce ?? records.find(recordShaped)), there));
   const on = teachingsOn(ctx.settings, ctx.now());
@@ -580,8 +579,8 @@ const FOLDER_NAME = /^(\d{4}-\d{2}-\d{2}) .*\(([^()]+)\)(?:-\d+)?$/;
 
 /** How an episode is named in a list of several, and wherever edit.js would name it by its folder: a gated one by its label and
     its short id, since two labels may be the same (shownName); one a newer brimm-video wrote by its short id alone
-    (newerName); on a Mac that does the light import, or that has a drop folder of its own whatever its file says (namesQuietly),
-    one with no record that can be read by its day and Mac alone (unreadName); and any other by its folder's name, as always. */
+    (newerName); one with no record that can be read, on every Mac, by its day and Mac alone (unreadName; every import is light, Phase 3,
+    L1d); and any other by its folder's name, as always. */
 function listedAs(ctx, e) {
   if (e.newer) return newerName(e.newer);
   if (isGated(e)) {
@@ -589,7 +588,7 @@ function listedAs(ctx, e) {
     // A gated video, or one held as a session, with no label is named by its short id already: it is said once.
     return withShortId(gatedName(r, e.held), r);
   }
-  if (!e.inForce && namesQuietly(ctx.settings)) return unreadName(e.name);
+  if (!e.inForce) return unreadName(e.name);
   return e.name;
 }
 
@@ -1070,10 +1069,8 @@ export async function episodes(ctx) {
     say("Left alone, not for BRIMM Video Studio:");
     for (const e of left) for (const line of episodeLines(ctx, e, true, all, links)) say(line);
   }
-  // The videos in each Mac's drop folder. A Mac with a drop folder of its own names them as one that does the light import, whatever
-  // its file says of the import (namesQuietly): every import is light, and a video waiting there may be a session, its file named for
-  // a client.
-  const light = namesQuietly(ctx.settings);
+  // The videos in each Mac's drop folder. Every Mac names them as the light import does, whatever its file says of the import: every
+  // import is light, and a video waiting there may be a session, its file named for a client (Phase 3, L1d).
   const statuses = readStatuses(ctx.root, ctx.now());
   const waiting = [];
   for (const { mac, folder } of dropFolders(ctx)) {
@@ -1094,14 +1091,10 @@ export async function episodes(ctx) {
       const came = noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs;
       // A video waiting here has not been answered. One a light import has a status of, with its label, or that a gated episode
       // holds, is named by its label, which retry takes, or by what it is and its size, whichever Mac this is; and so is every
-      // video on a Mac that does the light import. Any other, on a Mac that does not, as always.
+      // other video, on every Mac.
       const label = labelIn(statuses, video, mac);
-      const holding = holdingEpisode({ root: ctx.root, video, bytes: found.size });
-      if (!light && !label && !(holding && (holding.unknown || gatedAsOf(links)(holding.record)))) waiting.push(`  ${video}, in ${mac}'s, for ${ageText(ctx.now() - came)}${held ? `: ${held}` : ""}`);
-      else {
-        const who = label || capital(unlabelled(video, found.size));
-        waiting.push(`  ${who}, in ${spokenMac(mac)}'s drop folder, for ${ageText(ctx.now() - came)}${held ? `: ${withoutNames(held, namesOf(video), [label])}` : ""}`);
-      }
+      const who = label || capital(unlabelled(video, found.size));
+      waiting.push(`  ${who}, in ${spokenMac(mac)}'s drop folder, for ${ageText(ctx.now() - came)}${held ? `: ${withoutNames(held, namesOf(video), [label])}` : ""}`);
     }
   }
   if (waiting.length) {
@@ -1744,31 +1737,23 @@ export async function retry(ctx, rest) {
   } catch (e) {
     // The drop folder is not there, or cannot be read: it holds nothing that can be imported.
   }
-  // A Mac with a drop folder of its own is taken as one that does the light import, whatever its file says (namesQuietly), as
-  // `episodes` takes it.
-  const light = namesQuietly(ctx.settings);
   const statuses = readStatuses(ctx.root, ctx.now());
   const labelOf = (v) => labelIn(statuses, v, ctx.machine);
   const sizeOf = (v) => (statSync(join(drop, v), { throwIfNoEntry: false }) || { size: 0 }).size;
-  // A video a light import has a status of, or that a gated episode holds, is never named by its file, whichever Mac this is;
-  // and on a Mac that does the light import, none is.
+  // No video is named by its file, on any Mac, whatever its file says of the import (every import is light; Phase 3, L1d), as `episodes`
+  // has it.
   // An episode a version of a session holds is held as a session too (episodeAt's `held`), and named so.
   const gatedAs = gatedAsOf(linksOf(ctx.root));
-  const quiet = (v) => {
-    const holding = holdingEpisode({ root: ctx.root, video: v, bytes: sizeOf(v) });
-    return light || Boolean(labelOf(v)) || Boolean(holding && (holding.unknown || gatedAs(holding.record)));
-  };
   const video = videos.find((v) => plainly(v) === plainly(said) || plainly(basename(v, extname(v))) === plainly(said)) || videos.find((v) => labelOf(v) && spaced(labelOf(v)) === spaced(said));
   if (!video) {
-    const held = videos.map((v) => labelOf(v) || (quiet(v) ? unlabelled(v, sizeOf(v)) : v));
+    const held = videos.map((v) => labelOf(v) || unlabelled(v, sizeOf(v)));
     say(`No video in this Mac's drop folder fits "${said}". ${videos.length ? `It holds: ${listed(held)}.` : "It is empty."}`);
     return 1;
   }
   const bytes = statSync(join(drop, video)).size;
   const label = labelOf(video);
-  const hush = quiet(video);
-  const who = label || (hush ? `${capital(unlabelled(video, bytes))} in this Mac's drop folder` : video);
-  const plain = (text) => (hush ? withoutNames(text, namesOf(video), [label]) : text);
+  const who = label || `${capital(unlabelled(video, bytes))} in this Mac's drop folder`;
+  const plain = (text) => withoutNames(text, namesOf(video), [label]);
   const held = episodeHolding({ root: ctx.root, video, bytes, gatedAs });
   if (held) return lateCheckOwed(ctx, video, held, who, plain);
   // Of this Mac's imports of the video, the ones to take again are those that failed, stopped, or found a problem at their
@@ -6618,11 +6603,9 @@ export async function editMain(argv, deps = {}) {
   try {
     code = await run(ctx, rest);
   } catch (e) {
-    // Something nobody foresaw stopped a command that found a video not yet answered, or a session, or a record of the switch, or
-    // any command on a Mac that does the light import, or that has a drop folder of its own whatever its file says (namesQuietly),
+    // Something nobody foresaw stopped a command, on any Mac whatever its file says of the import (every import is light; Phase 3, L1d),
     // where any video's file may be named for a client: its error may name the video's file or folder, as a path does, so only its
-    // code is said, through the filter, and the command ends there. Any other is thrown as it always was.
-    if (!ctx.hidden.names.length && !ctx.hidden.switched && !namesQuietly(ctx.settings)) throw e;
+    // code is said, through the filter, and the command ends there.
     ctx.say(`The work stopped (${(e && e.code) || "an error"}).`);
     code = 1;
   }

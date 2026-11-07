@@ -58,12 +58,12 @@ function namesIn(folder) {
     import, and never counted. A video whose holder cannot be told (Episodes itself cannot be read, or an episode that could be
     the video's, in a folder named for it, cannot be) is named by what it is and its size, "A video of 1.2 GB", under either
     import (kinds.js unlabelled). Any other video, or status, that has no label is not named by its file when `light` says the
-    import is the light one (its name may be a client's, and nothing about an unanswered video, its file name included, is to
+    import is the light one (it does on every Mac since Phase 3, L1d: settings.js passes none, and `light` is true unless a test says not) (its name may be a client's, and nothing about an unanswered video, its file name included, is to
     reach a chat): a waiting or kept one, whose advice takes a file out of the old folder, is named by what it is and its size,
     and two alike are both said; a failed, problem, owed or running one is counted, apart by whether its video is still in the
     old folder. Under today's import it is named by its video's file name. A status is never named by its own file's name; and
     what it says of why it failed is left out, as it may hold a file's name. */
-export function heldInOld({ root, machine, folder, light, home, now = Date.now() }) {
+export function heldInOld({ root, machine, folder, light = true, home, now = Date.now() }) {
   // How a video the episode `holding` (holdingEpisode's) holds is named where edit.js would not name it by its file: "" when no
   // episode holds it, or edit.js would name it by its file. The versions of a video are read once, when first asked for.
   const namedAs = gatedAsOf(linksOf(root));

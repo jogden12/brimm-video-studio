@@ -5,7 +5,7 @@
     "  Pricing in a minute: a short video of 0:40, in 2026-10-15 Pricing short (Mac Studio), id 0a1b2c",
     "  Pricing: what to charge?: an episode of 0:23, in 2026-10-14 Pricing talk (Mac Studio), id 3fa9c1",
     "Waiting in the drop folders:",
-    "  Pricing talk again.mov, in Mac Studio's, for 0 minutes: its import failed on Mac Studio: the transcriber stopped (Pricing talk again.mov: Invalid data). Say \"try it again\" to import it again.",
+    "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: its import failed on Mac Studio: the transcriber stopped (the video: Invalid data). Say \"try it again\" to import it again.",
     "Imports:",
     "  Other talk.mov: being imported on Sallie's laptop, at Writing the transcript",
     "  Pricing talk again.mov: its import failed on Mac Studio: the transcriber stopped (Pricing talk again.mov: Invalid data)",
@@ -74,15 +74,15 @@
   ],
   "retry Pricing talk again.mov": [
     0,
-    "Pricing talk again.mov is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."
+    "A video of 5 bytes in this Mac's drop folder is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."
   ],
   "retry pricing talk again": [
     0,
-    "Pricing talk again.mov is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."
+    "A video of 5 bytes in this Mac's drop folder is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."
   ],
   "retry Nothing here": [
     1,
-    "No video in this Mac's drop folder fits \"Nothing here\". It holds: Pricing talk again.mov."
+    "No video in this Mac's drop folder fits \"Nothing here\". It holds: a video of 5 bytes."
   ],
   "retry": [
     2,

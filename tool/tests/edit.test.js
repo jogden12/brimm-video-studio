@@ -193,8 +193,8 @@ describe("node edit.js episodes", () => {
     const r = await t.run("episodes");
     assert.ok(r.text.includes([
       "Waiting in the drop folders:",
-      "  Talk.mov, in Mac Studio's, for 2 hours: already imported as 2026-10-13 Talk (Mac Studio). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.",
-      "  Budget.mov, in Sallie's laptop's, for 2 hours"
+      "  A video of 5 bytes, in the Mac Studio's drop folder, for 2 hours: already imported as 2026-10-13 the video (Mac Studio). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.",
+      "  A video of 6 bytes, in Sallie's laptop's drop folder, for 2 hours"
     ].join("\n")), r.text);
     t.done();
   });
@@ -387,7 +387,7 @@ describe("node edit.js bring, status and retry", () => {
     let kicked = 0;
     t.deps.kickstart = () => (kicked += 1);
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."]]);
+    assert.deepEqual([r.code, r.said], [0, ["A video of 5 bytes in this Mac's drop folder is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."]]);
     assert.deepEqual([readdirSync(join(t.episodes, ".importing")), kicked, t.started], [[], 1, []]);
     t.done();
   });
@@ -396,7 +396,7 @@ describe("node edit.js bring, status and retry", () => {
     writeFileSync(join(drop(t), "Talk.mov"), "video");
     status(t, "Talk.mov");
     const r = await t.run("retry", "Talk.mov");
-    assert.deepEqual([r.code, r.said, t.started], [1, ["Talk.mov is being imported now, at Making the rough cut. The panel shows how far it is."], []]);
+    assert.deepEqual([r.code, r.said, t.started], [1, ["A video of 5 bytes in this Mac's drop folder is being imported now, at Making the rough cut. The panel shows how far it is."], []]);
     t.done();
   });
   // A Zoom download in a light drop folder is held, until phase Z: its status says why (importing.js, held).
@@ -409,7 +409,7 @@ describe("node edit.js bring, status and retry", () => {
     // How long it has waited is from when it came into the folder, which a test cannot set: so the clock is set from it.
     t.deps.now = () => statSync(join(drop(t), ZOOM)).ctimeMs + 2 * 3600000;
     const r = await t.run("episodes");
-    assert.ok(r.text.includes(`Waiting in the drop folders:\n  ${ZOOM}, in Mac Studio's, for 2 hours: ${HELD}`), r.text);
+    assert.ok(r.text.includes(`Waiting in the drop folders:\n  A Zoom download of 5 bytes, in the Mac Studio's drop folder, for 2 hours: ${HELD}`), r.text);
     assert.ok(!r.text.includes("Imports:") && !r.text.includes("being imported") && !r.text.includes("stopped on"), r.text);
     const s = await t.run("status");
     assert.ok(!s.text.includes(ZOOM) && !s.text.includes("being imported"), s.text);
@@ -422,7 +422,7 @@ describe("node edit.js bring, status and retry", () => {
     let kicked = 0;
     t.deps.kickstart = () => (kicked += 1);
     const r = await t.run("retry", ZOOM);
-    assert.deepEqual([r.code, r.said, kicked, t.started], [1, [`${ZOOM} is held: ${HELD}`], 0, []]);
+    assert.deepEqual([r.code, r.said, kicked, t.started], [1, [`A Zoom download of 5 bytes in this Mac's drop folder is held: ${HELD}`], 0, []]);
     assert.equal(readdirSync(join(t.episodes, ".importing")).length, 1);
     t.done();
   });
@@ -441,7 +441,7 @@ describe("node edit.js bring, status and retry", () => {
     writeFileSync(join(drop(t), "Talk.mov"), "video");
     writeFileSync(join(drop(t), "Budget.mov"), "video");
     const r = await t.run("retry", "pricing");
-    assert.deepEqual([r.code, r.said], [1, [`No video in this Mac's drop folder fits "pricing". It holds: Budget.mov and Talk.mov.`]]);
+    assert.deepEqual([r.code, r.said], [1, [`No video in this Mac's drop folder fits "pricing". It holds: a video of 5 bytes and a video of 5 bytes.`]]);
     t.done();
   });
 });
@@ -464,7 +464,7 @@ describe("what the final review found in edit.js", () => {
     let kicked = 0;
     t.deps.kickstart = () => (kicked += 1);
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said], [0, [`Talk.mov is imported, as ${folder}. Dropbox's check of its copies is still to be made on this Mac: the Mac's import of its drop folder is asked to make it now. The panel shows how far it is.`]]);
+    assert.deepEqual([r.code, r.said], [0, [`A video of 5 bytes in this Mac's drop folder is imported, as ${folder}. Dropbox's check of its copies is still to be made on this Mac: the Mac's import of its drop folder is asked to make it now. The panel shows how far it is.`]]);
     assert.equal(kicked, 1);
     t.done();
   });
@@ -485,33 +485,33 @@ describe("what the final review found in edit.js", () => {
     const t = owing({ problem: "reel-2.mp4 could not be put into the episode." });
     t.deps.agentRunning = () => true;
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, t.kicked], [1, ['Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Dropbox found a problem with a copy of it: reel-2.mp4 could not be put into the episode. The import at work now does not check it again: once the problem is put right and the panel shows that import has ended, say "try it again" again.'], 0]);
+    assert.deepEqual([r.code, r.said, t.kicked], [1, ['A video of 5 bytes in this Mac\'s drop folder is imported, as 2026-10-13 Talk (Mac Studio). Dropbox found a problem with a copy of it: reel-2.mp4 could not be put into the episode. The import at work now does not check it again: once the problem is put right and the panel shows that import has ended, say "try it again" again.'], 0]);
     t.done();
   });
   it("retry has a late check that found a problem made again when no import is at work", async () => {
     const t = owing({ problem: "reel-2.mp4 could not be put into the episode." });
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, t.kicked], [0, ["Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Dropbox found a problem with a copy of it before (reel-2.mp4 could not be put into the episode): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is."], 1]);
+    assert.deepEqual([r.code, r.said, t.kicked], [0, ["A video of 5 bytes in this Mac's drop folder is imported, as 2026-10-13 Talk (Mac Studio). Dropbox found a problem with a copy of it before (reel-2.mp4 could not be put into the episode): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is."], 1]);
     t.done();
   });
   it("retry says the import at work makes a due late check once it has finished any video it is importing (PR 19's check of 2d4c8af, F7)", async () => {
     const t = owing();
     t.deps.agentRunning = () => true;
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, t.kicked], [0, ["Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Dropbox's check of its copies is still to be made on this Mac: the import at work now makes it once it has finished any video it is importing. The panel shows how far it is."], 0]);
+    assert.deepEqual([r.code, r.said, t.kicked], [0, ["A video of 5 bytes in this Mac's drop folder is imported, as 2026-10-13 Talk (Mac Studio). Dropbox's check of its copies is still to be made on this Mac: the import at work now makes it once it has finished any video it is importing. The panel shows how far it is."], 0]);
     t.done();
   });
   it("retry says when the import at work makes a late check that is not due yet (D8, D12)", async () => {
     const t = owing({ lastCopy: NOW - 5 * 60000 });
     t.deps.agentRunning = () => true;
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, t.kicked], [0, [`Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Dropbox's check of its copies is still to be made on this Mac: the import at work now makes it when it is due, at ${clock(NOW + 10 * 60000)}, once it has finished any video it is importing. The panel shows how far it is.`], 0]);
+    assert.deepEqual([r.code, r.said, t.kicked], [0, [`A video of 5 bytes in this Mac's drop folder is imported, as 2026-10-13 Talk (Mac Studio). Dropbox's check of its copies is still to be made on this Mac: the import at work now makes it when it is due, at ${clock(NOW + 10 * 60000)}, once it has finished any video it is importing. The panel shows how far it is.`], 0]);
     t.done();
   });
   it("retry says the import it starts makes a late check that is not due yet when it is due (E15)", async () => {
     const t = owing({ lastCopy: NOW - 5 * 60000 });
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, t.kicked], [0, [`Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Dropbox's check of its copies is still to be made on this Mac: the Mac's import of its drop folder is asked to make it when it is due, at ${clock(NOW + 10 * 60000)}. The panel shows how far it is.`], 1]);
+    assert.deepEqual([r.code, r.said, t.kicked], [0, [`A video of 5 bytes in this Mac's drop folder is imported, as 2026-10-13 Talk (Mac Studio). Dropbox's check of its copies is still to be made on this Mac: the Mac's import of its drop folder is asked to make it when it is due, at ${clock(NOW + 10 * 60000)}. The panel shows how far it is.`], 1]);
     t.done();
   });
   it("retry takes away a stopped status of this Mac's own for an imported video when it owes no late check of it", async () => {
@@ -523,7 +523,7 @@ describe("what the final review found in edit.js", () => {
     let kicked = 0;
     t.deps.kickstart = () => (kicked += 1);
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported, as 2026-10-13 Talk (Mac Studio). Its import stopped on this Mac, and has no check of its copies left to make here, so the status that held the episode is taken away."]]);
+    assert.deepEqual([r.code, r.said], [0, ["A video of 5 bytes in this Mac's drop folder is imported, as 2026-10-13 Talk (Mac Studio). Its import stopped on this Mac, and has no check of its copies left to make here, so the status that held the episode is taken away."]]);
     assert.deepEqual([readdirSync(join(t.episodes, ".importing")), kicked], [[], 0]);
     t.done();
   });
@@ -535,7 +535,7 @@ describe("what the final review found in edit.js", () => {
     t.deps.kickstart = () => (kicked += 1);
     const r = await t.run("retry", "talk");
     assert.equal(r.code, 1);
-    assert.match(r.text, /^Talk\.mov is already imported as /);
+    assert.match(r.text, /^A video of 5 bytes in this Mac's drop folder is already imported as /);
     assert.equal(kicked, 0);
     t.done();
   });
@@ -545,7 +545,7 @@ describe("what the final review found in edit.js", () => {
     const kicked = [];
     t.deps.kickstart = () => kicked.push("com.thebrimm.unedited");
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, kicked, t.started], [0, ["Talk.mov is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."], ["com.thebrimm.unedited"], []]);
+    assert.deepEqual([r.code, r.said, kicked, t.started], [0, ["A video of 5 bytes in this Mac's drop folder is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."], ["com.thebrimm.unedited"], []]);
     t.done();
   });
   it("retry says so when the launch agent is not there to ask", async () => {
@@ -564,7 +564,7 @@ describe("what the final review found in edit.js", () => {
     writeFileSync(join(t.root, "Unedited Video", "Mac Studio", "Talk.mov"), "video");
     t.deps.kickstart = () => assert.fail("nothing is asked");
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said], [1, ["Talk.mov is already imported as 2026-10-13 Talk (Mac Studio). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete."]]);
+    assert.deepEqual([r.code, r.said], [1, ["A video of 5 bytes in this Mac's drop folder is already imported as 2026-10-13 the video (Mac Studio). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete."]]);
     t.done();
   });
 });
@@ -631,7 +631,7 @@ describe("retry, with the launch agent idle or at work", () => {
     t.deps.agentRunning = () => false;
     t.deps.kickstart = () => kicked.push(1);
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, kicked.length], [0, ["Talk.mov is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."], 1]);
+    assert.deepEqual([r.code, r.said, kicked.length], [0, ["A video of 5 bytes in this Mac's drop folder is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."], 1]);
     t.done();
   });
   it("says truthfully when the launch agent's run is at work: that run takes it when it next looks", async () => {
@@ -641,7 +641,7 @@ describe("retry, with the launch agent idle or at work", () => {
     t.deps.agentRunning = () => true;
     t.deps.kickstart = () => assert.fail("a run is at work, and none is started");
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said], [0, ["Talk.mov is imported again by the import at work now, when it next looks in the drop folder: within a minute while it waits to check the copies, or once it has finished the video it is on. The panel shows how far it is."]]);
+    assert.deepEqual([r.code, r.said], [0, ["A video of 5 bytes in this Mac's drop folder is imported again by the import at work now, when it next looks in the drop folder: within a minute while it waits to check the copies, or once it has finished the video it is on. The panel shows how far it is."]]);
     assert.deepEqual(readdirSync(join(t.episodes, ".importing")), []);
     t.done();
   });
@@ -674,7 +674,7 @@ describe("the lead's re-check of PR 11, in edit.js", () => {
     t.deps.kickstart = () => {};
     const r = await t.run("retry", "talk");
     assert.equal(r.code, 0, r.text);
-    assert.match(r.said[0], /^Talk\.mov is imported again \(its imports aaa, which failed: ffmpeg stopped, and bbb, which failed: the transcriber stopped\)/);
+    assert.match(r.said[0], /^A video of 5 bytes in this Mac's drop folder is imported again \(its imports aaa, which failed: ffmpeg stopped, and bbb, which failed: the transcriber stopped\)/);
     assert.deepEqual(readdirSync(join(t.episodes, ".importing")), []);
     t.done();
   });
@@ -696,7 +696,7 @@ describe("the lead's last check of PR 11, in edit.js", () => {
     // A tag set a minute ago changed its ctime; its own date is a month old.
     t.deps.stat = () => ({ ino, size: 5, birthtimeMs: NOW - 30 * 86400000, ctimeMs: NOW - 60000, mtimeMs: NOW - 30 * 86400000 });
     const r = await t.run("episodes");
-    assert.ok(r.text.includes("  Talk.mov, in Mac Studio's, for 20 minutes"), r.text);
+    assert.ok(r.text.includes("  A video of 5 bytes, in the Mac Studio's drop folder, for 20 minutes"), r.text);
     t.done();
   });
   it("22. says how long a video has waited from when it came into the drop folder, not from its own date, when this Mac has not seen it yet", async () => {
@@ -707,7 +707,7 @@ describe("the lead's last check of PR 11, in edit.js", () => {
     const came = statSync(video).ctimeMs;
     t.deps.now = () => came + 5 * 60000;
     const r = await t.run("episodes");
-    assert.ok(r.text.includes("  Old.mov, in Mac Studio's, for 5 minutes"), r.text);
+    assert.ok(r.text.includes("  A video of 5 bytes, in the Mac Studio's drop folder, for 5 minutes"), r.text);
     t.done();
   });
   it("4. says another run is taking over the lock when a guard a crashed run left stands in the way", { timeout: 20000 }, async () => {
@@ -781,7 +781,7 @@ describe("the drop folders the settings name (the switch to Drop)", () => {
     const put = (folder, name) => writeFileSync(join(folder, name), "x".repeat(5));
     return { ...t, own, other, put, place };
   }
-  const WAITING = (r) => r.said.slice(r.said.indexOf("Waiting in the drop folders:") + 1).filter((line) => /^ {2}\S.*, in .*'s, for /.test(line)).map((line) => line.replace(/, for .*$/, ""));
+  const WAITING = (r) => r.said.slice(r.said.indexOf("Waiting in the drop folders:") + 1).filter((line) => /^ {2}\S.*, in .*'s drop folder, for /.test(line)).map((line) => line.replace(/, for .*$/, ""));
   it("episodes lists this Mac's videos in Drop/<this Mac> and the other Mac's in Drop/<other Mac>, this Mac's first, with no marker read", async () => {
     const t = dropping("Drop");
     t.put(t.own, "Talk.mov");
@@ -789,7 +789,7 @@ describe("the drop folders the settings name (the switch to Drop)", () => {
     t.put(t.other("Drop", "Sallie's laptop", false), "Budget.mov");
     const r = await t.run("episodes");
     assert.ok(r.said.includes("Waiting in the drop folders:"), r.text);
-    assert.deepEqual(WAITING(r), ["  Talk.mov, in Mac Studio's", "  Budget.mov, in Sallie's laptop's"]);
+    assert.deepEqual(WAITING(r), ["  A video of 5 bytes, in the Mac Studio's drop folder", "  A video of 5 bytes, in Sallie's laptop's drop folder"]);
     t.done();
   });
   it("episodes lists a video in either of the other Mac's folders, Drop/<other Mac> and Unedited Video/<other Mac>: none is ever hidden", async () => {
@@ -797,7 +797,7 @@ describe("the drop folders the settings name (the switch to Drop)", () => {
     t.put(t.other("Drop", "Sallie's laptop", true), "Budget.mov");
     t.put(t.other("Unedited Video", "Sallie's laptop", true), "Stray.mov");
     const r = await t.run("episodes");
-    assert.deepEqual(WAITING(r), ["  Budget.mov, in Sallie's laptop's", "  Stray.mov, in Sallie's laptop's"]);
+    assert.deepEqual(WAITING(r), ["  A video of 5 bytes, in Sallie's laptop's drop folder", "  A video of 5 bytes, in Sallie's laptop's drop folder"]);
     t.done();
   });
   it("episodes lists the other Mac's videos in its old folder after it was switched back, though its marker is still in Drop/<other Mac>", async () => {
@@ -806,7 +806,7 @@ describe("the drop folders the settings name (the switch to Drop)", () => {
     t.other("Drop", "Sallie's laptop", true);
     t.put(t.other("Unedited Video", "Sallie's laptop", true), "Budget.mov");
     const r = await t.run("episodes");
-    assert.deepEqual(WAITING(r), ["  Budget.mov, in Sallie's laptop's"]);
+    assert.deepEqual(WAITING(r), ["  A video of 5 bytes, in Sallie's laptop's drop folder"]);
     t.done();
   });
   it("episodes lists a video in the other Mac's Drop folder whatever marker it holds, even another Mac's", async () => {
@@ -814,7 +814,7 @@ describe("the drop folders the settings name (the switch to Drop)", () => {
     t.put(t.other("Drop", "Third Mac", false), "Third.mov");
     writeFileSync(join(t.place("Drop", "Third Mac"), ".brimm-watched-by"), "Sallie's laptop\n");
     const r = await t.run("episodes");
-    assert.deepEqual(WAITING(r), ["  Third.mov, in Third Mac's"]);
+    assert.deepEqual(WAITING(r), ["  A video of 5 bytes, in the Third Mac's drop folder"]);
     t.done();
   });
   it("episodes does not list this Mac's old Unedited Video folder, which is no longer watched, once its settings say Drop", async () => {
@@ -822,7 +822,7 @@ describe("the drop folders the settings name (the switch to Drop)", () => {
     t.put(t.own, "Talk.mov");
     t.put(t.place("Unedited Video", "Mac Studio"), "Old.mov");
     const r = await t.run("episodes");
-    assert.deepEqual(WAITING(r), ["  Talk.mov, in Mac Studio's"]);
+    assert.deepEqual(WAITING(r), ["  A video of 5 bytes, in the Mac Studio's drop folder"]);
     t.done();
   });
   it("episodes lists as it did when the settings name no drop folder: this Mac's Unedited Video folder first and the other Mac's after it", async () => {
@@ -830,10 +830,10 @@ describe("the drop folders the settings name (the switch to Drop)", () => {
     t.put(t.own, "Talk.mov");
     t.put(t.other("Unedited Video", "Sallie's laptop", true), "Budget.mov");
     const r = await t.run("episodes");
-    assert.deepEqual(WAITING(r), ["  Talk.mov, in Mac Studio's", "  Budget.mov, in Sallie's laptop's"]);
+    assert.deepEqual(WAITING(r), ["  A video of 5 bytes, in the Mac Studio's drop folder", "  A video of 5 bytes, in Sallie's laptop's drop folder"]);
     // This Mac's own Drop folder, which its settings do not name, is not watched by it, and its videos are not listed as waiting.
     t.put(t.other("Drop", "Mac Studio", false), "Stray.mov");
-    assert.deepEqual(WAITING(await t.run("episodes")), ["  Talk.mov, in Mac Studio's", "  Budget.mov, in Sallie's laptop's"]);
+    assert.deepEqual(WAITING(await t.run("episodes")), ["  A video of 5 bytes, in the Mac Studio's drop folder", "  A video of 5 bytes, in Sallie's laptop's drop folder"]);
     t.done();
   });
   it("retry finds a video in Drop/<this Mac> when the settings say Drop, and not one left in the old folder", async () => {
@@ -843,9 +843,9 @@ describe("the drop folders the settings name (the switch to Drop)", () => {
     const kicked = [];
     t.deps.kickstart = () => kicked.push("com.thebrimm.unedited");
     const r = await t.run("retry", "talk");
-    assert.deepEqual([r.code, r.said, kicked], [0, ["Talk.mov is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."], ["com.thebrimm.unedited"]]);
+    assert.deepEqual([r.code, r.said, kicked], [0, ["A video of 5 bytes in this Mac's drop folder is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is."], ["com.thebrimm.unedited"]]);
     const old = await t.run("retry", "old");
-    assert.deepEqual([old.code, old.said], [1, ['No video in this Mac\'s drop folder fits "old". It holds: Talk.mov.']]);
+    assert.deepEqual([old.code, old.said], [1, ['No video in this Mac\'s drop folder fits "old". It holds: a video of 5 bytes.']]);
     t.done();
   });
 });
