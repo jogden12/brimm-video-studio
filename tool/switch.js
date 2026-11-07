@@ -63,7 +63,7 @@ function namesIn(folder) {
     and two alike are both said; a failed, problem, owed or running one is counted, apart by whether its video is still in the
     old folder. A status is never named by its own file's name; and
     what it says of why it failed is left out, as it may hold a file's name. */
-export function heldInOld({ root, statusFolders = [importingFolder(root)], machine, folder, home, now = Date.now() }) {
+export function heldInOld({ root, statusFolders = [importingFolder(root)], machine, folder, home, now = Date.now(), local = false }) {
   // How a video the episode `holding` (holdingEpisode's) holds is named where edit.js would not name it by its file: "" when no
   // episode holds it, or edit.js would name it by its file. The versions of a video are read once, when first asked for.
   const namedAs = gatedAsOf(linksOf(root));
@@ -184,7 +184,7 @@ export function heldInOld({ root, statusFolders = [importingFolder(root)], machi
     if (pending) owe(label, video, pending);
     else if (held) {
       if (owing.code) continue;
-      kept.push(`  ${label || unnamed(video, bytes)}: already imported, and nothing of this Mac's import will take it out of the old folder: its late check has passed, or it is a copy of an imported video.`);
+      kept.push(`  ${label || unnamed(video, bytes)}: already imported, and nothing of this Mac's import will take it out of the old folder: ${local ? "it is a copy of an imported video." : "its late check has passed, or it is a copy of an imported video."}`);
     } else if (mine.some((s) => s.video === video && s.bytes === bytes && importState(s, now) === "running")) {
       // This Mac's import is at work on it now, and will make its late check from this video: it is to be waited for and left there.
       if (!label) runningCounted += 1;

@@ -767,7 +767,7 @@ function planned(home, rest, now, plutil = spawnSync) {
   // Whatever goes wrong in the look is said by its code alone: an error's message may hold a path, and a path a client's file name.
   return import("./switch.js")
     .then(({ heldInOld }) => {
-      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable, lateChecks } = heldInOld({ root: oldRoot, statusFolders: statusFoldersOf({ ...held, root: oldRoot, machine: oldMachine }, home), machine: oldMachine, folder: oldFolder, home, now: Number(now) });
+      const { work, running, problem, problemHere, problemGone, imported, kept, unreadable, lateChecks } = heldInOld({ root: oldRoot, statusFolders: statusFoldersOf({ ...held, root: oldRoot, machine: oldMachine }, home), machine: oldMachine, folder: oldFolder, home, now: Number(now), local: wasLocal });
       if (![work, running, problem, imported, kept, unreadable, lateChecks].some((lines) => lines.length)) return { settings, fields, remove, from, to, old: oldFolder };
       // What it is not done for: work in the old folder; else that folder, or its status files, could not be looked at; else this
       // Mac's own late checks could not be read, the old folder having been.
@@ -777,14 +777,14 @@ function planned(home, rest, now, plutil = spawnSync) {
       // check that found a problem (leave its video where it is), nor about an import at work (wait for it), nor an imported video.
       const kinds = [
         [work, ["Deal with each first (for example, try a failed import again with retry, or take the video out of the old folder), then run this again."]],
-        [running, ["Wait for each of these imports to finish, then run this again: leave the video in the old folder, which its late check needs."]],
+        [running, [wasLocal ? "Wait for each of these imports to finish, then run this again: leave the video in the old folder." : "Wait for each of these imports to finish, then run this again: leave the video in the old folder, which its late check needs."]],
         [problem, [
           ...(problemHere ? ["Try each of these again with retry, which makes its late check again from the video in the old folder: leave the video there, and run this again once the check has passed."] : []),
           ...(problemGone ? ["A late check needs its video: where the video is no longer in the old folder, the check cannot be made again, and Jason looks at it."] : [])
         ]],
         [imported, ["A video that is already imported leaves the old folder once its late check has passed: run this again after that."]],
         [kept, ["Delete each of these from the old folder by hand, then run this again."]],
-        [unreadable, ["Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again."]],
+        [unreadable, [wasLocal ? "Make each readable (macOS asks whether node may read that folder: Allow it in System Settings, Privacy & Security, Files and Folders), then run this again." : "Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again."]],
         [lateChecks, ["Make that folder readable again (it is on this Mac's own disk, not in Dropbox), then run this again."]]
       ];
       return {
