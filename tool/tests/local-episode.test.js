@@ -22,8 +22,9 @@ import { fingerprintOf } from "../versions.js";
 import { writeGuideNotes } from "../guide-note.js";
 import { reelCopyKey, reelCopyPaths, workCopyKey, workCopyPaths } from "../workcopy.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
-import { readPendingAt } from "../filing.js";
-import { checkOriginal, oweOriginals } from "../originals.js";
+import { readPendingAt, writePending } from "../filing.js";
+import { lockOf, takeEpisodeLock } from "../detached.js";
+import { ORIGINALS_PROBLEM, ORIGINALS_SESSION, checkOriginal, oweOriginals } from "../originals.js";
 import { changedSince, copyIsMade, fromOf } from "../app.js";
 import { readResult } from "../detached.js";
 import { TEACHINGS_FORMAT } from "../teachings.js";
@@ -1206,6 +1207,62 @@ describe("L6: after the recording's move", () => {
       const r = await on(w.studio, "guide", "Launch talk", "show");
       assert.deepEqual([r.code, r.said], [0, ["Shown in Finder: the video of Launch talk (a1a1a1), to post."]]);
       assert.ok(JSON.stringify(w.calls).includes(join(found.folder, "Original files", "Launch talk.mov")), JSON.stringify(w.calls));
+    } finally {
+      w.done();
+    }
+  });
+});
+
+describe("L6: the words of the move", () => {
+  const NAME = "2026-10-20 IMG_0042 (Mac Studio)";
+  /** KEPT.raw handed off, owed, and moved (the Mac's copy still there). */
+  function moveOnly(w) {
+    const found = KEPT.raw.make(w);
+    handedOff(found);
+    const record = readEpisode(found.folder).record;
+    const at = w.now();
+    const ctx = { home: w.home, root: w.root, machine: STUDIO, now: () => at, agentRunning: () => false, kickstart: () => {} };
+    oweOriginals(ctx, { folder: found.folder, record });
+    checkOriginal(readPendingAt(w.home, `original/${record.id}.json`), { episode: { root: w.root, machine: STUDIO, home: w.home, checkout: "/checkout" }, commit: "c709b57", log: () => {}, notify: () => {}, clock: () => at, alive: () => false, clone: w.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: () => true });
+    return { ...found, record: readEpisode(found.folder).record };
+  }
+  const SESSION_MARK = { kind: "session", answer: { ...ANSWERED, private: "yes" }, session: { marked: "2026-10-20T08:00:00-05:00", on: STUDIO, teachings: null, cleared: null } };
+
+  it("P1 `status` says the move", async () => {
+    const w = world();
+    try {
+      const found = moveOnly(w);
+      mkdirSync(dirname(join(w.home, "BRIMM Video Work", found.name, "x")), { recursive: true });
+      assert.equal(takeEpisodeLock(lockOf(w.home, found.name), "originals", () => true).taken, true);
+      const r = await on({ ...w.studio, alive: () => true }, "status", NAME);
+      assert.ok(r.said.includes(`${NAME}: its recording is being copied into Dropbox.`), r.text);
+      assert.ok(!r.text.includes("originals is running"), r.text);
+    } finally {
+      w.done();
+    }
+  });
+
+  it("P3 the guide and `episodes` say the Original files lines", async () => {
+    const w = world();
+    try {
+      const found = moveOnly(w);
+      // A video moved off well has neither line.
+      const good = await on(w.studio, "guide");
+      const listed = await on(w.studio, "episodes");
+      assert.ok(!good.text.includes("The recording of") && !listed.text.includes("The recording of"), good.text + listed.text);
+      // A problem found in the copy is said under the video's step.
+      const p = readPendingAt(w.home, `original/${found.record.id}.json`);
+      writePending(w.home, { ...p, problem: "Original files in Dropbox holds another file of its name." });
+      const told = await on(w.studio, "guide");
+      assert.ok(told.text.includes(ORIGINALS_PROBLEM("Pricing talk (3fa9c1)")), told.text);
+      writePending(w.home, p);
+      // Made a session after its move: said under its step, and on its line in `episodes`.
+      writeFileSync(recordFile(found.folder, 4), recordText({ ...found.record, rev: 4, ...SESSION_MARK }));
+      const label = found.record.label;
+      const guide = await on(w.studio, "guide");
+      const episodes = await on(w.studio, "episodes");
+      assert.ok(guide.text.includes(ORIGINALS_SESSION(label)), guide.text);
+      assert.ok(episodes.text.includes(`    ${ORIGINALS_SESSION(label)}`), episodes.text);
     } finally {
       w.done();
     }

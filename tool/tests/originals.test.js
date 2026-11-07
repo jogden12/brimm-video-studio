@@ -20,7 +20,8 @@ import { setup } from "./episodes.js";
 import { agentRun, finishRun, localExported, makeLocal } from "./local-world.js";
 import { finishedWorld } from "./reels-world.js";
 import { on, seeing } from "./checking-world.js";
-import { READ as READING } from "./guide-world.js";
+import { READ as READING, guideWorld } from "./guide-world.js";
+import { exportOf, whisper } from "./exports-world.js";
 
 const STUDIO = "Mac Studio";
 const MACBOOK = "Jason's MacBook";
@@ -809,5 +810,20 @@ describe("L6: A9 a plan's footage copy", () => {
     assert.equal(existsSync(join(a.video, a.file)), false);
     assert.deepEqual(footage().map((f) => f.from), [paths.video]);
     t.done();
+  });
+});
+
+describe("L6: P2 her command during the move", () => {
+  it("P2 is told so, and nothing is written", async () => {
+    const w = await guideWorld({ kind: "raw", projects: ["main", "reel 2"], programs: { WHISPER: whisper() } });
+    makeLocal(w);
+    exportOf(w, "main");
+    mkdirSync(episodeWork(w.t.home, FOLDER), { recursive: true });
+    assert.equal(takeEpisodeLock(lockOf(w.t.home, FOLDER), "originals", () => true).taken, true);
+    const before = reread(w.found).rev;
+    const r = await on(seeing(w, { alive: () => true }), "finish", FOLDER);
+    assert.ok(r.text.includes('Its recording is being copied into Dropbox. Say "hand it off" again then.'), r.text);
+    assert.equal(reread(w.found).rev, before);
+    w.t.done();
   });
 });

@@ -67,6 +67,7 @@ import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, light
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
+import { ORIGINALS_COMMAND, ORIGINALS_PROBLEM, ORIGINALS_RUNNING, ORIGINALS_SESSION, asSession as recordingHeld, listsOriginal } from "./originals.js";
 import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { fileSafe, timelineFile } from "./names.js";
@@ -1016,6 +1017,8 @@ function episodeLines(ctx, e, left, all, links) {
   if (record.editing) lines.push(`    Editing: ${record.editing.by}, since ${shownAt(record.editing.since)}`);
   if (record.title && !isGated(e)) lines.push(`    Title: ${record.title.text}${record.title.approved ? "" : " (recommended)"}`);
   if (record.finished) lines.push(`    Finished: revision ${record.finished.revision}, on ${record.finished.on}`);
+  // A video that became a session after its recording was copied into Original files says so, for as long as the copy is listed (L6).
+  if (listsOriginal(record) && recordingHeld(links, { folder: e.folder, record })) lines.push(`    ${ORIGINALS_SESSION(heldName(record))}`);
   if (there) return lines;
   // A script file changed outside the chat is said in its own plain line, not as "Not right" (plan-script.js; review changes R5).
   const handEdited = scriptHandEdited(e.folder, record);
@@ -1793,6 +1796,7 @@ export async function status(ctx, rest) {
     if (checking && !onThisMac) {
       // The line of a finish at work is the checking line, in place of that it is running.
     } else if (command === "join" && voicing) lines.push(`${shown}: ${VOICE_RUNNING}.`);
+    else if (command === ORIGINALS_COMMAND) lines.push(`${shown}: its recording is being copied into Dropbox.`);
     else if (command) lines.push(`${shown}: ${command} is running.`);
     for (const line of checkProblemLines(ctx, folder, shown, isGated(e))) lines.push(line);
     if (copying) lines.push(`${shown}: ${WORK_COPY_RUNNING}.`);
@@ -2015,6 +2019,8 @@ const refuse = (ctx, why) => {
     and Studio checks Dropbox's copies at <time>. <again>"; with no early result of that run it is the generic one. `record` is the
     episode's record in force. */
 function stoppedWords(ctx, found, record, { generic, again, of = "" }) {
+  if (runningCommand(ctx.home, found.name, ctx.alive) === ORIGINALS_COMMAND) return `${ORIGINALS_RUNNING} ${again}`;
+  // The move of the recording into Original files is at work (L6): it is a run of a few seconds, and she says it again then.
   // A video kept on this Mac waits for no check (Phase 3, L5, ruling 22): a run that stops a command is a run, whatever it is at.
   if (keptOnAMac(record)) return generic;
   const checking = checkingNow(ctx.home, found.name, record, ctx.alive);
@@ -6459,6 +6465,8 @@ function guideItems(ctx) {
   // The parts of the plans (PR H5a) are read from Episodes once for the pass too, by the first plan that has parts to count and then given to every
   // other, so that a pass costs the same whatever the number of plans (footage.js partsReader).
   const footageIn = partsReader(ctx.root);
+  // The videos whose recording's move or check found a problem with its copy in Original files (L6), by the video whose hand-off owed it.
+  const problemOf = new Set(readPendingsOf(ctx.home, "original").filter((p) => p.problem && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root)).map((p) => (p.of && p.of.id) || p.id));
   const drops = guideDrops(ctx);
   const items = drops.videos.map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
   let old = 0;
@@ -6474,7 +6482,7 @@ function guideItems(ctx) {
     const facts = guideFacts(ctx, e, links, rates, notes, downloads, footageIn);
     // A plan that has a part which shows a client says, after its step, which are waiting for the client's agreement.
     const waiting = facts.planned && Array.isArray(facts.planned.waiting) ? facts.planned.waiting.map((label) => `${label} shows a client: it stays out until you say "the client agreed".`) : [];
-    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r, also: [...waiting, ...(facts.checking ? [`${checkSentence(facts.checking)} ${ON_THE_CHECK}`] : [])] });
+    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r, also: [...waiting, ...(facts.checking ? [`${checkSentence(facts.checking)} ${ON_THE_CHECK}`] : []), ...(problemOf.has(r.id) ? [ORIGINALS_PROBLEM(facts.name)] : []), ...(listsOriginal(r) && recordingHeld(links, { folder: e.folder, record: r }) ? [ORIGINALS_SESSION(heldName(r))] : [])] });
   }
   const newest = new Map();
   for (const item of items) {
