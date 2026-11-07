@@ -12,8 +12,8 @@ import { fileURLToPath } from "node:url";
 import { localDay } from "./shared/text.js";
 import { createdOf, waitingToCut } from "./cuts.js";
 import { isMedia } from "./lib.js";
-import { LATE_CHECK_MS, cloneFile, cloneIn, lateCheck, onSameDisk, replaceIn, textWriter } from "./dropbox.js";
-import { RECORD_DIR, conflictedCopies, conflictedOf, lastWritten, newEpisode, newId, localStamp, readEpisode, recordCopies, recordNumbers, writeEpisode, shownName } from "./episode.js";
+import { LATE_CHECK_MS, cloneFile, cloneIn, isWhole, lateCheck, onSameDisk, replaceIn, sameBytes, startsAlike, textWriter } from "./dropbox.js";
+import { RECORD_DIR, recordFile, conflictedCopies, conflictedOf, lastWritten, newEpisode, newId, localStamp, readEpisode, recordCopies, recordNumbers, writeEpisode, shownName } from "./episode.js";
 import { episodeFolderName, fileSafe } from "./names.js";
 import { putHereNow } from "./put-here.js";
 import { dropFolderOf, episodeFilesFolder, episodeWork, episodesFolder, importingFolder, pendingFolder, runsFolder, seenFile, workFolder } from "./settings.js";
@@ -25,7 +25,9 @@ import { holdsVideo, importState, leftByCrash, readStatusesIn, removeStatusIn, w
 import { isRunning } from "./run.js";
 // kinds.js takes episodeKind from here: each is used only when called, so neither needs the other to have been read first.
 import { isZoomName, namesOf, withoutNames, zoomTimeOf } from "./kinds.js";
-import { gated, withShortId } from "./gate.js";
+import { gated, gatedAsOf, withShortId } from "./gate.js";
+import { keptOnAMac } from "./where.js";
+import { randomUUID } from "node:crypto";
 
 /** How long a recording must be to be an episode, in seconds. One that is shorter is a short video. */
 const SHORT_UNDER = 90;
@@ -797,6 +799,254 @@ export function settleReading(pending, { home, log = () => {} }) {
   writePending(home, next);
   log(pending.kind ? `${pending.label || `an episode (${String(pending.id).slice(-6)})`}: a write stopped while it put its files in. Its check leaves out ${left} file${left === 1 ? "" : "s"} the record says ${left === 1 ? "is" : "are"} that write's.` : `${pending.label || pending.video}: a reading stopped while it put its files in. Its late check leaves out ${left} file${left === 1 ? "" : "s"} the record says ${left === 1 ? "is" : "are"} the reading's.`);
   return { pending: next };
+}
+
+/** How a writer looks again for the lock of an episode's check while the check holds it, and for how long in all. */
+export const LOCK_LOOK_MS = 1000;
+export const LOCK_WAIT_MS = 2 * 60 * 1000;
+
+/** The sentence a writer says when it could not go on: "held" (the check kept its lock), "unsettled" (an earlier write's mark cannot be settled), "restored" (a
+    copy it built on was put back, or changed) and "lost" (one could not be put back). `shown` names the episode; `done` is what was not done, `again` how to ask. */
+export function busyWords(busy, shown, { done, again }) {
+  if (busy === "unsettled") return `A change to ${shown} stopped half way, and its record cannot be read now to sort it out, so ${done}. Ask Jason.`;
+  if (busy === "restored") return `A copy of ${shown} in final/ was not whole in Dropbox, so it is put back, and ${done}. ${again}`;
+  if (busy === "lost") return `A copy of ${shown} in final/ is not whole in Dropbox, and it could not be put back, so ${done}. Ask Jason.`;
+  return `Studio was still checking Dropbox's copies of ${shown} after two minutes, so ${done}. ${again}`;
+}
+
+const relOf = (folder, to) => relative(folder, to).split(sep).join("/");
+
+/** Whether a finish's record reached Dropbox, by the record file it wrote (ruling 11): true when it is there, or a later record of its revision is; false when the record at its
+    number is another writer's, or none is there; null when that cannot be told (a file cut short or unreadable). */
+export function recordHolds(pending, { isWhole: whole = isWhole } = {}) {
+  const rec = pending.record;
+  if (!rec || typeof rec.to !== "string") return null;
+  let st;
+  try {
+    st = statSync(rec.to, { throwIfNoEntry: false });
+  } catch (e) {
+    return null;
+  }
+  const ofRevision = (r) => r && r.id === pending.id && r.finished && r.finished.revision === pending.revision;
+  if (st) {
+    if (!whole(rec.to)) return null;
+    if (existsSync(rec.from) && sameBytes(rec.to, rec.from)) return true;
+    let read;
+    try {
+      read = JSON.parse(readFileSync(rec.to, "utf8"));
+    } catch (e) {
+      return null;
+    }
+    if (!existsSync(rec.from) && read && read.rev === pending.rev && ofRevision(read)) return true;
+    return false;
+  }
+  const folder = dirname(dirname(rec.to));
+  try {
+    readdirSync(dirname(rec.to));
+  } catch (e) {
+    return e.code === "ENOENT" ? false : null;
+  }
+  let unreadable = false;
+  for (const n of recordNumbers(folder).filter((n) => n > pending.rev)) {
+    try {
+      if (ofRevision(JSON.parse(readFileSync(recordFile(folder, n), "utf8")))) return true;
+    } catch (e) {
+      unreadable = true;
+    }
+  }
+  return unreadable ? null : false;
+}
+
+/** Table J (algorithm C, step 7): how a copy of `e` in final/ stands against `listed`, the files the record in force lists. { left: true } when the record lists it at other
+    bytes, { put: <what> } when it is to be put back, else {} (whole). */
+export function judgeEntry(e, folder, listed, whole) {
+  if (listed[relOf(folder, e.to)] !== e.bytes) return { left: true };
+  const st = statSync(e.to, { throwIfNoEntry: false });
+  if (!st) return { put: "it is not there" };
+  if (st.size !== e.bytes) return { put: `it is ${st.size} bytes there, not ${e.bytes}` };
+  if (!whole(e.to)) return {};
+  if (!existsSync(e.from)) return {};
+  return sameBytes(e.to, e.from) ? {} : { put: "its bytes are not the ones written" };
+}
+
+/** Put a copy back from its work copy on this Mac: "" when it is, else the problem, in plain words with no path. */
+export function putEntryBack(e, what, { opts, log, shown }) {
+  const file = basename(e.to);
+  if (!existsSync(e.from)) return `${file} in final/ is not whole in Dropbox (${what}), and its copy on this Mac is gone, so it could not be put back.`;
+  try {
+    mkdirSync(dirname(e.to), { recursive: true });
+    if (existsSync(e.to)) replaceIn(e.from, e.to, opts);
+    else cloneIn(e.from, e.to, opts);
+    log(`${shown}: ${file} in final/ was not whole in Dropbox (${what}), so it is put back from its copy on this Mac.`);
+    return "";
+  } catch (err) {
+    return `${file} in final/ could not be put back in Dropbox (${err.code || "an error"}).`;
+  }
+}
+
+/** Take the files a writer is about to put in or take out of final/ out of this Mac's own checks of the episode, under the lock the check also takes (plan R1c), so that
+    the check never puts an older file back over the writer's. Resolves:
+    - for a record without `local`, as keepCheckInStep always has: { none: true }, { why } or { end };
+    - for a record with `local`: { end } with `late-check.lock` held, or { busy: "held" | "unsettled" | "restored" | "lost" } with no lock held and no mark written.
+    `end({ put })` is to be called once. `reads` are the files the writer read to build its own, `{ path, id }`, `id` the fileId it took before reading, or null (ruling 34). */
+export async function takeOutOfCheck(ctx, { name, record, paths, reads = [], rev }, { wait, log = () => {}, problemWhy = () => "" }) {
+  const same = (p) => p.id === record.id && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root);
+  // Both sides are spelled by two sources (the writer's folder, the pending's own), so they are compared resolved and in NFC.
+  const spelled = (path) => resolve(String(path)).normalize("NFC");
+  const wanted = new Set(paths.map(spelled));
+  const shown = shownName(record);
+  if (!keptOnAMac(record)) {
+    const among = (p) => p.entries.filter((e) => e && wanted.has(spelled(e.to))).map((e) => e.to);
+    const first = readPendings(ctx.home).find(same);
+    if (!first || !among(first).length) return { none: true };
+    let held = null;
+    for (let waited = 0; ; waited += LOCK_LOOK_MS) {
+      held = takeLateCheckLock(ctx.home, name, "read", ctx.alive);
+      if (held) break;
+      if (waited >= LOCK_WAIT_MS) return { why: `The import was still checking its copies of ${shown} in Dropbox after two minutes, so nothing Claude read was put in.` };
+      await wait(LOCK_LOOK_MS);
+    }
+    let to = [];
+    let marked = false;
+    try {
+      // Under the lock the pending is read again: the check may have been made, or found a problem, while the lock was waited for.
+      let fresh = readPendings(ctx.home).find(same);
+      if (!fresh) return { none: true };
+      if (fresh.problem) return { why: problemWhy(record) || `Dropbox found a problem with a copy of this episode: ${String(fresh.problem).replace(/\.$/, "")}.` };
+      // A mark an earlier reading left (it stopped while it put its files in) is settled first, by the record, as the check settles it.
+      if (fresh.reading) {
+        const settled = settleReading(fresh, { home: ctx.home, log });
+        if (settled.later) return { why: `The import's check of its copies of ${shown} in Dropbox is not settled yet, so nothing Claude read was put in.` };
+        fresh = settled.pending;
+      }
+      to = among(fresh);
+      if (!to.length) return { none: true };
+      writePending(ctx.home, { ...fresh, reading: { pid: process.pid, at: ctx.now(), to } });
+      marked = true;
+    } finally {
+      if (!marked) releaseLateCheckLock(held);
+    }
+    let ended = false;
+    const end = ({ put }) => {
+      if (ended) return { reopened: false };
+      ended = true;
+      try {
+        const now = readPendings(ctx.home).find(same);
+        if (now) {
+          const { reading, ...rest } = now;
+          writePending(ctx.home, put ? { ...rest, entries: now.entries.filter((e) => !to.includes(e.to)) } : rest);
+        }
+      } catch (e) {
+        log(`The import's late check could not be kept in step with the reading (${e.code || "an error"}). It settles the reading's files at its next look.`);
+      } finally {
+        releaseLateCheckLock(held);
+      }
+      return { reopened: false };
+    };
+    return { end };
+  }
+  // A record kept on this Mac: algorithm D.
+  let held = null;
+  for (let waited = 0; ; waited += LOCK_LOOK_MS) {
+    held = takeLateCheckLock(ctx.home, name, "write", ctx.alive);
+    if (held) break;
+    if (waited >= LOCK_WAIT_MS) return { busy: "held" };
+    await wait(LOCK_LOOK_MS);
+  }
+  let marksWritten = false;
+  const marks = [];
+  const nonce = randomUUID();
+  try {
+    for (const p of readEveryPending(ctx.home).filter((x) => same(x) && x.reading)) {
+      if (settleReading(p, { home: ctx.home, log }).later) return { busy: "unsettled" };
+    }
+    const opts = ruleOpts({ ...ctx.deps, log });
+    const readPaths = new Set(reads.map((r) => spelled(r.path)));
+    let changed = false;
+    let lost = false;
+    let putBack = false;
+    for (const r of reads) {
+      if (!r.id) continue;
+      const now = fileId(r.path);
+      if (!now || now.ino !== r.id.ino || now.size !== r.id.size || now.mtimeMs !== r.id.mtimeMs) changed = true;
+    }
+    const listed = record.files || {};
+    for (const p of readPendingsOf(ctx.home, "final").filter(same)) {
+      if (!(p.copied === true || recordHolds(p, { isWhole: ctx.isWhole }) === true)) continue;
+      for (const e of p.entries) {
+        if (!e || !readPaths.has(spelled(e.to))) continue;
+        const judged = judgeEntry(e, p.folder, listed, ctx.isWhole);
+        if (!judged.put) continue;
+        if (putEntryBack(e, judged.put, { opts, log, shown }) === "") putBack = true;
+        else lost = true;
+      }
+    }
+    if (lost) return { busy: "lost" };
+    if (putBack || changed) return { busy: "restored" };
+    for (const p of readEveryPending(ctx.home).filter(same)) {
+      const to = p.entries.filter((e) => e && wanted.has(spelled(e.to))).map((e) => e.to);
+      if (!to.length) continue;
+      try {
+        writePending(ctx.home, { ...p, reading: { pid: process.pid, at: ctx.now(), to: [...to], nonce, rev } });
+      } catch (e) {
+        throw Object.assign(new Error("the check of its copies could not be kept in step on this Mac"), { code: e.code });
+      }
+      marks.push({ key: pendingKeyOf(p), to });
+    }
+    marksWritten = true;
+  } finally {
+    if (!marksWritten) releaseLateCheckLock(held);
+  }
+  let ended = false;
+  const end = ({ put }) => {
+    if (ended) return { reopened: false };
+    ended = true;
+    let reopened = false;
+    try {
+      for (const m of marks) {
+        const now = readPendingAt(ctx.home, m.key);
+        if (!now || !now.reading || now.reading.nonce !== nonce) continue;
+        const { reading, ...rest } = now;
+        let next = rest;
+        let reopening = false;
+        if (put) {
+          next = { ...rest, entries: now.entries.filter((e) => !m.to.includes(e.to)) };
+          if (now.problem && next.entries.length < now.entries.length) {
+            const { problem, lookUntil, nextLook, ...clear } = next;
+            next = { ...clear, wasProblem: problem, told: ctx.now() };
+            reopening = true;
+          }
+        }
+        try {
+          writePending(ctx.home, next);
+          if (reopening) reopened = true;
+        } catch (e) {
+          log(`${shown}: a write could not take its files out of an earlier check (${e.code || "an error"}). That check settles them by the record.`);
+        }
+      }
+    } finally {
+      releaseLateCheckLock(held);
+    }
+    return { reopened };
+  };
+  return { end };
+}
+
+/** Put back the files a writer is about to read, or stand on, that Dropbox lost or left short (ruling 34): "" when none needs it (or no held pending holds it), "held"
+    "unsettled" "restored" "lost" as takeOutOfCheck says. For a record without `local`, "" at once. `rels` are paths from `folder`. */
+export async function restoreReads(ctx, { name, record, folder, rels, rev }, { wait, log = () => {} }) {
+  if (!keptOnAMac(record)) return "";
+  const listed = record.files || {};
+  const doubtful = rels.filter((rel) => {
+    if (!(rel in listed)) return false;
+    const st = statSync(join(folder, rel), { throwIfNoEntry: false });
+    return !st || st.size !== listed[rel];
+  });
+  if (!doubtful.length) return "";
+  const step = await takeOutOfCheck(ctx, { name, record, paths: [], reads: doubtful.map((rel) => ({ path: join(folder, rel), id: null })), rev }, { wait, log });
+  if (step.busy) return step.busy;
+  if (step.end) step.end({ put: false });
+  return "";
 }
 
 /** A time of day as a person reads it, "10:15". */

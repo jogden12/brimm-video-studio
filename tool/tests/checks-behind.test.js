@@ -3,13 +3,13 @@
 // loads before they are there.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as filing from "../filing.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
-import { pendingFolder, runsFolder } from "../settings.js";
-import { acceptRev } from "../episode.js";
-import { HANDOFF, ID, L, MAC, NAME, SRT, holdFinal, holdImport, holdRecord, mine, run, runs, world } from "./checks-world.js";
+import { episodeWork, pendingFolder, runsFolder } from "../settings.js";
+import { acceptRev, recordFile } from "../episode.js";
+import { HANDOFF, ID, L, MAC, NAME, SRT, cloneOf, ctxOf, deadLock, holdFinal, holdImport, holdRecord, liveLock, mine, recordOf, run, runs, world } from "./checks-world.js";
 
 const base = (kind, over = {}) => ({ version: 1, ...(kind ? { kind } : {}), id: ID, name: NAME, folder: "/x", root: "/r", machine: MAC, entries: [], work: null, lastCopy: L, ...over });
 
@@ -394,6 +394,342 @@ describe("settleReading, for a mark with a rev (L5)", () => {
       assert.ok(filing.readPendingAt(w2.home, h.key).reading);
     } finally {
       w2.done();
+    }
+  });
+});
+
+describe("takeOutOfCheck, restoreReads and busyWords, for a local episode (L5)", () => {
+  const lockFile = (w) => join(episodeWork(w.home, NAME), "late-check.lock");
+  const recordTwo = (h) => JSON.parse(readFileSync(recordFile(h.folder, 2), "utf8"));
+  const step = (w, h, over = {}, opts = {}) => filing.takeOutOfCheck(ctxOf(w), { name: NAME, record: recordTwo(h), paths: [h.files.handoff], rev: 3, ...over }, { wait: async () => {}, ...opts });
+  const idOf = (path) => ({ path, id: filing.fileId(path) });
+  const words = { done: "nothing was changed", again: "Say it again in a minute." };
+
+  it("T1 always takes the lock, with no pending owed, and end lets it go", async () => {
+    const w = world();
+    try {
+      const h = holdFinal(w, L);
+      filing.removePending(w.home, h.pending);
+      const got = await step(w, h);
+      assert.ok(got.end);
+      assert.equal(JSON.parse(readFileSync(lockFile(w), "utf8")).command, "write");
+      assert.deepEqual(got.end({ put: false }), { reopened: false });
+      assert.equal(existsSync(lockFile(w)), false);
+    } finally {
+      w.done();
+    }
+  });
+
+  it("T2 marks the entries among its paths in every pending of the episode, and end({ put: true }) takes them out of each", async () => {
+    const w = world();
+    try {
+      const h = holdFinal(w, L);
+      const h2 = holdFinal(w, L + 1000, { revision: 2, episode: false });
+      const rec = holdRecord(w, L + 2000, { id: ID, there: "none" });
+      const got = await step(w, h);
+      for (const key of [h.key, h2.key]) {
+        const p = filing.readPendingAt(w.home, key);
+        assert.deepEqual(Object.keys(p.reading).sort(), ["at", "nonce", "pid", "rev", "to"]);
+        assert.deepEqual([p.reading.to, p.reading.rev, p.reading.pid], [[h.files.handoff], 3, process.pid]);
+      }
+      assert.equal("reading" in filing.readPendingAt(w.home, rec.key), false);
+      assert.deepEqual(got.end({ put: true }), { reopened: false });
+      for (const [key, original] of [[h.key, h.pending], [h2.key, h2.pending]]) {
+        const p = filing.readPendingAt(w.home, key);
+        assert.equal("reading" in p, false);
+        assert.deepEqual(p.entries, original.entries.filter((e) => e.to !== h.files.handoff));
+        const { entries, ...rest } = p;
+        const { entries: e2, ...rest2 } = original;
+        assert.deepEqual(rest, rest2);
+      }
+    } finally {
+      w.done();
+    }
+  });
+
+  it("T3 end({ put: false }) leaves the entries, unmarked; a second end changes nothing", async () => {
+    const w = world();
+    try {
+      const h = holdFinal(w, L);
+      const got = await step(w, h);
+      got.end({ put: false });
+      assert.deepEqual(filing.readPendingAt(w.home, h.key), h.pending);
+      const other = liveLock(w, NAME, "late check");
+      assert.deepEqual(got.end({ put: true }), { reopened: false });
+      assert.ok(existsSync(lockFile(w)));
+      filing.releaseLateCheckLock(other);
+      assert.deepEqual(filing.readPendingAt(w.home, h.key), h.pending);
+    } finally {
+      w.done();
+    }
+  });
+
+  it("T4 is not stopped by a pending's problem", async () => {
+    const w = world();
+    try {
+      const h = holdFinal(w, L, { problem: "x" });
+      const got = await step(w, h);
+      assert.ok(got.end);
+      assert.ok(filing.readPendingAt(w.home, h.key).reading);
+      got.end({ put: false });
+    } finally {
+      w.done();
+    }
+  });
+
+  it("T5 looks every LOCK_LOOK_MS while a check holds the lock, and is busy after LOCK_WAIT_MS, writing nothing", async () => {
+    const w = world();
+    try {
+      const h = holdFinal(w, L);
+      liveLock(w, NAME, "late check");
+      const waits = [];
+      const got = await step(w, h, {}, { wait: async (ms) => waits.push(ms) });
+      assert.deepEqual(got, { busy: "held" });
+      assert.equal(waits.length, filing.LOCK_WAIT_MS / filing.LOCK_LOOK_MS);
+      assert.ok(waits.every((ms) => ms === filing.LOCK_LOOK_MS));
+      assert.deepEqual(filing.readPendingAt(w.home, h.key), h.pending);
+      assert.equal(filing.busyWords("held", "Talk", words), "Studio was still checking Dropbox's copies of Talk after two minutes, so nothing was changed. Say it again in a minute.");
+    } finally {
+      w.done();
+    }
+  });
+
+  it("T6 takes at once a lock a dead process left", async () => {
+    const w = world();
+    try {
+      const h = holdFinal(w, L);
+      deadLock(w, NAME, "late check");
+      const waits = [];
+      const got = await step(w, h, {}, { wait: async (ms) => waits.push(ms) });
+      assert.ok(got.end);
+      assert.deepEqual(waits, []);
+      got.end({ put: false });
+    } finally {
+      w.done();
+    }
+  });
+
+  it("T7 settles an earlier dead writer's mark first, and is busy unsettled when it cannot be", async () => {
+    const w = world();
+    try {
+      const mark = { pid: 999999, at: L, to: [join(w.root, "Episodes", NAME, "final", "Talk.brimm-ops.json")], nonce: "n", rev: 3 };
+      const h = holdFinal(w, L, { mark });
+      h.later(() => ({ files: { Talk: 1 } }));
+      const got = await step(w, h, { rev: 4 });
+      assert.ok(got.end);
+      const settled = filing.readPendingAt(w.home, h.key);
+      assert.equal("reading" in settled, false);
+      assert.equal(settled.entries.some((e) => e.to === h.files.handoff), false);
+      got.end({ put: false });
+    } finally {
+      w.done();
+    }
+    const w2 = world();
+    try {
+      const mark = { pid: 999999, at: L, to: [join(w2.root, "Episodes", NAME, "final", "Talk.brimm-ops.json")], nonce: "n", rev: 3 };
+      const h = holdFinal(w2, L, { mark });
+      writeFileSync(join(h.folder, "record", "0003 (Sallie's laptop's conflicted copy 2026-11-06).json"), "{}");
+      const got = await step(w2, h);
+      assert.deepEqual(got, { busy: "unsettled" });
+      assert.ok(filing.readPendingAt(w2.home, h.key).reading);
+      assert.equal(existsSync(lockFile(w2)), false);
+    } finally {
+      w2.done();
+    }
+  });
+
+  it("T8 end leaves alone a pending written again under its key with another mark", async () => {
+    const w = world();
+    try {
+      const h = holdFinal(w, L);
+      const got = await step(w, h);
+      const again = { ...filing.readPendingAt(w.home, h.key), reading: { pid: 1, at: 1, to: [], nonce: "other", rev: 9 } };
+      filing.writePending(w.home, again);
+      got.end({ put: true });
+      assert.deepEqual(filing.readPendingAt(w.home, h.key), again);
+    } finally {
+      w.done();
+    }
+  });
+
+  it("T9 for a record without local it is keepCheckInStep, with the caller's problem words", async () => {
+    const w = world();
+    try {
+      const p = holdImport(w, "X.mov", L);
+      const record = { ...recordOf({ id: p.id, rev: 1 }), local: undefined };
+      delete record.local;
+      const ctx = ctxOf(w);
+      filing.writePending(w.home, { ...p, problem: "bad" });
+      assert.deepEqual(await filing.takeOutOfCheck(ctx, { name: p.name, record, paths: [p.entries[0].to] }, { wait: async () => {}, problemWhy: () => "P." }), { why: "P." });
+      assert.deepEqual(await filing.takeOutOfCheck(ctx, { name: p.name, record, paths: [p.entries[0].to] }, { wait: async () => {} }), { why: "Dropbox found a problem with a copy of this episode: bad." });
+      assert.deepEqual(await filing.takeOutOfCheck(ctx, { name: p.name, record: { ...record, id: "e-20261106-ee0005" }, paths: [p.entries[0].to] }, { wait: async () => {} }), { none: true });
+    } finally {
+      w.done();
+    }
+  });
+
+  it("T10 judges the copies among its reads under the lock: one not whole is put back, and it is busy restored, marking nothing", async () => {
+    for (const bad of ["1\nHo.\n\n", SRT.slice(0, 3)]) {
+      const w = world();
+      try {
+        const h = holdFinal(w, L);
+        writeFileSync(h.files.srt, bad);
+        const reads = [idOf(h.files.srt), idOf(h.files.handoff)];
+        assert.deepEqual(await step(w, h, { reads }), { busy: "restored" });
+        assert.equal(readFileSync(h.files.srt, "utf8"), SRT);
+        assert.deepEqual(filing.readPendingAt(w.home, h.key), h.pending);
+        assert.equal(existsSync(lockFile(w)), false);
+      } finally {
+        w.done();
+      }
+    }
+    const w = world();
+    try {
+      const h = holdFinal(w, L);
+      const got = await step(w, h, { reads: [idOf(h.files.srt), idOf(h.files.handoff)] });
+      assert.ok(got.end);
+      assert.deepEqual(filing.readPendingAt(w.home, h.key).reading.to, [h.files.handoff]);
+      got.end({ put: false });
+      assert.equal(filing.busyWords("restored", "Talk", words), "A copy of Talk in final/ was not whole in Dropbox, so it is put back, and nothing was changed. Say it again in a minute.");
+    } finally {
+      w.done();
+    }
+  });
+
+  it("T11 is busy lost, putting nothing back, when a copy among its reads is not whole and its copy on this Mac is gone", async () => {
+    const w = world();
+    try {
+      const h = holdFinal(w, L, { workCopies: false });
+      writeFileSync(h.files.srt, SRT.slice(0, 3));
+      assert.deepEqual(await step(w, h, { reads: [idOf(h.files.srt)] }), { busy: "lost" });
+      assert.equal(readFileSync(h.files.srt, "utf8"), SRT.slice(0, 3));
+      assert.equal("reading" in filing.readPendingAt(w.home, h.key), false);
+      assert.equal(existsSync(lockFile(w)), false);
+      assert.equal(filing.busyWords("lost", "Talk", words), "A copy of Talk in final/ is not whole in Dropbox, and it could not be put back, so nothing was changed. Ask Jason.");
+    } finally {
+      w.done();
+    }
+    const w2 = world();
+    try {
+      const h = holdFinal(w2, L);
+      h.later((r) => ({ files: { ...r.files, "final/Talk main.srt": 99 } }));
+      writeFileSync(h.files.srt, SRT.slice(0, 3));
+      const got = await step(w2, h, { record: JSON.parse(readFileSync(recordFile(h.folder, 3), "utf8")), reads: [idOf(h.files.srt)] });
+      assert.ok(got.end);
+      got.end({ put: false });
+    } finally {
+      w2.done();
+    }
+  });
+
+  it("T12 end({ put: true }) writes a pending with a problem that loses an entry with wasProblem and told, and says it reopened it", async () => {
+    const w = world();
+    try {
+      const h = holdFinal(w, L, { problem: "x" });
+      filing.writePending(w.home, { ...h.pending, lookUntil: L - 1 });
+      const got = await step(w, h);
+      assert.deepEqual(got.end({ put: true }), { reopened: true });
+      const p = filing.readPendingAt(w.home, h.key);
+      assert.equal("problem" in p, false);
+      assert.equal("lookUntil" in p, false);
+      assert.deepEqual([p.wasProblem, p.told], ["x", L]);
+      assert.equal(p.entries.some((e) => e.to === h.files.handoff), false);
+      assert.equal(filing.isOpen(p, L), true);
+      assert.deepEqual(got.end({ put: true }), { reopened: false });
+      const again = await step(w, h, { paths: [h.files.srt] });
+      assert.deepEqual(again.end({ put: false }), { reopened: false });
+    } finally {
+      w.done();
+    }
+    const w2 = world();
+    try {
+      const h = holdFinal(w2, L, { problem: "x" });
+      const got = await step(w2, h);
+      got.end({ put: false });
+      assert.equal(filing.readPendingAt(w2.home, h.key).problem, "x");
+    } finally {
+      w2.done();
+    }
+  });
+
+  it("T13 judges its reads only by a pending whose record reached Dropbox, so a dead finish's copy is never put back", async () => {
+    const w = world();
+    try {
+      const h = holdFinal(w, L);
+      writeFileSync(h.files.handoff, '{"revision": 2}\n');
+      const workTwo = join(w.dir, "work", "final-dead");
+      mkdirSync(workTwo, { recursive: true });
+      writeFileSync(join(workTwo, "Talk.brimm-ops.json"), '{"revision": 2}\n');
+      writeFileSync(join(workTwo, "0003.json"), "recordtext");
+      const dead = { ...h.pending, revision: 2, rev: 3, copied: undefined, lastCopy: L + 1000, work: workTwo, entries: [{ from: join(workTwo, "Talk.brimm-ops.json"), to: h.files.handoff, bytes: 16 }], took: [], record: { from: join(workTwo, "0003.json"), to: recordFile(h.folder, 3), bytes: 10 } };
+      delete dead.copied;
+      filing.writePending(w.home, dead);
+      const first = await step(w, h, { reads: [idOf(h.files.handoff)] });
+      assert.deepEqual(first, { busy: "restored" });
+      assert.equal(readFileSync(h.files.handoff, "utf8"), HANDOFF);
+      assert.equal("reading" in filing.readPendingAt(w.home, h.key), false);
+      assert.equal("reading" in filing.readPendingAt(w.home, "final/" + ID + "-2.json"), false);
+      const second = await step(w, h, { reads: [idOf(h.files.handoff)] });
+      assert.ok(second.end);
+      assert.equal(readFileSync(h.files.handoff, "utf8"), HANDOFF);
+      assert.ok(filing.readPendingAt(w.home, h.key).reading);
+      assert.ok(filing.readPendingAt(w.home, "final/" + ID + "-2.json").reading);
+      second.end({ put: false });
+    } finally {
+      w.done();
+    }
+  });
+
+  it("T15 is busy restored when a read's file is no longer the one the writer read, though no pending holds it now", async () => {
+    const w = world();
+    try {
+      const h = holdFinal(w, L);
+      writeFileSync(h.files.srt, SRT.slice(0, 3));
+      const id = filing.fileId(h.files.srt);
+      rmSync(h.files.srt, { force: true });
+      cloneOf(h.pending.entries[1].from, h.files.srt);
+      filing.removePending(w.home, h.pending);
+      assert.deepEqual(await step(w, h, { paths: [h.files.srt], reads: [{ path: h.files.srt, id }] }), { busy: "restored" });
+      assert.equal(existsSync(lockFile(w)), false);
+      const fresh = await step(w, h, { paths: [h.files.srt], reads: [idOf(h.files.srt)] });
+      assert.ok(fresh.end);
+      fresh.end({ put: false });
+      const nulled = await step(w, h, { paths: [h.files.srt], reads: [{ path: h.files.srt, id: null }] });
+      assert.ok(nulled.end);
+      nulled.end({ put: false });
+    } finally {
+      w.done();
+    }
+  });
+
+  it("T16 restoreReads judges only a read that is gone or at another size, asks no lock otherwise, and puts it back", async () => {
+    const w = world();
+    try {
+      const h = holdFinal(w, L);
+      const rels = ["final/Talk main.srt", "final/Talk.brimm-ops.json"];
+      const args = () => [ctxOf(w), { name: NAME, record: recordTwo(h), folder: h.folder, rels, rev: 3 }, { wait: async () => assert.fail("no wait") }];
+      const lock = liveLock(w, NAME, "late check");
+      assert.equal(await filing.restoreReads(...args()), "");
+      assert.ok(existsSync(lockFile(w)));
+      filing.releaseLateCheckLock(lock);
+      rmSync(h.files.srt);
+      assert.equal(await filing.restoreReads(...args()), "restored");
+      assert.equal(readFileSync(h.files.srt, "utf8"), SRT);
+      assert.deepEqual(filing.readPendingAt(w.home, h.key), h.pending);
+      assert.equal(existsSync(lockFile(w)), false);
+      writeFileSync(h.files.srt, SRT.slice(0, 3));
+      assert.equal(await filing.restoreReads(...args()), "restored");
+      rmSync(h.files.srt);
+      rmSync(h.work, { recursive: true, force: true });
+      assert.equal(await filing.restoreReads(...args()), "lost");
+      filing.removePending(w.home, h.pending);
+      assert.equal(await filing.restoreReads(...args()), "");
+      assert.equal(await filing.restoreReads(ctxOf(w), { name: NAME, record: recordTwo(h), folder: h.folder, rels: ["final/none.srt"], rev: 3 }, { wait: async () => {} }), "");
+      const old = { ...recordTwo(h) };
+      delete old.local;
+      assert.equal(await filing.restoreReads(ctxOf(w), { name: NAME, record: old, folder: h.folder, rels, rev: 3 }, { wait: async () => {} }), "");
+    } finally {
+      w.done();
     }
   });
 });
