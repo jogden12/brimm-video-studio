@@ -108,6 +108,10 @@ const opensByItself = (ctx, record) => {
 export function openByItself(ctx, { found, record }) {
   if (!runningCommand(ctx.home, found.name, ctx.alive, whenReadyLockOf(ctx.home, found.name))) startWhenReady(ctx, found.name);
   ctx.say(opensByItself(ctx, record));
+  // The app will open the project in a detached run whose words go to the log alone: the line about its buttons, and where to export, are said here, in her chat.
+  ctx.say(BUTTONS);
+  const into = exportsWords(ctx.settings, ctx.home);
+  if (into) ctx.say(`Export it on This Mac, into ${into}.`);
   return 0;
 }
 /** Whether `app` on the episode `found` has only to wait for the video for HyperFrames, which a run of the working copy is making now: a video kept on this

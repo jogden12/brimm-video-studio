@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url";
 import { CLAIM_WAIT_MS, editMain } from "../edit.js";
 import { lockOf, readResult, takeEpisodeLock } from "../detached.js";
 import { whenReadyLockOf } from "../app.js";
+// The buttons line is said in her chat when HyperFrames is to open by itself: the detached run that opens it speaks to the log alone (B0-F8).
+const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
 import { COPY_STEP } from "../guide.js";
 import { addRates, progressFolder } from "../progress.js";
 import { episodeFilesFolder, episodeWork, writeSettings } from "../settings.js";
@@ -92,13 +94,13 @@ describe("app, while the video for HyperFrames of a video kept on this Mac is be
     const { t, found } = kept();
     atWork(t, "workcopy");
     const first = await on(t.ctx.deps, "app", FOLDER);
-    assert.deepEqual([first.code, first.said], [0, [BEING_MADE("when it is ready")]]);
+    assert.deepEqual([first.code, first.said], [0, [BEING_MADE("when it is ready"), BUTTONS]]);
     assert.deepEqual(argsOf(t), [WHEN_READY]);
     assert.deepEqual([reread(found).rev, reread(found).editing, t.waits.includes(CLAIM_WAIT_MS)], [1, null, false]);
     // The run started takes a lock of its own: a second request finds it and starts none.
     whenReadyAtWork(t);
     const second = await on(t.ctx.deps, "app", FOLDER);
-    assert.deepEqual([second.code, second.said], [0, [BEING_MADE("when it is ready")]]);
+    assert.deepEqual([second.code, second.said], [0, [BEING_MADE("when it is ready"), BUTTONS]]);
     assert.equal(argsOf(t).length, 1);
     assert.equal(reread(found).rev, 1);
     t.done();
@@ -109,7 +111,7 @@ describe("app, while the video for HyperFrames of a video kept on this Mac is be
     addRates(progressFolder(t.home), { [COPY_STEP]: 0.1 });
     const r = await on(t.ctx.deps, "app", FOLDER);
     // 0.1 seconds of work for each second of the video's 23.423.
-    assert.deepEqual(r.said, [BEING_MADE(`about ${clockAt(t.now() + 0.1 * 23.423 * 1000)}`)]);
+    assert.deepEqual(r.said, [BEING_MADE(`about ${clockAt(t.now() + 0.1 * 23.423 * 1000)}`), BUTTONS]);
     t.done();
   });
   it("an episode from before the switch is told what it was: to say it again", async () => {
