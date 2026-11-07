@@ -628,7 +628,9 @@ describe("what says the guide's new states: the help and the README (the skills'
       "and once it is exported, to hand it off", "A raw video that was edited in Final Cut before is told so, and to open it in HyperFrames, from the recording",
       "being imported, being read or having its video for HyperFrames made", "its video for HyperFrames made, its finish's hand-off written, or an import, a reading or a finish that did not finish",
       // While a finish waits for its late check: the page's step, and a line of when Studio checks Dropbox's copies.
-      "Once its finish has written the hand-off it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's copies (a spelling and handing it off again wait until then), though the finish goes on checking them for a quarter of an hour"
+      "Once its finish has written the hand-off it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's copies (a spelling and handing it off again wait until then), though the finish goes on checking them for a quarter of an hour",
+      // For a video kept on this Mac (Phase 3, L5): no such line, and nothing she does waits for the check.
+      "for a video kept on this Mac it gives no such line: the finish ends at the hand-off, Studio checks Dropbox's copies by itself about 15 minutes later, and nothing she does waits for it"
     ]) assert.ok(guide.replace(/\n {40}/g, " ").includes(words), words);
   });
   it("has the README's rows for guide say the same: the stages, the times and where they come from, and that it only reads", () => {

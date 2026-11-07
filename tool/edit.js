@@ -73,9 +73,9 @@ import { fileSafe, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reel-candidates.js";
 import { readStatusesIn, importState, removeStatusIn, shownStep } from "./importing.js";
 import { localSource, projectWaits, readingCheckAt, readingWaitsUntil, waitFacts } from "./late-wait.js";
-import { fileId, heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, readSeen, seenKey, readPendings, dueAt, statusReadFolders } from "./filing.js";
+import { askAgent, busyWords, fileId, heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, logTo, ownRecordBack, readPendings, readPendingsOf, readSeen, restoreReads, seenKey, dueAt, statusReadFolders, takeOutOfCheck } from "./filing.js";
 import { HAND_OFF_ASK, REELS_ASK, finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, matchedSession, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
-import { BRINGING, REEL_KEY, exportAgainWords, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
+import { BRINGING, REEL_KEY, SAY_AGAIN, exportAgainWords, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
 import { checkingNow, problemFlagged } from "./finish-check.js";
 import { endedSinceYes, endedWithoutHandoff } from "./finish-ended.js";
 import { handoffIn, videoSeconds } from "./finish-time.js";
@@ -139,7 +139,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         and once it is exported, to hand it off. Once its finish has written the hand-off
                                         it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's
                                         copies (a spelling and handing it off again wait until then),
-                                        though the finish goes on checking them for a quarter of an hour. On a Mac
+                                        though the finish goes on checking them for a quarter of an hour; for a
+                                        video kept on this Mac it gives no such line: the finish ends at the
+                                        hand-off, Studio checks Dropbox's copies by itself about 15 minutes later,
+                                        and nothing she does waits for it. On a Mac
                                         that Jason has not set up for HyperFrames it says that this Mac is not set up,
                                         where it would say to open the video there or that its video is being made. A
                                         finished video whose hand-off is written is told to hand off the Reels once a Reel
@@ -787,7 +790,10 @@ export function findEpisode(ctx, said, { plannedAs } = {}) {
     }
   }
   if (fits.length === 1) {
-    const e = fits[0];
+    let e = fits[0];
+    // A finish's record that Dropbox lost is put back before any command builds on the record before it (ruling 35): said again, the command would write the
+    // next record under the lost one's number.
+    if (keptOnAMac(e.inForce) && ownRecordBack(ctx, { name: e.name, folder: e.folder, record: e.inForce })) e = episodeAt(ctx, e.name, links);
     hideNames(ctx, e);
     return gateOf(ctx, e, known(e), named, e.inForce) || holdWords(ctx, e) || { name: e.name, folder: e.folder, read: e.read, held: e.held };
   }
@@ -1701,6 +1707,21 @@ const VOICE_RUN_SAID = "taking in its voice";
     command is named by its own word. */
 const RUN_SAID = { [WORK_COPY_COMMAND]: "making the video for HyperFrames", join: "making the video from its footage", "when-ready": "waiting to open it in HyperFrames", app: "opening it in HyperFrames" };
 
+/** What a check of the copies of a video kept on this Mac found that is not put right (rulings 22 and 29), from the pendings of the episode `folder` on this Mac: a `final` pending
+    with a `problem`, or one a writer reopened (`wasProblem`) and that is to be checked again; and a `record` pending with a problem, by its label (its episode has no
+    record to name it by). `gated` leaves the problem's own words out. */
+function checkProblemLines(ctx, folder, shown, gated_) {
+  const mine = (p) => p.name === folder && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root);
+  const lines = [];
+  for (const p of readPendingsOf(ctx.home, "final").filter(mine)) {
+    const stays = p.took.length === 0 ? "" : p.took.length === 1 ? "The export stays in Downloads" : "The exports stay in Downloads";
+    if (p.problem) lines.push(gated_ ? `${shown}: the check of its copies in Dropbox found a problem. Ask Jason.` : `${shown}: the check of its copies in Dropbox found a problem: ${p.problem}${stays ? ` ${stays}.` : ""} Ask Jason.`);
+    else if (p.wasProblem) lines.push(gated_ ? `${shown}: the check of its copies in Dropbox found a problem, and Studio checks them again in a few minutes.` : `${shown}: the check of its copies in Dropbox found a problem: ${p.wasProblem} A change since may have put it right, and Studio checks them again in a few minutes.${stays ? ` ${stays} until then.` : ""}`);
+  }
+  for (const p of readPendingsOf(ctx.home, "record").filter(mine)) if (p.problem) lines.push(`${p.label || shown}: Dropbox lost a file of it, and it could not be put back. Ask Jason.`);
+  return lines;
+}
+
 /** `status ["<words>"]`: what is running on this Mac (each run's step, from the progress panel's files), the imports in
     Episodes/.importing/, and for each episode on this Mac the detached run at work on it and what each one left, with what to
     say next (nextOf). With words, only what they fit. An episode is named as listedAs names it: a video not yet answered, or a
@@ -1760,10 +1781,19 @@ export async function status(ctx, rest) {
     // running, with when Studio checks Dropbox's copies and then takes away what it took.
     // An explainer's join run takes its voice in: it has no footage to join.
     const voicing = Boolean(e.inForce && e.inForce.planned && e.inForce.planned.route === "explainer");
-    const checking = command === "finish" && e.inForce ? checkingNow(ctx.home, folder, e.inForce, ctx.alive) : null;
-    if (checking) lines.push(`${shown}: the hand-off is written. ${checkSentence(checking)}`);
-    else if (command === "join" && voicing) lines.push(`${shown}: ${VOICE_RUNNING}.`);
+    // A video kept on this Mac is checked behind its finish (Phase 3, L5): the check is said while no finish is at work on it, and late once its time is more than
+    // five minutes past; the run at work, if any, is said after it; and then the problem a check found (rulings 22 and 29). One from before the switch is as today.
+    const onThisMac = Boolean(e.inForce) && keptOnAMac(e.inForce);
+    const checking = e.inForce && (onThisMac ? command !== "finish" : command === "finish") ? checkingNow(ctx.home, folder, e.inForce, ctx.alive) : null;
+    if (checking) {
+      const late = onThisMac && ctx.now() > checking.due + 5 * 60 * 1000;
+      lines.push(late ? `${shown}: the hand-off is written. Studio's check of Dropbox's copies was due at ${clockAt(checking.due)}, and is made as soon as it can be.${checking.took.length ? " The export stays in Downloads until then." : ""}` : `${shown}: the hand-off is written. ${checkSentence(checking)}`);
+    }
+    if (checking && !onThisMac) {
+      // The line of a finish at work is the checking line, in place of that it is running.
+    } else if (command === "join" && voicing) lines.push(`${shown}: ${VOICE_RUNNING}.`);
     else if (command) lines.push(`${shown}: ${command} is running.`);
+    for (const line of checkProblemLines(ctx, folder, shown, isGated(e))) lines.push(line);
     if (copying) lines.push(`${shown}: ${WORK_COPY_RUNNING}.`);
     let results = [];
     try {
@@ -2193,6 +2223,12 @@ export async function finishEpisode(ctx, found, answers = {}) {
   // revision. What it needs of the record and of that hand-off is checked at once, before any export is looked for (reelsWhy).
   const forReels = Boolean(answers.reels);
   let based = null;
+  const waitFor = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+  if (forReels && keptOnAMac(record) && typeof (record.finished || {}).handoff === "string") {
+    // A hand-off Dropbox lost or left short within the 15 minutes is put back from its check's copy first, so `missingWords` does not refuse it (ruling 34).
+    const busy = await restoreReads(ctx, { name: found.name, record, folder: found.folder, rels: [record.finished.handoff], rev: record.rev + 1 }, { wait: waitFor, log: logTo(ctx.home) });
+    if (busy) return refuse(ctx, busyWords(busy, shownName(record), { done: "nothing was changed", again: SAY_AGAIN }));
+  }
   if (forReels) {
     const got = reelsWhy(ctx, found, record);
     if (got.why) return refuse(ctx, got.why);
@@ -2223,6 +2259,11 @@ export async function finishEpisode(ctx, found, answers = {}) {
   const { v2 } = target;
   if (record.name && record.name.placeholder && (!v2 || recordKind(record) === "raw")) stops.push(`Give the episode its name first: it is still called "${record.name.text}", from the video's file name.`);
   if (!v2 && record.kind !== "short video" && !(record.title && record.title.approved)) stops.push("Approve a title first.");
+  if (keptOnAMac(record)) {
+    // A copy in final/ Dropbox lost or left short within the 15 minutes is put back from its check's copy before it is called "not whole" (ruling 34).
+    const busy = await restoreReads(ctx, { name: found.name, record, folder: found.folder, rels: Object.keys(record.files || {}).filter((rel) => rel.startsWith("final/")), rev: record.rev + 1 }, { wait: waitFor, log: logTo(ctx.home) });
+    if (busy) return refuse(ctx, busyWords(busy, shownName(record), { done: "nothing was changed", again: forReels ? SAY_AGAIN : 'Say "hand it off" again.' }));
+  }
   const { dropbox: problems, mac: onThisMac } = problemsOf(ctx, found, record);
   if (problems.length) stops.push(`${calledAs(ctx, found)} is not whole in Dropbox: ${problems.join(" ")}`);
   stops.push(...onThisMac);
@@ -2990,6 +3031,17 @@ async function resolveIn(ctx, found, keep) {
   }
   const aHere = existsSync(at(of));
   if (!isRecord && keep === "A" && !aHere) return refuse(ctx, `A, ${of}, is not there, so it cannot be kept. Say B. If that is not what you want, tell Jason.`);
+  // On a video kept on this Mac, B put in A's place in final/ is taken out of the check of the episode's copies, under its lock (ruling 18): the check would
+  // otherwise put back over B a copy of A's size. Nothing else is read: B is a conflicted copy, in no check, and A is replaced by her choice.
+  let hold = null;
+  let replaced = false;
+  if (keptOnAMac(record) && keep === "B" && !isRecord && of.startsWith("final/")) {
+    const waitFor = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+    const got = await takeOutOfCheck(ctx, { name: found.name, record, paths: [at(of)], rev: record.rev + 1 }, { wait: waitFor, log: logTo(ctx.home) });
+    if (got.busy) return refuse(ctx, busyWords(got.busy, name, { done: "nothing was changed", again: 'Say "sort out the conflict" again in a minute.' }));
+    hold = got;
+  }
+  try {
   // 1. Set aside, by the rule, every file this step replaces or deletes, and see each is whole there. A record copy kept as B,
   // or one in force already, sets the record of its number aside too; a record file itself is never deleted.
   const stamp = localStamp(new Date(ctx.now())).replace(/:/g, "-");
@@ -3111,6 +3163,7 @@ async function resolveIn(ctx, found, keep) {
   if (keep === "B" && !isRecord) {
     try {
       replaceIn(at(copy), at(of), ruleOpts(ctx));
+      replaced = true;
     } catch (e) {
       const why = plainWhy(e);
       let back = !aHere || existsSync(at(of));
@@ -3158,7 +3211,14 @@ async function resolveIn(ctx, found, keep) {
   const caveat = finishedFrom && listedBytes !== undefined && listedBytes !== keptBytes ? ` The record's finish (revision ${record.finished.revision}, on ${record.finished.on}) was made from the other side's version of it: say "finish the episode" again to make the hand-off from this one.` : "";
   const step = outOfStep();
   ctx.say(planText ? `Kept ${keep}. The plan's files are written from it. The other is set aside in history/.${caveat}${step}` : `Kept ${keep} of ${of}. The other is set aside in history/.${caveat}${step}`);
+  // A check of the episode's copies that waits for a conflicted copy to be sorted out is made soon after it is (ruling 36).
+  if (!step && keptOnAMac(record) && readPendingsOf(ctx.home, "final").some((p) => p.id === record.id && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root))) askAgent(ctx, name);
   return step ? 1 : 0;
+  } finally {
+    if (hold) {
+      if (hold.end({ put: replaced }).reopened) askAgent(ctx, name);
+    }
+  }
 }
 
 /** `free "<episode>"`: take away an episode's working copy and the renders of its HyperFrames projects from this Mac, to give the room
@@ -4049,7 +4109,7 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
       // A finish of the Reels (`finish "<episode>" reels`) on the other Mac has a late check of final/ to come, as a Final Cut finish has:
       // the hand-off written now would be put back over (plan PR 9, the review's C1). The first hand-off, and a revision with no Reel
       // in it, have none.
-      const waits = Object.keys(finished.parts || {}).some((key) => REEL_KEY.test(key)) ? lateCheckWaits(ctx, finished) : "";
+      const waits = !keptOnAMac(found.record) && Object.keys(finished.parts || {}).some((key) => REEL_KEY.test(key)) ? lateCheckWaits(ctx, finished) : "";
       if (waits) return refuse(ctx, waits);
       return importHandoff(ctx, found, record, done, unhanded);
     }
@@ -4078,6 +4138,14 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
   const unhandedAfterAsk = ask ? "" : unhanded;
   if (!parts.some((p) => p.toApply.length)) return save(ctx, found, { ...record, finished: withHeld({}) }, `${done}${ask}${keptNote}${unhandedAfterAsk}`);
   const finals = [...parts.flatMap((p) => [`${p.stem}.srt`, `${p.stem}.transcript.txt`, ...(p.part.words ? [p.part.words] : [])]), finished.handoff];
+  const local = keptOnAMac(found.record);
+  const waitFor = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+  const spellWords = { done: "nothing was changed", again: "Say it again in a minute." };
+  if (local) {
+    // A copy Dropbox lost or left short within the 15 minutes is put back from its check's copy before it is called gone (ruling 34).
+    const busy = await restoreReads(ctx, { name: found.name, record: found.record, folder: found.folder, rels: finals, rev: found.record.rev + 1 }, { wait: waitFor, log: logTo(ctx.home) });
+    if (busy) return refuse(ctx, busyWords(busy, shownName(found.record), spellWords));
+  }
   const gone = finals.find((rel) => !existsSync(fileOf(ctx, found, rel)));
   if (gone) return refuse(ctx, `${gone} is not in the episode's folder, so the final transcripts cannot be spelled again. Nothing was changed. Say finish again.`);
   const coming = finals.filter((rel) => !ctx.isWhole(fileOf(ctx, found, rel)));
@@ -4085,6 +4153,10 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: coming });
     return refuse(ctx, "Dropbox is bringing the final transcripts over to this Mac. Say it again when it is done. Nothing was changed.");
   }
+  // The ids of what it reads in final/, taken just before it reads them (ruling 34).
+  const ids = new Map();
+  if (local) for (const rel of finals) ids.set(fileOf(ctx, found, rel), fileId(fileOf(ctx, found, rel)));
+  let hold = null;
   const work = join(runsFolder(ctx.home), `spell-${process.pid}-${ctx.now()}`);
   mkdirSync(work, { recursive: true });
   const put = textWriter({ work, ...ruleOpts(ctx) });
@@ -4149,8 +4221,14 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
       acceptRev(ctx.home, found.record.id, found.record.rev);
       return 1;
     }
-    const waits = lateCheckWaits(ctx, finished);
+    const waits = local ? "" : lateCheckWaits(ctx, finished);
     if (waits) return refuse(ctx, waits);
+    if (local) {
+      // It takes what it puts out of the check of the episode's copies, under the check's lock (ruling 18).
+      const got = await takeOutOfCheck(ctx, { name: found.name, record: found.record, paths: writes.map(([rel]) => fileOf(ctx, found, rel)), reads: [...ids].map(([path, id]) => ({ path, id })), rev: found.record.rev + 1 }, { wait: waitFor, log: logTo(ctx.home) });
+      if (got.busy) return refuse(ctx, busyWords(got.busy, shownName(found.record), spellWords));
+      hold = got;
+    }
     const files = {};
     for (const [rel, text] of writes) {
       before.push([rel, readFileSync(fileOf(ctx, found, rel), "utf8")]);
@@ -4168,11 +4246,17 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
       const lost = putBack();
       if (lost.length) ctx.say(`${listed(lost)} could not be put back as it was. Tell Jason: the episode needs him.`);
     }
+    if (hold) {
+      const ended = hold.end({ put: code === 0 });
+      if (ended.reopened) askAgent(ctx, shownName(record));
+    }
     return code;
   } catch (e) {
     const lost = putBack();
+    if (hold) hold.end({ put: false });
     return refuse(ctx, `The final transcripts could not be spelled again (${e.code || "a file could not be read or put in"}). ${lost.length ? `${listed(lost)} could not be put back as it was. Tell Jason: the episode needs him.` : "Nothing was changed."}`);
   } finally {
+    if (hold) hold.end({ put: false });
     rmSync(work, { recursive: true, force: true });
   }
 }
@@ -5332,6 +5416,18 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { 
     return { code: 1 };
   }
   const opts = ruleOpts(ctx);
+  // On a video kept on this Mac, what is set aside or put in final/ is taken out of the check of the episode's copies, under its lock (ruling 18).
+  let hold = null;
+  const inFinal = aside.rels.filter((rel) => rel.startsWith("final/"));
+  if (keptOnAMac(base) && (inFinal.length || handoff)) {
+    const waitFor = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+    const got = await takeOutOfCheck(ctx, { name: found.name, record: base, paths: [...inFinal.map(pathOf), ...(handoff ? [pathOf(handoff.rel)] : [])], reads: inFinal.map((rel) => ({ path: pathOf(rel), id: null })), rev: base.rev + 1 }, { wait: waitFor, log: logTo(ctx.home) });
+    if (got.busy) {
+      ctx.say(busyWords(got.busy, shownName(base), { done: "nothing was changed", again: "Say it again in a minute." }));
+      return { code: 1 };
+    }
+    hold = got;
+  }
   const stamp = localStamp(new Date(ctx.now())).replace(/:/g, "-");
   const work = join(runsFolder(ctx.home), `again-${process.pid}-${ctx.now()}`);
   const put = textWriter({ work, ...opts });
@@ -5361,6 +5457,7 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { 
     for (const [rel, from] of aside.restore) putIn(rel, readFileSync(join(own, from), "utf8"));
     if (handoff) putIn(handoff.rel, handoff.text);
     writeEpisode(folder, { ...next, files }, { expectRev: base.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer: writerOf(ctx), home: ctx.home });
+    if (hold && hold.end({ put: true }).reopened) askAgent(ctx, shownName(next));
   } catch (e) {
     let lost = false;
     for (const r of replaced.reverse()) {
@@ -5376,12 +5473,14 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { 
     }
     // The copies in history/ are taken out again, but when a file could not be put back: then they are what is left of it.
     if (!lost) for (const copy of copies) rmSync(copy, { force: true });
+    if (hold) hold.end({ put: false });
     const changed = e.code === "CHANGED";
     const why = changed ? "this episode changed on the other Mac: open it again" : plainWhy(e);
     if (lost) ctx.say(quiet ? "Its earlier files could not all be put back as they were; a copy of each is in history/. Tell Jason: the episode needs him." : `${capital(why)}. A file could not be put back as it was; a copy of it is in history/. Tell Jason: the episode needs him.`);
     else ctx.say(quiet && !changed ? asideFailed(e.code || "an error") : `Nothing was changed: ${why}.`);
     return { code: 1 };
   } finally {
+    if (hold) hold.end({ put: false });
     rmSync(work, { recursive: true, force: true });
   }
   // Each file set aside, whole in history/ and listed there by the record, leaves the episode.
