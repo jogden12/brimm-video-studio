@@ -599,9 +599,10 @@ describe("an episode kept on the Mac Studio, on the Mac Studio", () => {
       writeFileSync(join(found.folder, "IMG_0042.words.json"), readFileSync(words));
       writeFileSync(words, "");
       const r = await on(w.studio, "episodes");
-      const told = r.said.filter((line) => line.startsWith("    A file of this video"));
+      // The file is kept on this Mac, where Dropbox brings nothing: it is said as not whole on this Mac, for Jason (B0-F13).
+      const told = r.said.filter((line) => /^    .*'s words is not whole on this Mac\. Ask Jason\.$/.test(line));
       assert.equal(told.length, 1, r.text);
-      assert.match(told[0], /: IMG_0042\.words\.json\./);
+      assert.doesNotMatch(r.text, /Dropbox is still bringing|A file of this video/);
     } finally {
       w.done();
     }
