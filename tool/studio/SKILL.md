@@ -23,6 +23,8 @@ The card's words are a proposal, for Jason and Sallie to settle.
 - Show a spelling as Studio printed it, letters and capitals as they are.
 - Call a part by the label Studio printed; never "the second talking part".
 
+A video `episodes` lists with "It is on <Mac>. Carry on there." under it waits for her on that Mac: ask no card for it here, and tell her so.
+
 When `episodes` prints `Planned card: {…}` under a video waiting for her answer, ask it first, on one `AskUserQuestion` exactly as that line gives it, word for word: never word it yourself.
 On an answer that starts "Footage for", ask `Part card: {…}` next, as given, then run `footage "<label>" "<title>" talking --client no`: the plan's title from her answer, screen or b-roll in place of talking as she chose, `--client yes` when she says it shows a client, a client's name or their work, and, when it says which shot, the number she gives you in the chat as `--shot <n>`.
 On "No", go on to the card below; for a video whose lines say "No sound", tell her it can only be footage for a planned video, and run `leave "<label>"`.

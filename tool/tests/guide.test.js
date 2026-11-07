@@ -197,6 +197,8 @@ const STAGE_ROWS = [
   [{ kind: null, waiting: true, elsewhere: true, mac: "Mac Studio" }, "answering-elsewhere", "It is being answered on the Mac Studio. Carry on there."],
   [{ heldAsSession: true }, "held-session", 'One of its other versions is a client or group session. Say "it was a session after all" for this one too.'],
   [{ elsewhere: true, mac: "Mac Studio", reading: "running" }, "open-elsewhere", "It is open on the Mac Studio. Carry on there."],
+  // Phase 3, L2: a video kept on another Mac (its record's `local`) is changed only there.
+  [{ onOtherMac: true, mac: "Mac Studio", reading: "running" }, "on-other-mac", "It is on the Mac Studio. Carry on there."],
   [{ readingsOff: true, reading: "none" }, "readings-off", "Readings are off on this Mac: ask Jason."],
   [{ reading: "running" }, "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
   [{ reading: "none" }, "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
@@ -223,6 +225,7 @@ const STAGE_ROWS = [
   [SESSION({ choice: null, teachingsOn: false }), "session-off", OFF],
   [SESSION({ emptyOwed: true }), "session-empty-owed", 'Say "it was a session after all" again: its empty revision for the BRIMM Ops page is still to be written.'],
   [{ ...SESSION(), elsewhere: true, mac: "Mac Studio" }, "open-elsewhere", "It is open on the Mac Studio. Carry on there."],
+  [{ ...SESSION({ choice: null }), onOtherMac: true, mac: "Mac Studio" }, "on-other-mac", "It is on the Mac Studio. Carry on there."],
   [{ ...SESSION(), reading: "running" }, "session-reading", 'Claude is reading its teachings. A notice comes when it is done; then say "what did Claude find?".'],
   [{ ...SESSION({ teachingsOn: false }), reading: "none" }, "session-off", OFF],
   [{ ...SESSION(), reading: "failed" }, "reading-failed", 'Claude\'s reading of it did not finish. Say "how far is it?" to see why.'],
@@ -525,6 +528,50 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
   });
   it("is the same for a Reel's project: a project here is the main video's, and a copy at work beside it is not said", () => {
     assert.equal(nextFor({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT(), copy: { left: 90, usual: null } }) }, NONE, NOW).stage, "in-app");
+  });
+});
+
+describe("the next step for a video or a session kept on another Mac (Phase 3, L2; D3)", () => {
+  /** What edit.js reads of a video whose record says it is kept on the Mac Studio, on another Mac: `onOtherMac`, with the Mac in `mac`. */
+  const KEPT = { onOtherMac: true, mac: "Mac Studio" };
+  const ON_STUDIO = { stage: "on-other-mac", text: "It is on the Mac Studio. Carry on there." };
+  const PLANNED_FACTS = { kind: null, planned: { route: "script", voice: null, footage: "", waiting: [], joining: false, joinFailed: false, set: true, project: false } };
+  it("is that Mac's, whatever the video's own step would be here, until its hand-off is written", () => {
+    for (const over of [
+      {}, { reading: "running" }, { reading: "none" }, { reading: "failed" }, { readingsOff: true, reading: "none" }, { offersAnswered: false }, { v2: false },
+      RAW({ placeholder: true }), RAW(), APP({ copy: { left: 90, usual: null } }), APP({ way: "hyperframes", project: PROJECT() }), APP({ way: "hyperframes", project: PROJECT({ exported: true }) }),
+      APP({ way: "hyperframes", app: false }), CLIP(), CLIP({ v2: false }), RAW({ gated: true }), RAW({ finishRunning: true }),
+      // A video with no kind, which edit.js does not say is waiting here (its card is not offered on this Mac), and a plan with footage to come.
+      { kind: null }, PLANNED_FACTS, { ...PLANNED_FACTS, planned: { ...PLANNED_FACTS.planned, route: "explainer", voice: "heygen" } },
+      // The other Mac's claim, which a command may still write there, says no more than that it is there.
+      { elsewhere: true }
+    ]) assert.deepEqual(shown(nextFor({ ...BASE, ...over, ...KEPT }, NONE, NOW)), ON_STUDIO, JSON.stringify(over));
+    assert.deepEqual(shown(nextFor({ ...BASE, ...KEPT, mac: "Sallie's laptop" }, NONE, NOW)), { stage: "on-other-mac", text: "It is on Sallie's laptop. Carry on there." });
+  });
+  it("stays that Mac's after a hand-off when it has a conflict or is held beside a session (keeperFirst), for a video and for a session", () => {
+    assert.deepEqual(shown(nextFor({ ...BASE, ...KEPT, keeperFirst: true, handoff: OPS_HANDOFF }, NONE, NOW)), ON_STUDIO);
+    assert.deepEqual(shown(nextFor({ ...BASE, ...RAW(), ...KEPT, keeperFirst: true, handoff: { ...OPS_HANDOFF, kind: "raw" } }, NONE, NOW)), ON_STUDIO);
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), ...KEPT, keeperFirst: true, handoff: { ...OPS_HANDOFF, kind: "session" } }, NONE, NOW)), ON_STUDIO);
+  });
+  it("is a session's that Mac's too: its choice, its reading, its items, its hand-off and its empty revision are all made there", () => {
+    for (const over of [
+      SESSION({ choice: null }), SESSION({ choice: null, teachingsOn: false }), { ...SESSION(), reading: "running" }, { ...SESSION({ teachingsOn: false }), reading: "none" }, { ...SESSION(), reading: "failed" },
+      SESSION({ undecided: 3 }), SESSION(), { ...SESSION(), v2: false }, SESSION({ emptyOwed: true }), { ...SESSION(), elsewhere: true }
+    ]) assert.deepEqual(shown(nextFor({ ...BASE, ...over, ...KEPT }, NONE, NOW)), ON_STUDIO, JSON.stringify(over));
+  });
+  it("is the BRIMM Ops page's step once a hand-off is written, which she takes on any Mac, and done when nothing is left", () => {
+    assert.deepEqual(shown(nextFor({ ...BASE, ...KEPT, handoff: OPS_HANDOFF }, NONE, NOW)), { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.taken}` });
+    assert.equal(nextFor({ ...BASE, ...RAW(), ...KEPT, handoff: { ...OPS_HANDOFF, kind: "raw" } }, NONE, NOW).stage, "ops");
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), ...KEPT, handoff: { ...OPS_HANDOFF, kind: "session" } }, NONE, NOW)), { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.sessionTaken}` });
+    const EMPTY = { ...OPS_HANDOFF, revision: 2, kind: "session", emptyAt: 2, file: "" };
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), ...KEPT, handoff: EMPTY }, NONE, NOW)), { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.withdrawn}` });
+    assert.deepEqual(nextFor({ ...BASE, ...SESSION({ choice: "transcript only" }), ...KEPT }, NONE, NOW), { done: true });
+    assert.deepEqual(nextFor({ ...BASE, ...KEPT, handoff: OPS_HANDOFF }, { ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind: "episode", step: "cascade", revision: 1, at: AT } } }, NOW), { done: true });
+  });
+  it("keeps the words of a video open on the other Mac, which is not kept there", () => {
+    assert.deepEqual(shown(nextFor({ ...BASE, elsewhere: true, mac: "Mac Studio", reading: "running" }, NONE, NOW)), { stage: "open-elsewhere", text: "It is open on the Mac Studio. Carry on there." });
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), elsewhere: true, mac: "Mac Studio" }, NONE, NOW)), { stage: "open-elsewhere", text: "It is open on the Mac Studio. Carry on there." });
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), onOtherMac: false, elsewhere: true, mac: "Mac Studio" }, NONE, NOW)), { stage: "open-elsewhere", text: "It is open on the Mac Studio. Carry on there." });
   });
 });
 
