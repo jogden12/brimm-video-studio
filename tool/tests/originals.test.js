@@ -230,7 +230,7 @@ export function depsOf(t, over = {}) {
       said.add(line);
       t.logs.push(line);
     },
-    clone: t.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: () => true, onlineOnly: () => true, ...over
+    clone: t.ctx.deps.clone, sameDisk: () => true, isWhole: () => true, uploaded: (path) => (existsSync(path) ? true : null), onlineOnly: () => true, ...over
   };
 }
 /** The pending of a recording, read again, and checked. */
@@ -524,6 +524,18 @@ describe("L6: the check", () => {
     t.done();
   });
 
+  it("B0-F23 the delete under the lock asks again that the record in force lists the copy: a record Dropbox lost meanwhile keeps the Mac's copy", () => {
+    const t = world();
+    const found = local(t);
+    moveIt(t, found);
+    const lostRev = reread(found).rev;
+    t.advance(LATE_CHECK_MS);
+    look(t, depsOf(t, { uploaded: () => { rmSync(recordFile(found.folder, lostRev)); return true; } }));
+    assert.equal(existsSync(join(found.video, FILE)), true);
+    assert.equal(readPendingAt(t.home, `original/${ID}.json`).owed, true);
+    t.done();
+  });
+
   it("O2: not uploaded yet keeps the Mac's copy", () => {
     const t = world();
     const found = local(t);
@@ -547,18 +559,18 @@ describe("L6: the check", () => {
   });
 
   it("O3: a copy Dropbox lost, cut short, or put back older at its size is put back from the Mac's copy, and its 15 minutes start again", () => {
-    for (const harm of [(to) => rmSync(to), (to) => writeFileSync(to, "the rec"), (to) => writeFileSync(to, "the recordinG")]) {
+    for (const [harm, sameSize] of [[(to) => rmSync(to), false], [(to) => writeFileSync(to, "the rec"), false], [(to) => writeFileSync(to, "the recordinG"), true]]) {
       const t = world();
       const found = local(t);
       moveIt(t, found);
       harm(originalOf(found));
       t.advance(LATE_CHECK_MS);
       const asked = [];
-      look(t, depsOf(t, { uploaded: (path) => { asked.push(path); return true; } }));
+      look(t, depsOf(t, { uploaded: (path) => { asked.push(path); return existsSync(path) ? true : null; } }));
       assert.equal(textOf(originalOf(found)), RECORDING);
       assert.equal(readPendingAt(t.home, `original/${ID}.json`).lastCopy, t.now());
-      // The flag is asked first (the review's round), and the put-back follows it; the Mac's copy is not taken off in this look.
-      assert.deepEqual(asked, [originalOf(found)]);
+      // A copy not there or at another size is put back at once (table J's stat rows), asking Dropbox nothing; a copy at its size is asked about first.
+      assert.deepEqual(asked, sameSize ? [originalOf(found)] : []);
       assert.equal(existsSync(join(found.video, FILE)), true);
       assert.equal(t.logs.filter((l) => l.startsWith(`${SHOWN}: its copy in Original files was not whole in Dropbox (`)).length, 1);
       t.done();

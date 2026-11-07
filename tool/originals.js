@@ -299,6 +299,20 @@ export function checkOriginal(p, deps) {
     }
   }
 
+  /** Put the copy in Original files back from the recording on this Mac, and start its 15 minutes again. */
+  function putBack(what) {
+    const e = p.entries[0];
+    try {
+      mkdirSync(dirname(e.to), { recursive: true });
+      if (existsSync(e.to)) replaceIn(e.from, e.to, opts);
+      else cloneIn(e.from, e.to, opts);
+    } catch (err) {
+      return problem(`its copy in Original files could not be put back in Dropbox (${code(err)}).`);
+    }
+    writePending(home, { ...base(p), lastCopy: clock() });
+    log(`${shown}: its copy in Original files was not whole in Dropbox (${what}), so it is put back from the recording on this Mac.`);
+  }
+
   /** Algorithm O, steps 4-9. */
   function check() {
     const e = p.entries[0];
@@ -317,7 +331,11 @@ export function checkOriginal(p, deps) {
       if (putAway()) log(`${shown}: its recording on this Mac changed after it was copied into Original files, so it is kept on this Mac.`);
     };
     if (!sameFile(e.from, p.macCopy)) return changed();
-    // 6 and 7. The flag is asked first: a copy Dropbox has not uploaded yet costs no read of the recording. Table J's byte compare comes once it says uploaded.
+    // Table J's rows that only look at the file: a copy not there (J2) or at another size (J3) is put back at once. Dropbox could not say it is uploaded,
+    // and no file is a file nothing uploads.
+    const stat = statSync(e.to, { throwIfNoEntry: false });
+    if (!stat || stat.size !== e.bytes) return putBack(!stat ? "it is not there" : `it is ${stat.size} bytes there, not ${e.bytes}`);
+    // 6 and 7. The flag is asked next: a copy Dropbox has not uploaded yet costs no read of the recording. Table J's byte compare comes once it says uploaded.
     const asked = deps.uploaded || ((path) => uploadedOf(path, { swift: (deps.tools && deps.tools.swift) || "" }));
     if (asked(e.to) !== true) {
       writePending(home, { ...base(p), nextLook: clock() + UPLOAD_LOOK_MS, lookUntil: Number.isFinite(p.lookUntil) ? p.lookUntil : clock() + WAIT_LOOK_FOR_MS });
@@ -332,18 +350,7 @@ export function checkOriginal(p, deps) {
       log(`${shown}: the record no longer lists its copy in Original files, so it is listed again.`);
       return;
     }
-    if (judged.put) {
-      try {
-        mkdirSync(dirname(e.to), { recursive: true });
-        if (existsSync(e.to)) replaceIn(e.from, e.to, opts);
-        else cloneIn(e.from, e.to, opts);
-      } catch (err) {
-        return problem(`its copy in Original files could not be put back in Dropbox (${code(err)}).`);
-      }
-      writePending(home, { ...base(p), lastCopy: clock() });
-      log(`${shown}: its copy in Original files was not whole in Dropbox (${judged.put}), so it is put back from the recording on this Mac.`);
-      return;
-    }
+    if (judged.put) return putBack(judged.put);
     // 8. No run at work on it.
     const names = [...new Set([p.name, ...(p.of && typeof p.of.name === "string" ? [p.of.name] : [])])];
     if (names.some((n) => runningRun(home, n, alive, workCopyLockOf(home, n)))) return putOff();
@@ -357,6 +364,13 @@ export function checkOriginal(p, deps) {
       if (unreadable(latest)) return wait(recordLater);
       if (asSession(linksOf(p.root), { folder: p.folder, record: latest.record })) {
         if (putAway()) log(ORIGINALS_SESSION(heldName(latest.record)));
+        return;
+      }
+      // The record in force still lists the copy at the move's bytes: if Dropbox lost the move's record meanwhile, nothing is taken off; the copy is owed again.
+      const L = latest.record;
+      if (L.files[rel] !== e.bytes || !(typeof L.local === "object" && L.local !== null && typeof L.local.original === "object" && L.local.original !== null)) {
+        writePending(home, { ...base(p), owed: true, lastCopy: clock() });
+        log(`${shown}: the record no longer lists its copy in Original files, so it is listed again.`);
         return;
       }
       if (!sameFile(e.from, p.macCopy)) return changed();
