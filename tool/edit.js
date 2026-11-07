@@ -1984,6 +1984,8 @@ const refuse = (ctx, why) => {
     and Studio checks Dropbox's copies at <time>. <again>"; with no early result of that run it is the generic one. `record` is the
     episode's record in force. */
 function stoppedWords(ctx, found, record, { generic, again, of = "" }) {
+  // A video kept on this Mac waits for no check (Phase 3, L5, ruling 22): a run that stops a command is a run, whatever it is at.
+  if (keptOnAMac(record)) return generic;
   const checking = checkingNow(ctx.home, found.name, record, ctx.alive);
   if (checking) return `The hand-off${of} is written, and Studio checks Dropbox's copies at ${clockAt(checking.due)}. ${again}`;
   // A read run that has put its reading in the record and only waits for its own late check (late-wait.js readingCheckAt; plan R1d).
@@ -6187,7 +6189,7 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
   // A finish at work that has written its hand-off and only waits for its late check (finish-check.js): she need not wait for it. It is
   // asked only of a finish at work, and of no video the gate holds. It is given the time of the check as this Mac's clock says it (`at`), for
   // the step of the Reels that wait for it.
-  const checked = running === "finish" && !hidden ? checkingNow(ctx.home, e.name, r, ctx.alive) : null;
+  const checked = running === "finish" && !hidden && !keptOnAMac(r) ? checkingNow(ctx.home, e.name, r, ctx.alive) : null;
   const checking = checked ? { ...checked, at: clockAt(checked.due) } : null;
   // The late check of its last finish found a problem after she was told she could go on, and no later finish has ended well since (the
   // note finish.js leaves): asked only of a video with a hand-off that is not a session's, and of none the gate holds.

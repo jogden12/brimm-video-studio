@@ -19,7 +19,7 @@ import { finalTranscript, spelled, spelledPairs, spelledCaptions } from "./final
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredths, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, readThrough, LATE_CHECK_MS } from "./dropbox.js";
-import { clearChecking, clearProblem, flagProblem, markChecking } from "./finish-check.js";
+import { clearChecking, clearProblem, flagProblem, markChecking, problemNotice } from "./finish-check.js";
 import { videoSeconds, measured } from "./finish-time.js";
 import { KEPT as PROJECT_KEPT, wordsIn } from "./app.js";
 import { colourNote, firstWordsMatch, isExportOf, shapeFault, soundFault } from "./exports.js";
@@ -52,10 +52,6 @@ const MOST_LOOKS = 120;
     "What she is told, and when"). */
 const WAITING = "Waiting for HyperFrames' exports";
 const STEPS = [WAITING, "Checking the files", "Writing the transcripts", "Cutting the Story parts", "Copying into the episode"];
-
-/** The notice a finish posts on this Mac when its late check fails after it said she could go on: the video, and what to say to see
-    why (the result says the same). */
-const problemNotice = (name) => `The check of ${name}'s copies in Dropbox found a problem: say "how far is it?"`;
 
 const capital = (text) => text[0].toUpperCase() + text.slice(1);
 const stem = (name) => basename(name, extname(name));
