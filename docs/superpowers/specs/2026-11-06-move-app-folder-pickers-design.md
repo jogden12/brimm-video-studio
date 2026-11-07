@@ -2,7 +2,7 @@
 
 6 November 2026. Jason answered its questions on 7 November (below). Nothing is built until he approves the build. Branch `claude/studio-move-app-folders`, from main 673f770.
 
-It needs Phase 3's installer options, so it is built and merged after Phase 3. Those options are L1 (af3d75a) and L1b (c125ae7) on `claude/studio-local-folder`, reviewed and not merged; L1c and L9 are coming. Phase 3's plan is `docs/superpowers/plans/2026-11-06-local-working-folder-plan.md` on that branch. Its rulings D4, D7, D8, D10, D11 and D12 are cited here by number.
+It needs Phase 3's installer options, so it is built and merged after Phase 3. Those options are L1 (af3d75a) and L1b (c125ae7) on `claude/studio-local-folder`, reviewed and not merged. L1c (f690ed9) is merged into that branch, and its lines are folded in here (7 November); L5 and L9 are coming. Phase 3's plan is `docs/superpowers/plans/2026-11-06-local-working-folder-plan.md` on that branch. Its rulings D4, D7, D8, D10, D11 and D12 are cited here by number.
 
 This is version 5. Each version was attacked before the next:
 - **Version 1** was read by a builder and attacked once.
@@ -18,7 +18,7 @@ Every serious finding is in this version or its plan, with most of the minor one
   - A y takes the suggested folder: BRIMM Video Work › Drop, and Downloads.
   - A c opens macOS's own folder chooser, with New Folder.
 - The drop folder leaves Dropbox at the move. The old Dropbox drop folder is counted at the end of the run, and is deleted by hand only once it is empty.
-- A cloud drop folder gets Studio's warning, and is told that every video dropped there, a client session too, goes up to that cloud.
+- A cloud drop folder gets Studio's warning, which since L1c says that every video dropped there, a client or group session's recording too, goes up to that cloud.
 - The app refuses a drop folder that isn't empty, and an exports folder from which Studio or the transcript tool would take the export.
 - The chooser is a small helper app inside Move to Studio. It is started the way Finder starts an app, so that it comes in front with the keyboard, and falls back to a second way if it can't be shown.
 - A try mode, started through the app itself, shows the chooser on each Mac before its move, and changes nothing.
@@ -110,17 +110,27 @@ There is no warning for a cloud exports folder. Jason: "Cloud based folders are 
 Each pick is checked by the app's own checks (below) right after it is made. Then the print runs as today (`installer_print`), with the options below. Studio's installer is what checks the picks against D11.
 
 - **A pick the installer refuses** is asked about again. The installer's print ends 2 with its reason on its first line. The app says those words, then asks the refused folder's question again, with c alone when y would give the same folder. The print then runs again with both folders.
-  - **The two folders nested.** Today that line is `Not written: the drop folder cannot be the exports folder, or inside it, or hold it.` The app asks again the question of the folder picked on this run. When both were picked on this run, it asks the exports question.
-  - **The exports question** is asked again for any `Not written: the exports folder …` line, which comes from L1c if Phase 3 adds it.
+  - **The app says only that first line.** When the run named no exports folder, L1c adds a second line after an exports refusal ("The exports folder is <path>, kept from before: name another with --exports-folder.", or "… as none is set: …"). It is for a person at Terminal, and the app does not say it. `Not changed:` lines come only from `settings.js set`, which the app never runs.
+  - **The two folders nested.** That line is `Not written: the drop folder cannot be the exports folder, or inside it, or hold it.`, whichever of Studio's checks finds it. The app asks again the question of the folder picked on this run. When both were picked on this run, it asks the exports question.
+  - **The exports question** is asked again for any `Not written: the exports folder …` line. Since L1c these are:
+    - `… cannot be <what>, or inside it.`, `<what>` being one of: Episodes, References, Drop or Unedited Video in BRIMM Video; Drop in BRIMM Video Work; BRIMM Video Work; Studio's settings folder; BRIMM VIDEO Transfer; BRIMM VIDEO MacBook; a folder the transcript tool watches; BRIMM Video Studio; BRIMM Video Workshop; Zoom's recordings;
+    - `… cannot be a drop folder, and <Mac> has marked <folder> as its own (…)`, and its form for a folder inside one;
+    - `… must be named by a whole path with no . or .. in it.`
   - **The drop question** is asked again for every other line that means the drop folder was refused:
-    - any `Not written: the drop folder …` line but `Not written: the drop folder would change from …`;
+    - any `Not written: the drop folder …` line but `Not written: the drop folder would change from …`. Since L1c these include: `… holds a video already …` (or `… holds <n> videos already …`); `… could not be read (<code>) …`; `… cannot be BRIMM VIDEO Transfer, or inside it, or hold it.` and the same for BRIMM VIDEO MacBook; `… must be named by a whole path with no . or .. in it.`;
     - `Not written: the folder that is to hold the drop folder is not there.`;
     - `The folder <path> is watched by <Mac> already. A drop folder is watched by one Mac only.`;
     - `A folder is for transcripts or for unedited video, and not for both: …`.
+  - **Which refusals keep their y.** `… could not be read …` keeps its y, like the app's own "cannot look", since allowing Terminal cures it. `… holds a video already …` is the app's not-empty refusal, met late: when the chooser then cannot be shown, the stop says "Empty it in Finder". Every other installer refusal stops with the "Tell Jason" words then.
+  - **Dots.** The app makes every pick whole (`${pick:A}`), so it never gives the installer a `.` or `..` part. The dots lines can come only from a bug, and are read like any other.
 
-  Any other refusal stops the run, as today. The likeliest is the old drop folder's check, `Not written: the drop folder would change from …`. See "What the old drop folder holds".
-- **A drop folder in a cloud folder.** The print holds D11's line, `Warning: this drop folder is in <name>. A video still syncing there can be imported late, or twice. A folder on this Mac is safer.`
-  - The app says it, and adds: "Every video dropped there, a client session too, goes up to <name>, and stays in its deleted files after Studio takes it out." Phase 3's L1c may put that sentence in the Warning line itself. If it does, the app does not add its own.
+  Any other refusal stops the run, as today. The likeliest is the old drop folder's check, `Not written: the drop folder would change from …`. Studio runs it only after both folders pass its own checks, so it comes for a pick that is empty and allowed. See "What the old drop folder holds".
+- **A drop folder in a cloud folder.** The print holds D11's line, with L1c's sessions sentence in it. For Dropbox, iCloud Drive or another cloud folder, `<name>` being Studio's `cloudFolder`:
+  `Warning: this drop folder is in <name>. Every video dropped there goes up to that cloud, a client or group session's recording too. A video still syncing there can be imported late, or twice. A folder on this Mac is safer.`
+  For a folder under Desktop or Documents:
+  `Warning: this drop folder is in iCloud Drive, if it keeps Desktop & Documents. If it does, every video dropped there goes up to it, a client or group session's recording too. A video still syncing there can be imported late, or twice. A folder on this Mac is safer.`
+  - The app says the line as the print gives it, and adds nothing: the line itself now says that sessions go up to the cloud. Both forms get the cloud question.
+  - The line comes in the print's summary, and again after the real install's "Done.". The app reads the first one in the print, and asks once per print.
   - Then it asks: "Type y and press Return to use it anyway, or c and press Return to choose another. Anything else stops:".
   - A y holds for that folder, by real path, for the rest of the run. It is not asked again when the print is shown again, after a `claude update` or after an exports folder is picked again. A different drop folder in a cloud is asked about afresh.
   - A later run asks again only if it gives the installer a new drop folder. A folder the settings already name was answered on the run that wrote it.
@@ -131,8 +141,9 @@ Each pick is checked by the app's own checks (below) right after it is made. The
 - **Privacy questions.** Before the real install's question, the app says which questions macOS may still ask. It decides by asking Studio's own `needsFilesAccess` and `cloudFolder` (`settings.js`, through node), never by its own list.
   - **On every run:** "Studio looks in Downloads for exports, whatever is picked. macOS may ask once whether Claude Code may access files in your Downloads folder, the first time the chat on this Mac hands off a video and looks for its export. It may then ask once whether node may, about 15 minutes later, when Studio deletes that export from Downloads after its copies in Dropbox are checked. Choose Allow each time."
     - Settled 7 November (finding 10, Jason: "Yes, let it delete"). From Phase 3's L5 on, the launch agent's node (`/opt/homebrew/bin/node`) reads Downloads and deletes the export there, on each MacBook and on the Mac Studio. So the line names node as well as Claude Code.
-    - The words above are a draft. Studio's own `  Files and Folders:` line keeps its start and gets new words in L1c and L5. The app's line takes the exact text Phase 3's session sends when those are built.
-  - **Dropbox is decided first,** by `cloudFolder`: L1c's `needsFilesAccess` will also cover `~/Library/CloudStorage`, Dropbox included.
+    - The words above are a draft. They take the exact text Phase 3's session sends when L5 is built, which gives Studio's `  Files and Folders:` line its Downloads words.
+  - **Studio's own line, in the print.** Since L1c it reads: `  Files and Folders:  macOS may ask whether node may read this folder, and again after node is updated: choose Allow each time (in System Settings, Privacy & Security, Files and Folders, if it was refused); it may ask the same of the app her chat runs in, the first time she asks what's waiting`. It comes whenever `needsFilesAccess` is yes, for iCloud Drive and every `~/Library/CloudStorage` folder too, Dropbox's included. The app's own notes below come before the real install, in the app's words. On a moved Mac, Studio's line also shows for a drop folder in Dropbox, where node and Claude Code read already. It says "may", so the two don't disagree.
+  - **Dropbox is decided first,** by `cloudFolder`, since L1c's `needsFilesAccess` covers `~/Library/CloudStorage`, Dropbox included.
   - **For a drop folder under Desktop or Documents, in iCloud Drive or another cloud folder, or on another disk:** "macOS may also ask whether node may read <folder>, at the first import, and whether Claude Code may, the first time the chat on this Mac looks there ("what's waiting?"). Choose Allow each time. A Don't Allow is undone in System Settings › Privacy & Security › Files and Folders, under that name. macOS may ask node again after Homebrew updates it, and until someone clicks Allow, Studio sees no video dropped there." Terminal's own question came already, at the app's check that the folder is empty.
   - **Dropbox** brings these questions only on a Mac set up fresh. On a moved Mac, node and Claude Code read Dropbox already.
   - **For an exports folder in one of those places,** or one whose look for a marker passed over a folder Terminal could not open: "macOS may ask whether Claude Code may look in <folder>, at the first hand-off. Choose Allow."
@@ -165,13 +176,14 @@ The lines that matter, the question, the look again at the old drop folder and t
 
 These checks run right after each pick, before the installer's print, so a pick they refuse never reaches the print or the cloud question. Each refusal says why, and asks the question again: with c alone when y would give the same folder.
 - **How folders are compared.** By real path, letter case folded, as Studio's `sameOrNested` compares them. Studio's `sameFolder`, which D12 uses for Downloads, compares real paths as spelled.
+  - **Which way.** A drop folder is refused when it is, is inside, or holds one of the folders below, as L1c's `dropFolderFault` does. An exports folder is refused only when it is, or is inside, one, as L1c's `exportsFolderFault` does. A folder that holds one lower down, such as BRIMM Video itself or The BRIMM DB, will do for exports, as Studio takes it.
 - **How a pick is first taken.** It is made whole (`${pick:A}`), and must be a folder.
 
 For either folder:
 - **A line break.** A folder whose path holds a line break is refused: "A folder whose name holds a line break can't be used. Choose another." The installer reads its plan line by line, and the marks are lines.
-- **Not the transcript tool's.** A folder is refused when it is, or is inside, any of these:
-  - `BRIMM VIDEO Transfer` beside BRIMM Video in Dropbox (`${ROOT:A:h}`), which Studio gates (`places.js`);
-  - any folder this Mac's transcript tool watches: the `WatchPaths` of `~/Library/LaunchAgents/com.thebrimm.transcribe.plist`, or of its `.plist.off`.
+- **Not the transcript tool's.** A folder is refused by these, the way above:
+  - `BRIMM VIDEO Transfer` or `BRIMM VIDEO MacBook` beside BRIMM Video in Dropbox (`${ROOT:A:h}`), as L1c names them: the Mac Studio's transcript tool watches the first, and Jason's MacBook's watches the second while he is away;
+  - any folder this Mac's transcript tool watches: the `WatchPaths` of `~/Library/LaunchAgents/com.thebrimm.transcribe.plist`. For the exports folder, those of its `.plist.off` too. A drop folder that only the `.plist.off` lists is taken when empty, as L1c takes it.
 
   The transcript tool takes each video put there and files it away. "<folder> is watched by the transcript tool, which takes each video put there. Choose another."
 
@@ -188,16 +200,17 @@ For the exports folder, which Studio checks only for being a whole path and apar
 - **Downloads is never looked in.** Downloads, by y or by a pick that is Downloads or inside it by real path, takes no check that reads inside it. D11 keeps every drop folder out of it, and none of Studio's folders is there. It still takes the two checks that read nothing inside it: a line break, and the transcript tool's folders.
   - So the suggested answer brings no question from macOS at the move.
   - A folder inside Downloads gets one more line in its note: "Studio tidies only Downloads itself, so exports in this folder are never tidied."
-- **Not one of Studio's folders, and not a drop folder.** It is refused when it is, or is inside, any of these:
+- **Not one of Studio's folders, and not a drop folder.** It is refused when it is, or is inside, any of these, the list of L1c's `exportsFolderFault`:
   - BRIMM Video's `Drop`, `Unedited Video`, `Episodes` or `References`;
-  - BRIMM Video Work;
+  - BRIMM Video Work, `Drop` in it included;
+  - Studio's settings folder, `~/Library/Application Support/BRIMM Video`;
   - her chat's folder `~/BRIMM Video Studio`, or the workshop `~/BRIMM Video Workshop`;
-  - Zoom's recordings folder: the settings' `zoomFolder`, or `~/Documents/Zoom`;
-  - a folder that holds `.brimm-watched-by`, or is inside one. This is looked for in the folder and each folder above it, where Terminal can look. A place Terminal cannot look in is passed over, not refused, and the privacy note then names Claude Code's question.
+  - Zoom's recordings folder: the settings' `zoomFolder`, or `~/Documents/Zoom`. Its real path is asked only when the pick could be in or under Documents (by real path or as spelled), or Zoom's folder is not under Documents. That is L1c's rule, so that a pick elsewhere brings no question from macOS about Documents;
+  - a folder that holds `.brimm-watched-by`, or is inside one. This is looked for in the folder and each folder above it, where Terminal can look, and never in Downloads or below it. A place Terminal cannot look in is passed over, not refused, and the privacy note then names Claude Code's question.
 
   An export saved in a drop folder would be imported as a new video, and its original taken out. The words: "Exports can't go in <folder>: it is one of Studio's own folders, or a drop folder, where an export would be taken. Choose another."
 
-These rules went to Phase 3 as findings, and L1c is adding them to the installer. The app's checks stay even then, since they come before the print, and the installer's become a second guard.
+These rules went to Phase 3 as findings, and L1c added them to the installer (f690ed9). The app's checks stay, since they come before the print, and the installer's are a second guard. The app is stricter than Studio in two places only. It refuses a drop folder Terminal cannot look in before Studio's own "could not be read" does, with words that name Terminal. And it refuses a drop folder holding anything but `.DS_Store` and the marker, where Studio refuses only a video or a file still arriving: a drop folder is one that only its person drops into.
 
 ## What the installer is given
 
@@ -446,7 +459,7 @@ Tests come first, in `tool/tests/move-app.test.js`, `tool/tests/move-app-build.t
     - Every other refused pick asks the drop question again.
     - y that would give the refused folder again is asked with c alone.
     - The old folder's refusal stops.
-  - **The cloud question.** It is said with the sessions sentence, and c picks again. A y holds for that folder when the print is shown again. A different cloud folder is asked about afresh.
+  - **The cloud question.** It comes after the Warning line as the print gives it, for Dropbox and for a folder under Desktop, with no sentence added by the app, and c picks again. A y holds for that folder when the print is shown again. A different cloud folder is asked about afresh.
   - **Claude Code's update.** A print shown again after a refused pick does not count as a try at updating Claude Code.
   - **Privacy.** The Downloads line on every run. The note for a drop folder under Desktop, none for the suggested drop folder, and none for Dropbox on a moved Mac.
   - **The app's own checks:**
@@ -458,8 +471,11 @@ Tests come first, in `tool/tests/move-app.test.js`, `tool/tests/move-app-build.t
     - a drop folder Terminal cannot read (mode 000), refused, not taken as empty;
     - Downloads at mode 000, accepted by y and never looked in;
     - a folder inside Downloads, with its note;
-    - an exports folder in `Episodes`, in BRIMM Video Work, in `~/BRIMM Video Workshop`, or under a folder holding `.brimm-watched-by`;
-    - `BRIMM VIDEO Transfer`, or a folder a made-up transcribe plist watches, for either pick.
+    - an exports folder in `Episodes`, in BRIMM Video Work, in Studio's settings folder, in `~/BRIMM Video Workshop`, or under a folder holding `.brimm-watched-by`;
+    - an exports folder that holds BRIMM Video lower down, taken;
+    - Zoom's folder under Documents at mode 000, with an exports pick elsewhere: taken, and Zoom's folder never looked at;
+    - `BRIMM VIDEO Transfer` and `BRIMM VIDEO MacBook`, or a folder a made-up transcribe plist watches, for either pick; a drop folder holding `BRIMM VIDEO Transfer`, refused;
+    - a folder only a made-up `.plist.off` lists: refused for exports, taken for the drop folder when empty.
   - **Later runs:**
     - a Mac with `dropPath`: y keeps it, with no drop option, and c gives `--drop-folder`;
     - the "Last time" pick, from the marks;
@@ -486,11 +502,11 @@ Tests come first, in `tool/tests/move-app.test.js`, `tool/tests/move-app-build.t
   - Then the chooser closes, and the test sends a lone Return. The run must stop, and must have said "Keys typed while the window was open were not taken as answers."
   - The test is skipped where `/usr/bin/script` is missing.
 - **Three ties to Studio's real code**, in `move-app-ties.test.js`. Every other test uses stand-ins, and Phase 3's L1c and L9 still change its words.
-  - **Tie 1** runs Studio's `settings.js` `plan` (`settingsMain(["plan", …])`) for each of `dropFolderFault`'s refusals, the nesting one, and the old folder's. It feeds what it says to the move script's own reader. Each must be read as a refused pick of the right folder, and the old folder's as a stop.
+  - **Tie 1** runs Studio's `settings.js` `plan` (`settingsMain(["plan", …])`) for each of `dropFolderFault`'s refusals, each of `exportsFolderFault`'s, the nesting one, and the old folder's. It feeds what it says to the move script's own reader. Each must be read as a refused pick of the right folder, with the right kind (`… holds a video …` as not-empty, `… could not be read …` keeping its y), and the old folder's as a stop. An exports refusal on a run that named no exports folder has L1c's second line, which the app must not say.
   - **Tie 2** runs the real `tool/install.sh --print` in a made-up home, as `install.test.js` does. It feeds each print to the move script's own reader, sourced, and pins only the lines the app reads. Its cases:
-    - a drop folder in Dropbox, whose Warning line must be read with its cloud's name;
+    - a drop folder in Dropbox, and one under Desktop, whose Warning lines must each be read;
     - a pick the installer refuses;
-    - a pick while the old drop folder holds a video;
+    - an empty pick while the old drop folder holds a video, a stop (a pick that holds a video gets L1c's holds-a-video line first);
     - a pick holding another Mac's marker;
     - a pick a made-up transcribe plist watches;
     - a name with a space, an apostrophe, an accent and an emoji, which must be passed whole.
@@ -523,7 +539,7 @@ Tests come first, in `tool/tests/move-app.test.js`, `tool/tests/move-app-build.t
 ## Findings for Phase 3
 
 Findings 1 to 9 were sent to Phase 3's session on 6 November.
-- **1 to 8** join L1c, each checked in the code first.
+- **1 to 8** joined L1c, each checked in the code first. L1c is merged into Phase 3's branch as f690ed9, and its lines are folded in above.
 - **9** goes to L9 and its in-step list for BRIMM Ops.
 - **Finding 5:** Phase 3 holds the lines the app reads.
 
@@ -561,7 +577,7 @@ One more goes with this version:
    - a new drop folder Terminal can look in, and empty;
    - neither folder the transcript tool's;
    - an exports folder that is not one of Studio's own, or a drop folder.
-5. **The cloud question says sessions go up to the cloud.** A cloud drop folder gets Studio's own warning, that sentence, then y to keep it or c to choose again. A cloud exports folder gets no warning.
+5. **The cloud question says sessions go up to the cloud.** A cloud drop folder gets Studio's own warning, which since L1c holds that sentence, then y to keep it or c to choose again. A cloud exports folder gets no warning.
 6. **The chooser is a small helper app**, started the way Finder starts an app, so that it comes in front with the keyboard. It has a Dock icon. It falls back to a second way when it can't be shown. Terminal comes back to the front after it, and keys typed meanwhile are thrown away.
 7. **A try mode, started through the app,** shows the chooser on each Mac before its move, and changes nothing. It needs nothing of Studio's on the MacBook.
 8. **Any stop after the installer started** says where videos go now, or that nothing may import yet.

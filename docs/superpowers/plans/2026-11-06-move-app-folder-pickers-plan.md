@@ -292,12 +292,13 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
 - Modify `tool/move-app/move.zsh` and `tool/tests/move-app.test.js`.
 
 **Interfaces (produced):**
-- **`same_or_nested <a> <b>`**: true when one is the other or inside it. It compares by real path (`${p:A}`), with letter case folded (`${(L)…}`), and treats a missing part as spelled.
+- **`same_or_nested <a> <b>`**: true when one is the other or inside it. It compares by real path (`${p:A}`), with letter case folded (`${(L)…}`), and treats a missing part as spelled. The drop folder's checks use it.
+- **`same_or_inside <a> <b>`**: the same, one way only: true when `<a>` is `<b>` or inside it. The exports folder's checks use it, never `same_or_nested`, so that a folder holding one of Studio's lower down will do for exports, as L1c's `exportsFolderFault` takes it.
 - **`count_entries <folder>`** prints the number of entries but `.DS_Store` and `.brimm-watched-by`. It names no entry. `look_at_import_and_drop` uses it too.
   - A folder is "not there", and prints 0, only when the folder that holds it can be listed and the name is absent from it.
   - It returns 2 when the folder, or the folder that holds it, cannot be listed.
 - **`plist_watch_paths <file>`** prints a plist's `WatchPaths`, one a line, as install.sh reads them: `count="$(plutil -extract WatchPaths raw -o - "$f" 2>/dev/null)" || return 0; [[ $count == <-> ]] || return 0`, then `WatchPaths.$i raw` for each index. No JSON is read, so no node is needed.
-- **`transcript_folders`** prints, one a line, `"${ROOT:A:h}/BRIMM VIDEO Transfer"` and `plist_watch_paths` of `~/Library/LaunchAgents/com.thebrimm.transcribe.plist`, and of its `.plist.off`.
+- **`transcript_folders <drop|exports>`** prints, one a line, `"${ROOT:A:h}/BRIMM VIDEO Transfer"`, `"${ROOT:A:h}/BRIMM VIDEO MacBook"` and `plist_watch_paths` of `~/Library/LaunchAgents/com.thebrimm.transcribe.plist`. With `exports` it adds those of its `.plist.off`, as L1c does; with `drop` it doesn't.
 - **`in_downloads <path>`**: true when the path is `$HOME/Downloads`, or inside it, by real path.
 - **`drop_folder_fault <path> <from>`** prints the spec's refusal words, in this order, and prints nothing when the folder will do. It sets `FAULT_KIND` to `linebreak`, `transcript`, `cannot-look` or `not-empty`.
   - a line break;
@@ -306,7 +307,8 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - not empty, unless `<from>` is `settings`.
 - **`exports_folder_fault <path>`** sets `FAULT_KIND` the same way, with `studio` for one of Studio's folders or a drop folder.
   - **Every folder:** a line break; the transcript tool's.
-  - **Not in Downloads:** then, in this order: one of Studio's folders (the spec's list, with Zoom's folder from the settings' `zoomFolder`, else `~/Documents/Zoom`); `.brimm-watched-by` in the folder or above it, where Terminal can look.
+  - **Not in Downloads:** then, in this order: one of Studio's folders (the spec's list, Studio's settings folder `~/Library/Application Support/BRIMM Video` included); Zoom's folder, from the settings' `zoomFolder`, else `~/Documents/Zoom`; `.brimm-watched-by` in the folder or above it, where Terminal can look, never in `~/Downloads` or below it.
+  - **Zoom's folder** is resolved (`${zoom:A}`) only when L1c's rule allows: Zoom's folder is not under `~/Documents`, or the pick is in or under `~/Documents` by real path or as spelled, or the pick as spelled is inside Zoom's folder as spelled. Otherwise it is not compared, and nothing under Documents is read.
   - **In Downloads:** nothing inside it is read.
   - It sets `EXPORTS_PASSED_OVER=yes` when it passed over a place Terminal could not look in.
 - **Where c alone is offered.** It is offered when y would give a refused folder again, unless `FAULT_KIND` is `cannot-look`, which keeps its y. When c alone is offered and the chooser cannot be shown, the stop's words follow `FAULT_KIND`: `not-empty` gets the "Empty it in Finder" words, and any other kind the "Tell Jason" words.
@@ -321,9 +323,12 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - a picked folder inside a folder at mode 000: "cannot look", never 0;
   - Downloads, and a folder inside it, at mode 000, passed with nothing read; and a Downloads pick named by a made-up transcribe plist, refused;
   - a `WatchPaths` entry holding a comma and a quote, read whole;
-  - an exports folder in `Episodes`, in BRIMM Video Work, in the workshop, in Zoom's folder, and under a folder holding `.brimm-watched-by`;
+  - an exports folder in `Episodes`, in BRIMM Video Work, in Studio's settings folder, in the workshop, in Zoom's folder, and under a folder holding `.brimm-watched-by`;
+  - an exports folder that holds BRIMM Video lower down (its parent): passed;
+  - Zoom's folder under a made-up `~/Documents` at mode 000, and an exports pick outside Documents: passed, with no error from the unreadable folder;
   - a folder above an exports folder at mode 000: passed over, with `EXPORTS_PASSED_OVER`;
-  - `BRIMM VIDEO Transfer`, a folder named in a made-up transcribe plist, and one named in a `.plist.off`, for either pick.
+  - `BRIMM VIDEO Transfer`, `BRIMM VIDEO MacBook` and a folder named in a made-up transcribe plist, for either pick; a drop pick that holds `BRIMM VIDEO Transfer`, refused as the transcript tool's;
+  - a folder named only in a made-up `.plist.off`: refused for exports, passed for an empty drop pick.
 - **Whole runs:**
   - "a refused pick says why and asks again";
   - "the suggested drop folder, when it holds a file, is asked again with c alone; y then stops";
@@ -357,14 +362,16 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - `exports` for `Not written: the exports folder …`;
   - `drop` for the rest of the list;
   - nothing for `Not written: the drop folder would change from …` and any other line.
-- **`cloud_warning <print text>`** prints the `Warning: this drop folder is in …` line, or nothing. The cloud's name is the text between "is in " and the first ". ".
+  - It reads the first line only. L1c's second line after an exports refusal (`The exports folder is …: name another with --exports-folder.`) is never said.
+  - It also sets `FAULT_KIND`, so the loop treats an installer refusal as the app's own: `cannot-look` for `Not written: the drop folder could not be read`, which keeps its y; `not-empty` for `Not written: the drop folder holds`; `installer` for every other refused pick.
+- **`cloud_warning <print text>`** prints the first `Warning: this drop folder is in …` line, or nothing. Both of L1c's forms start so.
 - **`studio_says <cloudFolder|needsFilesAccess> <path>`** prints Studio's answer through node, with errors off the screen: the name, `yes` or `no`, or nothing on a failure.
 - **The loop in `run_the_installer`**, after the questions:
   - It prints. When `PRINT_RC` is not 0 and `refused_pick` names a folder, it says the words, runs that question again, sets the options again, and prints again.
     - `nested` asks the question of the folder whose `*_FROM` is `picked`, or the exports one when both are.
     - When y would give the same folder again, the question is asked with c alone.
   - Any other non-zero status stops, as today. Under `--print`, every non-zero print stops with the installer's words, and nothing is asked again.
-  - Then the cloud question, unless `DROP_KEPT` is yes (the installer gets no drop option), or `CLOUD_OK_FOR` already holds this drop folder's real path. A y sets `CLOUD_OK_FOR`, and nothing is written. When the Warning line itself already holds the sessions sentence (L1c), the app does not add its own.
+  - Then the cloud question, unless `DROP_KEPT` is yes (the installer gets no drop option), or `CLOUD_OK_FOR` already holds this drop folder's real path. A y sets `CLOUD_OK_FOR`, and nothing is written. The app says the Warning line as it is and adds no sentence: since L1c the line itself says that sessions go up to the cloud.
   - Then Claude Code's lines as today, with `tries` counted only after `claude update` or the Claude app's update.
 - **`privacy_notes`**, said before the real install's question:
   - always the Downloads line, naming Claude Code and node (spec, step 4; finding 10 settled 7 Nov). Its exact words are what Phase 3's session sends once L1c and L5 are built; until then, the spec's draft;
@@ -372,19 +379,19 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
   - the exports folder's line on the same rule, or when `EXPORTS_PASSED_OVER` is set.
 
 **Tests:**
-- **Sourced: `refused_pick`** on each line of the spec's step 5.3 list, on the old folder's line, and on `Not written: this Mac's drop folder is …`.
+- **Sourced: `refused_pick`** on each line of the spec's step 5.3 lists (L1c's new drop and exports lines included, each with its `FAULT_KIND`), on the old folder's line, and on `Not written: this Mac's drop folder is …`. An exports refusal followed by L1c's second line: only the first line is said.
 - **Whole runs, with a print list and an exit list:**
   - "a refusal naming the drop folder asks the drop question again, and prints again with the new pick";
   - "a refusal naming the exports folder asks the exports question again";
   - "the nesting refusal asks again the folder picked on this run";
   - "the old folder's refusal stops, and runs nothing for real".
 - "the cloud question":
-  - it is said with the sessions sentence;
+  - it says the Warning line as the print gives it, with no sentence added; L1c's Desktop form gets the question too;
   - c asks the drop question again;
   - y holds when the print is shown again after `claude update`, and after a refused exports pick;
   - after a c at the cloud question, a different cloud folder is asked about afresh;
   - a Mac whose settings already name a Dropbox drop folder, kept by y, is not asked, and its report says "kept on a y on an earlier run";
-  - a Warning line that already holds the sessions sentence gets no second one.
+  - a print whose Warning line comes twice asks once.
 - "under --print, a refused print stops with its words, and asks nothing".
 - "a print shown again after a refused pick, then an older Claude Code, still offers claude update".
 - "privacy":
@@ -547,17 +554,19 @@ Run the move app's tests with `cd tool && node --test tests/move-app.test.js tes
 - **Tie 1.** Run `settingsMain(["plan", "--machine", "Mac Studio", "--root", <root>, "--checkout", <co>, "--drop-folder", <pick>, …], { home, say })` for each of these. Feed the first said line to `refused_pick`, and expect the spec's routing:
   - each refusal Phase 3's own install test lists for `dropFolderFault`;
   - the nesting one;
-  - L1c's exports refusals;
-  - `References` and `Unedited Video` in BRIMM Video, `~/BRIMM Video Workshop`, `~/Documents/Zoom`, and a pick that is a file, not a folder;
-  - a plan made while the old folder holds a video, which must give nothing (a stop).
+  - L1c's drop refusals by name: a pick holding a video (`not-empty`), one holding two, one that cannot be read (`cannot-look`), `BRIMM VIDEO Transfer` and `BRIMM VIDEO MacBook`;
+  - L1c's exports refusals, through `--exports-folder`: each `<what>` of the spec's step 5.3 list, `References` and `Unedited Video` in BRIMM Video, Studio's settings folder, `~/BRIMM Video Workshop` and `~/Documents/Zoom` among them, and a folder another Mac has marked, and one inside it;
+  - an exports refusal on a run that names no exports folder (a kept `exportsPath` in BRIMM Video Work): `said[1]` starts `The exports folder is `, and the app says `said[0]` alone;
+  - a pick that is a file, not a folder;
+  - a plan made while the old folder holds a video, with an empty pick, which must give nothing (a stop).
 
-  Each case row carries its expected words, as `install.test.js` does in "refuses a drop folder it must not watch". The test asserts `deepEqual([await code, said[0]], [1, \`Not written: ${why}.\`])` before it feeds the line to `refused_pick`.
+  Each case row carries its expected words, as `install.test.js` does in "refuses a drop folder it must not watch". The test asserts `deepEqual([await code, said[0]], [1, \`Not written: ${why}.\`])` before it feeds the line to `refused_pick`, and checks the `FAULT_KIND` it sets.
 
   The old-folder row asserts code 1, and that the first line starts `Not written: the drop folder would change from `. Then it expects nothing (a stop) from `refused_pick`.
 - **Tie 2.** The real `install.sh --print` in a made-up home, for each of these picks. Feed each print to `refused_pick` and `cloud_warning`, and expect the spec's reading:
-  - a drop folder in `Library/CloudStorage/Dropbox-X/In`, which gives the Warning with "Dropbox";
+  - a drop folder in `Library/CloudStorage/Dropbox-X/In`, which gives the Warning with "Dropbox", and one in `Desktop/In`, which gives L1c's "if it keeps Desktop & Documents" form; each is read once though the print may hold it twice;
   - `Downloads`, which gives a refused pick;
-  - a pick while the old drop folder holds a video, which gives a stop: the print's exit code is not 0 and its first line starts `Not written: the drop folder would change from `;
+  - an empty pick while the old drop folder holds a video, which gives a stop: the print's exit code is not 0 and its first line starts `Not written: the drop folder would change from `;
   - a pick holding another Mac's `.brimm-watched-by`, which gives a refused pick;
   - a pick a made-up transcribe plist watches, which gives a refused pick;
   - a pick named `It’s café 🎬 x`, whose name is passed whole in the print's `Its drop folder, on this Mac:` line.
