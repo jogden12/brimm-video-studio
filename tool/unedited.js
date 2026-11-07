@@ -1563,9 +1563,12 @@ export async function uneditedFolders(folders, deps) {
     if (!existsSync(folder)) {
       log(`There is no folder at ${folder}.`);
       code = 2;
-      continue;
+      // The checks behind a hand-off or an import (the copies in final/, the export in Downloads, the move of a recording) do not wait for the drop folder: this
+      // Mac's own is still worked, and finds nothing waiting in it.
+      if (!episodeMode(folder, deps.settings, deps.home || studioHome())) continue;
+    } else {
+      log(`Folder: ${folder}`);
     }
-    log(`Folder: ${folder}`);
     try {
       const results = await uneditedFolder(folder, deps);
       if (!code && results.some((r) => !r.ok && !r.arriving)) code = 1;

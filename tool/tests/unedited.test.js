@@ -3297,6 +3297,28 @@ describe("a local import's record pending, its record checked behind (Phase 3, L
     t.done();
   });
 
+  it("B0-F6 the checks behind are still made when the Mac's drop folder is missing", async () => {
+    const t = local();
+    t.put("Talk.mov");
+    let held = null;
+    withWait(t, () => {
+      held = t.pendingOf();
+    });
+    await uneditedFolder(t.drop, t.deps);
+    assert.ok(held, "the check was waited for");
+    writePending(t.home, held);
+    rmSync(t.recordFile);
+    rmSync(t.drop, { recursive: true, force: true });
+    t.logs.length = 0;
+    const code = await uneditedFolders([t.drop], t.deps);
+    assert.equal(code, 2);
+    // The check ran (its copy on this Mac is gone here, since the first run cleared it, so it says it could not put it back).
+    assert.ok(t.logs.some((l) => l.includes("Dropbox lost its first record")), t.logs.join("|"));
+    assert.equal(t.logs.some((l) => l.startsWith("The folder could not be read")), false, t.logs.join("|"));
+    assert.ok(t.logs.includes(`There is no folder at ${t.drop}.`), t.logs.join("|"));
+    t.done();
+  });
+
   it("I6 an import stopped after its clone and before it noted its record still has a lost first record put back", async () => {
     const t = local();
     t.put("Talk.mov");

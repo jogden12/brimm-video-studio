@@ -1740,6 +1740,8 @@ export async function importEpisodes(dir, deps, importOne) {
     try {
       names = waitingToCut(readdirSync(dir)).filter((name) => !seen.has(key(name)));
     } catch (e) {
+      // A folder that is not there was said by the caller (unedited.js uneditedFolders); the checks behind went on without it.
+      if (e.code === "ENOENT") return;
       log(`The folder could not be read (${e.code || e.message}). If it is in Dropbox or another cloud drive, allow node to read it in System Settings, Privacy & Security, Files and Folders.`);
       return;
     }
