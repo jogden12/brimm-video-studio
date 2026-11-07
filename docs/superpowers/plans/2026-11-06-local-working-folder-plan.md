@@ -1732,6 +1732,37 @@ The guide's words, in step with brimm-operations: under a video kept on a Mac, `
 
 ---
 
+### L6b. The copy in Original files made online-only
+
+**Goal:** Once L6 has deleted the Mac's copy of a recording (its copy in Original files whole and Dropbox saying it is uploaded), Studio asks Dropbox to make that copy online-only, so the Mac's disk space really comes back: on the same disk the copy in Original files is an APFS clone of the Mac's, sharing its blocks until Dropbox evicts it. Jason, 7 Nov, to "Should Studio ask Dropbox to make each moved recording online-only, once its upload is confirmed?": "yes".
+
+**Evidence:** L6's delete in `checkOriginal` (originals.js, the step after the uploaded flag reads true and the gate is asked again under the lock, before `rmSync` of the Mac's copy); `uploadedOf` and `uploaded.swift` (dropbox.js), whose shape this follows.
+
+**Files:** create `tool/online-only.swift`; `tool/dropbox.js` (`ONLINE_ONLY`, `ONLINE_ONLY_TIMEOUT_MS`, `makeOnlineOnly`); `tool/originals.js` (one call after the delete); tests `dropbox.test.js`, `originals.test.js`. Not README: L9 and the final review carry its line.
+
+**Interfaces:**
+- `online-only.swift <file>`: calls `FileManager.default.evictUbiquitousItem(at:)`; prints one JSON document: `{"onlineOnly": true}`, or `{"onlineOnly": false, "error": "<NSError domain and code>"}`; ends 0; given no file, or a path where no file is, it prints nothing, says why on standard error, and ends 1. It touches nothing but whether this Mac keeps the file's data: Dropbox keeps the file.
+- `ONLINE_ONLY` (its path, as `UPLOADED` is found), `ONLINE_ONLY_TIMEOUT_MS = 20 * 1000`.
+- `makeOnlineOnly(path, { swift = "", exec = execFileSync, timeoutMs = ONLINE_ONLY_TIMEOUT_MS } = {}) -> true | false | null`, synchronous, as `uploadedOf`: null at once with no `swift`; `true` or `false` from the document; null for anything else and any throw.
+- In `checkOriginal`, right after the Mac's copy is deleted (and only then): `(deps.onlineOnly || ((path) => makeOnlineOnly(path, { swift: (deps.tools && deps.tools.swift) || "" })))(<the copy in Original files>)`, once. `true` logs `<who>: its recording in Original files is made online-only.`; anything else logs `<who>: its recording in Original files could not be made online-only (<error or "no answer">); it stays on this Mac's disk until Dropbox frees it.` Never a problem, a notice, a pending or a retry: the check is complete either way.
+
+**Failing tests first:**
+- "makeOnlineOnly reads the helper's one JSON document, synchronously": `exec` stand-ins giving `{"onlineOnly": true}`, `{"onlineOnly": false, "error": "NSCocoaErrorDomain 256"}`, garbage, and a throw → `true`, `false`, `null`, `null`; the call is `(swift, [ONLINE_ONLY, path], { encoding: "utf8", timeout: ONLINE_ONLY_TIMEOUT_MS, stdio: ["ignore", "pipe", "ignore"] })`; no `swift` → null with no call.
+- "the check makes the copy in Original files online-only once the Mac's copy is deleted": with `deps.uploaded` true and `deps.onlineOnly` a recording stand-in → called once, with the path in Original files, after the Mac's copy is gone; the log has the made-online-only line.
+- "it is never asked while the Mac's copy stays": `uploaded` false or null, the gate refusing, the copy not whole → `onlineOnly` never called.
+- "a copy that cannot be made online-only is logged, and the check is still done": `onlineOnly` → false, then a throw → the log line with the error, the pending gone, no notice, no problem.
+- No test runs swift: every check's test gives `onlineOnly`, as it gives `uploaded`.
+
+**Steps:** the tests, seen failing; `online-only.swift` (parse it with `swiftc -parse`; never run it); dropbox.js; the call in originals.js; the affected test files; commit.
+
+**Words:** Jason's log lines above; nothing new for Sallie.
+
+**By hand:** before the PR, a probe like P3-0 on a test file in Jason's Dropbox outside BRIMM Video: written, its flag `true`, then `swift online-only.swift <file>` prints `{"onlineOnly": true}`, and `ls -lO <file>` shows `dataless` and `du -k <file>` prints `0`; the file still opens (Dropbox brings it down). Check 97's step for the moved recording uses the same `ls -lO` and `du -k`.
+
+**Contract touched:** none. **Size:** S.
+
+---
+
 ### L7. Open it once: drop it, and it runs until it needs her
 
 **Goal:** After her answer nothing asks her to wait or to say a thing twice. Her answer starts the reading and the copy with no 20-second claim; "open it in HyperFrames" said while the copy is being made opens HyperFrames by itself when the copy is done.
