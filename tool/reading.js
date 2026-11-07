@@ -342,21 +342,23 @@ export async function readEpisodeNow(ctx, found, deps) {
   // teachings an earlier reading wrote, which it sets aside. One Dropbox has not brought over yet is read through, so that it
   // does. A session's files are said by what they are, never by name.
   const planRel = `${stem}.cut-plan.json`;
-  const there = (rel) => existsSync(fileOf(ctx, found, rel));
+  // The recording is read where recordingAt gives it: its copy in Original files/ once it has moved there (L6, ruling 8).
+  const pathOf = (rel) => (rel === record.video.file ? recordingAt(ctx, { folder: found.folder, record }) : fileOf(ctx, found, rel));
+  const there = (rel) => existsSync(pathOf(rel));
   const earlier = session ? earlierTeachings(record) : [];
   const need = session ? [...seenFrom(record), ...earlier.filter(there)] : [planRel, ...(kind === "raw" ? [video, `${stem}.srt`, ...[`${stem}.words.json`, `${stem}.cut-plan.txt`].filter(there)] : [])];
   const said = (rel) => (!session ? rel : rel === planOf(record) ? "its cut plan" : earlier.includes(rel) ? "its earlier teachings" : "the meeting's own transcript");
   const gone = need.find((rel) => !there(rel));
   if (gone) return stop(session ? `${capital(said(gone))} is not in the episode's folder, so Claude did not read ${name}.` : `${gone} is not in the episode's folder, so Claude did not read ${name}.`);
   const bring = deps.readAll || readThrough;
-  for (const rel of need.filter((r) => !whole(fileOf(ctx, found, r)))) {
+  for (const rel of need.filter((r) => !whole(pathOf(r)))) {
     try {
-      await bring(fileOf(ctx, found, rel));
+      await bring(pathOf(rel));
     } catch (e) {
       // It is said below, with the others that are not here.
     }
   }
-  const coming = need.filter((rel) => !whole(fileOf(ctx, found, rel)));
+  const coming = need.filter((rel) => !whole(pathOf(rel)));
   if (coming.length) return stop(`Dropbox is still bringing ${coming.map(said).join(", ")} over to this Mac, so Claude did not read ${name}.`, session ? AGAIN_TEACHINGS : AGAIN);
   let plan;
   // What a session's names are checked against, and the meeting's speakers, its own replaced (teachings.js sessionSeen).

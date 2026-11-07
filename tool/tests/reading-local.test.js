@@ -6,7 +6,7 @@
 // notice are stand-ins.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { editMain } from "../edit.js";
 import { layoutOf, newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
@@ -152,6 +152,25 @@ describe("a raw reading of an episode kept on this Mac", () => {
     const result = readResult(t.home, FOLDER, "read");
     assert.equal(result.ok, false);
     assert.equal(result.next, "Nothing was changed. Tell me what it is again, and Claude reads it again.");
+    t.done();
+  });
+});
+
+describe("B0-F3 a raw reading after the recording moved to Original files", () => {
+  it("reads the recording through its copy in Original files, and does not stop for its not being in video/", async () => {
+    const { t, found, own, asks } = mac();
+    const folder = found.folder;
+    mkdirSync(join(folder, "Original files"), { recursive: true });
+    const bytes = Buffer.byteLength(LIGHT_FILES[VIDEO]);
+    writeFileSync(join(folder, "Original files", VIDEO), LIGHT_FILES[VIDEO]);
+    rmSync(join(own, VIDEO));
+    const record = reread(found);
+    writeFileSync(recordFile(folder, 2), recordText({ ...record, rev: 2, files: { ...record.files, [`Original files/${VIDEO}`]: bytes }, local: { on: "Mac Studio", original: { file: VIDEO, bytes, mtimeMs: 1 } } }));
+    const r = await on(t.ctx.deps, ...readArgs("raw", 2));
+    const result = JSON.stringify(readResult(t.home, FOLDER, "read"));
+    assert.doesNotMatch(r.text + result, /is not in the episode's folder/);
+    assert.equal(r.code, 0, r.text + result);
+    assert.equal(asks.length > 0, true);
     t.done();
   });
 });
