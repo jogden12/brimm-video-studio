@@ -362,7 +362,7 @@ export async function readEpisodeNow(ctx, found, deps) {
   // What a session's names are checked against, and the meeting's speakers, its own replaced (teachings.js sessionSeen).
   let seen = null;
   if (session) {
-    seen = sessionSeen(folderAt(ctx, { folder: found.folder, record }, "local"), record, { host: ctx.settings.host });
+    seen = sessionSeen(folderAt(ctx, { folder: found.folder, record }, "local"), record, { host: ctx.settings.host, records: found.folder });
     if (seen.why) return stop(`${capital(seen.why)}, so Claude did not read ${name}.`);
     plan = seen.plan;
   } else {

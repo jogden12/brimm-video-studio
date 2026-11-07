@@ -9,7 +9,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { CLAIM_WAIT_MS, READ_POLL_MS, editMain } from "../edit.js";
 import { episodeFault, localStamp, newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
 import { episodeFilesFolder, settingsFile, writeSettings } from "../settings.js";
@@ -18,7 +18,7 @@ import { requestFor } from "../readings.js";
 import { replaceSpeakers, EDITS } from "../sessions.js";
 import { HOST } from "../shared/show.js";
 import { CLAUDE_MODEL } from "../unedited.js";
-import { sameAccount, teachingsWhy, herWordsName, OTHER_ACCOUNT } from "../teachings.js";
+import { sameAccount, sessionSeen, teachingsWhy, herWordsName, OTHER_ACCOUNT } from "../teachings.js";
 import { setup, listAll } from "./episodes.js";
 import { OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
 import * as filing from "../filing.js";
@@ -477,6 +477,21 @@ describe("read --kind session: the session's one reading", () => {
     assert.equal("description" in kept.principles[0], false);
     assert.ok(kept.dropped.some((d) => d.field === "Principle 2's example_application"), "a spelling of the record does not leave its words out");
     assert.doesNotMatch(r.text + readFileSync(resultFile(mac.t.home, FOLDER, "read"), "utf8"), /Ossery|Brandvale/);
+    mac.t.done();
+  });
+  it("L-final-1 checks the names given before the video was a session when it is kept on this Mac too", async () => {
+    const reply = { ...REPLY, frameworks: [{ ...REPLY.frameworks[0], description: "As Ossery learned, charge for the outcome." }, ...REPLY.frameworks.slice(1)] };
+    const mac = sessionMac({ reply, over: { ...ASKED_OVER, spellings: [["Brandville", "Brandvale"]] } });
+    const session = reread(mac.found);
+    writeFileSync(recordFile(mac.found.folder, 1), recordText({ ...session, kind: "raw", session: undefined, name: { text: "Ossery pricing chat", placeholder: false }, answer: { ...ANSWER, private: "no" }, editing: null }));
+    writeFileSync(recordFile(mac.found.folder, 2), recordText({ ...session, rev: 2 }));
+    makeLocal(mac);
+    const r = await on(mac.t.ctx.deps, ...readArgs(3));
+    assert.equal(r.code, 0, r.text);
+    const kept = JSON.parse(readFileSync(join(episodeFilesFolder(mac.t.home, basename(mac.found.folder)), TEACHINGS_JSON), "utf8"));
+    assert.equal("description" in kept.principles[0], false);
+    const names = sessionSeen(episodeFilesFolder(mac.t.home, basename(mac.found.folder)), reread(mac.found), { records: mac.found.folder });
+    assert.ok(names.names.includes("Ossery"), names.names.join());
     mac.t.done();
   });
   it("says so when the transcriber capitalised the recording throughout, so its capitalised words were not checked", async () => {

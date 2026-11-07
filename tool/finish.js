@@ -1716,7 +1716,7 @@ export async function finishSession(ctx, found, { host } = {}) {
   const items = itemsOf(read.teachings, record.session);
   const open = undecided(items);
   if (open.length) return { why: open.join("\n") };
-  const seen = sessionSeen(folderAt(ctx, { folder, record }, "local"), record, { host });
+  const seen = sessionSeen(folderAt(ctx, { folder, record }, "local"), record, { host, records: folder });
   if (seen.why) return { why: `${who}: ${seen.why}. Nothing was written.` };
   const approved = approvedSession(items, seen.names);
   if (approved.why) return { why: approved.why };

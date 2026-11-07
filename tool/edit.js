@@ -5826,7 +5826,7 @@ async function broughtOver(ctx, found, rels) {
 async function sessionNames(ctx, found) {
   const { record } = found;
   if ((await broughtOver(ctx, found, seenFrom(record))).length) return { why: WORDS_COMING };
-  const seen = sessionSeen(folderAt(ctx, { folder: found.folder, record }, "local"), record, { host: ctx.settings.host });
+  const seen = sessionSeen(folderAt(ctx, { folder: found.folder, record }, "local"), record, { host: ctx.settings.host, records: found.folder });
   return seen.why ? { why: `${shownName(record)}'s names cannot be checked now: ${seen.why}.` } : { names: seen.names, hers: seen.hers };
 }
 
