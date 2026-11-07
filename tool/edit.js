@@ -1470,7 +1470,7 @@ export async function app(ctx, rest) {
   const clip = clipWords(ctx, { found, record: got.record }, "main", got.record.name.text);
   if (clip) return refuse(ctx, clip);
   // A video kept on this Mac whose video for HyperFrames is being made opens by itself when it is done (Phase 3, L7): nothing is claimed or asked for.
-  if (copyAtWork(ctx, { found, record: got.record })) return openByItself(ctx, { found, record: got.record });
+  if (copyAtWork(ctx, { found, record: got.record })) return openByItself(ctx, { found, record: got.record, reading: projectWaits(ctx, { name: found.name, record: got.record }) === "reading" });
   const claim = await claimAndBring(ctx, found, got.record, { again: openInAppWords(got.record.name.text), by: APP_ASKED, notYet: () => notWholeYet(got.record.name.text) });
   if (claim.code !== undefined) return claim.code;
   const { record } = claim;
@@ -1523,6 +1523,8 @@ async function appWhenReady(ctx, rest) {
     // or its result shows it ended after this run began.
     let seen = false;
     let busyWith = "";
+    // Whether Claude's reading was seen at work while this run waited: a reading that ended without writing itself into the record is not opened over.
+    let sawRead = false;
     // The lock the copy's run takes is one for the main video, a Reel's and the footage: the run that ended may have been a Reel's. Only the main video's copy
     // answers this run (a result that says it was a Reel's or the footage's does not). When the run that ended was not the main video's copy and that copy
     // is not made, it is asked for once, and the second look is decided only by what happens after it was asked for (`since`).
@@ -1535,6 +1537,7 @@ async function appWhenReady(ctx, rest) {
       const copying = Boolean(runningCommand(ctx.home, found.name, ctx.alive, copyLock));
       busyWith = runningCommand(ctx.home, found.name, ctx.alive);
       if (copying) seen = true;
+      if (busyWith === "read") sawRead = true;
       const ended = mainResult();
       // A copy that failed at once may have ended just before this run began (the copy is asked for a moment before this run is started): that result is the answer too.
       const justEnded = slack && ended && ended.ok === false && ended.ended >= since - WHEN_READY_JUST_BEFORE_MS;
@@ -1567,6 +1570,13 @@ async function appWhenReady(ctx, rest) {
       // The copy is made, but another run (a reading) still holds the episode and the time is up: it is opened when she asks.
       notify(`The video for HyperFrames of ${name} is made, but it could not open by itself yet. Say "open ${name} in HyperFrames".`);
       return { ok: false, made: [], failed: ["Another run was still at work on it, so it was not opened."], next: "" };
+    }
+    // HyperFrames opens it once Claude has read it (F28): a reading that ended without a reading in the record is no reading to open over, and the project, which is
+    // never written again, would be made without the cut plan and the Reel suggestions.
+    const read = readResult(ctx.home, found.name, "read");
+    if (!currentReading(record) && read && read.early !== true && read.ok === false && (sawRead || read.ended >= began)) {
+      notify(`Claude's reading of ${name} did not finish, so HyperFrames did not open it. Say "how far is it?" to see why.`);
+      return { ok: false, made: [], failed: ["Claude's reading did not finish, so it was not opened."], next: "" };
     }
     // The copy is made: the episode's lock is taken now, and what `app` does is done.
     const said = [];

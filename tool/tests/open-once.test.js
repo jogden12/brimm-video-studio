@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { CLAIM_WAIT_MS, editMain } from "../edit.js";
 import { lockOf, readResult, resultFile, takeEpisodeLock } from "../detached.js";
 import { whenReadyLockOf } from "../app.js";
+import { recordFile, recordText } from "../episode.js";
 // The buttons line is said in her chat when HyperFrames is to open by itself: the detached run that opens it speaks to the log alone (B0-F8).
 const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
 import { COPY_STEP } from "../guide.js";
@@ -223,6 +224,46 @@ describe("app --when-ready", () => {
       assert.deepEqual(t.notices, [], `reel ${reelOk}`);
       assert.equal(argsOf(t).filter((a) => a[0] === "workcopy").length, 1, JSON.stringify(argsOf(t)));
       assert.equal(reread(found).app.projects[0].state, "opened");
+      t.done();
+    }
+  });
+  it("B1-F13 with the reading and the copy both at work, she is told it opens after the reading, not at the copy's time", async () => {
+    const { t } = kept();
+    atWork(t, "workcopy");
+    atWork(t, "read");
+    addRates(progressFolder(t.home), { [COPY_STEP]: 0.1 });
+    const r = await on(t.ctx.deps, "app", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.text, /Claude is still reading it\. HyperFrames opens it by itself/, r.text);
+    assert.doesNotMatch(r.text, /about \d/);
+    t.done();
+  });
+  it("B1-F4 the reading ended without a reading in the record: nothing opens and the notice says so; with the reading written, HyperFrames opens once", async () => {
+    for (const failed of [true, false]) {
+      const { t, found, paths } = kept();
+      madeCopy(paths);
+      atWork(t, "read");
+      const wait = t.ctx.deps.wait;
+      t.ctx.deps.wait = async (ms) => {
+        await wait(ms);
+        rmSync(lockOf(t.home, FOLDER), { force: true });
+        writeFileSync(resultFile(t.home, FOLDER, "read"), JSON.stringify({ version: 1, command: "read", started: t.now() - 3000, ended: t.now(), ok: !failed, made: [], failed: failed ? ["Claude stopped"] : [], next: "" }));
+        if (!failed) {
+          const record = reread(found);
+          writeFileSync(recordFile(found.folder, 2), recordText({ ...record, rev: 2, reading: { kind: "raw", model: "m", at: "2026-10-20T16:00:00-05:00", on: "Mac Studio", account: "a", outcome: "read" } }));
+        }
+      };
+      const r = await run(t);
+      if (failed) {
+        assert.equal(r.code, 1, r.text);
+        assert.deepEqual(t.notices, [`Claude's reading of ${NAME} did not finish, so HyperFrames did not open it. Say "how far is it?" to see why.`]);
+        assert.equal(existsSync(standInLog(t)), false);
+        assert.equal(reread(found).app, undefined);
+      } else {
+        assert.equal(r.code, 0, r.text);
+        assert.deepEqual(t.notices, []);
+        assert.equal(readFileSync(standInLog(t), "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((x) => x.args[0] === "open").length, 1);
+      }
       t.done();
     }
   });
