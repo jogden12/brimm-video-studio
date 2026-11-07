@@ -1156,9 +1156,10 @@ describe("L6: after the recording's move", () => {
     try {
       const found = movedOff(w);
       // A real look at the disk: the Mac's file is gone, the copy in Original files is there.
-      const r = await on({ ...w.studio, isWhole: (path) => existsSync(path) }, "kind", found.name, "raw", "--private", "no", "--again");
+      // The copy in Original files is a placeholder (made online-only, L6b): the answer still goes on, for there is no other Mac to leave it to.
+      const r = await on({ ...w.studio, isWhole: (path) => existsSync(path) && !path.includes("Original files") }, "kind", found.name, "raw", "--private", "no", "--again");
       assert.equal(r.code, 0, r.text);
-      assert.doesNotMatch(r.text, /not here|still bringing|not whole/i, r.text);
+      assert.doesNotMatch(r.text, /not here|not on this Mac|other Mac|still bringing|not whole/i, r.text);
     } finally {
       w.done();
     }

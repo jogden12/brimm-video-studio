@@ -5030,10 +5030,11 @@ async function answerKind(ctx, found, plan, began) {
   if (!receiptHeld(ctx, record, plan, name)) return 1;
   // A session that owes the BRIMM Ops page its empty revision: the same answer again writes it, and nothing else.
   if (plan.owed) return emptyRevisionAgain(ctx, found, record);
+  // (A video kept on this Mac has no other Mac to leave it for: its recording is in video/, or in Original files, which the reading brings down.)
   // A raw reading needs the video itself for the rough cut. On a Mac it is not whole on (the one that did not import it), that
   // brings it all over first: only with --here, her "read it here". Otherwise nothing is written or claimed, so that the other Mac
   // may answer it (spec 2, "Which Mac reads it").
-  if (stored === "raw" && !plan.here && ctx.settings.readings !== false && !ctx.isWhole(recordingAt(ctx, { folder: found.folder, record }))) return refuse(ctx, notHereYet(ctx, record));
+  if (stored === "raw" && !plan.here && ctx.settings.readings !== false && !(keptOnAMac(record) && onOtherMac(ctx, record) === "") && !ctx.isWhole(recordingAt(ctx, { folder: found.folder, record }))) return refuse(ctx, notHereYet(ctx, record));
   // A video answered before is being corrected: what its earlier reading and its hand-off left in the shared folder is set aside
   // with the answer, and must be whole on this Mac first (read through when it is not), before she is asked anything or it is
   // claimed.
@@ -5196,7 +5197,7 @@ async function answerKind(ctx, found, plan, began) {
   // for the reading, and a request while a run of it is at work starts none. It is asked for at once, whether or not the import's
   // late check of the video is still to come: its run waits for that itself (waitForImport). A video not here yet is made into one by
   // `app`, which asks for it when it is not there.
-  if (copyWanted(ctx, stored, wrote.record) && ctx.isWhole(recordingAt(ctx, { folder: found.folder, record: wrote.record }))) requestWorkCopy(ctx, { folder: found.name });
+  if (copyWanted(ctx, stored, wrote.record) && ((keptOnAMac(wrote.record) && onOtherMac(ctx, wrote.record) === "") || ctx.isWhole(recordingAt(ctx, { folder: found.folder, record: wrote.record })))) requestWorkCopy(ctx, { folder: found.name });
   if (holdsUntil !== null) {
     // When its rough cut is ready too, as the guide says it (guideReading), once this Mac has measured the speeds of Claude's call and of
     // the rough cut.
