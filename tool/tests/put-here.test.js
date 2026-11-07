@@ -192,6 +192,24 @@ describe("putHere", () => {
     assert.equal(w.inVideo()["IMG_0042.notes.txt"], "notes");
     w.done();
   });
+  it("B1-F9 a stopped put under a record from a newer Studio says so, and one under a newer record that does not read yet waits: the journal stays", async () => {
+    class Killed extends Error {}
+    for (const newer of [true, false]) {
+      const w = world();
+      await assert.rejects(putHere(w.found(), [w.made("IMG_0042.notes.txt", "notes")], w.opts({ killed: (at) => {
+        if (at === (newer ? "recorded" : "renamed")) throw new Killed("killed");
+      } })), Killed);
+      const top = readEpisode(w.folder).record;
+      if (newer) writeFileSync(recordFile(w.folder, top.rev + 1), recordText({ ...top, rev: top.rev + 1, version: 99 }));
+      else writeFileSync(recordFile(w.folder, top.rev + 1), "{");
+      const r = await putHere(w.found(), [w.made("IMG_0042.srt", "other words")], w.opts({ expectRev: top.rev }));
+      assert.equal(r.put, false, `newer ${newer}`);
+      if (newer) assert.match(r.why, /newer BRIMM Video Studio\. Ask Jason to update this Mac/);
+      assert.equal(existsSync(join(w.own, ".put.json")), true, `newer ${newer}`);
+      assert.equal(w.inVideo()["IMG_0042.notes.txt"], "notes", `newer ${newer}`);
+      w.done();
+    }
+  });
   it("waits for nothing and calls no check", async () => {
     const w = world();
     let waited = 0;

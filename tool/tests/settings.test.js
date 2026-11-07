@@ -3271,6 +3271,14 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
       assert.match(t.said.join("\n"), /Zoom's recordings/);
       t.done();
     });
+    it("B1-F21 Zoom's folder set elsewhere keeps a pick that holds it, or is inside it, refused", () => {
+      const t = mac({ drop: "Drop" });
+      const rec = join(t.home, "Rec");
+      const zoom = join(rec, "Zoom");
+      mkdirSync(zoom, { recursive: true });
+      for (const pick of [rec, join(zoom, "x")]) assert.match(dropFolderFault(pick, { home: t.home, root: t.root, zoom, exports: join(t.home, "Downloads") }) || "", /Zoom's recordings/, pick);
+      t.done();
+    });
     it("takes the Mac Studio's switch at P3-3: Drop in BRIMM Video Work, made or not, with Downloads, a link into Dropbox, as the exports folder, while the transcript tool watches BRIMM VIDEO Transfer (L1c)", async () => {
       for (const made of [false, true]) {
         const t = mac({ drop: "Drop", handoffVersion: 2 }, { transcripts: ({ root }) => ({ ".plist": [join(dirname(root), "BRIMM VIDEO Transfer"), join(dirname(root), "BRIMM VIDEO Transfer", "Zoom Video Transfer")] }) });

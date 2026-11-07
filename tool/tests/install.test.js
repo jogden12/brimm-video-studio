@@ -1652,7 +1652,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
       assert.deepEqual([r.status, r.out], [2, cannot(lines)], lines.join(" | "));
       assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
     }
-    // What it says whole is read: its own three lines, and the settings above them are what is shown.
+    // What it says whole is read: its own four lines, and the settings above them are what is shown.
     const good = askWith({ onPath: { node: answers(["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads"]) } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
     assert.equal(good.status, 0, good.out);
     assert.deepEqual(shown(good), { version: 1 });
@@ -2040,6 +2040,17 @@ describe("a drop folder of this Mac's own, asked what the installer would do (--
     assert.deepEqual(r.agents.map(held), [agent(r, [mine])]);
     assert.deepEqual(shown(r), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE), import: "light", handoffVersion: 2, dropPath: mine });
     changedNothing(r);
+    d.done();
+  });
+  it("B1-F20 without Xcode's command line tools, a Mac with a drop folder of its own is told its recordings stay on it, and a Mac on Drop is told the old line", () => {
+    const d = box();
+    const onPath = { "xcode-select": XCODE_MISSING, sw_vers: MACOS("26.5") };
+    const local = askWith({ onPath }, ...BASE, "--switch-local", d.root);
+    assert.equal(local.status, 0, local.err + local.out);
+    assert.ok(lineOf(local, "  Swift, to find the speaker's face:  not here, so a Reel is cropped at the centre of the picture. Without it Studio cannot tell when Dropbox has uploaded a recording's copy in Original files, so the recordings stay on this Mac. To get it: xcode-select --install"), local.out);
+    const plain = askWith({ onPath }, "--print", "--machine", "Mac Studio", "--import", "light", "--handoff", "2", "--drop", "Drop", d.root);
+    assert.equal(plain.status, 0, plain.err + plain.out);
+    assert.ok(lineOf(plain, "  Swift, to find the speaker's face:  not here, so a Reel is cropped at the centre of the picture. To get it: xcode-select --install"), plain.out);
     d.done();
   });
   it("--drop-folder in Dropbox shows it as the folder watched, warns it is in Dropbox, says macOS may ask whether node may read it, and keeps the offline step (L1c, X3)", () => {

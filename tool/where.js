@@ -4,7 +4,7 @@
 // at layout 6 (episode.js LOCAL_VERSION). Its folder in Dropbox keeps record/, final/, history/, Original files/ and a plan's three files. A
 // file's place is its name, and `files` keeps its shape. A record without `local` keeps every file in its folder in Dropbox, as before.
 // An episode with `local` is changed only on its Mac (D3): on any other, every command that names it says ON_OTHER_MAC and changes nothing.
-// This module reads and writes nothing but whether a recording is on this Mac (recordingAt, recordingStat): it says places and builds paths. It imports only what episode.js imports already (settings.js), so that
+// This module writes nothing, and reads nothing but whether a recording is on this Mac (recordingAt, recordingStat): it says places and builds paths. It imports only what episode.js imports already (settings.js), so that
 // episode.js and every reader of an episode's files can take it in without a loop of imports; for that, it names a plan's files itself
 // (PLAN_FILES, held to plan.js PLAN_FILE_NAMES by a test) and says a Mac as kinds.js does (held to spokenMac by a test).
 import { statSync } from "node:fs";

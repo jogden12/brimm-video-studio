@@ -15,8 +15,8 @@
 #   ./install.sh --machine "Mac Studio" "/path/to/The BRIMM DB/BRIMM Video"
 #                                    set this Mac up for episodes: it watches its own drop folder, BRIMM Video/Unedited
 #                                    Video/<this Mac>, or BRIMM Video/Drop/<this Mac> once its settings name Drop (--drop,
-#                                    below), which is made, with a marker that names this Mac, or the folder it picked on its own
-#                                    disk (--drop-folder, below), whose videos' files are kept in BRIMM Video Work. Each video
+#                                    below), which is made, with a marker that names this Mac; or the folder it picked
+#                                    (--drop-folder, below), on this Mac or in a cloud folder, also marked, whose videos' files are kept in BRIMM Video Work. Each video
 #                                    dropped there is imported into BRIMM Video/Episodes. This Mac's settings are written in
 #                                    ~/Library/Application Support/BRIMM Video/settings.json. With --print, nothing is made.
 #                                    It says whether Xcode's command line tools, Homebrew and
