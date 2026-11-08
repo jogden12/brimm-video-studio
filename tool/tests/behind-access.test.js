@@ -3,13 +3,13 @@
 // stand-ins: no test reaches the real ones. Every Mac here is made up in a temp home; nothing is written in Dropbox or a watched folder.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { editMain } from "../edit.js";
 import { ASKING_MS, DOWNLOADS_SAY_MS, UNSEEN_MS, accessLine, writeAccess } from "../access.js";
 import { dropWords } from "../guide.js";
 import { writeStatusIn } from "../importing.js";
-import { seenFile, dropFolderOf, downloadsFolder, importingFolderOf, runsFolder, writeSettings, readSettings, folderWords } from "../settings.js";
+import { seenFile, dropFolderOf, downloadsFolder, importingFolderOf, runsFolder, writeSettings, readSettings } from "../settings.js";
 import { lockFile } from "../run.js";
 import { seenKey } from "../filing.js";
 import { setup } from "./episodes.js";
@@ -34,7 +34,7 @@ const settingsOf = (t) => readSettings(t.home).settings;
 const dropOf = (t) => dropFolderOf(settingsOf(t), t.home);
 const place = (t, state, extra = {}) => ({ state, code: state === "refused" ? "EPERM" : state === "locked" ? "EACCES" : "", at: t.now(), since: t.now(), folder: dropOf(t), node: NODE, ...(state === "ok" ? { okNode: NODE } : {}), ...extra });
 const note = (t, places = {}, more = {}) => writeAccess(t.home, { version: 1, places, looking: null, told: {}, ...more });
-const dropWordsOf = (t) => `your drop folder, ${dropWords(settingsOf(t), t.machine ?? "Mac Studio", t.home)}`;
+const dropWordsOf = (t) => `your drop folder, ${dropWords(settingsOf(t), "Mac Studio", t.home)}`;
 /** A video of 5 bytes in the drop folder, and the clock set `minutes` after its ctime. */
 function video(t, name = "talk.mp4", minutes = 4) {
   const file = join(dropOf(t), name);
@@ -124,6 +124,19 @@ describe("behind: says each finding's line last, whatever git answered", () => {
   });
 });
 
+describe("behind: asking only for the agent's own pid", () => {
+  it("says asking only when the agent's pid is the one looking.pid noted", async () => {
+    const t = setup();
+    const asking = { place: "drop", pid: 4242, at: t.now() - ASKING_MS - 1000 };
+    note(t, {}, { looking: asking });
+    const line = accessLine({ kind: "asking", place: "drop" }, { placeWords: dropWordsOf(t) });
+    assert.deepEqual((await on(t, { agentPid: () => null })).said, [NEWEST]);
+    assert.deepEqual((await on(t, { agentPid: () => 5151 })).said, [NEWEST]);
+    assert.equal((await on(t, { agentPid: () => 4242 })).said.at(-1), line);
+    t.done();
+  });
+});
+
 describe("behind: a new node", () => {
   const worldOf = (t) => {
     writeSettings(t.home, { dropPath: join(t.home, "Desktop", "Drop") });
@@ -150,6 +163,18 @@ describe("behind: a new node", () => {
     assert.deepEqual([r.said, r.kicks], [[NEWEST], []]);
     note(t, { drop: place(t, "refused") });
     r = await on(t, { agentNode: () => NEW_NODE });
+    assert.deepEqual(r.kicks, []);
+    t.done();
+  });
+
+  it("does not ask when the lock holds a live pid", async () => {
+    const t = setup();
+    worldOf(t);
+    const lock = lockFile(dropOf(t), runsFolder(t.home));
+    mkdirSync(dirname(lock), { recursive: true });
+    writeFileSync(lock, String(process.pid));
+    const r = await on(t, { agentPid: () => null, agentNode: () => NEW_NODE, alive: (pid) => pid === process.pid });
+    assert.equal(r.said.at(-1), NEW_NODE_LINE);
     assert.deepEqual(r.kicks, []);
     t.done();
   });
@@ -181,8 +206,8 @@ describe("behind: a video the import never took", () => {
     const a = video(t, "a.mp4");
     let r = await on(t, { now: a.clock, agentPid: () => null });
     assert.equal(r.said.at(-1), UNSEEN(1));
-    video(t, "b.mov");
-    r = await on(t, { now: () => Math.max(a.clock(), video(t, "b.mov").clock()), agentPid: () => null });
+    const b = video(t, "b.mov");
+    r = await on(t, { now: () => Math.max(a.clock(), b.clock()), agentPid: () => null });
     assert.equal(r.said.at(-1), UNSEEN(2));
     assert.ok(!r.text.includes("a.mp4") && !r.text.includes("b.mov"));
     t.done();
@@ -204,8 +229,8 @@ describe("behind: a video the import never took", () => {
     for (const more of [{ failed: "it failed" }, { held: "it is held" }]) {
       writeStatusIn(importingFolderOf(settingsOf(t), t.home), { version: 1, machine: "Mac Studio", pid: 99, video: "talk.mp4", bytes: 5, seconds: null, step: "Waiting", at: new Date(v.clock()).toISOString(), ...more }, (to, text) => writeFileSync(to, text));
       assert.deepEqual(await none(), [NEWEST]);
-      writeFileSync(join(importingFolderOf(settingsOf(t), t.home), "x"), "");
-      for (const f of (await import("node:fs")).readdirSync(importingFolderOf(settingsOf(t), t.home))) (await import("node:fs")).rmSync(join(importingFolderOf(settingsOf(t), t.home), f));
+      const folder = importingFolderOf(settingsOf(t), t.home);
+      for (const f of readdirSync(folder)) rmSync(join(folder, f));
     }
     // an ok drop look after its ctime
     note(t, { drop: place(t, "ok", { at: v.clock() - 1000 }) });
@@ -224,6 +249,36 @@ describe("behind: a video the import never took", () => {
     writeFileSync(lock, String(process.pid));
     assert.deepEqual((await on(t, { now: v.clock, agentPid: () => null, alive: (pid) => pid === process.pid })).said, [NEWEST]);
     assert.equal((await on(t, { now: v.clock, agentPid: () => null, alive: () => false })).said.at(-1), UNSEEN(1));
+    t.done();
+  });
+
+  it("an ok look at an old drop folder does not hide an unseen video in the new one", async () => {
+    const t = setup();
+    const v = video(t);
+    note(t, { drop: place(t, "ok", { at: v.clock() - 1000, folder: join(t.dir, "old drop") }) });
+    assert.equal((await on(t, { now: v.clock, agentPid: () => null })).said.at(-1), UNSEEN(1));
+    note(t, { drop: place(t, "ok", { at: v.clock() - 1000 }) });
+    assert.deepEqual((await on(t, { now: v.clock, agentPid: () => null })).said, [NEWEST]);
+    t.done();
+  });
+
+  it("a drop folder it cannot stat into, or a looping link named like a video, ends as with no finding", async () => {
+    const t = setup();
+    const v = video(t);
+    const clock = v.clock();
+    chmodSync(dropOf(t), 0o444);
+    try {
+      const r = await on(t, { now: () => clock, agentPid: () => null });
+      assert.equal(r.code, 0);
+      assert.equal(r.said.at(-1), NEWEST);
+    } finally {
+      chmodSync(dropOf(t), 0o755);
+    }
+    rmSync(v.file);
+    symlinkSync("loop.mp4", join(dropOf(t), "loop.mp4"));
+    const r = await on(t, { now: () => Date.now() + 10 * 60000, agentPid: () => null });
+    assert.equal(r.code, 0);
+    assert.equal(r.said.at(-1), NEWEST);
     t.done();
   });
 
@@ -273,8 +328,24 @@ describe("behind: no real launchctl or plutil", () => {
     const { agentPid, agentNode, ...deps } = t.ctx.deps;
     const code = await editMain(["behind"], { ...deps, agentRunning: () => true, run: upToDate, say: (x) => said.push(x) });
     assert.equal(code, 0);
-    // agentRunning stood in for the pid (-1 while it runs), so the asking finding was reached without launchctl; the node is "" without plutil.
+    // agentRunning stood in for the pid (-1 while it runs), so the asking finding was reached without launchctl.
     assert.equal(said.at(-1), accessLine({ kind: "asking", place: "drop" }, { placeWords: dropWordsOf(t) }));
+    t.done();
+  });
+
+  it("a Mac whose drop folder needs access, with a real plist in its home, does not reach the real plutil", async () => {
+    const t = setup();
+    writeSettings(t.home, { dropPath: join(t.home, "Desktop", "Drop") });
+    mkdirSync(dropOf(t), { recursive: true });
+    note(t, { drop: place(t, "ok", { okNode: NODE }) });
+    const agents = join(t.home, "Library", "LaunchAgents");
+    mkdirSync(agents, { recursive: true });
+    writeFileSync(join(agents, "com.thebrimm.unedited.plist"), `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>ProgramArguments</key><array><string>${process.execPath}</string></array></dict></plist>\n`);
+    const said = [];
+    const { agentPid, agentNode, ...deps } = t.ctx.deps;
+    const code = await editMain(["behind"], { ...deps, agentRunning: () => false, run: upToDate, say: (x) => said.push(x) });
+    assert.equal(code, 0);
+    assert.deepEqual(said, [NEWEST]);
     t.done();
   });
 });

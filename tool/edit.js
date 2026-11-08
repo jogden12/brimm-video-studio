@@ -1712,6 +1712,25 @@ function agentNode(home) {
     (access.js findingOf, accessLine, and stepLine's words for a video's step are the caller's: see `step`). It asks the launch agent
     nothing unless a finding could need it, and writes nothing. */
 export function accessFinding(ctx) {
+  try {
+    return accessFindingOf(ctx);
+  } catch (e) {
+    return null;
+  }
+}
+
+/** No run is at work: the launch agent has no pid, and the lock (whose text is a pid) holds no live one. */
+function noRunAtWork(ctx, drop, agentPidNow) {
+  if (agentPidNow !== null) return false;
+  try {
+    const lockPid = parseInt(readFileSync(lockFile(drop, runsFolder(ctx.home)), "utf8").trim(), 10);
+    return !(Number.isInteger(lockPid) && lockPid > 0 && ctx.alive(lockPid));
+  } catch (e) {
+    return true; // no lock, or one that cannot be read: no run holds it
+  }
+}
+
+function accessFindingOf(ctx) {
   const now = ctx.now();
   const home = ctx.home;
   const note = readAccess(home);
@@ -1732,26 +1751,25 @@ export function accessFinding(ctx) {
     } catch (e) {
       names = [];
     }
-    const old = names.map((name) => ({ name, stat: ctx.stat(join(drop, name)) })).filter(({ stat }) => stat && stat.isFile() && now - stat.ctimeMs > UNSEEN_MS);
+    const statOf = (path) => {
+      try {
+        return ctx.stat(path);
+      } catch (e) {
+        return null;
+      }
+    };
+    const old = names.map((name) => ({ name, stat: statOf(join(drop, name)) })).filter(({ stat }) => stat && stat.isFile() && now - stat.ctimeMs > UNSEEN_MS);
     if (old.length) {
       const taken = new Set(readStatusesIn(statusReadFolders(ctx), now).filter(({ status }) => status && status.machine === ctx.machine).map(({ status }) => status.video));
       const seen = readSeen(home);
-      const looked = note.places.drop && note.places.drop.state === "ok" && typeof note.places.drop.at === "number" ? note.places.drop.at : -Infinity;
+      const looked = note.places.drop && note.places.drop.state === "ok" && typeof note.places.drop.at === "number" && typeof note.places.drop.folder === "string" && resolve(note.places.drop.folder) === resolve(drop) ? note.places.drop.at : -Infinity;
       const left = old.filter(({ name, stat }) => !taken.has(name) && !seen[seenKey(name, stat)] && !(looked > stat.ctimeMs));
-      if (left.length && pidOf() === null) {
-        let held = false;
-        try {
-          const lockPid = parseInt(readFileSync(lockFile(drop, runsFolder(home)), "utf8").trim(), 10);
-          held = Number.isInteger(lockPid) && lockPid > 0 && ctx.alive(lockPid);
-        } catch (e) {
-          // no lock, or one that cannot be read: no run holds it
-        }
-        if (!held) unseen = left.map(({ name }) => name);
-      }
+      if (left.length && noRunAtWork(ctx, drop, pidOf())) unseen = left.map(({ name }) => name);
     }
   }
-  const needsAccess = ["drop", "episodes"].filter((place) => needsFilesAccess(places[place], home));
-  const agentNodeNow = needsAccess.some((place) => (note.places[place] || {}).okNode) ? ctx.agentNode() : "";
+  const noted = ["drop", "episodes"].filter((place) => (note.places[place] || {}).okNode);
+  const needsAccess = noted.filter((place) => needsFilesAccess(places[place], home));
+  const agentNodeNow = needsAccess.length ? ctx.agentNode() : "";
   const finding = findingOf({ note, now, places, agentPid: agentPidNow, missing, unseen, agentNode: agentNodeNow, needsAccess });
   if (!finding) return null;
   const folder = places[finding.place];
@@ -2848,7 +2866,7 @@ async function behind(ctx) {
       ctx.say(found.line);
       if (found.finding.kind === "newNode") {
         try {
-          if (ctx.agentPid() === null) ctx.kickstart();
+          if (noRunAtWork(ctx, dropFolderOf(ctx.settings, ctx.home), ctx.agentPid())) ctx.kickstart();
         } catch (e) {
           // the line is said all the same
         }
