@@ -50,7 +50,7 @@ function jsonAfter(lines, start) {
 /** Every card in a fixed form, for the label `label`: each guess, each Maybe line, and the three not-a-session cards. */
 const everyCard = (label) => [
   ...[null, "finished", "raw", "clip"].map((guess) => [cardOf({ label, guess, maybe: null }), "what"]),
-  ...[{ session: true }, { name: "Pricing talk", kind: "finished" }, { name: "Pricing talk", kind: "short video" }, { name: "Pricing talk", kind: "raw" }].map((maybe) => [cardOf({ label, guess: "raw", maybe }), "what"]),
+  ...[{ session: true }, { name: "Pricing talk", kind: "finished" }, { name: "Pricing talk", kind: "short video" }, { name: "Pricing talk", kind: "raw" }].flatMap((maybe) => [null, "finished", "raw", "clip"].map((guess) => [cardOf({ label, guess, maybe }), "what"])),
   ...["zoom", "sound", null].map((came) => [notSessionCardOf({ label, came }), "not-a-session"])
 ];
 
@@ -69,9 +69,32 @@ describe("the card, in code", () => {
     }
     assert.equal(PRIVATE_Q, "Is it a private session with a client or a group?");
     assert.equal(WHAT_Q("Talk 3"), "What is Talk 3?");
-    // A Maybe line wins over a Guess line, and an iPhone clip's new version is offered as a new version, as a finished video's is.
-    assert.deepEqual(shape(cardOf({ label: "Talk 3", guess: "clip", maybe: { name: "Pricing talk", kind: "short video" } }))[0][1], ["A new version of Pricing talk", "Finished by your editor", "Raw with retakes", SESSION]);
+    // A Maybe line wins the first place over a Guess line, and an iPhone clip's new version is offered as a new version, as a finished video's is.
+    assert.deepEqual(shape(cardOf({ label: "Talk 3", guess: "finished", maybe: { name: "Pricing talk", kind: "short video" } }))[0][1], ["A new version of Pricing talk", "Finished by your editor", "Raw with retakes", SESSION]);
     assert.deepEqual(shape(cardOf({ label: "Talk 3", guess: "finished", maybe: { session: true } }))[0][1], [SESSION, "Finished by your editor", "Raw with retakes", "iPhone clip"]);
+  });
+
+  it("keeps the guessed kind on a card that offers a version: the version first, the guess second, then the other kinds in their usual order, the session last", () => {
+    const VERSION = (kind) => (kind === "raw" ? "A finished version of Pricing talk" : "A new version of Pricing talk");
+    for (const kind of ["finished", "short video", "raw"]) {
+      const maybe = { name: "Pricing talk", kind };
+      for (const [guess, rest] of [
+        ["clip", ["iPhone clip", "Finished by your editor"]],
+        ["finished", ["Finished by your editor", "Raw with retakes"]],
+        ["raw", ["Raw with retakes", "Finished by your editor"]],
+        // No guess: the card is as it was.
+        [null, ["Finished by your editor", "Raw with retakes"]]]) {
+        const answers = shape(cardOf({ label: "Talk 3", guess, maybe }))[0][1];
+        assert.deepEqual(answers, [VERSION(kind), ...rest, SESSION], `${kind} offered, guess ${guess}`);
+        // Four answers at most, none twice, and a session is always one of them.
+        assert.ok(answers.length <= 4 && new Set(answers).size === answers.length && answers.includes(SESSION), answers.join(", "));
+      }
+    }
+    // A session's new version keeps all four, led by the session, whatever the guess (the guess is among them).
+    for (const guess of ["clip", "finished", "raw", null]) {
+      const answers = shape(cardOf({ label: "Talk 3", guess, maybe: { session: true } }))[0][1];
+      assert.deepEqual(answers, [SESSION, "Finished by your editor", "Raw with retakes", "iPhone clip"], String(guess));
+    }
   });
 
   it("gives each question a fixed header, one answer at a time, and no description beside an answer", () => {
@@ -120,7 +143,9 @@ describe("the card, in code", () => {
       ["the first question with no question mark", [{ ...what[0], question: "What is Talk 3" }, what[1]]],
       ["the first question with no label", [{ ...what[0], question: "What is ?" }, what[1]]],
       ["another second question", [what[0], { ...what[1], question: "Is it private?" }]],
-      ["a new version offered in a guess's order", [withOptions(what[0], ["A new version of Pricing talk", "Raw with retakes", "Finished by your editor", SESSION]), what[1]]],
+      ["a new version offered with a second kind no guess puts there", [withOptions(what[0], ["A new version of Pricing talk", "Raw with retakes", "iPhone clip", SESSION]), what[1]]],
+      ["a new version offered with the session before a kind", [withOptions(what[0], ["A new version of Pricing talk", "Finished by your editor", SESSION, "Raw with retakes"]), what[1]]],
+      ["a new version offered with the guess dropped for a third kind", [withOptions(what[0], ["A new version of Pricing talk", "Finished by your editor", "Raw with retakes", "iPhone clip"]), what[1]]],
       ["a finished version with an iPhone clip", [withOptions(what[0], ["A finished version of Pricing talk", "Finished by your editor", "Raw with retakes", "iPhone clip"]), what[1]]],
       ["the not-a-session answers the other way", [withOptions(notSessionCardOf({ label: "Talk 3", came: "zoom" }).questions[0], ["It is not a session", "It is a client or group session"])]],
       ["the not-a-session question with no label", [{ ...notSessionCardOf({ label: "Talk 3", came: "zoom" }).questions[0], question: " came from Zoom, which is often a client or group session. Which is it?" }]],

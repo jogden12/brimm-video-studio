@@ -713,6 +713,28 @@ describe("episodes, the card's facts of a video waiting for its answer", () => {
     assert.ok(said.length > lines.length);
     t.done();
   });
+  it("prints a card that still holds the guessed kind when it offers a version, the version first and the guess second (check 95)", async () => {
+    const first = (card) => card.questions[0].options.map((o) => o.label);
+    const cases = [
+      ["clip", ["A new version of Pricing talk", "iPhone clip", "Finished by your editor", "Client or group session"], "    Guess: an iPhone clip"],
+      ["finished", ["A new version of Pricing talk", "Finished by your editor", "Raw with retakes", "Client or group session"], "    Guess: finished by your editor"],
+      ["raw", ["A new version of Pricing talk", "Raw with retakes", "Finished by your editor", "Client or group session"], "    Guess: raw with retakes"]
+    ];
+    for (const [guess, answers, guessLine] of cases) {
+      const { t } = waiting({ match: TARGET.id, guess }, { ...TARGET, over: { kind: "finished", answer: ANSWERED, name: NAMED } });
+      const { said, lines } = await cardOf(t);
+      assert.ok(lines.includes(guessLine) && lines.includes(maybe("Pricing talk", "finished by your editor")), lines.join("\n"));
+      const card = JSON.parse(said.find((line) => line.startsWith("    Card: ")).slice("    Card: ".length));
+      assert.deepEqual(first(card), answers, guess);
+      assert.deepEqual(card, cardFor({ label: LABEL, guess, maybe: { name: "Pricing talk", kind: "finished" } }), guess);
+      t.done();
+    }
+    // With no version offered the card is as it was: led by the guess.
+    const { t } = waiting({ guess: "clip" });
+    const { said } = await cardOf(t);
+    assert.deepEqual(first(JSON.parse(said.find((line) => line.startsWith("    Card: ")).slice("    Card: ".length))), ["iPhone clip", "Finished by your editor", "Raw with retakes", "Client or group session"]);
+    t.done();
+  });
   it("leaves out the whole Maybe line when the match names no record, or a record it cannot read, or one not answered anywhere, and says only that it may be a session's for a session", async () => {
     const sessionMark = { marked: AT, on: "Mac Studio", teachings: null, cleared: null };
     const cleared = { ...sessionMark, cleared: { at: AT, on: "Mac Studio", to: "a client", confirmed: "dialog" } };

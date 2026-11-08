@@ -12,7 +12,7 @@ import { studioFiles, writeStudio, guardDecision, studioFolder } from "../studio
 import { COMMAND_NAMES, HELP, LOCK_CHANGED, editMain, wordsLine } from "../edit.js";
 import { HELD_NARROWED, HELD_REFUSED } from "../held.js";
 import { UNTRUSTED } from "../loosened.js";
-import { NO_RECEIPT } from "../receipts.js";
+import { NO_RECEIPT, cardOf } from "../receipts.js";
 import { EDITS } from "../sessions.js";
 import { episodeAs, FOLDER as FOLDER_NAME } from "./episodes.js";
 import { episode } from "./phase4.js";
@@ -441,20 +441,20 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     // or neither, in the words episodes gives them (Ruling 1).
     const orders = card().split("\n").filter((line) => /^\s+- [^"]+: "/.test(line)).map((line) => {
       const at = line.indexOf(': "');
-      return { when: line.slice(line.indexOf("- ") + 2, at), answers: [...line.slice(at).matchAll(/"([^"]+)"/g)].map((m) => m[1]) };
+      return { line, when: line.slice(line.indexOf("- ") + 2, at), answers: [...line.slice(at).matchAll(/"([^"]+)"/g)].map((m) => m[1]) };
     });
     const BASE = ["Finished by your editor", "Raw with retakes", "iPhone clip"];
     const SESSION = "Client or group session";
     /** The answer each Guess line puts first. */
     const GUESSED = { "finished by your editor": "Finished by your editor", "raw with retakes": "Raw with retakes", "an iPhone clip": "iPhone clip" };
     const seen = new Set();
-    for (const { when, answers } of orders) {
+    for (const { line, when, answers } of orders) {
       const said = `${when}: ${answers.join(", ")}`;
-      assert.ok(answers.length <= 4, said);
-      assert.equal(new Set(answers).size, answers.length, said);
-      assert.ok(answers.includes(SESSION), said);
+      // (The Maybe lines of a video say their answers as a rule, below, so only the other lines list the session.)
+      if (!when.startsWith("Maybe a new version of a video")) assert.ok(answers.includes(SESSION), said);
       // A video that may be a new version of a session is offered as a session first (final fix 2): kind takes no other answer.
       if (when.startsWith("Maybe a new version of a client or group session")) {
+        assert.equal(new Set(answers).size, answers.length, said);
         assert.deepEqual(answers, [SESSION, ...BASE], said);
         seen.add("maybe session");
         continue;
@@ -463,22 +463,36 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       const guess = /^Guess (.+)$/.exec(when);
       const maybe = /^Maybe a new version of a video (.+)$/.exec(when);
       if (guess) {
+        assert.equal(new Set(answers).size, answers.length, said);
         // The guess first, then the other two of finished, raw and iPhone clip in that order.
         assert.ok(Object.hasOwn(GUESSED, guess[1]), said);
         assert.deepEqual(answers, [GUESSED[guess[1]], ...BASE.filter((a) => a !== GUESSED[guess[1]]), SESSION], said);
         seen.add(`guess ${guess[1]}`);
       } else if (maybe) {
-        // A raw video's new version is offered as finished by the editor, or as a new raw start (spec 1); any other as itself.
+        // A raw video's new version is offered as finished by the editor, or as a new raw start (spec 1); any other as itself. The
+        // version is first, the Guess line's kind second (check 95), then the first other kind in the usual order, the session last.
+        // The line says it as a rule, once for finished and iPhone clip videos, and once for raw ones "in the same order": the rule is
+        // applied here to each Guess line, and must give the card the code makes, of four answers at most.
         const raw = maybe[1] === "raw with retakes";
-        assert.deepEqual(answers, [raw ? "A finished version of <name>" : "A new version of <name>", "Finished by your editor", "Raw with retakes", SESSION], said);
+        const version = raw ? "A finished version of <name>" : "A new version of <name>";
+        assert.equal(answers[0], version, said);
+        assert.ok(line.endsWith(raw ? ', then the same three answers, in the same order'
+          : ', then the kind the Guess line names ("Finished by your editor" when there is no Guess line), then the first of "Finished by your editor" and "Raw with retakes" that is not that kind, then "Client or group session"'), line);
+        for (const guess of [null, "finished", "raw", "clip"]) {
+          const kind = guess ? { finished: BASE[0], raw: BASE[1], clip: BASE[2] }[guess] : BASE[0];
+          const ruled = [version, kind, BASE.slice(0, 2).find((a) => a !== kind), SESSION];
+          const made = cardOf({ label: "Talk 3", guess, maybe: { name: "<name>", kind: raw ? "raw" : "finished" } }).questions[0].options.map((o) => o.label);
+          assert.deepEqual(made, ruled, `${said}, guess ${guess}`);
+          assert.ok(made.length <= 4 && new Set(made).size === made.length && made.includes(SESSION) && (!guess || made[1] === kind), made.join(", "));
+        }
         seen.add(raw ? "maybe raw" : "maybe other");
       } else {
         assert.equal(when, "No Guess line", said);
+        assert.equal(new Set(answers).size, answers.length, said);
         assert.deepEqual(answers, [...BASE, SESSION], said);
         seen.add("none");
       }
     }
-    assert.deepEqual([...seen].sort(), ["guess an iPhone clip", "guess finished by your editor", "guess raw with retakes", "maybe other", "maybe raw", "maybe session", "none"]);
     // The skill listens for the line as edit.js says it.
     assert.match(source("edit.js"), /lines\.push\("    Maybe a new version of a client or group session\."\)/);
   });
@@ -1436,7 +1450,7 @@ describe("her folder's CLAUDE.md and skill under the open lock (design 2026-10-2
   it("keeps the strict lock's CLAUDE.md and skill as they are: the strict folder runs nothing but BRIMM Video Studio, and words its own card", () => {
     assert.ok(strict["CLAUDE.md"].includes("Everything is done through BRIMM Video Studio's commands. Do not open, read or change any code, and do not run any other program."));
     for (const words of ["Workshop", "heredoc", "teachings"]) assert.ok(!strict["CLAUDE.md"].includes(words), words);
-    assert.ok(strictSkill.includes('1. "What is <label>?", with these answers, in this order (a Maybe line wins over a Guess line):'));
+    assert.ok(strictSkill.includes('1. "What is <label>?", with these answers, in this order (a Maybe line takes the first place, and its card keeps the Guess line\'s kind second):'));
     for (const words of ["Card: {", "a file for this chat alone", "not trusted this folder", "This chat holds a session's words"]) assert.ok(!strictSkill.includes(words), words);
     assert.notEqual(openSkill(), strictSkill);
   });
