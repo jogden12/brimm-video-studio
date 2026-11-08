@@ -284,11 +284,14 @@ A small helper app, `Choose a Folder.app`, inside Move to Studio at `Contents/He
 - **Keys typed meanwhile.** After the chooser closes, the app brings Terminal to the front (`open -a Terminal`), then throws away any keys typed into Terminal while the chooser was open:
 
   ```zsh
-  local thrown=0 _key
+  local thrown=0 _key last=""
   if [[ -t 0 ]]; then
-    while read -t 0 -k 1 -s _key; do thrown=$(( thrown + 1 )); done
+    while read -t 0 -k 1 -s _key; do thrown=$(( thrown + 1 )); last=$_key; done
   fi
   THROWN=$(( THROWN + thrown ))
+  if (( thrown > 0 )); then
+    if [[ "$last" != $'\n' && "$last" != $'\r' ]]; then print -r -- ""; fi
+  fi
   ```
 
   - This is zsh's own terminal read, with no `-u`. It leaves line mode for each key, so a y typed without Return is thrown away too, which a read of whole lines would keep.

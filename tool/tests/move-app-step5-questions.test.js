@@ -174,7 +174,7 @@ describe("the move script, step 5's two questions, the chooser and the installer
 
   it("keeps the spec's block for the keys typed meanwhile", () => {
     const code = readFileSync(MOVE, "utf8");
-    for (const line of ["local thrown=0 _key", "if [[ -t 0 ]]; then", "while read -t 0 -k 1 -s _key; do thrown=$(( thrown + 1 )); done", "THROWN=$(( THROWN + thrown ))", "Keys typed while the window was open were not taken as answers."]) {
+    for (const line of ["local thrown=0 _key last=\"\"", "if [[ -t 0 ]]; then", "while read -t 0 -k 1 -s _key; do thrown=$(( thrown + 1 )); last=$_key; done", "if [[ \"$last\" != $'\\n' && \"$last\" != $'\\r' ]]; then print -r -- \"\"; fi", "THROWN=$(( THROWN + thrown ))", "Keys typed while the window was open were not taken as answers."]) {
       assert.ok(code.includes(line), line);
     }
     // Piped answers are not a keyboard: nothing is thrown away, and nothing said.
