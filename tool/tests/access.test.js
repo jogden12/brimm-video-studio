@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { seenFile } from "../settings.js";
 import {
   ASKING_MS, UNSEEN_MS, BANNER_AGAIN_MS, DOWNLOADS_SAY_MS, accessFile, accessBanner, accessLine, accessLog, bracket, findingOf, lookAt, lookLog, noteState,
-  placeWordsOf, readAccess, setupLine, stepLine, switchFor, writeAccess,
+  placeWordsOf, postIfDue, postNewNodeIfDue, readAccess, setupLine, stepLine, switchFor, writeAccess,
 } from "../access.js";
 import { watched } from "./watched-fs.js";
 
@@ -466,5 +466,57 @@ describe("the words are the design's", () => {
     mkdirSync(other, { recursive: true });
     assert.equal(switchFor(other, home), "its switches");
     assert.equal(switchFor("/Volumes/Backup/Drop", home), "Removable Volumes");
+  });
+});
+
+describe("postIfDue and postNewNodeIfDue (A3)", () => {
+  const refusedNote = (place = "drop") => ({ version: 1, places: { [place]: { state: "refused", code: "EPERM" } }, looking: null, told: {} });
+  const T0 = 1_000_000;
+
+  it("postIfDue posts for a refused place and writes told to home, so a later read finds it", () => {
+    const said = [];
+    const note = refusedNote();
+    writeAccess(home, note);
+    assert.equal(postIfDue("drop", note, { notify: (t) => said.push(t), clock: () => T0, node: NODE, placeWords: "your drop folder", home }), true);
+    assert.deepEqual(said, [accessBanner("refused", "your drop folder")]);
+    assert.deepEqual(readAccess(home).told.drop, { key: `refused|${NODE}`, at: T0 });
+  });
+
+  it("postIfDue does not post exactly BANNER_AGAIN_MS later, and does one ms more", () => {
+    const said = [];
+    const note = refusedNote();
+    const opts = (at) => ({ notify: (t) => said.push(t), clock: () => at, node: NODE, placeWords: "w", home });
+    assert.equal(postIfDue("drop", note, opts(T0)), true);
+    assert.equal(postIfDue("drop", readAccess(home), opts(T0 + BANNER_AGAIN_MS)), false);
+    assert.equal(postIfDue("drop", readAccess(home), opts(T0 + BANNER_AGAIN_MS + 1)), true);
+    assert.equal(said.length, 2);
+  });
+
+  it("postIfDue with a notify that throws leaves told unwritten and does not throw", () => {
+    const note = refusedNote();
+    writeAccess(home, note);
+    assert.equal(postIfDue("drop", note, { notify: () => { throw new Error("no notifier"); }, clock: () => T0, node: NODE, placeWords: "w", home }), false);
+    assert.deepEqual(readAccess(home).told || {}, {});
+    assert.equal("drop" in note.told, false);
+  });
+
+  it("postIfDue clears told[place] on an ok look, a missing one and an error", () => {
+    for (const state of ["ok", "missing", "error"]) {
+      const note = { version: 1, places: { drop: { state } }, looking: null, told: { drop: { key: `refused|${NODE}`, at: T0 } } };
+      writeAccess(home, note);
+      assert.equal(postIfDue("drop", note, { notify: () => assert.fail("no banner"), clock: () => T0, node: NODE, home }), false, state);
+      assert.equal("drop" in readAccess(home).told, false, state);
+    }
+  });
+
+  it("postNewNodeIfDue posts once per node when called twice on the same note", () => {
+    const said = [];
+    const note = { version: 1, places: { episodes: { state: "ok", okNode: NODE } }, looking: null, told: {} };
+    const opts = { notify: (t) => said.push(t), clock: () => T0, node: NODE2, needs: ["episodes"], home };
+    assert.equal(postNewNodeIfDue(note, opts), true);
+    assert.equal(postNewNodeIfDue(note, opts), false);
+    assert.equal(said.length, 1);
+    assert.deepEqual(note.told.newNode, { node: NODE2, at: T0 });
+    assert.deepEqual(readAccess(home).told.newNode, { node: NODE2, at: T0 });
   });
 });

@@ -239,7 +239,8 @@ export function setupLine(note, { home = studioHome(), now = Date.now(), alive =
     the state or node is not what `told[place]` last said, or the last banner for the place is more than an hour old. An ok look (or any
     other state) posts nothing and takes `told[place]` away, so the next refusal posts at once. The rule reads `told` from `note` and writes
     it to `home` each time, never from the run's memory (a run starts again on every dropped video). `notify` failing costs only the banner.
-    Gives whether a banner was posted. */
+    `home` is required for `told` to persist: without it the rule works on `note` in memory only. Pass a `note` read after noteState (the
+    look's own write), or the banner is judged from a note the look has since changed. Gives whether a banner was posted. */
 export function postIfDue(place, note, { notify, clock = Date.now, node = process.execPath, placeWords = "", home } = {}) {
   const state = (note.places[place] || {}).state;
   const told = (note.told = note.told || {});

@@ -1573,13 +1573,27 @@ export async function uneditedFolders(folders, deps) {
     // note; the old folder mode is left as it is.
     const home = deps.home || studioHome();
     const episodic = episodeMode(folder, deps.settings, home);
-    const noteOpts = { home, clock: deps.clock || Date.now };
+    const node = deps.node || process.execPath;
+    const noteOpts = { home, clock: deps.clock || Date.now, node };
     // Once per node, before the run's first touch of the drop folder: macOS is about to ask whether this node may look, in a place that needs it.
+    // The check first answers with no file-system call: only a run whose node changed (a noted place was let in by another node, and this node
+    // has not been told) works out which places need access, and it does so inside the bracket, as the drop folder's own first touch is.
     if (episodic) {
       try {
-        const note = readAccess(home);
-        const needs = Object.keys(note.places).filter((place) => place === "downloads" || (typeof note.places[place].folder === "string" && needsFilesAccess(note.places[place].folder, home)));
-        postNewNodeIfDue(note, { notify: deps.notify || (() => {}), clock: noteOpts.clock, node: deps.node || process.execPath, needs, home });
+        const noted = readAccess(home);
+        const told = (noted.told || {}).newNode;
+        const changed = !(told && told.node === node) && Object.values(noted.places).some((place) => place && place.okNode && place.okNode !== node);
+        if (changed) {
+          bracket(
+            "drop",
+            () => {
+              const note = readAccess(home);
+              const needs = Object.keys(note.places).filter((place) => place === "downloads" || (typeof note.places[place].folder === "string" && needsFilesAccess(note.places[place].folder, home)));
+              postNewNodeIfDue(note, { notify: deps.notify || (() => {}), clock: noteOpts.clock, node, needs, home });
+            },
+            noteOpts
+          );
+        }
       } catch {
         // a banner that fails costs only the banner
       }

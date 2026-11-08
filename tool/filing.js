@@ -1753,10 +1753,13 @@ export async function importEpisodes(dir, deps, importOne) {
   let progressed = false;
   // What the log says of a look that macOS or the folder's permissions refused: once while the look goes on meeting it.
   const lookSaid = new Map();
+  const node = deps.node || process.execPath;
   const sayLook = (place, folder, look) => {
-    // The banner for whoever is at the Mac: access.js says whether it is due, from the note's `told`. It never stops the run.
+    // The banner for whoever is at the Mac: access.js says whether it is due, from the note's `told`. It never stops the run. The place's
+    // words are worked out only for a look that was refused or locked.
     try {
-      postIfDue(place, readAccess(episode.home), { notify: deps.notify || (() => {}), clock, node, placeWords: placeWordsOf(place, folder, episode.home), home: episode.home });
+      const stopped = look && (look.state === "refused" || look.state === "locked");
+      postIfDue(place, readAccess(episode.home), { notify: deps.notify || (() => {}), clock, node, placeWords: stopped ? placeWordsOf(place, folder, episode.home) : "", home: episode.home });
     } catch {
       // a banner that fails costs only the banner
     }
@@ -1767,7 +1770,6 @@ export async function importEpisodes(dir, deps, importOne) {
       log(line);
     }
   };
-  const node = deps.node || process.execPath;
   const noted = { home: episode.home, clock, node };
   const episodesAt = episodesFolder(episode.root);
   // Whether Episodes was refused, locked or failed at its last look: nothing is imported then, for each import needs it. Not there is

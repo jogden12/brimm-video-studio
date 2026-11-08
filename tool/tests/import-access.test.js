@@ -257,6 +257,10 @@ describe("the banners (A3)", () => {
       const { r, before } = await newNodeRun(w, { episodes: okPlace(cloud(w), "/n/a") }, "/n/b");
       assert.equal(before, 1, "posted before the first existsSync on the drop folder");
       assert.deepEqual(r.notices.slice(0, 1), [accessBanner("newNode", "")]);
+      // Run one rewrote the Episodes place with the new node as okNode; put the old one back, keeping `told`, so that only the note's own
+      // "told" stops a second banner for this node.
+      const kept = readAccess(w.home);
+      writeAccess(w.home, { ...kept, places: { episodes: okPlace(cloud(w), "/n/a") } });
       const two = runs(w, L + MIN, { settings: settingsOf(w), home: w.home, node: "/n/b" });
       await uneditedFolders([w.drop], two.deps);
       assert.equal(two.notices.includes(accessBanner("newNode", "")), false, "once per node");
@@ -274,5 +278,57 @@ describe("the banners (A3)", () => {
     withWorld(async (w) => {
       const { r } = await newNodeRun(w, { downloads: okPlace(join(w.home, "Downloads"), "/n/a") }, "/n/b");
       assert.equal(r.notices.includes(accessBanner("newNode", "")), true);
+    }));
+
+  it("a new-node banner that cannot be posted does not stop the run", () =>
+    withWorld(async (w) => {
+      const { r } = await newNodeRun(w, { episodes: okPlace(cloud(w), "/n/a") }, "/n/b", { notify: () => { throw new Error("no notifier"); } });
+      assert.ok(r.logs.includes(`Folder: ${w.drop}`), r.logs.join("|"));
+      assert.equal(readAccess(w.home).told.newNode, undefined, "and it is not noted as told");
+    }));
+
+  it("an old-mode folder gets no new-node banner, though a place has a foreign okNode", () =>
+    withWorld(async (w) => {
+      const old = join(w.dir, "Old");
+      mkdirSync(old);
+      writeAccess(w.home, { version: 1, places: { episodes: okPlace(cloud(w), "/n/a") }, looking: null, told: {} });
+      const r = runs(w, L, { settings: settingsOf(w), home: w.home, node: "/n/b" });
+      await uneditedFolders([old], r.deps);
+      assert.equal(r.notices.includes(accessBanner("newNode", "")), false);
+    }));
+
+
+  it("on an ordinary run (node unchanged) no drop or Episodes path is resolved before the bracketed existsSync", () =>
+    withWorld(async (w) => {
+      writeAccess(w.home, { version: 1, places: { episodes: okPlace(episodesFolder(w.root), "/n/b") }, looking: null, told: {} });
+      const r = runs(w, L, { settings: settingsOf(w), home: w.home, node: "/n/b" });
+      let first = null;
+      const out = await watched(() => uneditedFolders([w.drop], r.deps), {
+        names: ["existsSync", "realpathSync"],
+        deny: (name, path) => {
+          if (first === null && ((name === "existsSync" && path === w.drop) || (name === "realpathSync" && (inside(w.drop, path) || inside(episodesFolder(w.root), path))))) first = { name, looking: (readAccess(w.home).looking || {}).place };
+          return null;
+        }
+      });
+      assert.ok(out.calls.length > 0);
+      assert.deepEqual(first, { name: "existsSync", looking: "drop" });
+    }));
+
+  it("on a changed-node run any resolve of a drop or Episodes path happens while looking.place is drop", () =>
+    withWorld(async (w) => {
+      writeAccess(w.home, { version: 1, places: { episodes: okPlace(episodesFolder(w.root), "/n/a") }, looking: null, told: {} });
+      const r = runs(w, L, { settings: settingsOf(w), home: w.home, node: "/n/b" });
+      const seen = [];
+      let beforeExists = true;
+      await watched(() => uneditedFolders([w.drop], r.deps), {
+        names: ["existsSync", "realpathSync"],
+        deny: (name, path) => {
+          if (name === "existsSync" && path === w.drop) beforeExists = false;
+          if (beforeExists && name === "realpathSync" && (inside(w.drop, path) || inside(episodesFolder(w.root), path))) seen.push((readAccess(w.home).looking || {}).place);
+          return null;
+        }
+      });
+      assert.ok(seen.length > 0, "the changed-node run resolves the Episodes path");
+      assert.ok(seen.every((place) => place === "drop"), seen.join(","));
     }));
 });
