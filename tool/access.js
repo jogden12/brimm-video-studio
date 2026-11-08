@@ -8,10 +8,11 @@
 // No note, line or banner names a video by its file. A write that fails costs only the notice.
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { studioHome } from "./home.js";
 import { realOf } from "./places.js";
 import { isRunning } from "./run.js";
-import { folderWords, seenFile } from "./settings.js";
+import { dropFolderOf, episodesFolder, folderWords, readSettings, seenFile } from "./settings.js";
 
 /** How long a look may wait before it is said that the import is waiting on macOS's question (or on a slow folder). */
 export const ASKING_MS = 60 * 1000;
@@ -236,6 +237,8 @@ export function setupLine(note, { home = studioHome(), now = Date.now(), alive =
   for (const place of PLACES) {
     const noted = note.places[place];
     if (!noted) continue;
+    // A refused Downloads note is never cleared until a later finish, so it is said only within the window her chat uses.
+    if (place === "downloads" && !(typeof noted.at === "number" && now - noted.at <= DOWNLOADS_SAY_MS)) continue;
     const said = noted.state === "missing" ? place === "drop" : ["refused", "locked", "error"].includes(noted.state);
     if (!said) continue;
     const finding = { kind: noted.state, place, code: noted.code };
@@ -290,3 +293,29 @@ export function postNewNodeIfDue(note, { notify, clock = Date.now, node = proces
   if (home) writeAccess(home, note);
   return true;
 }
+
+/** Where each place is now, from this Mac's settings: {} when none can be read. */
+function placesFromSettings(home) {
+  try {
+    const { settings } = readSettings(home);
+    if (!settings) return {};
+    return { drop: dropFolderOf(settings, home), episodes: episodesFolder(settings.root) };
+  } catch {
+    return {};
+  }
+}
+
+/** `node access.js --setup-line`: the installer's one line at the end of a setup, from the note. Prints nothing for any other argument,
+    and never fails the installer: whatever goes wrong prints nothing. */
+export function main(argv, { out = process.stdout, home } = {}) {
+  if (argv[0] !== "--setup-line") return 0;
+  try {
+    const h = home || studioHome();
+    out.write(`${setupLine(readAccess(h), { home: h, places: placesFromSettings(h) })}\n`);
+  } catch {
+    // Nothing: the setup goes on without the line.
+  }
+  return 0;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main(process.argv.slice(2));

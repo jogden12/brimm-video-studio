@@ -5,8 +5,10 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { seenFile } from "../settings.js";
+import { seenFile, settingsFile } from "../settings.js";
 import {
   ASKING_MS, UNSEEN_MS, BANNER_AGAIN_MS, DOWNLOADS_SAY_MS, accessFile, accessBanner, accessLine, accessLog, blocksDrop, bracket, findingOf, lookAt, lookLog, noteState,
   placeWordsOf, postIfDue, postNewNodeIfDue, readAccess, saysInEpisodes, saysInOverview, setupLine, stepLine, switchFor, writeAccess,
@@ -403,6 +405,12 @@ describe("the words are the design's", () => {
       assert.match(setupLine(note(process.pid), { home, now: 100_000 }), /still looking/);
     });
 
+    it("passes over a downloads note older than a day, and says a newer one", () => {
+      const down = (age) => withPlace(ok(), "downloads", { state: "refused", code: "EPERM", folder: join(home, "Downloads"), at: 100_000 + DOWNLOADS_SAY_MS - age });
+      assert.equal(setupLine(down(DOWNLOADS_SAY_MS + 1), opts({ now: 100_000 + DOWNLOADS_SAY_MS })), `${LEAD}node may look in the drop folder and in Dropbox.`);
+      assert.match(setupLine(down(DOWNLOADS_SAY_MS - 1), opts({ now: 100_000 + DOWNLOADS_SAY_MS })), /Downloads/);
+    });
+
     it("says refused and locked with the chat line and the switch", () => {
       const refused = withPlace(ok(), "drop", { state: "refused", code: "EPERM" });
       assert.equal(
@@ -544,5 +552,62 @@ describe("which findings the guide and episodes say (A5)", () => {
     assert.equal(saysInEpisodes(F("refused", "downloads")), true);
     assert.equal(saysInEpisodes({ kind: "unseen", videos: ["a.mov"] }), true);
     assert.equal(saysInEpisodes(F("newNode")), false);
+  });
+});
+
+describe("node access.js --setup-line", () => {
+  const ACCESS_JS = fileURLToPath(new URL("../access.js", import.meta.url));
+  const LEAD = "  Files and Folders, at the end:  ";
+  const at = { state: "ok", code: "", at: 1, since: 1, node: NODE, okNode: NODE };
+  const run = (note, args = ["--setup-line"]) => {
+    if (note) writeAccess(home, note);
+    const r = spawnSync(process.execPath, [ACCESS_JS, ...args], { env: { ...process.env, BRIMM_VIDEO_HOME: home }, encoding: "utf8" });
+    return r;
+  };
+  const noted = (extra = {}) => ({ version: 1, looking: null, told: {}, places: { drop: { ...at, folder: join(home, "Drop") }, episodes: { ...at, folder: join(home, "Episodes") } }, ...extra });
+
+  it("prints the ok line when both places are ok", () => {
+    const r = run(noted());
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, `${LEAD}node may look in the drop folder and in Dropbox.\n`);
+  });
+
+  it("prints the refused line when episodes is refused", () => {
+    const note = noted();
+    note.places.episodes = { ...note.places.episodes, state: "refused", code: "EPERM" };
+    const r = run(note);
+    assert.match(r.stdout, /^  Files and Folders, at the end:  This Mac does not let the import look in BRIMM Video in Dropbox/);
+  });
+
+  it("prints still looking for a live pid under a minute old, and asking for an older one", () => {
+    const fresh = run(noted({ looking: { place: "drop", pid: process.pid, at: Date.now() } }));
+    assert.match(fresh.stdout, /the import is still looking/);
+    const old = run(noted({ looking: { place: "drop", pid: process.pid, at: Date.now() - ASKING_MS - 5000 } }));
+    assert.match(old.stdout, /The import has waited more than a minute/);
+  });
+
+  it("passes over a look whose pid is not alive", () => {
+    const r = run(noted({ looking: { place: "drop", pid: 2 ** 22 + 12345, at: Date.now() } }));
+    assert.equal(r.stdout, `${LEAD}node may look in the drop folder and in Dropbox.\n`);
+  });
+
+  it("says not looked yet when there is no note", () => {
+    const r = run(null);
+    assert.equal(r.stdout, `${LEAD}the import has not looked yet.\n`);
+  });
+
+  it("names the drop folder from this Mac's settings for a first look", () => {
+    mkdirSync(dirname(settingsFile(home)), { recursive: true });
+    const drop = join(home, "Desktop", "Drop");
+    writeFileSync(settingsFile(home), JSON.stringify({ version: 1, machine: "Mac", root: join(home, "Root"), checkout: "/c", drop: "Drop", dropPath: drop }));
+    const r = run({ version: 1, looking: { place: "drop", pid: process.pid, at: Date.now() - ASKING_MS - 5000 }, told: {}, places: {} });
+    assert.match(r.stdout, /Desktop/);
+    assert.doesNotMatch(r.stdout, /your drop folder\./);
+  });
+
+  it("prints nothing and exits 0 with another argument", () => {
+    const r = run(noted(), []);
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, "");
   });
 });
