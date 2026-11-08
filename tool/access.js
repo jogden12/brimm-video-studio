@@ -7,9 +7,10 @@
 // only call it. Design: docs/superpowers/specs/2026-11-07-import-folder-access-notice-design.md.
 // No note, line or banner names a video by its file. A write that fails costs only the notice.
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { studioHome } from "./home.js";
 import { realOf } from "./places.js";
+import { isRunning } from "./run.js";
 import { folderWords, seenFile } from "./settings.js";
 
 /** How long a look may wait before it is said that the import is waiting on macOS's question (or on a slow folder). */
@@ -18,6 +19,8 @@ export const ASKING_MS = 60 * 1000;
 export const UNSEEN_MS = 3 * 60 * 1000;
 /** How long after a banner for a place that place's banner may come again while nothing has changed. */
 export const BANNER_AGAIN_MS = 60 * 60 * 1000;
+/** How long a refused Downloads export is left before it is said again (the Downloads check uses it). */
+export const DOWNLOADS_SAY_MS = 24 * 60 * 60 * 1000;
 /** Her words for "look again", the command that asks the import to look in the drop folder now. */
 export const LOOK_AT_WORK = "The import is at work now: it looks in your drop folder again within a minute.";
 export const LOOK_ASKED = "The import is asked to look in your drop folder now. The panel shows how far it is.";
@@ -42,14 +45,14 @@ export function readAccess(home) {
 
 /** Write the note whole, under another name and then renamed, as seen.json is. A write that fails is passed over. */
 export function writeAccess(home, note) {
-  const file = accessFile(home);
   try {
+    const file = accessFile(home);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(`${file}.writing`, JSON.stringify(note, null, 2) + "\n");
     renameSync(`${file}.writing`, file);
   } catch {
     try {
-      rmSync(`${file}.writing`, { force: true });
+      rmSync(`${accessFile(home)}.writing`, { force: true });
     } catch {
       // nothing more to do
     }
@@ -58,7 +61,7 @@ export function writeAccess(home, note) {
 
 /** Run `fn` with the note saying that the import is looking at `place` (its process and the time), and take that out again whatever
     `fn` does, so that a run stuck in `fn` shows in the note. Gives fn's result; a throw goes on. `fn` is not waited for if it is async. */
-export function bracket(place, fn, { home, clock = Date.now, pid = process.pid }) {
+export function bracket(place, fn, { home, clock = Date.now, pid = process.pid } = {}) {
   const note = readAccess(home);
   note.looking = { place, pid, at: clock() };
   writeAccess(home, note);
@@ -73,8 +76,8 @@ export function bracket(place, fn, { home, clock = Date.now, pid = process.pid }
 
 /** Write what a look at `folder` found for `place`: no error is ok, EPERM is refused (macOS's privacy control), EACCES locked (the
     folder's own permissions), ENOENT missing, any other error. `since` stays while the state does; `okNode` is the node of the last
-    ok look, kept through the other states and absent until a first ok look. */
-export function noteState(place, folder, error, { home, clock = Date.now, node = process.execPath }) {
+    ok look, kept through the other states and absent until a first ok look. Gives the state it wrote. */
+export function noteState(place, folder, error, { home, clock = Date.now, node = process.execPath } = {}) {
   const note = readAccess(home);
   const before = note.places[place];
   const state = error ? STATES[error.code] || "error" : "ok";
@@ -84,10 +87,11 @@ export function noteState(place, folder, error, { home, clock = Date.now, node =
   else if (before && before.okNode) next.okNode = before.okNode;
   note.places[place] = next;
   writeAccess(home, note);
+  return state;
 }
 
 /** List `folder` in a bracket, and write what came of it. Gives { names }, or { state, code } when the folder could not be read. */
-export function lookAt(place, folder, opts) {
+export function lookAt(place, folder, opts = {}) {
   let names;
   let failed = null;
   try {
@@ -95,27 +99,27 @@ export function lookAt(place, folder, opts) {
   } catch (e) {
     failed = e;
   }
-  noteState(place, folder, failed, opts);
-  return failed ? { state: STATES[failed.code] || "error", code: String(failed.code || "") } : { names };
+  const state = noteState(place, folder, failed, opts);
+  return failed ? { state, code: String(failed.code || "") } : { names };
 }
 
 /** What, if anything, to tell her or Jason about the import's looks, as one finding. `places` says where each place is now; `missing`
     is whether this Mac's drop folder is not there as her chat sees it; `unseen` is the videos the import has not taken; `agentNode`
-    is the node the plist names, "" when it is not known; `needsAccess` is whether a noted place is one macOS guards. The first that
+    is the node the plist names, "" when it is not known; `needsAccess` lists the places (drop, episodes) that macOS guards. The first that
     holds: asking, refused/locked/error (the first noted place, drop then episodes then downloads, that is still where it was),
     missing, unseen, newNode. */
-export function findingOf({ note, now, places, agentPid, missing = false, unseen = [], agentNode = "", needsAccess = false }) {
+export function findingOf({ note, now, places, agentPid, missing = false, unseen = [], agentNode = "", needsAccess = [] }) {
   const looking = note.looking;
   if (looking && looking.pid === agentPid && now - looking.at > ASKING_MS) return { kind: "asking", place: looking.place };
   for (const place of PLACES) {
     const noted = note.places[place];
-    if (!noted || !places[place] || resolve(noted.folder) !== resolve(places[place])) continue;
+    if (!noted || typeof noted.folder !== "string" || !places[place] || resolve(noted.folder) !== resolve(places[place])) continue;
     if (noted.state === "refused" || noted.state === "locked" || noted.state === "error") return { kind: noted.state, place, code: noted.code };
   }
   if (missing) return { kind: "missing", place: "drop" };
   if (unseen.length) return { kind: "unseen", videos: unseen };
-  const letIn = Object.values(note.places).map((p) => p.okNode).filter(Boolean);
-  if (needsAccess && agentNode && letIn.length && !letIn.includes(agentNode)) return { kind: "newNode" };
+  const guarded = needsAccess.filter((place) => place === "drop" || place === "episodes").map((place) => (note.places[place] || {}).okNode);
+  if (agentNode && guarded.some((okNode) => okNode && okNode !== agentNode)) return { kind: "newNode" };
   return null;
 }
 
@@ -172,9 +176,10 @@ export function accessLine(finding, { placeWords = "", switchName = "", code = "
 }
 
 /** The line on one waiting video's step: its own for a video the import has not taken, else the finding's line as it is. Nothing for
-    a finding that does not block a video. */
+    a finding that does not block a video, or one about Downloads. */
 export function stepLine(finding, opts = {}) {
   if (finding.kind === "unseen") return 'The import has not taken it, and no import is running. Say "look again". If it still waits, ask Jason.';
+  if (finding.place === "downloads") return "";
   return ["asking", "refused", "locked", "error"].includes(finding.kind) ? accessLine(finding, opts) : "";
 }
 
@@ -193,18 +198,29 @@ export function accessLog(state, code, node, placeWords) {
   return "";
 }
 
-/** The installer's line, from the note, for what macOS answered at the end of the setup. */
-export function setupLine(note, { home = homedir() } = {}) {
+/** The installer's line, from the note, for what macOS answered at the end of the setup. `home` is for the place words, `now` the time, `alive`
+    whether a process is running (kill 0, as run.js isRunning), and `places` where each place is now, to name a place the note has no
+    folder for yet (a first look). Only these: both places ok; none looked yet; a live look under a minute old (still looking), or older
+    (the asking line); a look whose process is gone is passed over; refused, locked and error in any place; missing for the drop folder only. */
+export function setupLine(note, { home = studioHome(), now = Date.now(), alive = isRunning, places = {} } = {}) {
   const lead = "  Files and Folders, at the end:  ";
-  const words = (place) => placeWordsOf(place, (note.places[place] || {}).folder || "", home);
-  if (note.looking) return lead + accessLine({ kind: "asking", place: note.looking.place }, { placeWords: words(note.looking.place) });
+  const folderOf = (place) => {
+    const noted = (note.places[place] || {}).folder;
+    return typeof noted === "string" && noted ? noted : places[place] || "";
+  };
+  const words = (place) => (folderOf(place) ? placeWordsOf(place, folderOf(place), home) : place === "drop" ? "your drop folder" : placeWordsOf(place, "", home));
+  const looking = note.looking;
+  if (looking && alive(looking.pid)) {
+    if (now - looking.at < ASKING_MS) return `${lead}the import is still looking; if a box asks whether "node" may look in a folder, choose Allow.`;
+    return lead + accessLine({ kind: "asking", place: looking.place }, { placeWords: words(looking.place) });
+  }
   for (const place of PLACES) {
     const noted = note.places[place];
     if (!noted) continue;
-    if (["refused", "locked", "error", "missing"].includes(noted.state)) {
-      const finding = { kind: noted.state, place, code: noted.code };
-      return lead + accessLine(finding, { placeWords: words(place), switchName: switchFor(noted.folder, home) });
-    }
+    const said = noted.state === "missing" ? place === "drop" : ["refused", "locked", "error"].includes(noted.state);
+    if (!said) continue;
+    const finding = { kind: noted.state, place, code: noted.code };
+    return lead + accessLine(finding, { placeWords: words(place), switchName: folderOf(place) ? switchFor(folderOf(place), home) : "its switches" });
   }
   const both = ["drop", "episodes"].every((place) => note.places[place] && note.places[place].state === "ok");
   return lead + (both ? "node may look in the drop folder and in Dropbox." : "the import has not looked yet.");

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { seenFile } from "../settings.js";
 import {
-  ASKING_MS, UNSEEN_MS, BANNER_AGAIN_MS, accessFile, accessBanner, accessLine, accessLog, bracket, findingOf, lookAt, noteState,
+  ASKING_MS, UNSEEN_MS, BANNER_AGAIN_MS, DOWNLOADS_SAY_MS, accessFile, accessBanner, accessLine, accessLog, bracket, findingOf, lookAt, noteState,
   readAccess, setupLine, stepLine, switchFor, writeAccess,
 } from "../access.js";
 import { watched } from "./watched-fs.js";
@@ -70,6 +70,14 @@ describe("bracket", () => {
   });
 });
 
+describe("the options are optional", () => {
+  it("bracket, noteState and lookAt go on with no options, passing over a note they cannot write", () => {
+    assert.equal(bracket("drop", () => 7), 7);
+    assert.equal(noteState("drop", join(home, "Drop"), null), "ok");
+    assert.deepEqual(lookAt("drop", join(home, "Nowhere")), { state: "missing", code: "ENOENT" });
+  });
+});
+
 describe("lookAt", () => {
   it("lists the folder, notes ok, and leaves no looking", () => {
     const folder = join(home, "Drop");
@@ -111,6 +119,13 @@ describe("lookAt", () => {
 });
 
 describe("noteState", () => {
+  it("gives back the state it wrote", () => {
+    const folder = join(home, "Drop");
+    assert.equal(noteState("drop", folder, null, { home, clock: () => 1, node: NODE }), "ok");
+    assert.equal(noteState("drop", folder, refusal("EPERM"), { home, clock: () => 2, node: NODE }), "refused");
+    assert.equal(noteState("drop", folder, refusal("EACCES"), { home, clock: () => 3, node: NODE }), "locked");
+  });
+
   it("keeps since and okNode while the state is the same, and starts a new since when it changes", () => {
     const folder = join(home, "Drop");
     noteState("drop", folder, null, { home, clock: () => 1, node: NODE });
@@ -204,7 +219,7 @@ describe("findingOf", () => {
   });
 
   it("keeps the order refused, missing, unseen, newNode", () => {
-    const all = { ...base, missing: true, unseen: ["a"], needsAccess: true, agentNode: NODE2 };
+    const all = { ...base, missing: true, unseen: ["a"], needsAccess: ["drop"], agentNode: NODE2 };
     const noted = note({ drop: place("ok", { okNode: NODE }) });
     assert.equal(findingOf({ ...all, note: noted }).kind, "missing");
     assert.equal(findingOf({ ...all, missing: false, note: noted }).kind, "unseen");
@@ -212,22 +227,40 @@ describe("findingOf", () => {
     assert.equal(findingOf({ ...all, note: note({ drop: place("refused", { okNode: NODE }) }) }).kind, "refused");
   });
 
-  it("says newNode when a place needs access and the agent's node is not the one that was let in", () => {
+  it("says newNode when a place that needs access was let in by another node", () => {
     const noted = note({ drop: place("ok", { okNode: NODE }) });
-    assert.deepEqual(findingOf({ ...base, note: noted, needsAccess: true, agentNode: NODE2 }), { kind: "newNode" });
-    assert.equal(findingOf({ ...base, note: noted, needsAccess: true, agentNode: NODE }), null);
-    assert.equal(findingOf({ ...base, note: noted, needsAccess: false, agentNode: NODE2 }), null);
+    assert.deepEqual(findingOf({ ...base, note: noted, needsAccess: ["drop"], agentNode: NODE2 }), { kind: "newNode" });
+    assert.equal(findingOf({ ...base, note: noted, needsAccess: ["drop"], agentNode: NODE }), null);
+    assert.equal(findingOf({ ...base, note: noted, needsAccess: [], agentNode: NODE2 }), null);
+    assert.equal(findingOf({ ...base, note: noted, agentNode: NODE2 }), null);
+    assert.equal(findingOf({ ...base, note: noted, needsAccess: ["drop"], agentNode: "" }), null);
   });
 
-  it("says no newNode when no place has an okNode", () => {
-    assert.equal(findingOf({ ...base, note: note({ drop: place("ok") }), needsAccess: true, agentNode: NODE2 }), null);
-    assert.equal(findingOf({ ...base, note: note({}), needsAccess: true, agentNode: NODE2 }), null);
+  it("judges newNode by the places that need access, not by any place", () => {
+    const noted = note({ drop: place("ok", { okNode: NODE2 }), episodes: place("ok", { okNode: NODE, folder: "/episodes" }) });
+    assert.deepEqual(findingOf({ ...base, note: noted, needsAccess: ["episodes"], agentNode: NODE2 }), { kind: "newNode" });
+    assert.equal(findingOf({ ...base, note: noted, needsAccess: ["drop"], agentNode: NODE2 }), null);
+  });
+
+  it("never gives newNode for downloads", () => {
+    const noted = note({ downloads: place("ok", { okNode: NODE, folder: "/downloads" }) });
+    assert.equal(findingOf({ ...base, note: noted, needsAccess: ["downloads"], agentNode: NODE2 }), null);
+  });
+
+  it("says no newNode when the places that need access have no okNode", () => {
+    assert.equal(findingOf({ ...base, note: note({ drop: place("ok") }), needsAccess: ["drop"], agentNode: NODE2 }), null);
+    assert.equal(findingOf({ ...base, note: note({}), needsAccess: ["drop"], agentNode: NODE2 }), null);
+  });
+
+  it("passes over a noted place whose folder is not text", () => {
+    assert.equal(findingOf({ ...base, note: note({ drop: place("refused", { folder: undefined }), episodes: place("refused", { folder: 5 }) }) }), null);
   });
 
   it("keeps the constants", () => {
     assert.equal(ASKING_MS, 60_000);
     assert.equal(UNSEEN_MS, 180_000);
     assert.equal(BANNER_AGAIN_MS, 3_600_000);
+    assert.equal(DOWNLOADS_SAY_MS, 86_400_000);
   });
 });
 
@@ -293,6 +326,11 @@ describe("the words are the design's", () => {
     }
   });
 
+  it("stepLine says nothing for Downloads", () => {
+    assert.equal(stepLine({ kind: "refused", place: "downloads", code: "EPERM" }, { placeWords: "the Downloads folder", switchName: "Downloads Folder" }), "");
+    assert.equal(stepLine({ kind: "asking", place: "downloads" }, { placeWords: "the Downloads folder" }), "");
+  });
+
   it("accessBanner", () => {
     assert.equal(accessBanner("refused", drop), `This Mac does not let node look in ${drop}. Allow it in System Settings › Privacy & Security › Files and Folders.`);
     assert.equal(accessBanner("locked", drop), `The import cannot open ${drop}. Ask Jason.`);
@@ -310,27 +348,96 @@ describe("the words are the design's", () => {
     );
   });
 
-  it("setupLine", () => {
+  describe("setupLine", () => {
+    const LEAD = "  Files and Folders, at the end:  ";
     const at = { state: "ok", code: "", at: 1, since: 1, node: NODE, okNode: NODE };
-    const drops = join(home, "Drop");
-    const ok = { version: 1, looking: null, told: {}, places: { drop: { ...at, folder: drops }, episodes: { ...at, folder: join(home, "Episodes") } } };
-    assert.equal(setupLine(ok, { home }), "  Files and Folders, at the end:  node may look in the drop folder and in Dropbox.");
-    assert.equal(setupLine(readAccess(home), { home }), "  Files and Folders, at the end:  the import has not looked yet.");
-    assert.equal(
-      setupLine({ ...ok, places: { drop: ok.places.drop } }, { home }),
-      "  Files and Folders, at the end:  the import has not looked yet.",
-    );
-    const refused = { ...ok, places: { ...ok.places, drop: { ...ok.places.drop, state: "refused", code: "EPERM" } } };
-    const words = `your drop folder, Drop, in your home folder`;
-    assert.equal(
-      setupLine(refused, { home }),
-      `  Files and Folders, at the end:  This Mac does not let the import look in ${words}, so the videos you drop wait. In System Settings, under Privacy & Security, Files and Folders, turn on its switches under each "node" listed. Then say "look again".`,
-    );
-    const asking = { ...ok, looking: { place: "episodes", pid: 1, at: 1 } };
-    assert.equal(
-      setupLine(asking, { home }),
-      '  Files and Folders, at the end:  The import has waited more than a minute to look in BRIMM Video in Dropbox. If a box on this Mac\'s screen asks whether "node" may look in it, choose Allow, and the import goes on.',
-    );
+    const drops = () => join(home, "Drop");
+    const ok = () => ({ version: 1, looking: null, told: {}, places: { drop: { ...at, folder: drops() }, episodes: { ...at, folder: join(home, "Episodes") } } });
+    const withPlace = (note, place, extra) => ({ ...note, places: { ...note.places, [place]: { ...note.places[place], ...extra } } });
+    const dead = () => false;
+    const live = () => true;
+    const opts = (extra = {}) => ({ home, now: 100_000, alive: dead, ...extra });
+    const words = "your drop folder, Drop, in your home folder";
+
+    it("says ok when drop and episodes are both ok", () => {
+      assert.equal(setupLine(ok(), opts()), `${LEAD}node may look in the drop folder and in Dropbox.`);
+    });
+
+    it("says not looked yet for no places, or for drop ok with episodes not noted", () => {
+      assert.equal(setupLine(readAccess(home), opts()), `${LEAD}the import has not looked yet.`);
+      assert.equal(setupLine({ ...ok(), places: { drop: ok().places.drop } }, opts()), `${LEAD}the import has not looked yet.`);
+    });
+
+    it("says still looking for a live look under a minute old", () => {
+      const note = { ...ok(), looking: { place: "episodes", pid: 5, at: 100_000 - ASKING_MS + 1 } };
+      assert.equal(setupLine(note, opts({ alive: live })), `${LEAD}the import is still looking; if a box asks whether "node" may look in a folder, choose Allow.`);
+    });
+
+    it("says asking for a live look a minute old or more", () => {
+      const note = { ...ok(), looking: { place: "episodes", pid: 5, at: 100_000 - ASKING_MS } };
+      assert.equal(
+        setupLine(note, opts({ alive: live })),
+        `${LEAD}The import has waited more than a minute to look in BRIMM Video in Dropbox. If a box on this Mac's screen asks whether "node" may look in it, choose Allow, and the import goes on.`,
+      );
+    });
+
+    it("passes over a look whose process is not alive, and asks it with the pid", () => {
+      const note = { ...ok(), looking: { place: "episodes", pid: 5, at: 1 } };
+      assert.equal(setupLine(note, opts()), `${LEAD}node may look in the drop folder and in Dropbox.`);
+      let asked;
+      setupLine(note, opts({ alive: (pid) => { asked = pid; return false; } }));
+      assert.equal(asked, 5);
+    });
+
+    it("checks the process with kill 0 by default, an unknown pid being not alive and this one alive", () => {
+      const note = (pid) => ({ ...ok(), looking: { place: "drop", pid, at: 99_999 } });
+      assert.equal(setupLine(note(2 ** 22 + 12345), { home, now: 100_000 }), `${LEAD}node may look in the drop folder and in Dropbox.`);
+      assert.match(setupLine(note(process.pid), { home, now: 100_000 }), /still looking/);
+    });
+
+    it("says refused and locked with the chat line and the switch", () => {
+      const refused = withPlace(ok(), "drop", { state: "refused", code: "EPERM" });
+      assert.equal(
+        setupLine(refused, opts()),
+        `${LEAD}This Mac does not let the import look in ${words}, so the videos you drop wait. In System Settings, under Privacy & Security, Files and Folders, turn on its switches under each "node" listed. Then say "look again".`,
+      );
+      const locked = withPlace(ok(), "episodes", { state: "locked", code: "EACCES" });
+      assert.equal(
+        setupLine(locked, opts()),
+        `${LEAD}The import cannot open BRIMM Video in Dropbox: the folder's own permissions shut it. Ask Jason. (Jason: node gets EACCES there; see Get Info, Sharing & Permissions.)`,
+      );
+    });
+
+    it("says error for any place", () => {
+      const note = withPlace(ok(), "episodes", { state: "error", code: "EIO" });
+      assert.equal(setupLine(note, opts()), `${LEAD}The import could not look in BRIMM Video in Dropbox (EIO). Ask Jason. (Jason: see ~/Library/Logs/brimm-video.log.)`);
+    });
+
+    it("says missing for the drop folder only", () => {
+      const note = withPlace(ok(), "drop", { state: "missing", code: "ENOENT" });
+      assert.equal(setupLine(note, opts()), `${LEAD}Your drop folder, Drop, in your home folder, is not there now. If it is on another disk, connect the disk, then say "look again".`);
+      assert.equal(setupLine(withPlace(ok(), "downloads", { ...at, state: "missing", folder: join(home, "Downloads") }), opts()), `${LEAD}node may look in the drop folder and in Dropbox.`);
+    });
+
+    it("says not looked yet for drop ok with episodes missing, and never sends episodes to the drop sentence", () => {
+      const note = withPlace(ok(), "episodes", { state: "missing", code: "ENOENT" });
+      assert.equal(setupLine(note, opts()), `${LEAD}the import has not looked yet.`);
+    });
+
+    it("names a place that has no noted folder by where it is now, on a first look", () => {
+      const note = { version: 1, places: {}, told: {}, looking: { place: "drop", pid: 5, at: 1 } };
+      assert.equal(
+        setupLine(note, opts({ alive: live, places: { drop: drops() } })),
+        `${LEAD}The import has waited more than a minute to look in ${words}. If a box on this Mac's screen asks whether "node" may look in it, choose Allow, and the import goes on.`,
+      );
+    });
+
+    it("never names a place by an empty path", () => {
+      const note = { version: 1, places: {}, told: {}, looking: { place: "drop", pid: 5, at: 1 } };
+      const line = setupLine(note, opts({ alive: live }));
+      assert.doesNotMatch(line, /›|in your home folder/);
+      assert.match(line, /look in your drop folder\./);
+    });
   });
 
   it("switchFor, by the folder's real path", () => {
@@ -350,5 +457,6 @@ describe("the words are the design's", () => {
     const other = join(home, "BRIMM Video Work", "Drop");
     mkdirSync(other, { recursive: true });
     assert.equal(switchFor(other, home), "its switches");
+    assert.equal(switchFor("/Volumes/Backup/Drop", home), "Removable Volumes");
   });
 });
