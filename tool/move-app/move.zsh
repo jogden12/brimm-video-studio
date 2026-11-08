@@ -77,7 +77,7 @@ CAND="" CAND_FROM="" QUESTION_LINES="" QUESTION_PROMPT=""   # what y gives for a
 THROWN=0             # keys typed while a chooser was open, thrown away
 CHOSEN=""            # the folder the chooser gave, made whole
 ANSWER=""            # y or c, from ask_y_or_c
-FAULT_KIND="" FAULT_WORDS=""   # why a folder will not do (empty when it will), set by the checks of a pick
+FAULT_KIND="" FAULT_WORDS="" FAULT_REASON=""   # why a folder will not do (empty when it will), set by the checks of a pick: the refusal in the app's words, and its reason alone as a clause
 DROP_FOLDER="" EXPORTS_FOLDER=""   # the folders step 5 gives the installer, whole paths
 DROP_KEPT="" EXPORTS_KEPT=""       # yes when the settings' own folder is kept
 DROP_FROM="" EXPORTS_FROM=""       # where each came from: suggested, settings, last or picked
@@ -828,22 +828,22 @@ choose_folder() {
 # run it as a command when it is node's first argument), as install.sh's lock_facts does. When that cannot be asked (no node, no
 # Studio checkout, an error: node's errors are kept off the screen) the whole path is said instead.
 words_for() {
-  local path="$1" told=""
+  local folder="$1" told=""
   if [[ -n "$NODE" && -f "$STUDIO/tool/settings.js" ]]; then
     told="$("$NODE" --input-type=module -e '
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 const { folderWords } = await import(pathToFileURL(join(process.argv[1], "settings.js")).href);
 process.stdout.write(folderWords(process.argv[2], process.argv[3]));
-' "$STUDIO/tool" "$path" "$HOME" 2>/dev/null)" || told=""
+' "$STUDIO/tool" "$folder" "$HOME" 2>/dev/null)" || told=""
   fi
-  print -r -- "${told:-$path}"
+  print -r -- "${told:-$folder}"
 }
 
 # The app's own checks of a pick: they set FAULT_KIND (linebreak, transcript, cannot-look, not-empty, studio) and FAULT_WORDS, the
 # refusal in the app's words, empty when the folder will do. Nothing is refused until they are written.
-drop_folder_fault() { FAULT_KIND="" FAULT_WORDS=""; }
-exports_folder_fault() { FAULT_KIND="" FAULT_WORDS=""; }
+drop_folder_fault() { FAULT_KIND="" FAULT_WORDS="" FAULT_REASON=""; }
+exports_folder_fault() { FAULT_KIND="" FAULT_WORDS="" FAULT_REASON=""; }
 
 # What y gives for a question: CAND, and CAND_FROM (settings, last or suggested). The settings' own folder is dropPath or exportsPath
 # (exportsPath only when it is not Downloads by real path); the last-time folder is the mark drop= or exports=.
@@ -916,7 +916,7 @@ say_left_behind() {
 # give the same refused folder again (unless allowing Terminal cures it). When the chooser cannot be shown, y still takes the
 # suggested folder; only c alone stops, with the words that fit the refusal.
 ask_folder() {
-  local kind="$1" message c_only="" y_kind="" y_words="" rc cand from started words
+  local kind="$1" message c_only="" y_kind="" y_reason="" rc cand from started words
   if [[ "$kind" == drop ]]; then message="Move to Studio: choose the folder you will drop videos into, or make a new one with New Folder."
   else message="Move to Studio: choose the folder HyperFrames' exports will go into, or make a new one with New Folder."; fi
   folder_candidate "$kind"
@@ -932,7 +932,7 @@ ask_folder() {
       folder_fault "$kind" "$cand" "$from"
       if [[ -n "$FAULT_WORDS" ]]; then
         say "  $FAULT_WORDS"
-        if [[ "$FAULT_KIND" != cannot-look ]]; then c_only=yes y_kind="$FAULT_KIND" y_words="$FAULT_WORDS"; fi
+        if [[ "$FAULT_KIND" != cannot-look ]]; then c_only=yes y_kind="$FAULT_KIND" y_reason="$FAULT_REASON"; fi
         continue
       fi
       settle_folder "$kind" "$cand" "$([[ "$from" == settings ]] && print yes || true)" "$from"
@@ -952,7 +952,7 @@ ask_folder() {
         if [[ "$y_kind" == not-empty ]]; then
           stop_here "The window to choose a folder could not be shown, and $words is not empty. Empty it in Finder, or tell Jason, then double-click Move to Studio again."
         fi
-        stop_here "The window to choose a folder could not be shown, and $words can't be used: $y_words Tell Jason, then double-click Move to Studio again."
+        stop_here "The window to choose a folder could not be shown, and $words can't be used: $y_reason. Tell Jason, then double-click Move to Studio again."
       fi
       continue
     fi
@@ -963,14 +963,14 @@ ask_folder() {
       continue
     fi
     settle_folder "$kind" "$CHOSEN" "" picked
-    if [[ "$started" == last && "${CHOSEN:A}" != "${cand:A}" ]]; then say_left_behind "$cand"; fi
+    if [[ "$kind" == drop && "$started" == last && "${CHOSEN:A}" != "${cand:A}" ]]; then say_left_behind "$cand"; fi
     break
   done
   if [[ "$kind" == exports ]]; then say_exports_note; fi
 }
 # Runs the check of a pick: $1 the kind, $2 the folder, $3 where it came from. FAULT_WORDS is empty when the folder will do.
 folder_fault() {
-  FAULT_KIND="" FAULT_WORDS=""
+  FAULT_KIND="" FAULT_WORDS="" FAULT_REASON=""
   if [[ "$1" == drop ]]; then drop_folder_fault "$2" "$3"; else exports_folder_fault "$2"; fi
 }
 # After an exports folder other than Downloads: where Studio looks, and that nothing is deleted from it.

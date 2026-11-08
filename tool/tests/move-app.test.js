@@ -292,10 +292,11 @@ echo "\${GIT_SSH-unset}" > "${dir}/install-gitssh"
 case "$1" in
   --print)
     n=$(cat "${dir}/n-print" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${dir}/n-print"
+    call=$n
     c=$(cat "${dir}/print-count"); [ $n -le $c ] || n=$c
     ${inst.printDrops ? `touch "${join(home, "Dropbox", "The BRIMM DB", "BRIMM Video", "Drop", "Sallie's laptop", inst.printDrops)}"` : ""}
     cat "${dir}/print-$n"
-    c=$(cat "${dir}/exit-count"); [ $n -le $c ] || n=$c
+    c=$(cat "${dir}/exit-count"); n=$call; [ $n -le $c ] || n=$c
     exit $(cat "${dir}/exit-$n") ;;
   --yes)
     cat "${dir}/install-ran"
@@ -472,8 +473,9 @@ esac
   const baseEnv = {
     HOME: home, PATH: `${bin}:/usr/bin:/bin:${dirname(process.execPath)}`, BRIMM_HOMEBREW_DIRS: "",
     BRIMM_CLAUDE: join(bin, "claude"), BRIMM_STUDIO_REPO: options.repoMissing ? join(dir, "nowhere") : github, BRIMM_HYPERFRAMES_APP: hfApp,
-    BRIMM_CHOOSER_APP: chooserApp
+    BRIMM_CHOOSER_APP: chooserApp, TMPDIR: join(dir, "tmp")
   };
+  mkdirSync(join(dir, "tmp"));
   if (options.noRepo) delete baseEnv.BRIMM_STUDIO_REPO;
   if (options.testFail) baseEnv.BRIMM_TEST_FAIL = "1";
   const text = (file) => (existsSync(file) ? readFileSync(file, "utf8") : "");
@@ -1593,7 +1595,7 @@ describe("the move script, step 5's two questions, the chooser and the installer
     writeList(dir, "pick", fillHome(picks));
     writeList(dir, "prog", fillHome(program));
     if (fillHome(program).includes("missing")) rmSync(join(app, "Contents", "MacOS", "Choose a Folder"));
-    const r = spawnSync("/bin/zsh", ["-c", `source "$1"\n${script}`, "move", MOVE], { encoding: "utf8", input, env: { HOME: home, PATH: `${bin}:/usr/bin:/bin:${dirname(process.execPath)}`, BRIMM_CHOOSER_APP: app, NODE_BIN: process.execPath, ...env } });
+    const r = spawnSync("/bin/zsh", ["-c", `source "$1"\n${script}`, "move", MOVE], { encoding: "utf8", input, env: { HOME: home, TMPDIR: dir, PATH: `${bin}:/usr/bin:/bin:${dirname(process.execPath)}`, BRIMM_CHOOSER_APP: app, NODE_BIN: process.execPath, ...env } });
     return { status: r.status, out: r.stdout, err: r.stderr, home, dir, ran: existsSync(ran) ? readFileSync(ran, "utf8") : "" };
   }
 
@@ -1799,13 +1801,17 @@ describe("the move script, step 5's two questions, the chooser and the installer
       const exports = moveOn({ marks: "tests=SHA\nexports=<HOME>/Last Exports\n", answers: "y\ny\nn\n" });
       assert.ok(exports.out.includes("Last time, this folder was picked: Last Exports, in your home folder."), exports.out);
       assert.deepEqual(installCalls(exports), [printed(exports, undefined, `${exports.home}/Last Exports`)]);
+
+      const exportsOther = moveOn({ marks: "tests=SHA\nexports=<HOME>/Last Exports\n", folderFiles: { "<HOME>/Last Exports": ["a.mov"] }, picks: ["<HOME>/Exports"], answers: "y\nc\nn\n" });
+      assert.deepEqual(installCalls(exportsOther), [printed(exportsOther, undefined, `${exportsOther.home}/Exports`)]);
+      assert.ok(!exportsOther.out.includes("was left as it is"), "the exports question says nothing of the folder left behind");
     });
   });
 
   it("stops, when c alone is offered and the chooser cannot be shown, with the words that fit the refusal", () => {
     // The checks come in Task 3; here a refusal is made up, to see what the question does with it.
     const script = 'MACHINE="Sallie\'s laptop"; SETTINGS="$HOME/none.json"; MARKS="$HOME/none"; ROOT="$HOME/root"; STUDIO="$HOME/studio"\n'
-      + 'drop_folder_fault() { FAULT_KIND=$KIND; FAULT_WORDS="The folder is no good."; }\nask_drop_folder';
+      + 'drop_folder_fault() { FAULT_KIND=$KIND; FAULT_WORDS="The folder is no good."; FAULT_REASON="the folder is no good"; }\nask_drop_folder';
     const stops = (kind, input) => sourced(`KIND=${kind}\n${script}`, { picks: ["fail"], program: ["two"], input });
     const full = stops("not-empty", "y\nc\n");
     assert.equal(full.status, 1, full.out);
@@ -1813,7 +1819,7 @@ describe("the move script, step 5's two questions, the chooser and the installer
     assert.ok(full.out.includes(`The window to choose a folder could not be shown, and ${full.home}/BRIMM Video Work/Drop is not empty. Empty it in Finder, or tell Jason, then double-click Move to Studio again.`), full.out);
     const other = stops("transcript", "y\nc\n");
     assert.equal(other.status, 1, other.out);
-    assert.ok(other.out.includes(`The window to choose a folder could not be shown, and ${other.home}/BRIMM Video Work/Drop can't be used: The folder is no good. Tell Jason, then double-click Move to Studio again.`), other.out);
+    assert.ok(other.out.includes(`The window to choose a folder could not be shown, and ${other.home}/BRIMM Video Work/Drop can't be used: the folder is no good. Tell Jason, then double-click Move to Studio again.`), other.out);
     // With c alone offered, a y stops, and no chooser is opened.
     const y = stops("not-empty", "y\ny\n");
     assert.equal(y.status, 1, y.out);
@@ -1822,6 +1828,14 @@ describe("the move script, step 5's two questions, the chooser and the installer
     const keeps = stops("cannot-look", "y\ny\n");
     assert.equal(keeps.status, 1);
     assert.ok(!keeps.out.includes("Type c and press Return to choose another folder."), keeps.out);
+  });
+
+  it("(the test's own stand-in) the installer's print texts and exit statuses are indexed by the call, each on its own list", () => {
+    const older = printText(PRINT_LINES.signed, PRINT_LINES.older, PRINT_LINES.hdr);
+    const r = moveOn({ marks: NOT_INSTALLED, install: { print: older, printExit: [0, 2] }, answers: "y\ny\ny\n" });
+    assert.equal(r.status, 1, r.out);
+    assert.equal(installCalls(r).length, 2);
+    assert.match(r.out, /Studio's installer refused/, "the second call exits 2 though the print list has one text");
   });
 
   it("under --print: no chooser and no question, the would line, and the installer's print with the folders y would give", () => {
