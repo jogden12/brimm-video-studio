@@ -102,6 +102,12 @@ const MAKING = 'The video for Reel 2 is being made. Say "open Reel 2 of Pricing 
 const BUSY = 'A video for HyperFrames is being made already, and they are made one at a time. Say "open Reel 2 of Pricing talk in HyperFrames" again when it is done; "how far is it?" shows how far it has got.';
 
 describe("openReelInApp: a Reel opened in HyperFrames", () => {
+  it("names the exports folder after the buttons line when the Mac picked one that is not Downloads, as the main video's open does (L1b)", async (c) => {
+    const e = episode(c);
+    e.ctx.settings = { ...e.ctx.settings, exportsPath: join(e.home, "Movies", "Exports") };
+    assert.equal(await run(e), 0);
+    assert.deepEqual(e.said, ["Reel 2 is made: the recording from 0:01 to 0:03.", "It's open in HyperFrames.", BUTTONS, "Export it on This Mac, into Movies › Exports, in your home folder."]);
+  });
   it("makes the Reel's project from its video, opens it with the pinned command line in PR 1's environment, and records it with the Reel picked", async (c) => {
     const e = episode(c);
     assert.equal(await run(e), 0);

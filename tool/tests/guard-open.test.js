@@ -10,11 +10,12 @@ import { GATED_REFUSED, NEVER_REFUSED, NOT_NAMED, RUN_ALONE, WEB_HELD, WORKSHOP_
 import { LOCK_CHANGED } from "../loosened.js";
 import { HELD_NARROWED, HELD_REFUSED, clearStrictSeen, markChat, noteStrictSeen, untiedMark } from "../held.js";
 import { processTable } from "../chain.js";
-import { settingsFile, settingsMain, writeSettings } from "../settings.js";
+import { settingsFile, settingsMain, writeSettings, dropFolderFault } from "../settings.js";
 import { heldFolder } from "../scan.js";
 import { DRAWING, neverCaught } from "../never.js";
 import { LOCAL_ADDRESS, NUMERIC_ADDRESS } from "../fetchable.js";
 import { claudeDirName, gatedIndex, gatedPlaces, realOf } from "../places.js";
+import { gatedReadRules, guardDecision } from "../studio.js";
 import { APP_ARGS, MINIMUM, SESSION, appCopy, chatChain, openDeps, openWorld, psText, transcript } from "./open-world.js";
 import { ALLOWED, CHECKOUT, EDIT, NODE } from "./guard-cases.js";
 
@@ -835,5 +836,60 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     writeFileSync(cache, "{not json");
     assert.deepEqual(await date(w), CHANGED);
     w.done();
+  });
+});
+
+describe("a drop folder this Mac picked is a gated place, strict lock and open lock (Phase 3, L1)", () => {
+  let w;
+  before(() => {
+    w = openWorld();
+  });
+  after(() => w.done());
+  const places = (dropFolder) => ({ ...w.facts, ...(dropFolder ? { dropFolder } : {}) });
+  const ctxOf = (facts) => ({ checkout: w.checkout, node: w.node, folder: w.folder, home: w.home, uid: w.uid, tmp: w.tmp, index: gatedIndex(gatedPlaces(facts), [join(realOf(w.root), "Assets")]), allow: facts.allow, web: "held", resolve: async () => ["93.184.215.14"], loosened: false, held: false });
+  const input = (name, file_path) => ({ session_id: SESSION, transcript_path: join(w.home, ".claude", "projects", "x", `${SESSION}.jsonl`), cwd: w.folder, hook_event_name: "PreToolUse", tool_name: name, tool_input: { file_path, old_string: "a", new_string: "b" } });
+  const picked = () => [
+    join(w.home, "BRIMM Video Work", "Drop"),
+    join(w.home, "Desktop", "Drop"),
+    join(w.home, "Library", "CloudStorage", "Dropbox-X", "The BRIMM DB", "In")
+  ];
+  it("refuses Read and Edit of a file in it under the open lock, as a file in the Mac's old folder in Dropbox is", async () => {
+    mkdirSync(join(w.root, "Drop", "Mac Studio"), { recursive: true });
+    for (const folder of picked()) {
+      mkdirSync(folder, { recursive: true });
+      const ctx = ctxOf(places(folder));
+      for (const file of [join(folder, "Talk.mov"), join(folder, "new", "Talk.srt")]) {
+        assert.deepEqual(await openDecision(input("Read", file), ctx), { decision: "deny", reason: GATED_REFUSED }, `Read ${file}`);
+        assert.equal((await openDecision(input("Edit", file), ctx)).decision, "deny", `Edit ${file}`);
+      }
+    }
+    const old = ctxOf(places());
+    assert.deepEqual(await openDecision(input("Read", join(w.root, "Drop", "Mac Studio", "Talk.mov")), old), { decision: "deny", reason: GATED_REFUSED });
+  });
+  it("is never a folder in BRIMM Video outside its gated three, which the guard leaves open (Assets): dropFolderFault refuses each, so none is picked", async () => {
+    mkdirSync(join(w.root, "Assets", "In"), { recursive: true });
+    const facts = { home: w.home, root: w.root, exports: join(w.home, "Downloads"), zoom: join(w.home, "Documents", "Zoom") };
+    for (const folder of [join(w.root, "Assets"), join(w.root, "Assets", "In"), join(w.root, "Inbox")]) {
+      assert.equal(dropFolderFault(folder, facts), "the drop folder cannot be BRIMM Video, or inside it, or hold it", folder);
+    }
+    // The reason: a file in Assets is open to every call, even with it named as the drop folder.
+    const ctx = ctxOf(places(join(w.root, "Assets", "In")));
+    assert.equal((await openDecision(input("Read", join(w.root, "Assets", "In", "x.png")), ctx)).decision, "allow");
+  });
+  it("refuses a file in an episode's video folder on this Mac, and in the local status folder, as it does BRIMM Video Work", async () => {
+    const ctx = ctxOf(places(join(w.home, "Desktop", "Drop")));
+    for (const file of [join(w.home, "BRIMM Video Work", "2026-11-06 Talk (Mac Studio)", "video", "Talk.mov"), join(w.home, "Library", "Application Support", "BRIMM Video", "importing", "Talk.mov (Mac Studio) 1.json")]) {
+      assert.deepEqual(await openDecision(input("Read", file), ctx), { decision: "deny", reason: GATED_REFUSED }, file);
+      assert.equal((await openDecision(input("Edit", file), ctx)).decision, "deny", file);
+    }
+  });
+  it("is denied to Claude's Read by a rule, wherever it is, and the strict lock lets a Read outside her folder go no further", () => {
+    for (const folder of picked()) {
+      const rules = gatedReadRules(places(folder));
+      assert.ok(rules.some((rule) => rule.includes(realOf(folder))), `${folder}\n${rules.join("\n")}`);
+      const strict = { tool_name: "Read", tool_input: { file_path: join(folder, "Talk.mov") }, cwd: w.folder, session_id: SESSION, transcript_path: join(w.home, ".claude", "projects", "x", `${SESSION}.jsonl`) };
+      assert.equal(guardDecision(strict, { checkout: w.checkout, node: w.node, folder: w.folder }).decision, "deny", folder);
+      assert.equal(guardDecision({ ...strict, tool_name: "Edit" }, { checkout: w.checkout, node: w.node, folder: w.folder }).decision, "deny", folder);
+    }
   });
 });

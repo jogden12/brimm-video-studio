@@ -415,3 +415,114 @@ describe("reading a file through, so that Dropbox brings it down", () => {
     }
   });
 });
+
+describe("textWriter's onCopy, and sameBytes (L5)", () => {
+  it("D1: onCopy is called with the whole work copy, before it is put in", () => {
+    const s = setup();
+    try {
+      let seen = null;
+      const write = textWriter({ work: s.work, ...s.opts, onCopy: ({ from, to }) => { seen = { text: readFileSync(from, "utf8"), there: existsSync(to) }; } });
+      const got = write(join(s.dest, "r.json"), "TEXT");
+      assert.deepEqual(seen, { text: "TEXT", there: false });
+      assert.equal(readFileSync(join(s.dest, "r.json"), "utf8"), "TEXT");
+      assert.equal(got.bytes, 4);
+    } finally {
+      s.done();
+    }
+  });
+
+  it("D2: a throw from onCopy puts nothing in, and is thrown on", () => {
+    const s = setup();
+    try {
+      const boom = new Error("boom");
+      const hook = () => { throw boom; };
+      assert.throws(() => textWriter({ work: s.work, ...s.opts, onCopy: hook })(join(s.dest, "r.json"), "T"), (e) => e === boom);
+      assert.equal(existsSync(join(s.dest, "r.json")), false);
+      assert.deepEqual(readdirSync(s.work), []);
+      assert.throws(() => textWriter({ work: s.work, keep: true, ...s.opts, onCopy: hook })(join(s.dest, "r.json"), "T"), (e) => e === boom);
+      assert.equal(readdirSync(s.work).length, 1);
+    } finally {
+      s.done();
+    }
+  });
+
+  it("D3: sameBytes and startsAlike are dropbox.js's", async () => {
+    const dropbox = await import("../dropbox.js");
+    const s = setup();
+    try {
+      writeFileSync(join(s.dest, "a"), "hello world");
+      writeFileSync(join(s.dest, "b"), "hello world");
+      writeFileSync(join(s.dest, "c"), "hello worle");
+      assert.equal(dropbox.sameBytes(join(s.dest, "a"), join(s.dest, "b")), true);
+      assert.equal(dropbox.sameBytes(join(s.dest, "a"), join(s.dest, "c")), false);
+      assert.equal(dropbox.sameBytes(join(s.dest, "a"), join(s.dest, "none")), false);
+      assert.equal(dropbox.startsAlike(join(s.dest, "a"), join(s.dest, "c"), 10), true);
+    } finally {
+      s.done();
+    }
+  });
+
+  it("U1: uploadedOf reads the helper's one JSON document, synchronously", async () => {
+    const { UPLOADED, UPLOADED_TIMEOUT_MS, uploadedOf } = await import("../dropbox.js");
+    const calls = [];
+    const giving = (text) => (...args) => {
+      calls.push(args);
+      return text;
+    };
+    assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", exec: giving('{"uploaded": true}\n') }), true);
+    assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", exec: giving('{"uploaded": false}') }), false);
+    assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", exec: giving('{"uploaded": null}') }), null);
+    assert.deepEqual(calls[0], ["SWIFT", [UPLOADED, "/x/f.mov"], { encoding: "utf8", timeout: UPLOADED_TIMEOUT_MS, stdio: ["ignore", "pipe", "ignore"] }]);
+    assert.equal(UPLOADED_TIMEOUT_MS, 20 * 1000);
+    const got = uploadedOf("/x/f.mov", { swift: "SWIFT", exec: giving('{"uploaded": true}') });
+    assert.equal(typeof got.then, "undefined");
+  });
+
+  it("makeOnlineOnly reads the helper's one JSON document, synchronously", async () => {
+    const { ONLINE_ONLY, ONLINE_ONLY_TIMEOUT_MS, makeOnlineOnly } = await import("../dropbox.js");
+    const calls = [];
+    const giving = (text) => (...args) => {
+      calls.push(args);
+      return text;
+    };
+    const boom = () => {
+      throw new Error("t");
+    };
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": true}\n') }), true);
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": false, "error": "NSCocoaErrorDomain 256"}') }), false);
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving("garbage") }), null);
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: boom }), null);
+    assert.deepEqual(calls[0], ["SWIFT", [ONLINE_ONLY, "/x/f.mov"], { encoding: "utf8", timeout: ONLINE_ONLY_TIMEOUT_MS, stdio: ["ignore", "pipe", "ignore"] }]);
+    assert.equal(ONLINE_ONLY_TIMEOUT_MS, 20 * 1000);
+    assert.equal(typeof makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": true}') }).then, "undefined");
+    const said = [];
+    makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": false, "error": "NSCocoaErrorDomain 256"}'), said: (m) => said.push(m) });
+    makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": true}'), said: (m) => said.push(m) });
+    assert.deepEqual(said, ["NSCocoaErrorDomain 256"]);
+    const before = calls.length;
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "", exec: giving('{"onlineOnly": true}') }), null);
+    assert.equal(calls.length, before);
+  });
+
+  it("U2: anything else is null, and no swift runs nothing", async () => {
+    const { uploadedOf } = await import("../dropbox.js");
+    const throwing = (e) => () => {
+      throw e;
+    };
+    const giving = (text) => () => text;
+    for (const exec of [throwing(Object.assign(new Error("t"), { code: "ETIMEDOUT" })), throwing(Object.assign(new Error("end"), { status: 1 })), giving("yes"), giving("{}")]) {
+      assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", exec }), null);
+    }
+    let called = 0;
+    assert.equal(uploadedOf("/x/f.mov", { swift: "", exec: () => { called += 1; return '{"uploaded": true}'; } }), null);
+    assert.equal(uploadedOf("/x/f.mov", { exec: () => { called += 1; return '{"uploaded": true}'; } }), null);
+    assert.equal(called, 0);
+  });
+
+  it("U3: the helper is beside the tool", async () => {
+    const { UPLOADED } = await import("../dropbox.js");
+    assert.ok(UPLOADED.endsWith("/tool/uploaded.swift"));
+    assert.equal(existsSync(UPLOADED), true);
+    assert.match(readFileSync(UPLOADED, "utf8"), /ubiquitousItemIsUploadedKey/);
+  });
+});

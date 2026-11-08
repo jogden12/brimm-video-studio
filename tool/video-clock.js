@@ -2,7 +2,7 @@
 // the stretch of it that reels.json suggests. Nothing is read from Final Cut, a rough cut or a timeline, so a record from the
 // Final Cut days (a render, a push) gives the same times as a record with none. Only the episode's folder is read.
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { fileAt } from "./where.js";
 import { readReels, REELS_FILE } from "./reel-candidates.js";
 import { spellWords } from "./spelling.js";
 import { saidWords } from "./project.js";
@@ -18,14 +18,16 @@ import { saidWords } from "./project.js";
     - { why } when the words file is missing or cannot be read, or the Reel is not in reels.json. */
 export function videoClock(found, ctx, part = "main") {
   const { record, folder } = found;
+  // Each file is looked for where the record keeps it: in the episode's folder in Dropbox, or in its video/ folder on this Mac (where.js fileAt).
+  const at_ = (rel) => fileAt(ctx, { folder, record }, rel);
   const stem = record.video.file.replace(/\.[^.]*$/, "");
   const wordsFile = `${stem}.words.json`;
   const planFile = `${stem}.cut-plan.json`;
-  if (!existsSync(join(folder, wordsFile))) return { why: `${wordsFile} is not in the episode's folder.` };
-  if (!ctx.isWhole(join(folder, wordsFile))) return { coming: wordsFile, bring: [wordsFile] };
+  if (!existsSync(at_(wordsFile))) return { why: `${wordsFile} is not in the episode's folder.` };
+  if (!ctx.isWhole(at_(wordsFile))) return { coming: wordsFile, bring: [wordsFile] };
   let stretch = null;
   if (part !== "main") {
-    const at = join(folder, REELS_FILE);
+    const at = at_(REELS_FILE);
     if (!existsSync(at)) return { why: `There is no Reel ${part.reel}.` };
     if (!ctx.isWhole(at)) return { coming: REELS_FILE, bring: [REELS_FILE] };
     const listed = readReels(readFileSync(at, "utf8"));
@@ -34,15 +36,15 @@ export function videoClock(found, ctx, part = "main") {
     stretch = { from: candidate.start, to: candidate.end };
   }
   let plan = {};
-  if (existsSync(join(folder, planFile)) && !ctx.isWhole(join(folder, planFile))) return { coming: planFile, bring: [planFile] };
+  if (existsSync(at_(planFile)) && !ctx.isWhole(at_(planFile))) return { coming: planFile, bring: [planFile] };
   try {
-    if (existsSync(join(folder, planFile))) plan = JSON.parse(readFileSync(join(folder, planFile), "utf8")) || {};
+    if (existsSync(at_(planFile))) plan = JSON.parse(readFileSync(at_(planFile), "utf8")) || {};
   } catch (e) {
     return { why: `${planFile} or ${wordsFile} cannot be read.` };
   }
   let file;
   try {
-    file = JSON.parse(readFileSync(join(folder, wordsFile), "utf8"));
+    file = JSON.parse(readFileSync(at_(wordsFile), "utf8"));
   } catch (e) {
     return { why: `${wordsFile} cannot be read.` };
   }

@@ -15,7 +15,8 @@ import { lockOf, readResult, resultFile } from "../detached.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { NEWEST_VERSION, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
-import { removeStatus, writeStatus } from "../importing.js";
+import { removeStatusIn, writeStatusIn } from "../importing.js";
+import { importingFolder } from "../settings.js";
 import { READ_HOLD_MS, READ_LOOK_MS } from "../reading.js";
 import { pendingFolder } from "../settings.js";
 import { importHold } from "../unedited.js";
@@ -100,6 +101,47 @@ describe("workcopy: the command", () => {
     await on(t.ctx.deps, "workcopy", "--now", FOLDER);
     assert.deepEqual([guarded[0].copyLock, guarded[0].episodeLock], [true, false]);
     t.done();
+  });
+});
+
+describe("workcopy: its result says which copy it was and what asked for it (F3)", () => {
+  it("writes copy and the token it was given into its result, ended well or not", async () => {
+    for (const how of ["works", "fail"]) {
+      const { t } = world({ how });
+      await on(t.ctx.deps, "workcopy", "--now", FOLDER, "--asked", "123");
+      const r = readResult(t.home, FOLDER, "workcopy");
+      assert.deepEqual([r.ok, r.copy, r.asked], [how === "works", "main", 123], how);
+      t.done();
+    }
+  });
+  it("takes a token that is a whole number alone: any other is left out of the result", async () => {
+    for (const given of [["--asked"], ["--asked", "x"], ["--asked", "1.5"], ["--asked", "-3"], ["--asked", "1", "--asked", "2"]]) {
+      const { t } = world();
+      await on(t.ctx.deps, "workcopy", "--now", FOLDER, ...given);
+      const r = readResult(t.home, FOLDER, "workcopy");
+      assert.deepEqual([r.copy, "asked" in r], ["main", false], given.join(" "));
+      t.done();
+    }
+  });
+  it("keeps its tag when the run throws: a main run with a token says main and the token, a footage run says footage", async () => {
+    for (const [argv, expected] of [[["--asked", "123"], { copy: "main", asked: 123 }], [["--footage"], { copy: "footage" }]]) {
+      const { t } = world();
+      t.ctx.deps.runGuarded = async () => {
+        throw new Error("the watchdog broke");
+      };
+      t.ctx.deps.readAll = async () => {
+        throw new Error("dropbox broke");
+      };
+      t.ctx.isWhole = () => {
+        throw new Error("disk broke");
+      };
+      await on(t.ctx.deps, "workcopy", "--now", FOLDER, ...argv);
+      const r = readResult(t.home, FOLDER, "workcopy");
+      assert.equal(r.ok, false);
+      assert.equal(r.copy, expected.copy);
+      assert.equal(r.asked, expected.asked);
+      t.done();
+    }
   });
 });
 
@@ -269,9 +311,9 @@ describe("workcopy: it waits for the import's late check, as the reading does", 
   /** The import makes its late check, and takes its pending one away. */
   const checkMade = (t) => rmSync(join(pendingFolder(t.home), `${ID}.json`), { force: true });
   /** An import of the video at work on the other Mac, as its status says it, written at the start of the test's clock. */
-  const importAt = (t, found, over = {}) => writeStatus(t.root, { version: 1, machine: OTHER_MAC, pid: 7, import: "k3j9x", video: VIDEO, bytes: found.record.video.bytes, seconds: 23.423, step: "Waiting for its late check", at: AT, label: "Video of 20 Oct, 15:00 (Mac Studio)", ...over }, (to, text) => writeFileSync(to, text));
+  const importAt = (t, found, over = {}) => writeStatusIn(importingFolder(t.root), { version: 1, machine: OTHER_MAC, pid: 7, import: "k3j9x", video: VIDEO, bytes: found.record.video.bytes, seconds: 23.423, step: "Waiting for its late check", at: AT, label: "Video of 20 Oct, 15:00 (Mac Studio)", ...over }, (to, text) => writeFileSync(to, text));
   /** The import has finished: its status is taken away. */
-  const importDone = (t) => removeStatus(t.root, VIDEO, OTHER_MAC, "k3j9x");
+  const importDone = (t) => removeStatusIn(importingFolder(t.root), VIDEO, OTHER_MAC, "k3j9x");
   /** Have the stand-in wait do `then` on every wait of `ms` milliseconds, before it has moved the clock. */
   const onWaits = (t, ms, then) => {
     const wait = t.ctx.deps.wait;
@@ -397,7 +439,7 @@ describe("workcopy: it waits for the import's late check, as the reading does", 
       ["a late check that found a problem", (t, found) => owedWithLocal(t, found, { over: { problem: "Pricing talk.srt is not whole in Dropbox." } })],
       ["an import that failed", (t, found) => {
         owedWithLocal(t, found);
-        writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: VIDEO, bytes: found.record.video.bytes, seconds: 23.423, step: "Waiting for its late check", at: AT, label: "x", failed: "ffprobe could not read it." }, (to, text) => writeFileSync(to, text));
+        writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: VIDEO, bytes: found.record.video.bytes, seconds: 23.423, step: "Waiting for its late check", at: AT, label: "x", failed: "ffprobe could not read it." }, (to, text) => writeFileSync(to, text));
       }]
     ];
     for (const [what, set] of CASES) {

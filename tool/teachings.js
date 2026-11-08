@@ -235,8 +235,10 @@ function givenNames(folder, record) {
       leaves a word out for a session;
     - `hers` the same names as her own words are checked against them (hersOf, herWordsName);
     - `skipped` the line saying its capitalised words were not checked, or "" (namesSkipped);
-    - `plan` the cut plan, read. */
-export function sessionSeen(folder, record, { host } = {}) {
+    - `plan` the cut plan, read.
+    `records` is the episode's folder in Dropbox, where its records are (the names given before it was a session): `folder` is
+    where its files are, which for a video kept on a Mac is the Mac's own video/ folder. */
+export function sessionSeen(folder, record, { host, records = folder } = {}) {
   let plan;
   try {
     plan = JSON.parse(readFileSync(join(folder, planOf(record)), "utf8"));
@@ -254,7 +256,7 @@ export function sessionSeen(folder, record, { host } = {}) {
   const replaced = meetings.length ? replaceSpeakers(zoom, typeof host === "string" && host.trim() ? host : HOST) : { text: "", map: {} };
   const words = list(plan.phrases).map((p) => String((p && p.text) ?? "")).join(" ");
   // Zoom's fixed names are no person's: their lowercase words would match a field's words in any case.
-  const fileName = [record.video.file, ...meetings.filter((rel) => !ZOOM_FIXED.includes(rel.toLowerCase())), ...givenNames(folder, record)];
+  const fileName = [record.video.file, ...meetings.filter((rel) => !ZOOM_FIXED.includes(rel.toLowerCase())), ...givenNames(records, record)];
   const seen = visibleNames({ map: replaced.map, fileName, words, spellings: [] });
   const known = new Set(seen.map((n) => n.toLowerCase()));
   const spelled = spellingNames(record.spellings).filter((w) => !known.has(w.toLowerCase()) && Boolean(known.add(w.toLowerCase())));

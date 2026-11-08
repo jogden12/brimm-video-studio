@@ -1304,6 +1304,14 @@ describe("asking for the working copy", () => {
     assert.deepEqual(requestWorkCopy(ctx, { folder: FOLDER }), { started: true, running: "" });
     assert.deepEqual(started, [[process.execPath, [OWN_EDIT_JS, "workcopy", "--now", FOLDER]]]);
   });
+  it("F3 a main copy asked for with a token gets --asked <n>; without one, and for a Reel or the footage, it gets none", (c) => {
+    const { ctx, started } = asking(c);
+    requestWorkCopy(ctx, { folder: FOLDER, asked: 1700000000000 });
+    requestWorkCopy(ctx, { folder: FOLDER });
+    requestWorkCopy(ctx, { folder: FOLDER, reel: 2, asked: 5 });
+    requestWorkCopy(ctx, { folder: FOLDER, footage: true, asked: 5 });
+    assert.deepEqual(started.map(([, args]) => args.slice(1)), [["workcopy", "--now", FOLDER, "--asked", "1700000000000"], ["workcopy", "--now", FOLDER], ["workcopy", "--now", FOLDER, "--reel", "2"], ["workcopy", "--now", FOLDER, "--footage"]]);
+  });
   it("starts none for a second request while the first one runs", (c) => {
     const { ctx, home, started } = asking(c, (pid) => pid === process.pid);
     assert.equal(requestWorkCopy(ctx, { folder: FOLDER }).started, true);
@@ -2143,5 +2151,25 @@ describe("making the footage copies of a plan's video (PR H5b)", () => {
     assert.deepEqual(brought, ["Footage 2.mov"]);
     const stuck = await makeFootageCopies({ home: t.home, folder: t.folder, items: items.slice(1, 2) }, { ...t.deps, isWhole: () => false, readAll: async () => {} });
     assert.deepEqual(stuck.failed, ["The footage for shot 4 could not be made: Dropbox is still bringing Video 4 over to this Mac."]);
+  });
+});
+
+describe("K1: a copy's key is the rawStat it is given (Phase 3, L6)", () => {
+  it("makeWorkCopy and makeFootageCopies take the key from the recording as the record keeps it", async (c) => {
+    const t = setup();
+    c.after(t.done);
+    const rawStat = { size: 5, mtimeMs: 1000 };
+    const key = workCopyKey({ bytes: 5, mtimeMs: 1000 });
+    const paths = workCopyPaths(t.home, t.folder, key);
+    mkdirSync(paths.dir, { recursive: true });
+    writeFileSync(paths.video, "THE COPY");
+    writeFileSync(paths.facts, "{}");
+    const result = await t.job({ rawStat });
+    assert.deepEqual([result.ok, result.made, result.key], [true, [], key]);
+    const fPaths = footageCopyPaths(t.home, t.folder, 3, key);
+    writeFileSync(fPaths.video, "THE FOOTAGE");
+    writeFileSync(fPaths.facts, "{}");
+    const footage = await makeFootageCopies({ home: t.home, folder: t.folder, items: [{ video: t.video, shot: 3, name: "Shot", raw: rawStat }] }, t.deps);
+    assert.deepEqual([footage.ok, footage.made, footage.failed], [true, [], []]);
   });
 });

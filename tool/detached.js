@@ -168,8 +168,11 @@ export function releaseEpisodeLock(lock, text) {
     still to come) says so by `early(result)`, which writes that result at once, as the final one is written, marked `early` and
     with this run's pid, so that `kind`, waiting, and `status` can say what it made; the final result is written over it when the
     run ends. An early result that cannot be written costs nothing: the final one is still written. `nonce` is the one in the lock
-    this run holds, for a run that leaves a note of its own on the disk to be believed only while that lock is its own. */
-export async function runDetached({ home, folder, command, lock: own, keepAwake = caffeinate, alive = isRunning, now = Date.now, clean = (text) => text }, work) {
+    this run holds, for a run that leaves a note of its own on the disk to be believed only while that lock is its own.
+    `tag` is an object the run writes into its result, its early result too, whatever the work did (returned, threw or was refused): the working
+    copy's run says which copy it is (`copy`) and which request it answers (`asked`), so that `app --when-ready` is answered by its own request
+    alone. A key the work's own result has is never read in its place. */
+export async function runDetached({ home, folder, command, lock: own, keepAwake = caffeinate, alive = isRunning, now = Date.now, clean = (text) => text, tag = {} }, work) {
   // The episode's lock, or a lock of the command's own (`lock`), for a run that writes no record and so may run beside the others.
   const lock = own ?? lockOf(home, folder);
   /** The error `e` as `clean` says it: the same error when that changes nothing, as for every episode today. */
@@ -188,7 +191,7 @@ export async function runDetached({ home, folder, command, lock: own, keepAwake 
   if (took.taking) return { taking: true };
   if (!took.taken) return { running: took.running };
   const started = now();
-  const resultOf = (done) => ({ version: 1, command, started, ended: now(), ok: Boolean(done.ok), made: (done.made || []).map(clean), failed: (done.failed || []).map(clean), next: done.next ? clean(done.next) : "" });
+  const resultOf = (done) => ({ version: 1, command, started, ended: now(), ok: Boolean(done.ok), ...tag, made: (done.made || []).map(clean), failed: (done.failed || []).map(clean), next: done.next ? clean(done.next) : "" });
   const early = (done) => {
     try {
       writeWhole(resultFile(home, folder, command), JSON.stringify({ ...resultOf(done), early: true, pid: process.pid }, null, 2) + "\n");
@@ -250,4 +253,15 @@ export function spawnDetached(cmd, args, { spawn: start = spawn, env = process.e
     started detached (spawnDetached, unless a test gives another). */
 export function startDetached(ctx, { command, folder, args = [] }) {
   ctx.start(process.execPath, [join(thisCheckout(), "tool", "edit.js"), command, "--now", folder, ...args]);
+}
+
+/** The lock of an `app --when-ready` run (Phase 3, L7) for the episode `folder`: held as long as the run waits for the video for HyperFrames, which the
+    episode's own lock is not, so that nothing she says meanwhile is refused for it. */
+export const whenReadyLockOf = (home, folder) => join(episodeWork(home, folder), "when-ready.lock");
+
+/** Start `app --when-ready <folder>`, the run that opens an episode kept on this Mac in HyperFrames once its video is ready: the same edit.js as
+    startDetached starts, and the folder itself, with no `--now`. `asked` is the token of the request for the main video's copy that this run answers (workcopy.js
+    requestWorkCopy), given after the folder as `--asked <n>` when there is one. */
+export function startWhenReady(ctx, folder, asked) {
+  ctx.start(process.execPath, [join(thisCheckout(), "tool", "edit.js"), "app", "--when-ready", folder, ...(asked === undefined ? [] : ["--asked", String(asked)])]);
 }

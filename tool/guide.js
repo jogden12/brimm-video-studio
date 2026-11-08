@@ -1,9 +1,11 @@
 // The guide in her Claude folder (spec 2026-10-25): where a video has got, from her drop folder to the BRIMM Ops page's cascade,
 // and the one next step for it, in her own words. brimm-video cannot see the BRIMM Ops page, so her note on this Mac keeps the
 // steps she has done there, by the hand-off's id.
-// Everything here is pure: it reads and writes nothing, and edit.js gives it what it read.
+// Everything here is pure but dropWords, which says a folder in Finder's words through settings.js folderWords (it looks at the folder's real
+// path); the export step's folder words are a fact edit.js computes (project.exportsWords). edit.js gives it all else it read.
 import { spokenMac } from "./kinds.js";
 import { aboutLeft } from "./progress.js";
+import { folderWords, isLocal } from "./settings.js";
 
 /** The BRIMM Ops page, which `guide page` opens in her browser. */
 export const OPS_PAGE = "https://claude.ai/artifact/GCUQPLnSFWZe3VghyaKNtX";
@@ -15,10 +17,17 @@ export const NOT_SET_UP = "This Mac isn't set up for the guide yet: ask Jason.";
 /** A folder as she finds it in Finder: each folder on the way to it, after the one it is in. */
 const finderWords = (...folders) => folders.join(" › ");
 
-/** This Mac's drop folder in Finder words, from the drop folder its settings name (settings.drop) and the Mac's name:
-    "Dropbox › The BRIMM DB › BRIMM Video › Drop › Sallie's laptop". On a Mac whose settings name none, it is still the old
-    folder, Unedited Video. */
-export const dropWords = (drop, machine) => finderWords("Dropbox", "The BRIMM DB", "BRIMM Video", drop || "Unedited Video", machine);
+/** This Mac's drop folder in Finder words, from its settings and the Mac's name: on a Mac with a drop folder of its own (settings.js
+    isLocal), the picked folder's words, "BRIMM Video Work › Drop, in your home folder" (`home` is that Mac's home folder); else, from
+    the drop folder its settings name (settings.drop), "Dropbox › The BRIMM DB › BRIMM Video › Drop › Sallie's laptop". On a Mac
+    whose settings name none, it is still the old folder, Unedited Video. */
+export const dropWords = (settings, machine, home) => (isLocal(settings)
+  ? folderWords(settings.dropPath, home)
+  : finderWords("Dropbox", "The BRIMM DB", "BRIMM Video", settings?.drop || "Unedited Video", machine));
+
+/** What the guide and `episodes` say, right under the drop folder's line, when this Mac does not let BRIMM Video Studio look in the drop
+    folder (macOS's refusal, EPERM, which System Settings can lift): `words` is the folder in Finder words (dropWords). No app is named. */
+export const dropUnreadable = (words) => `This Mac does not let BRIMM Video Studio look in your drop folder, ${words}. Allow it in System Settings, under Privacy & Security, Files and Folders, then ask again.`;
 
 /** Where a Zoom download goes, in Finder words: Zoom Video Transfer, in BRIMM VIDEO Transfer, beside BRIMM Video. */
 export const ZOOM_WORDS = finderWords("Dropbox", "The BRIMM DB", "BRIMM VIDEO Transfer", "Zoom Video Transfer");
@@ -138,11 +147,12 @@ const SAYS = {
     her note on it, which says the revision she last took on the page and how far she got with it (a first take reads no note). It
     is the note that counts, as opsNext has it: the same kind of hand-off, with one of its steps. Taking an episode again when her
     note is at the cascade, the last step, ends by sending her on to the "Reels" card (LATE_REELS). Taking a raw episode ends with
-    freeing its space in Dropbox, after that. */
-export function opsText(handoff, step, again, note) {
+    freeing its space in Dropbox, after that: for an episode filed before the Mac's switch, whose recording is in Dropbox. An episode kept on
+    its Mac (`local`; Phase 3, L8) has no recording in Dropbox to free, so its words stop at the page's. */
+export function opsText(handoff, step, again, note, local = false) {
   const family = noteKindOf(handoff.kind);
   const text = SAYS[step](family, again, handoff.revision, note);
-  return step === "taken" && handoff.kind === "raw" ? text + ONLINE_ONLY : text;
+  return step === "taken" && handoff.kind === "raw" && !local ? text + ONLINE_ONLY : text;
 }
 
 /** What edit.js reads of a video for the guide (VideoFacts):
@@ -155,14 +165,16 @@ export function opsText(handoff, step, again, note) {
       known. `readyAt` is the time it should be Ready, as this Mac's clock says it ("15:06"), "" when not known.
     - `conflicted`, when Dropbox kept two copies of a change to it; `kind`, "finished", "raw", "short video", "session", or null
       before she has answered; `waiting`, for her answer; `heldAsSession`, when one of its other versions is a session after all;
-      `elsewhere`, when it is open, or being answered, on the other Mac; `readingsOff`, when this Mac reads none.
+      `elsewhere`, when it is open, or being answered, on the other Mac; `keeperFirst`, when it is kept on another Mac (`onOtherMac`) that has
+      a conflict or a session to settle first, so that its step stays that Mac's even once a hand-off is written; `readingsOff`, when this Mac reads none;
+      `local`, when its record keeps its files on a Mac (`local`, Phase 3), so that its hand-off's "taken" step has no "Make online-only" after it (opsText).
     - `reading`: "done", "running", "failed", "later" (at `readsAt`, once the import has checked its copies) or "none". `roughAt`
       is, for a raw video whose reading waits (`later`), the time its rough cut should be ready, "" when not known.
       `offersAnswered`, once the spellings card is answered; `v2`, when this Mac hands off version 2; `app`, when this Mac's settings turn
       the app (HyperFrames) on.
     - For a raw video: `placeholder`, while its name is still to be given; `editedInFinalCut`, when a part of it was shown in Final Cut
       once (an episode from the Final Cut days: its record lists a push); and `finishRunning` (an iPhone clip's too).
-    - `checking`, for a video whose finish has written its hand-off and shown it and now only waits for its late check (finish-check.js),
+    - `checking`, for a video in Dropbox whose finish has written its hand-off and shown it and now only waits for its late check (finish-check.js; null for a video kept on a Mac, whose check is made behind by the launch agent, Phase 3, L5),
       and is otherwise `finishRunning`: { due, took, at }, `due` the time the check is made (ms), `at` the same as this Mac's clock says
       it ("15:20") and `took` the places the finish took originals from ("Downloads"); null for any other. She need not
       wait for the check, so a raw video, an iPhone clip or a finished video is not at its finish running then: the stage is the one it
@@ -181,9 +193,10 @@ export function opsText(handoff, step, again, note) {
       app has not opened) or "finished"; a raw video is on the HyperFrames way whichever of the first two it is. `copy`, while this Mac's run makes
       the video for HyperFrames, and null otherwise: { left, usual }, the seconds left as the panel's run says (null when it says none)
       and the seconds it usually takes by the speed this Mac measured (copyIn; null while not known). `project`, the main project in use
-      when its folder is here and no hand-off is written yet, and null otherwise: { opened, last, exported }, whether the record says
-      the app opened it, the time of the last turn in the app's history in words ("today at 3:41 pm"; "" when there is none), and
-      whether it has an export that began after its last change.
+      when its folder is here and no hand-off is written yet, and null otherwise: { opened, last, exported, exportsWords }, whether the record says
+      the app opened it, the time of the last turn in the app's history in words ("today at 3:41 pm"; "" when there is none),
+      whether it has an export that began after its last change, and the exports folder this Mac picked in Finder's words when it is not
+      Downloads ("" otherwise), which the in-app step names.
     - For a finished video whose hand-off is written (plan PR 16): `reelsExported`, the numbers of its Reels, in order, that were exported from
       HyperFrames and are not in that hand-off, as `finish … reels` would take them (edit.js guideReels); [] when there are none, when that
       command would go no further, or when she has said the video is finished, which is read for nothing of its Reels. It is said ahead of the
@@ -217,6 +230,9 @@ const DAY_MS = 86400000;
 
 /** What the overview says with no video under way. */
 export const NOTHING_UNDER_WAY = "Nothing is under way. To start, put the video in your drop folder.";
+/** What the overview adds, on a Mac with a drop folder of its own and nothing under way, for a clip from her iPhone: AirDrop puts it in
+    Downloads (on the Mac Studio, a link into Dropbox), and Studio touches it only once it is in the drop folder (Phase 3, D7). */
+export const AIRDROP = "A clip from your iPhone? Send it to this Mac with AirDrop. It lands in Downloads: drag it from there into your drop folder.";
 /** What the guide says when no video fits what she said. It never says her words again: they may hold a client's name. */
 export const NO_FIT = 'No video under way fits that. Say "what\'s next?" to see the ones that are.';
 
@@ -303,22 +319,27 @@ function opsStep(facts, notes, now) {
   const then = opsNext(handoff, noted.handoffs[handoff.id]);
   const own = !then && handoff.revision === handoff.emptyAt ? nextFor(facts, noted, now) : null;
   // Only a hand-off taken again reads her note (opsText), and that is one for a revision newer than the note's.
-  const after = then ? opsText(handoff, then.step, then.again, noted.handoffs[handoff.id]) : own && !own.done ? own.text : "";
-  return { done: false, stage: "ops", text: `On the BRIMM Ops page: ${opsText(handoff, next.step, next.again, note)}`, step: next.step, after };
+  const after = then ? opsText(handoff, then.step, then.again, noted.handoffs[handoff.id], facts.local === true) : own && !own.done ? own.text : "";
+  return { done: false, stage: "ops", text: `On the BRIMM Ops page: ${opsText(handoff, next.step, next.again, note, facts.local === true)}`, step: next.step, after };
 }
 
 /** The next step for a session. Its hand-off's BRIMM Ops steps come first, so that the withdrawal of a session after all comes
     before anything else of it, transcript only included. At its empty revision, once the withdrawal is noted, its own steps
-    follow, until its own hand-off is written. */
+    follow, until its own hand-off is written. A session kept on another Mac (`onOtherMac`, Phase 3 L2) is on that Mac for every step
+    of its own, its empty revision included: only its hand-off's steps on the BRIMM Ops page, and transcript only, are said here as they are, but for a session with a conflict or held
+    beside a session (`keeperFirst`), whose step stays that Mac's even after a hand-off. */
 function sessionNext(facts, notes, now) {
   const session = facts.session;
-  if (session.emptyOwed) return toDo("session-empty-owed", 'Say "it was a session after all" again: its empty revision for the BRIMM Ops page is still to be written.');
+  const there = facts.onOtherMac ? toDo("on-other-mac", `It is on ${spokenMac(facts.mac)}. Carry on there.`) : null;
+  if (there && facts.keeperFirst) return there;
+  if (session.emptyOwed) return there || toDo("session-empty-owed", 'Say "it was a session after all" again: its empty revision for the BRIMM Ops page is still to be written.');
   if (facts.handoff) {
     const ops = opsStep(facts, notes, now);
     if (ops) return ops;
     if (facts.handoff.revision !== facts.handoff.emptyAt) return { done: true };
   }
   if (session.choice === "transcript only") return { done: true };
+  if (there) return there;
   if (session.choice === null) return session.teachingsOn ? toDo("session-choice", "Choose what you want from it: its teachings, or the transcript only.") : toDo("session-off", TEACHINGS_OFF);
   if (facts.elsewhere) return toDo("open-elsewhere", `It is open on ${spokenMac(facts.mac)}. Carry on there.`);
   const reading = toDo("session-reading", 'Claude is reading its teachings. A notice comes when it is done; then say "what did Claude find?".');
@@ -339,12 +360,16 @@ export function waitWords({ checkAt, readyAt, inSeconds }) {
 
 /** The video for HyperFrames being made, and what to say when it is done: how long is left when the panel's run says, else how long it
     usually takes, by the speed this Mac measured, else no time. */
-function copyStep({ left, usual, wait }) {
+function copyStep({ left, usual, wait, opening }, local = false) {
+  // The copy is made and `app --when-ready` is about to open it: nothing is left for her to say.
+  if (opening) return toDo("making-copy", "It opens in HyperFrames by itself in a moment.");
+  // A video kept on this Mac opens by itself once its video is made (Phase 3, L7), and waits for no check of Dropbox's.
+  const say = local ? 'Say "open it in HyperFrames": it opens by itself when it is ready.' : 'Say "open it in HyperFrames" when it is done.';
   // Waiting for Dropbox's late check (plan R1a): when it will be ready with the wait in it, else when the check is made.
-  if (left == null && wait) return toDo("making-copy", `The video for HyperFrames is being made. ${waitWords(wait)} Say "open it in HyperFrames" when it is done.`);
+  if (left == null && wait && !local) return toDo("making-copy", `The video for HyperFrames is being made. ${waitWords(wait)} ${say}`);
   const time = left != null ? `, ${aboutLeft(left)} left` : "";
   const often = left == null && usual != null ? ` It usually takes ${aboutLeft(usual)}.` : "";
-  return toDo("making-copy", `The video for HyperFrames is being made${time}.${often} Say "open it in HyperFrames" when it is done.`);
+  return toDo("making-copy", `The video for HyperFrames is being made${time}.${often} ${say}`);
 }
 
 /** The one line her words keep of Final Cut: for an episode edited there before. */
@@ -360,9 +385,14 @@ const FROM_FINAL_CUT = 'It was edited in Final Cut before. Studio doesn\'t use F
 function appStep(facts) {
   const project = facts.project;
   if (project && project.exported) return toDo("exported", 'You have exported it. Say "hand it off" and I will check what you exported.');
-  if (project && project.opened) return toDo("in-app", `Edit it in HyperFrames.${project.last ? ` Your last request there was ${project.last}.` : ""} When you are done, export it on This Mac, as MP4, then say "hand it off".`);
+  // When this Mac picked an exports folder that is not Downloads (project.exportsWords, in Finder's words), she is told where to export.
+  if (project && project.opened) {
+    const last = project.last ? ` Your last request there was ${project.last}.` : "";
+    const into = project.exportsWords ? `, into ${project.exportsWords}` : "";
+    return toDo("in-app", `Edit it in HyperFrames.${last} When you are done, export it on This Mac, as MP4${into}, then say "hand it off".`);
+  }
   if (!facts.app) return toDo("app-off", APP_NOT_SET_UP);
-  if (!project && facts.copy) return copyStep(facts.copy);
+  if (!project && facts.copy) return copyStep(facts.copy, facts.local === true);
   // An episode from the Final Cut days: its Final Cut edits are not carried over, and it is made from the recording.
   if (facts.editedInFinalCut && facts.way === "unopened") return toDo("open-app", FROM_FINAL_CUT);
   return toDo("open-app", 'Say "open it in HyperFrames" to edit it there.');
@@ -416,8 +446,14 @@ function filmStep({ route, voice, footage = "", joining = false, joinFailed = fa
 
 /** The next step for a finished episode, a raw one or a short video: Claude's reading, the spellings, a raw video's edit and
     finish, then its hand-off's BRIMM Ops steps. A raw video and an iPhone clip are edited in HyperFrames (appStep). A planned episode
-    is told to film (filmStep) before anything else. */
+    is told to film (filmStep) before anything else. A video or a plan kept on another Mac (`onOtherMac`, Phase 3 L2) is changed only there:
+    until its hand-off is written its step is on that Mac, before anything else; its hand-off's steps on the BRIMM Ops page are hers on any Mac,
+    but not while it has a conflict or is held beside a session (`keeperFirst`): then it stays "Carry on there." after a hand-off too.
+    `onOtherMac` is the fact edit.js gives when its record says it is kept on another Mac (its `local`), with that Mac in `mac`, and is absent or
+    false otherwise; edit.js says such a video is waiting for her answer, in a conflict or held as a session on that Mac alone. sessionNext
+    takes the same fact. */
 function videoNext(facts, notes, now) {
+  if (facts.onOtherMac && (!facts.handoff || facts.keeperFirst)) return toDo("on-other-mac", `It is on ${spokenMac(facts.mac)}. Carry on there.`);
   if (facts.planned) return filmStep(facts.planned);
   const raw = facts.kind === "raw";
   const clip = facts.kind === "short video";
@@ -454,7 +490,7 @@ function videoNext(facts, notes, now) {
   // Once the app has opened its project it is edited there; before, the video for the app is made first, on a Mac set up for the app, while
   // no project is here: a video at work beside a project is not the main video's (a Reel's holds the same lock), as for a raw video (appStep;
   // plan PR 17, the review of PR 10, M3).
-  if (clip) return facts.way === "hyperframes" ? appStep(facts) : facts.app && facts.copy && !facts.project ? copyStep(facts.copy) : clipStep(facts);
+  if (clip) return facts.way === "hyperframes" ? appStep(facts) : facts.app && facts.copy && !facts.project ? copyStep(facts.copy, facts.local === true) : clipStep(facts);
   if (!facts.v2) return toDo("waits-v2", WAITS_V2);
   return toDo("handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.');
 }
@@ -543,13 +579,17 @@ export function findIn(items, said) {
   return { why: NO_FIT };
 }
 
-/** The overview's lines: this Mac's drop folder in Finder words, each video under way with its next step, and the lines edit.js adds of
-    its own for it (`also`) under that, and, when there are any, how many videos from before the switch it does not guide. */
-export function overviewLines({ drop, items, old }) {
+/** The overview's lines: this Mac's drop folder in Finder words, when this Mac does not let it look in that folder (`unreadable`) the
+    line that says so (dropUnreadable), each video under way with its next step, and the lines edit.js adds of its own for it (`also`)
+    under that, and, when there are any, how many videos from before the switch it does not guide. With `unreadable` and none under way
+    it does not say that nothing is: "put the video in your drop folder" would have her drop it again. On a Mac with a drop folder of its own
+    (`local`), with none under way, it also says how a clip from her iPhone gets there (AIRDROP). */
+export function overviewLines({ drop, items, old, unreadable = false, local = false }) {
   const under = ordered(items.filter(({ next }) => !next.done));
   return [
     `Your drop folder: ${drop}`,
-    ...(under.length ? ["Under way:", ...under.flatMap(({ facts, next, also = [] }) => [`  ${facts.name}: ${next.text}`, ...also.map((line) => `    ${line}`)])] : [NOTHING_UNDER_WAY]),
+    ...(unreadable ? [dropUnreadable(drop)] : []),
+    ...(under.length ? ["Under way:", ...under.flatMap(({ facts, next, also = [] }) => [`  ${facts.name}: ${next.text}`, ...also.map((line) => `    ${line}`)])] : unreadable ? [] : local ? [NOTHING_UNDER_WAY, AIRDROP] : [NOTHING_UNDER_WAY]),
     ...(old > 0 ? [`${old} ${old === 1 ? "video" : "videos"} from before the switch ${old === 1 ? "is" : "are"} not guided.`] : [])
   ];
 }

@@ -19,11 +19,18 @@ import { claudeDirName } from "../places.js";
 import { episodeWork } from "../settings.js";
 import { footageCopyPaths, workCopyKey, workCopyLockOf, workCopyPaths } from "../workcopy.js";
 import { fileId, writePending } from "../filing.js";
-import { writeStatus } from "../importing.js";
+import { writeStatusIn } from "../importing.js";
+import { importingFolder } from "../settings.js";
 import { COPY_STEP } from "../guide.js";
 import { addRates, progressFolder } from "../progress.js";
 import { clockAt } from "../unedited.js";
 import { psText } from "./open-world.js";
+/** A request for the main video's copy from `app` carries a token (--asked <n>, F3): what is asked for is compared without it (the token is open-once.test.js's). */
+const noAsked = (args) => {
+  const at = args.indexOf("--asked");
+  assert.ok(at === -1 || /^\d+$/.test(args[at + 1]), "the token is a whole number");
+  return at === -1 ? args : [...args.slice(0, at), ...args.slice(at + 2)];
+};
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/hyperframes.mjs", import.meta.url));
 const CHAT = "5b1f0c8e-2d47-4a93-b6e1-7c9a3f2d8e04";
@@ -197,6 +204,16 @@ const WHOLE = { ...newEpisode({ id: "e-20261028-3fa9c1", machine: "Mac Studio", 
 const unreadable = (next) => episodeFault({ ...WHOLE, app: next.app });
 
 describe("app: opening an episode in HyperFrames", () => {
+  it("names the exports folder after the buttons line when the Mac picked one that is not Downloads (L1b), and says nothing more for Downloads", async (c) => {
+    const e = episode(c);
+    e.ctx.settings = { ...e.ctx.settings, exportsPath: join(e.home, "Movies", "Exports") };
+    assert.equal(await run(e), 0);
+    assert.deepEqual(e.said, ["It's open in HyperFrames.", BUTTONS, "Export it on This Mac, into Movies › Exports, in your home folder."]);
+    const same = episode(c);
+    same.ctx.settings = { ...same.ctx.settings, exportsPath: join(same.home, "Downloads") };
+    assert.equal(await run(same), 0);
+    assert.deepEqual(same.said, ["It's open in HyperFrames.", BUTTONS]);
+  });
   it("makes the project from the working copy, opens it with the pinned command line in PR 1's environment, and records it", async (c) => {
     const e = episode(c);
     assert.equal(await run(e), 0);
@@ -332,7 +349,7 @@ describe("app: opening an episode in HyperFrames", () => {
   it("starts the working copy when there is none, says it is being made, and makes no project yet", async (c) => {
     const e = episode(c, { copy: false });
     assert.equal(await run(e), 0);
-    assert.deepEqual(e.started, [["workcopy", "--now", FOLDER]]);
+    assert.deepEqual(e.started.map(noAsked), [["workcopy", "--now", FOLDER]]);
     assert.deepEqual(e.said, ['The video for HyperFrames is being made. Say "open Pricing talk in HyperFrames" again when it is done; "how far is it?" shows how far it has got.']);
     assert.ok(!existsSync(e.project));
     assert.deepEqual([e.saved, e.runs()], [[], []]);
@@ -391,7 +408,7 @@ describe("app: opening an episode in HyperFrames", () => {
     it("says when Claude starts, and why, while Claude is still reading a raw video whose reading waits for the check: the other Mac's import is at work (R1c)", async (c) => {
       const e = episode(c);
       const { due } = owing(e);
-      writeStatus(e.ctx.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "z9", video: "Talk.mov", bytes: e.record.video.bytes, seconds: 2.6, step: "Importing", at: new Date(AT).toISOString() }, (to, text) => writeFileSync(to, text));
+      writeStatusIn(importingFolder(e.ctx.root), { version: 1, machine: "Sallie's laptop", pid: 7, import: "z9", video: "Talk.mov", bytes: e.record.video.bytes, seconds: 2.6, step: "Importing", at: new Date(AT).toISOString() }, (to, text) => writeFileSync(to, text));
       mkdirSync(episodeWork(e.home, FOLDER), { recursive: true });
       assert.equal(takeEpisodeLock(lockOf(e.home, FOLDER), "read", () => true).taken, true);
       assert.equal(await run(e), 0);
@@ -400,7 +417,7 @@ describe("app: opening an episode in HyperFrames", () => {
       // With no copy yet the same is said, and the copy is asked for.
       const none = episode(c, { copy: false });
       owing(none);
-      writeStatus(none.ctx.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "z9", video: "Talk.mov", bytes: none.record.video.bytes, seconds: 2.6, step: "Importing", at: new Date(AT).toISOString() }, (to, text) => writeFileSync(to, text));
+      writeStatusIn(importingFolder(none.ctx.root), { version: 1, machine: "Sallie's laptop", pid: 7, import: "z9", video: "Talk.mov", bytes: none.record.video.bytes, seconds: 2.6, step: "Importing", at: new Date(AT).toISOString() }, (to, text) => writeFileSync(to, text));
       mkdirSync(episodeWork(none.home, FOLDER), { recursive: true });
       assert.equal(takeEpisodeLock(lockOf(none.home, FOLDER), "read", () => true).taken, true);
       assert.equal(await run(none), 0);
@@ -540,7 +557,7 @@ describe("app: opening an episode in HyperFrames", () => {
       const e = episode(c, { copy: false });
       atWork(e);
       assert.equal(await run(e), 0);
-      assert.deepEqual(e.started, [["workcopy", "--now", FOLDER]]);
+      assert.deepEqual(e.started.map(noAsked), [["workcopy", "--now", FOLDER]]);
       assert.deepEqual(e.said, [STILL]);
       assert.ok(!existsSync(e.project));
       assert.deepEqual([e.saved, e.runs()], [[], []]);

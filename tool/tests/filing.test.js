@@ -11,7 +11,8 @@ import { episodeMode, episodeKind, findFolder, commitOf, thisCheckout, importEpi
 import { episodeWork } from "../settings.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
-import { readStatuses, writeStatus } from "../importing.js";
+import { readStatusesIn, writeStatusIn } from "../importing.js";
+import { importingFolder } from "../settings.js";
 import { zoomTimeOf } from "../kinds.js";
 import { OWN_CHECKOUT, OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
 
@@ -44,6 +45,16 @@ describe("whether a watched folder is this Mac's drop folder", () => {
       assert.equal(episodeMode(`${ROOT}/Unedited Video/Mac Studio`, settings), true);
       assert.equal(episodeMode(`${ROOT}/Drop/Mac Studio`, settings), false);
     }
+  });
+});
+
+describe("whether a watched folder is the drop folder this Mac picked (Phase 3, L1)", () => {
+  const local = { ...SETTINGS, import: "light", drop: "Drop", dropPath: "/Users/sallie/BRIMM Video Work/Drop" };
+  it("is the picked folder, however it is written, and no longer the one in BRIMM Video", () => {
+    assert.equal(episodeMode("/Users/sallie/BRIMM Video Work/Drop", local, "/Users/sallie"), true);
+    assert.equal(episodeMode("/Users/sallie/BRIMM Video Work/Drop/", local, "/Users/sallie"), true);
+    assert.equal(episodeMode(`${ROOT}/Drop/Mac Studio`, local, "/Users/sallie"), false);
+    assert.equal(episodeMode("/Users/sallie/BRIMM Video Work", local, "/Users/sallie"), false);
   });
 });
 
@@ -82,7 +93,7 @@ describe("the folder in Episodes a video goes into", () => {
         writeFileSync(recordFile(join(episodes, name), 1), recordText(r));
       }
     };
-    return { episodes, folder, done: () => rmSync(dir, { recursive: true, force: true }) };
+    return { dir, episodes, folder, done: () => rmSync(dir, { recursive: true, force: true }) };
   }
   const asked = { video: "Talk.mp4", bytes: 5, machine: "Mac Studio", day: "2026-10-14" };
   it("is a new folder named for the day, the video and this Mac", () => {
@@ -113,6 +124,76 @@ describe("the folder in Episodes a video goes into", () => {
     t.folder("2026-10-14 Talk (Mac Studio)", { files: { "Talk.mp4": 9 } });
     t.folder("2026-10-14 Talk (Sallie's laptop)", { files: { "Talk.mp4": 5 } });
     assert.deepEqual(findFolder(t.episodes, asked), { name: "2026-10-14 Talk (Mac Studio)-2", reused: false });
+    t.done();
+  });
+});
+
+describe("the folder a local import goes into (Phase 3, L3)", () => {
+  const asked = { video: "Talk.mp4", bytes: 5, machine: "Mac Studio", day: "2026-10-14" };
+  /** An Episodes folder, and a work folder beside it in which an episode's own files are in <name>/video. `mark` is its marker. */
+  function setup() {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-find-"));
+    const episodes = join(dir, "Episodes");
+    const work = join(dir, "work");
+    mkdirSync(episodes);
+    mkdirSync(work);
+    const local = (name, mark) => {
+      mkdirSync(join(work, name, "video"), { recursive: true });
+      if (mark) writeFileSync(join(work, name, "video", ".import.json"), JSON.stringify(mark));
+    };
+    return { dir, episodes, work, local, ask: { ...asked, work, importId: "3k9", dropId: "11:5:1700" }, done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  it("throws when Episodes cannot be listed for any reason but its not being there", () => {
+    const t = setup();
+    writeFileSync(join(t.dir, "Episodes is a file"), "x");
+    assert.throws(() => findFolder(join(t.dir, "Episodes is a file"), t.ask), (e) => e.code === "ENOTDIR");
+    assert.deepEqual(findFolder(join(t.dir, "nowhere"), t.ask), { name: "2026-10-14 Talk (Mac Studio)", reused: false });
+    t.done();
+  });
+  it("is free only when neither Episodes/<name> nor <work>/<name>/video is there", () => {
+    const t = setup();
+    mkdirSync(join(t.episodes, "2026-10-14 Talk (Mac Studio)"));
+    assert.equal(findFolder(t.episodes, t.ask).name, "2026-10-14 Talk (Mac Studio)-2");
+    t.local("2026-10-14 Talk (Mac Studio)-2", { import: "other", drop: "1:9:1" });
+    assert.equal(findFolder(t.episodes, t.ask).name, "2026-10-14 Talk (Mac Studio)-3");
+    t.done();
+  });
+  it("is never the folder of a first record lost, which has no record and no video in Episodes but holds the episode's files on the Mac", () => {
+    const t = setup();
+    mkdirSync(join(t.episodes, "2026-10-14 Talk (Mac Studio)"));
+    t.local("2026-10-14 Talk (Mac Studio)", { import: "other", drop: "1:9:1" });
+    assert.deepEqual(findFolder(t.episodes, t.ask), { name: "2026-10-14 Talk (Mac Studio)-2", reused: false });
+    t.done();
+  });
+  it("is the folder whose marker names this import, whatever day it was named on, whether or not Episodes has it", () => {
+    const t = setup();
+    t.local("2026-10-12 Talk (Mac Studio)", { import: "3k9", drop: "11:5:1700" });
+    assert.deepEqual(findFolder(t.episodes, t.ask), { name: "2026-10-12 Talk (Mac Studio)", reused: true });
+    mkdirSync(join(t.episodes, "2026-10-12 Talk (Mac Studio)"));
+    assert.deepEqual(findFolder(t.episodes, { ...t.ask, day: "2026-11-01" }), { name: "2026-10-12 Talk (Mac Studio)", reused: true });
+    t.done();
+  });
+  it("is not a folder whose marker names another import, only the import's id or only the drop file's, or one with no marker", () => {
+    const t = setup();
+    t.local("2026-10-12 Talk (Mac Studio)", { import: "3k9", drop: "11:6:1700" });
+    t.local("2026-10-12 Talk (Mac Studio)-2", { import: "other", drop: "11:5:1700" });
+    t.local("2026-10-12 Talk (Mac Studio)-3");
+    assert.equal(findFolder(t.episodes, t.ask).reused, false);
+    t.done();
+  });
+  it("does not reuse a folder by its marker when Episodes has a whole record for it", () => {
+    const t = setup();
+    t.local("2026-10-12 Talk (Mac Studio)", { import: "3k9", drop: "11:5:1700" });
+    const folder = join(t.episodes, "2026-10-12 Talk (Mac Studio)");
+    mkdirSync(join(folder, "record"), { recursive: true });
+    const r = { ...newEpisode({ id: "e-20261012-3fa9c1", machine: "Mac Studio", at: "2026-10-12T09:12:00-05:00", video: { file: "Talk.mp4", bytes: 5, seconds: 23.4, created: null }, kind: "episode", writer: { commit: "abc1234", on: "Mac Studio" } }), rev: 1 };
+    writeFileSync(recordFile(folder, 1), recordText(r));
+    assert.deepEqual(findFolder(t.episodes, t.ask), { name: "2026-10-14 Talk (Mac Studio)", reused: false });
+    t.done();
+  });
+  it("is as it was for an import that gives no work folder", () => {
+    const t = setup();
+    assert.deepEqual(findFolder(t.episodes, asked), { name: "2026-10-14 Talk (Mac Studio)", reused: false });
     t.done();
   });
 });
@@ -165,7 +246,7 @@ describe("the wait for late checks", () => {
     const folder = join(root, "Unedited Video", "Mac Studio");
     mkdirSync(folder, { recursive: true });
     for (const name of names) writeFileSync(join(folder, name), `the bytes of ${name}`);
-    const statuses = () => readStatuses(root).map(({ status }) => status);
+    const statuses = () => readStatusesIn([importingFolder(root)]).map(({ status }) => status);
     return { dir, home, root, folder, statuses, done: () => rmSync(dir, { recursive: true, force: true }) };
   }
   /** A late check this Mac holds of `video`, imported into its own episode, `lastCopy` milliseconds from the epoch: the pending
@@ -224,7 +305,7 @@ describe("the wait for late checks", () => {
     const w = world(["B.mov", "X.mov"]);
     const L = Date.parse("2026-10-27T10:00:00");
     const X = holdCheck(w, "X.mov", L);
-    writeStatus(w.root, { version: 1, machine: "Mac Studio", pid: process.pid, import: "k3j9x", video: "X.mov", bytes: X.bytes, seconds: 120, step: "Waiting for its late check", at: new Date().toISOString(), due: dueAt(X) }, (to, text) => writeFileSync(to, text));
+    writeStatusIn(importingFolder(w.root), { version: 1, machine: "Mac Studio", pid: process.pid, import: "k3j9x", video: "X.mov", bytes: X.bytes, seconds: 120, step: "Waiting for its late check", at: new Date().toISOString(), due: dueAt(X) }, (to, text) => writeFileSync(to, text));
     let now = L + 60 * 1000;
     let tick = null;
     const imported = [];
@@ -320,7 +401,7 @@ describe("the wait for late checks", () => {
     const w = world([]);
     const L = Date.parse("2026-10-27T10:00:00");
     const { X, A, pending } = readingWorld(w, L, { listedA: 23 });
-    writeStatus(w.root, { version: 1, machine: "Mac Studio", pid: process.pid, import: "k3j9x", video: "X.mov", bytes: X.bytes, seconds: 120, step: "Waiting for its late check", at: new Date(dueAt(X)).toISOString(), due: dueAt(X) }, (to, text) => writeFileSync(to, text));
+    writeStatusIn(importingFolder(w.root), { version: 1, machine: "Mac Studio", pid: process.pid, import: "k3j9x", video: "X.mov", bytes: X.bytes, seconds: 120, step: "Waiting for its late check", at: new Date(dueAt(X)).toISOString(), due: dueAt(X) }, (to, text) => writeFileSync(to, text));
     const held = takeLateCheckLock(w.home, X.name, "read", mine);
     assert.ok(held);
     const waits = [];
@@ -384,7 +465,7 @@ describe("the wait for late checks", () => {
     const w = world([]);
     const L = Date.parse("2026-10-27T10:00:00");
     const { X } = readingWorld(w, L, { listedA: 23 });
-    writeStatus(w.root, { version: 1, machine: "Mac Studio", pid: process.pid, import: "k3j9x", video: "X.mov", bytes: X.bytes, seconds: 120, step: "Waiting for its late check", at: new Date().toISOString(), due: dueAt(X) }, (to, text) => writeFileSync(to, text));
+    writeStatusIn(importingFolder(w.root), { version: 1, machine: "Mac Studio", pid: process.pid, import: "k3j9x", video: "X.mov", bytes: X.bytes, seconds: 120, step: "Waiting for its late check", at: new Date().toISOString(), due: dueAt(X) }, (to, text) => writeFileSync(to, text));
     const held = takeLateCheckLock(w.home, X.name, "read", mine);
     assert.ok(held);
     let now = dueAt(X) + 1;
@@ -394,7 +475,7 @@ describe("the wait for late checks", () => {
     const wait = async (ms) => {
       waits += 1;
       now += ms;
-      numbers.push(readStatuses(w.root).find(({ status }) => status && status.video === "X.mov")?.n);
+      numbers.push(readStatusesIn([importingFolder(w.root)]).find(({ status }) => status && status.video === "X.mov")?.n);
       // A video is dropped at the first wait; the hold lasts 90 waits (15 minutes) of LOCK_AGAIN_MS.
       if (waits === 1) writeFileSync(join(w.folder, "B.mov"), "the bytes of B.mov");
       if (waits === 90) releaseLateCheckLock(held);
@@ -467,7 +548,7 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
       imported.push(name);
       return { ok: true, name };
     });
-    const statuses = () => readStatuses(root).map((s) => s.status);
+    const statuses = () => readStatusesIn([importingFolder(root)]).map((s) => s.status);
     return { dir, home, root, folder, logs, imported, deps, run, statuses, done: () => rmSync(dir, { recursive: true, force: true }) };
   }
 
@@ -553,7 +634,7 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
     const t = drop([ZOOM[0]]);
     await t.run();
     // The run that wrote it is gone, and the status is old: a crash's status goes then, but not a hold's.
-    const cleared = clearCrashes({ root: t.root, machine: "Mac Studio", now: Date.parse("2026-10-23T12:00:00"), alive: () => false, pid: 1 });
+    const cleared = clearCrashes({ statusFolders: [importingFolder(t.root)], machine: "Mac Studio", now: Date.parse("2026-10-23T12:00:00"), alive: () => false, pid: 1 });
     assert.deepEqual([cleared, t.statuses().map((s) => s.held)], [[], [HELD]]);
     t.done();
   });
@@ -565,7 +646,7 @@ describe("Zoom's files in a light drop folder, held until phase Z", () => {
     assert.equal(heldBy({ root: t.root, video: ZOOM[0], bytes: 1 }), "");
     assert.equal(heldBy({ root: t.root, video: "Talk.mov", bytes: bytesOf(ZOOM[0]) }), "");
     // The other Mac's status is there for this Mac to read, as it is for the person asking on either.
-    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 1, video: ZOOM[1], bytes: 7, seconds: null, step: "Held", at: "2026-10-23T10:00:00-04:00", held: HELD }, (to, text) => writeFileSync(to, text));
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 1, video: ZOOM[1], bytes: 7, seconds: null, step: "Held", at: "2026-10-23T10:00:00-04:00", held: HELD }, (to, text) => writeFileSync(to, text));
     assert.equal(heldBy({ root: t.root, video: ZOOM[1], bytes: 7 }), HELD);
     t.done();
   });

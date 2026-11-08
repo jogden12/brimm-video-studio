@@ -5,7 +5,7 @@
 // its own under the temp folder.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HELP, editMain } from "../edit.js";
@@ -21,7 +21,7 @@ import { fileEpisode, readPendings } from "../filing.js";
 import { clockAt, importInto } from "../unedited.js";
 import { COPY_STEP } from "../guide.js";
 import { addRates, progressFolder } from "../progress.js";
-import { episodeWork } from "../settings.js";
+import { episodeFilesFolder, episodeWork } from "../settings.js";
 import { localDay } from "../shared/text.js";
 import { FOOTAGE_STEP, WORK_COPY_STEP, footageCopyPaths, workCopyDir, workCopyKey, workCopyPaths } from "../workcopy.js";
 import { probed } from "./fixtures.js";
@@ -518,6 +518,28 @@ describe("plan … join, for \"that's all the footage\" (PR H5b)", () => {
     assert.deepEqual([snapshot(t), t.started], [before, []]);
     t.done();
   });
+  it("finds the words of a local plan's parts in each part's own video/, so that none is whose place is unknown (L2c)", async () => {
+    const t = world();
+    await planned(t);
+    // The same two parts as above, each kept on this Mac (layout 6): its files are in its video/ folder, none in its folder in Dropbox.
+    const local = (n, words) => {
+      const made = part(t, n, { words, record: { version: 6, local: { on: "Mac Studio" } } });
+      const own = episodeFilesFolder(t.home, made.name);
+      mkdirSync(own, { recursive: true });
+      for (const rel of readdirSync(made.folder).filter((name) => name !== "record")) renameSync(join(made.folder, rel), join(own, rel));
+      return made;
+    };
+    local(1, SCRIPT[2].split(" "));
+    local(2, SCRIPT[0].split(" "));
+    const r = await on(depsOf(t), "plan", TITLE, "join");
+    assert.deepEqual([r.code, r.said], [0, [
+      `The talking parts of "${TITLE}", in the order of its script:`,
+      `1. ${labelOf(2)}`,
+      `2. ${labelOf(1)}`,
+      NO_MORE
+    ]]);
+    t.done();
+  });
   it("starts the run at once for one talking part, and again when it is named", async () => {
     const t = world();
     const folder = await planned(t);
@@ -537,6 +559,26 @@ describe("plan … join, for \"that's all the footage\" (PR H5b)", () => {
     assert.equal(t.started.length, 2);
     assert.equal(planOf(t).planned.filmed, null);
     assert.ok(existsSync(folder));
+    t.done();
+  });
+  it("takes a plan kept on one Mac (Phase 3, L2: layout 6 with `local`) as it takes one at layout 5: the run is started for its talking part", async () => {
+    const t = world();
+    const folder = await planned(t);
+    // The plan's record written once more, kept on this Mac, as the import of a Mac with a drop folder of its own will file one.
+    const plan = planOf(t);
+    writeFileSync(recordFile(folder, plan.rev + 1), recordText({ ...plan, rev: plan.rev + 1, version: 6, local: { on: "Mac Studio" } }));
+    assert.deepEqual([planOf(t).version, isPlannedRecord(planOf(t))], [6, true]);
+    const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+    const before = snapshot(t);
+    const r = await on(depsOf(t), "plan", TITLE, "join");
+    assert.deepEqual([r.code, r.said], [0, [JOINING]]);
+    assert.equal(t.started.length, 1);
+    assert.deepEqual(t.started[0][1].slice(1), ["join", "--now", `${dayOf(t)} ${TITLE} (Mac Studio)`, "--parts", one.record.id]);
+    assert.deepEqual(snapshot(t), before);
+    // And `plan "<title>"` shows it, as it shows a plan at layout 5.
+    const shown = await on(depsOf(t), "plan", TITLE);
+    assert.equal(shown.code, 0, shown.text);
+    assert.ok(shown.said.length > 1 && shown.said.some((line) => line.includes(labelOf(1))), shown.text);
     t.done();
   });
   it("starts the run with the ids of the talking parts in the order she gave them", async () => {
@@ -1888,6 +1930,31 @@ describe("from the parts to the project: the join, the copies and the open, run 
     // Nothing of any of it was written into Dropbox but the join's files and the records: no part's video was taken, and the footage is only on this Mac.
     for (const one of [broll, screen, client, talk]) assert.ok(existsSync(join(one.folder, one.record.video.file)), "a part's own video stays in its own episode");
     assert.deepEqual(listAll(folder).filter((rel) => /b-roll|screen|footage/.test(rel)), []);
+    t.done();
+  });
+  it("copies the footage of b-roll and screen parts kept on this Mac, from their video/ folders (L2c)", async () => {
+    const t = world({ probes: longTalk("Take 1"), copy: "120.000000" });
+    writeFileSync(join(t.home, "hyperframes-stand-in.json"), JSON.stringify({ open: "opened" }));
+    await planned(t, { shots: [...SHOT_ARGS, ...CUES] });
+    const talk = part(t, 1, { words: SCRIPT.join(" ").split(" ") });
+    // The footage parts are kept on this Mac (layout 6): their recordings are in video/, none in their folders in Dropbox.
+    const local = (n, as, shot) => {
+      const made = part(t, n, { as, shot, record: { version: 6, local: { on: "Mac Studio" } } });
+      const own = episodeFilesFolder(t.home, made.name);
+      mkdirSync(own, { recursive: true });
+      for (const rel of readdirSync(made.folder).filter((name) => name !== "record")) renameSync(join(made.folder, rel), join(own, rel));
+      return made;
+    };
+    local(2, "b-roll", 2);
+    local(3, "screen", 4);
+    const app = () => appDeps(t, { app: { cli: STAND_IN, node: process.execPath, guidance: GUIDANCE } });
+    assert.equal((await joinRun(t, [talk.record.id])).code, 0);
+    const { finishLate } = await import("../filing.js");
+    const [pending] = readPendings(t.home);
+    finishLate(pending, { episode: { root: t.root, machine: "Mac Studio", home: t.home }, log: () => {}, notify: () => {}, clone: t.ctx.deps.clone, sameDisk: () => true });
+    const made = await on(app(), "workcopy", "--now", FOLDER_NAME(t));
+    assert.equal(made.code, 0, made.text);
+    assert.deepEqual(readdirSync(workCopyDir(t.home, FOLDER_NAME(t))).filter((n) => n.startsWith("footage-") && n.endsWith(".mp4")).map((n) => n.split("-")[1]), ["2", "4"]);
     t.done();
   });
   it("keeps, in the record of the video a plan made, nothing a record's own judge would refuse: a record with a kind and no sound is the filing's to refuse, not the judge's", async () => {

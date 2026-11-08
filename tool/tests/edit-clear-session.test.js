@@ -12,7 +12,7 @@ import { CLAIM_WAIT_MS, editMain } from "../edit.js";
 import { dialogScript } from "../dialog.js";
 import { gated } from "../gate.js";
 import { episodeFault, localStamp, recordFile, recordText } from "../episode.js";
-import { episodeWork, writeSettings } from "../settings.js";
+import { episodeFilesFolder, episodeWork, writeSettings } from "../settings.js";
 import { lockOf, resultFile } from "../detached.js";
 import { setup, episodeFor, episodeAs, reread, FOLDER, ID, NAME } from "./episodes.js";
 
@@ -585,6 +585,17 @@ describe("kind --clear-session: what changed while the dialog was open (the clai
     const r = await d.ask(...clearing("raw"));
     assert.deepEqual([r.code, r.said], [1, [CLICK(), TOO_LONG]]);
     assert.deepEqual([recordsOf(found), gated(reread(found)), t.started, t.waits, existsSync(logOf(t)), existsSync(answerLock(t))], [before, true, [], [85000], false, false]);
+    t.done();
+  });
+  it("a session kept on this Mac is never too late: it waits for no claim, so a click 85 seconds in clears it all the same (Phase 3, L7)", async () => {
+    const t = setup();
+    const found = sessionOf(t, { version: 6, local: { on: "Mac Studio" } });
+    // Its recording is in video/ on this Mac (an answer is refused when it is in neither place; B1-F12).
+    mkdirSync(episodeFilesFolder(t.home, FOLDER), { recursive: true });
+    writeFileSync(join(episodeFilesFolder(t.home, FOLDER), found.record.video.file), "the recording");
+    const d = dialogs(t, found, CLEAR_IT, { during: () => t.ctx.deps.wait(85000) });
+    const r = await d.ask(...clearing("raw"));
+    assert.deepEqual([r.code, r.said.includes(TOO_LONG), reread(found).session.cleared !== null, t.waits.includes(CLAIM_WAIT_MS)], [0, false, true, false]);
     t.done();
   });
   it("clears all the same when she clicks as late as 80 seconds in, which is the last the claim's wait fits", async () => {

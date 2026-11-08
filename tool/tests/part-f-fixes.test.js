@@ -58,12 +58,14 @@ describe("an error nobody foresaw, on a Mac that does the light import (item 8)"
     assert.doesNotMatch(r.text.replace(CLIENT_VIDEO, ""), SECRET);
     t.done();
   });
-  it("is thrown as today with the light import off", async () => {
+  it("says it as well with the light import off: every Mac does (L1d)", async () => {
     const t = setup();
     const drop = join(t.root, "Unedited Video", "Mac Studio");
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, CLIENT_VIDEO), "video");
-    await refusing("statSync", drop, () => assert.rejects(on(t.ctx.deps, "retry", CLIENT_VIDEO), (err) => err.code === "EACCES" && err.message.includes(CLIENT_VIDEO)));
+    const r = await refusing("statSync", drop, () => on(t.ctx.deps, "retry", CLIENT_VIDEO));
+    assert.deepEqual([r.code, r.said], [1, ["The work stopped (EACCES)."]]);
+    assert.doesNotMatch(r.text.replace(CLIENT_VIDEO, ""), SECRET);
     t.done();
   });
 });

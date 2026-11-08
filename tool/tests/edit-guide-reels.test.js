@@ -525,16 +525,20 @@ describe("B7. where the guide reads", () => {
 
 describe("B7b. a video she set aside is read for nothing of its Reels (review F6)", () => {
   /** The paths this process asks the file system about while `run` goes: the functions of `fs` that look at a path are wrapped, and put back
-      whatever happens. (The test files run one by one, and each test in a file after the one before, so nothing else is looking meanwhile.) */
+      whatever happens. realpathSync's own `native` is wrapped with it, so that a call of it is seen and answers as it does. (The test files run
+      one by one, and each test in a file after the one before, so nothing else is looking meanwhile.) */
   async function touched(run) {
     const names = ["statSync", "lstatSync", "readdirSync", "readFileSync", "openSync", "existsSync", "realpathSync", "accessSync", "readlinkSync", "opendirSync"];
     const real = Object.fromEntries(names.map((name) => [name, fs[name]]));
     const paths = new Set();
-    for (const name of names) {
-      fs[name] = function (...args) {
+    const seeing = (call) =>
+      function (...args) {
         if (typeof args[0] === "string") paths.add(args[0]);
-        return real[name].apply(this, args);
+        return call.apply(this, args);
       };
+    for (const name of names) {
+      fs[name] = seeing(real[name]);
+      if (typeof real[name].native === "function") fs[name].native = seeing(real[name].native);
     }
     syncBuiltinESMExports();
     try {
