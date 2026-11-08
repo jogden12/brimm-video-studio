@@ -33,10 +33,10 @@ On an answer that starts "Footage for", ask `Part card: {…}` next, as given, t
 On "No", go on to the card below; for a video whose lines say "No sound", tell her it can only be footage for a planned video, and run `leave "<label>"`.
 
 `episodes` names a video waiting for her answer by its label, as "<label>: a video waiting for your answer, of 42:10, id 1a2b3c", and may add under it lines that start "Seen:", "Came:", "Guess:" and "Maybe a new version of:". For each such video in turn, one `AskUserQuestion`, never two videos in one card, with two questions. Above each card, say its Seen and Came lines, when given, in one line, and that she can say "which one is it?" first.
-1. "What is <label>?", with these answers, in this order (a Maybe line wins over a Guess line):
+1. "What is <label>?", with these answers, in this order (a Maybe line takes the first place, and its card keeps the Guess line's kind second):
    - Maybe a new version of a client or group session (the line names no video): "Client or group session", "Finished by your editor", "Raw with retakes", "iPhone clip". Tell her it holds most of the words of a client or group session, so `kind` takes no other answer for it
-   - Maybe a new version of a video finished by your editor or an iPhone clip: "A new version of <name>", "Finished by your editor", "Raw with retakes", "Client or group session"
-   - Maybe a new version of a video raw with retakes: "A finished version of <name>", "Finished by your editor", "Raw with retakes", "Client or group session"
+   - Maybe a new version of a video finished by your editor or an iPhone clip: "A new version of <name>", then the kind the Guess line names ("Finished by your editor" when there is no Guess line), then the first of "Finished by your editor" and "Raw with retakes" that is not that kind, then "Client or group session"
+   - Maybe a new version of a video raw with retakes: "A finished version of <name>", then the same three answers, in the same order
    - Guess finished by your editor: "Finished by your editor", "Raw with retakes", "iPhone clip", "Client or group session"
    - Guess raw with retakes: "Raw with retakes", "Finished by your editor", "iPhone clip", "Client or group session"
    - Guess an iPhone clip: "iPhone clip", "Finished by your editor", "Raw with retakes", "Client or group session"

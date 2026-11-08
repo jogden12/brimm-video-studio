@@ -47,12 +47,15 @@ const HEADER = { what: "What it is", private: "Private", notSession: "Session", 
 
 const question = (text, header, labels) => ({ question: text, header, multiSelect: false, options: labels.map((label) => ({ label, description: "" })) });
 
-/** The answers to "What is <label>?", in order: a Maybe line wins over a Guess line. */
+/** The answers to "What is <label>?", in order: a Maybe line wins the first place over a Guess line. The card holds four answers
+    at most. A card that offers a version of a video keeps the guessed kind second (the Guess line's, when there is one), then the
+    first other kind in the usual order, and the session last: the kind dropped is neither the guess nor the session. */
 function whatAnswers({ guess, maybe }) {
+  const guessed = typeof guess === "string" && Object.hasOwn(GUESSED, guess) ? GUESSED[guess] : null;
+  const kinds = guessed ? [guessed, ...BASE.filter((a) => a !== guessed)] : BASE;
   if (maybe && maybe.session === true) return [SESSION, ...BASE];
-  if (maybe && typeof maybe.name === "string") return [versionOf(maybe), FINISHED, RAW, SESSION];
-  if (typeof guess === "string" && Object.hasOwn(GUESSED, guess)) return [GUESSED[guess], ...BASE.filter((a) => a !== GUESSED[guess]), SESSION];
-  return [...BASE, SESSION];
+  if (maybe && typeof maybe.name === "string") return [versionOf(maybe), ...kinds.slice(0, 2), SESSION];
+  return [...kinds, SESSION];
 }
 
 /** Her card for the video called `label`: `guess` is the import's (finished, raw, clip, or null), and `maybe` the video its words
