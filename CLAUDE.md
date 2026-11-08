@@ -56,7 +56,7 @@ BRIMM Ops takes Studio's hand-off file. These carry over exactly. Change any of 
 
 ## The brand
 
-The brand is The BRIMM's brand guide: its colours (navy, sand, mist and the rest). The typeface is Josefin Sans (Google Fonts) in place of Sweet Sans Pro, which never became active on the Mac Studio. Fonts come only from Adobe Fonts or Google Fonts. A replacement for the script Sinthya is still to be picked. The name on screen is Sallie Ogden.
+The brand is The BRIMM's brand guide: its colours (navy, sand, mist and the rest). The typeface is Josefin Sans (Google Fonts) in place of Sweet Sans Pro, which never became active on the Mac Studio. Fonts come only from Adobe Fonts or Google Fonts. The script is Allison (Google Fonts) in place of Sinthya (Jason, 2026-10-28; `tool/brand/brand.md`). The name on screen is Sallie Ogden.
 
 ## Elsewhere
 
