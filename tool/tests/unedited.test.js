@@ -23,6 +23,7 @@ import { readStatusesIn, removeStatusIn, writeStatusIn } from "../importing.js";
 import { importingFolder } from "../settings.js";
 import { fingerprintOf } from "../versions.js";
 import { zoomTimeOf } from "../kinds.js";
+import { accessLog, placeWordsOf } from "../access.js";
 
 const FACTS = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0, device: { make: "", model: "" } };
 /** Where ffmpeg heard silence in the made-up recording. */
@@ -2950,12 +2951,13 @@ describe("an episode filed on a Mac with a drop folder of its own (Phase 3, L3)"
     } finally {
       chmodSync(t.episodes, 0o755);
     }
-    assert.ok(results.length > 0 && results.every((r) => r.ok === false && r.arriving === true), JSON.stringify(results));
+    // The run's first look at Episodes (access.js, A2) meets the refusal, so nothing is imported or even tried: no results, and the log holds the locked line.
+    assert.deepEqual(results, []);
     assert.equal(t.calls.length, calls);
     assert.deepEqual(namesOf(t.statuses), []);
     assert.deepEqual(namesOf(t.drop), ["Talk.mov"]);
     assert.deepEqual(t.sizes(), before);
-    assert.equal(t.logs.filter((line) => /Episodes could not be read/.test(line)).length >= 1, true, t.logs.join("\n"));
+    assert.equal(t.logs.includes(accessLog("locked", "EACCES", process.execPath, placeWordsOf("episodes", t.episodes, t.home))), true, t.logs.join("\n"));
     t.done();
   });
   it("with Episodes unreadable only at the filing step, the import fails with its status, and the first video/ is untouched", async () => {

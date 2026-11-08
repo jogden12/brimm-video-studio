@@ -198,6 +198,15 @@ export function accessLog(state, code, node, placeWords) {
   return "";
 }
 
+/** The log line for a `lookAt` result that was not ok: `accessLog`'s line for refused and locked, a line with the code for any other error, and
+    "" for a look that found the folder, or did not find it there (the caller says that). `home` is for the place's words. */
+export function lookLog(place, folder, look, home, node = process.execPath) {
+  if (!look || look.names) return "";
+  const words = placeWordsOf(place, folder, home);
+  if (look.state === "error") return `node (${node}) could not look in ${words} (${look.code || "an error"}). Jason: see ${LOG_FILE}.`;
+  return accessLog(look.state, look.code, node, words);
+}
+
 /** The installer's line, from the note, for what macOS answered at the end of the setup. `home` is for the place words, `now` the time, `alive`
     whether a process is running (kill 0, as run.js isRunning), and `places` where each place is now, to name a place the note has no
     folder for yet (a first look). Only these: both places ok; none looked yet; a live look under a minute old (still looking), or older

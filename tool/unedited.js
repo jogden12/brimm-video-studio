@@ -34,6 +34,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { homeRefusal, studioHome } from "./home.js";
+import { bracket, noteState } from "./access.js";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { localDay, stamp } from "./shared/text.js";
@@ -1568,13 +1569,19 @@ export async function uneditedFolders(folders, deps) {
   let code = 0;
   for (const given of folders) {
     const folder = resolve(given);
-    if (!existsSync(folder)) {
+    // This Mac's drop folder is looked at inside the note's bracket (access.js), so that a run stuck at its very first touch of it shows in the
+    // note; the old folder mode is left as it is.
+    const home = deps.home || studioHome();
+    const episodic = episodeMode(folder, deps.settings, home);
+    const seen = { home, clock: deps.clock || Date.now };
+    if (!(episodic ? bracket("drop", () => existsSync(folder), seen) : existsSync(folder))) {
       log(`There is no folder at ${folder}.`);
       code = 2;
+      if (episodic) noteState("drop", folder, Object.assign(new Error("ENOENT"), { code: "ENOENT" }), seen);
       // The checks behind a hand-off or an import (the copies in final/, the export in Downloads, the move of a recording) do not wait for the drop folder: this
       // Mac's own is still worked, and finds nothing waiting in it. Only a Mac with a drop folder of its own does so: on a Dropbox drop folder a missing
       // folder is Dropbox's to bring back, and no check is made into a path that is not there.
-      if (!(isLocal(deps.settings) && episodeMode(folder, deps.settings, deps.home || studioHome()))) continue;
+      if (!(isLocal(deps.settings) && episodic)) continue;
     } else {
       log(`Folder: ${folder}`);
     }

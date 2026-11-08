@@ -8,8 +8,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { seenFile } from "../settings.js";
 import {
-  ASKING_MS, UNSEEN_MS, BANNER_AGAIN_MS, DOWNLOADS_SAY_MS, accessFile, accessBanner, accessLine, accessLog, bracket, findingOf, lookAt, noteState,
-  readAccess, setupLine, stepLine, switchFor, writeAccess,
+  ASKING_MS, UNSEEN_MS, BANNER_AGAIN_MS, DOWNLOADS_SAY_MS, accessFile, accessBanner, accessLine, accessLog, bracket, findingOf, lookAt, lookLog, noteState,
+  placeWordsOf, readAccess, setupLine, stepLine, switchFor, writeAccess,
 } from "../access.js";
 import { watched } from "./watched-fs.js";
 
@@ -346,6 +346,14 @@ describe("the words are the design's", () => {
       accessLog("locked", "EACCES", NODE, drop),
       `The folder's own permissions do not let node look in ${drop} (EACCES). Jason checks them in Finder, Get Info, Sharing & Permissions.`,
     );
+  });
+
+  it("lookLog gives accessLog's line for a look that was refused or locked, in the place's words, and nothing for the others", () => {
+    const folder = join(home, "Drop");
+    assert.equal(lookLog("drop", folder, { state: "refused", code: "EPERM" }, home, NODE), accessLog("refused", "EPERM", NODE, placeWordsOf("drop", folder, home)));
+    assert.equal(lookLog("episodes", folder, { state: "locked", code: "EACCES" }, home, NODE), accessLog("locked", "EACCES", NODE, "BRIMM Video in Dropbox"));
+    assert.match(lookLog("drop", folder, { state: "error", code: "EIO" }, home, NODE), /EIO/);
+    for (const look of [{ names: [] }, { state: "missing", code: "ENOENT" }]) assert.equal(lookLog("drop", folder, look, home, NODE), "");
   });
 
   describe("setupLine", () => {
