@@ -6,7 +6,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, fstatSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -584,7 +584,8 @@ describe("A6. from a folder", () => {
     try {
       assert.deepEqual(projectWords(through).words, [{ text: "Through a link", at: 3 }]);
     } finally {
-      rmSync(through, { force: true });
+      // unlinkSync, not rmSync: Node 24's rmSync refuses a link to a folder (ERR_FS_EISDIR).
+      unlinkSync(through);
     }
     done();
   });
