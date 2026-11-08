@@ -840,10 +840,150 @@ process.stdout.write(folderWords(process.argv[2], process.argv[3]));
   print -r -- "${told:-$folder}"
 }
 
-# The app's own checks of a pick: they set FAULT_KIND (linebreak, transcript, cannot-look, not-empty, studio) and FAULT_WORDS, the
-# refusal in the app's words, empty when the folder will do. Nothing is refused until they are written.
-drop_folder_fault() { FAULT_KIND="" FAULT_WORDS="" FAULT_REASON=""; }
-exports_folder_fault() { FAULT_KIND="" FAULT_WORDS="" FAULT_REASON=""; }
+# The app's own checks of a pick. They are never called inside $(...), which would lose what they set: FAULT_KIND (linebreak,
+# transcript, cannot-look, not-empty or studio), FAULT_WORDS (the refusal in the app's words, empty when the folder will do) and
+# FAULT_REASON (the reason alone, a clause that fits the stop "... and <folder> can't be used: <reason>."). The exports check also
+# sets EXPORTS_PASSED_OVER to yes when it passed over a place Terminal could not look in.
+
+# Whether $1 is $2 or inside it, by real path (a missing part as spelled), letter case folded.
+same_or_inside() {
+  local a="${(L)${1:A}}" b="${(L)${2:A}}"
+  a="${a%/}" b="${b%/}"
+  [[ "$a" == "$b" || "$a" == "$b"/* ]]
+}
+# Whether one is the other or inside it, either way.
+same_or_nested() { same_or_inside "$1" "$2" || same_or_inside "$2" "$1"; }
+# Whether $1 is $2 or inside it as spelled: whole paths, nothing resolved, letter case folded.
+spelled_inside() {
+  local a="${(L)${1:a}}" b="${(L)${2:a}}"
+  a="${a%/}" b="${b%/}"
+  [[ "$a" == "$b" || "$a" == "$b"/* ]]
+}
+# A plist's WatchPaths, one a line, read through plutil as install.sh reads them: no JSON, no node.
+plist_watch_paths() {
+  local file="$1" count i
+  count="$(plutil -extract WatchPaths raw -o - "$file" 2>/dev/null)" || return 0
+  [[ $count == <-> ]] || return 0
+  for (( i = 0; i < count; i++ )); do
+    plutil -extract "WatchPaths.$i" raw -o - "$file" 2>/dev/null || true
+  done
+  return 0
+}
+# The transcript tool's folders, one a line: the two beside BRIMM Video, and what its launch agent watches (for exports, what its
+# turned-off file watches too, as L1c does).
+transcript_folders() {
+  if [[ -n "$ROOT" ]]; then
+    print -r -- "${ROOT:A:h}/BRIMM VIDEO Transfer"
+    print -r -- "${ROOT:A:h}/BRIMM VIDEO MacBook"
+  fi
+  plist_watch_paths "$HOME/Library/LaunchAgents/com.thebrimm.transcribe.plist"
+  if [[ "${1-}" == exports ]]; then plist_watch_paths "$HOME/Library/LaunchAgents/com.thebrimm.transcribe.plist.off"; fi
+  return 0
+}
+# Whether $1 is Downloads or inside it, by real path. Nothing is looked at inside it.
+in_downloads() { same_or_inside "$1" "$HOME/Downloads"; }
+
+# Sets the three variables for one refusal: $1 the kind, $2 the words, $3 the reason.
+refuse_with() { FAULT_KIND="$1" FAULT_WORDS="$2" FAULT_REASON="$3"; }
+
+# Which of the transcript tool's folders refuses $1 ($2: drop or exports): for a drop folder one that is, holds or is inside it, for
+# exports one it is, or is inside. Gives 0 when it is refused.
+watched_by_transcripts() {
+  local folder="$1" kind="$2" other
+  local -a others
+  others=("${(@f)$(transcript_folders "$kind")}")
+  for other in "${others[@]}"; do
+    [[ -n "$other" ]] || continue
+    if [[ "$kind" == drop ]]; then
+      if same_or_nested "$folder" "$other"; then return 0; fi
+    else
+      if same_or_inside "$folder" "$other"; then return 0; fi
+    fi
+  done
+  return 1
+}
+
+# The drop folder: $1 the folder, $2 where it came from (settings, last, suggested or picked). The settings' own is not held to being empty.
+drop_folder_fault() {
+  local folder="$1" from="${2-}" held="" rc=0 shown
+  FAULT_KIND="" FAULT_WORDS="" FAULT_REASON=""
+  if [[ "$folder" == *$'\n'* ]]; then
+    refuse_with linebreak "A folder whose name holds a line break can't be used. Choose another." "its name holds a line break"
+    return 0
+  fi
+  if watched_by_transcripts "$folder" drop; then
+    refuse_with transcript "$(words_for "$folder") is watched by the transcript tool, which takes each video put there. Choose another." "the transcript tool watches it"
+    return 0
+  fi
+  # The suggested folder, when BRIMM Video Work is not there yet: the installer makes both, so what holds them is looked at instead.
+  if [[ "$folder" == "$HOME/BRIMM Video Work/Drop" && ! -e "$HOME/BRIMM Video Work" && ! -L "$HOME/BRIMM Video Work" ]]; then
+    held="$(count_entries "$HOME/BRIMM Video Work")" || rc=$?
+  else
+    held="$(count_entries "$folder")" || rc=$?
+  fi
+  if (( rc != 0 )); then
+    refuse_with cannot-look "macOS did not let Terminal look in $(words_for "$folder"). Allow Terminal in System Settings › Privacy & Security › Files and Folders, or choose another folder." "macOS did not let Terminal look in it"
+    return 0
+  fi
+  if [[ "$from" != settings ]] && (( held > 0 )); then
+    shown="$held files or folders"
+    if (( held == 1 )); then shown="1 file or folder"; fi
+    refuse_with not-empty "$(words_for "$folder") holds $shown. Studio takes every video out of a drop folder, so choose an empty folder that only you drop into, or make one with New Folder." "it is not empty"
+  fi
+  return 0
+}
+
+# Whether Zoom's recordings folder may be compared with the pick $1: when it is not under Documents, which macOS guards, or the pick
+# is in or under Documents (by real path or as spelled), or the pick as spelled is inside Zoom's folder as spelled. Otherwise nothing
+# under Documents is asked.
+zoom_may_hold() {
+  local folder="$1" zoom="$2" docs="${HOME:A}/Documents"
+  if ! spelled_inside "$zoom" "$docs"; then return 0; fi
+  if same_or_inside "$folder" "$docs" || spelled_inside "$folder" "$docs" || spelled_inside "$folder" "$zoom"; then return 0; fi
+  return 1
+}
+# The exports folder: $1 the folder. Downloads is never looked in; every other folder is compared with Studio's folders, and the
+# folder and each folder above it are looked in for .brimm-watched-by where Terminal can look.
+exports_folder_fault() {
+  local folder="$1" other zoom at
+  local -a studio_folders
+  FAULT_KIND="" FAULT_WORDS="" FAULT_REASON="" EXPORTS_PASSED_OVER=""
+  if [[ "$folder" == *$'\n'* ]]; then
+    refuse_with linebreak "A folder whose name holds a line break can't be used. Choose another." "its name holds a line break"
+    return 0
+  fi
+  if watched_by_transcripts "$folder" exports; then
+    refuse_with transcript "$(words_for "$folder") is watched by the transcript tool, which takes each video put there. Choose another." "the transcript tool watches it"
+    return 0
+  fi
+  if in_downloads "$folder"; then return 0; fi
+  local studio_words="Exports can't go in $(words_for "$folder"): it is one of Studio's own folders, or a drop folder, where an export would be taken. Choose another."
+  local studio_reason="it is one of Studio's own folders, or a drop folder"
+  studio_folders=("$ROOT/Drop" "$ROOT/Unedited Video" "$ROOT/Episodes" "$ROOT/References" "$HOME/BRIMM Video Work"
+    "$HOME/Library/Application Support/BRIMM Video" "$HOME/BRIMM Video Studio" "$HOME/BRIMM Video Workshop")
+  for other in "${studio_folders[@]}"; do
+    if same_or_inside "$folder" "$other"; then refuse_with studio "$studio_words" "$studio_reason"; return 0; fi
+  done
+  zoom="$(setting zoomFolder)"
+  if [[ "$zoom" != /* ]]; then zoom="$HOME/Documents/Zoom"; fi
+  if zoom_may_hold "$folder" "$zoom" && same_or_inside "$folder" "$zoom"; then
+    refuse_with studio "$studio_words" "$studio_reason"
+    return 0
+  fi
+  # A folder a Mac has marked as its drop folder, or one inside it. A place that is there and that Terminal cannot look in is passed
+  # over, and said; one that is not there (yet) is just not a place with a marker.
+  at="${folder:A}"
+  while true; do
+    if [[ -e "$at/.brimm-watched-by" ]]; then
+      refuse_with studio "$studio_words" "$studio_reason"
+      return 0
+    fi
+    if [[ -e "$at" ]] && ! ls -A -- "$at" >/dev/null 2>&1; then EXPORTS_PASSED_OVER=yes; fi
+    if [[ "$at" == / ]]; then break; fi
+    at="${at:h}"
+  done
+  return 0
+}
 
 # What y gives for a question: CAND, and CAND_FROM (settings, last or suggested). The settings' own folder is dropPath or exportsPath
 # (exportsPath only when it is not Downloads by real path); the last-time folder is the mark drop= or exports=.
@@ -977,6 +1117,7 @@ folder_fault() {
 say_exports_note() {
   if [[ "${EXPORTS_FOLDER:A}" != "${HOME:A}/Downloads" ]]; then
     say "Studio looks for exports there and in Downloads. It copies each one into its video's final folder in Dropbox, and leaves the one there as it is. When you export in HyperFrames, choose this folder in its Export dialog. Never export into the drop folder."
+    if in_downloads "$EXPORTS_FOLDER"; then say "Studio tidies only Downloads itself, so exports in this folder are never tidied."; fi
   fi
 }
 ask_drop_folder() { ask_folder drop; }
