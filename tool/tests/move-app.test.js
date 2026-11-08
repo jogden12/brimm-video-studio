@@ -2978,7 +2978,7 @@ describe("the move script, later runs, the marks, the stop summary and the end o
 
 describe("the move script, the try mode (--try-chooser)", { skip: notAMac }, () => {
   const TRY_HEADING = "Trying the folder questions. Nothing is changed.";
-  const TRY_STOP = /This was a try of the folder questions: nothing was changed\. To try again: open ".+" --args --try-chooser/;
+  const TRY_STOP = /This was a try of the folder questions: nothing was changed\. To try again: open (-a )?".+" --args --try-chooser/;
   const PATHS_LINE = "Studio's code is not on this Mac yet, so folders are given as paths here. Finder's words come at the move.";
   const END_LINE = "Nothing was changed. Studio's installer checks more at the move.";
   const studioSettings = { version: 1, machine: "Mac Studio", root: "<HOME>/Dropbox/The BRIMM DB/BRIMM Video", checkout: "<HOME>/Claude Code/brimm-video-studio",
@@ -3062,6 +3062,8 @@ describe("the move script, the try mode (--try-chooser)", { skip: notAMac }, () 
     for (const extra of [["--commit", "a".repeat(40)], ["--print"]]) {
       const r = moveOn({ commit: null, settings: studioSettings }, "--try-chooser", ...extra);
       assert.equal(r.status, 2, r.out + r.err);
+      assert.ok(r.out.includes("The try of the folder questions (--try-chooser) takes neither --commit nor --print."), r.out);
+      assert.ok(!r.out.includes("Not an option this app knows"), r.out);
       assert.ok(!r.out.includes(TRY_HEADING), r.out);
       assert.deepEqual(r.tree, r.before);
       assert.ok(!r.ran.includes("chooser"), r.ran);
@@ -3086,5 +3088,53 @@ describe("the move script, the try mode (--try-chooser)", { skip: notAMac }, () 
     assert.match(r.out, TRY_STOP);
     assert.ok(!/double-click/i.test(r.out), r.out);
     unchanged(r);
+  });
+
+  it("--try-chooser with two BRIMM Video folders says more than one was found, and with a linked Dropbox prints no stray assignment", () => {
+    const two = tryOn({ settings: null, brimmVideo: "two", checkout: "absent", answers: "y\ny\n" });
+    assert.equal(two.status, 0, two.out + two.err);
+    assert.ok(two.out.includes("2 folders of that name were found in Dropbox, so the checks that need it are passed over."), two.out);
+    assert.ok(!two.out.includes("not found in Dropbox"), two.out);
+    assert.ok(!/^(f|same|p)=/m.test(two.out), two.out);
+    const linked = tryOn({ settings: null, brimmVideo: "linked", checkout: "absent", answers: "y\ny\n" });
+    assert.equal(linked.status, 0, linked.out + linked.err);
+    assert.ok(!/^(f|same|p)=/m.test(linked.out), linked.out);
+    assert.ok(linked.out.includes("  BRIMM Video: "), linked.out);
+  });
+
+  it("--try-chooser's stop line names the app in app.txt, and without it says open -a", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-try-app-")));
+    dirsToClean.add(dir);
+    const home = join(dir, "home");
+    mkdirSync(home);
+    const copy = join(dir, "copy");
+    mkdirSync(copy);
+    writeFileSync(join(copy, "move.zsh"), readFileSync(MOVE));
+    const go = () => spawnSync("/bin/zsh", [join(copy, "move.zsh"), "--try-chooser"], { encoding: "utf8", input: "", env: { HOME: home, PATH: "/usr/bin:/bin", TMPDIR: dir } });
+    const without = go();
+    assert.equal(without.status, 1, without.stdout);
+    assert.ok(without.stdout.includes('To try again: open -a "Move to Studio" --args --try-chooser'), without.stdout);
+    writeFileSync(join(copy, "app.txt"), "/Users/x/Downloads/Move to Studio.app\n");
+    const withApp = go();
+    assert.ok(withApp.stdout.includes('To try again: open "/Users/x/Downloads/Move to Studio.app" --args --try-chooser'), withApp.stdout);
+  });
+
+  it("the chooser's temp folder lands inside TMPDIR, and is taken away on a stop and on Ctrl-C", () => {
+    const r = tryOn({ settings: studioSettings, picks: ["<HOME>/Picked exports"], answers: "y\nc\n" });
+    assert.equal(r.status, 0, r.out + r.err);
+    const tmp = join(dirname(r.home), "tmp");
+    assert.deepEqual(readdirSync(tmp), [], "nothing left in TMPDIR");
+    // Stop and interrupt with the chooser's folder made: it goes.
+    for (const call of ["stop_here", "on_int"]) {
+      const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-move-chooser-")));
+      dirsToClean.add(dir);
+      const made = join(dir, "chooser-tmp");
+      mkdirSync(made);
+      const q = spawnSync("/bin/zsh", ["-c", `source "$1"; changed=(); CHOOSER_TMP="$2"; ${call}`, "move", MOVE, made], { encoding: "utf8", env: { HOME: dir, PATH: "/usr/bin:/bin" } });
+      assert.ok([1, 130].includes(q.status), q.stdout + q.stderr);
+      assert.ok(!existsSync(made), `${call} takes the chooser's folder away`);
+    }
+    const m = readFileSync(MOVE, "utf8");
+    assert.ok(!/mktemp(?! (-d )?"\$\{TMPDIR)/.test(m), "every mktemp has a template in TMPDIR");
   });
 });

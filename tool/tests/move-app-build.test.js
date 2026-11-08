@@ -197,6 +197,19 @@ describe("open-in-terminal.zsh", { skip: notAMac }, () => {
     }
   });
 
+  it("the copy carries app.txt with the bundle's path, and the .command is unchanged", () => {
+    const { w, res, go } = resources("f".repeat(40));
+    try {
+      const r = go("--try-chooser");
+      assert.equal(r.status, 0, r.stderr);
+      const folder = openedFolder(w);
+      assert.equal(readFileSync(join(folder, "app.txt"), "utf8"), `${dirname(dirname(res))}\n`);
+      assert.equal(readFileSync(join(folder, "Move to Studio.command"), "utf8"), `#!/bin/zsh\n/bin/zsh '${folder}/move.zsh' --try-chooser\n`);
+    } finally {
+      w.cleanup();
+    }
+  });
+
   it("--try-chooser, and --try-chooser --second-way, write the try's .command; other arguments are passed over", () => {
     const commit = "e".repeat(40);
     const cases = [

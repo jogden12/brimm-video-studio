@@ -84,6 +84,7 @@ ROOT="" DROP="" CHECKOUT_NOW="" NODE="" CLAUDE=""
 R43_VERSION=""       # the report's line for check 43: the HyperFrames app's version
 R44_PRINT="" R44_RAN="" R44_AGENT="" R44_APP=""   # the report's lines for check 44: the print's lines that matter, the install's last lines, the one-shot check, and turning HyperFrames on
 CAND="" CAND_FROM="" QUESTION_LINES="" QUESTION_PROMPT=""   # what y gives for a question, and the question's words
+CHOOSER_TMP=""       # the chooser's temporary folder while it is in use; taken away on a stop or an interrupt
 THROWN=0             # keys typed while a chooser was open, thrown away
 CHOSEN=""            # the folder the chooser gave, made whole
 ANSWER=""            # y or c, from ask_y_or_c
@@ -115,7 +116,14 @@ summary() {
   local -a folders
   # A try of the folder questions changed nothing, and starts again with its own line, never a move.
   if [[ -n "$TRY" ]]; then
-    say "This was a try of the folder questions: nothing was changed. To try again: open \"${BRIMM_MOVE_APP:-Move to Studio.app}\" --args --try-chooser"
+    # open-in-terminal.zsh writes the app's path beside the copied script; a run by hand has none.
+    local app_file="${SELF:A:h}/app.txt" app_path=""
+    if [[ -r "$app_file" ]]; then read -r app_path < "$app_file" || true; fi
+    if [[ -n "$app_path" ]]; then
+      say "This was a try of the folder questions: nothing was changed. To try again: open \"$app_path\" --args --try-chooser"
+    else
+      say "This was a try of the folder questions: nothing was changed. To try again: open -a \"Move to Studio\" --args --try-chooser"
+    fi
     return 0
   fi
   # After the installer started, where the drop folder is now: Studio's own settings say. Nothing here waits, asks or counts the old folder.
@@ -141,6 +149,7 @@ summary() {
   say "Double-click Move to Studio again to go on from here."
 }
 stop_here() {
+  [[ -z "$CHOOSER_TMP" ]] || rm -rf "$CHOOSER_TMP"
   [[ -z "${1-}" ]] || say "$1"
   summary
   exit 1
@@ -148,6 +157,7 @@ stop_here() {
 # Ctrl-C, a kill, and closing the Terminal window (HUP): a clone this run was part way through is taken away, so the next run
 # starts clean. That comes before the first word said, since after a closed window there may be nobody to say it to.
 interrupted() {
+  [[ -z "$CHOOSER_TMP" ]] || rm -rf "$CHOOSER_TMP"
   [[ -z "$made_partial" || -z "$PARTIAL" ]] || rm -rf "$PARTIAL"
   say ""
   summary
@@ -409,20 +419,19 @@ look_at_import_and_drop() {
 # installer makes the settings and the drop folder in step 5.
 # The BRIMM Video folders in Dropbox, into FOUND_BRIMM_VIDEO (each folder once, the first spelling kept).
 search_brimm_video() {
-  local p
+  local p same f
   FOUND_BRIMM_VIDEO=()
   # The BRIMM DB is at the top of a Dropbox, or a level deeper, in a team member's folder (as on the Mac Studio:
   # Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB).
   for p in $HOME/Library/CloudStorage/Dropbox*/"The BRIMM DB/BRIMM Video"(N/) $HOME/Library/CloudStorage/Dropbox*/*/"The BRIMM DB/BRIMM Video"(N/) \
       $HOME/Dropbox*/"The BRIMM DB/BRIMM Video"(N/) $HOME/Dropbox*/*/"The BRIMM DB/BRIMM Video"(N/); do
     # Two paths that resolve to the same folder count once, and the first is kept as found.
-    local same="" f
+    same=""
     for f in "${FOUND_BRIMM_VIDEO[@]}"; do [[ "${f:A}" != "${p:A}" ]] || same=yes; done
     [[ -n "$same" ]] || FOUND_BRIMM_VIDEO+=("$p")
   done
 }
 set_up_fresh() {
-  local p
   local -a found
   search_brimm_video
   found=("${FOUND_BRIMM_VIDEO[@]}")
@@ -827,7 +836,7 @@ run_the_tests() {
     return 0
   fi
   say "  Now Studio's own tests run, in $STUDIO/tool. They take about three minutes and change nothing."
-  kept="$(mktemp)"
+  kept="$(mktemp "${TMPDIR:-/tmp}/brimm-move.XXXXXX")"
   { (cd "$STUDIO/tool" && "$NODE" --test --test-reporter=spec) 2>&1 | while IFS= read -r line; do
       say "$line"
       print -r -- "$line" >> "$kept"
@@ -921,7 +930,8 @@ throw_away_typed_keys() {
 # be shown (no file, and the helper gone).
 chooser_app_way() {
   local message="$1" start="$2" folder result content first rest rc=0
-  folder="$(mktemp -d 2>/dev/null)" || return 2
+  folder="$(mktemp -d "${TMPDIR:-/tmp}/brimm-move.XXXXXX" 2>/dev/null)" || return 2
+  CHOOSER_TMP="$folder"
   result="$folder/result"
   open -n -W "$CHOOSER_APP" --args "$message" "$start" "$result" "$$" </dev/null 2>/dev/null || rc=$?
   # open's own status is not looked at while a result file is there. With none, the helper may still be up (open can give up on it
@@ -936,6 +946,7 @@ chooser_app_way() {
     content="${content%x}"
   fi
   rm -rf "$folder"
+  CHOOSER_TMP=""
   [[ -n "$content" ]] || return 2
   first="${content%%$'\n'*}"
   rest=""
@@ -1617,7 +1628,7 @@ run_the_installer() {
   if [[ -n "$SET_UP_FRESH" ]]; then write_mark fresh yes; fi
   INSTALL_STARTED=yes
   local kept rc
-  kept="$(mktemp)"
+  kept="$(mktemp "${TMPDIR:-/tmp}/brimm-move.XXXXXX")"
   # Written before the installer runs, in words that are true however far it gets; made plain once it has finished.
   changed+=("ran Studio's installer (if it stopped, its last lines say how far it got)")
   local installer_at=${#changed[@]}
@@ -1778,7 +1789,6 @@ retire_the_old_key() {
 # no report, no marks, no installer, and which_mac's refusal does not apply. Folders are read from settings.json with plutil, and said
 # in Finder's words only when node and Studio's settings.js answer.
 try_chooser() {
-  local told
   trap on_int INT
   trap on_term TERM
   trap on_hup HUP
@@ -1792,6 +1802,8 @@ try_chooser() {
   fi
   if [[ -n "$ROOT" ]]; then
     say "  BRIMM Video: $ROOT"
+  elif (( ${#FOUND_BRIMM_VIDEO[@]} > 1 )); then
+    say "  BRIMM Video: ${#FOUND_BRIMM_VIDEO[@]} folders of that name were found in Dropbox, so the checks that need it are passed over."
   else
     say "  BRIMM Video: not found in Dropbox on this Mac, so the checks that need it are passed over."
   fi

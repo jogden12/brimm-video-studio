@@ -44,6 +44,8 @@ done
 for item in $chooser_src/**/*(DN.); do
   cat -- $item > $chooser_dest/${item#$chooser_src/} || alert "A temporary copy could not be made."
 done
+# The app's own place, for the try's stop words (it says how to start the try again). printf, so no mark is copied.
+printf '%s\n' "${here:h:h}" > $folder/app.txt || alert "A temporary copy could not be made."
 command_file=$folder/"Move to Studio.command"
 move_file=$folder/move.zsh
 if [[ -n $try ]]; then
