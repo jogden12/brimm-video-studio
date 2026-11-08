@@ -7,92 +7,38 @@
 // The tests need a Mac (zsh and plutil). Anywhere else they skip themselves and say why.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   MOVE,
   notAMac,
-  EMAIL,
-  ORG,
-  SIGNED_IN,
-  SIGNED_OUT,
-  KEY_COMMENT,
-  GITHUB_HOST_KEY,
-  HOST_BLOCK,
-  HI,
   STOPPED_NOTHING,
-  HEADINGS,
   PRINT_LINES,
   printText,
-  DEFAULT_PRINT,
-  BACKGROUND,
-  DEFAULT_RAN,
-  GIT_ENV,
-  git,
-  put,
-  FAKE_SETTINGS_JS,
-  FAKE_STUDIO_SETTINGS_JS,
-  NEXT_SH,
-  helperStandIn,
-  openStandIn,
-  writeList,
-  makeChooser,
-  dirsToClean,
-  xmlEscape,
-  agentPlist,
-  moveOn
+  moveOn,
+  NOT_INSTALLED,
+  installCalls,
+  rootOf,
+  suggested,
+  count,
+  DROP_QUESTION,
+  EXPORTS_QUESTION,
+  TERMINAL_LINE,
+  DROP_MESSAGE,
+  EXPORTS_MESSAGE,
+  NOT_SHOWN,
+  EXPORTS_NOTE,
+  sourced
 } from "./move-app-harness.js";
 
 describe("the move script, step 5's two questions, the chooser and the installer's options (1 of 3: the questions)", { skip: notAMac }, () => {
-  const NOT_INSTALLED = "tests=SHA\n";
-  const rootOf = (home) => `${home}/Dropbox/The BRIMM DB/BRIMM Video`;
-  const installCalls = (r) => r.ran.split("\n").filter((l) => l.startsWith("install.sh "));
-  const suggested = (home) => `${home}/BRIMM Video Work/Drop`;
   // The installer's options for Sallie's laptop: --drop-folder unless it is kept (drop === ""), --exports-folder when given.
   const optionsOf = (home, drop = suggested(home), exports = "") => `--machine Sallie's laptop${drop ? ` --drop-folder ${drop}` : ""}${exports ? ` --exports-folder ${exports}` : ""} --import light --handoff 2`;
   const printed = (r, drop, exports) => `install.sh --print ${optionsOf(r.home, drop, exports)} ${rootOf(r.home)}`;
   const real = (r, drop, exports) => `install.sh --yes ${optionsOf(r.home, drop, exports)} ${rootOf(r.home)}`;
-  const count = (text, part) => text.split(part).length - 1;
 
-  const DROP_QUESTION = [
-    "  Where videos are dropped for Studio: the drop folder.",
-    "  Studio takes every video out of this folder and files it. Use a new folder that only you drop into: never one shared with others, or one an app saves into.",
-    "  Suggested: BRIMM Video Work › Drop, in your home folder. It is on this Mac, the installer makes it, and macOS asks no questions about it.",
-    "  A folder in Dropbox, iCloud Drive or another cloud folder can be picked, but every video dropped there, a client session too, goes up to that cloud, and one still syncing can be imported late, or twice.",
-    "Type y and press Return to use the suggested folder, or c and press Return to choose another. Anything else stops:"
-  ];
-  const EXPORTS_QUESTION = [
-    "  Where HyperFrames' exports go: the exports folder.",
-    "  Suggested: Downloads, where HyperFrames saves an export unless its Export dialog is given another folder. Studio looks in Downloads in any case, and deletes each export it takes from there once its copy in the video's final folder in Dropbox is checked.",
-    "  A folder in Dropbox is fine, for instance to share the exports with other people.",
-    "Type y and press Return to use Downloads, or c and press Return to choose another. Anything else stops:"
-  ];
-  const TERMINAL_LINE = "A window to choose the folder is opening. If you don't see it, click the folder icon named Choose a Folder in the Dock. If no window comes at all, press Control-C; on the next run, y uses the suggested folder.";
-  const DROP_MESSAGE = "Move to Studio: choose the folder you will drop videos into, or make a new one with New Folder.";
-  const EXPORTS_MESSAGE = "Move to Studio: choose the folder HyperFrames' exports will go into, or make a new one with New Folder.";
-  const NOT_SHOWN = "The window to choose a folder could not be shown.";
-  const EXPORTS_NOTE = "Studio looks for exports there and in Downloads. It copies each one into its video's final folder in Dropbox, and leaves the one there as it is. When you export in HyperFrames, choose this folder in its Export dialog. Never export into the drop folder.";
 
-  /** The script sourced, with the stand-in chooser first on its PATH and in BRIMM_CHOOSER_APP: `script` runs after `source "$1"`. */
-  function sourced(script, { picks, program, input = "", env = {} } = {}) {
-    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-chooser-")));
-    dirsToClean.add(dir);
-    const bin = join(dir, "bin");
-    const home = join(dir, "home");
-    mkdirSync(bin);
-    mkdirSync(home);
-    const ran = join(dir, "ran");
-    const app = makeChooser(dir, bin, ran);
-    const fillHome = (list) => [list ?? []].flat().map((x) => x.replaceAll("<HOME>", home));
-    writeList(dir, "pick", fillHome(picks));
-    writeList(dir, "prog", fillHome(program));
-    if (fillHome(program).includes("missing")) rmSync(join(app, "Contents", "MacOS", "Choose a Folder"));
-    const r = spawnSync("/bin/zsh", ["-c", `source "$1"\n${script}`, "move", MOVE], { encoding: "utf8", input, env: { HOME: home, TMPDIR: dir, PATH: `${bin}:/usr/bin:/bin:${dirname(process.execPath)}`, BRIMM_CHOOSER_APP: app, NODE_BIN: process.execPath, ...env } });
-    return { status: r.status, out: r.stdout, err: r.stderr, home, dir, ran: existsSync(ran) ? readFileSync(ran, "utf8") : "" };
-  }
 
   it("takes c, C and ' c ' as choose, and y as before", () => {
     const cases = [["y", "y"], ["Y", "y"], ["yes", "y"], ["YES", "y"], [" y ", "y"], ["c", "c"], ["C", "c"], [" c ", "c"], ["choose", "c"], ["CHOOSE", "c"], [" Choose ", "c"],

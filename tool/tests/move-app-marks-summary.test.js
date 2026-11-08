@@ -7,47 +7,18 @@
 // The tests need a Mac (zsh and plutil). Anywhere else they skip themselves and say why.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import {
-  MOVE,
   notAMac,
-  EMAIL,
-  ORG,
-  SIGNED_IN,
-  SIGNED_OUT,
-  KEY_COMMENT,
-  GITHUB_HOST_KEY,
-  HOST_BLOCK,
-  HI,
   STOPPED_NOTHING,
-  HEADINGS,
-  PRINT_LINES,
-  printText,
-  DEFAULT_PRINT,
-  BACKGROUND,
-  DEFAULT_RAN,
-  GIT_ENV,
-  git,
   put,
-  FAKE_SETTINGS_JS,
-  FAKE_STUDIO_SETTINGS_JS,
-  NEXT_SH,
-  helperStandIn,
-  openStandIn,
-  writeList,
-  makeChooser,
-  dirsToClean,
-  xmlEscape,
-  agentPlist,
-  moveOn
+  moveOn,
+  NOT_INSTALLED,
+  installCalls
 } from "./move-app-harness.js";
 
 describe("the move script, later runs, the marks, the stop summary and the end of the run (1 of 2: marks, stop summary, report)", { skip: notAMac }, () => {
-  const NOT_INSTALLED = "tests=SHA\n";
   const JASON = "Jason's MacBook";
   const JASON_KEY = "brimm-video-studio read-only, Jason's MacBook";
   const STUDIO_AT = "<HOME>/Claude Code/brimm-video-studio";
@@ -56,7 +27,6 @@ describe("the move script, later runs, the marks, the stop summary and the end o
   // A Mac set up with a drop folder of its own and no drop.
   const OWN = { ...MOVED, drop: undefined };
   const OLD_DROP = "<HOME>/Dropbox/The BRIMM DB/BRIMM Video/Drop/Sallie's laptop";
-  const installCalls = (r) => r.ran.split("\n").filter((l) => l.startsWith("install.sh "));
   const FRESH_MAC = { settings: null, key: JASON_KEY, marks: NOT_INSTALLED };
   const NOT_FINISHED = "Move to Studio has not finished, so a video dropped now may not be imported. Drop no video until it has finished: double-click it again now.";
   const NOW = (words) => `This Mac's drop folder is now ${words}.`;

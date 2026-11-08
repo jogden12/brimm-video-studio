@@ -101,13 +101,13 @@ Start it through the app itself, so Terminal comes in front as at a move:
 open "<path to Move to Studio.app>" --args --try-chooser
 ```
 
-`--second-way` shows the window by its program first, which tests the second way:
+`--second-way` shows the window by its program first, which is how the second way is tried. The app passes on only `--try-chooser`, so start it from Terminal, through the app's helper:
 
 ```
-open "<path to Move to Studio.app>" --args --try-chooser --second-way
+zsh "<path to Move to Studio.app>/Contents/Resources/open-in-terminal.zsh" --try-chooser --second-way
 ```
 
-The try's last lines say how to start it again. Run by hand from the repo, `zsh tool/move-app/move.zsh --try-chooser` does the same in a Terminal; it takes neither `--commit` nor `--print`.
+When a try stops (an n, Control-C, or a window that could not be shown), its last lines say how to start it again. A finished try ends: `Nothing was changed. Studio's installer checks more at the move.` Run by hand from the repo, `zsh tool/move-app/move.zsh --try-chooser` asks the same questions, but the folder window needs the built app, which the repo does not have: only y answers work there, and c says the window could not be shown. It takes neither `--commit` nor `--print`.
 
 ### 6. The report
 
@@ -249,10 +249,10 @@ Step 3, the code:
 - **"Studio's code could not be put at the app's commit (<commit>)."** The half-made copy is taken away. Tell Jason.
 - **"Studio's tests did not pass at <commit>. Tell Jason; the lines above, from ℹ tests on, say how many failed."** Tell Jason.
 
-Step 5, the folder questions (a refused pick is asked again and is not a stop; these are the stops):
+Step 5, the folder questions (a refused pick is asked again and is not a stop; the first two items below are stops, the rest are what the app says or asks on the way):
 
 - **"The window to choose a folder could not be shown, and <folder> is not empty. Empty it in Finder, or tell Jason, then double-click Move to Studio again."** Only when neither way of showing the window worked and the folder y gives was refused for not being empty. Do that.
-- **"The window to choose a folder could not be shown, and <folder> can't be used: <reason>. Tell Jason, then double-click Move to Studio again."** The same, for another reason (the transcript tool watches it, it is one of Studio's own folders, and so on). Tell Jason. In a try, the words end after "Tell Jason." with no advice to double-click.
+- **"The window to choose a folder could not be shown, and <folder> can't be used: <reason>. Tell Jason, then double-click Move to Studio again."** The same, for another reason (the transcript tool watches it, it is one of Studio's own folders, and so on). Tell Jason. In a try, this stop and the "is not empty" one end after "Tell Jason" or "tell Jason" with no advice to double-click.
 - **The privacy questions.** Not stops. The app says that macOS may ask whether Claude Code may access Downloads, whether node may, and whether either may read the drop folder or the exports folder. Choose Allow each time. A Don't Allow is undone in System Settings › Privacy & Security › Files and Folders. Until node is allowed, Studio sees no video dropped there.
 - **"macOS did not let Terminal look in <folder>. Allow Terminal in System Settings › Privacy & Security › Files and Folders, or choose another folder."** A refused pick, asked again. Allow it, or choose another.
 - **The cloud question**, after the print, for a drop folder in a cloud folder: y uses it anyway, c chooses another, anything else stops with no change.

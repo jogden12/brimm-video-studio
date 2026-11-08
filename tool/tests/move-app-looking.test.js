@@ -7,43 +7,26 @@
 // The tests need a Mac (zsh and plutil). Anywhere else they skip themselves and say why.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   MOVE,
   notAMac,
   EMAIL,
   ORG,
-  SIGNED_IN,
   SIGNED_OUT,
-  KEY_COMMENT,
-  GITHUB_HOST_KEY,
-  HOST_BLOCK,
-  HI,
   STOPPED_NOTHING,
   HEADINGS,
-  PRINT_LINES,
-  printText,
-  DEFAULT_PRINT,
-  BACKGROUND,
-  DEFAULT_RAN,
-  GIT_ENV,
   git,
   put,
-  FAKE_SETTINGS_JS,
-  FAKE_STUDIO_SETTINGS_JS,
-  NEXT_SH,
-  helperStandIn,
-  openStandIn,
-  writeList,
-  makeChooser,
   dirsToClean,
-  xmlEscape,
-  agentPlist,
-  moveOn
+  moveOn,
+  NOT_INSTALLED,
+  installCalls,
+  rootOf,
+  count
 } from "./move-app-harness.js";
 
 describe("the move script, looking at her Mac", { skip: notAMac }, () => {
@@ -284,9 +267,6 @@ describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook
   const JASON = "Jason's MacBook";
   const JASON_KEY = "brimm-video-studio read-only, Jason's MacBook";
   const optionsOf = (home) => `--machine Jason's MacBook --drop-folder ${home}/BRIMM Video Work/Drop --import light --handoff 2`;
-  const rootOf = (home) => `${home}/Dropbox/The BRIMM DB/BRIMM Video`;
-  const installCalls = (r) => r.ran.split("\n").filter((l) => l.startsWith("install.sh "));
-  const NOT_INSTALLED = "tests=SHA\n";
   // A Mac with no brimm-video settings, where Studio's code is already at the pin with its tests passed and Studio's key is made for
   // Jason's MacBook, so a run goes from step 1's question straight to the installer. A brimm-video checkout with no settings (as the
   // transcript tool's standby may have) is there too: the harness always makes one.
@@ -401,7 +381,6 @@ describe("the move script, the try mode (--try-chooser)", { skip: notAMac }, () 
   const END_LINE = "Nothing was changed. Studio's installer checks more at the move.";
   const studioSettings = { version: 1, machine: "Mac Studio", root: "<HOME>/Dropbox/The BRIMM DB/BRIMM Video", checkout: "<HOME>/Claude Code/brimm-video-studio",
     import: "light", handoffVersion: 2, dropPath: "<HOME>/BRIMM Video Work/Drop", exportsPath: "<HOME>/Exports" };
-  const count = (text, part) => text.split(part).length - 1;
   const tryOn = (options = {}, ...args) => moveOn({ commit: null, ...options }, "--try-chooser", ...args);
   const unchanged = (r) => {
     assert.deepEqual(r.tree, r.before, "the home's files are unchanged");

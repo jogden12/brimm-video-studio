@@ -7,50 +7,22 @@
 // The tests need a Mac (zsh and plutil). Anywhere else they skip themselves and say why.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
-  MOVE,
   notAMac,
-  EMAIL,
-  ORG,
-  SIGNED_IN,
-  SIGNED_OUT,
-  KEY_COMMENT,
-  GITHUB_HOST_KEY,
-  HOST_BLOCK,
-  HI,
   STOPPED_NOTHING,
-  HEADINGS,
   PRINT_LINES,
   printText,
   DEFAULT_PRINT,
   BACKGROUND,
-  DEFAULT_RAN,
-  GIT_ENV,
   git,
-  put,
-  FAKE_SETTINGS_JS,
-  FAKE_STUDIO_SETTINGS_JS,
-  NEXT_SH,
-  helperStandIn,
-  openStandIn,
-  writeList,
-  makeChooser,
-  dirsToClean,
-  xmlEscape,
-  agentPlist,
-  moveOn
+  moveOn,
+  NOT_INSTALLED,
+  installCalls,
+  rootOf
 } from "./move-app-harness.js";
 
 describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)", { skip: notAMac }, () => {
   const optionsOf = (home) => `--machine Sallie's laptop --drop-folder ${home}/BRIMM Video Work/Drop --import light --handoff 2`;
-  const rootOf = (home) => `${home}/Dropbox/The BRIMM DB/BRIMM Video`;
-  const installCalls = (r) => r.ran.split("\n").filter((l) => l.startsWith("install.sh "));
-  const NOT_INSTALLED = "tests=SHA\n";
 
   it("notes HyperFrames' version, or opens its page in Safari and waits", () => {
     const here = moveOn({ hfApp: "1.4.0" });

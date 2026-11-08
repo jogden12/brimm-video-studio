@@ -7,43 +7,21 @@
 // The tests need a Mac (zsh and plutil). Anywhere else they skip themselves and say why.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
-  MOVE,
   notAMac,
   EMAIL,
   ORG,
-  SIGNED_IN,
-  SIGNED_OUT,
   KEY_COMMENT,
   GITHUB_HOST_KEY,
   HOST_BLOCK,
   HI,
   STOPPED_NOTHING,
-  HEADINGS,
-  PRINT_LINES,
-  printText,
-  DEFAULT_PRINT,
   BACKGROUND,
-  DEFAULT_RAN,
-  GIT_ENV,
   git,
   put,
-  FAKE_SETTINGS_JS,
-  FAKE_STUDIO_SETTINGS_JS,
-  NEXT_SH,
-  helperStandIn,
-  openStandIn,
-  writeList,
-  makeChooser,
-  dirsToClean,
-  xmlEscape,
-  agentPlist,
-  moveOn
+  moveOn,
+  NOT_INSTALLED,
+  count
 } from "./move-app-harness.js";
 
 describe("the move script, Studio's key (check 42)", { skip: notAMac }, () => {
@@ -308,7 +286,6 @@ describe("the move script, Studio's code (check 42)", { skip: notAMac }, () => {
 });
 
 describe("the move script, the report and brimm-video's old key (check 48)", { skip: notAMac }, () => {
-  const NOT_INSTALLED = "tests=SHA\n";
   const LABELS = [
     "Her macOS:", "Free on her disk:", "Anything unexpected in her settings:", "What the count printed:", "Her Claude account's plan:",
     "Whether the key is on GitHub, and how:", "What the check of the key printed:", "The commit:", "The tests' last lines:",
