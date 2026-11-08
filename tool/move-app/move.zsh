@@ -10,7 +10,8 @@
 #                                    look, say what it would do in order, and change nothing: no log, no report, no key, no
 #                                    clone, and no question. A look that would stop the real run stops this one too
 #
-# Each step looks first, says what it will change, and asks before it changes it. Answer y and press Return to go ahead.
+# Each step looks first, says what it will change, and asks before it changes it. Answer y and press Return to go ahead. Step 5's two
+# questions (the drop folder, the exports folder) also take c: it opens macOS's own window to choose the folder.
 # Anything else, an empty line, or the end of input is no: the run stops, says what it changed (nothing, before the first
 # change), and runs again from where it stopped when it is started again. Control-C stops it the same way.
 # Nothing here prints, logs or writes the private half of Studio's key, the Claude account's email or organisation, or the name
@@ -22,7 +23,8 @@ set -euo pipefail
 # The two Macs this app is for, named once. A Mac with no brimm-video settings is set up fresh as FRESH_MACHINE.
 MACHINES=("Sallie's laptop" "Jason's MacBook")
 FRESH_MACHINE="Jason's MacBook"
-# Set once the Mac is known (which_mac): its name, Studio's key comment, and the installer's options.
+# Set once the Mac is known (which_mac): its name and Studio's key comment. The installer's options are set by set_install_options,
+# once step 5 has asked its two questions.
 MACHINE="" KEY_COMMENT="" INSTALL_OPTIONS=()
 FRESH=""             # set by which_mac on a Mac with no brimm-video settings
 STUDIO_URL="${BRIMM_STUDIO_REPO:-git@github-brimm-video-studio:jogden12/brimm-video-studio.git}"
@@ -39,7 +41,7 @@ LOG="$HOME/Library/Logs/brimm-video-studio-move.log"
 REPORT="$HOME/Desktop/Studio move report.txt"
 PUBLIC_COPY="$HOME/Desktop/Studio key (public half).txt"
 MARKS="$STUDIO/.git/move-to-studio"
-# The installer's options are written in which_mac and nowhere else, so that a later round changes one line.
+# The installer's options are written in set_install_options and nowhere else, so that a later round changes one line.
 HF_APP="${BRIMM_HYPERFRAMES_APP:-/Applications/HyperFrames.app}"
 HF_PAGE="https://hyperframes.dev/studio"
 CHECK_FILE="$HOME/Library/LaunchAgents/com.thebrimm.claude-check.plist"
@@ -54,6 +56,10 @@ SSH_OPTS=(-F "$HOME/.ssh/config" -o "UserKnownHostsFile=$HOME/.ssh/known_hosts" 
 CLONE_SSH="ssh ${(j: :)${(@q)SSH_OPTS}}"
 
 SELF="${(%):-%x}"
+# The small helper app that shows macOS's folder chooser, inside this app. BRIMM_CHOOSER_APP is only for tests. CHOOSER_ROUTE names
+# which way of showing it goes first: app (started the way Finder starts an app) or program (its program run directly).
+CHOOSER_APP="${BRIMM_CHOOSER_APP:-${SELF:A:h}/Choose a Folder.app}"
+CHOOSER_ROUTE=app
 # State of the run.
 PRINT_ONLY=""        # set by --print: nothing is changed, written or asked
 LOGGING=""           # set once the run is a real one that has been let through: what is said is also kept in $LOG
@@ -67,6 +73,14 @@ R42_KEY="" R42_SSH=""   # the report's lines for check 42: whether the key is on
 ROOT="" DROP="" CHECKOUT_NOW="" NODE="" CLAUDE=""
 R43_VERSION=""       # the report's line for check 43: the HyperFrames app's version
 R44_PRINT="" R44_RAN="" R44_AGENT="" R44_APP=""   # the report's lines for check 44: the print's lines that matter, the install's last lines, the one-shot check, and turning HyperFrames on
+CAND="" CAND_FROM="" QUESTION_LINES="" QUESTION_PROMPT=""   # what y gives for a question, and the question's words
+THROWN=0             # keys typed while a chooser was open, thrown away
+CHOSEN=""            # the folder the chooser gave, made whole
+ANSWER=""            # y or c, from ask_y_or_c
+FAULT_KIND="" FAULT_WORDS=""   # why a folder will not do (empty when it will), set by the checks of a pick
+DROP_FOLDER="" EXPORTS_FOLDER=""   # the folders step 5 gives the installer, whole paths
+DROP_KEPT="" EXPORTS_KEPT=""       # yes when the settings' own folder is kept
+DROP_FROM="" EXPORTS_FROM=""       # where each came from: suggested, settings, last or picked
 
 say() {
   print -r -- "$@" 2>/dev/null || true
@@ -194,7 +208,24 @@ which_mac() {
     MACHINE="$FRESH_MACHINE"
   fi
   KEY_COMMENT="brimm-video-studio read-only, $MACHINE"
-  INSTALL_OPTIONS=(--machine "$MACHINE" --drop Drop --import light --handoff 2)
+}
+
+# The number of entries in a folder but .DS_Store and .brimm-watched-by, counted and never named. A folder that is not there is 0
+# only when the folder that holds it can be listed and the name is absent from it; a folder, or the folder that holds it, that cannot be
+# listed gives 2 (never 0, which would take a folder macOS did not let Terminal look in for an empty one).
+count_entries() {
+  local folder="$1" parent="${1:h}"
+  local -a held
+  if [[ -d "$folder" ]]; then
+    ls -A -- "$folder" >/dev/null 2>&1 || return 2
+    held=("$folder"/*(N) "$folder"/.*(N))
+    held=(${held:#*/.}) held=(${held:#*/..}) held=(${held:#*/.DS_Store}) held=(${held:#*/.brimm-watched-by})
+    print -r -- "${#held[@]}"
+    return 0
+  fi
+  if [[ -e "$folder" || -L "$folder" ]]; then return 2; fi
+  ls -A -- "$parent" >/dev/null 2>&1 || return 2
+  print -r -- 0
 }
 
 # The two looks that must hold when anything is changed: no import is running, and the drop folder holds nothing to import. Step 1
@@ -224,18 +255,17 @@ look_at_import_and_drop() {
   if [[ -z "$DROP" || ! -d "$DROP" ]]; then
     stop_here "The drop folder could not be found from this Mac's settings (settings.js show)."
   fi
-  # A folder that cannot be listed is not an empty one: the glob below would swallow the failure and count nothing.
-  if ! ls -A -- "$DROP" >/dev/null 2>&1; then
+  # A folder that cannot be listed is not an empty one: count_entries gives 2 for it, never 0.
+  local held rc=0
+  held="$(count_entries "$DROP")" || rc=$?
+  if (( rc != 0 )); then
     stop_here "The drop folder could not be read. macOS may have asked whether Terminal may read Dropbox, and the answer may have been no. Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again."
   fi
-  local -a held
-  held=("$DROP"/*(N) "$DROP"/.*(N))
-  held=(${held:#*/.}) held=(${held:#*/..}) held=(${held:#*/.DS_Store}) held=(${held:#*/.brimm-watched-by})
-  if (( ${#held[@]} > 0 )); then
-    stop_here "The drop folder holds ${#held[@]} file$([[ ${#held[@]} -eq 1 ]] || print -rn s) still to be imported."
+  if (( held > 0 )); then
+    stop_here "The drop folder holds $held file$([[ $held -eq 1 ]] || print -rn s) still to be imported."
   fi
   say "  The drop folder is empty."
-  R_COUNT="${#held[@]}"
+  R_COUNT="$held"
 }
 
 # Step 1 on a Mac with no brimm-video settings: BRIMM Video is found in Dropbox, and setting the Mac up fresh is asked. Studio's
@@ -682,6 +712,294 @@ find_the_app() {
   done
 }
 
+# Step 5's two questions: the drop folder, where videos are dropped, and the exports folder, where HyperFrames' exports go. Each is
+# answered with y (the suggested folder, or the one kept) or c (macOS's own folder chooser, in the helper app). The installer's
+# options are made from the answers (set_install_options) and nowhere else.
+
+# y or c from one line: y or yes, c or choose, in any case, with spaces round them. Prints y, c, or nothing.
+answer_of() {
+  local line="${(L)1}"
+  if [[ "$line" =~ '^[[:space:]]*(y|yes)[[:space:]]*$' ]]; then
+    print y
+  elif [[ "$line" =~ '^[[:space:]]*(c|choose)[[:space:]]*$' ]]; then
+    print c
+  fi
+  return 0
+}
+# Says $1, reads one line as ask_yes does (the prompt $2, the answer kept in the log) and sets ANSWER to y or c. Anything else, an
+# empty line or the end of input stops. With "c-only" in $3 a y stops too.
+ask_y_or_c() {
+  local line="" answer
+  [[ -z "$1" ]] || say "$1"
+  print -rn -- "$2"
+  [[ -z "$LOGGING" ]] || print -rn -- "$2" >> "$LOG"
+  IFS= read -r line || true
+  [[ -t 0 ]] || print -r -- ""
+  [[ -z "$LOGGING" ]] || print -r -- "$line" >> "$LOG"
+  answer="$(answer_of "$line")"
+  if [[ "${3-}" == c-only && "$answer" == y ]]; then answer=""; fi
+  [[ -n "$answer" ]] || stop_here
+  ANSWER="$answer"
+}
+
+# Keys typed into Terminal while the chooser was open are not answers: they are read and thrown away, but only from a keyboard, so a
+# test's piped answers are kept. zsh's own terminal read, with no -u, leaves line mode for each key, so a y typed without Return goes
+# too. Written with if, and with $(( )) assignments: either of && or (( )) alone would end the script under set -e at a 0.
+throw_away_typed_keys() {
+  local thrown=0 _key
+  if [[ -t 0 ]]; then
+    while read -t 0 -k 1 -s _key; do thrown=$(( thrown + 1 )); done
+  fi
+  THROWN=$(( THROWN + thrown ))
+  if (( thrown > 0 )); then say "Keys typed while the window was open were not taken as answers."; fi
+}
+
+# The chooser's first way: the helper app started the way Finder starts an app, which brings it in front with the keyboard. It writes
+# its answer into a file, whole or not at all. Gives 0 and CHOSEN for a pick, 1 for Cancel, 3 for a line break, 2 when it could not
+# be shown (no file, and the helper gone).
+chooser_app_way() {
+  local message="$1" start="$2" folder result content first rest rc=0
+  folder="$(mktemp -d 2>/dev/null)" || return 2
+  result="$folder/result"
+  open -n -W "$CHOOSER_APP" --args "$message" "$start" "$result" "$$" </dev/null 2>/dev/null || rc=$?
+  # open's own status is not looked at while a result file is there. With none, the helper may still be up (open can give up on it
+  # while its window is open): wait while its program runs, with no time limit. Control-C goes to the traps, and the helper ends with
+  # this script through its process-id watch.
+  if [[ ! -r "$result" ]]; then
+    while pgrep -f "$CHOOSER_APP/Contents/MacOS/Choose a Folder" >/dev/null 2>&1; do sleep 0.5; done
+  fi
+  content=""
+  if [[ -r "$result" ]]; then
+    content="$(cat -- "$result" 2>/dev/null; print -rn x)" || content=""
+    content="${content%x}"
+  fi
+  rm -rf "$folder"
+  [[ -n "$content" ]] || return 2
+  first="${content%%$'\n'*}"
+  rest=""
+  [[ "$content" != *$'\n'* ]] || rest="${content#*$'\n'}"
+  case "$first" in
+    cancel) return 1 ;;
+    linebreak) return 3 ;;
+    path)
+      rest="${rest%$'\n'}"
+      [[ -n "$rest" ]] || return 2
+      CHOSEN="${rest:A}"
+      return 0 ;;
+    *) return 2 ;;
+  esac
+}
+# The chooser's second way: the helper's program run directly. It prints the path and ends 0, ends 1 on Cancel, 3 on a line break,
+# and 2 when it could not show the window. The same answers as the first way.
+chooser_program_way() {
+  local message="$1" start="$2" program="$CHOOSER_APP/Contents/MacOS/Choose a Folder" told="" rc=0
+  [[ -x "$program" ]] || return 2
+  told="$("$program" "$message" "$start" </dev/null 2>/dev/null)" || rc=$?
+  case "$rc" in
+    0)
+      [[ -n "$told" ]] || return 2
+      CHOSEN="${told:A}"
+      return 0 ;;
+    1) return 1 ;;
+    3) return 3 ;;
+    *) return 2 ;;
+  esac
+}
+# Opens the chooser at $2 with the message $1: the first way of CHOOSER_ROUTE, and the other only when the first could not be shown.
+# Gives 0 with CHOSEN (the pick, made whole), 1 on Cancel, 3 for a line break, 2 when neither way could be shown. Terminal is brought
+# back to the front and the keys typed meanwhile are thrown away on every way back.
+choose_folder() {
+  local message="$1" start="$2" rc=0 way
+  local -a ways
+  CHOSEN=""
+  say "A window to choose the folder is opening. If you don't see it, click the folder icon named Choose a Folder in the Dock. If no window comes at all, press Control-C; on the next run, y uses the suggested folder."
+  if [[ "$CHOOSER_ROUTE" == program ]]; then ways=(program app); else ways=(app program); fi
+  for way in "${ways[@]}"; do
+    rc=0
+    "chooser_${way}_way" "$message" "$start" || rc=$?
+    if (( rc != 2 )); then break; fi
+  done
+  open -a Terminal || true
+  throw_away_typed_keys
+  return $rc
+}
+
+# A folder in Finder's words, which Studio's own folderWords gives. Studio's settings.js is imported (never run: its main guard would
+# run it as a command when it is node's first argument), as install.sh's lock_facts does. When that cannot be asked (no node, no
+# Studio checkout, an error: node's errors are kept off the screen) the whole path is said instead.
+words_for() {
+  local path="$1" told=""
+  if [[ -n "$NODE" && -f "$STUDIO/tool/settings.js" ]]; then
+    told="$("$NODE" --input-type=module -e '
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+const { folderWords } = await import(pathToFileURL(join(process.argv[1], "settings.js")).href);
+process.stdout.write(folderWords(process.argv[2], process.argv[3]));
+' "$STUDIO/tool" "$path" "$HOME" 2>/dev/null)" || told=""
+  fi
+  print -r -- "${told:-$path}"
+}
+
+# The app's own checks of a pick: they set FAULT_KIND (linebreak, transcript, cannot-look, not-empty, studio) and FAULT_WORDS, the
+# refusal in the app's words, empty when the folder will do. Nothing is refused until they are written.
+drop_folder_fault() { FAULT_KIND="" FAULT_WORDS=""; }
+exports_folder_fault() { FAULT_KIND="" FAULT_WORDS=""; }
+
+# What y gives for a question: CAND, and CAND_FROM (settings, last or suggested). The settings' own folder is dropPath or exportsPath
+# (exportsPath only when it is not Downloads by real path); the last-time folder is the mark drop= or exports=.
+folder_candidate() {
+  local kind="$1" suggested kept last
+  if [[ "$kind" == drop ]]; then
+    suggested="$HOME/BRIMM Video Work/Drop"
+    kept="$(setting dropPath)"
+  else
+    suggested="$HOME/Downloads"
+    kept="$(setting exportsPath)"
+    if [[ -n "$kept" && "${kept:A}" == "${suggested:A}" ]]; then kept=""; fi
+  fi
+  last="$(mark_of "$kind")"
+  if [[ -n "$kept" ]]; then CAND="$kept" CAND_FROM=settings
+  elif [[ -n "$last" ]]; then CAND="$last" CAND_FROM=last
+  else CAND="$suggested" CAND_FROM=suggested
+  fi
+}
+# The question's words (QUESTION_LINES) and its last line, the prompt (QUESTION_PROMPT), for the folder y gives.
+folder_question() {
+  local kind="$1" from="$2" cand="$3"
+  local -a lines
+  case "$from" in
+    settings)
+      if [[ "$kind" == drop ]]; then lines=("This Mac's drop folder is $(words_for "$cand").")
+      else lines=("HyperFrames' exports are looked for in $(words_for "$cand") and in Downloads."); fi
+      QUESTION_PROMPT="Type y and press Return to keep it, or c and press Return to choose another. Anything else stops: " ;;
+    last)
+      lines=("Last time, this folder was picked: $(words_for "$cand").")
+      QUESTION_PROMPT="Type y and press Return to use it again, or c and press Return to choose another. Anything else stops: " ;;
+    *)
+      if [[ "$kind" == drop ]]; then
+        lines=("  Where videos are dropped for Studio: the drop folder."
+          "  Studio takes every video out of this folder and files it. Use a new folder that only you drop into: never one shared with others, or one an app saves into."
+          "  Suggested: BRIMM Video Work › Drop, in your home folder. It is on this Mac, the installer makes it, and macOS asks no questions about it."
+          "  A folder in Dropbox, iCloud Drive or another cloud folder can be picked, but every video dropped there, a client session too, goes up to that cloud, and one still syncing can be imported late, or twice.")
+        QUESTION_PROMPT="Type y and press Return to use the suggested folder, or c and press Return to choose another. Anything else stops: "
+      else
+        lines=("  Where HyperFrames' exports go: the exports folder."
+          "  Suggested: Downloads, where HyperFrames saves an export unless its Export dialog is given another folder. Studio looks in Downloads in any case, and deletes each export it takes from there once its copy in the video's final folder in Dropbox is checked."
+          "  A folder in Dropbox is fine, for instance to share the exports with other people.")
+        QUESTION_PROMPT="Type y and press Return to use Downloads, or c and press Return to choose another. Anything else stops: "
+      fi ;;
+  esac
+  # On a Mac moved from brimm-video, the drop folder it has today stops being watched.
+  if [[ "$kind" == drop && -z "$FRESH" && "$from" != settings ]]; then
+    lines=("Today the drop folder is Drop › $MACHINE in Dropbox. Once the install has run, it is no longer watched." "${lines[@]}")
+  fi
+  QUESTION_LINES="${(F)lines}"
+}
+# Records the answer: the folder, whether the settings' own is kept, and where it came from.
+settle_folder() {
+  if [[ "$1" == drop ]]; then DROP_FOLDER="$2" DROP_KEPT="$3" DROP_FROM="$4"
+  else EXPORTS_FOLDER="$2" EXPORTS_KEPT="$3" EXPORTS_FROM="$4"
+  fi
+}
+# A folder picked last time and not taken this time was left as it is: said in Finder's words with its count, never its files.
+say_left_behind() {
+  local folder="$1" held rc=0 how
+  held="$(count_entries "$folder")" || rc=$?
+  if (( rc != 0 )); then how="could not be looked in, so it was not counted"
+  elif (( held == 0 )); then how="is empty"
+  elif (( held == 1 )); then how="holds 1 file or folder"
+  else how="holds $held files or folders"; fi
+  say "The folder picked last time, $(words_for "$folder"), was left as it is, and $how. Jason checks it is empty, then deletes it by hand if it is not wanted."
+}
+# Asks one of the two questions ($1: drop or exports) until it is answered, and sets its folder (DROP_FOLDER or EXPORTS_FOLDER), whether
+# the settings' own is kept, and where it came from. A pick is checked at once; a refused one is asked again, with c alone when y would
+# give the same refused folder again (unless allowing Terminal cures it). When the chooser cannot be shown, y still takes the
+# suggested folder; only c alone stops, with the words that fit the refusal.
+ask_folder() {
+  local kind="$1" message c_only="" y_kind="" y_words="" rc cand from started words
+  if [[ "$kind" == drop ]]; then message="Move to Studio: choose the folder you will drop videos into, or make a new one with New Folder."
+  else message="Move to Studio: choose the folder HyperFrames' exports will go into, or make a new one with New Folder."; fi
+  folder_candidate "$kind"
+  cand="$CAND" from="$CAND_FROM" started="$CAND_FROM"
+  while true; do
+    if [[ -n "$c_only" ]]; then
+      ask_y_or_c "" "Type c and press Return to choose another folder. Anything else stops: " c-only
+    else
+      folder_question "$kind" "$from" "$cand"
+      ask_y_or_c "$QUESTION_LINES" "$QUESTION_PROMPT"
+    fi
+    if [[ "$ANSWER" == y ]]; then
+      folder_fault "$kind" "$cand" "$from"
+      if [[ -n "$FAULT_WORDS" ]]; then
+        say "  $FAULT_WORDS"
+        if [[ "$FAULT_KIND" != cannot-look ]]; then c_only=yes y_kind="$FAULT_KIND" y_words="$FAULT_WORDS"; fi
+        continue
+      fi
+      settle_folder "$kind" "$cand" "$([[ "$from" == settings ]] && print yes || true)" "$from"
+      break
+    fi
+    rc=0
+    choose_folder "$message" "$HOME" || rc=$?
+    if (( rc == 1 )); then continue; fi
+    if (( rc == 3 )); then
+      say "A folder whose name holds a line break can't be used. Choose another."
+      continue
+    fi
+    if (( rc != 0 )); then
+      say "The window to choose a folder could not be shown."
+      if [[ -n "$c_only" ]]; then
+        words="$(words_for "$cand")"
+        if [[ "$y_kind" == not-empty ]]; then
+          stop_here "The window to choose a folder could not be shown, and $words is not empty. Empty it in Finder, or tell Jason, then double-click Move to Studio again."
+        fi
+        stop_here "The window to choose a folder could not be shown, and $words can't be used: $y_words Tell Jason, then double-click Move to Studio again."
+      fi
+      continue
+    fi
+    say "  Picked: $(words_for "$CHOSEN")"
+    folder_fault "$kind" "$CHOSEN" picked
+    if [[ -n "$FAULT_WORDS" ]]; then
+      say "  $FAULT_WORDS"
+      continue
+    fi
+    settle_folder "$kind" "$CHOSEN" "" picked
+    if [[ "$started" == last && "${CHOSEN:A}" != "${cand:A}" ]]; then say_left_behind "$cand"; fi
+    break
+  done
+  if [[ "$kind" == exports ]]; then say_exports_note; fi
+}
+# Runs the check of a pick: $1 the kind, $2 the folder, $3 where it came from. FAULT_WORDS is empty when the folder will do.
+folder_fault() {
+  FAULT_KIND="" FAULT_WORDS=""
+  if [[ "$1" == drop ]]; then drop_folder_fault "$2" "$3"; else exports_folder_fault "$2"; fi
+}
+# After an exports folder other than Downloads: where Studio looks, and that nothing is deleted from it.
+say_exports_note() {
+  if [[ "${EXPORTS_FOLDER:A}" != "${HOME:A}/Downloads" ]]; then
+    say "Studio looks for exports there and in Downloads. It copies each one into its video's final folder in Dropbox, and leaves the one there as it is. When you export in HyperFrames, choose this folder in its Export dialog. Never export into the drop folder."
+  fi
+}
+ask_drop_folder() { ask_folder drop; }
+ask_exports_folder() { ask_folder exports; }
+# The folders a y would give, for a print, which asks nothing: the settings' own, else the last time's, else the suggested ones.
+folders_a_y_gives() {
+  folder_candidate drop
+  settle_folder drop "$CAND" "$([[ "$CAND_FROM" == settings ]] && print yes || true)" "$CAND_FROM"
+  folder_candidate exports
+  settle_folder exports "$CAND" "$([[ "$CAND_FROM" == settings ]] && print yes || true)" "$CAND_FROM"
+}
+# The installer's options, written here and nowhere else: --drop-folder unless the settings' own drop folder is kept, and
+# --exports-folder when the folder differs, by real path, from the one the settings name now (exportsPath, or Downloads when none).
+set_install_options() {
+  local now
+  INSTALL_OPTIONS=(--machine "$MACHINE")
+  if [[ -z "$DROP_KEPT" ]]; then INSTALL_OPTIONS+=(--drop-folder "$DROP_FOLDER"); fi
+  now="$(setting exportsPath)"
+  if [[ -z "$now" ]]; then now="$HOME/Downloads"; fi
+  if [[ "${EXPORTS_FOLDER:A}" != "${now:A}" ]]; then INSTALL_OPTIONS+=(--exports-folder "$EXPORTS_FOLDER"); fi
+  INSTALL_OPTIONS+=(--import light --handoff 2)
+}
+
 # Step 5, check 44: Studio's own installer, shown first with --print, then run for real on a y.
 # The installer's options come from INSTALL_OPTIONS and nowhere else.
 PRINT_TOLD="" PRINT_RC=0
@@ -750,6 +1068,12 @@ run_the_installer() {
     turn_on_hyperframes
     return 0
   fi
+  # A print asks nothing and opens no chooser: it uses the folders a y would give.
+  if [[ -n "$PRINT_ONLY" ]]; then
+    would "ask where videos are dropped (suggested: BRIMM Video Work › Drop) and where HyperFrames' exports go (suggested: Downloads)"
+    folders_a_y_gives
+    set_install_options
+  fi
   if [[ -n "$PRINT_ONLY" && ! -f "$STUDIO/tool/install.sh" ]]; then
     would "run Studio's installer with --print first (it changes nothing): $(installer_line)"
     would "ask, then run it for real with the same line and --yes in place of --print"
@@ -757,6 +1081,13 @@ run_the_installer() {
     return 0
   fi
   [[ -f "$STUDIO/tool/install.sh" ]] || stop_here "$STUDIO/tool/install.sh is not there."
+
+  # The two questions come before the print, and the options are made from their answers.
+  if [[ -z "$PRINT_ONLY" ]]; then
+    ask_drop_folder
+    ask_exports_folder
+    set_install_options
+  fi
 
   # The print, again after Claude Code or the Claude app has been brought up to date.
   while true; do

@@ -8,7 +8,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,7 +61,7 @@ const put = (file, text, mode) => {
   if (mode) chmodSync(file, mode);
 };
 
-/** The fake tool/settings.js that both the old checkout and the "GitHub" repo hold: `show` and `set --app hyperframes`. */
+/** The fake tool/settings.js of the old checkout (brimm-video's): `show` and `set --app hyperframes`. */
 const FAKE_SETTINGS_JS = `import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const file = join(process.env.HOME, "Library", "Application Support", "BRIMM Video", "settings.json");
@@ -81,15 +81,148 @@ if (command === "show") {
 }
 `;
 
-/** Runs the move script on a Mac made for the test. `options`, all optional:
+/** The fake tool/settings.js of Studio's checkout, as Phase 3's is: it runs as a command only (its own main guard, so that importing it
+    runs nothing), `show` prints the drop folder (dropPath, else root/drop/machine) and the exports line, and it exports what the move
+    script imports for words: folderWords, cloudFolder and needsFilesAccess. */
+const FAKE_STUDIO_SETTINGS_JS = `import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+export function folderWords(path, home) {
+  const p = resolve(path);
+  const h = resolve(home);
+  if (p === h) return "your home folder";
+  if (p.startsWith(h + "/")) return p.slice(h.length + 1).split("/").join(" › ") + ", in your home folder";
+  return p.split("/").filter(Boolean).join(" › ");
+}
+export function cloudFolder(path, home) {
+  const p = resolve(path);
+  const h = resolve(home);
+  const under = (dir) => p === dir || p.startsWith(dir + "/");
+  if (under(join(h, "Dropbox")) || p.startsWith(join(h, "Library", "CloudStorage", "Dropbox"))) return "Dropbox";
+  return "";
+}
+export function needsFilesAccess(path, home) {
+  const p = resolve(path);
+  const h = resolve(home);
+  return [join(h, "Desktop"), join(h, "Documents")].some((dir) => p === dir || p.startsWith(dir + "/"));
+}
+
+function main() {
+  const file = join(process.env.HOME, "Library", "Application Support", "BRIMM Video", "settings.json");
+  const s = JSON.parse(readFileSync(file, "utf8"));
+  const [command, ...rest] = process.argv.slice(2);
+  if (command === "show") {
+    console.log("  Its drop folder:  " + (s.dropPath ?? s.root + "/" + s.drop + "/" + s.machine));
+    console.log("  Exports from HyperFrames, looked for in:  " + (s.exportsPath ?? join(process.env.HOME, "Downloads")));
+    if (s.app !== undefined) console.log("  The editing app:  " + s.app);
+  } else if (command === "set" && rest.join(" ") === "--app hyperframes") {
+    const was = s.app ?? "off";
+    s.app = "hyperframes";
+    writeFileSync(file, JSON.stringify(s));
+    console.log("The editing app is now hyperframes (it was " + was + ").");
+  } else {
+    console.log("settings.js: not understood: " + process.argv.slice(2).join(" "));
+    process.exit(2);
+  }
+}
+let isMain = false;
+try {
+  isMain = pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url;
+} catch {}
+if (isMain) main();
+`;
+
+/** The stand-in chooser. Its answers are in files of the test's own folder, a file an answer and a count (see writeList), read again
+    at each run: `pick-N` for the first way (through the stand-in `open`), `prog-N` for the second (the helper's own program). */
+const NEXT_SH = (dir) => `D="${dir}"
+next() {
+  n=$(cat "$D/n-$1" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$D/n-$1"
+  c=$(cat "$D/$1-count" 2>/dev/null || echo 0)
+  if [ "$c" -eq 0 ]; then printf '%s' "$2"; return; fi
+  [ $n -le $c ] || n=$c
+  cat "$D/$1-$n"
+}
+`;
+/** The program of the stand-in helper app: the second way, answering from `prog`; or, with --late, the first way's result file written
+    two seconds on (a pick that arrives after `open` has ended 1). */
+const helperStandIn = (dir, ran) => `#!/bin/sh
+${NEXT_SH(dir)}RAN="${ran}"
+if [ "$1" = --late ]; then sleep 2; printf 'path\\n%s\\n' "$3" > "$2.part"; mv "$2.part" "$2"; exit 0; fi
+printf '%s\\n' "program $1 | $2" >> "$RAN"
+a=$(next prog two)
+case "$a" in
+  cancel) exit 1 ;;
+  linebreak) echo "That folder's name holds a line break." >&2; exit 3 ;;
+  two) echo "The window to choose a folder could not be shown." >&2; exit 2 ;;
+  *) printf '%s\\n' "$a"; exit 0 ;;
+esac
+`;
+/** The stand-in `open`: for the chooser's launch line it takes the next pick (a path, cancel, linebreak, nofile, fail, or late:<path>),
+    notes `chooser <message> | <start>` in `ran` and on its own stdout, and each argument on a line of its own; every other call is noted
+    as `open <arguments>`. It never writes into the home folder. `appears` is shell run for `open -a Safari` (the HyperFrames app arriving). */
+const openStandIn = (dir, ran, appears) => `#!/bin/sh
+${NEXT_SH(dir)}RAN="${ran}"
+if [ "$1" = -n ] && [ "$2" = -W ]; then
+  app="$3"; message="$5"; start="$6"; result="$7"
+  printf '%s\\n' "chooser $message | $start" | tee -a "$RAN"
+  for a in "$@"; do printf 'chooser-arg: %s\\n' "$a" >> "$RAN"; done
+  if [ "$app" != "$BRIMM_CHOOSER_APP" ]; then echo "open: not the chooser app: $app" >> "$RAN"; exit 1; fi
+  pick=$(next pick cancel)
+  case "$pick" in
+    cancel|linebreak) printf '%s\\n' "$pick" > "$result.part"; mv "$result.part" "$result"; exit 0 ;;
+    nofile) exit 0 ;;
+    fail) exit 1 ;;
+    late:*) "$app/Contents/MacOS/Choose a Folder" --late "$result" "\${pick#late:}" </dev/null >/dev/null 2>&1 &
+            sleep 0.5; exit 1 ;;
+    *) printf 'path\\n%s\\n' "$pick" > "$result.part"; mv "$result.part" "$result"; exit 0 ;;
+  esac
+fi
+printf '%s\\n' "open $*" >> "$RAN"
+${appears}exit 0
+`;
+
+/** Writes a list of answers as files `name-1`, `name-2`… and `name-count` in `dir`, and forgets how far the last run read (`n-name`). */
+const writeList = (dir, name, list) => {
+  const items = [list ?? []].flat();
+  items.forEach((text, i) => writeFileSync(join(dir, `${name}-${i + 1}`), text));
+  writeFileSync(join(dir, `${name}-count`), String(items.length));
+  rmSync(join(dir, `n-${name}`), { force: true });
+};
+/** Makes the stand-in chooser: the app (at the returned path) with its program, and `open` in `bin`. The run's answers are in `dir` (writeList). */
+function makeChooser(dir, bin, ran, appears = "") {
+  const app = join(dir, "Applications", "Choose a Folder.app");
+  put(join(app, "Contents", "MacOS", "Choose a Folder"), helperStandIn(dir, ran), 0o755);
+  put(join(bin, "open"), openStandIn(dir, ran, appears), 0o755);
+  return app;
+}
+
+const dirsToClean = new Set();
+process.on("exit", () => {
+  for (const dir of dirsToClean) {
+    try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+});
+const xmlEscape = (s) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+/** A stand-in launch agent's plist: its label and the folders it watches. */
+const agentPlist = (paths) => `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>com.thebrimm.unedited</string><key>WatchPaths</key><array>${paths.map((p) => `<string>${xmlEscape(p)}</string>`).join("")}</array></dict></plist>\n`;
+
+/** Runs the move script on a Mac made for the test. `options`, all optional. A string anywhere in the folder options may begin with
+    <HOME>, the made-up home folder (a real path, so that zsh's :A on a pick matches).
     settings   her settings.json (default: as the switch of 26 October left it), or null for none (a Mac with no brimm-video)
-    settingsChange  values to change in the default settings
+    settingsChange  values to change in the default settings. dropPath ("<HOME>/…") with drop kept, or with drop taken out (drop:
+               undefined), and exportsPath, are the two Studio's installer adds. With dropPath and no drop, the drop folder made
+               (.DS_Store, .brimm-watched-by, dropFiles, dropMode) is the one at dropPath; with both, the old Drop/<Mac> is made too.
     brimmVideo with no settings, Dropbox's The BRIMM DB/BRIMM Video is still made in ~/Dropbox, unless this is null (none),
                "two" (a second one in ~/Library/CloudStorage/Dropbox too), "linked" (only in ~/Library/CloudStorage/Dropbox, with
                ~/Dropbox a link to that Dropbox folder) or "team" (a level deeper, in a team member's folder, as on the Mac Studio:
                ~/Library/CloudStorage/Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB/BRIMM Video)
     launchctl  what `launchctl list` prints; launchctlLater: what it prints from its second call on (default: the same)
+    agentLoaded  whether `launchctl list com.thebrimm.unedited` finds the job (default: true on a Mac with settings, false with none);
+               agentWatches: the folders the stand-in unedited plist's WatchPaths name (default: the Mac's drop folder in Dropbox)
     dropFiles  names put in her drop folder (it always holds .DS_Store and .brimm-watched-by too)
+    folderFiles  { "<HOME>/…": [names] }: each folder is made and holds these files (a name alone makes an empty folder);
+               links  { "<HOME>/…": "<HOME>/…" }: links made, a name and where it goes
     claude     { status, version }: what the stand-in prints for `auth status --json` (default signed in, Max), and for --version;
                `auth login` flips it to signed in unless loginFails
     key        the comment of a key already in ~/.ssh (default: KEY_COMMENT, so a key made earlier), or null for none
@@ -99,17 +232,25 @@ if (command === "show") {
                warning) or a list of them (default "ok"; the last repeats)
     firstRunWaiting  a real run is started first and left waiting at its question, holding the lock (use it with a signed-out claude)
     dropMode, desktopMode  the mode her drop folder or her Desktop is given for the run (0o000 and 0o555 test the unreadable and the unwritable)
+    folderModes  { "<HOME>/…": 0o000 }: modes given to folders for the run, after the listing in `before`, and put right before `tree`
     checkout   Studio's checkout in the home folder: "at-pin" (default), "absent", "other-commit", "dirty", "other-remote", "detached", "other-branch" or
                "partial-left" (no checkout, a half-made .partial beside where it goes)
-    marks      text of the checkout's .git/move-to-studio, SHA standing for the pin (default for an at-pin checkout: the tests passed
-               and the installer finished at the pin)
+    marks      text of the checkout's .git/move-to-studio, SHA standing for the pin (default for an at-pin checkout: the tests passed,
+               the installer finished at the pin, and the Finder step is done)
     hfApp      the version of the HyperFrames app (default "1.4.0"), or null for none; hfAppAfterOpen: the version the app has once
                `open -a Safari` has been run (the stand-in puts it there)
-    install    what the stand-in tool/install.sh in the "GitHub" repo does: { print, printExit, ran, ranExit, moves, checkLeft }.
-               `print` is the text of --print (a list: one text a call, the last repeating), `ran` the text of --yes; `printDrops` (a file name put in her drop folder by every --print), `moves`
+    install    what the stand-in tool/install.sh in the "GitHub" repo does: { print, printExit, ran, ranExit, noBackground, moves, checkLeft }.
+               `print` and `printExit` are the text and the status of --print (a list: one a call, the last repeating), `ran` the text of
+               --yes (noBackground leaves out its "From the background job:" line); `printDrops` (a file name put in her drop folder by every --print), `moves`
                rewrites settings.json's checkout to Studio and writes the agent's plist; `checkLeft` leaves the one-shot plist;
                `writesSettings` makes, as the real one does on a Mac with none, a settings.json for the --machine and the folder it is
-               given, and the drop folder Drop/<machine>
+               given, and the drop folder Drop/<machine>. --yes writes dropPath and exportsPath from --drop-folder and --exports-folder (after
+               writesSettings' settings, so that dropPath is kept), and makes that drop folder
+    picks      answers for the stand-in `open`'s chooser call (a list: one a call, the last repeating, "cancel" with none): "<HOME>/…"
+               (a pick), "cancel", "linebreak", "nofile" (no result file), "fail" (open ends 1), or "late:<HOME>/…" (open ends 1 at once, and
+               the helper writes the pick two seconds later)
+    program    answers for the stand-in helper's second way: "<HOME>/…", "cancel" (ends 1), "linebreak" (ends 3), "two" (ends 2 with a
+               sentence; the default) or "missing" (the program is not there)
     laterCommit  the "GitHub" repo gets a commit after the pin
     testFail   BRIMM_TEST_FAIL=1 for the tests in the checkout
     gitStandIn a stand-in git that notes its arguments and GIT_SSH_COMMAND, and fails; noRepo leaves BRIMM_STUDIO_REPO unset;
@@ -119,38 +260,43 @@ if (command === "show") {
     oldReport  text of a report an earlier run left on her Desktop
     answers    stdin, such as "y\ny\n\n"
     env        more of the run's environment, such as { GIT_SSH: "..." }
-    Returns { status, out, ran, home, before, tree, log, report }: `before` and `tree` list every file in the home folder before
+    Returns { status, out, ran, home, before, tree, log, report, again }: `before` and `tree` list every file in the home folder before
     and after, and `log` and `report` are those files' text, or "". installGitEnv and installGitSsh are what the stand-in installer
-    saw of GIT_SSH_COMMAND and GIT_SSH ("unset" for none). */
+    saw of GIT_SSH_COMMAND and GIT_SSH ("unset" for none). `again(options, ...args)` runs the script again in the same home, the same
+    "GitHub" and the same clone, and returns the same shape for that run alone. It takes the options of one run: answers, env, picks,
+    program, launchctl, launchctlLater, agentLoaded, agentWatches, install's print, printExit, ran, ranExit and noBackground, dropMode,
+    desktopMode, folderModes and commit; each not given is its default again. Every stand-in reads these from files in the test's own
+    folder, which a run writes first: none reads them from the committed clone, which step 3 needs clean. */
 function moveOn(options = {}, ...args) {
-  const dir = mkdtempSync(join(tmpdir(), "brimm-move-"));
-  try {
-    const home = join(dir, "home");
-    const bin = join(dir, "bin");
-    const ran = join(dir, "ran");
-    const github = join(dir, "github");
-    mkdirSync(home);
-    mkdirSync(bin);
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-move-")));
+  dirsToClean.add(dir);
+  const home = join(dir, "home");
+  const bin = join(dir, "bin");
+  const ran = join(dir, "ran");
+  const github = join(dir, "github");
+  mkdirSync(home);
+  mkdirSync(bin);
+  const fill = (v) => (typeof v === "string" ? v.replaceAll("<HOME>", home) : Array.isArray(v) ? v.map(fill) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [fill(k), fill(x)])) : v);
 
-    // The "GitHub" Studio is cloned from: a local repository with a stand-in installer, the fake settings.js and one test.
-    mkdirSync(github);
-    git(github, "init", "-q", "-b", "main");
-    // The stand-in installer: it notes its call in `ran`, answers --print from a file a call (the last repeating), and --yes from another.
-    const inst = options.install ?? {};
-    const prints = [inst.print ?? DEFAULT_PRINT].flat();
-    prints.forEach((text, i) => writeFileSync(join(dir, `install-print-${i + 1}`), text));
-    writeFileSync(join(dir, "install-ran"), inst.ran ?? DEFAULT_RAN);
-    const ranFile = join(dir, "ran");
-    put(join(github, "tool", "install.sh"), `#!/bin/zsh
-echo "install.sh $*" >> "${ranFile}"
+  // The "GitHub" Studio is cloned from: a local repository with a stand-in installer, the fake settings.js and one test.
+  mkdirSync(github);
+  git(github, "init", "-q", "-b", "main");
+  // The stand-in installer: it notes its call in `ran` (and each argument on a line of its own), answers --print from a file a call
+  // (the last repeating) and --yes from another. Everything it answers with is in files of the test's folder, which a run writes first.
+  const inst = options.install ?? {};
+  put(join(github, "tool", "install.sh"), `#!/bin/zsh
+echo "install.sh $*" >> "${ran}"
+for a in "$@"; do echo "install-arg: $a" >> "${ran}"; done
 echo "\${GIT_SSH_COMMAND-unset}" > "${dir}/install-gitenv"
 echo "\${GIT_SSH-unset}" > "${dir}/install-gitssh"
 case "$1" in
   --print)
-    n=$(cat "${dir}/install-prints" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${dir}/install-prints"
+    n=$(cat "${dir}/n-print" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${dir}/n-print"
+    c=$(cat "${dir}/print-count"); [ $n -le $c ] || n=$c
     ${inst.printDrops ? `touch "${join(home, "Dropbox", "The BRIMM DB", "BRIMM Video", "Drop", "Sallie's laptop", inst.printDrops)}"` : ""}
-    f="${dir}/install-print-$n"; [ -f "$f" ] || f="${dir}/install-print-${prints.length}"
-    cat "$f"; exit ${inst.printExit ?? 0} ;;
+    cat "${dir}/print-$n"
+    c=$(cat "${dir}/exit-count"); [ $n -le $c ] || n=$c
+    exit $(cat "${dir}/exit-$n") ;;
   --yes)
     cat "${dir}/install-ran"
     ${inst.moves ? `node -e 'const fs=require("fs");const f=process.argv[1];const s=JSON.parse(fs.readFileSync(f,"utf8"));s.checkout=process.argv[2];fs.writeFileSync(f,JSON.stringify(s))' "$HOME/Library/Application Support/BRIMM Video/settings.json" "$HOME/Claude Code/brimm-video-studio"
@@ -159,84 +305,108 @@ case "$1" in
     ${inst.writesSettings ? `machine="$3"; for a in "$@"; do root="$a"; done
     mkdir -p "$HOME/Library/Application Support/BRIMM Video" "$root/Drop/$machine"
     node -e 'const [f, root, machine, checkout] = process.argv.slice(1); require("fs").writeFileSync(f, JSON.stringify({ version: 1, machine, root, checkout, import: "light", handoffVersion: 2, drop: "Drop" }))' "$HOME/Library/Application Support/BRIMM Video/settings.json" "$root" "$machine" "$HOME/Claude Code/brimm-video-studio"` : ""}
-    exit ${inst.ranExit ?? 0} ;;
+    dropf=""; exportsf=""
+    while [ $# -gt 0 ]; do case "$1" in --drop-folder) dropf="$2"; shift ;; --exports-folder) exportsf="$2"; shift ;; esac; shift; done
+    if [ -n "$dropf$exportsf" ] && [ -f "$HOME/Library/Application Support/BRIMM Video/settings.json" ]; then
+      node -e 'const fs=require("fs");const [f, d, e]=process.argv.slice(1);const s=JSON.parse(fs.readFileSync(f,"utf8"));if(d)s.dropPath=d;if(e)s.exportsPath=e;fs.writeFileSync(f,JSON.stringify(s))' "$HOME/Library/Application Support/BRIMM Video/settings.json" "$dropf" "$exportsf"
+    fi
+    [ -z "$dropf" ] || mkdir -p "$dropf"
+    exit $(cat "${dir}/install-ranexit") ;;
 esac
 `, 0o755);
-    put(join(github, "tool", "settings.js"), FAKE_SETTINGS_JS);
-    put(join(github, "tool", "tests", "ok.test.js"), 'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("ok", () => assert.notEqual(process.env.BRIMM_TEST_FAIL, "1"));\n');
+  put(join(github, "tool", "settings.js"), FAKE_STUDIO_SETTINGS_JS);
+  put(join(github, "tool", "tests", "ok.test.js"), 'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("ok", () => assert.notEqual(process.env.BRIMM_TEST_FAIL, "1"));\n');
+  git(github, "add", "-A");
+  git(github, "commit", "-q", "-m", "the stand-in Studio");
+  const sha = git(github, "rev-parse", "HEAD");
+  if (options.laterCommit) {
+    put(join(github, "later.txt"), "after the pin\n");
     git(github, "add", "-A");
-    git(github, "commit", "-q", "-m", "the stand-in Studio");
-    const sha = git(github, "rev-parse", "HEAD");
-    if (options.laterCommit) {
-      put(join(github, "later.txt"), "after the pin\n");
-      git(github, "add", "-A");
-      git(github, "commit", "-q", "-m", "after the pin");
-    }
+    git(github, "commit", "-q", "-m", "after the pin");
+  }
 
-    // Her laptop: the old checkout (with the fake settings.js), her settings, her drop folder.
-    const oldCheckout = join(home, "Claude Code", "BRIMM video");
-    put(join(oldCheckout, "tool", "settings.js"), FAKE_SETTINGS_JS);
-    const settings = options.settings === undefined
-      ? { version: 1, machine: "Sallie's laptop", root: join(home, "Dropbox", "The BRIMM DB", "BRIMM Video"), checkout: oldCheckout, import: "light", handoffVersion: 2, drop: "Drop", app: "hyperframes", ...options.settingsChange }
-      : options.settings;
-    if (settings !== null) {
-      put(join(home, "Library", "Application Support", "BRIMM Video", "settings.json"), JSON.stringify(settings));
-      const drop = join(settings.root, settings.drop, settings.machine);
+  // Her laptop: the old checkout (with the fake settings.js), her settings, her drop folder.
+  const oldCheckout = join(home, "Claude Code", "BRIMM video");
+  put(join(oldCheckout, "tool", "settings.js"), FAKE_SETTINGS_JS);
+  const settings = options.settings === undefined
+    ? { version: 1, machine: "Sallie's laptop", root: join(home, "Dropbox", "The BRIMM DB", "BRIMM Video"), checkout: oldCheckout, import: "light", handoffVersion: 2, drop: "Drop", app: "hyperframes", ...fill(options.settingsChange) }
+    : fill(options.settings);
+  // The drop folder settings.js show names (dropPath, else Drop/<Mac> in BRIMM Video), and the old one when both are there.
+  const oldDrop = settings !== null && settings.drop !== undefined ? join(settings.root, settings.drop, settings.machine) : null;
+  const dropDir = settings === null ? null : settings.dropPath ?? oldDrop;
+  if (settings !== null) {
+    put(join(home, "Library", "Application Support", "BRIMM Video", "settings.json"), JSON.stringify(settings));
+    for (const drop of new Set([settings.dropPath, oldDrop].filter(Boolean))) {
       put(join(drop, ".DS_Store"), "");
       put(join(drop, ".brimm-watched-by"), `${settings.machine}\n`);
-      for (const name of options.dropFiles ?? []) put(join(drop, name), "made for the test");
     }
-    // A Mac with no settings still has The BRIMM DB in Dropbox, unless the test says it has none (null), two ("two"), or one in
-    // CloudStorage with ~/Dropbox a link to it ("linked"), as Dropbox makes it on a newer Mac.
-    if (settings === null && options.brimmVideo !== null) {
-      const cloud = join(home, "Library", "CloudStorage", "Dropbox");
-      if (options.brimmVideo === "linked") {
-        mkdirSync(join(cloud, "The BRIMM DB", "BRIMM Video"), { recursive: true });
-        symlinkSync(cloud, join(home, "Dropbox"));
-      } else if (options.brimmVideo === "team") {
-        mkdirSync(join(home, "Library", "CloudStorage", "Dropbox-Ogden28.5", "Jason Ogden", "The BRIMM DB", "BRIMM Video"), { recursive: true });
-      } else {
-        mkdirSync(join(home, "Dropbox", "The BRIMM DB", "BRIMM Video"), { recursive: true });
-        if (options.brimmVideo === "two") mkdirSync(join(cloud, "The BRIMM DB", "BRIMM Video"), { recursive: true });
-      }
+    for (const name of options.dropFiles ?? []) put(join(dropDir, name), "made for the test");
+  }
+  // A Mac with no settings still has The BRIMM DB in Dropbox, unless the test says it has none (null), two ("two"), or one in
+  // CloudStorage with ~/Dropbox a link to it ("linked"), as Dropbox makes it on a newer Mac.
+  if (settings === null && options.brimmVideo !== null) {
+    const cloud = join(home, "Library", "CloudStorage", "Dropbox");
+    if (options.brimmVideo === "linked") {
+      mkdirSync(join(cloud, "The BRIMM DB", "BRIMM Video"), { recursive: true });
+      symlinkSync(cloud, join(home, "Dropbox"));
+    } else if (options.brimmVideo === "team") {
+      mkdirSync(join(home, "Library", "CloudStorage", "Dropbox-Ogden28.5", "Jason Ogden", "The BRIMM DB", "BRIMM Video"), { recursive: true });
+    } else {
+      mkdirSync(join(home, "Dropbox", "The BRIMM DB", "BRIMM Video"), { recursive: true });
+      if (options.brimmVideo === "two") mkdirSync(join(cloud, "The BRIMM DB", "BRIMM Video"), { recursive: true });
     }
+  }
+  // Every Mac has Downloads; a test's folders hold their files, and its links go where it says.
+  mkdirSync(join(home, "Downloads"), { recursive: true });
+  for (const [folder, names] of Object.entries(fill(options.folderFiles ?? {}))) {
+    mkdirSync(folder, { recursive: true });
+    for (const name of names) put(join(folder, name), "made for the test");
+  }
+  for (const [link, to] of Object.entries(fill(options.links ?? {}))) {
+    mkdirSync(dirname(link), { recursive: true });
+    symlinkSync(to, link);
+  }
 
-    // Studio's checkout, as an earlier run left it.
-    const studio = join(home, "Claude Code", "brimm-video-studio");
-    const checkout = options.checkout ?? "at-pin";
-    if (checkout !== "absent" && checkout !== "partial-left") {
-      git(home, "clone", "-q", "--branch", "main", github, studio);
-      git(studio, "reset", "-q", "--hard", sha);
-      if (checkout === "other-commit") git(studio, "commit", "-q", "--allow-empty", "-m", "elsewhere");
-      if (checkout === "detached") git(studio, "checkout", "-q", "--detach");
-      if (checkout === "other-branch") git(studio, "checkout", "-q", "-b", "feature");
-      if (checkout === "dirty") put(join(studio, "tool", "install.sh"), "changed by hand\n");
-      if (checkout === "other-remote") git(studio, "remote", "set-url", "origin", "/somewhere/else");
-      const marks = options.marks ?? (checkout === "at-pin" ? "tests=SHA\ninstalled=SHA\n" : null);
-      if (marks !== null) writeFileSync(join(studio, ".git", "move-to-studio"), marks.replaceAll("SHA", sha));
-    }
-    if (checkout === "partial-left") put(`${studio}.partial/half-made`, "cut short\n");
+  // Studio's checkout, as an earlier run left it.
+  const studio = join(home, "Claude Code", "brimm-video-studio");
+  const checkout = options.checkout ?? "at-pin";
+  if (checkout !== "absent" && checkout !== "partial-left") {
+    git(home, "clone", "-q", "--branch", "main", github, studio);
+    git(studio, "reset", "-q", "--hard", sha);
+    if (checkout === "other-commit") git(studio, "commit", "-q", "--allow-empty", "-m", "elsewhere");
+    if (checkout === "detached") git(studio, "checkout", "-q", "--detach");
+    if (checkout === "other-branch") git(studio, "checkout", "-q", "-b", "feature");
+    if (checkout === "dirty") put(join(studio, "tool", "install.sh"), "changed by hand\n");
+    if (checkout === "other-remote") git(studio, "remote", "set-url", "origin", "/somewhere/else");
+    const marks = options.marks ?? (checkout === "at-pin" ? "tests=SHA\ninstalled=SHA\nfinder=SHA\n" : null);
+    if (marks !== null) writeFileSync(join(studio, ".git", "move-to-studio"), fill(marks).replaceAll("SHA", sha));
+  }
+  if (checkout === "partial-left") put(`${studio}.partial/half-made`, "cut short\n");
 
-    // The stand-ins: each writes what it was asked into `ran`.
-    const stand = (name, body = "") => put(join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${ran}"\n${body}`, 0o755);
-    // `launchctl list` answers `launchctl` the first time and `launchctlLater` from the second time on.
-    const idle = "-\\t0\\tcom.thebrimm.unedited";
-    stand("launchctl", `if [ "$1" = list ]; then n=$(cat "${dir}/launchctl-n" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${dir}/launchctl-n"
-  if [ $n -gt 1 ]; then printf '%b\\n' '${options.launchctlLater ?? options.launchctl ?? idle}'; else printf '%b\\n' '${options.launchctl ?? idle}'; fi
+  // The stand-ins: each writes what it was asked into `ran`.
+  const stand = (name, body = "") => put(join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${ran}"\n${body}`, 0o755);
+  // `launchctl list` answers the first time with the first text and from the second time on with the later one; `list <label>` ends 0
+  // when the job is loaded, and does not count.
+  stand("launchctl", `if [ "$1" = list ] && [ -n "$2" ]; then
+  [ "$(cat "${dir}/agent-loaded")" = yes ] || exit 113
+  echo '{ "Label" = "com.thebrimm.unedited"; };'; exit 0
+fi
+if [ "$1" = list ]; then n=$(cat "${dir}/n-launchctl" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${dir}/n-launchctl"
+  if [ $n -gt 1 ]; then printf '%b\\n' "$(cat "${dir}/launchctl-later")"; else printf '%b\\n' "$(cat "${dir}/launchctl-first")"; fi
 fi
 exit 0
 `);
-    const hfApp = join(dir, "Applications", "HyperFrames.app");
-    const appPlist = (version) => `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>\n`;
-    const hfVersion = options.hfApp === undefined ? "1.4.0" : options.hfApp;
-    if (hfVersion !== null) put(join(hfApp, "Contents", "Info.plist"), appPlist(hfVersion));
-    for (const name of ["caffeinate", "brew"]) stand(name, name === "brew" ? 'echo "Homebrew 4.5.0"\n' : "");
-    // `open -a Safari <page>` puts the app in place when the test says the app arrives after it.
-    stand("open", options.hfAppAfterOpen ? `[ "$1" = -a ] && { mkdir -p "${hfApp}/Contents"; printf '%s' '${appPlist(options.hfAppAfterOpen)}' > "${hfApp}/Contents/Info.plist"; }\nexit 0\n` : "");
-    // pbcopy keeps what it was given; ssh-keygen makes a stand-in key (-t) and looks in known_hosts (-F); ssh answers one answer a call.
-    const copied = join(dir, "pbcopied");
-    stand("pbcopy", `cat > "${copied}"\n`);
-    stand("ssh-keygen", `case "$1" in
+  const hfApp = join(dir, "Applications", "HyperFrames.app");
+  const appPlist = (version) => `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>\n`;
+  const hfVersion = options.hfApp === undefined ? "1.4.0" : options.hfApp;
+  if (hfVersion !== null) put(join(hfApp, "Contents", "Info.plist"), appPlist(hfVersion));
+  for (const name of ["caffeinate", "brew"]) stand(name, name === "brew" ? 'echo "Homebrew 4.5.0"\n' : "");
+  // `open -a Safari <page>` puts the app in place when the test says the app arrives after it. The chooser's stand-ins are in makeChooser.
+  const chooserApp = makeChooser(dir, bin, ran, options.hfAppAfterOpen ? `[ "$1" = -a ] && { mkdir -p "${hfApp}/Contents"; printf '%s' '${appPlist(options.hfAppAfterOpen)}' > "${hfApp}/Contents/Info.plist"; }\n` : "");
+  // pbcopy keeps what it was given; ssh-keygen makes a stand-in key (-t) and looks in known_hosts (-F); ssh answers one answer a call.
+  const copied = join(dir, "pbcopied");
+  stand("pbcopy", `cat > "${copied}"\n`);
+  stand("ssh-keygen", `case "$1" in
   -t) file=""; comment=""
       while [ $# -gt 0 ]; do case "$1" in -f) file="$2"; shift ;; -C) comment="$2"; shift ;; esac; shift; done
       echo PRIVATE-HALF > "$file"; chmod 600 "$file"
@@ -245,12 +415,12 @@ exit 0
       exit 1 ;;
 esac
 `);
-    const answers = join(dir, "ssh-answers");
-    const asked = join(dir, "ssh-asked");
-    const said = [options.ssh ?? "ok"].flat();
-    writeFileSync(answers, said.join("\n") + "\n");
-    // Like the real ssh, this one reads standard input unless it is given -n: a call that forgets -n eats the answers still to come.
-    stand("ssh", `case " $* " in *" -n "*) ;; *) cat > /dev/null ;; esac
+  const answers = join(dir, "ssh-answers");
+  const asked = join(dir, "ssh-asked");
+  const said = [options.ssh ?? "ok"].flat();
+  writeFileSync(answers, said.join("\n") + "\n");
+  // Like the real ssh, this one reads standard input unless it is given -n: a call that forgets -n eats the answers still to come.
+  stand("ssh", `case " $* " in *" -n "*) ;; *) cat > /dev/null ;; esac
 n=$(cat "${asked}" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${asked}"
 a=$(sed -n "$n"p "${answers}"); [ -n "$a" ] || a=$(tail -n 1 "${answers}")
 case "$a" in
@@ -260,31 +430,31 @@ case "$a" in
   banner) echo "@@@@@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@@@@@"; echo "Host key verification failed."; exit 255 ;;
 esac
 `);
-    if (options.gitStandIn) stand("git", `echo "GIT_SSH_COMMAND=$GIT_SSH_COMMAND" >> "${ran}"\nexit 1\n`);
-    stand("sw_vers", '[ "$1" = "-productVersion" ] && echo 15.1\n');
-    stand("df", 'echo "Filesystem 1024-blocks Used Available Capacity iused ifree %iused Mounted on"\necho "/dev/disk3s1s1 971350180 400000000 450000000 47% 400000 4000000000 0% /"\n');
-    stand("xcode-select", '[ "$1" = "-p" ] && echo /Library/Developer/CommandLineTools\n');
-    const ssh = join(home, ".ssh");
-    const keyComment = options.key === undefined ? KEY_COMMENT : options.key;
-    if (keyComment !== null) {
-      put(join(ssh, "brimm_video_studio_deploy"), "PRIVATE-HALF\n", 0o600);
-      put(join(ssh, "brimm_video_studio_deploy.pub"), `ssh-ed25519 AAAAstandin ${keyComment}\n`);
-      // The Desktop copy of its public half, as the key step of an earlier run left it, so that a run that stops changes nothing.
-      put(join(home, "Desktop", "Studio key (public half).txt"), `ssh-ed25519 AAAAstandin ${keyComment}\n`);
-    }
-    if (options.oldKey) {
-      put(join(ssh, "brimm_video_deploy"), "OLD-PRIVATE-HALF\n", 0o600);
-      put(join(ssh, "brimm_video_deploy.pub"), "ssh-ed25519 AAAAold brimm-video read-only\n");
-      put(join(ssh, "id_ed25519"), "HER-OWN-KEY\n", 0o600);
-    }
-    if (options.oldReport) put(join(home, "Desktop", "Studio move report.txt"), options.oldReport);
-    const sshConfig = options.sshConfig === undefined ? HOST_BLOCK : options.sshConfig;
-    if (sshConfig !== null) put(join(ssh, "config"), sshConfig, 0o600);
-    const knownHosts = options.knownHosts === undefined ? `${GITHUB_HOST_KEY}\n` : options.knownHosts;
-    if (knownHosts !== null) put(join(ssh, "known_hosts"), knownHosts, 0o644);
-    const state = join(dir, "claude-state");
-    writeFileSync(state, (options.claude?.status ?? SIGNED_IN).includes('"loggedIn":true') ? "in" : "out");
-    stand("claude", `case "$*" in
+  if (options.gitStandIn) stand("git", `echo "GIT_SSH_COMMAND=$GIT_SSH_COMMAND" >> "${ran}"\nexit 1\n`);
+  stand("sw_vers", '[ "$1" = "-productVersion" ] && echo 15.1\n');
+  stand("df", 'echo "Filesystem 1024-blocks Used Available Capacity iused ifree %iused Mounted on"\necho "/dev/disk3s1s1 971350180 400000000 450000000 47% 400000 4000000000 0% /"\n');
+  stand("xcode-select", '[ "$1" = "-p" ] && echo /Library/Developer/CommandLineTools\n');
+  const ssh = join(home, ".ssh");
+  const keyComment = options.key === undefined ? KEY_COMMENT : options.key;
+  if (keyComment !== null) {
+    put(join(ssh, "brimm_video_studio_deploy"), "PRIVATE-HALF\n", 0o600);
+    put(join(ssh, "brimm_video_studio_deploy.pub"), `ssh-ed25519 AAAAstandin ${keyComment}\n`);
+    // The Desktop copy of its public half, as the key step of an earlier run left it, so that a run that stops changes nothing.
+    put(join(home, "Desktop", "Studio key (public half).txt"), `ssh-ed25519 AAAAstandin ${keyComment}\n`);
+  }
+  if (options.oldKey) {
+    put(join(ssh, "brimm_video_deploy"), "OLD-PRIVATE-HALF\n", 0o600);
+    put(join(ssh, "brimm_video_deploy.pub"), "ssh-ed25519 AAAAold brimm-video read-only\n");
+    put(join(ssh, "id_ed25519"), "HER-OWN-KEY\n", 0o600);
+  }
+  if (options.oldReport) put(join(home, "Desktop", "Studio move report.txt"), options.oldReport);
+  const sshConfig = options.sshConfig === undefined ? HOST_BLOCK : options.sshConfig;
+  if (sshConfig !== null) put(join(ssh, "config"), sshConfig, 0o600);
+  const knownHosts = options.knownHosts === undefined ? `${GITHUB_HOST_KEY}\n` : options.knownHosts;
+  if (knownHosts !== null) put(join(ssh, "known_hosts"), knownHosts, 0o644);
+  const state = join(dir, "claude-state");
+  writeFileSync(state, (options.claude?.status ?? SIGNED_IN).includes('"loggedIn":true') ? "in" : "out");
+  stand("claude", `case "$*" in
   "auth status --json")
     if [ "$(cat "${state}")" = in ]; then printf '%s' '${SIGNED_IN}'; exit 0; fi
     printf '%s' '${options.claude?.status ?? SIGNED_OUT}'; exit 1 ;;
@@ -292,65 +462,99 @@ esac
   --version) echo '${options.claude?.version ?? "2.1.300 (Claude Code)"}' ;;
 esac
 `);
+  // The unedited launch agent's file: it watches the Mac's drop folder in Dropbox, as brimm-video's agent does, unless a test says.
+  if (settings !== null) {
+    const watched = options.agentWatches === undefined ? [oldDrop ?? settings.dropPath] : fill(options.agentWatches);
+    put(join(home, "Library", "LaunchAgents", "com.thebrimm.unedited.plist"), agentPlist(watched));
+  }
+
+  const desktop = join(home, "Desktop");
+  const baseEnv = {
+    HOME: home, PATH: `${bin}:/usr/bin:/bin:${dirname(process.execPath)}`, BRIMM_HOMEBREW_DIRS: "",
+    BRIMM_CLAUDE: join(bin, "claude"), BRIMM_STUDIO_REPO: options.repoMissing ? join(dir, "nowhere") : github, BRIMM_HYPERFRAMES_APP: hfApp,
+    BRIMM_CHOOSER_APP: chooserApp
+  };
+  if (options.noRepo) delete baseEnv.BRIMM_STUDIO_REPO;
+  if (options.testFail) baseEnv.BRIMM_TEST_FAIL = "1";
+  const text = (file) => (existsSync(file) ? readFileSync(file, "utf8") : "");
+  const mode = (file) => (existsSync(file) ? statSync(file).mode & 0o777 : null);
+  const inStudio = (...a) => spawnSync("git", ["-C", studio, ...a], { encoding: "utf8", env: { ...GIT_ENV, HOME: home } }).stdout.trim();
+
+  // One run of the script. `o` holds what only this run has (see `again`); the first run takes the options given to moveOn.
+  const run = (o, runArgs, first) => {
+    // What the stand-ins answer, written first: files of the test's own folder, read by every call.
+    writeList(dir, "pick", fill(o.picks));
+    writeList(dir, "prog", fill(o.program));
+    rmSync(join(dir, "n-launchctl"), { force: true });
+    writeFileSync(join(dir, "launchctl-first"), o.launchctl ?? "-\\t0\\tcom.thebrimm.unedited");
+    writeFileSync(join(dir, "launchctl-later"), o.launchctlLater ?? o.launchctl ?? "-\\t0\\tcom.thebrimm.unedited");
+    writeFileSync(join(dir, "agent-loaded"), (o.agentLoaded ?? (settings !== null)) ? "yes" : "no");
+    if (!first && o.agentWatches !== undefined) put(join(home, "Library", "LaunchAgents", "com.thebrimm.unedited.plist"), agentPlist(fill(o.agentWatches)));
+    const i = o.install ?? {};
+    writeList(dir, "print", [i.print ?? DEFAULT_PRINT].flat());
+    writeList(dir, "exit", [i.printExit ?? 0].flat().map(String));
+    writeFileSync(join(dir, "install-ran"), i.noBackground ? (i.ran ?? DEFAULT_RAN).split("\n").filter((l) => !l.startsWith("From the background job:")).join("\n") : i.ran ?? DEFAULT_RAN);
+    writeFileSync(join(dir, "install-ranexit"), String(i.ranExit ?? 0));
+    // The program of the second way is not there at all when a test says "missing".
+    const program = join(chooserApp, "Contents", "MacOS", "Choose a Folder");
+    if ([o.program ?? []].flat().includes("missing")) rmSync(program, { force: true });
+    else if (!existsSync(program)) put(program, helperStandIn(dir, ran), 0o755);
+    rmSync(ran, { force: true });
 
     const before = readdirSync(home, { recursive: true }).sort();
-    // A folder made unreadable or unwritable only now, after the listing above, and put right again after the run.
-    const dropDir = settings !== null ? join(settings.root, settings.drop, settings.machine) : null;
-    const desktop = join(home, "Desktop");
-    if (options.dropMode !== undefined) chmodSync(dropDir, options.dropMode);
-    if (options.desktopMode !== undefined) { mkdirSync(desktop, { recursive: true }); chmodSync(desktop, options.desktopMode); }
-    // The environment is built from scratch: the stand-ins first, the node that runs these tests last, no Homebrew.
-    const env = {
-      HOME: home, PATH: `${bin}:/usr/bin:/bin:${dirname(process.execPath)}`, BRIMM_HOMEBREW_DIRS: "",
-      BRIMM_CLAUDE: join(bin, "claude"), BRIMM_STUDIO_REPO: options.repoMissing ? join(dir, "nowhere") : github, BRIMM_HYPERFRAMES_APP: hfApp
-    };
-    if (options.noRepo) delete env.BRIMM_STUDIO_REPO;
-    if (options.testFail) env.BRIMM_TEST_FAIL = "1";
-    Object.assign(env, options.env);
-    const commit = options.commit === undefined ? ["--commit", sha] : options.commit === null ? [] : ["--commit", options.commit];
-    // A first run already open, waiting at its first question (stdin is held open): the one the run under test is a second to.
-    let first = null;
-    if (options.firstRunWaiting) {
-      first = spawn("/bin/zsh", [MOVE, ...commit], { env, stdio: ["pipe", "pipe", "pipe"] });
-      const log = join(home, "Library", "Logs", "brimm-video-studio-move.log");
-      const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-      const asking = () => existsSync(log) && readFileSync(log, "utf8").includes("Go ahead?");
-      // Node can't see the first run end while this waits, so ps is asked: gone, or a zombie (Z), is ended.
-      const ended = () => !/^[^Z]/.test(spawnSync("ps", ["-o", "stat=", "-p", String(first.pid)], { encoding: "utf8" }).stdout.trim());
-      const limit = Date.now() + 30_000;
-      let why = "";
-      while (!asking() && !why) {
-        if (ended()) why = "it ended first";
-        else if (Date.now() > limit) why = "it was still going after 30 seconds (is this Mac very busy?)";
-        else sleep(100);
+    // Folders made unreadable or unwritable only now, after the listing above, and put right again after the run.
+    const modes = [];
+    if (o.dropMode !== undefined) modes.push([dropDir, o.dropMode]);
+    if (o.desktopMode !== undefined) { mkdirSync(desktop, { recursive: true }); modes.push([desktop, o.desktopMode]); }
+    for (const [folder, m] of Object.entries(fill(o.folderModes ?? {}))) modes.push([folder, m]);
+    const putRight = () => { for (const [folder] of [...modes].reverse()) { try { chmodSync(folder, 0o755); } catch {} } };
+    try {
+      for (const [folder, m] of modes) chmodSync(folder, m);
+      // The environment is built from scratch: the stand-ins first, the node that runs these tests last, no Homebrew.
+      const env = { ...baseEnv, ...o.env };
+      const commit = o.commit === undefined ? ["--commit", sha] : o.commit === null ? [] : ["--commit", o.commit];
+      // A first run already open, waiting at its first question (stdin is held open): the one the run under test is a second to.
+      let firstRun = null;
+      if (first && o.firstRunWaiting) {
+        firstRun = spawn("/bin/zsh", [MOVE, ...commit], { env, stdio: ["pipe", "pipe", "pipe"] });
+        const log = join(home, "Library", "Logs", "brimm-video-studio-move.log");
+        const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+        const asking = () => existsSync(log) && readFileSync(log, "utf8").includes("Go ahead?");
+        // Node can't see the first run end while this waits, so ps is asked: gone, or a zombie (Z), is ended.
+        const ended = () => !/^[^Z]/.test(spawnSync("ps", ["-o", "stat=", "-p", String(firstRun.pid)], { encoding: "utf8" }).stdout.trim());
+        const limit = Date.now() + 30_000;
+        let why = "";
+        while (!asking() && !why) {
+          if (ended()) why = "it ended first";
+          else if (Date.now() > limit) why = "it was still going after 30 seconds (is this Mac very busy?)";
+          else sleep(100);
+        }
+        if (why) {
+          firstRun.kill("SIGKILL");
+          throw new Error(`The first run never reached its first question: ${why}. Its log:\n${existsSync(log) ? readFileSync(log, "utf8") : "(none)"}`);
+        }
       }
-      if (why) {
-        first.kill("SIGKILL");
-        throw new Error(`The first run never reached its first question: ${why}. Its log:\n${existsSync(log) ? readFileSync(log, "utf8") : "(none)"}`);
-      }
+      const r = spawnSync("/bin/zsh", [MOVE, ...commit, ...runArgs], { encoding: "utf8", input: o.answers ?? "", env });
+      if (firstRun) firstRun.kill("SIGKILL");
+      putRight();
+      const studioNow = existsSync(studio)
+        ? { branch: inStudio("rev-parse", "--abbrev-ref", "HEAD"), head: inStudio("rev-parse", "HEAD"), upstream: inStudio("rev-parse", "--abbrev-ref", "@{u}"),
+            origin: inStudio("remote", "get-url", "origin"), marks: text(join(studio, ".git", "move-to-studio")) }
+        : null;
+      return {
+        sha, github, studioNow, installGitEnv: text(join(dir, "install-gitenv")), installGitSsh: text(join(dir, "install-gitssh")), partialLeft: existsSync(`${studio}.partial`),
+        copied: text(copied), sshConfig: text(join(ssh, "config")), sshConfigMode: mode(join(ssh, "config")), knownHosts: text(join(ssh, "known_hosts")),
+        publicCopy: text(join(home, "Desktop", "Studio key (public half).txt")), sshAsked: Number(text(asked).trim() || 0),
+        status: r.status, out: r.stdout, err: r.stderr, home, before, tree: readdirSync(home, { recursive: true }).sort(),
+        oldKeyFiles: ["brimm_video_deploy", "brimm_video_deploy.pub"].map((f) => existsSync(join(ssh, f))), ownKeyKept: existsSync(join(ssh, "id_ed25519")),
+        ran: text(ran), log: text(join(home, "Library", "Logs", "brimm-video-studio-move.log")), report: text(join(home, "Desktop", "Studio move report.txt")),
+        again: (next = {}, ...nextArgs) => run(next, nextArgs, false)
+      };
+    } finally {
+      putRight();
     }
-    const r = spawnSync("/bin/zsh", [MOVE, ...commit, ...args], { encoding: "utf8", input: options.answers ?? "", env });
-    if (first) first.kill("SIGKILL");
-    if (options.dropMode !== undefined) chmodSync(dropDir, 0o755);
-    if (options.desktopMode !== undefined) chmodSync(desktop, 0o755);
-    const text = (file) => (existsSync(file) ? readFileSync(file, "utf8") : "");
-    const mode = (file) => (existsSync(file) ? statSync(file).mode & 0o777 : null);
-    const inStudio = (...a) => spawnSync("git", ["-C", studio, ...a], { encoding: "utf8", env: { ...GIT_ENV, HOME: home } }).stdout.trim();
-    const studioNow = existsSync(studio)
-      ? { branch: inStudio("rev-parse", "--abbrev-ref", "HEAD"), head: inStudio("rev-parse", "HEAD"), upstream: inStudio("rev-parse", "--abbrev-ref", "@{u}"),
-          origin: inStudio("remote", "get-url", "origin"), marks: text(join(studio, ".git", "move-to-studio")) }
-      : null;
-    return {
-      sha, github, studioNow, installGitEnv: text(join(dir, "install-gitenv")), installGitSsh: text(join(dir, "install-gitssh")), partialLeft: existsSync(`${studio}.partial`),
-      copied: text(copied), sshConfig: text(join(ssh, "config")), sshConfigMode: mode(join(ssh, "config")), knownHosts: text(join(ssh, "known_hosts")),
-      publicCopy: text(join(home, "Desktop", "Studio key (public half).txt")), sshAsked: Number(text(asked).trim() || 0),
-      status: r.status, out: r.stdout, err: r.stderr, home, before, tree: readdirSync(home, { recursive: true }).sort(),
-      oldKeyFiles: ["brimm_video_deploy", "brimm_video_deploy.pub"].map((f) => existsSync(join(ssh, f))), ownKeyKept: existsSync(join(ssh, "id_ed25519")),
-      ran: text(ran), log: text(join(home, "Library", "Logs", "brimm-video-studio-move.log")), report: text(join(home, "Desktop", "Studio move report.txt"))
-    };
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  };
+  return run(options, args, true);
 }
 
 describe("the move script, looking at her Mac", { skip: notAMac }, () => {
@@ -490,7 +694,7 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
     }
     assert.ok(r.out.trimEnd().endsWith("Nothing was changed."), r.out);
     assert.deepEqual(r.tree, r.before, "no log, no report, no Desktop file");
-    const reading = /^(launchctl list|claude auth status --json|claude --version|sw_vers.*|df.*|xcode-select -p|brew --version|ssh-keygen -F github\.com -f .*|ssh -F .* -T git@github-brimm-video-studio|install\.sh --print .*)$/;
+    const reading = /^(launchctl list|claude auth status --json|claude --version|sw_vers.*|df.*|xcode-select -p|brew --version|ssh-keygen -F github\.com -f .*|ssh -F .* -T git@github-brimm-video-studio|install\.sh --print .*|install-arg: .*)$/;
     const calls = r.ran.split("\n").filter(Boolean);
     assert.ok(calls.length > 0);
     for (const call of calls) assert.match(call, reading, `a call that reads and changes nothing: ${call}`);
@@ -711,7 +915,7 @@ describe("the move script, Studio's key (check 42)", { skip: notAMac }, () => {
 
 describe("the move script, Studio's code (check 42)", { skip: notAMac }, () => {
   it("clones main on y into the partial folder, puts main at the app's commit, then renames it", () => {
-    const r = moveOn({ checkout: "absent", laterCommit: true, answers: "y\ny\n\n" });
+    const r = moveOn({ checkout: "absent", laterCommit: true, answers: "y\ny\ny\ny\n\n" });
     assert.equal(r.status, 0, r.out);
     assert.ok(r.studioNow, "the checkout is there");
     assert.equal(r.studioNow.branch, "main");
@@ -733,7 +937,7 @@ describe("the move script, Studio's code (check 42)", { skip: notAMac }, () => {
   });
 
   it("takes away a half-made clone an earlier run left, then clones", () => {
-    const r = moveOn({ checkout: "partial-left", answers: "y\ny\n\n" });
+    const r = moveOn({ checkout: "partial-left", answers: "y\ny\ny\ny\n\n" });
     assert.equal(r.status, 0, r.out);
     assert.match(r.out, /half-made/);
     assert.equal(r.partialLeft, false);
@@ -848,7 +1052,7 @@ describe("the move script, Studio's code (check 42)", { skip: notAMac }, () => {
 });
 
 describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)", { skip: notAMac }, () => {
-  const OPTIONS = "--machine Sallie's laptop --drop Drop --import light --handoff 2";
+  const optionsOf = (home) => `--machine Sallie's laptop --drop-folder ${home}/BRIMM Video Work/Drop --import light --handoff 2`;
   const rootOf = (home) => `${home}/Dropbox/The BRIMM DB/BRIMM Video`;
   const installCalls = (r) => r.ran.split("\n").filter((l) => l.startsWith("install.sh "));
   const NOT_INSTALLED = "tests=SHA\n";
@@ -881,10 +1085,10 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
   });
 
   it("prints the installer first, with check 44's options and her BRIMM Video, and repeats the lines that matter", () => {
-    const r = moveOn({ marks: NOT_INSTALLED, answers: "n\n" });
+    const r = moveOn({ marks: NOT_INSTALLED, answers: "y\ny\nn\n" });
     assert.equal(r.status, 1);
     assert.match(r.out, /5\. Studio's installer \(check 44\)/);
-    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`]);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${optionsOf(r.home)} ${rootOf(r.home)}`]);
     const at = r.out.indexOf("The lines that matter:");
     assert.ok(at > 0, r.out);
     const after = r.out.slice(at);
@@ -910,14 +1114,14 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
   });
 
   it("stops, saying to sign in, when the print says Claude Code is not signed in", () => {
-    const r = moveOn({ marks: NOT_INSTALLED, install: { print: printText("  Claude Code, signed in:  no. In Terminal, run: claude auth login (Sallie signs in), then run this again.") }, answers: "y\n" });
+    const r = moveOn({ marks: NOT_INSTALLED, install: { print: printText("  Claude Code, signed in:  no. In Terminal, run: claude auth login (Sallie signs in), then run this again.") }, answers: "y\ny\ny\n" });
     assert.equal(r.status, 1, r.out);
     assert.match(r.out, /claude auth login/);
     assert.ok(!r.ran.includes("install.sh --yes"));
   });
 
   it("on n after the print, runs nothing for real", () => {
-    const r = moveOn({ marks: NOT_INSTALLED, answers: "n\n" });
+    const r = moveOn({ marks: NOT_INSTALLED, answers: "y\ny\nn\n" });
     assert.equal(r.status, 1);
     assert.ok(!r.ran.includes("--yes"), r.ran);
     assert.equal(r.studioNow.marks, `tests=${r.sha}\n`);
@@ -925,43 +1129,43 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
   });
 
   it("on y runs the same line with --yes, then checks the background job's line and the one-shot agent", () => {
-    const r = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n" });
+    const r = moveOn({ marks: NOT_INSTALLED, answers: "y\ny\ny\n\n" });
     assert.equal(r.status, 0, r.out);
-    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`, `install.sh --yes ${OPTIONS} ${rootOf(r.home)}`]);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${optionsOf(r.home)} ${rootOf(r.home)}`, `install.sh --yes ${optionsOf(r.home)} ${rootOf(r.home)}`]);
     assert.ok(r.out.includes(BACKGROUND), "its output is shown");
     assert.match(r.studioNow.marks, new RegExp(`installed=${r.sha}`));
 
-    const noCheck = moveOn({ marks: NOT_INSTALLED, install: { ran: "Setting up Studio...\nDone.\n" }, answers: "y\n" });
+    const noCheck = moveOn({ marks: NOT_INSTALLED, install: { ran: "Setting up Studio...\nDone.\n" }, answers: "y\ny\ny\n" });
     assert.equal(noCheck.status, 1, noCheck.out);
     assert.match(noCheck.out, /stopped before its check of Claude/);
     assert.ok(!/installed=/.test(noCheck.studioNow.marks), "a stopped install writes no mark");
 
-    const left = moveOn({ marks: NOT_INSTALLED, install: { checkLeft: true }, answers: "y\n" });
+    const left = moveOn({ marks: NOT_INSTALLED, install: { checkLeft: true }, answers: "y\ny\ny\n" });
     assert.equal(left.status, 1, left.out);
     assert.match(left.out, /launchd would run it at every login/);
     assert.ok(!/installed=/.test(left.studioNow.marks));
   });
 
   it("offers claude update when the print says Terminal's Claude Code is too old, then prints again", () => {
-    const r = moveOn({ marks: NOT_INSTALLED, install: { print: [printText(PRINT_LINES.signed, PRINT_LINES.older, PRINT_LINES.hdr), DEFAULT_PRINT] }, answers: "y\ny\n\n" });
+    const r = moveOn({ marks: NOT_INSTALLED, install: { print: [printText(PRINT_LINES.signed, PRINT_LINES.older, PRINT_LINES.hdr), DEFAULT_PRINT] }, answers: "y\ny\ny\ny\n\n" });
     assert.equal(r.status, 0, r.out);
     assert.equal((r.out.match(/older than/g) ?? []).length, 1, "the older line is shown once, by the first print");
     assert.ok(r.ran.split("\n").includes("claude update"), r.ran);
     assert.equal(installCalls(r).filter((c) => c.startsWith("install.sh --print")).length, 2);
     assert.ok(r.ran.indexOf("claude update") < r.ran.indexOf("install.sh --yes"));
 
-    const declined = moveOn({ marks: NOT_INSTALLED, install: { print: printText(PRINT_LINES.signed, PRINT_LINES.older) }, answers: "n\n" });
+    const declined = moveOn({ marks: NOT_INSTALLED, install: { print: printText(PRINT_LINES.signed, PRINT_LINES.older) }, answers: "y\ny\nn\n" });
     assert.equal(declined.status, 1);
     assert.ok(!declined.ran.includes("claude update"));
 
     // Still too old after the update: it stops, and does not run the installer.
-    const still = moveOn({ marks: NOT_INSTALLED, install: { print: printText(PRINT_LINES.signed, PRINT_LINES.older) }, answers: "y\ny\ny\ny\n" });
+    const still = moveOn({ marks: NOT_INSTALLED, install: { print: printText(PRINT_LINES.signed, PRINT_LINES.older) }, answers: "y\ny\ny\ny\ny\ny\n" });
     assert.equal(still.status, 1, still.out);
     assert.ok(!still.ran.includes("install.sh --yes"));
   });
 
   it("waits for the Claude app's own update when its copy is too old, then prints again", () => {
-    const r = moveOn({ marks: NOT_INSTALLED, install: { print: [printText(PRINT_LINES.signed, PRINT_LINES.version, PRINT_LINES.appOlder), DEFAULT_PRINT] }, answers: "\ny\n\n" });
+    const r = moveOn({ marks: NOT_INSTALLED, install: { print: [printText(PRINT_LINES.signed, PRINT_LINES.version, PRINT_LINES.appOlder), DEFAULT_PRINT] }, answers: "y\ny\n\ny\n\n" });
     assert.equal(r.status, 0, r.out);
     assert.match(r.out, /Check for Updates/);
     assert.match(r.out, /Press Return when that's done/);
@@ -970,21 +1174,21 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
   });
 
   it("turns HyperFrames on, asked, unless it is on already, and shows her drop folder in Finder", () => {
-    const r = moveOn({ marks: NOT_INSTALLED, settingsChange: { app: undefined }, answers: "y\ny\n\n" });
+    const r = moveOn({ marks: NOT_INSTALLED, settingsChange: { app: undefined }, answers: "y\ny\ny\ny\n\n" });
     assert.equal(r.status, 0, r.out);
     assert.ok(r.out.includes("The editing app is now hyperframes (it was off)."), r.out);
     assert.match(r.out, /Make available offline/);
     assert.match(r.out, /Allow/);
     assert.match(r.out, /node/);
     const calls = r.ran.split("\n");
-    assert.ok(calls.includes(`open -R ${rootOf(r.home)}/Drop/Sallie's laptop`), r.ran);
+    assert.ok(calls.includes(`open -R ${r.home}/BRIMM Video Work/Drop`), r.ran);
 
-    const on = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n" });
+    const on = moveOn({ marks: NOT_INSTALLED, answers: "y\ny\ny\n\n" });
     assert.equal(on.status, 0, on.out);
     assert.match(on.out, /Already done: HyperFrames is on/);
     assert.ok(!on.out.includes("is now hyperframes"));
 
-    const declined = moveOn({ marks: NOT_INSTALLED, settingsChange: { app: undefined }, answers: "y\nn\n" });
+    const declined = moveOn({ marks: NOT_INSTALLED, settingsChange: { app: undefined }, answers: "y\ny\ny\nn\n" });
     assert.equal(declined.status, 1, declined.out);
     assert.ok(!declined.out.includes("is now hyperframes"));
     assert.match(declined.studioNow.marks, /installed=/, "the install itself was finished");
@@ -1005,18 +1209,18 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     assert.match(done.out, /Already done: .*installer/);
     assert.deepEqual(installCalls(done), []);
 
-    const other = moveOn({ marks: `tests=SHA\ninstalled=${"0".repeat(40)}\n`, answers: "n\n" });
+    const other = moveOn({ marks: `tests=SHA\ninstalled=${"0".repeat(40)}\n`, answers: "y\ny\nn\n" });
     assert.equal(other.status, 1);
     assert.equal(installCalls(other).length, 1, "it prints again");
 
-    const fresh = moveOn({ marks: "tests=SHA\n", answers: "y\n\n" });
+    const fresh = moveOn({ marks: "tests=SHA\n", answers: "y\ny\ny\n\n" });
     assert.equal(fresh.studioNow.marks, `tests=${fresh.sha}\ninstalled=${fresh.sha}\n`, "only its own line is written, the rest kept");
   });
 
   it("with --print and no checkout, says the exact line it would print first", () => {
     const r = moveOn({ checkout: "absent", gitStandIn: true, noRepo: true }, "--print");
     assert.equal(r.status, 0, r.out);
-    assert.ok(r.out.includes(`Would run Studio's installer with --print first (it changes nothing): zsh "${r.home}/Claude Code/brimm-video-studio/tool/install.sh" --print --machine "Sallie's laptop" --drop Drop --import light --handoff 2 "${rootOf(r.home)}"`), r.out);
+    assert.ok(r.out.includes(`Would run Studio's installer with --print first (it changes nothing): zsh "${r.home}/Claude Code/brimm-video-studio/tool/install.sh" --print --machine "Sallie's laptop" --drop-folder "${r.home}/BRIMM Video Work/Drop" --import light --handoff 2 "${rootOf(r.home)}"`), r.out);
     assert.deepEqual(installCalls(r), []);
     assert.deepEqual(r.tree, r.before);
   });
@@ -1024,7 +1228,7 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
   it("with --print and the checkout there, shows the installer's print and changes nothing", () => {
     const r = moveOn({ marks: NOT_INSTALLED }, "--print");
     assert.equal(r.status, 0, r.out);
-    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`]);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${optionsOf(r.home)} ${rootOf(r.home)}`]);
     assert.ok(r.out.includes(PRINT_LINES.hdr));
     assert.match(r.out, /Would run Studio's installer for real/);
     assert.deepEqual(r.tree, r.before);
@@ -1033,7 +1237,7 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
 
   it("stops, showing its last lines, when the real install fails", () => {
     const lines = Array.from({ length: 12 }, (_, i) => `step ${i + 1} of the install`);
-    const r = moveOn({ marks: NOT_INSTALLED, install: { ran: lines.join("\n") + "\nThe install could not go on.\n", ranExit: 1 }, answers: "y\n" });
+    const r = moveOn({ marks: NOT_INSTALLED, install: { ran: lines.join("\n") + "\nThe install could not go on.\n", ranExit: 1 }, answers: "y\ny\ny\n" });
     assert.equal(r.status, 1, r.out);
     assert.match(r.out, /The installer stopped/);
     const tail = r.out.slice(r.out.lastIndexOf("The installer stopped"));
@@ -1047,7 +1251,7 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
   });
 
   it("looks again at her drop folder and the import right before the real install, and stops, naming no file, if one came since", () => {
-    const dropped = moveOn({ marks: NOT_INSTALLED, install: { printDrops: "Client Name Session.mov" }, answers: "y\ny\n" });
+    const dropped = moveOn({ marks: NOT_INSTALLED, install: { printDrops: "Client Name Session.mov" }, answers: "y\ny\ny\n" });
     assert.equal(dropped.status, 1, dropped.out);
     assert.ok(!dropped.ran.includes("install.sh --yes"), dropped.ran);
     assert.match(dropped.out, /The drop folder holds 1 file still to be imported\./);
@@ -1055,14 +1259,14 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     for (const text of [dropped.out, dropped.log, dropped.report, dropped.err]) assert.ok(!text.includes("Client Name"), "no file's name anywhere");
     assert.ok(dropped.out.endsWith(STOPPED_NOTHING), dropped.out);
 
-    const running = moveOn({ marks: NOT_INSTALLED, launchctlLater: "1234\\t0\\tcom.thebrimm.unedited", answers: "y\ny\n" });
+    const running = moveOn({ marks: NOT_INSTALLED, launchctlLater: "1234\\t0\\tcom.thebrimm.unedited", answers: "y\ny\ny\n" });
     assert.equal(running.status, 1, running.out);
     assert.ok(!running.ran.includes("install.sh --yes"), running.ran);
     assert.match(running.out, /An import is running now\. Wait until its window in the top right closes, then double-click Move to Studio again\./);
     assert.ok(running.out.endsWith(STOPPED_NOTHING), running.out);
 
     // Nothing new in her drop folder and no import: it goes on, and says so a second time.
-    const clear = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n" });
+    const clear = moveOn({ marks: NOT_INSTALLED, answers: "y\ny\ny\n\n" });
     assert.equal(clear.status, 0, clear.out);
     assert.equal((clear.out.match(/The drop folder is empty\./g) ?? []).length, 2);
     assert.equal((clear.out.match(/No import is running\./g) ?? []).length, 2);
@@ -1071,30 +1275,30 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
   it("sees a line of the print that comes after 64 KiB", () => {
     const filler = Array.from({ length: 1000 }, (_, i) => `  a line of the print, number ${i}, made long enough to fill the pipe ${"x".repeat(60)}`).join("\n");
     assert.ok(filler.length > 70000);
-    const late = moveOn({ marks: NOT_INSTALLED, install: { print: [`${filler}\n${printText(PRINT_LINES.signed, PRINT_LINES.older)}`, DEFAULT_PRINT] }, answers: "y\ny\n\n" });
+    const late = moveOn({ marks: NOT_INSTALLED, install: { print: [`${filler}\n${printText(PRINT_LINES.signed, PRINT_LINES.older)}`, DEFAULT_PRINT] }, answers: "y\ny\ny\ny\n\n" });
     assert.equal(late.status, 0, late.out.slice(-600));
     assert.ok(late.ran.split("\n").includes("claude update"), "the older line was seen");
-    const early = moveOn({ marks: NOT_INSTALLED, install: { print: [`${printText(PRINT_LINES.signed, PRINT_LINES.older)}\n${filler}`, DEFAULT_PRINT] }, answers: "y\ny\n\n" });
+    const early = moveOn({ marks: NOT_INSTALLED, install: { print: [`${printText(PRINT_LINES.signed, PRINT_LINES.older)}\n${filler}`, DEFAULT_PRINT] }, answers: "y\ny\ny\ny\n\n" });
     assert.equal(early.status, 0, early.out.slice(-600));
     assert.ok(early.ran.split("\n").includes("claude update"), "the older line was seen, with more than 64 KiB after it");
   });
 
   it("leaves her own GIT_SSH alone: the clone's ssh command has a name of its own", () => {
-    const hers = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n", env: { GIT_SSH: "/usr/local/bin/her-own-ssh" } });
+    const hers = moveOn({ marks: NOT_INSTALLED, answers: "y\ny\ny\n\n", env: { GIT_SSH: "/usr/local/bin/her-own-ssh" } });
     assert.equal(hers.status, 0, hers.out);
     assert.equal(hers.installGitSsh.trim(), "/usr/local/bin/her-own-ssh", "the installer sees her own GIT_SSH, as it was");
-    const none = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n" });
+    const none = moveOn({ marks: NOT_INSTALLED, answers: "y\ny\ny\n\n" });
     assert.equal(none.status, 0, none.out);
     assert.equal(none.installGitSsh.trim(), "unset", "and none when she has none");
   });
 
   it("takes only 'Claude answered from here' as the installer's check of Claude, and leaves the environment of git out of the installer", () => {
-    const ok = moveOn({ marks: NOT_INSTALLED, answers: "y\n\n" });
+    const ok = moveOn({ marks: NOT_INSTALLED, answers: "y\ny\ny\n\n" });
     assert.equal(ok.status, 0, ok.out);
     assert.equal(ok.installGitEnv.trim(), "unset", "GIT_SSH_COMMAND is for the clone alone");
 
     for (const said of ["From the background job: Claude could not be asked from here. What it said is in /tmp/check.log.", "From the background job: Claude did not answer within 90 seconds. What it said is in /tmp/check.log."]) {
-      const r = moveOn({ marks: NOT_INSTALLED, install: { ran: `Setting up Studio...\n${said}\nDone.\n` }, answers: "y\n\n" });
+      const r = moveOn({ marks: NOT_INSTALLED, install: { ran: `Setting up Studio...\n${said}\nDone.\n` }, answers: "y\ny\ny\n\n" });
       assert.equal(r.status, 1, r.out);
       assert.ok(r.out.split(said).length > 2, `its line is shown again by the stop:\n${r.out}`);
       assert.ok(!/installed=/.test(r.studioNow.marks), "no installed mark");
@@ -1103,7 +1307,7 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
   });
 
   it("when the install moves her settings and agent to Studio, goes on and marks it", () => {
-    const r = moveOn({ marks: NOT_INSTALLED, install: { moves: true }, answers: "y\n\n" });
+    const r = moveOn({ marks: NOT_INSTALLED, install: { moves: true }, answers: "y\ny\ny\n\n" });
     assert.equal(r.status, 0, r.out);
     assert.ok(r.tree.includes("Library/LaunchAgents/com.thebrimm.unedited.plist"));
     assert.ok(!r.tree.includes("Library/LaunchAgents/com.thebrimm.claude-check.plist"));
@@ -1121,7 +1325,7 @@ describe("the move script, the report and brimm-video's old key (check 48)", { s
   const CHECKS = ["41 Before you start", "42 Studio's code on her laptop", "43 The HyperFrames app on her laptop", "44 Studio's installer on her laptop", "48 Afterwards"];
 
   it("writes the report on her Desktop, one heading a check and one line a box, as the page labels them, and shows it in Finder", () => {
-    const r = moveOn({ marks: NOT_INSTALLED, install: { moves: true }, oldReport: "STALE REPORT\n", answers: "y\n\n" });
+    const r = moveOn({ marks: NOT_INSTALLED, install: { moves: true }, oldReport: "STALE REPORT\n", answers: "y\ny\ny\n\n" });
     assert.equal(r.status, 0, r.out);
     assert.ok(r.tree.includes("Desktop/Studio move report.txt"));
     assert.ok(!r.report.includes("STALE REPORT"), "a run writes it whole again");
@@ -1219,7 +1423,7 @@ describe("the move script, the report and brimm-video's old key (check 48)", { s
     assert.equal(eof.status, 0, eof.out);
     assert.deepEqual(eof.oldKeyFiles, [true, true], "the end of input keeps them");
 
-    const notYet = moveOn({ oldKey: true, marks: "tests=SHA\n", install: { moves: true }, answers: "n\n" });
+    const notYet = moveOn({ oldKey: true, marks: "tests=SHA\n", install: { moves: true }, answers: "y\ny\nn\n" });
     assert.equal(notYet.status, 1, notYet.out);
     assert.ok(!notYet.out.includes("Has brimm-video's key been deleted"), "not installed: no question");
     assert.deepEqual(notYet.oldKeyFiles, [true, true]);
@@ -1234,7 +1438,7 @@ describe("the move script, the report and brimm-video's old key (check 48)", { s
 describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook moved or set up fresh", { skip: notAMac }, () => {
   const JASON = "Jason's MacBook";
   const JASON_KEY = "brimm-video-studio read-only, Jason's MacBook";
-  const OPTIONS = "--machine Jason's MacBook --drop Drop --import light --handoff 2";
+  const optionsOf = (home) => `--machine Jason's MacBook --drop-folder ${home}/BRIMM Video Work/Drop --import light --handoff 2`;
   const rootOf = (home) => `${home}/Dropbox/The BRIMM DB/BRIMM Video`;
   const installCalls = (r) => r.ran.split("\n").filter((l) => l.startsWith("install.sh "));
   const NOT_INSTALLED = "tests=SHA\n";
@@ -1242,8 +1446,8 @@ describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook
   // Jason's MacBook, so a run goes from step 1's question straight to the installer. A brimm-video checkout with no settings (as the
   // transcript tool's standby may have) is there too: the harness always makes one.
   const FRESH = { settings: null, key: JASON_KEY, marks: NOT_INSTALLED };
-  // Its answers: set up fresh, the installer, HyperFrames on (a fresh Mac's settings name no editing app), and Return at Finder.
-  const FRESH_YES = "y\ny\ny\n\n";
+  // Its answers: set up fresh, the drop folder and the exports folder (y to each), the installer, HyperFrames on (a fresh Mac's settings name no editing app), and Return at Finder.
+  const FRESH_YES = "y\ny\ny\ny\ny\n\n";
 
   it("refuses a Mac whose settings name another Mac, changing nothing", () => {
     for (const machine of ["Mac Studio", "Sallie's MacBook Air"]) {
@@ -1255,10 +1459,10 @@ describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook
   });
 
   it("moves Jason's MacBook from brimm-video under its own name", () => {
-    const r = moveOn({ settingsChange: { machine: JASON }, key: JASON_KEY, marks: NOT_INSTALLED, answers: "y\n\n" });
+    const r = moveOn({ settingsChange: { machine: JASON }, key: JASON_KEY, marks: NOT_INSTALLED, answers: "y\ny\ny\n\n" });
     assert.equal(r.status, 0, r.out);
-    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`, `install.sh --yes ${OPTIONS} ${rootOf(r.home)}`]);
-    assert.ok(r.ran.split("\n").includes(`open -R ${rootOf(r.home)}/Drop/${JASON}`), r.ran);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${optionsOf(r.home)} ${rootOf(r.home)}`, `install.sh --yes ${optionsOf(r.home)} ${rootOf(r.home)}`]);
+    assert.ok(r.ran.split("\n").includes(`open -R ${r.home}/BRIMM Video Work/Drop`), r.ran);
     assert.ok(!/set up fresh/.test(r.out), "a Mac with brimm-video is moved, not set up fresh");
     assert.ok(r.out.trimEnd().endsWith("Done. Next on the By-Hand page: the rest of the check for Jason's MacBook."), r.out.slice(-300));
     assert.match(r.report, /^Studio move report: Jason's MacBook, /);
@@ -1280,7 +1484,7 @@ describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook
     assert.ok(r.out.includes(rootOf(r.home)), "it says where BRIMM Video is");
     assert.match(r.out, /Would leave brimm-video's old key as it is, if there is one: this Mac is set up fresh/);
     assert.ok(!r.out.includes("only once Studio's installer has finished"), "a fresh Mac's step 7 is never asked");
-    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`]);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${optionsOf(r.home)} ${rootOf(r.home)}`]);
     assert.deepEqual(r.tree, r.before);
   });
 
@@ -1288,10 +1492,10 @@ describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook
     const r = moveOn({ ...FRESH, install: { writesSettings: true }, answers: FRESH_YES });
     assert.equal(r.status, 0, r.out);
     assert.match(r.out, /set up fresh, as Jason's MacBook/);
-    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${rootOf(r.home)}`, `install.sh --yes ${OPTIONS} ${rootOf(r.home)}`]);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${optionsOf(r.home)} ${rootOf(r.home)}`, `install.sh --yes ${optionsOf(r.home)} ${rootOf(r.home)}`]);
     assert.equal((r.out.match(/No import is running\./g) ?? []).length, 2, "it looked again right before the install");
     assert.ok(!/drop folder (is empty|holds)/i.test(r.out), "a Mac set up fresh has no drop folder to count before the install");
-    assert.ok(r.ran.split("\n").includes(`open -R ${rootOf(r.home)}/Drop/${JASON}`), r.ran);
+    assert.ok(r.ran.split("\n").includes(`open -R ${r.home}/BRIMM Video Work/Drop`), r.ran);
     assert.match(r.report, /^Studio move report: Jason's MacBook, /);
     assert.match(r.report, /1\.4\.0 on Jason's MacBook/);
     assert.match(r.report, /^Anything unexpected in her settings: .*set up fresh/m);
@@ -1325,13 +1529,13 @@ describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook
   it("counts BRIMM Video once when ~/Dropbox is a link to Dropbox's folder in CloudStorage, and names it there", () => {
     const r = moveOn({ ...FRESH, brimmVideo: "linked" }, "--print");
     assert.equal(r.status, 0, r.out);
-    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${r.home}/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video`]);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${optionsOf(r.home)} ${r.home}/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video`]);
   });
 
   it("finds BRIMM Video a level deeper, in a team Dropbox's member folder, as the Mac Studio has it", () => {
     const r = moveOn({ ...FRESH, brimmVideo: "team" }, "--print");
     assert.equal(r.status, 0, r.out);
-    assert.deepEqual(installCalls(r), [`install.sh --print ${OPTIONS} ${r.home}/Library/CloudStorage/Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB/BRIMM Video`]);
+    assert.deepEqual(installCalls(r), [`install.sh --print ${optionsOf(r.home)} ${r.home}/Library/CloudStorage/Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB/BRIMM Video`]);
   });
 
   it("leaves brimm-video's old key alone on a Mac set up fresh", () => {
@@ -1342,5 +1546,352 @@ describe("the move script on either MacBook: Sallie's laptop, or Jason's MacBook
     assert.ok(!r.out.includes("Has brimm-video's key been deleted"), "no question about it");
     assert.match(r.out, /Not asked: this Mac was set up fresh/);
     assert.match(r.report, /^brimm-video's old key: not asked: this Mac was set up fresh/m);
+  });
+});
+
+describe("the move script, step 5's two questions, the chooser and the installer's options", { skip: notAMac }, () => {
+  const NOT_INSTALLED = "tests=SHA\n";
+  const rootOf = (home) => `${home}/Dropbox/The BRIMM DB/BRIMM Video`;
+  const installCalls = (r) => r.ran.split("\n").filter((l) => l.startsWith("install.sh "));
+  const suggested = (home) => `${home}/BRIMM Video Work/Drop`;
+  // The installer's options for Sallie's laptop: --drop-folder unless it is kept (drop === ""), --exports-folder when given.
+  const optionsOf = (home, drop = suggested(home), exports = "") => `--machine Sallie's laptop${drop ? ` --drop-folder ${drop}` : ""}${exports ? ` --exports-folder ${exports}` : ""} --import light --handoff 2`;
+  const printed = (r, drop, exports) => `install.sh --print ${optionsOf(r.home, drop, exports)} ${rootOf(r.home)}`;
+  const real = (r, drop, exports) => `install.sh --yes ${optionsOf(r.home, drop, exports)} ${rootOf(r.home)}`;
+  const count = (text, part) => text.split(part).length - 1;
+
+  const DROP_QUESTION = [
+    "  Where videos are dropped for Studio: the drop folder.",
+    "  Studio takes every video out of this folder and files it. Use a new folder that only you drop into: never one shared with others, or one an app saves into.",
+    "  Suggested: BRIMM Video Work › Drop, in your home folder. It is on this Mac, the installer makes it, and macOS asks no questions about it.",
+    "  A folder in Dropbox, iCloud Drive or another cloud folder can be picked, but every video dropped there, a client session too, goes up to that cloud, and one still syncing can be imported late, or twice.",
+    "Type y and press Return to use the suggested folder, or c and press Return to choose another. Anything else stops:"
+  ];
+  const EXPORTS_QUESTION = [
+    "  Where HyperFrames' exports go: the exports folder.",
+    "  Suggested: Downloads, where HyperFrames saves an export unless its Export dialog is given another folder. Studio looks in Downloads in any case, and deletes each export it takes from there once its copy in the video's final folder in Dropbox is checked.",
+    "  A folder in Dropbox is fine, for instance to share the exports with other people.",
+    "Type y and press Return to use Downloads, or c and press Return to choose another. Anything else stops:"
+  ];
+  const TERMINAL_LINE = "A window to choose the folder is opening. If you don't see it, click the folder icon named Choose a Folder in the Dock. If no window comes at all, press Control-C; on the next run, y uses the suggested folder.";
+  const DROP_MESSAGE = "Move to Studio: choose the folder you will drop videos into, or make a new one with New Folder.";
+  const EXPORTS_MESSAGE = "Move to Studio: choose the folder HyperFrames' exports will go into, or make a new one with New Folder.";
+  const NOT_SHOWN = "The window to choose a folder could not be shown.";
+  const EXPORTS_NOTE = "Studio looks for exports there and in Downloads. It copies each one into its video's final folder in Dropbox, and leaves the one there as it is. When you export in HyperFrames, choose this folder in its Export dialog. Never export into the drop folder.";
+
+  /** The script sourced, with the stand-in chooser first on its PATH and in BRIMM_CHOOSER_APP: `script` runs after `source "$1"`. */
+  function sourced(script, { picks, program, input = "", env = {} } = {}) {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-chooser-")));
+    dirsToClean.add(dir);
+    const bin = join(dir, "bin");
+    const home = join(dir, "home");
+    mkdirSync(bin);
+    mkdirSync(home);
+    const ran = join(dir, "ran");
+    const app = makeChooser(dir, bin, ran);
+    const fillHome = (list) => [list ?? []].flat().map((x) => x.replaceAll("<HOME>", home));
+    writeList(dir, "pick", fillHome(picks));
+    writeList(dir, "prog", fillHome(program));
+    if (fillHome(program).includes("missing")) rmSync(join(app, "Contents", "MacOS", "Choose a Folder"));
+    const r = spawnSync("/bin/zsh", ["-c", `source "$1"\n${script}`, "move", MOVE], { encoding: "utf8", input, env: { HOME: home, PATH: `${bin}:/usr/bin:/bin:${dirname(process.execPath)}`, BRIMM_CHOOSER_APP: app, NODE_BIN: process.execPath, ...env } });
+    return { status: r.status, out: r.stdout, err: r.stderr, home, dir, ran: existsSync(ran) ? readFileSync(ran, "utf8") : "" };
+  }
+
+  it("takes c, C and ' c ' as choose, and y as before", () => {
+    const cases = [["y", "y"], ["Y", "y"], ["yes", "y"], ["YES", "y"], [" y ", "y"], ["c", "c"], ["C", "c"], [" c ", "c"], ["choose", "c"], ["CHOOSE", "c"], [" Choose ", "c"],
+      ["", ""], ["n", ""], ["cc", ""], ["yy", ""], ["yes please", ""], ["ok", ""], ["c y", ""], ["y c", ""]];
+    const r = spawnSync("/bin/zsh", ["-c", 'source "$1"; shift; for l in "$@"; do print -r -- "[$(answer_of "$l")]"; done', "t", MOVE, ...cases.map(([line]) => line)], { encoding: "utf8", env: { HOME: "/tmp", PATH: "/usr/bin:/bin" } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.stdout.trimEnd().split("\n"), cases.map(([, want]) => `[${want}]`));
+  });
+
+  it("y and y give --drop-folder <HOME>/BRIMM Video Work/Drop and no --exports-folder, in the print and in the real run", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, answers: "y\ny\ny\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(installCalls(r), [printed(r), real(r)]);
+    assert.ok(!r.ran.includes("--exports-folder"), r.ran);
+    assert.ok(!r.ran.includes("--drop Drop"), "never --drop");
+    // The two questions come in this order, before the installer's print, in the app's own words.
+    const at = (line) => r.out.indexOf(line);
+    for (const line of [...DROP_QUESTION, ...EXPORTS_QUESTION]) assert.ok(at(line) >= 0, `${line}\n${r.out}`);
+    assert.ok(at(DROP_QUESTION[0]) < at(EXPORTS_QUESTION[0]) && at(EXPORTS_QUESTION[0]) < at("Studio's installer, with --print first"), r.out);
+    // On a Mac moved from brimm-video the drop question first says what is true today.
+    assert.ok(at("Today the drop folder is Drop › Sallie's laptop in Dropbox. Once the install has run, it is no longer watched.") < at(DROP_QUESTION[0]), r.out);
+    assert.ok(!r.ran.includes("chooser"), "y opens no chooser");
+    assert.ok(r.tree.includes("BRIMM Video Work/Drop"), "the installer (here, the stand-in) made the suggested folder");
+  });
+
+  it("c opens the chooser in the home folder with the drop message, says the pick in Finder's words, and gives it to the installer", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, picks: ["<HOME>/Videos to Drop"], answers: "c\ny\ny\n\n" });
+    assert.equal(r.status, 0, r.out);
+    const at = (s) => r.out.indexOf(s);
+    const chooser = `chooser ${DROP_MESSAGE} | ${r.home}`;
+    assert.ok(at(TERMINAL_LINE) >= 0, r.out);
+    assert.ok(at(TERMINAL_LINE) < at(chooser) && at(chooser) < at("Picked: Videos to Drop, in your home folder") && at("Picked: Videos to Drop, in your home folder") < at("Studio's installer, with --print first"), r.out);
+    const calls = r.ran.split("\n");
+    assert.ok(calls.indexOf(chooser) >= 0 && calls.indexOf("open -a Terminal") > calls.indexOf(chooser), "Terminal is brought back after the chooser:\n" + r.ran);
+    // It is opened the way Finder opens an app, with the arguments in order: the message, the start folder, a result file, a process id.
+    const args = calls.filter((l) => l.startsWith("chooser-arg: ")).map((l) => l.slice("chooser-arg: ".length));
+    assert.deepEqual(args.slice(0, 4), ["-n", "-W", join(dirname(r.home), "Applications", "Choose a Folder.app"), "--args"]);
+    assert.equal(args[4], DROP_MESSAGE);
+    assert.equal(args[5], r.home);
+    assert.match(args[6], /\/result$/);
+    assert.match(args[7], /^\d+$/);
+    assert.deepEqual(installCalls(r), [printed(r, `${r.home}/Videos to Drop`), real(r, `${r.home}/Videos to Drop`)]);
+    assert.ok(!r.out.includes("Keys typed while the window was open"), "nothing was typed meanwhile");
+  });
+
+  it("Cancel asks again; the end of input then stops with nothing run for real", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, picks: ["cancel"], answers: "c\n" });
+    assert.equal(r.status, 1, r.out);
+    assert.equal(count(r.out, DROP_QUESTION[0]), 2, "the question is asked again");
+    assert.equal(r.ran.split("\n").filter((l) => l.startsWith("chooser ")).length, 1);
+    assert.deepEqual(installCalls(r), [], "stopped before the print");
+    assert.ok(r.out.endsWith(STOPPED_NOTHING), r.out);
+    // Cancel at the exports question asks the exports question again.
+    const exports = moveOn({ marks: NOT_INSTALLED, picks: ["cancel"], answers: "y\nc\n" });
+    assert.equal(exports.status, 1, exports.out);
+    assert.equal(count(exports.out, EXPORTS_QUESTION[0]), 2);
+    assert.equal(count(exports.out, DROP_QUESTION[0]), 1);
+    assert.ok(exports.out.endsWith(STOPPED_NOTHING), exports.out);
+  });
+
+  it("a pick that arrives after `open` has ended 1 is still taken", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, picks: ["late:<HOME>/Late Folder"], answers: "c\ny\ny\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(installCalls(r), [printed(r, `${r.home}/Late Folder`), real(r, `${r.home}/Late Folder`)]);
+    assert.ok(!r.ran.split("\n").some((l) => l.startsWith("program ")), "the second way was never called:\n" + r.ran);
+    assert.ok(!r.out.includes(NOT_SHOWN), r.out);
+  });
+
+  it("the first way not shown: the second way is tried", () => {
+    for (const picks of [["nofile"], ["fail"]]) {
+      const path = moveOn({ marks: NOT_INSTALLED, picks, program: ["<HOME>/Second Way"], answers: "c\ny\nn\n" });
+      assert.equal(path.status, 1, path.out);
+      assert.deepEqual(installCalls(path), [printed(path, `${path.home}/Second Way`)], picks.join());
+      assert.ok(path.ran.split("\n").includes(`program ${DROP_MESSAGE} | ${path.home}`), path.ran);
+      assert.ok(path.ran.split("\n").indexOf("open -a Terminal") > path.ran.split("\n").indexOf(`program ${DROP_MESSAGE} | ${path.home}`), "Terminal is brought back after the second way too");
+      assert.ok(!path.out.includes(NOT_SHOWN), path.out);
+
+      const cancel = moveOn({ marks: NOT_INSTALLED, picks, program: ["cancel"], answers: "c\n" });
+      assert.equal(cancel.status, 1, cancel.out);
+      assert.equal(count(cancel.out, DROP_QUESTION[0]), 2, "Cancel of the second way asks again");
+      assert.ok(!cancel.out.includes(NOT_SHOWN), "a Cancel is not a chooser that could not be shown");
+    }
+  });
+
+  it("neither way shown: asked again, and y takes the suggested folder", () => {
+    for (const [picks, program] of [[["nofile"], ["two"]], [["fail"], ["missing"]]]) {
+      const r = moveOn({ marks: NOT_INSTALLED, picks, program, answers: "c\ny\ny\nn\n" });
+      assert.equal(r.status, 1, r.out);
+      assert.equal(count(r.out, NOT_SHOWN), 1, r.out);
+      assert.equal(count(r.out, DROP_QUESTION[0]), 2);
+      assert.deepEqual(installCalls(r), [printed(r)], "y took the suggested folder");
+      assert.ok(r.out.indexOf(NOT_SHOWN) > r.out.indexOf(TERMINAL_LINE));
+    }
+  });
+
+  it("a name with a space, an apostrophe, an accent and an emoji reaches the installer whole", () => {
+    const name = "Dröp's folder 🎬  two spaces";
+    const r = moveOn({ marks: NOT_INSTALLED, picks: [`<HOME>/${name}`], answers: "c\ny\ny\n\n" });
+    assert.equal(r.status, 0, r.out);
+    const lines = r.ran.split("\n");
+    assert.equal(lines.filter((l) => l === `install-arg: ${r.home}/${name}`).length, 2, "whole, in the print and in the real run:\n" + r.ran);
+    assert.ok(lines.includes("install-arg: --drop-folder"));
+    assert.ok(r.out.includes(`Picked: ${name}, in your home folder`), r.out);
+    assert.ok(r.log.includes(name), "and kept in the log");
+  });
+
+  it("a line break from the chooser is refused by the app's line, and asked again", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, picks: ["linebreak", "<HOME>/After Line"], answers: "c\nc\ny\ny\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.equal(count(r.out, "A folder whose name holds a line break can't be used. Choose another."), 1, r.out);
+    assert.equal(count(r.out, DROP_QUESTION[0]), 2);
+    assert.deepEqual(installCalls(r), [printed(r, `${r.home}/After Line`), real(r, `${r.home}/After Line`)]);
+    // The second way ends 3 for it too.
+    const second = moveOn({ marks: NOT_INSTALLED, picks: ["nofile"], program: ["linebreak", "<HOME>/After Line"], answers: "c\nc\ny\nn\n" });
+    assert.equal(count(second.out, "A folder whose name holds a line break can't be used. Choose another."), 1, second.out);
+    assert.ok(!second.out.includes(NOT_SHOWN), "a line break is never mistaken for a chooser that could not be shown");
+    assert.deepEqual(installCalls(second), [printed(second, `${second.home}/After Line`)]);
+  });
+
+  it("answers piped after the chooser are still read", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, picks: ["<HOME>/Videos to Drop", "<HOME>/Exports"], answers: "c\nc\ny\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(installCalls(r), [printed(r, `${r.home}/Videos to Drop`, `${r.home}/Exports`), real(r, `${r.home}/Videos to Drop`, `${r.home}/Exports`)]);
+    assert.equal(r.ran.split("\n").filter((l) => l.startsWith("chooser ")).length, 2);
+  });
+
+  it("keeps the spec's block for the keys typed meanwhile", () => {
+    const code = readFileSync(MOVE, "utf8");
+    for (const line of ["local thrown=0 _key", "if [[ -t 0 ]]; then", "while read -t 0 -k 1 -s _key; do thrown=$(( thrown + 1 )); done", "THROWN=$(( THROWN + thrown ))", "Keys typed while the window was open were not taken as answers."]) {
+      assert.ok(code.includes(line), line);
+    }
+    // Piped answers are not a keyboard: nothing is thrown away, and nothing said.
+    const r = sourced('THROWN=0; throw_away_typed_keys; print -r -- "THROWN=$THROWN"', { input: "y\n" });
+    assert.equal(r.out, "THROWN=0\n");
+  });
+
+  describe("the exports question", () => {
+    it("Downloads picked through a link gives no option; another folder gives --exports-folder and the note", () => {
+      const link = moveOn({ marks: NOT_INSTALLED, links: { "<HOME>/dl-link": "<HOME>/Downloads" }, picks: ["<HOME>/dl-link"], answers: "y\nc\nn\n" });
+      assert.equal(link.status, 1, link.out);
+      assert.deepEqual(installCalls(link), [printed(link)]);
+      assert.ok(link.out.includes("Picked: Downloads, in your home folder"), link.out);
+      assert.ok(!link.out.includes(EXPORTS_NOTE), "Downloads brings no note");
+
+      const other = moveOn({ marks: NOT_INSTALLED, picks: ["<HOME>/Exports"], answers: "y\nc\nn\n" });
+      assert.equal(other.status, 1, other.out);
+      assert.deepEqual(installCalls(other), [printed(other, undefined, `${other.home}/Exports`)]);
+      assert.ok(other.ran.split("\n").includes(`chooser ${EXPORTS_MESSAGE} | ${other.home}`), other.ran);
+      assert.ok(other.out.includes(EXPORTS_NOTE), other.out);
+      assert.ok(other.out.indexOf(EXPORTS_NOTE) > other.out.indexOf("Picked: Exports, in your home folder"));
+    });
+
+    it("an exportsPath naming Downloads is not a kept folder", () => {
+      const r = moveOn({ marks: NOT_INSTALLED, settingsChange: { exportsPath: "<HOME>/Downloads" }, answers: "y\ny\nn\n" });
+      assert.equal(r.status, 1, r.out);
+      for (const line of EXPORTS_QUESTION) assert.ok(r.out.includes(line), line);
+      assert.ok(!r.out.includes("looked for in"), r.out);
+      assert.deepEqual(installCalls(r), [printed(r, undefined, undefined)]);
+    });
+
+    it("an exportsPath of its own is kept by y, and going back to Downloads gives --exports-folder <HOME>/Downloads", () => {
+      const kept = moveOn({ marks: NOT_INSTALLED, settingsChange: { exportsPath: "<HOME>/Old Exports" }, answers: "y\ny\nn\n" });
+      assert.equal(kept.status, 1, kept.out);
+      assert.ok(kept.out.includes("HyperFrames' exports are looked for in Old Exports, in your home folder and in Downloads."), kept.out);
+      assert.ok(kept.out.includes("Type y and press Return to keep it, or c and press Return to choose another."), kept.out);
+      assert.deepEqual(installCalls(kept), [printed(kept)], "kept: no exports option");
+
+      const back = moveOn({ marks: NOT_INSTALLED, settingsChange: { exportsPath: "<HOME>/Old Exports" }, picks: ["<HOME>/Downloads"], answers: "y\nc\nn\n" });
+      assert.equal(back.status, 1, back.out);
+      assert.deepEqual(installCalls(back), [printed(back, undefined, `${back.home}/Downloads`)]);
+    });
+  });
+
+  describe("later runs", () => {
+    it("a Mac whose settings have dropPath: y keeps it with no drop option; c gives --drop-folder", () => {
+      const kept = moveOn({ marks: NOT_INSTALLED, settingsChange: { dropPath: "<HOME>/My Drop" }, answers: "y\ny\nn\n" });
+      assert.equal(kept.status, 1, kept.out);
+      assert.ok(kept.out.includes("This Mac's drop folder is My Drop, in your home folder."), kept.out);
+      assert.ok(kept.out.includes("Type y and press Return to keep it, or c and press Return to choose another."), kept.out);
+      assert.ok(!kept.out.includes("Today the drop folder is"), "it is not the old folder any more");
+      assert.deepEqual(installCalls(kept), [printed(kept, "")]);
+
+      const other = moveOn({ marks: NOT_INSTALLED, settingsChange: { dropPath: "<HOME>/My Drop" }, picks: ["<HOME>/Another"], answers: "c\ny\nn\n" });
+      assert.equal(other.status, 1, other.out);
+      assert.deepEqual(installCalls(other), [printed(other, `${other.home}/Another`)]);
+    });
+
+    it("a folder picked last time is offered again, and, when another is picked, named with its count", () => {
+      const again = moveOn({ marks: "tests=SHA\ndrop=<HOME>/Last Time\n", folderFiles: { "<HOME>/Last Time": [] }, answers: "y\ny\nn\n" });
+      assert.equal(again.status, 1, again.out);
+      assert.ok(again.out.includes("Last time, this folder was picked: Last Time, in your home folder."), again.out);
+      assert.ok(again.out.includes("Type y and press Return to use it again, or c and press Return to choose another."), again.out);
+      assert.deepEqual(installCalls(again), [printed(again, `${again.home}/Last Time`)]);
+
+      const other = moveOn({ marks: "tests=SHA\ndrop=<HOME>/Last Time\n", folderFiles: { "<HOME>/Last Time": ["a.mov", "Client Name.mov"] }, picks: ["<HOME>/Another"], answers: "c\ny\nn\n" });
+      assert.equal(other.status, 1, other.out);
+      assert.deepEqual(installCalls(other), [printed(other, `${other.home}/Another`)]);
+      assert.ok(other.out.includes("The folder picked last time, Last Time, in your home folder, was left as it is, and holds 2 files or folders. Jason checks it is empty, then deletes it by hand if it is not wanted."), other.out);
+      for (const text of [other.out, other.log, other.err]) assert.ok(!text.includes("Client Name"), "counted and never listed");
+
+      const exports = moveOn({ marks: "tests=SHA\nexports=<HOME>/Last Exports\n", answers: "y\ny\nn\n" });
+      assert.ok(exports.out.includes("Last time, this folder was picked: Last Exports, in your home folder."), exports.out);
+      assert.deepEqual(installCalls(exports), [printed(exports, undefined, `${exports.home}/Last Exports`)]);
+    });
+  });
+
+  it("stops, when c alone is offered and the chooser cannot be shown, with the words that fit the refusal", () => {
+    // The checks come in Task 3; here a refusal is made up, to see what the question does with it.
+    const script = 'MACHINE="Sallie\'s laptop"; SETTINGS="$HOME/none.json"; MARKS="$HOME/none"; ROOT="$HOME/root"; STUDIO="$HOME/studio"\n'
+      + 'drop_folder_fault() { FAULT_KIND=$KIND; FAULT_WORDS="The folder is no good."; }\nask_drop_folder';
+    const stops = (kind, input) => sourced(`KIND=${kind}\n${script}`, { picks: ["fail"], program: ["two"], input });
+    const full = stops("not-empty", "y\nc\n");
+    assert.equal(full.status, 1, full.out);
+    assert.ok(full.out.includes("Type c and press Return to choose another folder. Anything else stops:"), full.out);
+    assert.ok(full.out.includes(`The window to choose a folder could not be shown, and ${full.home}/BRIMM Video Work/Drop is not empty. Empty it in Finder, or tell Jason, then double-click Move to Studio again.`), full.out);
+    const other = stops("transcript", "y\nc\n");
+    assert.equal(other.status, 1, other.out);
+    assert.ok(other.out.includes(`The window to choose a folder could not be shown, and ${other.home}/BRIMM Video Work/Drop can't be used: The folder is no good. Tell Jason, then double-click Move to Studio again.`), other.out);
+    // With c alone offered, a y stops, and no chooser is opened.
+    const y = stops("not-empty", "y\ny\n");
+    assert.equal(y.status, 1, y.out);
+    assert.ok(!y.ran.includes("chooser"), y.ran);
+    // A refusal that allowing Terminal cures keeps its y.
+    const keeps = stops("cannot-look", "y\ny\n");
+    assert.equal(keeps.status, 1);
+    assert.ok(!keeps.out.includes("Type c and press Return to choose another folder."), keeps.out);
+  });
+
+  it("under --print: no chooser and no question, the would line, and the installer's print with the folders y would give", () => {
+    const r = moveOn({ marks: NOT_INSTALLED }, "--print");
+    assert.equal(r.status, 0, r.out);
+    assert.ok(r.out.includes("Would ask where videos are dropped (suggested: BRIMM Video Work › Drop) and where HyperFrames' exports go (suggested: Downloads)"), r.out);
+    assert.ok(!r.out.includes(DROP_QUESTION[0]) && !r.ran.includes("chooser"), "nothing is asked, and no chooser opens");
+    assert.deepEqual(installCalls(r), [printed(r)]);
+    assert.deepEqual(r.tree, r.before);
+
+    // A Mac with dropPath and exportsPath keeps them, as a y would.
+    const kept = moveOn({ marks: NOT_INSTALLED, settingsChange: { dropPath: "<HOME>/My Drop", exportsPath: "<HOME>/Old Exports" } }, "--print");
+    assert.equal(kept.status, 0, kept.out);
+    assert.deepEqual(installCalls(kept), [printed(kept, "")]);
+    assert.ok(!kept.ran.includes("--exports-folder") && !kept.ran.includes("--drop-folder"), kept.ran);
+  });
+
+  describe("the chooser's two ways, sourced", () => {
+    const rcOf = (route, { picks, program }) => {
+      const r = sourced(`CHOOSER_ROUTE=${route}; rc=0; choose_folder "a message" "$HOME" || rc=$?; print -r -- "rc=$rc CHOSEN=$CHOSEN"`, { picks, program });
+      assert.equal(r.status, 0, r.out + r.err);
+      return { ...r, rc: r.out.match(/rc=(\d+) CHOSEN=(.*)\n/)?.slice(1) };
+    };
+
+    it("the second way: a path; Cancel (1); a line break (3); 2 with a sentence; a missing program", () => {
+      const path = rcOf("program", { program: ["<HOME>/Elsewhere"] });
+      assert.deepEqual(path.rc, ["0", `${path.home}/Elsewhere`]);
+      assert.ok(path.ran.includes(`program a message | ${path.home}`) && !path.ran.includes("chooser "), "the first way is not tried when the second answers:\n" + path.ran);
+      assert.ok(path.ran.split("\n").includes("open -a Terminal"), "Terminal is brought back");
+
+      assert.deepEqual(rcOf("program", { program: ["cancel"] }).rc, ["1", ""]);
+      assert.deepEqual(rcOf("program", { program: ["linebreak"] }).rc, ["3", ""]);
+      const two = rcOf("program", { program: ["two"], picks: ["fail"] });
+      assert.deepEqual(two.rc, ["2", ""]);
+      assert.ok(two.ran.includes("chooser "), "and then the other way is tried");
+      assert.ok(!two.err.includes("could not be shown"), "the helper's sentence is kept off the screen");
+      assert.deepEqual(rcOf("program", { program: ["missing"], picks: ["fail"] }).rc, ["2", ""]);
+    });
+
+    it("the first way first: a result, Cancel or a line break is final; no file tries the program", () => {
+      const cancel = rcOf("app", { picks: ["cancel"], program: ["<HOME>/Elsewhere"] });
+      assert.deepEqual(cancel.rc, ["1", ""]);
+      assert.ok(!cancel.ran.includes("program "), "the second way is never tried after a Cancel");
+      assert.deepEqual(rcOf("app", { picks: ["linebreak"] }).rc, ["3", ""]);
+      const pick = rcOf("app", { picks: ["<HOME>/A Folder"] });
+      assert.deepEqual(pick.rc, ["0", `${pick.home}/A Folder`]);
+      const fallback = rcOf("app", { picks: ["nofile"], program: ["<HOME>/Elsewhere"] });
+      assert.deepEqual(fallback.rc, ["0", `${fallback.home}/Elsewhere`]);
+      assert.deepEqual(rcOf("app", { picks: ["fail"], program: ["two"] }).rc, ["2", ""]);
+    });
+
+    it("makes the pick whole: a link is followed", () => {
+      const r = sourced('mkdir -p "$HOME/real"; ln -s "$HOME/real" "$HOME/link"; CHOOSER_ROUTE=app; rc=0; choose_folder "m" "$HOME" || rc=$?; print -r -- "rc=$rc CHOSEN=$CHOSEN"', { picks: ["<HOME>/link"] });
+      assert.equal(r.out.trimEnd().split("\n").pop(), `rc=0 CHOSEN=${r.home}/real`);
+    });
+  });
+
+  it("words_for gives Studio's folderWords through node, and the path itself when that cannot be asked", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-words-")));
+    dirsToClean.add(dir);
+    const studio = join(dir, "studio");
+    put(join(studio, "tool", "settings.js"), FAKE_STUDIO_SETTINGS_JS);
+    const broken = join(dir, "broken");
+    put(join(broken, "tool", "settings.js"), 'throw new Error("not today");\n');
+    const home = join(dir, "home");
+    mkdirSync(home);
+    const script = 'NODE="$NODE_BIN"; STUDIO="$2"; words_for "$HOME/Videos to Drop"; STUDIO="$3"; words_for "$HOME/Videos to Drop"; NODE=""; STUDIO="$2"; words_for "$HOME/Videos to Drop"; NODE="$NODE_BIN"; STUDIO="$4"; words_for "$HOME/Videos to Drop"';
+    const r = spawnSync("/bin/zsh", ["-c", `source "$1"\n${script}`, "move", MOVE, studio, broken, join(dir, "nothing")], { encoding: "utf8", env: { HOME: home, PATH: "/usr/bin:/bin", NODE_BIN: process.execPath } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.stdout.trimEnd().split("\n"), ["Videos to Drop, in your home folder", `${home}/Videos to Drop`, `${home}/Videos to Drop`, `${home}/Videos to Drop`]);
+    assert.equal(r.stderr, "", "node's errors are kept off the screen");
   });
 });
