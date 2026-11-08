@@ -229,6 +229,19 @@ describe("findingOf", () => {
     assert.equal(findingOf({ ...all, note: note({ drop: place("refused", { okNode: NODE }) }) }).kind, "refused");
   });
 
+  it("puts a Downloads refusal after missing and unseen (it hides neither)", () => {
+    const where = { ...places, downloads: "/downloads" };
+    const noted = note({ downloads: place("refused", { folder: "/downloads" }) });
+    assert.deepEqual(findingOf({ ...base, places: where, unseen: ["a"], note: noted }), { kind: "unseen", videos: ["a"] });
+    assert.deepEqual(findingOf({ ...base, places: where, missing: true, note: noted }), { kind: "missing", place: "drop" });
+    assert.deepEqual(findingOf({ ...base, places: where, note: noted }), { kind: "refused", place: "downloads", code: "EPERM" });
+    const all = { ...base, places: where, unseen: ["a"], needsAccess: ["drop"], agentNode: NODE2 };
+    const both = note({ drop: place("ok", { okNode: NODE }), downloads: place("refused", { folder: "/downloads" }) });
+    assert.equal(findingOf({ ...all, unseen: [], note: both }).kind, "refused");
+    assert.equal(findingOf({ ...all, note: both }).kind, "unseen");
+    assert.equal(findingOf({ ...all, note: note({ drop: place("refused") , downloads: place("refused", { folder: "/downloads" }) }) }).place, "drop");
+  });
+
   it("says newNode when a place that needs access was let in by another node", () => {
     const noted = note({ drop: place("ok", { okNode: NODE }) });
     assert.deepEqual(findingOf({ ...base, note: noted, needsAccess: ["drop"], agentNode: NODE2 }), { kind: "newNode" });
@@ -295,6 +308,10 @@ describe("the words are the design's", () => {
     assert.equal(
       accessLine({ kind: "error", place: "drop" }, { placeWords: drop, code: "EBUSY" }),
       `The import could not look in ${drop} (EBUSY). Ask Jason. (Jason: see ~/Library/Logs/brimm-video.log.)`,
+    );
+    assert.equal(
+      accessLine({ kind: "error", place: "drop", code: "" }, { placeWords: drop }),
+      `The import could not look in ${drop}. Ask Jason. (Jason: see ~/Library/Logs/brimm-video.log.)`,
     );
     assert.equal(
       accessLine({ kind: "missing", place: "drop" }, { placeWords: drop }),
@@ -603,6 +620,22 @@ describe("node access.js --setup-line", () => {
     const r = run({ version: 1, looking: { place: "drop", pid: process.pid, at: Date.now() - ASKING_MS - 5000 }, told: {}, places: {} });
     assert.match(r.stdout, /Desktop/);
     assert.doesNotMatch(r.stdout, /your drop folder\./);
+  });
+
+  it("passes over a noted place whose folder is not where the Mac's place is now (after a switch)", () => {
+    mkdirSync(dirname(settingsFile(home)), { recursive: true });
+    const oldDrop = join(home, "Desktop", "Old Drop");
+    const newDrop = join(home, "BRIMM Video Work", "Drop");
+    writeFileSync(settingsFile(home), JSON.stringify({ version: 1, machine: "Mac", root: join(home, "Episodes", ".."), checkout: "/c", drop: "Drop", dropPath: newDrop }));
+    const stale = noted();
+    stale.places.drop = { ...stale.places.drop, state: "refused", code: "EPERM", folder: oldDrop };
+    const r = run(stale);
+    assert.doesNotMatch(r.stdout, /Old Drop|Desktop/);
+    assert.equal(r.stdout, `${LEAD}the import has not looked yet.\n`);
+    // an old ok note for the old folder does not count toward the ok line
+    const okOld = noted();
+    okOld.places.drop = { ...okOld.places.drop, folder: oldDrop };
+    assert.equal(run(okOld).stdout, `${LEAD}the import has not looked yet.\n`);
   });
 
   it("prints nothing and exits 0 with another argument", () => {

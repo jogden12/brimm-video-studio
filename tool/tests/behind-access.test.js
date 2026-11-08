@@ -211,6 +211,17 @@ describe("behind: a new node", () => {
     t.done();
   });
 
+  it("works out no node (no plutil) when another finding is to be said", async () => {
+    const t = setup();
+    worldOf(t);
+    note(t, { drop: place(t, "refused", { okNode: NODE }), episodes: place(t, "ok", { okNode: NODE, folder: t.ctx.episodes }) });
+    let asked = 0;
+    const r = await on(t, { agentNode: () => { asked++; return NEW_NODE; } });
+    assert.equal(asked, 0);
+    assert.match(r.said.at(-1), /does not let the import look/);
+    t.done();
+  });
+
   it("asks nothing of a Mac whose places need no Files and Folders access", async () => {
     const t = setup();
     note(t, { drop: place(t, "ok", { okNode: NODE }) });
@@ -261,6 +272,15 @@ describe("behind: a video the import never took", () => {
     assert.deepEqual(await none(), [NEWEST]);
     note(t, { drop: place(t, "ok", { at: statSync(v.file).ctimeMs - 1000 }) });
     assert.equal((await none()).at(-1), UNSEEN(1));
+    t.done();
+  });
+
+  it("a Downloads refusal within 24 hours does not hide an unseen video", async () => {
+    const t = setup();
+    const v = video(t);
+    note(t, { downloads: place(t, "refused", { folder: downloadsFolder(t.home), at: v.clock() - 3600000 }) });
+    const r = await on(t, { now: v.clock, agentPid: () => null });
+    assert.equal(r.said.at(-1), UNSEEN(1));
     t.done();
   });
 

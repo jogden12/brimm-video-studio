@@ -107,18 +107,25 @@ export function lookAt(place, folder, opts = {}) {
 /** What, if anything, to tell her or Jason about the import's looks, as one finding. `places` says where each place is now; `missing`
     is whether this Mac's drop folder is not there as her chat sees it; `unseen` is the videos the import has not taken; `agentNode`
     is the node the plist names, "" when it is not known; `needsAccess` lists the places (drop, episodes) that macOS guards. The first that
-    holds: asking, refused/locked/error (the first noted place, drop then episodes then downloads, that is still where it was),
-    missing, unseen, newNode. */
+    holds: asking, refused/locked/error for the drop folder or Episodes (the first noted place that is still where it was),
+    missing, unseen, refused/locked/error for Downloads, newNode. */
 export function findingOf({ note, now, places, agentPid, missing = false, unseen = [], agentNode = "", needsAccess = [] }) {
   const looking = note.looking;
   if (looking && looking.pid === agentPid && now - looking.at > ASKING_MS) return { kind: "asking", place: looking.place };
-  for (const place of PLACES) {
+  const refusedAt = (place) => {
     const noted = note.places[place];
-    if (!noted || typeof noted.folder !== "string" || !places[place] || resolve(noted.folder) !== resolve(places[place])) continue;
-    if (noted.state === "refused" || noted.state === "locked" || noted.state === "error") return { kind: noted.state, place, code: noted.code };
+    if (!noted || typeof noted.folder !== "string" || !places[place] || resolve(noted.folder) !== resolve(places[place])) return null;
+    return noted.state === "refused" || noted.state === "locked" || noted.state === "error" ? { kind: noted.state, place, code: noted.code } : null;
+  };
+  for (const place of ["drop", "episodes"]) {
+    const found = refusedAt(place);
+    if (found) return found;
   }
   if (missing) return { kind: "missing", place: "drop" };
   if (unseen.length) return { kind: "unseen", videos: unseen };
+  // Downloads is no hindrance to the videos, so it speaks after the findings that are: missing and unseen are not hidden by it.
+  const found = refusedAt("downloads");
+  if (found) return found;
   const guarded = needsAccess.filter((place) => place === "drop" || place === "episodes").map((place) => (note.places[place] || {}).okNode);
   if (agentNode && guarded.some((okNode) => okNode && okNode !== agentNode)) return { kind: "newNode" };
   return null;
@@ -161,7 +168,7 @@ export function accessLine(finding, { placeWords = "", switchName = "", code = "
     case "locked":
       return `The import cannot open ${placeWords}: the folder's own permissions shut it. Ask Jason. (Jason: node gets EACCES there; see Get Info, Sharing & Permissions.)`;
     case "error":
-      return `The import could not look in ${placeWords} (${finding.code || code}). Ask Jason. (Jason: see ${LOG_FILE}.)`;
+      return `The import could not look in ${placeWords}${finding.code || code ? ` (${finding.code || code})` : ""}. Ask Jason. (Jason: see ${LOG_FILE}.)`;
     case "missing":
       return `${capital(placeWords)}, is not there now. If it is on another disk, connect the disk, then say "look again".`;
     case "unseen": {
@@ -229,13 +236,20 @@ export function setupLine(note, { home = studioHome(), now = Date.now(), alive =
     return typeof noted === "string" && noted ? noted : places[place] || "";
   };
   const words = (place) => (folderOf(place) ? placeWordsOf(place, folderOf(place), home) : place === "drop" ? "your drop folder" : placeWordsOf(place, "", home));
+  // A noted place whose folder is not where the Mac's place is now (after a switch) is passed over, as findingOf does.
+  const noteOf = (place) => {
+    const noted = note.places[place];
+    if (!noted) return null;
+    if (places[place] && typeof noted.folder === "string" && resolve(noted.folder) !== resolve(places[place])) return null;
+    return noted;
+  };
   const looking = note.looking;
   if (looking && alive(looking.pid)) {
     if (now - looking.at < ASKING_MS) return `${lead}the import is still looking; if a box asks whether "node" may look in a folder, choose Allow.`;
     return lead + accessLine({ kind: "asking", place: looking.place }, { placeWords: words(looking.place) });
   }
   for (const place of PLACES) {
-    const noted = note.places[place];
+    const noted = noteOf(place);
     if (!noted) continue;
     // A refused Downloads note is never cleared until a later finish, so it is said only within the window her chat uses.
     if (place === "downloads" && !(typeof noted.at === "number" && now - noted.at <= DOWNLOADS_SAY_MS)) continue;
@@ -244,7 +258,7 @@ export function setupLine(note, { home = studioHome(), now = Date.now(), alive =
     const finding = { kind: noted.state, place, code: noted.code };
     return lead + accessLine(finding, { placeWords: words(place), switchName: folderOf(place) ? switchFor(folderOf(place), home) : "its switches" });
   }
-  const both = ["drop", "episodes"].every((place) => note.places[place] && note.places[place].state === "ok");
+  const both = ["drop", "episodes"].every((place) => (noteOf(place) || {}).state === "ok");
   return lead + (both ? "node may look in the drop folder and in Dropbox." : "the import has not looked yet.");
 }
 

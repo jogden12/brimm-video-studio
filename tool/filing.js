@@ -1873,6 +1873,10 @@ export async function importEpisodes(dir, deps, importOne) {
     }
   };
   clearRuns(episode.home, alive);
+  // The first things the run does with the folders, each noted in access.json, before any other read of Dropbox (the labels, the crashes
+  // and the owed recordings read Episodes) and before any late check is made: a run held at macOS's question is seen as asking.
+  sayLook("drop", dir, lookAt("drop", dir, noted));
+  lookEpisodes();
   const before = labelsNow();
   for (const video of clearCrashes({ statusFolders: statusReadFolders(episode), machine: episode.machine, ...(deps.alive ? { alive: deps.alive } : {}) })) log(`${named(video, before)}: an import of it on this Mac stopped before it was done, so it is imported again.`);
   // A hand-off writer that stopped before it owed its video's recordings (or whose owe could not be written) is made good here (L6).
@@ -1881,9 +1885,6 @@ export async function importEpisodes(dir, deps, importOne) {
   } catch (e) {
     log(`Recordings owed to Original files could not be looked for (${e.code || "an error"}).`);
   }
-  // The first things the run does with the folders, each noted in access.json, before any late check is made.
-  sayLook("drop", dir, lookAt("drop", dir, noted));
-  lookEpisodes();
   finishDue(true);
   await importWaiting(true);
   while (changed) {

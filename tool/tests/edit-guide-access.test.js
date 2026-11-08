@@ -128,6 +128,16 @@ describe("guide: the import's line and a blocked video", () => {
     assert.ok(!e.said.some((l) => l.includes("node was updated")), e.said.join("\n"));
     t.done();
   });
+  it("a Downloads refusal within 24 hours does not hide an unseen video: the guide blocks it with the unseen step", async () => {
+    const t = setup();
+    const file = video(t, "Old.mov");
+    const clock = () => statSync(file).ctimeMs + UNSEEN_MS + 60000;
+    note(t, { downloads: place(t, "refused", downloadsFolder(t.home), { at: clock() - 3600000 }) });
+    const r = await on(light(t, { now: clock }), "guide");
+    assert.equal(r.said[1], accessLine({ kind: "unseen", videos: ["Old.mov"] }));
+    assert.ok(r.said.includes(`  A video of 5 bytes: ${stepLine({ kind: "unseen", videos: ["Old.mov"] })}`), r.said.join("\n"));
+    t.done();
+  });
   it("a Downloads finding blocks no video in the guide, and the overview still says what it said", async () => {
     const t = setup();
     note(t, { downloads: place(t, "refused", downloadsFolder(t.home)) });

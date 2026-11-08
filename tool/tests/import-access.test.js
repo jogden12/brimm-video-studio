@@ -59,6 +59,24 @@ describe("the import notes each look (A2)", () => {
       assert.equal(oldAt, null);
     }));
 
+  it("on a Mac with its own drop folder, the first read under Episodes is inside the bracket (a held Dropbox question is seen)", () =>
+    withWorld(async (w) => {
+      const local = join(w.home, "BRIMM Video Work", "Drop");
+      mkdirSync(local, { recursive: true });
+      const r = runs(w, L, { settings: settingsOf(w, local), home: w.home });
+      const episodes = episodesFolder(w.root);
+      let first = "not asked";
+      await watched(() => uneditedFolders([local], r.deps), {
+        names: READS,
+        deny: (name, path) => {
+          if (inside(episodes, path) && first === "not asked") first = readAccess(w.home).looking;
+          return null;
+        }
+      });
+      assert.ok(first && first !== "not asked", `looking was ${JSON.stringify(first)} at the first read under Episodes`);
+      assert.equal(first.place, "episodes");
+    }));
+
   it("a folder not there is noted missing, in both branches: the log still says so, and a local Mac's late checks still run", () =>
     withWorld(async (w) => {
       rmSync(w.drop, { recursive: true, force: true });

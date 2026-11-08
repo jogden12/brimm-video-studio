@@ -1773,10 +1773,14 @@ function accessFindingOf(ctx) {
       if (left.length && noRunAtWork(ctx, drop, pidOf())) unseen = left.map(({ name }) => name);
     }
   }
-  const noted = ["drop", "episodes"].filter((place) => (note.places[place] || {}).okNode);
-  const needsAccess = noted.filter((place) => needsFilesAccess(places[place], home));
-  const agentNodeNow = needsAccess.length ? ctx.agentNode() : "";
-  const finding = findingOf({ note, now, places, agentPid: agentPidNow, missing, unseen, agentNode: agentNodeNow, needsAccess });
+  const args = { note, now, places, agentPid: agentPidNow, missing, unseen };
+  let finding = findingOf(args);
+  // A new node is the last finding: the places that need access, and the plist's node (plutil), are worked out only when nothing else is to be said.
+  if (!finding) {
+    const noted = ["drop", "episodes"].filter((place) => (note.places[place] || {}).okNode);
+    const needsAccess = noted.filter((place) => needsFilesAccess(places[place], home));
+    finding = findingOf({ ...args, agentNode: needsAccess.length ? ctx.agentNode() : "", needsAccess });
+  }
   if (!finding) return null;
   const folder = places[finding.place];
   const words = finding.place === "drop" ? `your drop folder, ${dropWords(ctx.settings, ctx.machine, home)}` : folder ? placeWordsOf(finding.place, folder, home) : "";
