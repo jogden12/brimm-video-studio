@@ -58,7 +58,7 @@ export function box() {
     `settings` this Mac's settings; an argument may be a function of the home. Gives { status, out, err, home, left, ran }. */
 export function askWith({ installed = {}, files = [], onPath = STAND_INS, ffmpegSays = FFMPEG_SAYS, claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", settings }, ...args) {
   assert.ok(args.includes("--print"), "the installer is only ever asked what it would do");
-  const dir = mkdtempSync(join(tmpdir(), "brimm-install-"));
+  const dir = mkdtempSync(join(tmpdir(), "brimm-ties-install-"));
   try {
     const home = join(dir, "home");
     const bin = join(dir, "bin");

@@ -6,7 +6,7 @@
 //   Tie 3: words_for, finder_sentence and privacy_notes, which rest on Studio's three functions.
 //   Then the keys typed while the chooser is open, on a pseudo-terminal (/usr/bin/script).
 // Nothing is written outside a folder made for the test; no real window, app, claude or installer run is made.
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -22,6 +22,21 @@ const SETTINGS_JS = join(HERE, "settings.js");
 const notAMac = process.platform !== "darwin" || !existsSync("/bin/zsh") ? "the move script is for a Mac: it needs zsh and plutil" : false;
 const noScript = existsSync("/usr/bin/script") ? false : "there is no /usr/bin/script here, which gives the test a real terminal";
 const NODE_DIR = dirname(process.execPath);
+/** Studio's checkout and the node, given to zsh by the environment, never quoted into its text. */
+const PATHS = { T_STUDIO: STUDIO, T_NODE: process.execPath };
+
+/** Every folder a test makes is taken away after it, whether it passed or failed. */
+const cleanups = [];
+afterEach(() => {
+  while (cleanups.length) {
+    try { cleanups.pop()(); } catch { /* already gone */ }
+  }
+});
+const boxed = () => {
+  const d = box();
+  cleanups.push(d.done);
+  return d;
+};
 
 /** A made-up world for one run of the readers: a folder of its own with a home, BRIMM Video and the folders the checks look at. */
 function world({ settings, transcribe, transcribeOff } = {}) {
@@ -36,7 +51,9 @@ function world({ settings, transcribe, transcribeOff } = {}) {
   if (settings) put(join(home, "Library", "Application Support", "BRIMM Video", "settings.json"), JSON.stringify({ version: 1, machine: "Mac Studio", root, checkout: STUDIO, import: "light", ...settings }));
   if (transcribe) put(join(home, "Library", "LaunchAgents", "com.thebrimm.transcribe.plist"), transcriptAgent(transcribe));
   if (transcribeOff) put(join(home, "Library", "LaunchAgents", "com.thebrimm.transcribe.plist.off"), transcriptAgent(transcribeOff));
-  return { dir, home, root, put, done: () => rmSync(dir, { recursive: true, force: true }) };
+  const done = () => rmSync(dir, { recursive: true, force: true });
+  cleanups.push(done);
+  return { dir, home, root, put, done };
 }
 
 /** Studio's `plan`, awaited: { code, said }. A run that says nothing is a failed test, never "nothing wrong". */
@@ -96,6 +113,11 @@ describe("tie 1: settings.js plan's refusals, read by the app's refused_pick", {
       [join(w.home, "BRIMM Video Work"), "the drop folder cannot be BRIMM Video Work, or inside it but for Drop, or hold it"],
       [join(w.home, "BRIMM Video Studio", "Drop"), "the drop folder cannot be BRIMM Video Studio, or inside it, or hold it"],
       ["Desktop/Drop", "the drop folder must be a whole path"],
+      [`${w.dir}/x/../y`, "the drop folder must be named by a whole path with no . or .. in it"],
+      [join(w.root, "References"), "the drop folder cannot be References in BRIMM Video, or inside it, or hold it"],
+      [join(w.root, "Unedited Video", "Mac Studio"), "the drop folder cannot be Unedited Video in BRIMM Video, or inside it, or hold it"],
+      [join(w.home, "BRIMM Video Workshop"), "the drop folder cannot be BRIMM Video Workshop, or inside it, or hold it"],
+      [join(w.home, "Documents", "Zoom"), "the drop folder cannot be Zoom's recordings, or inside it, or hold it"],
       [join(w.home, "Nowhere", "Drop"), "the folder that is to hold the drop folder is not there"]
     ];
     for (const [pick, why] of rows) {
@@ -183,6 +205,7 @@ describe("tie 1: settings.js plan's refusals, read by the app's refused_pick", {
     const listed = join(w.dir, "Other", "BRIMM Transcripts");
     w.put(join(w.home, "Library", "LaunchAgents", "com.thebrimm.transcribe.plist.off"), transcriptAgent([listed]));
     const rows = [
+      [`${w.dir}/x/../y`, "the exports folder must be named by a whole path with no . or .. in it"],
       [laptopDrop, cannot("Drop in BRIMM Video")],
       [join(w.root, "Episodes"), cannot("Episodes in BRIMM Video")],
       [join(w.root, "References"), cannot("References in BRIMM Video")],
@@ -199,6 +222,11 @@ describe("tie 1: settings.js plan's refusals, read by the app's refused_pick", {
       [jasons, marked("Jason's MacBook", jasons)],
       [join(jasons, "HF"), markedAbove("Jason's MacBook", jasons)]
     ];
+    // A relative exports folder never reaches exportsFolderFault: the argument parser refuses it first, in words the app does not
+    // send back to a question, so it is a stop.
+    const relative = await plan(w, "--drop-folder", drop, "--exports-folder", "Exports");
+    assert.deepEqual([relative.code, relative.said[0]], [1, 'Not written: --exports-folder takes "<whole path>".']);
+    assert.deepEqual(reading(w, relative.said[0]), { refused: "", kind: "", words: "", reason: "" });
     for (const [pick, why] of rows) {
       const { code, said } = await plan(w, "--drop-folder", drop, "--exports-folder", pick);
       assert.deepEqual([code, said[0]], [1, NOT_WRITTEN(why)], why);
@@ -246,7 +274,7 @@ describe("tie 2: Studio's real install.sh --print, read by the app", { skip: not
   const reader = () => world();
 
   it("gives a drop folder in Dropbox the Warning with Dropbox, once, and one under Desktop L1c's form for Desktop & Documents; neither is a refused pick", () => {
-    const d = box();
+    const d = boxed();
     const w = reader();
     for (const [folder, name] of [["Library/CloudStorage/Dropbox-X", "Dropbox"], ["Desktop", "iCloud Drive, if it keeps Desktop & Documents"]]) {
       const r = askWith({ files: [`${folder}/.keep`] }, ...BASE, "--drop-folder", (home) => `${home}/${folder}/In`, d.root);
@@ -261,7 +289,7 @@ describe("tie 2: Studio's real install.sh --print, read by the app", { skip: not
   });
 
   it("gives a drop folder on this Mac no Warning", () => {
-    const d = box();
+    const d = boxed();
     const w = reader();
     const r = askWith({ files: ["Videos/.keep"] }, ...BASE, "--drop-folder", (home) => `${home}/Videos/In`, d.root);
     assert.equal(r.status, 0, r.err + r.out);
@@ -271,7 +299,7 @@ describe("tie 2: Studio's real install.sh --print, read by the app", { skip: not
   });
 
   it("gives Downloads as the drop folder a refused pick of the drop question", () => {
-    const d = box();
+    const d = boxed();
     const w = reader();
     const r = askWith({ files: ["Downloads/.keep"] }, ...BASE, "--drop-folder", (home) => `${home}/Downloads`, d.root);
     const why = "the drop folder cannot be Downloads, or inside it, or hold it";
@@ -282,7 +310,7 @@ describe("tie 2: Studio's real install.sh --print, read by the app", { skip: not
   });
 
   it("gives an empty pick while the old drop folder holds a video a stop: not 0, and a first line the app does not send back to a question", () => {
-    const d = box();
+    const d = boxed();
     const w = reader();
     const old = join(d.root, "Unedited Video", "Mac Studio");
     mkdirSync(old, { recursive: true });
@@ -296,7 +324,7 @@ describe("tie 2: Studio's real install.sh --print, read by the app", { skip: not
   });
 
   it("gives a pick holding another Mac's marker, and a pick a made-up transcribe plist watches, refused picks", () => {
-    const d = box();
+    const d = boxed();
     const w = reader();
     const jasons = join(d.dir, "Jason drop");
     mkdirSync(jasons);
@@ -316,7 +344,7 @@ describe("tie 2: Studio's real install.sh --print, read by the app", { skip: not
   });
 
   it("passes a name with an apostrophe, an accent and an emoji whole, in the print's Its drop folder line", () => {
-    const d = box();
+    const d = boxed();
     const w = reader();
     const name = "It’s café 🎬 x";
     const r = askWith({ files: ["Videos/.keep"] }, ...BASE, "--drop-folder", (home) => `${home}/Videos/${name}`, d.root);
@@ -338,11 +366,11 @@ describe("tie 2: Studio's real install.sh --print, read by the app", { skip: not
     assert.equal(shown.status, 0, shown.stderr + shown.stdout);
     assert.ok(lineOf(`\n${shown.stdout}`, `  Its drop folder:  ${drop}`), shown.stdout);
     assert.ok(lineOf(`\n${shown.stdout}`, `  Exports from HyperFrames, looked for in:  ${exports}`), shown.stdout);
-    const out = zsh(`STUDIO=${JSON.stringify(STUDIO)} NODE=${JSON.stringify(process.execPath)} CHECKOUT_NOW=${JSON.stringify(STUDIO)} INSTALL_STARTED=yes\nSETTINGS="$HOME/Library/Application Support/BRIMM Video/settings.json"\nshow_folders`, { home: w.home, dir: w.dir });
+    const out = zsh(`STUDIO="$T_STUDIO" NODE="$T_NODE" CHECKOUT_NOW="$T_STUDIO" INSTALL_STARTED=yes\nSETTINGS="$HOME/Library/Application Support/BRIMM Video/settings.json"\nshow_folders`, { home: w.home, dir: w.dir, env: PATHS });
     assert.deepEqual(lines(out), [drop, exports, ""]);
     // With no exportsPath the exports line is Downloads, not nothing.
     w.put(join(w.home, "Library", "Application Support", "BRIMM Video", "settings.json"), JSON.stringify({ version: 1, machine: "Mac Studio", root: w.root, checkout: STUDIO, import: "light", handoffVersion: 2, dropPath: drop }));
-    const plain = zsh(`STUDIO=${JSON.stringify(STUDIO)} NODE=${JSON.stringify(process.execPath)} CHECKOUT_NOW=${JSON.stringify(STUDIO)} INSTALL_STARTED=yes\nSETTINGS="$HOME/Library/Application Support/BRIMM Video/settings.json"\nshow_folders`, { home: w.home, dir: w.dir });
+    const plain = zsh(`STUDIO="$T_STUDIO" NODE="$T_NODE" CHECKOUT_NOW="$T_STUDIO" INSTALL_STARTED=yes\nSETTINGS="$HOME/Library/Application Support/BRIMM Video/settings.json"\nshow_folders`, { home: w.home, dir: w.dir, env: PATHS });
     assert.deepEqual(lines(plain), [drop, join(w.home, "Downloads"), ""]);
     w.done();
   });
@@ -359,7 +387,7 @@ describe("tie 3: the app's words and decisions rest on Studio's folderWords, clo
       "/Volumes/X/In",
       join(w.home, "BRIMM Video Work", "Drop")
     ];
-    const setup = `STUDIO=${JSON.stringify(STUDIO)} NODE=${JSON.stringify(process.execPath)}\n`;
+    const setup = 'STUDIO="$T_STUDIO" NODE="$T_NODE"\n';
     const downloads = join(w.home, "Downloads");
     const DOWNLOADS_LINE = "Studio looks in Downloads for exports, whatever is picked. macOS may ask once whether Claude Code may access files in your Downloads folder, the first time the chat on this Mac hands off a video and looks for its export. About 15 minutes after each hand-off, once the export's copies in Dropbox are checked, Studio's background job deletes the export from Downloads, and macOS may ask once whether node may. Choose Allow each time. If node was refused, allow it in System Settings › Privacy & Security › Files and Folders. Until then, exports stay in Downloads, to be deleted by hand.";
     // Pinned apart from the functions, so that a change to what a folder is called is seen here too.
@@ -369,15 +397,15 @@ describe("tie 3: the app's words and decisions rest on Studio's folderWords, clo
       const cloud = studio.cloudFolder(folder, w.home);
       const asks = studio.needsFilesAccess(folder, w.home);
       assert.equal(words, PINNED[i], folder);
-      assert.deepEqual(lines(zsh(`${setup}words_for ${JSON.stringify(folder)}`, { home: w.home, dir: w.dir })), [words, ""], folder);
+      assert.deepEqual(lines(zsh(`${setup}words_for "$T_FOLDER"`, { home: w.home, dir: w.dir, env: { ...PATHS, T_FOLDER: folder } })), [words, ""], folder);
       for (const fresh of ["", "yes"]) {
-        const sentence = lines(zsh(`${setup}SET_UP_FRESH=${fresh}\nfinder_sentence ${JSON.stringify(folder)}`, { home: w.home, dir: w.dir }));
+        const sentence = lines(zsh(`${setup}SET_UP_FRESH=${fresh}\nfinder_sentence "$T_FOLDER"`, { home: w.home, dir: w.dir, env: { ...PATHS, T_FOLDER: folder } }));
         const wanted = cloud === "Dropbox"
           ? `The drop folder is shown in Finder: ${words}. In Finder, Control-click it, choose Make available offline${fresh ? ", and click Allow if macOS asks whether node may read the Dropbox folder" : ""}.`
           : `This is the drop folder from now on: ${words}. Drag it into Finder's sidebar now, under Favorites, so it is one click away. To bring in a video that is in Dropbox, hold Option as you drag it, so that Dropbox keeps its copy. Never export into the drop folder.`;
         assert.deepEqual(sentence, [wanted, ""], `${folder} fresh=${fresh}`);
         // The drop folder's privacy line: a Dropbox folder asks only on a Mac set up fresh, any other cloud folder always, and else as needsFilesAccess says.
-        const notes = lines(zsh(`${setup}SET_UP_FRESH=${fresh}\nDROP_FOLDER=${JSON.stringify(folder)} EXPORTS_FOLDER=${JSON.stringify(downloads)} EXPORTS_PASSED_OVER=\nprivacy_notes`, { home: w.home, dir: w.dir }));
+        const notes = lines(zsh(`${setup}SET_UP_FRESH=${fresh}\nDROP_FOLDER="$T_FOLDER" EXPORTS_FOLDER="$T_DOWNLOADS" EXPORTS_PASSED_OVER=\nprivacy_notes`, { home: w.home, dir: w.dir, env: { ...PATHS, T_FOLDER: folder, T_DOWNLOADS: downloads } }));
         const mayAsk = cloud === "Dropbox" ? Boolean(fresh) : Boolean(cloud) || asks;
         assert.equal(notes[0], DOWNLOADS_LINE);
         if (mayAsk) {
@@ -387,7 +415,7 @@ describe("tie 3: the app's words and decisions rest on Studio's folderWords, clo
           assert.deepEqual(notes, [DOWNLOADS_LINE, ""], `${folder} fresh=${fresh}`);
         }
         // The exports folder's: the same decision for the folder as the exports folder.
-        const out = lines(zsh(`${setup}SET_UP_FRESH=${fresh}\nDROP_FOLDER=${JSON.stringify(join(w.home, "BRIMM Video Work", "Drop"))} EXPORTS_FOLDER=${JSON.stringify(folder)} EXPORTS_PASSED_OVER=\nprivacy_notes`, { home: w.home, dir: w.dir }));
+        const out = lines(zsh(`${setup}SET_UP_FRESH=${fresh}\nDROP_FOLDER="$T_DEFAULT" EXPORTS_FOLDER="$T_FOLDER" EXPORTS_PASSED_OVER=\nprivacy_notes`, { home: w.home, dir: w.dir, env: { ...PATHS, T_FOLDER: folder, T_DEFAULT: join(w.home, "BRIMM Video Work", "Drop") } }));
         if (mayAsk) assert.equal(out[1], `macOS may ask whether Claude Code may look in ${words}, at the first hand-off. Choose Allow.`, `${folder} fresh=${fresh}`);
         else assert.deepEqual(out, [DOWNLOADS_LINE, ""], `${folder} fresh=${fresh}`);
       }
@@ -512,6 +540,7 @@ describe("keys typed while the chooser is open, on a real terminal", { skip: not
     try {
       await waitFor("the stand-in chooser to start", () => existsSync(t.files.started));
       await waitFor("the chooser's line in the output", () => run.out().includes("A window to choose the folder is opening."));
+      await waitFor("the chooser line's end", () => run.out().includes("y uses the suggested folder."));
       const mark = run.out().length;
       run.type("y");
       await waitFor("the echoed y", () => run.out().slice(mark).includes("y"));
