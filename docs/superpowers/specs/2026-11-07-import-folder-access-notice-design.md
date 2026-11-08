@@ -1,7 +1,13 @@
 # When macOS stops the import reading a folder: notice it and say it (design)
 
-7 November 2026 (version 3, 7 November 2026, after Phase 3 merged). A design for Jason to approve. The build plan is
-`docs/superpowers/plans/2026-11-07-import-folder-access-notice-plan.md`.
+7 November 2026 (version 3.1, 8 November 2026: version 3 with the build's rulings). A design for Jason to approve. The build
+plan is `docs/superpowers/plans/2026-11-07-import-folder-access-notice-plan.md`.
+
+**What changed in version 3.1.** The build and its reviews settled five points, each now in its part: the run's first looks
+come right after `clearRuns`, before anything else reads Episodes in Dropbox (part 1); a Downloads finding comes after
+`missing` and `unseen`, so it never hides a video the import has not taken (part 3); in her chat Downloads never gives
+`newNode` (part 3); the setup line passes over a note about a folder that is no longer where its place is (part 5); and a
+line with no code leaves out the empty brackets (Words).
 
 **What changed from version 2.** Version 2 was written against e17df12, before Phase 3. Phase 3 has merged (main 565150f), and a
 check of this design and the plan against that code found sixteen points that no longer fit: line numbers, where the first
@@ -130,7 +136,9 @@ Where the import uses them (the episode import of this Mac's drop folder only; t
   `episodeMode(folder, deps.settings, home)` holds (the loop also walks old-mode folders, which are left as they are), so that a
   run stuck at its very first touch is inside the bracket. A folder not there is noted `missing`, in both branches: the late
   checks of a missing local drop folder still run, as `tests/unedited.test.js:3358-3378` pins.
-- `importEpisodes`, first thing, before `finishDue(true)` (`filing.js:1830`; after `clearRuns`, `clearCrashes` and `oweForgotten`):
+- `importEpisodes`, first thing: right after `clearRuns`, and before `labelsNow`, `clearCrashes` and `oweForgotten` (each of
+  which reads Episodes in Dropbox, so a run held at macOS's question there is inside the bracket) and `finishDue(true)`. Those
+  still run as before; no new early return:
   `lookAt("drop", dir)` and `lookAt("episodes", episodesFolder(root))`.
   - After a drop look that is not `ok`, the run reads nothing more in the drop folder: no `noteSeen`, `releaseHeld` or imports.
   - After an episodes look that is `refused`, `locked` or `error`, it imports nothing (each import needs Episodes). `missing` is
@@ -183,7 +191,7 @@ The rule that decides a banner lives in `access.js`, so that the import's look s
 | finding | when | covers |
 |---|---|---|
 | `asking` | `looking` is set, its `pid` is the agent's own (the `pid = N` that `launchctl print` gives, which `agentRunning` already reads), and it is more than a minute old | a run waiting on macOS's question, or on Dropbox listing a folder slowly |
-| `refused` / `locked` / `error` | a place's state is so, and its `folder` is still where that place is now (a note about an old drop folder is passed over) | Don't Allow, a question that ended without Allow, the folder's own permissions |
+| `refused` / `locked` / `error` | the drop folder's or Episodes' state is so, and its `folder` is still where that place is now (a note about an old drop folder is passed over). Downloads' own refusal comes later, after `unseen` | Don't Allow, a question that ended without Allow, the folder's own permissions |
 | `missing` | on a Mac with a drop folder of its own (`settings.js:78` `isLocal`), that folder is not there, as her chat sees it | another disk not connected, a folder moved. A missing Dropbox drop folder is Dropbox's to bring back (`unedited.js:1574-1576`), so it says nothing |
 | `unseen` | a video in this Mac's own drop folder, older than 3 minutes (ctime), that no status of this Mac names, that `seen.json` does not note and that no `ok` drop look made after it came saw, while no run is at work (neither the agent's pid nor a live pid in the drop folder's lock, `run.js` `lockFile` under `runsFolder`) | node gone or broken after a Homebrew change, the agent not loaded, a refusal from before this build |
 | `newNode` | `okNode` is set, the node the plist names (its real path) is not it, and a noted place needs Files and Folders access | a heads-up before any video is dropped |
@@ -196,7 +204,11 @@ How the reader gets its facts. The agent's pid and node are asked only when a fi
 the real `launchctl` or `plutil` when the caller gave `agentRunning` instead: `agentPid` falls back to it, and `agentNode`
 to `""`. `agentNode` reads the plist under the Studio home (`<home>/Library/LaunchAgents/com.thebrimm.unedited.plist`,
 `ProgramArguments.0`, `install.sh:88`, `351-353`), and gives `""` on any failure; `""` is never a new node. The lock's pid is
-checked with her chat's `ctx.alive`. A place `downloads` always counts as needing access.
+checked with her chat's `ctx.alive`. `agentNode` is asked only when no other finding holds. In her chat `downloads` never gives
+`newNode` (its `okNode` is renewed only by a later finish, so it would say "new node" for days); the import's new-node banner,
+shown once per node, does count it.
+
+After `unseen` and before `newNode` comes a Downloads `refused` / `locked` / `error`, said only within a day of its note.
 
 Only the places `drop` and `episodes` block a drop video or take anything from the overview. A `downloads` finding is said in
 `behind` and `episodes` only, and only while that place's note `at` is within 24 hours (`DOWNLOADS_SAY_MS = 24 * 60 * 60 *
@@ -245,7 +257,9 @@ only for a machine), the installer reads `access.json` and prints one line: both
 line), or a place still being looked at. The setup cannot count on the import having had 90 seconds (the check stops as soon
 as Claude answers, and not at all with `--rules-only`), and no wait is added. So the line judges the `looking` it finds: one
 whose pid is not alive is passed over (the places are used); a live one under a minute old gets new words, "the import is still
-looking"; an older one gets the asking line. The entry is `node access.js --setup-line`, behind the main-module guard, since
+looking"; an older one gets the asking line. A note about a folder that is no longer where its place is (a drop folder just
+switched) is passed over, and so is a Downloads note more than a day old. The entry is `node access.js --setup-line`, behind
+the main-module guard, since
 every `tool/*.js` must load alone. No launch agent is added or used differently. The installer's own words change (the real run's, and the `--print` "Files and
 Folders:" line if it names node again), so the old and new words go to the installer session (`local_d62ac744`) first: the Move
 to Studio app reads `install.sh`'s lines by their words (X5).
@@ -291,7 +305,7 @@ Every new sentence, exactly. `<words>` is the drop folder as the guide's "Your d
 | chat, asking | `The import has waited more than a minute to look in <place>. If a box on this Mac's screen asks whether "node" may look in it, choose Allow, and the import goes on.` |
 | chat, refused | `This Mac does not let the import look in <place>, so the videos you drop wait. In System Settings, under Privacy & Security, Files and Folders, turn on <switch> under each "node" listed. Then say "look again".` |
 | chat, locked | `The import cannot open <place>: the folder's own permissions shut it. Ask Jason. (Jason: node gets EACCES there; see Get Info, Sharing & Permissions.)` |
-| chat, error | `The import could not look in <place> (<code>). Ask Jason. (Jason: see ~/Library/Logs/brimm-video.log.)` |
+| chat, error | `The import could not look in <place> (<code>). Ask Jason. (Jason: see ~/Library/Logs/brimm-video.log.)`; with no code, ` (<code>)` is left out |
 | chat, missing | `Your drop folder, <words>, is not there now. If it is on another disk, connect the disk, then say "look again".` |
 | chat, unseen (behind, episodes) | `The import has not taken <n> video(s) in your drop folder, and no import is running. Say "look again". If <it/they> still wait(s), ask Jason. (Jason: see ~/Library/Logs/brimm-video.log, and launchctl print gui/$(id -u)/com.thebrimm.unedited.)`, with "1 video" / "it" / "waits" for one |
 | step, unseen | `The import has not taken it, and no import is running. Say "look again". If it still waits, ask Jason.` |
