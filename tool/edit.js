@@ -18,6 +18,7 @@
 //                                         made, and the Reel picked (app-reel.js)
 //   node edit.js status ["<words>"]       what is running on this Mac, the imports, and what detached runs left
 //   node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped
+//   node edit.js look                     ask the import to look in the drop folder now (after she allowed node in System Settings)
 //   node edit.js name, title, reel drop
 //                                         the episode's name, its title, and its Reels
 //   node edit.js finish "<episode>"       gather what HyperFrames exported, ask what it must, and then, detached,
@@ -63,7 +64,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, answerOf, kindOf as recordKind } from "./episode.js";
-import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf, importingFolderOf, statusFoldersOf } from "./settings.js";
+import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf, importingFolderOf, statusFoldersOf, downloadsFolder, needsFilesAccess } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
@@ -102,7 +103,8 @@ import { SESSION_ID } from "./scan.js";
 import { processTable, readProcesses } from "./chain.js";
 import { SHOWN_MARKER, addShown, cantOpen, clearShownIn, freeShownName, madeShownByIdFolder, revealed, shownByIdFolder } from "./reveal.js";
 import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sessionByFollowUp } from "./receipts.js";
-import { isRunning, lastLine, runProgram } from "./run.js";
+import { isRunning, lastLine, lockFile, runProgram } from "./run.js";
+import { DOWNLOADS_SAY_MS, LOOK_ASKED, LOOK_AT_WORK, UNSEEN_MS, accessLine, blocksDrop, saysInEpisodes, saysInOverview, stepLine, findingOf, placeWordsOf, readAccess, switchFor } from "./access.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
@@ -219,6 +221,8 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         its command line
   node edit.js status ["<words>"]       what is running on this Mac, the imports, and what detached runs left
   node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped
+  node edit.js look                     ask the import to look in the drop folder now (after she allowed node in System
+                                        Settings)
   node edit.js name "<episode>" "<name>"
                                         give the episode its name. Nothing is renamed
   node edit.js title "<episode>" [--words "<words>"] [--approve] [--change]
@@ -413,6 +417,10 @@ export function contextFor(deps = {}) {
     openApp: deps.openApp || openApp,
     kickstart: deps.kickstart || kickstart,
     agentRunning: deps.agentRunning || agentRunning,
+    // The launch agent's pid and node, asked only when a finding could need them (accessFinding). A caller that gave agentRunning and
+    // neither of these never reaches launchctl or plutil: the pid is -1 while it runs, and the node is not known.
+    agentPid: deps.agentPid || (deps.agentRunning ? () => (deps.agentRunning() ? -1 : null) : agentPid),
+    agentNode: deps.agentNode || (deps.agentRunning ? () => "" : () => agentNode(home)),
     deps
   };
 }
@@ -1126,6 +1134,9 @@ export async function episodes(ctx) {
     for (const line of waiting) say(line);
   }
   if (unreadable) say(dropUnreadable(dropWords(ctx.settings, ctx.machine, ctx.home)));
+  // What the import's note and the drop folder show of it: once, after that one (every place, Downloads too; never a new node).
+  const access = accessFinding(ctx);
+  if (access && access.line && saysInEpisodes(access.finding)) say(access.line);
   // The imports, from their status files.
   const imports = importLines(ctx);
   if (imports.length) {
@@ -1684,6 +1695,99 @@ function agentRunning() {
   return ran.status === 0 && /^\s*pid = \d+/m.test(ran.stdout);
 }
 
+/** The process number launchctl names for the launch agent while it runs (`pid = N`), or null when it is not running or cannot be asked. */
+function agentPid() {
+  const ran = spawnSync("/bin/launchctl", ["print", `gui/${process.getuid()}/${AGENT}`], { encoding: "utf8" });
+  const found = ran.status === 0 ? /^\s*pid = (\d+)/m.exec(ran.stdout) : null;
+  return found ? Number(found[1]) : null;
+}
+
+/** The real path of the node the launch agent's plist names (ProgramArguments.0, in `home`'s LaunchAgents folder, as install.sh writes it),
+    or "" when that cannot be read for any reason. */
+function agentNode(home) {
+  try {
+    const ran = spawnSync("/usr/bin/plutil", ["-extract", "ProgramArguments.0", "raw", "-o", "-", join(home, "Library", "LaunchAgents", `${AGENT}.plist`)], { encoding: "utf8" });
+    const path = ran.status === 0 ? String(ran.stdout).trim() : "";
+    return path ? realpathSync(path) : "";
+  } catch (e) {
+    return "";
+  }
+}
+
+/** What the import's note (access.json) and this Mac's drop folder show, as one finding for her chat: null, or { finding, line, step }
+    (access.js findingOf, accessLine, and stepLine's words for a video's step are the caller's: see `step`). It asks the launch agent
+    nothing unless a finding could need it, and writes nothing. */
+export function accessFinding(ctx) {
+  try {
+    return accessFindingOf(ctx);
+  } catch (e) {
+    return null;
+  }
+}
+
+/** No run is at work: the launch agent has no pid, and the lock (whose text is a pid) holds no live one. */
+function noRunAtWork(ctx, drop, agentPidNow) {
+  if (agentPidNow !== null) return false;
+  try {
+    const lockPid = parseInt(readFileSync(lockFile(drop, runsFolder(ctx.home)), "utf8").trim(), 10);
+    return !(Number.isInteger(lockPid) && lockPid > 0 && ctx.alive(lockPid));
+  } catch (e) {
+    return true; // no lock, or one that cannot be read: no run holds it
+  }
+}
+
+function accessFindingOf(ctx) {
+  const now = ctx.now();
+  const home = ctx.home;
+  const note = readAccess(home);
+  const drop = dropFolderOf(ctx.settings, home);
+  const places = { drop, episodes: ctx.episodes };
+  const downloads = note.places.downloads;
+  if (downloads && typeof downloads.at === "number" && now - downloads.at <= DOWNLOADS_SAY_MS) places.downloads = downloadsFolder(home);
+  let pid;
+  const pidOf = () => (pid === undefined ? (pid = ctx.agentPid()) : pid);
+  const agentPidNow = note.looking ? pidOf() : null;
+  const missing = isLocal(ctx.settings) && !existsSync(drop);
+  // A video the import never took: only this Mac's own drop folder, and only while no run is at work.
+  let unseen = [];
+  if (!missing) {
+    let names = [];
+    try {
+      names = readdirSync(drop).filter(isMedia);
+    } catch (e) {
+      names = [];
+    }
+    const statOf = (path) => {
+      try {
+        return ctx.stat(path);
+      } catch (e) {
+        return null;
+      }
+    };
+    const old = names.map((name) => ({ name, stat: statOf(join(drop, name)) })).filter(({ stat }) => stat && stat.isFile() && now - stat.ctimeMs > UNSEEN_MS);
+    if (old.length) {
+      const taken = new Set(readStatusesIn(statusReadFolders(ctx), now).filter(({ status }) => status && status.machine === ctx.machine).map(({ status }) => status.video));
+      const seen = readSeen(home);
+      const looked = note.places.drop && note.places.drop.state === "ok" && typeof note.places.drop.at === "number" && typeof note.places.drop.folder === "string" && resolve(note.places.drop.folder) === resolve(drop) ? note.places.drop.at : -Infinity;
+      const left = old.filter(({ name, stat }) => !taken.has(name) && !seen[seenKey(name, stat)] && !(looked > stat.ctimeMs));
+      if (left.length && noRunAtWork(ctx, drop, pidOf())) unseen = left.map(({ name }) => name);
+    }
+  }
+  const args = { note, now, places, agentPid: agentPidNow, missing, unseen };
+  let finding = findingOf(args);
+  // A new node is the last finding: the places that need access, and the plist's node (plutil), are worked out only when nothing else is to be said.
+  if (!finding) {
+    const noted = ["drop", "episodes"].filter((place) => (note.places[place] || {}).okNode);
+    const needsAccess = noted.filter((place) => needsFilesAccess(places[place], home));
+    finding = findingOf({ ...args, agentNode: needsAccess.length ? ctx.agentNode() : "", needsAccess });
+  }
+  if (!finding) return null;
+  const folder = places[finding.place];
+  const words = finding.place === "drop" ? `your drop folder, ${dropWords(ctx.settings, ctx.machine, home)}` : folder ? placeWordsOf(finding.place, folder, home) : "";
+  const opts = { placeWords: words, switchName: folder ? switchFor(folder, home) : "its switches" };
+  return { finding, line: accessLine(finding, opts), step: stepLine(finding, opts) };
+}
+
 /** Ask the launch agent to look in this Mac's drop folder now, as it does when something lands there: with its own
     arguments, its own environment and its own lock. When it is running already, nothing more is started, and its run
     looks again within a minute. Throws, saying why in launchctl's words, when it could not be asked. */
@@ -1930,7 +2034,7 @@ function lateCheckOwed(ctx, video, held, who = video, plain = (text) => text) {
   try {
     ctx.kickstart();
   } catch (e) {
-    say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
+    say(couldNotAsk(e));
     return 1;
   }
   if (problem) say(`${who} is imported, as ${name}. Dropbox found a problem with a copy of it before (${problem}): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is.`);
@@ -2021,10 +2125,39 @@ export async function retry(ctx, rest) {
   try {
     ctx.kickstart();
   } catch (e) {
-    say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
+    say(couldNotAsk(e));
     return 1;
   }
   say(`${who} is imported again${which}: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`);
+  return 0;
+}
+
+/** The line for a launch agent that could not be asked to look (retry, lateCheckOwed, look). */
+function couldNotAsk(e) {
+  return `The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`;
+}
+
+/** `look`: "look again", after she allowed node in System Settings (access-notice design, part 4). It names no episode. A look that has
+    waited for macOS's question over a minute says that line and kicks nothing; a run at work looks again within a minute by itself;
+    otherwise the launch agent is asked to look, once. */
+export async function look(ctx) {
+  const { say } = ctx;
+  const found = accessFinding(ctx);
+  if (found && found.finding.kind === "asking") {
+    say(found.line);
+    return 0;
+  }
+  if (!noRunAtWork(ctx, dropFolderOf(ctx.settings, ctx.home), ctx.agentPid())) {
+    say(LOOK_AT_WORK);
+    return 0;
+  }
+  try {
+    ctx.kickstart();
+  } catch (e) {
+    say(couldNotAsk(e));
+    return 1;
+  }
+  say(LOOK_ASKED);
   return 0;
 }
 
@@ -2765,6 +2898,19 @@ async function behind(ctx) {
     const differs = appOf(ctx.settings) ? toolchainDiffers(toolchainHolds(ctx.home)) : "";
     if (differs) ctx.say(`HyperFrames' command line on this Mac is not the one Studio needs. Ask Jason to update it when it suits. (Jason: Studio is pinned to version ${PIN.version}, and this Mac has ${differs}; the installer puts the pinned one in place.)`);
     if (added.length) ctx.say(`(Jason: her folder also allows, on this Mac: ${added.map(({ type, name }) => `${type} ${name}`).join(", ")}.)`);
+    // What the import's note and the drop folder show, last: needs no network. A new node also asks the launch agent to look now, when no
+    // run is at work, so that macOS's question comes up while she is at this Mac.
+    const found = accessFinding(ctx);
+    if (found) {
+      ctx.say(found.line);
+      if (found.finding.kind === "newNode") {
+        try {
+          if (noRunAtWork(ctx, dropFolderOf(ctx.settings, ctx.home), ctx.agentPid())) ctx.kickstart();
+        } catch (e) {
+          // the line is said all the same
+        }
+      }
+    }
     return 0;
   };
   const fetched = await git("fetch", "-q", "origin", "main");
@@ -6483,7 +6629,8 @@ function panelRuns(ctx) {
     and `kind` null. How far a video has got is read from the statuses of its Mac's imports of it, a running import and a hold
     only at the video's size, as heldBy takes them: one dropped again under the same name is another recording. Its import did
     not finish ("retry") when one failed, found a problem in its late check or stopped; it is a Zoom download held there ("zoom");
-    it is being imported ("importing", at its status's step); or it is still coming in ("arriving"). A video an episode holds is
+    it is being imported ("importing", at its status's step); or it is still coming in ("arriving"), or, when the import cannot take it
+    (accessFinding), "blocked", with the import's step line in `blocked`. A video an episode holds is
     imported, and the records say where it has got: it is left out, unless its import is to be tried again. Each is named by its
     label, else by what it is and its size, never by its file's name, which may be a client's: two of one size with no label yet
     are told apart by when they came (guide.js apart). It came when this Mac's import first saw it (seen.json), as `episodes`
@@ -6493,8 +6640,12 @@ function panelRuns(ctx) {
     minute (clockNear). Gives { videos, unreadable }: `unreadable` is whether macOS does not let this Mac's chat look in this Mac's own drop
     folder (EPERM: a folder its own permissions shut, EACCES, or one that is not there is passed over, as another Mac's is), which
     the overview says under the drop folder's line (Phase 3, L1c). */
-function guideDrops(ctx) {
+function guideDrops(ctx, access = null) {
   const now = ctx.now();
+  // The finding that blocks a video (the caller's, once per pass): for a place that is the drop folder or Episodes, every arriving video of
+  // this Mac; for the videos the import never took, only those. A Downloads finding, a new node and a missing folder block nothing.
+  const blocking = access && access.step && blocksDrop(access.finding) ? access : null;
+  const unseenNames = blocking && blocking.finding.kind === "unseen" ? new Set(blocking.finding.videos) : null;
   const statuses = readStatusesIn(statusReadFolders(ctx), now);
   const seen = readSeen(ctx.home);
   const runs = panelRuns(ctx);
@@ -6514,7 +6665,9 @@ function guideDrops(ctx) {
       const mine = statuses.filter(({ status }) => status && status.video === video && status.machine === mac && (!["running", "held"].includes(importState(status, now)) || status.bytes === found.size));
       const states = mine.map(({ status }) => importState(status, now));
       const running = mine.find(({ status }) => importState(status, now) === "running");
-      const state = states.some((s) => ["failed", "problem", "stopped"].includes(s)) ? "retry" : states.includes("held") ? "zoom" : running ? "importing" : "arriving";
+      let state = states.some((s) => ["failed", "problem", "stopped"].includes(s)) ? "retry" : states.includes("held") ? "zoom" : running ? "importing" : "arriving";
+      const blocked = state === "arriving" && mac === ctx.machine && blocking && (!unseenNames || unseenNames.has(video));
+      if (blocked) state = "blocked";
       if (state !== "retry") {
         const holding = holdingEpisode({ root: ctx.root, video, bytes: found.size });
         if (holding && !holding.unknown) continue;
@@ -6529,7 +6682,7 @@ function guideDrops(ctx) {
       const fresh = (s) => (Number.isFinite(s) && s - since > 0 ? Math.round(s - since) : null);
       const times = run ? { left: fresh(run.left), total: fresh(run.total), n: run.n, of: run.of } : null;
       const ready = times ? readyIn(times) : null;
-      const drop = { here, state, step: state === "importing" ? shownStep(running.status.step) : "", left: times ? times.left : null, total: times ? times.total : null, readyAt: ready === null ? "" : clockNear(now + ready * 1000) };
+      const drop = { here, state, ...(blocked ? { blocked: blocking.step } : {}), step: state === "importing" ? shownStep(running.status.step) : "", left: times ? times.left : null, total: times ? times.total : null, readyAt: ready === null ? "" : clockNear(now + ready * 1000) };
       // `source` is for `guide tell` alone, which follows the video by it: never said.
       videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null, source: { mac, file: video, bytes: found.size } });
     }
@@ -6549,7 +6702,8 @@ function checkSentence({ due, took }) {
     are stopped until it is made (stoppedWords): a spelling and handing the video off again. */
 const ON_THE_CHECK = "You do not need to wait for it. A spelling and handing it off again wait until then.";
 
-/** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old, unreadable }. Each item (guide.js Item) is a
+/** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old, unreadable, access }. `access` is the import's line
+    when it cannot look (accessFinding; "" for none, a new node or Downloads), which the overview says under the drop folder's. Each item (guide.js Item) is a
     video in a drop folder, or an answered video, with what was read of it and its one next step, from her notes on this Mac
     (guide-note.js) and the time now. An episode with no record that can be read, one a newer brimm-video wrote, an archived one
     and one she left alone are passed over; one from before the switch, which has no answer, is counted in `old`, and not guided.
@@ -6572,7 +6726,9 @@ function guideItems(ctx) {
   const footageIn = partsReader(ctx.root);
   // The videos whose recording's move or check found a problem with its copy in Original files (L6), by the video whose hand-off owed it.
   const problemOf = new Set(readPendingsOf(ctx.home, "original").filter((p) => p.problem && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root)).map((p) => (p.of && p.of.id) || p.id));
-  const drops = guideDrops(ctx);
+  // The import's finding, read once for the pass (`guide wait` reads every 5 seconds).
+  const finding = accessFinding(ctx);
+  const drops = guideDrops(ctx, finding);
   const items = drops.videos.map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
   let old = 0;
   for (const name of folders(ctx)) {
@@ -6596,7 +6752,7 @@ function guideItems(ctx) {
     if (h && (!best || h.revision > best.facts.handoff.revision || (h.revision === best.facts.handoff.revision && h.at > best.facts.handoff.at))) newest.set(h.id, item);
   }
   const own = (item) => !item.next.done && item.next.stage !== "ops";
-  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item || own(item)), old, unreadable: drops.unreadable };
+  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item || own(item)), old, unreadable: drops.unreadable, access: finding && finding.line && saysInOverview(finding.finding) ? finding.line : "" };
 }
 
 /** A folder opened in Finder for the guide, as `which` opens QuickTime Player, and said as `what` is, in Finder words (`words`).
@@ -6696,8 +6852,8 @@ function noteFinished(ctx, { facts }) {
 
 /** The guide's overview of what guideItems read: this Mac's drop folder in Finder's words, each video under way with its one next
     step, and how many videos from before the switch it does not guide. */
-function sayOverview(ctx, { items, old, unreadable = false }) {
-  for (const line of overviewLines({ drop: dropWords(ctx.settings, ctx.machine, ctx.home), items, old, unreadable, local: isLocal(ctx.settings) })) ctx.say(line);
+function sayOverview(ctx, { items, old, unreadable = false, access = "" }) {
+  for (const line of overviewLines({ drop: dropWords(ctx.settings, ctx.machine, ctx.home), items, old, unreadable, local: isLocal(ctx.settings), access })) ctx.say(line);
   return 0;
 }
 
@@ -6955,7 +7111,7 @@ async function joinCommand(ctx, rest) {
 
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and so are `workcopy` (`kind` and `app` start it) and `join` (`plan … join` starts it): all three are in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, bring, status, retry, name, title, reel, reels, ask, finish, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, graphic, teachings: teachingsCommand, principles, ideas, refs, plan, footage };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, bring, status, retry, look, name, title, reel, reels, ask, finish, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, graphic, teachings: teachingsCommand, principles, ideas, refs, plan, footage };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

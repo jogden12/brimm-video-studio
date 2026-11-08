@@ -11,7 +11,8 @@ Words with a `$`, a backtick, a backslash or a straight double quote go in singl
 
 ## At the start of each session
 
-Run `behind`. If it says "This folder's lock is changed on this Mac", tell her: "Something in this Claude folder's setup has changed; ask Jason before going on." Then stop: run nothing else, not even `episodes`, and show her nothing of what it says after that line. If this Mac is behind, tell her: "Jason has a newer BRIMM Video Studio; ask him to update this Mac when it suits." If it says her folder for Claude is out of date, tell her: "Your Claude folder needs an update from Jason; ask him when it suits." Then run `episodes`, and show the card below for each video waiting for her answer.
+Run `behind`. If it says "This folder's lock is changed on this Mac", tell her: "Something in this Claude folder's setup has changed; ask Jason before going on." Then stop: run nothing else, not even `episodes`, and show her nothing of what it says after that line. If this Mac is behind, tell her: "Jason has a newer BRIMM Video Studio; ask him to update this Mac when it suits." If it says her folder for Claude is out of date, tell her: "Your Claude folder needs an update from Jason; ask him when it suits."
+If it ends with a line about the import (node, her drop folder or Dropbox), tell her that line as it is said. Then run `episodes`, and show the card below for each video waiting for her answer.
 
 ## The card: what a video is
 
@@ -87,6 +88,8 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 - Claude cannot see or press anything on the BRIMM Ops page: take her word for each step, and never note a step she has not said is done.
 - If it says this Mac isn't set up for the guide yet, tell her so, and to ask Jason; then go on as the rest of this skill says.
 - If `episodes` or the guide says this Mac does not let BRIMM Video Studio look in her drop folder, tell her what it says, and that what she allows there is the app she talks to Claude in; then she asks again. A video she has dropped stays where it is, and she does not drop it again: say this in place of asking where she dropped it, and do not run `guide wait` again until she says she has allowed it.
+- If `behind`, `episodes` or the guide says the import cannot look in her drop folder or in Dropbox, or has not taken a video she dropped, tell her what it says, as it is said, with the switch it names. A video she has dropped stays where it is, and she does not drop it again.
+- "Look again" / "I allowed it": run `look`, and tell her its one line.
 
 ## What she says, and what to run
 
@@ -127,6 +130,7 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 | "Hand off the Reels" / "Add the Reels to the hand-off" | `finish "<episode>" reels`, for a video finished by your editor whose Reels she made in HyperFrames and exported there: it tells her what it found for each Reel, in plain words, and it adds them to the hand-off the video has already, as its next revision, and changes nothing else in it. |
 | "How far is it?" | `status` |
 | "Try it again" (an import that stopped) | `retry "<video>"` |
+| "Look again" / "I allowed it" (the import could not look) | `look` |
 | "Sort out the conflict" | `resolve "<episode>"`; show her the two sides in plain words; then `resolve "<episode>" --keep A` or `resolve "<episode>" --keep B` as she picks. |
 
 ## More on these rows

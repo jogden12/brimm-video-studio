@@ -23,6 +23,7 @@ import { releaseEpisodeLock, runningCommand, takeEpisodeLock } from "./detached.
 import { askedAt, endedSinceYes } from "./finish-ended.js";
 import { holdsVideo, importState, leftByCrash, readStatusesIn, removeStatusIn, writeStatusIn } from "./importing.js";
 import { isRunning } from "./run.js";
+import { lookAt, lookLog, noteState, placeWordsOf, postIfDue, readAccess } from "./access.js";
 // kinds.js takes episodeKind from here: each is used only when called, so neither needs the other to have been read first.
 import { isZoomName, namesOf, withoutNames, zoomTimeOf } from "./kinds.js";
 import { gated, gatedAsOf, withShortId } from "./gate.js";
@@ -1416,6 +1417,18 @@ export function checkFinal(p, deps) {
     return;
   }
   const finished = read.record.finished;
+  // What macOS answered the Downloads export is noted in access.json, with the banner when it is due. Neither changes what the check does, and neither
+  // can stop it.
+  const noteDownloads = (err) => {
+    try {
+      const folder = downloadsFolder(home);
+      const node = deps.node || process.execPath;
+      noteState("downloads", folder, err, { home, clock, node });
+      postIfDue("downloads", readAccess(home), { notify: deps.notify || (() => {}), clock, node, placeWords: err ? placeWordsOf("downloads", folder, home) : "", home });
+    } catch {
+      // a note or banner that fails costs only itself
+    }
+  };
   for (const t of q.took) {
     try {
       if (!statSync(t.path, { throwIfNoEntry: false })) continue;
@@ -1436,8 +1449,10 @@ export function checkFinal(p, deps) {
         continue;
       }
       rmSync(t.path, { recursive: true, force: true });
+      noteDownloads(null);
       log(`${shown}: ${t.name} is taken out of Downloads.`);
     } catch (err) {
+      noteDownloads(err);
       log(`${shown}: ${t.name} could not be looked at or taken out of Downloads (${err.code || "an error"}), so it is kept there. Delete it there by hand.`);
     }
   }
@@ -1605,6 +1620,9 @@ function releaseHeld(dir, deps) {
   }
 }
 
+/** What the log says of a late check that threw, whether of a kind's or an import's: it stays pending, and the next run makes it again. */
+const checkPutOff = (label, e) => `${label}: its check could not be made (${e.code || "an error"}). The next run makes it again.`;
+
 /** How often the wait for a late check looks in the drop folder for videos that have arrived meanwhile. */
 const LOOK_AGAIN_MS = 60 * 1000;
 
@@ -1705,7 +1723,7 @@ export async function importEpisodes(dir, deps, importOne) {
             check(fresh, { ...deps, clock, alive, once: (line) => sayOnce(`said:${key}:${line}`, line) });
           } catch (e) {
             checked.add(checkedKey(fresh));
-            sayOnce(`threw:${key}`, `${who}: its check could not be made (${e.code || "an error"}). The next run makes it again.`);
+            sayOnce(`threw:${key}`, checkPutOff(who, e));
             continue;
           }
           const after = readPendingAt(episode.home, key);
@@ -1715,18 +1733,25 @@ export async function importEpisodes(dir, deps, importOne) {
         // The pending as it is now: a reading may have taken files out of it, or the check may have been made meanwhile.
         const fresh = readPendings(episode.home).find((p) => p.id === pending.id && p.machine === episode.machine && resolve(p.root) === resolve(episode.root));
         if (!fresh) continue;
-        let now = fresh;
-        if (fresh.reading) {
-          const settled = settleReading(fresh, { home: episode.home, log: (line) => log(line) });
-          if (settled.later) {
-            checked.add(checkedKey(pending));
-            sayOnce(`later:${pending.id}`, `${who}: its late check waits for the next run: a reading stopped while it put its files in, and the episode's record cannot be read now.`);
-            continue;
+        // Each check in its own try, as a kind's is: a read macOS refuses (the drop file's stat) must not end the run. The check stays pending, and
+        // the log says so by the pending's label, never by its file (`who` is the file for a pending with no label).
+        try {
+          let now = fresh;
+          if (fresh.reading) {
+            const settled = settleReading(fresh, { home: episode.home, log: (line) => log(line) });
+            if (settled.later) {
+              checked.add(checkedKey(pending));
+              sayOnce(`later:${pending.id}`, `${who}: its late check waits for the next run: a reading stopped while it put its files in, and the episode's record cannot be read now.`);
+              continue;
+            }
+            now = settled.pending;
           }
-          now = settled.pending;
+          checked.add(checkedKey(pending));
+          finishLate(now, deps);
+        } catch (e) {
+          checked.add(checkedKey(pending));
+          sayOnce(`threw:${key}`, checkPutOff(pending.label || "A video", e));
         }
-        checked.add(checkedKey(pending));
-        finishLate(now, deps);
       } finally {
         releaseLateCheckLock(held);
       }
@@ -1740,9 +1765,46 @@ export async function importEpisodes(dir, deps, importOne) {
   const failed = new Map();
   // Whether the last look imported anything, which then has its late check to wait for.
   let progressed = false;
+  // What the log says of a look that macOS or the folder's permissions refused: once while the look goes on meeting it.
+  const lookSaid = new Map();
+  const node = deps.node || process.execPath;
+  const sayLook = (place, folder, look) => {
+    // The banner for whoever is at the Mac: access.js says whether it is due, from the note's `told`. It never stops the run. The place's
+    // words are worked out only for a look that was refused or locked.
+    try {
+      const stopped = look && (look.state === "refused" || look.state === "locked");
+      postIfDue(place, readAccess(episode.home), { notify: deps.notify || (() => {}), clock, node, placeWords: stopped ? placeWordsOf(place, folder, episode.home) : "", home: episode.home });
+    } catch {
+      // a banner that fails costs only the banner
+    }
+    const line = lookLog(place, folder, look, episode.home, node);
+    if (!line) lookSaid.delete(place);
+    else if (lookSaid.get(place) !== line) {
+      lookSaid.set(place, line);
+      log(line);
+    }
+  };
+  const noted = { home: episode.home, clock, node };
+  const episodesAt = episodesFolder(episode.root);
+  // Whether Episodes was refused, locked or failed at its last look: nothing is imported then, for each import needs it. Not there is
+  // not that: the import makes Episodes itself.
+  let episodesStopped = false;
+  const lookEpisodes = () => {
+    const look = lookAt("episodes", episodesAt, noted);
+    sayLook("episodes", episodesAt, look);
+    episodesStopped = ["refused", "locked", "error"].includes(look.state);
+  };
   const importWaiting = async (first) => {
-    noteSeen(episode.home, dir, clock());
+    const look = lookAt("drop", dir, noted);
+    // A folder that is not there was said by the caller (unedited.js uneditedFolders), which goes on to it only on a Mac with a drop folder of its own.
+    sayLook("drop", dir, look);
+    if (!look.names) return;
+    noteSeen(episode.home, dir, clock(), look.names);
     releaseHeld(dir, deps);
+    if (episodesStopped) {
+      lookEpisodes();
+      if (episodesStopped) return;
+    }
     for (const [id, name] of failed) {
       const still = readStatusesIn(statusReadFolders(episode)).some(({ status }) => status && status.video === name && status.machine === episode.machine && status.failed);
       if (!still) {
@@ -1754,15 +1816,7 @@ export async function importEpisodes(dir, deps, importOne) {
       const id = fileId(join(dir, name));
       return id ? `${name}:${id.ino}:${id.size}` : name;
     };
-    let names;
-    try {
-      names = waitingToCut(readdirSync(dir)).filter((name) => !seen.has(key(name)));
-    } catch (e) {
-      // A folder that is not there was said by the caller (unedited.js uneditedFolders), which goes on to it only on a Mac with a drop folder of its own.
-      if (e.code === "ENOENT") return;
-      log(`The folder could not be read (${e.code || e.message}). If it is in Dropbox or another cloud drive, allow node to read it in System Settings, Privacy & Security, Files and Folders.`);
-      return;
-    }
+    const names = waitingToCut(look.names).filter((name) => !seen.has(key(name)));
     if (first) log(names.length ? `Looked in the folder: ${names.length} waiting.` : "Looked in the folder: nothing is waiting.");
     for (const name of names) {
       // A late check that came due while an earlier video imported took this video out of the folder: it is no video to import,
@@ -1819,6 +1873,10 @@ export async function importEpisodes(dir, deps, importOne) {
     }
   };
   clearRuns(episode.home, alive);
+  // The first things the run does with the folders, each noted in access.json, before any other read of Dropbox (the labels, the crashes
+  // and the owed recordings read Episodes) and before any late check is made: a run held at macOS's question is seen as asking.
+  sayLook("drop", dir, lookAt("drop", dir, noted));
+  lookEpisodes();
   const before = labelsNow();
   for (const video of clearCrashes({ statusFolders: statusReadFolders(episode), machine: episode.machine, ...(deps.alive ? { alive: deps.alive } : {}) })) log(`${named(video, before)}: an import of it on this Mac stopped before it was done, so it is imported again.`);
   // A hand-off writer that stopped before it owed its video's recordings (or whose owe could not be written) is made good here (L6).
@@ -1925,24 +1983,37 @@ export function readSeen(home) {
 /** Note when this Mac first saw each video in the drop folder `dir`, at `now`, and forget each video noted that is no longer
     there as it was. Written whole on this Mac's own disk, under another name and then renamed. A note that cannot be written
     costs only how long a video is said to have waited. */
-export function noteSeen(home, dir, now) {
+export function noteSeen(home, dir, now, listed) {
   const seen = readSeen(home);
   let changed = false;
   for (const [key, entry] of Object.entries(seen)) {
     const [name, ino, size] = key.split(/:(?=\d+:\d+$)|:(?=\d+$)/);
-    if (!entry || !sameFile(entry.path, { ino: Number(ino), size: Number(size) }) || basename(entry.path) !== name) {
+    let gone;
+    try {
+      gone = !entry || !sameFile(entry.path, { ino: Number(ino), size: Number(size) }) || basename(entry.path) !== name;
+    } catch (e) {
+      // Any throw (a file macOS will not let the import look at, or a malformed entry) leaves the entry noted: it is not known to be gone.
+      continue;
+    }
+    if (gone) {
       delete seen[key];
       changed = true;
     }
   }
+  // With the names given, the folder has been listed already (access.js lookAt) and is not listed again.
   let names = [];
   try {
-    names = readdirSync(dir).filter(isMedia);
+    names = (listed || readdirSync(dir)).filter(isMedia);
   } catch (e) {
     // The folder cannot be read now, and nothing new is noted.
   }
   for (const name of names) {
-    const id = fileId(join(dir, name));
+    let id;
+    try {
+      id = fileId(join(dir, name));
+    } catch (e) {
+      continue;
+    }
     if (!id || seen[seenKey(name, id)]) continue;
     seen[seenKey(name, id)] = { path: join(dir, name), at: now };
     changed = true;

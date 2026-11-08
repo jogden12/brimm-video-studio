@@ -1051,6 +1051,11 @@ if [[ -n "$machine" && -z "$rules_only" ]] && claude="$(find_claude)"; then
   say "From the background job: ${answered:-Claude did not answer within 90 seconds. What it said is in $CHECK_LOG.}"
 fi
 
+# One line of what macOS answered the import, from its note (access.js): a real setup only, never --print, and never a failure here.
+if [[ -n "$machine" && -n "$node" ]]; then
+  "$node" "$HERE/access.js" --setup-line 2>/dev/null || true
+fi
+
 if [[ -n "$machine" ]]; then
   say ""
   say "Done. Drop a video in:"

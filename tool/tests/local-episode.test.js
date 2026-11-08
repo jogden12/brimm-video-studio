@@ -55,6 +55,8 @@ const OWN = (stem) => ({
 function world() {
   const t = setup({ machine: STUDIO });
   const studio = { ...t.ctx.deps, settings: { ...t.ctx.settings, import: "light", handoffVersion: 2, drop: "Drop", dropPath: join(t.home, "BRIMM Video Work", "Drop") } };
+  // On a real Mac with a drop folder of its own the installer makes it; without it the import's chat would say it is not there.
+  mkdirSync(join(t.home, "BRIMM Video Work", "Drop"), { recursive: true });
   const macbookHome = join(t.dir, "home-macbook");
   const macbook = { ...t.ctx.deps, home: macbookHome, settings: { version: 1, machine: MACBOOK, root: t.root, checkout: "/checkout", import: "light", handoffVersion: 2, drop: "Drop" } };
   return { ...t, studio, macbook, macbookHome };

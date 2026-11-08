@@ -160,7 +160,7 @@ export function opsText(handoff, step, again, note, local = false) {
       it (its label, its id, its short id); `at`, when it came (ms); and `mac`, the other Mac's name, where it is held or open
       there ("" otherwise).
     - `drop`, for a file in a drop folder, and null for anything else: { here, state, step, left, total, readyAt }. `here` is true
-      for this Mac's drop folder. `state` is "arriving", "importing", "retry" (its import did not finish) or "zoom" (a Zoom
+      for this Mac's drop folder. `state` is "arriving", "importing", "retry" (its import did not finish), "blocked" (the import cannot take it: `blocked` is the import's step line, edit.js accessFinding) or "zoom" (a Zoom
       download held there). `step` is the panel's step, and `left` and `total` the seconds left of it and in all, null when not
       known. `readyAt` is the time it should be Ready, as this Mac's clock says it ("15:06"), "" when not known.
     - `conflicted`, when Dropbox kept two copies of a change to it; `kind`, "finished", "raw", "short video", "session", or null
@@ -300,6 +300,7 @@ function dropNext(drop, mac) {
     const readyAt = drop.readyAt ? ` Ready about ${drop.readyAt}.` : "";
     return toDo("importing", `It is being imported${on}${drop.step ? `, at ${midSentence(drop.step)}` : ""}${left ? `, ${left}` : ""}.${readyAt} ${ready}`);
   }
+  if (drop.state === "blocked") return toDo("blocked", drop.blocked);
   if (drop.state === "retry") return toDo("retry", `Its import did not finish${on}. Say "try it again"${there}.`);
   // A Zoom download. On the other Mac the place it goes is a sentence of its own, to keep each under 25 words.
   return toDo("zoom", drop.here ? `It is a Zoom download, and those go in ${ZOOM_WORDS}. Move it there in Finder.` : `It is a Zoom download${on}. Those go in ${ZOOM_WORDS}. Move it there in Finder${there}.`);
@@ -583,13 +584,15 @@ export function findIn(items, said) {
     line that says so (dropUnreadable), each video under way with its next step, and the lines edit.js adds of its own for it (`also`)
     under that, and, when there are any, how many videos from before the switch it does not guide. With `unreadable` and none under way
     it does not say that nothing is: "put the video in your drop folder" would have her drop it again. On a Mac with a drop folder of its own
-    (`local`), with none under way, it also says how a clip from her iPhone gets there (AIRDROP). */
-export function overviewLines({ drop, items, old, unreadable = false, local = false }) {
+    (`local`), with none under way, it also says how a clip from her iPhone gets there (AIRDROP). With `access`, the import's line (edit.js
+    accessFinding: the import cannot look), it comes after that one, and no line tells her to put a video in either: NOTHING_UNDER_WAY and AIRDROP are left out. */
+export function overviewLines({ drop, items, old, unreadable = false, local = false, access = "" }) {
   const under = ordered(items.filter(({ next }) => !next.done));
   return [
     `Your drop folder: ${drop}`,
     ...(unreadable ? [dropUnreadable(drop)] : []),
-    ...(under.length ? ["Under way:", ...under.flatMap(({ facts, next, also = [] }) => [`  ${facts.name}: ${next.text}`, ...also.map((line) => `    ${line}`)])] : unreadable ? [] : local ? [NOTHING_UNDER_WAY, AIRDROP] : [NOTHING_UNDER_WAY]),
+    ...(access ? [access] : []),
+    ...(under.length ? ["Under way:", ...under.flatMap(({ facts, next, also = [] }) => [`  ${facts.name}: ${next.text}`, ...also.map((line) => `    ${line}`)])] : unreadable || access ? [] : local ? [NOTHING_UNDER_WAY, AIRDROP] : [NOTHING_UNDER_WAY]),
     ...(old > 0 ? [`${old} ${old === 1 ? "video" : "videos"} from before the switch ${old === 1 ? "is" : "are"} not guided.`] : [])
   ];
 }
@@ -630,7 +633,7 @@ export const TELL_POLL_MS = 15000;
 export const trailOf = (facts) =>
   facts.id
     ? { id: facts.id, ...(facts.source || {}) }
-    : { mac: facts.source.mac, file: facts.source.file, bytes: facts.source.bytes, growing: facts.drop.state === "arriving", came: facts.at };
+    : { mac: facts.source.mac, file: facts.source.file, bytes: facts.source.bytes, growing: facts.drop.state === "arriving" || facts.drop.state === "blocked", came: facts.at };
 
 /** The video `trail` follows, found again among `items`: { item, trail }, with the trail as it is now, or null when none is. By
     its id once it has one, unless the import of its file, at its size, did not finish: that is said of the file in its drop
