@@ -195,7 +195,7 @@ describe("the gate walks every command that names an episode", () => {
     episodeFor(t, { record: UNANSWERED_RECORD });
     const free = await on(t.ctx.deps, "free", FOLDER, "library");
     assert.ok(!GATE_REFUSALS.some((why) => free.text.includes(why)), free.text);
-    for (const ask of [["episodes"], ["status"], ["status", FOLDER], ["status", "Pricing"], ["behind"]]) {
+    for (const ask of [["episodes"], ["status"], ["status", FOLDER], ["status", "Pricing"], ["behind"], ["look"]]) {
       const r = await on({ ...t.ctx.deps, run: async () => ({ code: 0, stderr: "", stdout: "0\n" }) }, ...ask);
       assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${ask.join(" ")}: ${r.text}`);
     }

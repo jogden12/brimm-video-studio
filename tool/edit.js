@@ -18,6 +18,7 @@
 //                                         made, and the Reel picked (app-reel.js)
 //   node edit.js status ["<words>"]       what is running on this Mac, the imports, and what detached runs left
 //   node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped
+//   node edit.js look                     ask the import to look in the drop folder now (after she allowed node in System Settings)
 //   node edit.js name, title, reel drop
 //                                         the episode's name, its title, and its Reels
 //   node edit.js finish "<episode>"       gather what HyperFrames exported, ask what it must, and then, detached,
@@ -103,7 +104,7 @@ import { processTable, readProcesses } from "./chain.js";
 import { SHOWN_MARKER, addShown, cantOpen, clearShownIn, freeShownName, madeShownByIdFolder, revealed, shownByIdFolder } from "./reveal.js";
 import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sessionByFollowUp } from "./receipts.js";
 import { isRunning, lastLine, lockFile, runProgram } from "./run.js";
-import { DOWNLOADS_SAY_MS, UNSEEN_MS, accessLine, blocksDrop, saysInEpisodes, saysInOverview, stepLine, findingOf, placeWordsOf, readAccess, switchFor } from "./access.js";
+import { DOWNLOADS_SAY_MS, LOOK_ASKED, LOOK_AT_WORK, UNSEEN_MS, accessLine, blocksDrop, saysInEpisodes, saysInOverview, stepLine, findingOf, placeWordsOf, readAccess, switchFor } from "./access.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
@@ -220,6 +221,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         its command line
   node edit.js status ["<words>"]       what is running on this Mac, the imports, and what detached runs left
   node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped
+  node edit.js look                     ask the import to look in the drop folder now, as after she allowed node in System Settings
   node edit.js name "<episode>" "<name>"
                                         give the episode its name. Nothing is renamed
   node edit.js title "<episode>" [--words "<words>"] [--approve] [--change]
@@ -2122,6 +2124,30 @@ export async function retry(ctx, rest) {
     return 1;
   }
   say(`${who} is imported again${which}: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`);
+  return 0;
+}
+
+/** `look`: "look again", after she allowed node in System Settings (access-notice design, part 4). It names no episode. A look that has
+    waited for macOS's question over a minute says that line and kicks nothing; a run at work looks again within a minute by itself;
+    otherwise the launch agent is asked to look, once. */
+export async function look(ctx) {
+  const { say } = ctx;
+  const found = accessFinding(ctx);
+  if (found && found.finding.kind === "asking") {
+    say(found.line);
+    return 0;
+  }
+  if (!noRunAtWork(ctx, dropFolderOf(ctx.settings, ctx.home), ctx.agentPid())) {
+    say(LOOK_AT_WORK);
+    return 0;
+  }
+  try {
+    ctx.kickstart();
+  } catch (e) {
+    say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
+    return 1;
+  }
+  say(LOOK_ASKED);
   return 0;
 }
 
@@ -7075,7 +7101,7 @@ async function joinCommand(ctx, rest) {
 
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and so are `workcopy` (`kind` and `app` start it) and `join` (`plan … join` starts it): all three are in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, bring, status, retry, name, title, reel, reels, ask, finish, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, graphic, teachings: teachingsCommand, principles, ideas, refs, plan, footage };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, bring, status, retry, look, name, title, reel, reels, ask, finish, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, graphic, teachings: teachingsCommand, principles, ideas, refs, plan, footage };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

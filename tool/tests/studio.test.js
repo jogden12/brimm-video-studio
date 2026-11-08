@@ -1552,6 +1552,26 @@ describe("her skill tells her what Studio says when this Mac does not let it loo
   }
 });
 
+describe("her skill passes on the import's line, and runs look for \"look again\", in both locks (access notice, A6)", () => {
+  const SKILLS = Object.fromEntries(["SKILL.md", "SKILL-open.md"].map((name) => [name, readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8")]));
+  for (const [name, text] of Object.entries(SKILLS)) {
+    it(`${name}: the start of a session, the two bullets after L1c's, and the row`, () => {
+      const start = sectionOf(text, "## At the start of each session");
+      assert.ok(start.includes("ask him when it suits.\"\nIf it ends with a line about the import (node, her drop folder or Dropbox), tell her that line as it is said. Then run `episodes`"), name);
+      const lines = text.split("\n");
+      const l1c = lines.findIndex((line) => line.startsWith("- If `episodes` or the guide says this Mac does not let"));
+      const pass = lines[l1c + 1];
+      assert.ok(pass.startsWith("- If `behind`, `episodes` or the guide says the import cannot look in her drop folder or in Dropbox"), pass);
+      for (const clause of ["tell her what it says, as it is said, with the switch it names", "A video she has dropped stays where it is, and she does not drop it again"]) assert.ok(pass.includes(clause), clause);
+      assert.equal(lines[l1c + 2], '- "Look again" / "I allowed it": run `look`, and tell her its one line.');
+      assert.equal(lines.filter((line) => line.startsWith("- If `episodes` or the guide says this Mac does not let")).length, 1);
+      assert.ok(sectionOf(text, "## Guide her").trimEnd().split("\n").length <= 30, name);
+      const retry = lines.findIndex((line) => line.startsWith('| "Try it again"'));
+      assert.equal(lines[retry + 1], '| "Look again" / "I allowed it" (the import could not look) | `look` |');
+    });
+  }
+});
+
 describe("her skill's words for the local working folder, in both locks (Phase 3, L9)", () => {
   const SKILLS = Object.fromEntries(["SKILL.md", "SKILL-open.md"].map((name) => [name, readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8")]));
   for (const [name, text] of Object.entries(SKILLS)) {
