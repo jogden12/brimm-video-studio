@@ -193,6 +193,27 @@ const SCENARIOS = {
     const never = W(name, { projects: null });
     return { w, lines: [...(await quick(w)), ...(await quick(never, { yes: true }))] };
   },
+  "an export in the exports folder this Mac picked, and a picked folder it will not let it look in": async (name) => {
+    const world = () => {
+      const w = W(name, { projects: ["main"], over: { reels: [] } });
+      const picked = join(w.t.home, "Movies", "Exports");
+      w.t.ctx.settings = { ...w.t.ctx.settings, exportsPath: picked };
+      return { w, picked };
+    };
+    const { w, picked } = world();
+    exported(w, "main", { folder: picked });
+    const refused = world();
+    refused.w.t.ctx.deps.readdir = (dir, ...more) => {
+      if (dir === refused.picked) throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" });
+      return readdirSync(dir, ...more);
+    };
+    const none = world();
+    const lines = [...(await quick(w)), ...(await quick(none.w)), ...(await quick(refused.w))];
+    assert.ok(lines.some((line) => line.includes("from the exports folder")), lines.join("\n"));
+    assert.ok(lines.some((line) => line.startsWith("Looked in Downloads and in the exports folder, Movies › Exports, in your home folder, for exports of:")), lines.join("\n"));
+    assert.ok(lines.some((line) => line.startsWith("This Mac does not let BRIMM Video Studio look in your exports folder, Movies › Exports, in your home folder,")), lines.join("\n"));
+    return { w, lines };
+  },
   "an episode finished already, kept, and a project changed since": async (name) => {
     const w = W(name);
     exported(w, "main");

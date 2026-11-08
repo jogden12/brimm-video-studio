@@ -8,19 +8,21 @@
 // Player, Finder and the notice are stand-ins. Every name in it is made up.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { CLAIM_WAIT_MS, READ_POLL_MS, editMain } from "../edit.js";
 import { episodeFault, localStamp, newEpisode, readEpisode, recordFile, recordText } from "../episode.js";
-import { settingsFile, writeSettings } from "../settings.js";
+import { episodeFilesFolder, settingsFile, writeSettings } from "../settings.js";
 import { readResult, resultFile, lockOf, takeEpisodeLock, releaseEpisodeLock } from "../detached.js";
 import { requestFor } from "../readings.js";
 import { replaceSpeakers, EDITS } from "../sessions.js";
 import { HOST } from "../shared/show.js";
 import { CLAUDE_MODEL } from "../unedited.js";
-import { sameAccount, teachingsWhy, herWordsName, OTHER_ACCOUNT } from "../teachings.js";
+import { sameAccount, sessionSeen, teachingsWhy, herWordsName, OTHER_ACCOUNT } from "../teachings.js";
 import { setup, listAll } from "./episodes.js";
 import { OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
+import * as filing from "../filing.js";
+import { makeLocal } from "./local-world.js";
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -312,6 +314,19 @@ describe("teachings --transcript-only", () => {
 });
 
 describe("teachings: the claim, her ask, and the reading started", () => {
+  it("a session kept on this Mac is asked for with no claim written or waited for: one write, and the reading of that record (Phase 3, L7)", async () => {
+    const mac = sessionMac({ over: { version: 6, local: { on: "Mac Studio" } } });
+    const own = episodeFilesFolder(mac.t.home, FOLDER);
+    mkdirSync(own, { recursive: true });
+    for (const rel of listAll(mac.found.folder).filter((r) => !r.startsWith("record/"))) renameSync(join(mac.found.folder, rel), join(own, rel));
+    const r = await on(mac.t.ctx.deps, "teachings", LABEL);
+    assert.deepEqual(r.said, [STILL]);
+    assert.equal(mac.t.waits.includes(CLAIM_WAIT_MS), false);
+    const record = reread(mac.found);
+    assert.deepEqual([record.rev, record.session.teachings, record.editing], [2, "asked", null]);
+    assert.deepEqual(mac.t.started.map(([, args]) => args.slice(1)), [readArgs(2)]);
+    mac.t.done();
+  });
   it("claims the session as kind does, records the ask, and starts the session's reading of that record", async () => {
     const mac = sessionMac();
     const r = await on(mac.t.ctx.deps, "teachings", LABEL);
@@ -462,6 +477,35 @@ describe("read --kind session: the session's one reading", () => {
     assert.equal("description" in kept.principles[0], false);
     assert.ok(kept.dropped.some((d) => d.field === "Principle 2's example_application"), "a spelling of the record does not leave its words out");
     assert.doesNotMatch(r.text + readFileSync(resultFile(mac.t.home, FOLDER, "read"), "utf8"), /Ossery|Brandvale/);
+    mac.t.done();
+  });
+  it("L-final-1 checks the names given before the video was a session when it is kept on this Mac too", async () => {
+    const reply = { ...REPLY, frameworks: [{ ...REPLY.frameworks[0], description: "As Ossery learned, charge for the outcome." }, ...REPLY.frameworks.slice(1)] };
+    const mac = sessionMac({ reply, over: { ...ASKED_OVER, spellings: [["Brandville", "Brandvale"]] } });
+    const session = reread(mac.found);
+    writeFileSync(recordFile(mac.found.folder, 1), recordText({ ...session, kind: "raw", session: undefined, name: { text: "Ossery pricing chat", placeholder: false }, answer: { ...ANSWER, private: "no" }, editing: null }));
+    writeFileSync(recordFile(mac.found.folder, 2), recordText({ ...session, rev: 2 }));
+    makeLocal(mac);
+    const r = await on(mac.t.ctx.deps, ...readArgs(3));
+    assert.equal(r.code, 0, r.text);
+    const kept = JSON.parse(readFileSync(join(episodeFilesFolder(mac.t.home, basename(mac.found.folder)), TEACHINGS_JSON), "utf8"));
+    assert.equal("description" in kept.principles[0], false);
+    const names = sessionSeen(episodeFilesFolder(mac.t.home, basename(mac.found.folder)), reread(mac.found), { records: mac.found.folder });
+    assert.ok(names.names.includes("Ossery"), names.names.join());
+    mac.t.done();
+  });
+  it("B1-F15 a session kept on this Mac refuses her words holding a name given before it became a session, at edit and at the name", async () => {
+    const mac = sessionMac({ over: { ...ASKED_OVER } });
+    const session = reread(mac.found);
+    writeFileSync(recordFile(mac.found.folder, 1), recordText({ ...session, kind: "raw", session: undefined, name: { text: "Ossery pricing chat", placeholder: false }, answer: { ...ANSWER, private: "no" }, editing: null }));
+    writeFileSync(recordFile(mac.found.folder, 2), recordText({ ...session, rev: 2 }));
+    makeLocal(mac);
+    const r = await on(mac.t.ctx.deps, ...readArgs(3));
+    assert.equal(r.code, 0, r.text);
+    const edited = await on(mac.t.ctx.deps, "principles", LABEL, "edit", "1", "--description", "As Ossery learned, charge for the outcome.");
+    assert.deepEqual([edited.code, edited.said], [1, [EDIT_HOLDS("Ossery")]]);
+    const named = await on(mac.t.ctx.deps, "name", LABEL, "Ossery pricing");
+    assert.deepEqual([named.code, named.said], [1, [NAME_HOLDS("Ossery")]]);
     mac.t.done();
   });
   it("says so when the transcriber capitalised the recording throughout, so its capitalised words were not checked", async () => {
@@ -1393,5 +1437,22 @@ describe("fix round 4, 1: ordinary words the transcript writes with capitals sid
     }
     assert.deepEqual((await on(t.ctx.deps, "name", LABEL, "quillonmarsh notes")).said, [NAME_HOLDS("quillonmarsh")]);
     t.done();
+  });
+});
+
+describe("a session's hand-off on a video kept on this Mac (Phase 3, L5)", () => {
+  it("L20 takes the check's lock: it writes its hand-off after exactly two waits for it, and is 0", async () => {
+    const mac = await decidedSession();
+    makeLocal(mac);
+    const THIS = (pid) => pid === process.pid;
+    const lock = filing.takeLateCheckLock(mac.t.home, mac.found.name, "late check", THIS);
+    const base = mac.t.ctx.deps.wait;
+    const waits = [];
+    const deps = { ...mac.t.ctx.deps, alive: THIS, wait: async (ms) => { waits.push(ms); if (waits.length === 2) filing.releaseLateCheckLock(lock); await base(ms); } };
+    const r = await on(deps, "finish", SHORT);
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(waits.slice(0, 2), [filing.LOCK_LOOK_MS, filing.LOCK_LOOK_MS]);
+    assert.equal(mac.t.inFinal(mac.found).length, 1);
+    mac.t.done();
   });
 });

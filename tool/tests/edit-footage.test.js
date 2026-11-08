@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { COMMAND_NAMES, HELP, editMain } from "../edit.js";
-import { episodeFault, isPart, isPlannedRecord, localStamp, readEpisode, recordFile, recordText, writeEpisode } from "../episode.js";
+import { NEWEST_VERSION, episodeFault, isPart, isPlannedRecord, localStamp, readEpisode, recordFile, recordText, writeEpisode } from "../episode.js";
 import { footageAsked, mayGoIn, partsOf } from "../footage.js";
 import { CLIENT_Q, NO_RECEIPT, PLANNED_Q, SHOT_Q, cardOf, expectedAnswers, footageOption, formOf, partCardOf, plannedCardOf, sessionByFollowUp, writeReceipt } from "../receipts.js";
 import { fileSafe } from "../names.js";
@@ -907,7 +907,7 @@ describe("plan … agreed: asking on a dialog Claude cannot press", () => {
     t.done();
     const u = (await clientWorld()).t;
     const newer = join(u.root, "Episodes", "2026-11-04 Drop 1 (Mac Studio)");
-    writeFileSync(recordFile(newer, 3), JSON.stringify({ version: 6, id: idOf(1), rev: 3, kind: "podcast" }));
+    writeFileSync(recordFile(newer, 3), JSON.stringify({ version: NEWEST_VERSION + 1, id: idOf(1), rev: 3, kind: "podcast" }));
     const e = dialogs(u, agreed());
     const s = await e.ask(...AGREE());
     assert.equal(s.code, 1, s.text);

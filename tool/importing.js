@@ -1,4 +1,6 @@
-// The import status files: small files for each import, in Episodes/.importing/ in Dropbox, so that both Macs can see them.
+// The import status files: small files for each import, in a folder called importing or .importing. A Mac on a drop folder in Dropbox writes
+// them in Episodes/.importing/ in Dropbox, so that both Macs can see them; a Mac with a drop folder of its own writes them on its own disk
+// (settings.js importingFolderOf), and every reader reads both places (statusFoldersOf). No call here takes a root: each is given the folder.
 // Each says which Mac is importing which video, the video's size and length, the step the import is at, and when it was
 // written. A status file is never written into: each write is a new file, named for the video, the Mac, the import's own short
 // id and the next number, as "Pricing talk.mp4 (Mac Studio) k3j9x 3.json", and the one before is then deleted. The id keeps
@@ -12,7 +14,6 @@
 // Nothing here runs a program. A status file is written only through the rule's text writer, which the caller gives.
 import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
-import { importingFolder } from "./settings.js";
 
 /** How long a status may go unwritten before its import counts as stopped: 10 minutes. The import writes one at least once a
     minute. */
@@ -38,7 +39,7 @@ function startOf(video, machine) {
     when it has one, and the file's number. A path is cut to its file's name. */
 export const statusName = (video, machine, n, id = "") => `${startOf(video, machine)}${id ? `${id} ` : ""}${n}.json`;
 
-/** Whether a file name in Episodes/.importing/ starts as the status files of `video` from the Mac `machine` do: the start of
+/** Whether a file name in a status folder starts as the status files of `video` from the Mac `machine` do: the start of
     `statusName`, and nothing of the import's id or the number. It says of a file that cannot be read whose it was meant to be. */
 export const isStatusFileOf = (name, video, machine) => name.startsWith(startOf(video, machine));
 
@@ -48,7 +49,7 @@ const numberOf = (name) => {
   return m ? Number(m[1]) : 0;
 };
 
-/** The names in Episodes/.importing/ that are one video's status files from one Mac, each with its number: of the import
+/** The names in a status folder that are one video's status files from one Mac, each with its number: of the import
     `id`, or of every import of the video when no id is given. The video's name and the Mac's may both hold brackets, so a
     name is matched against the one it would have, and not taken apart. */
 function filesOf(names, video, machine, id) {
@@ -57,10 +58,17 @@ function filesOf(names, video, machine, id) {
   return names.filter((n) => n.startsWith(start) && rest.test(n.slice(start.length))).map((n) => ({ name: n, n: numberOf(n) }));
 }
 
-/** The names in Episodes/.importing/ under `root`, or [] when there is no such folder. */
-function namesIn(root) {
+/** The folder `folder`, when it is one of import status files: its name is importing or .importing. Anything else throws, so a call
+    that was meant for another folder never writes into it or takes a file out of it. */
+function checked(folder) {
+  if (!["importing", ".importing"].includes(basename(String(folder)))) throw new Error(`${folder} is not a folder of import status files`);
+  return folder;
+}
+
+/** The names in the folder `folder`, or [] when there is no such folder. */
+function namesIn(folder) {
   try {
-    return readdirSync(importingFolder(root));
+    return readdirSync(folder);
   } catch (e) {
     return [];
   }
@@ -95,16 +103,16 @@ export function statusFault(s) {
   return found ? found[1] : "";
 }
 
-/** Write a video's status into Episodes/.importing/ under `root`, as a new file with the next number for the video and the
+/** Write a video's status into the folder `folder`, as a new file with the next number for the video and the
     Mac, through `writeText(to, text)`, the rule's text writer, which never writes over a file. The folder is made first
     when it is not there, and the files before this one are deleted after it. Gives back the file. It throws, and writes
     nothing, when the status is not whole. */
-export function writeStatus(root, status, writeText) {
+export function writeStatusIn(folder, status, writeText) {
+  checked(folder);
   const fault = statusFault(status);
   if (fault) throw new Error(`the import's status was not written, because ${fault}`);
-  const folder = importingFolder(root);
   mkdirSync(folder, { recursive: true });
-  const before = filesOf(namesIn(root), status.video, status.machine, status.import || "");
+  const before = filesOf(namesIn(folder), status.video, status.machine, status.import || "");
   const n = before.reduce((most, f) => Math.max(most, f.n), 0) + 1;
   const file = join(folder, statusName(status.video, status.machine, n, status.import || ""));
   writeText(file, JSON.stringify(status, null, 2) + "\n");
@@ -115,14 +123,18 @@ export function writeStatus(root, status, writeText) {
 /** Whether a status has gone unwritten for 10 minutes at `now`, in milliseconds. */
 const isStale = (status, now) => now - Date.parse(status.at) >= STALE_MS;
 
-/** The status files in Episodes/.importing/ under `root`, by name: for each video and Mac the one with the highest number,
-    as { file, status, stale, n }, where `stale` says it was not written in the 10 minutes before `now`, in milliseconds. A
+/** The status files in the folders `folders`, each read apart, by name: for each video and Mac, in a folder, the one with the highest
+    number, as { file, status, stale, n, folder }, where `stale` says it was not written in the 10 minutes before `now`, in milliseconds. A
     lower number that Dropbox has not yet deleted is left out. A file that cannot be read is listed with status null, stale
     false, and `why` in plain words. Hidden files, and files that are not status files, are left out. [] when there is no
     folder. */
-export function readStatuses(root, now = Date.now()) {
-  const folder = importingFolder(root);
-  const read = namesIn(root)
+export function readStatusesIn(folders, now = Date.now()) {
+  return folders.flatMap((folder) => readOne(checked(folder), now));
+}
+
+/** `readStatusesIn` of one folder. */
+function readOne(folder, now) {
+  const read = namesIn(folder)
     .filter((n) => !n.startsWith(".") && numberOf(n) > 0)
     .sort()
     .map((name) => {
@@ -132,10 +144,10 @@ export function readStatuses(root, now = Date.now()) {
       try {
         status = JSON.parse(readFileSync(file, "utf8"));
       } catch (e) {
-        return { file, status: null, stale: false, n, why: `it could not be read (${e instanceof SyntaxError ? "it is not whole" : e.message})` };
+        return { file, status: null, stale: false, n, folder, why: `it could not be read (${e instanceof SyntaxError ? "it is not whole" : e.message})` };
       }
       const fault = statusFault(status);
-      return fault ? { file, status: null, stale: false, n, why: `it could not be read (${fault})` } : { file, status, stale: isStale(status, now), n };
+      return fault ? { file, status: null, stale: false, n, folder, why: `it could not be read (${fault})` } : { file, status, stale: isStale(status, now), n, folder };
     });
   // Of one import's files, the highest number is the status.
   const key = (r) => JSON.stringify([r.status.video, r.status.machine, r.status.import || ""]);
@@ -144,11 +156,11 @@ export function readStatuses(root, now = Date.now()) {
   return read.filter((r) => !r.status || highest.get(key(r)) === r);
 }
 
-/** One video's statuses at `now`, in milliseconds, from the Macs `machines`: of `readStatuses`, those that can be read, are
+/** One video's statuses at `now`, in milliseconds, from the Macs `machines`: of `readStatusesIn` the folders `folders`, those that can be read, are
     of `video` and were written by one of the Macs, of any state, stale or not, and the paths of the files that cannot be
     read and are named for `video` as a status file of one of the Macs is (isStatusFileOf). As { statuses, unreadable }. */
-export function statusesOf(root, video, machines, now = Date.now()) {
-  const read = readStatuses(root, now);
+export function statusesIn(folders, video, machines, now = Date.now()) {
+  const read = readStatusesIn(folders, now);
   const statuses = read.filter((r) => r.status && r.status.video === video && machines.includes(r.status.machine)).map((r) => r.status);
   const unreadable = read.filter((r) => !r.status && machines.some((m) => isStatusFileOf(basename(r.file), video, m))).map((r) => r.file);
   return { statuses, unreadable };
@@ -159,11 +171,12 @@ export function statusesOf(root, video, machines, now = Date.now()) {
     does not know the field reads the status as it always has. */
 export const dueOf = (status) => (typeof status.due === "number" && Number.isFinite(status.due) ? status.due : null);
 
-/** Take away the status files of one video from one Mac, `machine`, under `root`: of the import `id` alone, once its files
+/** Take away the status files of one video from one Mac, `machine`, in the folder `folder`: of the import `id` alone, once its files
     have passed the late check; or of every import of the video, with no id, at this Mac's next run after a crash, or by
     `edit.js retry`. Nothing happens when there is none. */
-export function removeStatus(root, video, machine, id) {
-  for (const f of filesOf(namesIn(root), video, machine, id)) rmSync(join(importingFolder(root), f.name), { force: true });
+export function removeStatusIn(folder, video, machine, id) {
+  checked(folder);
+  for (const f of filesOf(namesIn(folder), video, machine, id)) rmSync(join(folder, f.name), { force: true });
 }
 
 /** Where an import has got to, by its whole status at `now`, in milliseconds: "failed" when it says why it failed; "problem"

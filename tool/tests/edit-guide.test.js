@@ -6,9 +6,11 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { editMain, HELP } from "../edit.js";
 import { readGuideNotes, writeGuideNotes, guideFile } from "../guide-note.js";
-import { NOT_SET_UP, OPS_PAGE } from "../guide.js";
+import { NOT_SET_UP, OPS_PAGE, dropUnreadable, AIRDROP } from "../guide.js";
+import { watched } from "./watched-fs.js";
 import { localStamp, readEpisode, recordFile, recordText } from "../episode.js";
-import { removeStatus, writeStatus } from "../importing.js";
+import { removeStatusIn, writeStatusIn } from "../importing.js";
+import { importingFolder } from "../settings.js";
 import { progressFolder, RATES } from "../progress.js";
 import { clockAt } from "../unedited.js";
 import { writePending, noteSeen } from "../filing.js";
@@ -62,6 +64,13 @@ describe("guide on a Mac not on the light import", () => {
     }
     assert.deepEqual([t.opened, t.calls, t.waits], [[], [], []]);
     t.done();
+  });
+  it("still says it, whatever else it names quietly: the file's import setting alone sets the chat up (L1d)", async () => {
+    for (const over of [{ import: "full" }, { dropPath: "/x/Drop" }, { import: "full", dropPath: "/x/Drop" }]) {
+      const t = setup();
+      assert.deepEqual(await on({ ...t.ctx.deps, settings: { ...t.ctx.settings, ...over } }, "guide"), { code: 1, said: [NOT_SET_UP] }, JSON.stringify(over));
+      t.done();
+    }
   });
 });
 
@@ -190,7 +199,7 @@ describe("guide, from the records", () => {
     const found = episodeAs(t, { id: "e-20261020-c2c2c2", name: "2026-10-20 Long talk (Mac Studio)", record: { kind: "raw", answer: ANSWERED, name: { text: "Long talk", placeholder: false }, video: { file: "Long talk.mov", bytes: 5, seconds: 2400, recorded: "2026-10-20", recordedFrom: "import" }, main: MAIN([]), ...imported("10:30") } });
     writePending(t.home, { version: 1, id: found.record.id, name: found.name, folder: found.folder, video: "Long talk.mov", bytes: 5, seconds: 2400, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt" });
     // The other Mac's import of the video is at work: its check is not this Mac's to keep in step, so the reading waits for it.
-    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Long talk.mov", bytes: 5, seconds: 2400, step: "Importing", at: new Date(t.now()).toISOString() }, (to, text) => writeFileSync(to, text));
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Long talk.mov", bytes: 5, seconds: 2400, step: "Importing", at: new Date(t.now()).toISOString() }, (to, text) => writeFileSync(to, text));
     const due = t.now() + 10 * 60 * 1000;
     const STARTS = `Long talk (c2c2c2): Claude starts reading it about ${clockAt(due)}, once the import has checked its copies.`;
     const ROUGH = `Its rough cut is ready about ${clockAt(due + 1032 * 1000)}.`;
@@ -207,7 +216,7 @@ describe("guide, from the records", () => {
     assert.deepEqual((await on(reading, "guide", "Long talk")).said, [`${STARTS} ${ROUGH} ${NOTICE}`]);
     // Only this Mac's own check is left to come (R1c): the reading started at once and keeps it in step, so it is "reading", with no time.
     const READING = 'Long talk (c2c2c2): Claude is reading it. A notice comes when it is done; then say "what did Claude find?".';
-    removeStatus(t.root, "Long talk.mov", "Sallie's laptop", "k3j9x");
+    removeStatusIn(importingFolder(t.root), "Long talk.mov", "Sallie's laptop", "k3j9x");
     assert.deepEqual((await on(reading, "guide", "Long talk")).said, [READING]);
     // The check made, Claude is at work: when it began is not kept, so no time.
     rmSync(join(pendingFolder(t.home), `${found.record.id}.json`));
@@ -218,7 +227,7 @@ describe("guide, from the records", () => {
     const t = setup();
     const found = episodeAs(t, { id: "e-20261020-c2c2c2", name: "2026-10-20 Long talk (Mac Studio)", record: { kind: "raw", answer: ANSWERED, name: { text: "Long talk", placeholder: false }, video: { file: "Long talk.mov", bytes: 5, seconds: 2400, recorded: "2026-10-20", recordedFrom: "import" }, main: MAIN([]), ...imported("10:30") } });
     writePending(t.home, { version: 1, id: found.record.id, name: found.name, folder: found.folder, video: "Long talk.mov", bytes: 5, seconds: 2400, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 60 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "x.txt" });
-    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Long talk.mov", bytes: 5, seconds: 2400, step: "Importing", at: new Date(t.now()).toISOString() }, (to, text) => writeFileSync(to, text));
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Long talk.mov", bytes: 5, seconds: 2400, step: "Importing", at: new Date(t.now()).toISOString() }, (to, text) => writeFileSync(to, text));
     mkdirSync(progressFolder(t.home), { recursive: true });
     writeFileSync(join(progressFolder(t.home), RATES), JSON.stringify({ "Asking Claude": 0.31, "Making the rough cut": 0.12 }));
     const STARTS = `Long talk (c2c2c2): Claude starts reading it about ${clockAt(t.now())}, once the import has checked its copies.`;
@@ -251,7 +260,7 @@ const dropIn = (t, mac, name, text = "video") => {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, name), text);
 };
-const statusOf = (t, over) => writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, bytes: 5, seconds: null, step: "Reading the sound", at: "2026-10-20T14:58:00-05:00", ...over }, writeText);
+const statusOf = (t, over) => writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, bytes: 5, seconds: null, step: "Reading the sound", at: "2026-10-20T14:58:00-05:00", ...over }, writeText);
 
 describe("guide, from the drop folders", () => {
   it("names each video waiting there by its label or what it is, says its step, and leaves out one an episode holds", async () => {
@@ -385,6 +394,72 @@ describe("guide opens a folder, the page, or a file's place in Finder", () => {
     assert.deepEqual(t.opened, [["Finder", join(t.root, "Drop", "Mac Studio")]]);
     const broken = light(t, { openApp: () => { throw new Error("Finder could not be opened (/x/y)"); } });
     assert.deepEqual(await on(broken, "guide", "drop"), { code: 1, said: ["Finder could not open your drop folder. Say it again. If it says this again, tell Jason."] });
+    t.done();
+  });
+  it("opens a drop folder this Mac picked, says it in Finder's words in the overview, and looks in that folder alone (Phase 3, L1)", async () => {
+    const t = setup();
+    const picked = join(t.home, "BRIMM Video Work", "Drop");
+    const own = () => ({ ...t.ctx.deps, settings: { ...t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 2, dropPath: picked } });
+    const WORDS = "BRIMM Video Work › Drop, in your home folder";
+    assert.deepEqual(await on(own(), "guide", "drop"), { code: 1, said: ["Your drop folder is not there: ask Jason."] });
+    mkdirSync(picked, { recursive: true });
+    assert.deepEqual(await on(own(), "guide", "drop"), { code: 0, said: [`Opened your drop folder in Finder: ${WORDS}.`] });
+    assert.deepEqual(t.opened, [["Finder", picked]]);
+    // A video in her laptop's folder in Dropbox is not looked for here; one in the picked folder is.
+    mkdirSync(join(t.root, "Drop", "Sallie's laptop"), { recursive: true });
+    writeFileSync(join(t.root, "Drop", "Sallie's laptop", "Theirs.mov"), "video");
+    assert.deepEqual((await on(own(), "guide")).said, [`Your drop folder: ${WORDS}`, "Nothing is under way. To start, put the video in your drop folder.", AIRDROP]);
+    writeFileSync(join(picked, "Mine.mov"), "video");
+    const r = await on(own(), "guide");
+    assert.equal(r.said[0], `Your drop folder: ${WORDS}`);
+    assert.deepEqual(r.said.slice(2), ['  A video of 5 bytes: It is coming into your drop folder. Wait for the "Ready" notice.']);
+    t.done();
+  });
+  it("says when this Mac does not let it look in its drop folder, in the overview and in episodes, on a Mac with a drop folder of its own and on one whose drop folder is in Dropbox, and lists nothing from that folder; another Mac's folder, one not there, or one its own permissions shut, is passed over as before (L1c, finding 6)", async () => {
+    const t = setup();
+    const picked = join(t.home, "Desktop", "Drop");
+    mkdirSync(picked, { recursive: true });
+    writeFileSync(join(picked, "Mine.mov"), "video");
+    const WORDS = "Desktop › Drop, in your home folder";
+    const SAID = dropUnreadable(WORDS);
+    const NOTHING = "Nothing is under way. To start, put the video in your drop folder.";
+    const shut = (folders, code) => ({ names: ["readdirSync"], deny: (name, path) => (folders.includes(path) ? Object.assign(new Error(`${code}: operation not permitted, scandir '${path}'`), { code }) : null) });
+    const own = { ...t.ctx.deps, settings: { ...t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 2, dropPath: picked } };
+    const run = async (deps, folders, code, ...argv) => (await watched(() => on(deps, ...argv), shut(folders, code))).result;
+    let r = await run(own, [picked], "EPERM", "guide");
+    assert.deepEqual(r.said, [`Your drop folder: ${WORDS}`, SAID]);
+    r = await run(own, [picked], "EPERM", "episodes");
+    assert.equal(r.said.filter((l) => l === SAID).length, 1, r.said.join("\n"));
+    assert.ok(!r.said.includes("Waiting in the drop folders:"), r.said.join("\n"));
+    assert.ok(r.said.indexOf(SAID) < r.said.indexOf("On this Mac:"), r.said.join("\n"));
+    // Her chat is told to allow it, not to retry the video: a video that is there stays, and the retry says so too.
+    r = await run(own, [picked], "EPERM", "retry", "Mine");
+    assert.deepEqual(r, { code: 1, said: [SAID] });
+    r = await run(own, [picked], "EACCES", "retry", "Mine");
+    assert.deepEqual(r, { code: 1, said: [SAID] });
+    // A folder its own permissions shut (EACCES), or one that is not there (ENOENT), is passed over as before.
+    for (const code of ["EACCES", "ENOENT"]) {
+      r = await run(own, [picked], code, "guide");
+      assert.deepEqual(r.said, [`Your drop folder: ${WORDS}`, NOTHING, AIRDROP], code);
+      r = await run(own, [picked], code, "episodes");
+      assert.ok(!r.said.some((l) => l.startsWith("This Mac does not let")), r.said.join("\n"));
+    }
+    r = await run(own, [], "EPERM", "guide");
+    assert.ok(!r.said.includes(SAID));
+    assert.deepEqual(r.said.slice(2), ['  A video of 5 bytes: It is coming into your drop folder. Wait for the "Ready" notice.']);
+    // A Mac whose drop folder is in Dropbox: macOS shuts all of Dropbox at once, this Mac's folder first of all.
+    mkdirSync(join(t.root, "Drop", "Mac Studio"), { recursive: true });
+    mkdirSync(join(t.root, "Drop", "Sallie's laptop"), { recursive: true });
+    const all = [join(t.root, "Drop"), join(t.root, "Unedited Video"), join(t.root, "Drop", "Mac Studio"), join(t.root, "Drop", "Sallie's laptop")];
+    const dropbox = dropUnreadable("Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio");
+    r = await run(light(t), all, "EPERM", "guide");
+    assert.deepEqual(r.said, [DROP_LINE, dropbox]);
+    r = await run(light(t), all, "EPERM", "episodes");
+    assert.equal(r.said.filter((l) => l === dropbox).length, 1, r.said.join("\n"));
+    r = await run(light(t), [join(t.root, "Drop", "Sallie's laptop")], "EPERM", "guide");
+    assert.deepEqual(r.said, [DROP_LINE, NOTHING]);
+    r = await run(light(t), [join(t.root, "Drop", "Sallie's laptop")], "EPERM", "episodes");
+    assert.ok(!r.said.some((l) => l.startsWith("This Mac does not let")), r.said.join("\n"));
     t.done();
   });
   it("opens Zoom Video Transfer, beside BRIMM Video, or says to ask Jason", async () => {

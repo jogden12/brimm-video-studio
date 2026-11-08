@@ -9,7 +9,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { CHECKING_FILE, PLACES, PROBLEM_FILE, checkingNow, clearChecking, clearProblem, flagProblem, markChecking, problemFlagged } from "../finish-check.js";
-import { episodeWork } from "../settings.js";
+import { episodeWork, pendingFolder } from "../settings.js";
+import * as filing from "../filing.js";
+import { pendingKeyOf } from "../filing.js";
 
 const FOLDER = "2026-10-13 Talk (Mac Studio)";
 const DUE = Date.parse("2026-10-20T15:20:00-05:00");
@@ -152,5 +154,41 @@ describe("the note of a late check that found a problem", () => {
     const home = mkdtempSync(join(tmpdir(), "brimm-finish-check-"));
     assert.equal(problemFlagged(home, FOLDER), false);
     rmSync(home, { recursive: true, force: true });
+  });
+});
+
+describe("the marker of a finish on a video kept on this Mac (L5)", () => {
+  const ID = "e-20261013-3fa9c1";
+  const LOCAL = { id: ID, local: { on: "Mac Studio" }, finished: { revision: 1 } };
+  const pendingOf = (home, over = {}) => filing.writePending(home, { version: 1, kind: "final", id: ID, name: FOLDER, folder: "/x", root: "/r", machine: "Mac Studio", revision: 1, rev: 2, entries: [], took: [], work: null, lastCopy: 1, ...over });
+
+  it("K2 clearChecking with a revision takes away only a marker of that revision", () => {
+    const t = setup();
+    mark(t, { revision: 2 });
+    clearChecking(t.home, FOLDER, 1);
+    assert.equal(existsSync(join(t.work, CHECKING_FILE)), true);
+    clearChecking(t.home, FOLDER, 2);
+    assert.equal(existsSync(join(t.work, CHECKING_FILE)), false);
+    mark(t, { revision: 2 });
+    clearChecking(t.home, FOLDER);
+    assert.equal(existsSync(join(t.work, CHECKING_FILE)), false);
+    t.done();
+  });
+
+  it("K3 believes a local episode's marker while its final pending is there, whoever holds the lock", () => {
+    const t = setup("read");
+    markChecking(t.home, FOLDER, { nonce: "x", revision: 1, due: DUE, took: ["Downloads"] });
+    pendingOf(t.home);
+    assert.deepEqual(checkingNow(t.home, FOLDER, LOCAL, () => false), { revision: 1, due: DUE, took: ["Downloads"] });
+    assert.deepEqual(checkingNow(t.home, FOLDER, { ...LOCAL, finished: { revision: 2 } }, () => false), { revision: 1, due: DUE, took: ["Downloads"] });
+    assert.equal(checkingNow(t.home, FOLDER, { id: ID, finished: { revision: 1 } }, () => false), null, "a record without local: no run holds the lock");
+    pendingOf(t.home, { problem: "x" });
+    assert.equal(checkingNow(t.home, FOLDER, LOCAL, () => false), null);
+    pendingOf(t.home, { wasProblem: "x" });
+    assert.equal(checkingNow(t.home, FOLDER, LOCAL, () => false), null);
+    rmSync(join(pendingFolder(t.home), "final", `${ID}-1.json`));
+    assert.equal(checkingNow(t.home, FOLDER, LOCAL, () => false), null);
+    assert.equal(pendingKeyOf({ kind: "final", id: ID, revision: 1 }), `final/${ID}-1.json`);
+    t.done();
   });
 });

@@ -23,12 +23,13 @@ import { runGuarded } from "./guard.js";
 import { fileSafe } from "./names.js";
 import { FOOTAGE_KINDS } from "./plan-project.js";
 import { lastLine } from "./run.js";
-import { appOf, runsFolder } from "./settings.js";
+import { appOf, isLocal, runsFolder } from "./settings.js";
 import { banner, clockAt, importInto } from "./unedited.js";
 import { copyIn } from "./guide.js";
 import { waitFacts } from "./late-wait.js";
 import { progressFolder, readRates } from "./progress.js";
 import { requestWorkCopy, workCopyLimits } from "./workcopy.js";
+import { ON_OTHER_MAC, fileAt, keptOnAMac, notWholeHere, onOtherMac } from "./where.js";
 
 export { isFromPlan };
 
@@ -173,10 +174,10 @@ const takenOf = (record) => (record.planned.route === "explainer" ? isVoiceover 
 
 /** The words a talking part is read from, for the order it comes in: the words file its light import filed. [] when it is not there, is not whole
     or cannot be read, and the part then has no place in the script. */
-function wordsOfPart(part) {
+function wordsOfPart(ctx, part) {
   const stem = basename(part.record.video.file, extname(part.record.video.file));
   try {
-    const held = JSON.parse(readFileSync(join(part.folder, `${stem}.words.json`), "utf8"));
+    const held = JSON.parse(readFileSync(fileAt(ctx, part, `${stem}.words.json`), "utf8"));
     return Array.isArray(held?.words) ? held.words : [];
   } catch (e) {
     return [];
@@ -223,7 +224,7 @@ export function joinCase(ctx, record, kit, { videos = [], ids = null } = {}) {
   if (held) return { why: heldWords(held.part, held.held, kit) };
   const ordered = explainer
     ? taken.map((part) => ({ id: part.record.id, label: labelOf(part), place: null }))
-    : partOrder(taken.map((part) => ({ id: part.record.id, label: labelOf(part), words: wordsOfPart(part) })), record.planned.lines);
+    : partOrder(taken.map((part) => ({ id: part.record.id, label: labelOf(part), words: wordsOfPart(ctx, part) })), record.planned.lines);
   const labels = ordered.map((part) => part.label).join(", ");
   if (explainer && taken.length > 1) return { why: `"${title}" has more than one voiceover: ${labels}. Take the others back, each with "that's not footage for ${title}".` };
   if (ids !== null || videos.length) {
@@ -294,7 +295,8 @@ const stopped = (title, why, voice = false) => ({
     always a short video: `kind`), its video, files and fingerprint those of the video that was filed, with the plan's own files kept; its answer
     says it is answered, by this Mac, now, as no card asked her anything: what was seen of it and how it came are the first talking part's (`seen` is
     that of the video the light import read, for several parts); and its plan is kept whole but for `filmed`, { at, parts }: when, and which parts,
-    in the order they were joined. Nothing else of the plan's record changes: its name stays its title, and it stays at layout 5.
+    in the order they were joined. Nothing else of the plan's record changes: its name stays its title, and it stays at layout 5 (at 6, with its
+    `local`, for a plan kept on one Mac).
     An explainer (PR H6) is given the voice it has, hers when it had none (`voice`); one read by a HeyGen voice (`project`, the entry of its project
     for `app.projects`, which is the main project in use from now on) moves its project out of its plan, where it was kept until the voice was in. */
 function videoOf(plan, made, { at, machine, ids, came, seen, kind = made.kind, voice = null, project = null }) {
@@ -370,7 +372,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
   };
   if (!read.record) return stop(String(read.why).replace(/\.$/, ""));
   if (read.newer) return stop(kit.newerWhy(read.record));
-  const plan = read.record;
+  let plan = read.record;
   if (voice) voiced = true;
   const title = shownName(plan);
   keepTitle(ctx, title);
@@ -384,6 +386,16 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
   if (heard && heard.why) return stop(heard.why);
   const taken = voice ? { parts: [], explainer: true } : joinCase(ctx, plan, kit, { ids });
   if (taken.why) return stop(taken.why);
+  // On a Mac with a drop folder of its own, a HeyGen voice's plan is marked as filmed here before its voice is filed as the plan's video (Phase 3, L4); a script's
+  // is marked by its first footage already, and one whose footage began before the switch has no `local` and is joined the old way (D9).
+  if (voice && isLocal(ctx.settings) && !keptOnAMac(plan)) {
+    if ((await kit.save({ ...found, record: plan }, { ...plan, local: { on: ctx.machine } }, "")) !== 0) return stop("the plan could not be marked as made on this Mac");
+    const marked = readEpisode(found.folder);
+    if (!marked.record || marked.newer) return stop("the plan could not be read again");
+    plan = marked.record;
+  }
+  // A plan kept on this Mac has its video filed into its own video/ here, with no late check of Dropbox's.
+  const here = keptOnAMac(plan);
   const chosen = taken.parts;
   const tools = deps.tools;
   const work = join(runsFolder(ctx.home), `join-${process.pid}-${ctx.now()}`);
@@ -392,8 +404,14 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
   try {
     mkdirSync(work, { recursive: true });
     const bring = deps.readAll || readThrough;
-    /** Make a file of a part whole on this Mac (Dropbox may show only a placeholder), or say why not: "" when it is here. */
-    const hereWhy = async (part, path) => {
+    /** Make a file of a part whole on this Mac (Dropbox may show only a placeholder), or say why not: "" when it is here. A part kept on another Mac is that
+        Mac's, and one kept on this Mac that is not whole in its video/ is for Jason: neither is Dropbox's to bring (Phase 3, L4). */
+    const hereWhy = async (part, path, rel) => {
+      if (keptOnAMac(part.record)) {
+        const away = onOtherMac(ctx, part.record);
+        if (away) return ON_OTHER_MAC(labelOf(part), away);
+        return ctx.isWhole(path) ? "" : notWholeHere(labelOf(part), rel);
+      }
       if (!ctx.isWhole(path)) {
         try {
           await bring(path);
@@ -425,6 +443,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       const imported = await importInto(copy, {
         folder: found.folder,
         record: plan,
+        local: here,
         change: (made) => videoOf(plan, made, {
           at, machine: ctx.machine, ids: [], came: "sound", seen: made.answer && typeof made.answer.seen === "string" ? made.answer.seen : "", kind: "short video", voice: "heygen",
           project: {
@@ -434,7 +453,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
         })
       }, { ...deps, episode, work, shown: title });
       if (!imported.filed) return stop(String(imported.message || "the work stopped").replace(/^it could not be filed into Episodes: /, ""));
-      kept = true;
+      kept = !here;
       if (!imported.ok) ctx.say(`${title}: ${imported.message}.`);
       ctx.say(`${title}: made from its voice, as ${imported.filed.record.id}.`);
       return {
@@ -445,8 +464,8 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
     // What ffprobe prints of each part's video, as a JSON text, "" for one it cannot read.
     const printeds = [];
     for (const [i, part] of chosen.entries()) {
-      const video = join(part.folder, part.record.video.file);
-      const why = await hereWhy(part, video);
+      const video = fileAt(ctx, part, part.record.video.file);
+      const why = await hereWhy(part, video, part.record.video.file);
       if (why) return stop(why);
       // The video is the one that came in: a plan made its video can never be joined again, so a file Dropbox is still changing makes no video (the final review, fix 3).
       if (differs(video, part.record.video?.bytes)) return stop(changedWords(part));
@@ -479,6 +498,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
     const into = (seen) => ({
       folder: found.folder,
       record: plan,
+      local: here,
       change: (made) => {
         unchanged();
         // An explainer is a short video whatever its voice is (a recording of sound alone is an episode by the import's rule), and its voice is hers when
@@ -498,31 +518,34 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       // as the plan's video. Several are held to the sound of the first by partsFault, and to a sound to join by the check of its streams below.
       if (streamsOf(printeds[0]).audio === null) return stop(`${labelOf(part)} has no sound, so it can't be a talking part`);
       const facts = factsOf(printeds[0]);
-      const video = join(part.folder, part.record.video.file);
+      const video = fileAt(ctx, part, part.record.video.file);
       // The files its light import filed beside it: the part's record lists them.
       const rels = Object.keys(part.record.files).filter((rel) => rel !== part.record.video.file && !rel.startsWith("record/"));
       for (const rel of rels) {
-        const why = await hereWhy(part, join(part.folder, rel));
+        const why = await hereWhy(part, fileAt(ctx, part, rel), rel);
         if (why) return stop(why);
-        if (differs(join(part.folder, rel), part.record.files[rel])) return stop(changedWords(part));
+        if (differs(fileAt(ctx, part, rel), part.record.files[rel])) return stop(changedWords(part));
       }
       try {
         filed = fileEpisode({
-          file: video, made: rels.map((rel) => join(part.folder, rel)), at: (to) => to, facts, printed: printeds[0], kind: taken.explainer || episodeKind(facts) === "short video" ? "short video" : "raw",
+          file: video, made: rels.map((rel) => fileAt(ctx, part, rel)), at: (to) => to, facts, printed: printeds[0], kind: taken.explainer || episodeKind(facts) === "short video" ? "short video" : "raw",
           read: null, reels: [], work, fingerprint: typeof part.record.fingerprint === "string" ? part.record.fingerprint : "", into: into(part.record.answer.seen)
         }, fdeps);
       } catch (e) {
         return stop(String(e.message).replace(/\.$/, ""));
       }
-      kept = true;
-      const pending = pendingFor(filed, { video: part.record.video.file, drop: join(work, "not in a drop folder"), work, planTxt: `${basename(part.record.video.file, extname(part.record.video.file))}.cut-plan.txt`, label: title }, { episode, clock: deps.clock || Date.now });
-      try {
-        writePending(ctx.home, pending);
-        ctx.say(`${title}: copied into Dropbox. Dropbox's check of its copies is made in ${LATE_CHECK_MS / 60000} minutes.`);
-        // The result keeps it too (plan R1a), with no title: "how far is it?" and the guide's tell read the result, not the log.
-        late = `copied into Dropbox, and Dropbox's check of its copies is made in ${LATE_CHECK_MS / 60000} minutes`;
-      } catch (e) {
-        ctx.say(`${title}: copied into Dropbox, but the check of its copies could not be kept (${e.code || e.message}), so it is not made.`);
+      kept = !here;
+      // A plan kept on this Mac was filed into its own video/ here: nothing is in Dropbox but its record, and no late check is owed (D4).
+      if (!here) {
+        const pending = pendingFor(filed, { video: part.record.video.file, drop: join(work, "not in a drop folder"), work, planTxt: `${basename(part.record.video.file, extname(part.record.video.file))}.cut-plan.txt`, label: title }, { episode, clock: deps.clock || Date.now });
+        try {
+          writePending(ctx.home, pending);
+          ctx.say(`${title}: copied into Dropbox. Dropbox's check of its copies is made in ${LATE_CHECK_MS / 60000} minutes.`);
+          // The result keeps it too (plan R1a), with no title: "how far is it?" and the guide's tell read the result, not the log.
+          late = `copied into Dropbox, and Dropbox's check of its copies is made in ${LATE_CHECK_MS / 60000} minutes`;
+        } catch (e) {
+          ctx.say(`${title}: copied into Dropbox, but the check of its copies could not be kept (${e.code || e.message}), so it is not made.`);
+        }
       }
     } else {
       const output = join(work, `${fileSafe(title)}.mov`);
@@ -530,7 +553,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       const streams = streamsOf(printeds[0]);
       if (streams.video === null || streams.audio === null) return stop("talking part 1 has no picture or no sound this Mac can read, so the parts cannot be joined");
       try {
-        writeFileSync(list, concatList(chosen.map((part) => join(part.folder, part.record.video.file))));
+        writeFileSync(list, concatList(chosen.map((part) => fileAt(ctx, part, part.record.video.file))));
       } catch (e) {
         return stop(String(e.message).replace(/\.$/, ""));
       }
@@ -550,7 +573,7 @@ export async function joinRun(ctx, { found }, asked, deps, kit) {
       const imported = await importInto(output, into(null), { ...fdeps, work, shown: title });
       if (!imported.filed) return stop(String(imported.message || "the work stopped").replace(/^it could not be filed into Episodes: /, ""));
       filed = imported.filed;
-      kept = true;
+      kept = !here;
       if (!imported.ok) ctx.say(`${title}: ${imported.message}.`);
     }
     ctx.say(`${title}: made from its ${taken.explainer ? "voice" : "footage"}, as ${filed.record.id}.`);
@@ -590,17 +613,24 @@ export function afterJoin(ctx, found, started, notify = banner) {
   let copyAsked = false;
   if (ctx.settings.readings !== false) {
     startDetached(ctx, { command: "read", folder: found.name, args: ["--kind", started.kind, "--rev", String(started.rev)] });
-    if (started.project !== true && appOf(ctx.settings) !== "" && ctx.isWhole(join(found.folder, started.video))) {
+    if (started.project !== true && appOf(ctx.settings) !== "" && ctx.isWhole(fileAt(ctx, { folder: found.folder, record: wrote.record }, started.video))) {
       requestWorkCopy(ctx, { folder: found.name });
       copyAsked = true;
     }
   }
-  if (!ctx.agentRunning()) {
+  // A plan kept on this Mac owes no late check, so the launch agent is not asked to make one (Phase 3, L4, D4), and the copy starts at once: the notice names no time.
+  const here = keptOnAMac(wrote.record);
+  if (!here && !ctx.agentRunning()) {
     try {
       ctx.kickstart();
     } catch (e) {
       ctx.say(`${title}: the launch agent could not be asked to make the check of its copies (${String(e.message).replace(/\.$/, "")}). It is made when the Mac's import next runs.`);
     }
   }
-  notify(started.explainer === true ? `Ready: "${title}" has its voice. In Claude, say "what's next?"` : `Ready: "${title}" is made from its footage.${copyAsked ? opensAt(ctx, wrote.record) : ""} In Claude, say "what's next?"`);
+  // A video kept on this Mac whose video for HyperFrames is being made opens by itself once it is ready, when she asks for it (Phase 3, L7).
+  if (started.explainer !== true && copyAsked && here) {
+    notify(`Ready: "${title}" is made from its footage. Say "open ${title} in HyperFrames": it opens by itself once its video is ready and you have answered the spellings card.`);
+    return;
+  }
+  notify(started.explainer === true ? `Ready: "${title}" has its voice. In Claude, say "what's next?"` : `Ready: "${title}" is made from its footage.${copyAsked && !here ? opensAt(ctx, wrote.record) : ""} In Claude, say "what's next?"`);
 }

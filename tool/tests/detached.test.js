@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startDetached, runDetached, resultFile, readResult, runningCommand, runningRun, lockOf } from "../detached.js";
+import { startDetached, startWhenReady, runDetached, resultFile, readResult, runningCommand, runningRun, lockOf } from "../detached.js";
 
 const FOLDER = "2026-10-13 Talk (Mac Studio)";
 /** The edit.js of the checkout this code is in, worked out from this file's place: tool/tests/ is beside tool/edit.js. */
@@ -107,6 +107,30 @@ describe("a command run detached", () => {
     startDetached({ settings: { checkout: "/elsewhere/BRIMM video" }, start: (cmd, args) => started.push([cmd, ...args]) }, { command: "bring", folder: FOLDER, args: ["--quiet"] });
     assert.deepEqual(started, [[process.execPath, EDIT_JS, "bring", "--now", FOLDER, "--quiet"]]);
     assert.ok(existsSync(EDIT_JS), "the program it starts is a file that is there");
+  });
+  it("F3 startWhenReady gives the token after the folder only when it is given one", () => {
+    const started = [];
+    const ctx = { settings: { checkout: "/elsewhere" }, start: (cmd, args) => started.push([cmd, ...args]) };
+    startWhenReady(ctx, FOLDER);
+    startWhenReady(ctx, FOLDER, 1700000000000);
+    assert.deepEqual(started, [[process.execPath, EDIT_JS, "app", "--when-ready", FOLDER], [process.execPath, EDIT_JS, "app", "--when-ready", FOLDER, "--asked", "1700000000000"]]);
+  });
+  it("F3 the tag is the run's: it is written into the result whatever the body did, and a body's own copy is not read", async () => {
+    for (const how of ["returned", "threw", "early"]) {
+      const t = setup();
+      const r = await runDetached({ ...t.opts, command: "workcopy", tag: { copy: "reel", asked: 7 } }, async ({ early }) => {
+        if (how === "early") early({ ok: true, made: [], failed: [], next: "" });
+        if (how === "threw") throw new Error("boom");
+        return { ok: how !== "threw", made: [], failed: [], next: "", copy: "main" };
+      });
+      assert.deepEqual([r.copy, r.asked], ["reel", 7], how);
+      assert.deepEqual([readResult(t.home, FOLDER, "workcopy").copy, readResult(t.home, FOLDER, "workcopy").asked], ["reel", 7], how);
+      t.done();
+    }
+    const t = setup();
+    const none = await runDetached({ ...t.opts, command: "workcopy" }, async () => ({ ok: true, made: [], failed: [], next: "", copy: "reel" }));
+    assert.equal("copy" in none, false);
+    t.done();
   });
   it("has no result before it has run, and no running command without a lock", () => {
     const t = setup();

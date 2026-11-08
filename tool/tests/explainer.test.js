@@ -24,10 +24,16 @@ import { FONTS, explainerHtml, projectFiles } from "../project.js";
 
 import { NO_RECEIPT, PLANNED_Q, cardOf, footageOption, formOf, notSessionCardOf, plannedCardOf, receiptFrom, voiceoverOption, writeReceipt } from "../receipts.js";
 import { fileSafe } from "../names.js";
-import { downloadsFolder, episodeWork, writeSettings } from "../settings.js";
+import { downloadsFolder, episodeFilesFolder, episodeWork, writeSettings } from "../settings.js";
 import { localDay } from "../shared/text.js";
 import { setup, episodeAs, reread, listAll, toldOf } from "./episodes.js";
 import { MINIMUM } from "./open-world.js";
+/** A request for the main video's copy from `app` carries a token (--asked <n>, F3): what is asked for is compared without it (the token is open-once.test.js's). */
+const noAsked = (args) => {
+  const at = args.indexOf("--asked");
+  assert.ok(at === -1 || /^\d+$/.test(args[at + 1]), "the token is a whole number");
+  return at === -1 ? args : [...args.slice(0, at), ...args.slice(at + 2)];
+};
 
 /** Run a command of edit.js by its deps: { code, said, text }, with each line it said. */
 async function on(deps, ...argv) {
@@ -1106,7 +1112,7 @@ describe("app, for an explainer in her voice: the project from sound (PR H6)", (
     const r = await on(depsOf(t), "app", TITLE);
     assert.equal(r.code, 0, r.text);
     assert.match(r.said[0], /^The video for HyperFrames is being made\./);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)), [["workcopy", "--now", nameOf(t)]]);
+    assert.deepEqual(t.started.map(([, args]) => noAsked(args.slice(1))), [["workcopy", "--now", nameOf(t)]]);
     assert.equal(existsSync(join(workOf(t), PROJECT)), false);
     assert.deepEqual(planOf(t).app, undefined);
     t.done();
@@ -1122,7 +1128,7 @@ describe("app, for an explainer in her voice: the project from sound (PR H6)", (
     const asked = await on(depsOf(t), "app", TITLE);
     assert.equal(asked.code, 0, asked.text);
     assert.match(asked.said[0], /^The video for HyperFrames is being made\./);
-    assert.deepEqual(t.started.map(([, args]) => args.slice(1)).at(-1), ["workcopy", "--now", nameOf(t)]);
+    assert.deepEqual(noAsked(t.started.map(([, args]) => args.slice(1)).at(-1)), ["workcopy", "--now", nameOf(t)]);
     assert.equal((await on(depsOf(t), "workcopy", "--now", nameOf(t))).code, 0);
     const back = await on(depsOf(t), "app", TITLE);
     assert.equal(back.code, 0, back.text);
@@ -1282,6 +1288,22 @@ describe("onMac and voiceSeconds, the small words of a HeyGen explainer's projec
 });
 
 describe("app, for a planned HeyGen explainer: its project, with no media (PR H6)", () => {
+  it("says nothing of where to export, though this Mac picked an exports folder: her step there is the voice, and there is nothing to export yet (L1b fix 3)", async () => {
+    const t = world();
+    await explainer(t, { voice: "heygen" });
+    writeSettings(t.home, { exportsPath: join(t.home, "Movies", "Exports") });
+    const r = await on(depsOf(t), "app", TITLE);
+    assert.deepEqual([r.code, r.said], [0, ["It's open in HyperFrames.", BUTTONS_SAID]]);
+    // Opened again before its voice is done, the same.
+    const again = await on(depsOf(t), "app", TITLE);
+    assert.deepEqual([again.code, again.said], [0, ["It's open in HyperFrames.", BUTTONS_SAID]]);
+    // Once its voice is taken in it is a video to export, and its project's open says where.
+    voiceMade(t);
+    assert.equal((await on(depsOf(t), "join", "--now", nameOf(t), "--voice")).code, 0);
+    const made = await on(depsOf(t), "app", TITLE);
+    assert.deepEqual([made.code, made.said], [0, ["It's open in HyperFrames.", BUTTONS_SAID, "Export it on This Mac, into Movies › Exports, in your home folder."]]);
+    t.done();
+  });
   it("makes an upright project from the package, with no media, opens it, and writes it into the plan in one write", async () => {
     const t = world();
     await explainer(t, { voice: "heygen" });
@@ -1535,6 +1557,21 @@ describe("the join run with --voice: the HeyGen voice taken in (PR H6)", () => {
     assert.deepEqual(main.workingCopy, { bytes: size, seconds: 182, fps: 30 });
     assert.deepEqual([main.from.file, main.from.bytes], ["HeyGen voice 1.wav", size]);
     assert.equal(changedSince(main, { found: { folder }, record: now }), false, "the voice is the one the project was made with");
+    t.done();
+  });
+  it("on a Mac with a drop folder of its own, marks the plan local before it files the voice, which is in the plan's video/ and not in Dropbox, with no pending (Phase 3, L4)", async () => {
+    const t = world();
+    const { folder } = await heygenOpened(t);
+    voiceMade(t);
+    const plan = planOf(t);
+    const r = await run(t, { settings: { ...t.ctx.settings, dropPath: join(t.home, "BRIMM Video Work", "Drop") } });
+    assert.equal(r.code, 0, resultOf(t).failed.join(" | "));
+    const now = readEpisode(folder).record;
+    assert.deepEqual([now.local, now.rev, isFromPlan(now), episodeFault(now)], [{ on: "Mac Studio" }, plan.rev + 2, true, ""]);
+    assert.ok(existsSync(join(episodeFilesFolder(t.home, nameOf(t)), "HeyGen voice 1.wav")));
+    assert.ok(!existsSync(join(folder, "HeyGen voice 1.wav")));
+    assert.deepEqual(readPendings(t.home), []);
+    assert.deepEqual(t.kicks, []);
     t.done();
   });
   it("asks for Claude's reading, for its spellings, and for no working copy, asks the launch agent to make the late check, and posts its notice; its late check is kept", async () => {

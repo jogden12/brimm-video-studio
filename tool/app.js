@@ -20,7 +20,7 @@
 //     is made;
 //   - and Claude's reading must be in the episode's record: the project is written from it (the cut plan and the Reel suggestions), and
 //     nothing writes it again afterwards, so a project made while `read` is still at work on it would keep an unfinished reading for
-//     good. Until the record holds the current reading nothing is made, and she is told to say it again when it has finished. Once it
+//     good. Until the record holds the current reading nothing is made, and she is told to say it again when it has finished (a video kept on this Mac is told that once Claude has read it, its video is made and she has answered the spellings card, HyperFrames opens it by itself). Once it
 //     does, the project is made even while the reading's own late check is still to come (plan R1d), if the words, the Reel
 //     suggestions and the cut plan are each at the size the record lists (readListed; else she is told some files are not whole yet,
 //     and claimAndBring says so before it claims anything). Only a new project waits for the reading: one made before is opened as it
@@ -28,9 +28,10 @@
 //   - the project is written from them (project.js), whole or not at all, with the working copy moved into it (5.1, 5.2);
 //   - the app is opened on the project by the pinned command line (hyperframes.js), by absolute path and in a short list of
 //     variables of its own, with her chat handed to the app only when handoverAllowed says it may be (5.6);
-//   - what the command line printed is said in her words, and, whenever the app opened, a last line names the app's buttons that
-//     Studio cannot control (BUTTONS; 3.3 and 5.9). The record gets the project and the time it was opened (7.1). A record
-//     that could not be written ends the run with 1, and the project it was for stays on this Mac.
+//   - what the command line printed is said in her words, and, whenever the app opened, a line names the app's buttons that
+//     Studio cannot control (BUTTONS; 3.3 and 5.9), and after it, when this Mac picked an exports folder that is not Downloads, a
+//     line says where to export, in Finder's words (Phase 3, L1b); a video kept on this Mac hears both before HyperFrames opens it by itself (openByItself); the lines of a plan's footage, if any, come after it. The record gets the project and the time it was opened
+//     (7.1). A record that could not be written ends the run with 1, and the project it was for stays on this Mac.
 // A project that was made is kept whether or not the app opened: nothing here takes one away.
 //
 // The last three steps are openProjectInApp, which a Reel's project is opened by too (app-reel.js, plan PR 5): it asks the app,
@@ -43,12 +44,12 @@
 // files is given to it (`deps`), so that no test runs the command line, the app or `claude`; each but `save` has a default, and the
 // defaults fail closed.
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
 import { programHome } from "./home.js";
-import { readResult, runningCommand } from "./detached.js";
-import { isFromPlan, kindOf, localStamp } from "./episode.js";
+import { readResult, runningCommand, startWhenReady, whenReadyLockOf } from "./detached.js";
+import { answerOf, isFromPlan, kindOf, localStamp } from "./episode.js";
 import { sessionNotCleared } from "./gate.js";
 import { copyIn as copyTakes, waitWords } from "./guide.js";
 import { projectWaits, readingWaitsUntil, waitFacts } from "./late-wait.js";
@@ -60,11 +61,15 @@ import { graphicCuesOfPlan, graphicCuesOfRecord } from "./graphic-cues.js";
 import { VOICEOVER, projectCues, projectFiles, projectName, writeProject } from "./project.js";
 import { refNamesOf, withReferences } from "./references.js";
 import { REELS_FILE } from "./reel-candidates.js";
-import { appHandoverOn, episodeWork } from "./settings.js";
+import { appHandoverOn, episodeWork, exportsWords } from "./settings.js";
 import { teleprompterText } from "./sentences.js";
 import { studioFolder } from "./studio.js";
 import { clockAt } from "./unedited.js";
 import { requestWorkCopy, voiceCopyPaths, workCopyKey, workCopyLockOf, workCopyPaths } from "./workcopy.js";
+import { fileAt, keptOnAMac, recordingStat } from "./where.js";
+
+/** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
+const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
 
 /** What is said of a Mac that is not set up for the app (settings.js appOf). edit.js says it before it goes any further, so
     openInApp is only ever given a Mac that is set up, and does not say it. */
@@ -78,7 +83,36 @@ export const KEPT = "kept for an earlier kind";
 
 /** What she is told, in words that hold no path, no flag and no command name. The three exported ones are said of a Reel's project in
     the same words (app-reel.js, plan PR 5); the other two, which tell her what to say again, have a Reel's own there. */
-export const noWords = (name) => `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Dropbox may still be bringing them: say it again in a few minutes. If it says this again, tell Jason.`;
+export const noWords = (name, local = false) => local ? `${name}'s words are not whole on this Mac. Ask Jason.` : `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Dropbox may still be bringing them: say it again in a few minutes. If it says this again, tell Jason.`;
+/** The lock of an `app --when-ready` run, held while it waits for the video for HyperFrames of an episode kept on this Mac (detached.js). */
+export { whenReadyLockOf };
+/** The marker of a video kept on this Mac whose `app --when-ready` ended to wait for her answer to its spellings card: { at: <ms> }, in the episode's work folder.
+    Her answer removes it and starts the run again (edit.js answerOffers). */
+export const opensAfterSpellingsOf = (home, folder) => join(episodeWork(home, folder), "opens-after-spellings.json");
+/** Write the marker, whole (a temporary file renamed over it): the run that waits for her answer has ended, and her answer is to start it again. */
+export function markOpensAfterSpellings(ctx, folder) {
+  const file = opensAfterSpellingsOf(ctx.home, folder);
+  mkdirSync(dirname(file), { recursive: true });
+  const at = ctx.now();
+  const temporary = `${file}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify({ at })}\n`);
+  renameSync(temporary, file);
+  // A seam for the tests: the marker is in place, and her answer may land now, before the record is read again.
+  if (typeof ctx.deps?.marked === "function") ctx.deps.marked();
+}
+/** Take the marker away: whether it was there. A marker that is not there is no fault. */
+export function clearOpensAfterSpellings(home, folder) {
+  try {
+    unlinkSync(opensAfterSpellingsOf(home, folder));
+    return true;
+  } catch (e) {
+    if (e.code === "ENOENT") return false;
+    throw e;
+  }
+}
+/** Whether a video kept on this Mac is to wait for her answer to its spellings card before HyperFrames opens it by itself: the current reading's card is not
+    answered, and this Mac's readings are on (with readings off there is never a card). Her own `app` opens it at once, answered or not. */
+export const waitsForSpellings = (ctx, record) => ctx.settings.readings !== false && answerOf(record) === null;
 const beingMade = (name, ready = "") => `The video for HyperFrames is being made.${ready} Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
 /** When the video for HyperFrames will be ready, as a clock time and in minutes, for the line that says it is being made: from the speed
     this Mac measured of making one (guide.js copyIn, which the guide's "It usually takes" is made of) and the recording's length, as
@@ -90,6 +124,56 @@ function readyAt(ctx, record) {
   if (wait) return ` ${waitWords(wait)}`;
   return seconds === null ? "" : ` It is ready about ${clockAt(ctx.now() + seconds * 1000)}, in ${aboutLeft(seconds)}.`;
 }
+/** What she is told of a video kept on this Mac whose video for HyperFrames is being made: HyperFrames opens it by itself (Phase 3, L7), once its video is made
+    and she has answered the spellings card (a project's words and spellings are written once, when it is made); when she has answered it, or this Mac's readings are
+    off, about when this Mac measured the copy would be done, else when it is ready. */
+const opensByItself = (ctx, record) => {
+  if (waitsForSpellings(ctx, record)) return `Its video for HyperFrames is being made. HyperFrames opens it by itself once it is made and you have answered the spellings card.`;
+  const seconds = copyTakes(readRates(progressFolder(ctx.home)), record.video && record.video.seconds);
+  return `Its video for HyperFrames is being made. HyperFrames opens it by itself ${seconds === null ? "when it is ready" : `about ${clockAt(ctx.now() + seconds * 1000)}`}.`;
+};
+/** Say that HyperFrames opens a video kept on this Mac by itself, and start the run that does it (`app --when-ready`) unless one is at work already:
+    resolves 0. Claims nothing and writes no record. Three things are said of when it opens: while Claude is still reading, that it opens once Claude has read it,
+    its video is made and she has answered the spellings card; while the card is not answered (and readings are on), that it opens once its video is made and she has
+    answered it; else the time (opensByItself). */
+export function openByItself(ctx, { found, record, reading = false, asked }) {
+  if (!runningCommand(ctx.home, found.name, ctx.alive, whenReadyLockOf(ctx.home, found.name))) startWhenReady(ctx, found.name, asked);
+  // While Claude is still reading, the run waits for the reading too: she is not asked to say it again.
+  ctx.say(reading ? `Claude is still reading it. Once Claude has read it, its video is made and you have answered the spellings card, HyperFrames opens it by itself.` : opensByItself(ctx, record));
+  // The app will open the project in a detached run whose words go to the log alone: the line about its buttons, and where to export, are said here, in her chat.
+  ctx.say(BUTTONS);
+  const into = exportsWords(ctx.settings, ctx.home);
+  if (into) ctx.say(`Export it on This Mac, into ${into}.`);
+  return 0;
+}
+/** Whether `app` on the episode `found` has only to wait for the video for HyperFrames, which a run of the working copy is making now: a video kept on this
+    Mac, with no main project of its own on disk yet and no copy made. Then nothing is claimed and nothing is asked for. */
+export function copyAtWork(ctx, { found, record }) {
+  if (!keptOnAMac(record) || !runningCommand(ctx.home, found.name, ctx.alive, workCopyLockOf(ctx.home, found.name))) return false;
+  if (mainIsOnDisk(ctx, { found, record })) return false;
+  return !copyIsMade(ctx, { found, record });
+}
+/** What the episode has of its main project on disk: "none" (no project in use under a plain name with its folder there), "bare" (the folder is there and the video it
+    holds is not: `free` took it away, or the project holds no media), or "whole" (the folder is there with its video in it). Judged as openInApp judges it (videoIn, nothingAt). */
+export function mainState(ctx, { found, record }) {
+  if (!mainIsOnDisk(ctx, { found, record })) return "none";
+  const earlier = (record.app?.projects ?? []).find(isMain);
+  const media = videoIn(join(episodeWork(ctx.home, found.name), earlier.name), record);
+  return media !== null && !nothingAt(media) ? "whole" : "bare";
+}
+/** Whether the episode has its main project on disk in its work folder: the record's project in use under a plain name, and its folder there. */
+export function mainIsOnDisk(ctx, { found, record }) {
+  const earlier = (record.app?.projects ?? []).find(isMain);
+  return Boolean(earlier) && plainName(earlier.name) && existsSync(join(episodeWork(ctx.home, found.name), earlier.name));
+}
+/** Whether the video for HyperFrames of the episode `found` is made: its video and its facts are both there (`app --when-ready` goes on once they are). */
+export function copyIsMade(ctx, { found, record }) {
+  const raw = recordingStat(ctx, { folder: found.folder, record });
+  if (raw === undefined) return false;
+  const copy = copyPathsOf(ctx.home, found.name, record, raw);
+  return existsSync(copy.video) && existsSync(copy.facts);
+}
+
 /** Claude's reading of a raw video waits for the import's late check as well (reading.js): while that is still to come, when the reading
     starts is said with it (plan R1a). */
 function stillReading(ctx, record) {
@@ -117,7 +201,9 @@ const STAYS = {
   "no chat": "This chat could not be found, so it stays here."
 };
 const STAYS_OTHERWISE = "This video's chat stays here.";
-/** The last line, whenever the app opened (architecture 3.3 and 5.9): the app's own buttons, which Studio cannot turn off, and what
+/** The line said whenever the app opened (openOnly), last but for where to export, which openProjectInApp says after it for the main
+    video's project and a Reel's when this Mac picked an exports folder that is not Downloads, and never for a HeyGen explainer's opened
+    for its voice (architecture 3.3 and 5.9): the app's own buttons, which Studio cannot turn off, and what
     is allowed with them: Share for invited people only, and exports on This Mac, though the Export dialog may start on Cloud. It
     ends with a warning and blocks nothing (Jason, 2026-11-04): The BRIMM doesn't use AI avatars or an AI Sallie, her face or her
     voice, for now. It holds no path, no flag and no name of a command. */
@@ -373,8 +459,8 @@ export const fromOf = (record, raw) => ({ file: record.video.file, bytes: raw.si
     looked at is no change that can be told, since a project is opened without it. A project that says nothing readable of the
     recording it was made from (no `from`, or one that is no record of a file) may have been made from another: it counts as changed,
     and the record, which two Macs write, is never taken to hold what it does not. */
-export function changedSince(project, { found, record }) {
-  const raw = statOf(join(found.folder, record.video.file));
+export function changedSince(project, { found, record, ctx = null }) {
+  const raw = ctx ? recordingStat(ctx, { folder: found.folder, record }) : statOf(join(found.folder, record.video.file));
   if (raw === undefined) return false;
   const from = project?.from;
   if (from === null || typeof from !== "object") return true;
@@ -413,7 +499,7 @@ function adoptProject(ctx, { found, record, at, projects }) {
   const { name } = nextMain(record, projects);
   const dir = join(episodeWork(home, found.name), name);
   if (!existsSync(dir)) return null;
-  const raw = statSync(join(found.folder, record.video.file));
+  const raw = recordingStat(ctx, { folder: found.folder, record }) ?? statSync(fileOf(ctx, found, record.video.file));
   const copy = copyPathsOf(home, found.name, record, raw);
   const workingCopy = copyOf(factsIn(copy.facts)) ?? copyIn(dir, record);
   if (!workingCopy) {
@@ -430,7 +516,7 @@ function adoptProject(ctx, { found, record, at, projects }) {
       to say it again when it is done (0). A project made before has taken the copy into itself and left only its facts, which
       is why openInApp looks for that project first.
     - While Claude's reading of the episode is at work and not yet in the record (`projectWaits` "reading"), nothing is made: the project
-      is written from the reading, and nothing writes it again later. She is told to say it again when it has finished (0). With the
+      is written from the reading, and nothing writes it again later. She is told to say it again when it has finished (0), or, for a video kept on this Mac, that HyperFrames opens it by itself after the reading and the copy, and once she has answered the spellings card. With the
       reading in the record ("verify": the read run is at its own late check, or this Mac still owes the import's) the words, the Reel
       suggestions and the cut plan are read through `readListed`, and a file not at the size the record lists makes nothing (0, in
       `notWholeYet`'s words). The working copy
@@ -450,32 +536,35 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   const wait = projectWaits(ctx, { name: found.name, record });
   // While the reading's own late check is still to come (plan R1d), the three files read from the episode's folder are held to the
   // sizes the record lists, judged by the bytes read; one that is not whole makes nothing.
-  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel, i) => (i === 0 ? readWords : readListed)(found.folder, record, rel)) : null;
+  const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel, i) => (i === 0 ? readWords : readListed)(dirname(fileOf(ctx, found, rel)), record, rel)) : null;
   if (checked && checked.some((got) => got.notWhole)) {
     ctx.say(notWholeYet(record.name.text));
     return { code: 0 };
   }
-  const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(join(found.folder, `${stem}.words.json`));
+  const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(fileOf(ctx, found, `${stem}.words.json`));
   if (!words) {
-    ctx.say(noWords(record.name.text));
+    ctx.say(noWords(record.name.text, keptOnAMac(record)));
     return { code: 1 };
   }
-  const raw = statSync(join(found.folder, record.video.file));
+  const raw = recordingStat(ctx, { folder: found.folder, record }) ?? statSync(fileOf(ctx, found, record.video.file));
   const copy = copyPathsOf(home, found.name, record, raw);
   const reading = wait === "reading";
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
-    requestWorkCopy(ctx, { folder: found.name });
+    const asked = Math.trunc(ctx.now());
+    const requested = requestWorkCopy(ctx, { folder: found.name, asked });
+    if (keptOnAMac(record)) return { code: openByItself(ctx, { found, record, reading, ...(requested.started ? { asked } : {}) }) };
     ctx.say(reading ? stillReading(ctx, record) : beingMade(record.name.text, readyAt(ctx, record)));
     return { code: 0 };
   }
   if (reading) {
+    if (keptOnAMac(record)) return { code: openByItself(ctx, { found, record, reading }) };
     ctx.say(stillReading(ctx, record));
     return { code: 0 };
   }
   const facts = JSON.parse(readFileSync(copy.facts, "utf8"));
   const { name, number } = nextMain(record, projects);
-  const reels = checked ? (checked[1].text === undefined ? undefined : JSON.parse(checked[1].text)) : jsonIn(join(found.folder, REELS_FILE));
-  const plan = checked ? (checked[2].text === undefined ? undefined : JSON.parse(checked[2].text)) : jsonIn(join(found.folder, `${stem}.cut-plan.json`));
+  const reels = checked ? (checked[1].text === undefined ? undefined : JSON.parse(checked[1].text)) : jsonIn(fileOf(ctx, found, REELS_FILE));
+  const plan = checked ? (checked[2].text === undefined ? undefined : JSON.parse(checked[2].text)) : jsonIn(fileOf(ctx, found, `${stem}.cut-plan.json`));
   // The graphic cues go in beside the suggested cuts, placed on the project's words (project.js). A raw video's are the cut plan's own,
   // or for a plan made before them its ideas for graphics as cues (graphic-cues.js graphicCuesOfPlan). An iPhone clip's are the ones its
   // reading kept in its record (graphicCuesOfRecord, PR H2): its cut plan is the import's, and holds none.
@@ -537,12 +626,12 @@ export function copyFits({ was, made, size, starts = true }) {
 function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
   const { home } = ctx;
   const name = record.name.text;
-  const raw = statOf(join(found.folder, record.video.file));
+  const raw = recordingStat(ctx, { folder: found.folder, record });
   if (raw === undefined) {
     ctx.say(noRecording(name));
     return { code: 1 };
   }
-  if (changedSince(project, { found, record })) {
+  if (changedSince(project, { found, record, ctx })) {
     ctx.say(videoGoneAndChanged(name));
     return { code: 1 };
   }
@@ -550,7 +639,9 @@ function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
   const was = factsIn(join(dir, "brimm", "facts.json"));
   const made = factsIn(copy.facts);
   if (!(existsSync(copy.video) && existsSync(copy.facts))) {
-    requestWorkCopy(ctx, { folder: found.name });
+    const asked = Math.trunc(ctx.now());
+    const requested = requestWorkCopy(ctx, { folder: found.name, asked });
+    if (keptOnAMac(record)) return { code: openByItself(ctx, { found, record, ...(requested.started ? { asked } : {}) }) };
     ctx.say(beingMade(name, readyAt(ctx, record)));
     return { code: 0 };
   }
@@ -667,8 +758,9 @@ function placeFootage(ctx, { found, dir, kit, record }, { rename }) {
     kind (KEPT) is none in use: the next is made as any first one is, under the first name no project the record keeps has
     (nextMain), "main 2" after the first, and the kept one keeps its folder, its name and its entry in the record.
     What it says when the app opened is the command line's own words in hers, one line more about her chat when a handover was
-    wanted and not made, and last the line about the buttons Studio cannot control (BUTTONS); when the app did not open it says
-    the reason alone.
+    wanted and not made, then the line about the buttons Studio cannot control (BUTTONS), and after it, when this Mac picked an exports
+    folder that is not Downloads, where to export: "Export it on This Mac, into <the folder in Finder's words>." (openProjectInApp);
+    when the app did not open it says the reason alone.
     The record that is saved holds the project in `app.projects`, with a time in `opened` only if the app opened, and `handover`
     true if the command line says it took her chat, whatever was asked of it.
     `deps` is all that is touched beyond the episode's own files, and each one but `save` has a default:
@@ -705,7 +797,7 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
       const back = putVideoBack(ctx, { found, record, project, dir: join(work, project.name) }, { rename });
       if (back.code !== undefined) return back.code;
       restored = back.workingCopy;
-    } else if (media !== null && changedSince(project, { found, record })) {
+    } else if (media !== null && changedSince(project, { found, record, ctx })) {
       // The project is opened as it was whatever the recording is now: a project that may be open in the app is never changed (4.8).
       ctx.say(recordingChanged(record.name.text));
     }
@@ -725,6 +817,8 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   // What it says of the footage comes after "It's open in HyperFrames." (review changes R4c), not before it.
   const footage = typeof deps.plan === "function" && isFromPlan(record) ? placeFootage(ctx, { found, dir: join(work, project.name), kit: deps.plan({ found, record }), record }, { rename }) : [];
   const opened = await openProjectInApp(ctx, { record, project, dir: join(work, project.name), projects, keeps: (p) => !isMain(p), at, restored }, { save, cli, spawn, env, node, chat: deps.chat });
+  // Opened: nothing is left to open by itself after her answer to the spellings card (a marker left by an earlier `app --when-ready`).
+  if (opened === 0) clearOpensAfterSpellings(home, found.name);
   for (const line of footage) ctx.say(line);
   return opened;
 }
@@ -733,7 +827,8 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
     openProjectInApp, which a HeyGen explainer's project is opened by too, before its voice is taken in, when its record is a plan's: explainer.js
     openVoiceProject). Resolves what the command line printed, as hyperframes.js readOpen reads it: { opened, handedOver, words }. What it says is the
     command line's own words in hers (readOpen), one line more about her chat when a handover was wanted and not made, and last, whenever the app
-    opened, the line about the buttons Studio cannot control (BUTTONS). `record` is the episode's record, which says whether her chat may be handed over
+    opened, the line about the buttons Studio cannot control (BUTTONS). Where to export is said after it by openProjectInApp alone: a HeyGen
+    explainer's project opens for its voice, with nothing to export yet. `record` is the episode's record, which says whether her chat may be handed over
     (hyperframes.js handoverAllowed). `deps` are `cli`, `spawn`, `env`, `node` and `chat` as openInApp has them; the chat is asked only when this Mac's
     setting wants the handover. */
 export function openOnly(ctx, { record, dir }, { cli, spawn = spawnSync, env = process.env, node = process.execPath, chat: given }) {
@@ -769,13 +864,22 @@ export function openOnly(ctx, { record, dir }, { cli, spawn = spawnSync, env = p
     picked in the same write); it is given it whole and gives it back. `restored` is what the record keeps of the working copy that
     was put back into the project's folder a moment before (putVideoBack), when one was: the project's entry gets it.
     What it says is the command line's own words in hers (readOpen), one line more about her chat when a handover was wanted and not
-    made, and last the line about the buttons Studio cannot control (BUTTONS), which is said whenever the app opened. The record gets
+    made, then the line about the buttons Studio cannot control (BUTTONS), which is said whenever the app opened (openOnly), and after
+    it, when this Mac picked an exports folder that is not Downloads (settings.js exportsWords), where to export: "Export it on This
+    Mac, into <the folder in Finder's words>." (Phase 3, L1b). The record gets
     the time of the open only if the app opened, `handover` true if the command line says it took her chat, and the state moved
     from made to opened and never back.
     `deps` are the `save` that writes the record (resolves 0 when it has), the pinned command line's program `cli`, and `spawn`,
     `env`, `node` and `chat` as openInApp has them. The chat is asked only when this Mac's setting wants the handover. */
 export async function openProjectInApp(ctx, { record, project, dir, projects, keeps, at = localStamp(new Date(ctx.now())), also = (next) => next, restored = null }, { save, cli, spawn = spawnSync, env = process.env, node = process.execPath, chat: given }) {
   const read = openOnly(ctx, { record, dir }, { cli, spawn, env, node, chat: given });
+  // Where to export, in Finder's words, when this Mac picked an exports folder that is not Downloads (Phase 3, L1b): said for the main
+  // video's project and a Reel's, which are exported from the app, and not by openOnly, which a HeyGen explainer's project opens by too
+  // before its voice is made. Like the buttons line, it does not wait for the record.
+  if (read.opened) {
+    const into = exportsWords(ctx.settings, ctx.home);
+    if (into) ctx.say(`Export it on This Mac, into ${into}.`);
+  }
 
   // A time is added only if the app opened; a chat once handed over stays recorded as handed over; a later state is not moved back.
   const updated = {

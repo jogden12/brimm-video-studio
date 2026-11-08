@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { KEPT, NOT_SET_UP } from "../app.js";
-import { lockOf, takeEpisodeLock } from "../detached.js";
+import { lockOf, takeEpisodeLock, whenReadyLockOf } from "../detached.js";
 import { HELP } from "../edit.js";
 import { COPY_STEP } from "../guide.js";
 import { fileId, writePending } from "../filing.js";
@@ -22,6 +22,8 @@ import { WORK_COPY_WAIT_STEP, workCopyLockOf } from "../workcopy.js";
 import { FOLDER, ID, episodeAs, listAll, reread } from "./episodes.js";
 import { ANSWERED, entry, exportOf } from "./exports-world.js";
 import { OFFERS, READ, depsOf, guideWorld } from "./guide-world.js";
+import { makeLocal } from "./local-world.js";
+import { episodeWork } from "../settings.js";
 import { PLAIN, RAW as RAW_RECORD, atWork, on, world as copyWorld } from "./workcopy-world.js";
 const HAND_OFF_LINE = "Hand-off question: I found your export. Hand it off?";
 
@@ -294,6 +296,24 @@ describe("the guide while the video for HyperFrames is made", () => {
     mkdirSync(dirname(workCopyLockOf(w.t.home, other)), { recursive: true });
     assert.equal(takeEpisodeLock(workCopyLockOf(w.t.home, other), "workcopy", () => true).taken, true);
     assert.equal(await line(w), says(OPEN));
+    w.t.done();
+  });
+  it("B0-F7 a video kept on this Mac, between its copy's end and the open by itself, is still at the copy's step and is not asked to say it again", async () => {
+    const w = guideWorld({ projects: null });
+    makeLocal(w);
+    mkdirSync(episodeWork(w.t.home, FOLDER), { recursive: true });
+    w.t.ctx.deps.alive = (pid) => pid === process.pid;
+    assert.equal(takeEpisodeLock(whenReadyLockOf(w.t.home, FOLDER), "when-ready", () => true).taken, true);
+    assert.equal(await line(w), says("It opens in HyperFrames by itself in a moment."));
+    w.t.done();
+  });
+  it("says where to export when the Mac picked an exports folder that is not Downloads (L1b)", async () => {
+    const w = guideWorld();
+    atWork(w.t, "workcopy");
+    const picked = join(w.t.home, "Movies", "Exports");
+    const settings = { ...depsOf(w).settings, exportsPath: picked };
+    assert.equal(await line(w, { settings }), says('Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, into Movies › Exports, in your home folder, then say "hand it off".'));
+    assert.equal(await line(w, { settings: { ...settings, exportsPath: join(w.t.home, "Downloads") } }), says(edit()));
     w.t.done();
   });
   it("is not making it once a project is here: a Reel's video at work beside it is not the main video's", async () => {
@@ -619,7 +639,9 @@ describe("what says the guide's new states: the help and the README (the skills'
       "and once it is exported, to hand it off", "A raw video that was edited in Final Cut before is told so, and to open it in HyperFrames, from the recording",
       "being imported, being read or having its video for HyperFrames made", "its video for HyperFrames made, its finish's hand-off written, or an import, a reading or a finish that did not finish",
       // While a finish waits for its late check: the page's step, and a line of when Studio checks Dropbox's copies.
-      "Once its finish has written the hand-off it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's copies (a spelling and handing it off again wait until then), though the finish goes on checking them for a quarter of an hour"
+      "Once its finish has written the hand-off it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's copies (a spelling and handing it off again wait until then), though the finish goes on checking them for a quarter of an hour",
+      // For a video kept on this Mac (Phase 3, L5): no such line, and nothing she does waits for the check.
+      "for a video kept on this Mac it gives no such line: the finish ends at the hand-off, Studio checks Dropbox's copies by itself about 15 minutes later, and nothing she does waits for it"
     ]) assert.ok(guide.replace(/\n {40}/g, " ").includes(words), words);
   });
   it("has the README's rows for guide say the same: the stages, the times and where they come from, and that it only reads", () => {

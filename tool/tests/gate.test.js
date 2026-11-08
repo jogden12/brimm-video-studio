@@ -69,6 +69,20 @@ describe("the gate and plan (PR H4)", () => {
     assert.equal(gateFor("leave", PLAN, OFF), 'To drop a plan, say "drop the plan for Too many SKUs".');
     assert.equal(gateFor("open", PLAN, OFF), '"Too many SKUs" is a planned video, and it isn\'t made from its footage yet.');
   });
+  it("walks a plan kept on one Mac (Phase 3, L2: layout 6 with `local`) as it walks a plan at layout 5: it is not gated, and the same commands run", () => {
+    const local = { ...PLAN, version: 6, local: { on: "Mac Studio" } };
+    assert.equal(gated(local), false);
+    for (const name of [...COMMAND_NAMES, "somethingNew"]) for (const on of [ON, OFF]) assert.equal(gateFor(name, local, on), gateFor(name, PLAN, on), name);
+    for (const name of PLANNED) assert.equal(gateFor(name, local, OFF), "", name);
+    assert.equal(gateFor("leave", local, OFF), 'To drop a plan, say "drop the plan for Too many SKUs".');
+    assert.equal(gateFor("open", local, OFF), '"Too many SKUs" is a planned video, and it isn\'t made from its footage yet.');
+  });
+  it("gates a plan whose `local` it cannot read, or that holds `local` below layout 6, as a video not yet answered: it only claims to be planned", () => {
+    for (const record of [{ ...PLAN, version: 6, local: {} }, { ...PLAN, version: 6, local: { on: "" } }, { ...PLAN, local: { on: "Mac Studio" } }, { ...PLAN, version: 6 }]) {
+      assert.equal(gated(record), true, JSON.stringify(record.local));
+      for (const name of ["plan", "name", "join", "app"]) assert.equal(gateFor(name, record, OFF), WAITING, `${name} ${JSON.stringify(record.local)}`);
+    }
+  });
 });
 
 describe("the gate and footage (PR H5a)", () => {

@@ -83,7 +83,8 @@ export const leftAlone = (record) => isObject(record) && kindOf(record) === null
     Not gated: a planned episode (PR H4), and no other record with no kind. It was made in her chat from words she gave and never
     from a file, so it cannot be a client's session, and it is named by its title. A record is treated so only when isPlannedRecord
     says it is whole in every way: its answer says "planned", its `planned` is whole, it has no video and no kind, and it was written
-    at layout 5. One that only claims to be planned, failing any of those, is gated as a video not yet answered is. */
+    at layout 5 with no `local`, or at layout 6 with a whole `local` (Phase 3, L2: a plan kept on one Mac). One that only claims to be
+    planned, failing any of those, is gated as a video not yet answered is. */
 export const gated = (record) => isObject(record) && !isPlannedRecord(record) && (kindOf(record) === null || sessionNotCleared(record));
 
 /** Whether a record has a label of the import's to be named by. */

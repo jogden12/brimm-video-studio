@@ -559,12 +559,13 @@ export const workCopyLockOf = (home, folder) => join(episodeWork(home, folder), 
     (runDetached). `fourK` is the switch for a copy of 4K, which the run is given. `reel` is the number of a Reel, whose stretch of the
     recording the run makes the copy of instead (`--reel <n>`; plan PR 5): a Reel's copy is never of 4K, and it has the same lock, so
     one copy of an episode is made at a time, a Reel's or the video's. `footage` is the copies of a plan's footage alone (`--footage`; PR H5b):
-    its b-roll and screen recordings, made for the first time, or again once the project's open finds one missing. `ctx` is what edit.js gives
+    its b-roll and screen recordings, made for the first time, or again once the project's open finds one missing. `asked` is a token (a whole number, the time of the ask), given by a caller that waits for the main video's copy
+    (`app`, for `app --when-ready`) and written into the run's result as it is: only the main video's copy is ever asked for with one. `ctx` is what edit.js gives
     its commands: { home, alive, start }. The run is this checkout's edit.js, whatever checkout the settings name (startDetached). */
-export function requestWorkCopy(ctx, { folder, fourK = false, reel = 0, footage = false }) {
+export function requestWorkCopy(ctx, { folder, fourK = false, reel = 0, footage = false, asked }) {
   const running = runningCommand(ctx.home, folder, ctx.alive, workCopyLockOf(ctx.home, folder));
   if (running) return { started: false, running };
-  startDetached(ctx, { command: WORK_COPY_COMMAND, folder, args: reel ? ["--reel", String(reel)] : footage ? ["--footage"] : fourK ? ["--4k"] : [] });
+  startDetached(ctx, { command: WORK_COPY_COMMAND, folder, args: reel ? ["--reel", String(reel)] : footage ? ["--footage"] : [...(fourK ? ["--4k"] : []), ...(asked === undefined ? [] : ["--asked", String(asked)])] });
   return { started: true, running: "" };
 }
 
@@ -705,7 +706,7 @@ async function keepCues({ cues, stretch, paths, work, shown, write, rename, log 
     (an HDR video's alone), `runGuarded`, `tools` ({ ffmpeg, ffprobe }), `probe` (a function from a file to what ffprobe printed
     of it, or "": read through `run` when none is given), `freeBytes`, `stat`, `mkdir`, `rename`, `rm`, `readDir`, `write`,
     `progress`, `log`, `now`, `pid`, which names the run's own folder, `faces` and `cues`. */
-export async function makeWorkCopy({ home, folder, video, name, fourK = false, reel = null, footage = null, voice = false, from = null }, deps = {}) {
+export async function makeWorkCopy({ home, folder, video, name, fourK = false, reel = null, footage = null, voice = false, from = null, rawStat = null }, deps = {}) {
   const {
     run = runProgram, runGuarded: guarded = runGuarded, tools = {}, probe: given, freeBytes = freeOn, stat = statOf, mkdir = mkdirSync,
     rename = renameSync, rm = rmSync, readDir = readdirSync, write = writeFileSync, progress = noProgress, log = () => {}, now = Date.now, pid = process.pid,
@@ -727,7 +728,8 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
     // A Reel's copy is of a stretch, and of a Reel: anything else is no Reel's.
     if (reel !== null && reel !== undefined && !(typeof reel === "object" && Number.isInteger(reel.n) && reel.n >= 1 && isStretch(reel))) return refuse("it is not a stretch of the video", "it is not a Reel with a stretch of the video");
     if (!tools.ffmpeg || !tools.ffprobe) return refuse("this Mac has no program to make it with: ask Jason", "ffmpeg or ffprobe is not installed");
-    const raw = stat(video);
+    // `rawStat`, when given (L6), is the recording as the record keeps it: its key and size are that, not those of the copy this Mac reads.
+    const raw = rawStat || stat(video);
     // `video` is the identity (the key, the places, the size); `from`, when given, is the file this Mac holds of it, which is read instead (plan R1b).
     const source = typeof from === "string" && from ? from : video;
     if (!raw) return refuse("it isn't on this Mac", "the video is not there");
@@ -948,7 +950,7 @@ export async function makeFootageCopies({ home, folder, items }, deps = {}) {
       log(`${shown}: the footage for shot ${item.shot} could not be made: Dropbox is still bringing the video over to this Mac.`);
       continue;
     }
-    const result = await makeWorkCopy({ home, folder, video: item.video, name: shown, footage: { shot: item.shot } }, deps);
+    const result = await makeWorkCopy({ home, folder, video: item.video, name: shown, footage: { shot: item.shot }, rawStat: item.raw || null }, deps);
     if (!result.ok) failed.push(`${said} ${reasonOf(result.failed)}.`);
     else if (result.made.length) made.push(`the footage for shot ${item.shot}`);
   }

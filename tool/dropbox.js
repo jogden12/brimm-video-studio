@@ -9,9 +9,10 @@
 // at least 15 minutes after the last copy, which copies a file in again when Dropbox has taken it away or left it short.
 // And a file that Dropbox is still bringing over to this Mac can show its full size with no data in it yet, so a file counts
 // as here only when its blocks on the disk cover its size, or the disk does not mark it dataless.
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { lastLine } from "./run.js";
 
 /** How long after the last copy into Dropbox the late check is made: 15 minutes. On 2026-10-14 Dropbox undid two renames
@@ -216,18 +217,89 @@ export async function waitWhole(paths, { wait = (ms) => new Promise((r) => setTi
     `(to, text, { replace })`, which writes `text` whole in the folder `work`, under a name of its own each time, puts it in
     at `to` (cloneIn, or replaceIn when `replace` is true), and then deletes its work copy. With `keep`, the work copy stays,
     for the late check, and goes with the run's own folder. The writer gives back the file as the late check takes it,
-    `{ from, to, bytes }`, and throws as cloneIn does. `opts` are cloneIn's. */
-export function textWriter({ work, keep = false, ...opts }) {
+    `{ from, to, bytes }`, and throws as cloneIn does. `onCopy({ from, to, bytes })`, when given, is called once the work copy is written whole
+    and before it is put in (a local import tells the late check of the first record here, Phase 3, L3). `opts` are cloneIn's. */
+export function textWriter({ work, keep = false, onCopy, ...opts }) {
   return (to, text, { replace = false } = {}) => {
     mkdirSync(work, { recursive: true });
     written += 1;
     const from = join(work, `${process.pid}-${written}-${basename(to)}`);
     writeFileSync(from, text);
     try {
+      if (onCopy) onCopy({ from, to, bytes: statSync(from).size });
       (replace ? replaceIn : cloneIn)(from, to, opts);
       return { from, to, bytes: statSync(from).size };
     } finally {
       if (!keep) rmSync(from, { force: true });
     }
   };
+}
+
+/** Whether the first `length` bytes of the files at `a` and `b` are the same, read a megabyte at a time. False when either
+    cannot be read. */
+export function startsAlike(a, b, length) {
+  let fa;
+  let fb;
+  try {
+    fa = openSync(a, "r");
+    fb = openSync(b, "r");
+    const size = 1024 * 1024;
+    const ba = Buffer.alloc(size);
+    const bb = Buffer.alloc(size);
+    for (let at = 0; at < length; at += size) {
+      const n = Math.min(size, length - at);
+      if (readSync(fa, ba, 0, n, at) !== n || readSync(fb, bb, 0, n, at) !== n || !ba.subarray(0, n).equals(bb.subarray(0, n))) return false;
+    }
+    return true;
+  } catch (e) {
+    return false;
+  } finally {
+    if (fa !== undefined) closeSync(fa);
+    if (fb !== undefined) closeSync(fb);
+  }
+}
+
+/** Whether the files at `a` and `b` hold the same bytes. */
+export function sameBytes(a, b) {
+  const sa = statSync(a, { throwIfNoEntry: false });
+  const sb = statSync(b, { throwIfNoEntry: false });
+  return Boolean(sa && sb) && sa.size === sb.size && startsAlike(a, b, sa.size);
+}
+
+/** The helper that asks macOS whether Dropbox reports a file uploaded (ubiquitousItemIsUploadedKey): uploaded.swift, beside the tool. */
+export const UPLOADED = fileURLToPath(new URL("./uploaded.swift", import.meta.url));
+/** How long the helper may take: swift compiles it each time. */
+export const UPLOADED_TIMEOUT_MS = 20 * 1000;
+
+/** Whether Dropbox reports the file at `path` uploaded: true or false, or null when that cannot be told (no swift, a file outside Dropbox, a timeout, a failure, an
+    answer that is not the helper's JSON). Synchronous: it never gives a promise. */
+export function uploadedOf(path, { swift = "", exec = execFileSync, timeoutMs = UPLOADED_TIMEOUT_MS } = {}) {
+  if (!swift) return null;
+  try {
+    const out = exec(swift, [UPLOADED, path], { encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"] });
+    const said = JSON.parse(String(out).trim());
+    return said && (said.uploaded === true || said.uploaded === false) ? said.uploaded : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** The helper that asks Dropbox to make a file online-only (evictUbiquitousItem): online-only.swift, beside the tool. */
+export const ONLINE_ONLY = fileURLToPath(new URL("./online-only.swift", import.meta.url));
+/** How long the helper may take: swift compiles it each time. */
+export const ONLINE_ONLY_TIMEOUT_MS = 20 * 1000;
+
+/** Asks Dropbox to make the file at `path` online-only: true or false from the helper's document, or null when that cannot be told (no swift, a timeout, a failure, an
+    answer that is not the helper's JSON). On false, `said` is given the helper's error text. Synchronous: it never gives a promise. */
+export function makeOnlineOnly(path, { swift = "", exec = execFileSync, timeoutMs = ONLINE_ONLY_TIMEOUT_MS, said = () => {} } = {}) {
+  if (!swift) return null;
+  try {
+    const out = exec(swift, [ONLINE_ONLY, path], { encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"] });
+    const doc = JSON.parse(String(out).trim());
+    if (!doc || (doc.onlineOnly !== true && doc.onlineOnly !== false)) return null;
+    if (doc.onlineOnly === false && typeof doc.error === "string") said(doc.error);
+    return doc.onlineOnly;
+  } catch (e) {
+    return null;
+  }
 }

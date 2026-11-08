@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { PART_KINDS, newEpisode, newPlannedEpisode, recordFile, recordText } from "../episode.js";
+import { NEWEST_VERSION, PART_KINDS, newEpisode, newPlannedEpisode, recordFile, recordText } from "../episode.js";
 import { footageOption } from "../receipts.js";
 import { footageAsked, footageCounts, mayBeUsed, mayGoIn, partHeld, partLine, partsOf, partsReader, plannedOffers } from "../footage.js";
 import { setup } from "./episodes.js";
@@ -103,6 +103,13 @@ describe("plannedOffers, the plans a dropped video may be for", () => {
   it("offers none when it is given something that is not a list", () => {
     for (const bad of [null, undefined, "x", 3, {}]) assert.deepEqual(plannedOffers(bad, PICTURE), []);
   });
+  it("offers a plan kept on one Mac (Phase 3, L2: layout 6 with `local`) as it offers one at layout 5, and none whose `local` it cannot read", () => {
+    const local = plan({ version: 6, local: { on: "Mac Studio" } });
+    assert.deepEqual(plannedOffers([local], PICTURE).map((o) => [o.option, o.record.id]), [['Footage for "Too many SKUs"', PLAN_ID]]);
+    const explainer = plan({ id: OTHER_ID, title: "Why SKUs", route: "explainer", version: 6, local: { on: "Mac Studio" } });
+    assert.deepEqual(plannedOffers([explainer], { picture: false, sound: true }).map((o) => o.record.id), [OTHER_ID], "an explainer kept on one Mac is offered its voiceover");
+    for (const bad of [plan({ version: 6, local: {} }), plan({ local: { on: "Mac Studio" } }), plan({ version: 6 })]) assert.deepEqual(plannedOffers([bad], PICTURE), [], JSON.stringify([bad.version, bad.local]));
+  });
 });
 
 describe("plannedOffers, a plan made from its footage (PR H5b)", () => {
@@ -172,7 +179,7 @@ describe("partsOf, the parts of a plan", () => {
     // A part with no shot is not a whole record, so it is not a part of anything.
     put(t, "2026-11-04 Broken (Mac Studio)", part({ id: "e-20261104-bb2222", partOf: { id: PLAN_ID, as: "b-roll", shot: null, client: false } }));
     // A record of a layout newer than this brimm-video's is read for its id alone, never as a part.
-    put(t, "2026-11-04 Newer (Mac Studio)", { ...part({ id: "e-20261104-cc3333" }), version: 6 });
+    put(t, "2026-11-04 Newer (Mac Studio)", { ...part({ id: "e-20261104-cc3333" }), version: NEWEST_VERSION + 1 });
     mkdirSync(join(t.root, "Episodes", "2026-11-04 Empty (Mac Studio)"), { recursive: true });
     assert.deepEqual(partsOf(t.root, PLAN_ID).map((p) => p.record.id), ["e-20261104-aa1111"]);
     t.done();
@@ -185,6 +192,14 @@ describe("partsOf, the parts of a plan", () => {
     assert.deepEqual(partsOf(t.root, PLAN_ID).map((p) => [p.record.id, p.record.rev]), [["e-20261104-aa1111", 1]]);
     t.done();
   });
+  it("lists a part kept on one Mac (Phase 3, L2: layout 6 with `local`) as it lists one at layout 5, by its record in Dropbox", () => {
+    const t = setup();
+    put(t, "2026-11-04 Kept (Mac Studio)", part({ id: "e-20261104-aa1111", version: 6, local: { on: "Mac Studio" } }));
+    put(t, "2026-11-04 In Dropbox (Mac Studio)", part({ id: "e-20261104-bb2222", at: "2026-11-04T10:30:00-05:00" }));
+    assert.deepEqual(partsOf(t.root, PLAN_ID).map((p) => p.record.id), ["e-20261104-aa1111", "e-20261104-bb2222"]);
+    assert.deepEqual(partsOf(t.root, PLAN_ID)[0].record.local, { on: "Mac Studio" });
+    t.done();
+  });
   it("counts a part once for each folder of Episodes that holds it, and none that is not a folder", () => {
     const t = setup();
     put(t, "2026-11-04 One (Mac Studio)", part({ id: "e-20261104-aa1111" }));
@@ -195,9 +210,9 @@ describe("partsOf, the parts of a plan", () => {
   it("lists a part a newer BRIMM Video Studio wrote only when it is asked to (newer: true): flagged, after the others, by the plan its record names (PR H5b)", () => {
     const t = setup();
     put(t, "2026-11-04 Whole (Mac Studio)", part({ id: "e-20261104-aa1111" }));
-    put(t, "2026-11-04 Newer (Mac Studio)", { ...part({ id: "e-20261104-cc3333", at: "2026-11-04T08:00:00-05:00" }), version: 6 });
-    put(t, "2026-11-04 Newer of another plan (Mac Studio)", { ...part({ id: "e-20261104-dd4444", of: OTHER_ID }), version: 6 });
-    put(t, "2026-11-04 Newer, no part (Mac Studio)", { ...waitingVideo({ id: "e-20261104-ee5555" }), version: 6 });
+    put(t, "2026-11-04 Newer (Mac Studio)", { ...part({ id: "e-20261104-cc3333", at: "2026-11-04T08:00:00-05:00" }), version: NEWEST_VERSION + 1 });
+    put(t, "2026-11-04 Newer of another plan (Mac Studio)", { ...part({ id: "e-20261104-dd4444", of: OTHER_ID }), version: NEWEST_VERSION + 1 });
+    put(t, "2026-11-04 Newer, no part (Mac Studio)", { ...waitingVideo({ id: "e-20261104-ee5555" }), version: NEWEST_VERSION + 1 });
     assert.deepEqual(partsOf(t.root, PLAN_ID).map((p) => p.record.id), ["e-20261104-aa1111"]);
     const all = partsOf(t.root, PLAN_ID, { newer: true });
     assert.deepEqual(all.map((p) => [p.record.id, p.newer === true]), [["e-20261104-aa1111", false], ["e-20261104-cc3333", true]]);

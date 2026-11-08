@@ -10,9 +10,14 @@
 // until a later finish ends well. Everything here is on this Mac's own disk, and never in Dropbox.
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { episodeWork } from "./settings.js";
+import { episodeWork, pendingFolder } from "./settings.js";
+import { keptOnAMac } from "./where.js";
 import { runningRun } from "./detached.js";
 import { isRunning } from "./run.js";
+
+/** The notice a finish posts on this Mac when its check of its copies fails after it said she could go on: the video, and what to say to see
+    why. A local episode's check is made by the launch agent, which posts it (filing.js checkFinal). */
+export const problemNotice = (name) => `The check of ${name}'s copies in Dropbox found a problem: say "how far is it?"`;
 
 /** The marker of a finish that is waiting for its late check, in the episode's folder in BRIMM Video Work. */
 export const CHECKING_FILE = "finish.checking.json";
@@ -44,8 +49,18 @@ export function markChecking(home, folder, { nonce, revision, due, took }) {
 
 /** Take the marker away, when the run ends however it ends. It is no matter if there is none, or it cannot be taken away: a marker
     nobody holds the lock for is not believed (checkingNow). */
-export function clearChecking(home, folder) {
+export function clearChecking(home, folder, revision) {
   try {
+    // With a revision, the marker goes only when it names that revision: a later finish's marker is not the earlier check's to take away.
+    if (revision !== undefined) {
+      let marker = null;
+      try {
+        marker = JSON.parse(readFileSync(checkingFile(home, folder), "utf8"));
+      } catch (e) {
+        return;
+      }
+      if (marker === null || typeof marker !== "object" || marker.revision !== revision) return;
+    }
     rmSync(checkingFile(home, folder), { force: true });
   } catch (e) {
     // Left where it is; checkingNow does not believe it.
@@ -58,16 +73,28 @@ export function clearChecking(home, folder) {
     names (`record.finished.revision`): otherwise it was left by a run that is gone or by an older one, or another write has
     changed what the finish wrote. A marker that cannot be read, or is not as it should be, is none. */
 export function checkingNow(home, folder, record, alive = isRunning) {
-  const run = runningRun(home, folder, alive);
-  if (!run || run.command !== "finish" || run.nonce === "") return null;
+  const local = keptOnAMac(record);
+  const run = local ? null : runningRun(home, folder, alive);
+  if (!local && (!run || run.command !== "finish" || run.nonce === "")) return null;
   let marker = null;
   try {
     marker = JSON.parse(readFileSync(checkingFile(home, folder), "utf8"));
   } catch (e) {
     return null;
   }
-  const shaped = marker !== null && typeof marker === "object" && marker.version === 1 && marker.nonce === run.nonce && Number.isInteger(marker.revision) && Number.isFinite(marker.due) && Array.isArray(marker.took);
+  const shaped = marker !== null && typeof marker === "object" && marker.version === 1 && (local || marker.nonce === run.nonce) && Number.isInteger(marker.revision) && Number.isFinite(marker.due) && Array.isArray(marker.took);
   if (!shaped) return null;
+  if (local) {
+    // A video kept on this Mac: the marker is believed while its `final` pending is there with no problem (filing.js pendingKeyOf), whoever holds the lock and
+    // whatever revision the record holds now: a spelling since leaves that check owed, and it still takes the export out of Downloads.
+    try {
+      const pending = JSON.parse(readFileSync(join(pendingFolder(home), "final", `${record.id}-${marker.revision}.json`), "utf8"));
+      const open = pending !== null && typeof pending === "object" && pending.kind === "final" && !pending.problem && !pending.wasProblem;
+      return open ? { revision: marker.revision, due: marker.due, took: PLACES.filter((place) => marker.took.includes(place)) } : null;
+    } catch (e) {
+      return null;
+    }
+  }
   const finished = record !== null && typeof record === "object" ? record.finished : null;
   const holds = finished !== null && typeof finished === "object" && finished.revision === marker.revision;
   return holds ? { revision: marker.revision, due: marker.due, took: PLACES.filter((place) => marker.took.includes(place)) } : null;

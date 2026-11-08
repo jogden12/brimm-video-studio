@@ -14,7 +14,9 @@ import { dirname, join } from "node:path";
 import { COMMAND_NAMES, contextFor, editMain, findEpisode } from "../edit.js";
 import { newEpisode, readEpisode, recordFile, recordText, shownName } from "../episode.js";
 import { episodeWork, workFolder, writeSettings } from "../settings.js";
-import { readStatuses, writeStatus } from "../importing.js";
+import { readStatusesIn, writeStatusIn } from "../importing.js";
+import { importingFolder } from "../settings.js";
+import { episodeHolding } from "../filing.js";
 import { readResult, resultFile, runDetached } from "../detached.js";
 import { sessionLabel, withoutNames } from "../kinds.js";
 import { fileSafe } from "../names.js";
@@ -67,9 +69,9 @@ function today(setting) {
   const drop = join(t.root, "Unedited Video", "Mac Studio");
   mkdirSync(drop, { recursive: true });
   writeFileSync(join(drop, "Pricing talk again.mov"), "video");
-  writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: "Pricing talk again.mov", bytes: 5, seconds: null, step: "Writing the transcript", at: "2026-10-20T14:00:00-05:00", failed: "the transcriber stopped (Pricing talk again.mov: Invalid data)" }, writeText);
-  writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 2, import: "a1b2", video: "Other talk.mov", bytes: 9, seconds: 60, step: "Writing the transcript", at: "2026-10-20T14:58:00-05:00" }, writeText);
-  writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 3, import: "c3d4", video: "Third talk.mov", bytes: 9, seconds: 60, step: "Late check", at: "2026-10-20T13:00:00-05:00", problem: "Third talk.srt is not whole in Dropbox." }, writeText);
+  writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: "Pricing talk again.mov", bytes: 5, seconds: null, step: "Writing the transcript", at: "2026-10-20T14:00:00-05:00", failed: "the transcriber stopped (Pricing talk again.mov: Invalid data)" }, writeText);
+  writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 2, import: "a1b2", video: "Other talk.mov", bytes: 9, seconds: 60, step: "Writing the transcript", at: "2026-10-20T14:58:00-05:00" }, writeText);
+  writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 3, import: "c3d4", video: "Third talk.mov", bytes: 9, seconds: 60, step: "Late check", at: "2026-10-20T13:00:00-05:00", problem: "Third talk.srt is not whole in Dropbox." }, writeText);
   const work = episodeWork(t.home, FOLDER);
   mkdirSync(join(work, `${FOLDER}.fcpbundle`), { recursive: true });
   writeFileSync(join(work, `${FOLDER}.fcpbundle`, "CurrentVersion.flexolibrary"), "a library");
@@ -249,7 +251,7 @@ function failedStatus(t, video = SECOND, label = SECOND_LABEL) {
   const drop = join(t.root, "Unedited Video", "Mac Studio");
   mkdirSync(drop, { recursive: true });
   if (!existsSync(join(drop, video))) writeFileSync(join(drop, video), "video");
-  writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video, bytes: statSync(join(drop, video)).size, seconds: null, step: "Reading the sound", at: "2026-10-20T14:00:00-05:00", label, failed: `the sound could not be read from the file (${join(drop, video)}: Invalid data found when processing input)` }, writeText);
+  writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video, bytes: statSync(join(drop, video)).size, seconds: null, step: "Reading the sound", at: "2026-10-20T14:00:00-05:00", label, failed: `the sound could not be read from the file (${join(drop, video)}: Invalid data found when processing input)` }, writeText);
 }
 
 /** A result a run left for the episode in `folder` before it was answered, as bring writes one, naming the files it brought by
@@ -406,12 +408,12 @@ describe("findEpisode, for a video named by its label", () => {
     assert.doesNotMatch(why, /Bloggs \(Mac|Ann Other|2026-10-1/);
     t.done();
   });
-  it("names an episode folder with no record that can be read by its day and Mac alone, on a Mac that does the light import", () => {
+  it("names an episode folder with no record that can be read by its day and Mac alone, on every Mac", () => {
     const t = setup();
     // A file where an episode's folder should be: its folder cannot be read as one.
     writeFileSync(join(t.root, "Episodes", LIGHT_FOLDER), "not a folder");
     assert.equal(findEpisode(ctxOf(t), "nothing fits this").why, `No episode fits "nothing fits this". The episodes are: an episode of 2026-10-20 from the Mac Studio whose record cannot be read.`);
-    assert.equal(findEpisode(ctxOf(t, "full"), "nothing fits this").why, `No episode fits "nothing fits this". The episodes are: ${LIGHT_FOLDER}.`, "as today with the light import off");
+    for (const setting of ["full", ""]) assert.equal(findEpisode(ctxOf(t, setting), "nothing fits this").why, `No episode fits "nothing fits this". The episodes are: an episode of 2026-10-20 from the Mac Studio whose record cannot be read.`, `${setting}: quietly whatever the import (L1d)`);
     t.done();
   });
 });
@@ -430,13 +432,13 @@ describe("a command the gate lets through, for a gated video", () => {
       t.done();
     }
   });
-  it("names an episode whose record cannot be read by its day and Mac, on a Mac that does the light import, and as today without it", async () => {
+  it("names an episode whose record cannot be read by its day and Mac, on every Mac, whatever its file says of the import", async () => {
     const t = setup();
     writeFileSync(join(t.root, "Episodes", LIGHT_FOLDER), "not a folder");
     writeSettings(t.home, { import: "light" });
     assert.deepEqual((await on(t.ctx.deps, "show", LIGHT_FOLDER, "transcript")).said, ["An episode of 2026-10-20 from the Mac Studio whose record cannot be read: ask Jason."]);
     writeSettings(t.home, { import: "full" });
-    assert.match((await on(t.ctx.deps, "show", LIGHT_FOLDER, "transcript")).said[0], new RegExp(`^${LIGHT_FOLDER.replace(/[()]/g, "\\$&")}: the folder ${LIGHT_FOLDER.replace(/[()]/g, "\\$&")} could not be read`));
+    assert.deepEqual((await on(t.ctx.deps, "show", LIGHT_FOLDER, "transcript")).said, ["An episode of 2026-10-20 from the Mac Studio whose record cannot be read: ask Jason."]);
     t.done();
   });
   it("resolve names it by its label, and says only that its name, label or video differ, never what they hold", async () => {
@@ -541,6 +543,14 @@ describe("episodes, on a Mac that does the light import", () => {
       "  A Zoom download of 4 bytes, in Sallie's laptop's drop folder, for 0 minutes"
     ]);
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Bloggs/);
+    t.done();
+  });
+  it("B0-F19 says of a video held in a folder this Mac picked for itself that it stays for a person to delete, whatever the holding record says", () => {
+    const t = setup();
+    clientEpisode(t);
+    const line = (local) => episodeHolding({ root: t.root, video: VIDEO, bytes: 5, ...(local ? { local: true } : {}) });
+    assert.match(line(false), /until Dropbox's check of its copies passes, or for a person to delete\.$/);
+    assert.match(line(true), /It stays in the drop folder for you to delete\.$/);
     t.done();
   });
   it("says a video waiting there that a gated episode holds is imported already, by that episode's label", async () => {
@@ -959,7 +969,7 @@ describe("a video in the drop folder whose episode has a conflicted copy, or can
       t.done();
     }
   });
-  it("names it by its file as today when an episode that cannot be read is not named for it: only one that could be its makes it untold", async () => {
+  it("names it by what it is and its size when an episode that cannot be read is not named for it, as when one that could be its makes it untold", async () => {
     const t = setup();
     const e = clientEpisode(t, { folder: "2026-10-19 Budget (Mac Studio)", video: "Budget.mov", id: "e-20261019-0c0c0c", over: { kind: "finished", answer: ANSWERED } });
     const drop = join(t.root, "Unedited Video", "Mac Studio");
@@ -968,25 +978,25 @@ describe("a video in the drop folder whose episode has a conflicted copy, or can
     const shut = join(e.folder, "record");
     chmodSync(shut, 0o000);
     try {
-      assert.deepEqual(waitingIn((await on(depsOf(t), "episodes")).said), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes"]);
-      assert.deepEqual((await on(depsOf(t), "retry", "nothing fits this")).said, ['No video in this Mac\'s drop folder fits "nothing fits this". It holds: Talk.mov.']);
+      assert.deepEqual(waitingIn((await on(depsOf(t), "episodes")).said), ["Waiting in the drop folders:", "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes"]);
+      assert.deepEqual((await on(depsOf(t), "retry", "nothing fits this")).said, ['No video in this Mac\'s drop folder fits "nothing fits this". It holds: a video of 5 bytes.']);
     } finally {
       chmodSync(shut, 0o755);
     }
     t.done();
   });
-  it("names it by its file as today when an episode that can be read holds it and is answered, or nothing holds it", async () => {
+  it("names it by what it is and its size when an episode that can be read holds it and is answered, or nothing holds it", async () => {
     const t = setup();
     const drop = join(t.root, "Unedited Video", "Mac Studio");
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, "Talk.mov"), "video");
     const said = (await on(depsOf(t), "episodes")).said;
-    assert.deepEqual(waitingIn(said), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes"]);
-    // Held by an answered episode, with a conflicted copy of its record: by its file, and the episode by its folder, as today.
+    assert.deepEqual(waitingIn(said), ["Waiting in the drop folders:", "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes"]);
+    // Held by an answered episode, with a conflicted copy of its record: by what it is and its size, and the episode's folder with the video's name taken out.
     const e = clientEpisode(t, { folder: "2026-10-18 Talk (Mac Studio)", video: "Talk.mov", id: "e-20261018-0d0d0d", label: "", over: { kind: "finished", answer: ANSWERED } });
     conflictedRecord(e.folder);
     const held = (await on(depsOf(t), "episodes")).said;
-    assert.deepEqual(waitingIn(held), ["Waiting in the drop folders:", "  Talk.mov, in Mac Studio's, for 0 minutes: already imported as 2026-10-18 Talk (Mac Studio). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete."]);
+    assert.deepEqual(waitingIn(held), ["Waiting in the drop folders:", "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as 2026-10-18 the video (Mac Studio). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete."]);
     t.done();
   });
 });
@@ -1010,7 +1020,7 @@ describe("the import statuses, status and retry, of a light import", () => {
     failedStatus(t);
     const r = await on(depsOf(t), "retry", SECOND_LABEL.toLowerCase());
     assert.deepEqual([r.code, r.said], [0, [`${SECOND_LABEL} is imported again: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`]]);
-    assert.deepEqual(readStatuses(t.root), []);
+    assert.deepEqual(readStatusesIn([importingFolder(t.root)]), []);
     t.done();
   });
   it("retry names what the drop folder holds by labels and sizes alone when nothing fits", async () => {
@@ -1030,7 +1040,7 @@ describe("the import statuses, status and retry, of a light import", () => {
     const drop = join(t.root, "Unedited Video", "Mac Studio");
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, ZOOM), "zoom");
-    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, video: ZOOM, bytes: 4, seconds: null, step: "Held", at: AT, held: "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer." }, writeText);
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, video: ZOOM, bytes: 4, seconds: null, step: "Held", at: AT, held: "Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer." }, writeText);
     const r = await on(depsOf(t), "retry", ZOOM);
     assert.deepEqual([r.code, r.said], [1, ["A Zoom download of 4 bytes in this Mac's drop folder is held: Zoom downloads are taken from a later version. Put this one in BRIMM VIDEO Transfer."]]);
     t.done();
@@ -1043,7 +1053,7 @@ describe("the import statuses, status and retry, of a light import", () => {
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, VIDEO), "video");
     // Its import stopped on this Mac before its late check: its status, with its label, is still there.
-    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: VIDEO, bytes: 5, seconds: 120, step: "Filing", at: "2026-10-20T13:00:00-05:00", label: LABEL }, writeText);
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: VIDEO, bytes: 5, seconds: 120, step: "Filing", at: "2026-10-20T13:00:00-05:00", label: LABEL }, writeText);
     const r = await on(depsOf(t), "retry", LABEL);
     assert.deepEqual([r.code, r.said], [0, [`${LABEL} is imported, as ${LABEL} (a1b2c3). Its import stopped on this Mac, and has no check of its copies left to make here, so the status that held the episode is taken away.`]]);
     // With no status left, the video in the drop folder is named by what it is and its size, and the episode by its label.
@@ -1118,7 +1128,7 @@ describe("the light import's log, status files and notices", () => {
     for (const fail of ["sound", "whisper"]) {
       const t = setup();
       const { logs, notes } = await importLightly(t, VIDEO, { fail });
-      const statuses = readStatuses(t.root).map(({ status }) => status);
+      const statuses = readStatusesIn([importingFolder(t.root)]).map(({ status }) => status);
       assert.equal(statuses.length, 1, fail);
       assert.equal(statuses[0].label, LABEL, fail);
       assert.ok(statuses[0].failed, fail);
@@ -1134,7 +1144,7 @@ describe("the light import's log, status files and notices", () => {
       if (cmd === "FFPROBE") mkdirSync(join(dirname(args[args.indexOf("-o") + 1]), "made", `${STEM}.words.json`), { recursive: true });
     };
     const { logs, notes } = await importLightly(t, VIDEO, { before });
-    const statuses = readStatuses(t.root).map(({ status }) => status);
+    const statuses = readStatusesIn([importingFolder(t.root)]).map(({ status }) => status);
     assert.deepEqual(statuses.map((s) => [s.label, s.failed]), [[LABEL, "the work stopped (EISDIR)"]]);
     assert.equal(existsSync(join(lightFolder(t), "record")), false);
     assert.ok(logs.includes(`${LABEL}: failed. the work stopped (EISDIR).`), logs.join("\n"));
@@ -1147,7 +1157,7 @@ describe("the light import's log, status files and notices", () => {
       if (to.endsWith(".json") && to.includes("/record/")) throw new Error(`${to} could not be cloned: it is not on the same disk`);
       copyFileSync(from, to);
     } } });
-    const statuses = readStatuses(t.root).map(({ status }) => status);
+    const statuses = readStatusesIn([importingFolder(t.root)]).map(({ status }) => status);
     assert.equal(statuses.length, 1);
     assert.match(statuses[0].failed, /^it could not be filed into Episodes: /);
     assert.doesNotMatch(statuses[0].failed, /\//, statuses[0].failed);
@@ -1167,7 +1177,7 @@ describe("the light import's log, status files and notices", () => {
         writeFileSync(srt, "1\n");
       }
     }, clock: () => Date.parse("2026-10-20T15:00:00") + clock } });
-    const statuses = readStatuses(t.root).map(({ status }) => status);
+    const statuses = readStatusesIn([importingFolder(t.root)]).map(({ status }) => status);
     assert.equal(statuses.length, 1);
     assert.ok(statuses[0].problem, JSON.stringify(statuses[0]));
     assert.doesNotMatch(statuses[0].problem, /\//, statuses[0].problem);
@@ -1361,7 +1371,7 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     const drop = join(t.root, "Unedited Video", "Mac Studio");
     mkdirSync(drop, { recursive: true });
     writeFileSync(join(drop, VIDEO), "video");
-    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9w", video: VIDEO, bytes: 5, seconds: 120, step: "Waiting for its late check", at: "2026-10-20T14:59:00-05:00", label: LABEL }, writeText);
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9w", video: VIDEO, bytes: 5, seconds: 120, step: "Waiting for its late check", at: "2026-10-20T14:59:00-05:00", label: LABEL }, writeText);
     return t;
   }
   it("names the other Mac's waiting videos by their labels, or their sizes, and never by their files", async () => {
@@ -1378,7 +1388,7 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
       "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes: already imported as Video of 19 Oct, 10:00 (Mac Studio) (0c0c0c). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.",
       `  ${SECOND_LABEL}, in the Mac Studio's drop folder, for 0 minutes: its import failed on Mac Studio: the sound could not be read from the file (a file: Invalid data found when processing input). Say "try it again" to import it again.`,
       `  ${LABEL}, in the Mac Studio's drop folder, for 0 minutes: already imported as ${LABEL} (a1b2c3). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.`,
-      "  Pricing talk again.mov, in Mac Studio's, for 0 minutes"
+      "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes"
     ]);
     assert.doesNotMatch(said.join("\n"), /Jane|Coaching|Bloggs/);
     t.done();
@@ -1389,9 +1399,9 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     mkdirSync(drop, { recursive: true });
     clientEpisode(t);
     for (const name of [VIDEO, SECOND, "Pricing talk again.mov"]) writeFileSync(join(drop, name), "video");
-    writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 1, import: "k3j9x", video: SECOND, bytes: 5, seconds: null, step: "Reading the sound", at: AT, label: SECOND_LABEL, failed: "the sound could not be read" }, writeText);
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 1, import: "k3j9x", video: SECOND, bytes: 5, seconds: null, step: "Reading the sound", at: AT, label: SECOND_LABEL, failed: "the sound could not be read" }, writeText);
     const r = await on(depsOf(t), "retry", "nothing fits this");
-    assert.deepEqual(r.said, [`No video in this Mac's drop folder fits "nothing fits this". It holds: ${SECOND_LABEL}, a video of 5 bytes and Pricing talk again.mov.`]);
+    assert.deepEqual(r.said, [`No video in this Mac's drop folder fits "nothing fits this". It holds: ${SECOND_LABEL}, a video of 5 bytes and a video of 5 bytes.`]);
     t.done();
   });
   it("walks every command there with nothing of the client's names in what it says or writes", async () => {
@@ -1406,10 +1416,10 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     // there, and a third is being imported.
     const drop = join(t.root, "Unedited Video", "Mac Studio");
     writeFileSync(join(drop, VIDEO), "video");
-    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9w", video: VIDEO, bytes: 5, seconds: 120, step: "Waiting for its late check", at: "2026-10-20T14:59:00-05:00", label: LABEL }, writeText);
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9w", video: VIDEO, bytes: 5, seconds: 120, step: "Waiting for its late check", at: "2026-10-20T14:59:00-05:00", label: LABEL }, writeText);
     failedStatus(t);
     writeFileSync(join(drop, `${STEM} part 3.mov`), "video");
-    writeStatus(t.root, { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9z", video: `${STEM} part 3.mov`, bytes: 5, seconds: null, step: "Writing the transcript", at: "2026-10-20T14:58:00-05:00", label: "Video of 20 Oct, 14:58 (Mac Studio)" }, writeText);
+    writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9z", video: `${STEM} part 3.mov`, bytes: 5, seconds: null, step: "Writing the transcript", at: "2026-10-20T14:58:00-05:00", label: "Video of 20 Oct, 14:58 (Mac Studio)" }, writeText);
     // This Mac brought its files over once, before it was a video waiting for its answer, and has a library of it.
     oldResult(t);
     library(t);
@@ -1427,6 +1437,113 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     const episodes = (await on(depsOf(t), "episodes")).said;
     assert.ok(episodes.includes(`  ${LABEL}: a video waiting for your answer, of 2:00, id ${record.id.slice(-6)}`), episodes.join("\n"));
     t.done();
+  });
+});
+
+describe("a Mac with a drop folder of its own, whatever its file says of the import (Phase 3, L1b fix 2)", () => {
+  // Every import is light since Phase 2, and a drop folder of a Mac's own no longer needs the file to say so: a video waiting in it may
+  // be a session, and its file's name a client's, as an episode's folder may be named from it, so they are named as on a Mac that does
+  // the light import. (Whether her chat is set up is another rule, the file's alone.)
+  /** t's Mac with its drop folder in BRIMM Video Work, its file saying `setting` of the import (none when undefined): its folder and deps. */
+  const ownMac = (t, setting) => {
+    const own = join(t.home, "BRIMM Video Work", "Drop");
+    mkdirSync(own, { recursive: true });
+    return { own, deps: { ...depsOf(t), settings: { version: 1, machine: "Mac Studio", root: t.root, checkout: "/checkout", ...(setting ? { import: setting } : {}), dropPath: own } } };
+  };
+  it("episodes and retry name a video waiting in it by what it is and its size, never by its file, with the full import or none in the file", async () => {
+    for (const setting of ["full", undefined, "light"]) {
+      const t = setup();
+      const { own, deps } = ownMac(t, setting);
+      writeFileSync(join(own, VIDEO), "video");
+      const said = (await on(deps, "episodes")).said;
+      const at = said.indexOf("Waiting in the drop folders:");
+      assert.deepEqual(said.slice(at, at + 2), ["Waiting in the drop folders:", "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes"], String(setting));
+      const none = await on(deps, "retry", "nothing fits this");
+      assert.deepEqual(none.said, ['No video in this Mac\'s drop folder fits "nothing fits this". It holds: a video of 5 bytes.'], String(setting));
+      assert.doesNotMatch([...said, ...none.said].join("\n"), SECRET, String(setting));
+      t.done();
+    }
+  });
+  it("episodes names an episode whose record cannot be read by its day and Mac, never by its folder, with the full import or none in the file", async () => {
+    for (const setting of ["full", undefined, "light"]) {
+      const t = setup();
+      const { deps } = ownMac(t, setting);
+      writeFileSync(join(t.root, "Episodes", LIGHT_FOLDER), "not a folder");
+      const said = (await on(deps, "episodes")).said;
+      assert.deepEqual(said.slice(0, 2), ["Episodes, newest first:", "  An episode of 2026-10-20 from the Mac Studio whose record cannot be read: ask Jason."], String(setting));
+      assert.doesNotMatch(said.join("\n"), SECRET, String(setting));
+      t.done();
+    }
+  });
+  it("says only that the work stopped, with its code, for an error nobody foresaw, with the full import or none in the file", async () => {
+    for (const setting of ["full", undefined, "light"]) {
+      const t = setup();
+      const { own, deps } = ownMac(t, setting);
+      writeFileSync(join(own, VIDEO), "video");
+      const r = await refusing("statSync", own, () => on(deps, "retry", VIDEO));
+      assert.deepEqual([r.code, r.said], [1, ["The work stopped (EACCES)."]], String(setting));
+      t.done();
+    }
+  });
+});
+
+describe("every Mac names quietly, whatever its file says of the import, with its drop folder in Dropbox (Phase 3, L1d)", () => {
+  // The review session's ruling of 7 Nov 2026: every import is light, so a Mac whose file says "full", or says nothing, and whose drop
+  // folder is in Dropbox (no dropPath) names a waiting video, an episode it cannot read and an error nobody foresaw as the light import
+  // does. (Whether her chat is set up is another rule, the file's alone.)
+  const dropboxMac = (t, setting) => ({ ...depsOf(t), settings: { version: 1, machine: "Mac Studio", root: t.root, checkout: "/checkout", ...(setting ? { import: setting } : {}) } });
+  const dropIn = (t) => {
+    const drop = join(t.root, "Unedited Video", "Mac Studio");
+    mkdirSync(drop, { recursive: true });
+    return drop;
+  };
+  it("episodes and retry name a video waiting in it by what it is and its size, never by its file", async () => {
+    for (const setting of ["full", undefined]) {
+      const t = setup();
+      writeFileSync(join(dropIn(t), VIDEO), "video");
+      const deps = dropboxMac(t, setting);
+      const said = (await on(deps, "episodes")).said;
+      const at = said.indexOf("Waiting in the drop folders:");
+      assert.deepEqual(said.slice(at, at + 2), ["Waiting in the drop folders:", "  A video of 5 bytes, in the Mac Studio's drop folder, for 0 minutes"], String(setting));
+      const none = await on(deps, "retry", "nothing fits this");
+      assert.deepEqual(none.said, ['No video in this Mac\'s drop folder fits "nothing fits this". It holds: a video of 5 bytes.'], String(setting));
+      assert.doesNotMatch([...said, ...none.said].join("\n"), SECRET, String(setting));
+      t.done();
+    }
+  });
+  it("episodes names an episode whose record cannot be read by its day and Mac, never by its folder", async () => {
+    for (const setting of ["full", undefined]) {
+      const t = setup();
+      writeFileSync(join(t.root, "Episodes", LIGHT_FOLDER), "not a folder");
+      const said = (await on(dropboxMac(t, setting), "episodes")).said;
+      assert.deepEqual(said.slice(0, 2), ["Episodes, newest first:", "  An episode of 2026-10-20 from the Mac Studio whose record cannot be read: ask Jason."], String(setting));
+      assert.doesNotMatch(said.join("\n"), SECRET, String(setting));
+      t.done();
+    }
+  });
+  it("names a status with no label quietly in the Imports lines of episodes and status, with no file name in its why", async () => {
+    const zoom = "GMT20261020-150000_Recording Jane Doe.mp4";
+    for (const setting of ["full", undefined]) {
+      const t = setup();
+      writeStatusIn(importingFolder(t.root), { version: 1, machine: "Mac Studio", pid: 1, import: "k3j9x", video: zoom, bytes: 5, seconds: null, step: "Reading the sound", at: "2026-10-20T14:00:00-05:00", failed: `the sound could not be read from ${zoom}` }, writeText);
+      for (const argv of [["episodes"], ["status"]]) {
+        const said = (await on(dropboxMac(t, setting), ...argv)).said;
+        assert.ok(said.some((line) => line.startsWith("  A Zoom download of 5 bytes: its import failed on Mac Studio")), `${setting} ${argv}\n${said.join("\n")}`);
+        assert.doesNotMatch(said.join("\n"), SECRET, `${setting} ${argv}`);
+        assert.ok(!said.join("\n").includes(zoom), `${setting} ${argv}`);
+      }
+      t.done();
+    }
+  });
+  it("says only that the work stopped, with its code, for an error nobody foresaw", async () => {
+    for (const setting of ["full", undefined]) {
+      const t = setup();
+      const drop = dropIn(t);
+      writeFileSync(join(drop, VIDEO), "video");
+      const r = await refusing("statSync", drop, () => on(dropboxMac(t, setting), "retry", VIDEO));
+      assert.deepEqual([r.code, r.said], [1, ["The work stopped (EACCES)."]], String(setting));
+      t.done();
+    }
   });
 });
 

@@ -2,8 +2,8 @@
 // step in her words, and the guide's lists. None of it needs a disk, a program or the page.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { OPS, OPS_PAGE, NOT_SET_UP, ZOOM_WORDS, dropWords, noteKindOf, opsNext, noteAfter, opsText } from "../guide.js";
-import { nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT, signatureOf, WAIT_MS, POLL_MS } from "../guide.js";
+import { OPS, OPS_PAGE, NOT_SET_UP, ZOOM_WORDS, dropWords, dropUnreadable, noteKindOf, opsNext, noteAfter, opsText } from "../guide.js";
+import { AIRDROP, nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT, signatureOf, WAIT_MS, POLL_MS } from "../guide.js";
 import { readyIn, roughIn, READING_STEPS, apart, COMING } from "../guide.js";
 import { APP_NOT_SET_UP, COPY_STEP, copyIn } from "../guide.js";
 import { NOT_SET_UP as APP_SAYS } from "../app.js";
@@ -42,8 +42,11 @@ describe("the guide's constants and Finder words", () => {
   it("are the design's", () => {
     assert.equal(OPS_PAGE, "https://claude.ai/artifact/GCUQPLnSFWZe3VghyaKNtX");
     assert.equal(NOT_SET_UP, "This Mac isn't set up for the guide yet: ask Jason.");
-    assert.equal(dropWords("Drop", "Sallie's laptop"), "Dropbox › The BRIMM DB › BRIMM Video › Drop › Sallie's laptop");
-    assert.equal(dropWords(undefined, "Sallie's laptop"), "Dropbox › The BRIMM DB › BRIMM Video › Unedited Video › Sallie's laptop");
+    assert.equal(dropWords({ drop: "Drop" }, "Sallie's laptop", "/Users/s"), "Dropbox › The BRIMM DB › BRIMM Video › Drop › Sallie's laptop");
+    assert.equal(dropWords({}, "Sallie's laptop", "/Users/s"), "Dropbox › The BRIMM DB › BRIMM Video › Unedited Video › Sallie's laptop");
+    // A Mac with a drop folder of its own says it in Finder's words (Phase 3, L1).
+    assert.equal(dropWords({ drop: "Drop", dropPath: "/Users/s/BRIMM Video Work/Drop" }, "Mac Studio", "/Users/s"), "BRIMM Video Work › Drop, in your home folder");
+    assert.equal(dropWords({ dropPath: "/Users/s/Library/CloudStorage/Dropbox-X/The BRIMM DB/In" }, "Mac Studio", "/Users/s"), "Dropbox › The BRIMM DB › In");
     assert.equal(ZOOM_WORDS, "Dropbox › The BRIMM DB › BRIMM VIDEO Transfer › Zoom Video Transfer");
   });
 });
@@ -194,6 +197,8 @@ const STAGE_ROWS = [
   [{ kind: null, waiting: true, elsewhere: true, mac: "Mac Studio" }, "answering-elsewhere", "It is being answered on the Mac Studio. Carry on there."],
   [{ heldAsSession: true }, "held-session", 'One of its other versions is a client or group session. Say "it was a session after all" for this one too.'],
   [{ elsewhere: true, mac: "Mac Studio", reading: "running" }, "open-elsewhere", "It is open on the Mac Studio. Carry on there."],
+  // Phase 3, L2: a video kept on another Mac (its record's `local`) is changed only there.
+  [{ onOtherMac: true, mac: "Mac Studio", reading: "running" }, "on-other-mac", "It is on the Mac Studio. Carry on there."],
   [{ readingsOff: true, reading: "none" }, "readings-off", "Readings are off on this Mac: ask Jason."],
   [{ reading: "running" }, "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
   [{ reading: "none" }, "reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".'],
@@ -220,6 +225,7 @@ const STAGE_ROWS = [
   [SESSION({ choice: null, teachingsOn: false }), "session-off", OFF],
   [SESSION({ emptyOwed: true }), "session-empty-owed", 'Say "it was a session after all" again: its empty revision for the BRIMM Ops page is still to be written.'],
   [{ ...SESSION(), elsewhere: true, mac: "Mac Studio" }, "open-elsewhere", "It is open on the Mac Studio. Carry on there."],
+  [{ ...SESSION({ choice: null }), onOtherMac: true, mac: "Mac Studio" }, "on-other-mac", "It is on the Mac Studio. Carry on there."],
   [{ ...SESSION(), reading: "running" }, "session-reading", 'Claude is reading its teachings. A notice comes when it is done; then say "what did Claude find?".'],
   [{ ...SESSION({ teachingsOn: false }), reading: "none" }, "session-off", OFF],
   [{ ...SESSION(), reading: "failed" }, "reading-failed", 'Claude\'s reading of it did not finish. Say "how far is it?" to see why.'],
@@ -241,6 +247,13 @@ const STAGE_ROWS = [
   [APP({ copy: { left: null, usual: null, wait: { checkAt: "17:15", readyAt: "", inSeconds: null } } }), "making-copy", 'The video for HyperFrames is being made. Dropbox checks its copies at 17:15 first. Say "open it in HyperFrames" when it is done.'],
   [APP({ copy: { left: 90, usual: null, wait: { checkAt: "17:15", readyAt: "17:26", inSeconds: 660 } } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames" when it is done.'],
   [CLIP({ copy: { left: 120, usual: null } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames" when it is done.'],
+  // Phase 3, L7: a video kept on this Mac opens by itself once its video is made, so the step says so; one from before the switch is told as it was.
+  [APP({ local: true, copy: { left: 180, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made, about 3 minutes left. Say "open it in HyperFrames": it opens by itself when it is ready.'],
+  [APP({ local: true, copy: { left: null, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made. It usually takes about 4 minutes. Say "open it in HyperFrames": it opens by itself when it is ready.'],
+  [APP({ local: true, copy: { left: null, usual: null } }), "making-copy", 'The video for HyperFrames is being made. Say "open it in HyperFrames": it opens by itself when it is ready.'],
+  [APP({ local: true, copy: { left: null, usual: null, opening: true } }), "making-copy", "It opens in HyperFrames by itself in a moment."],
+  [CLIP({ local: true, copy: { left: 120, usual: null } }), "making-copy", 'The video for HyperFrames is being made, about 2 minutes left. Say "open it in HyperFrames": it opens by itself when it is ready.'],
+  [APP({ local: false, copy: { left: 180, usual: 240 } }), "making-copy", 'The video for HyperFrames is being made, about 3 minutes left. Say "open it in HyperFrames" when it is done.'],
   // On a Mac whose settings have the app off nothing opens a project, so a clip is not told to open one.
   [CLIP({ copy: { left: null, usual: null }, app: false, v2: false }), "waits-v2", V1],
   [APP({ way: "hyperframes", project: PROJECT(), elsewhere: true, mac: "Mac Studio" }), "open-elsewhere", "It is open on the Mac Studio. Carry on there."],
@@ -445,6 +458,15 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
     assert.equal(nextFor({ ...BASE, ...APP({ editedInFinalCut: true, app: false }) }, NONE, NOW).stage, "app-off");
     assert.equal(nextFor({ ...BASE, ...APP({ editedInFinalCut: true, way: "hyperframes", project: PROJECT() }) }, NONE, NOW).stage, "in-app");
   });
+  it("names the exports folder in the export step when it is not Downloads (L1b), and says the old words otherwise", () => {
+    const words = "Movies › Exports, in your home folder";
+    const n = nextFor({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT({ last: "today at 3:41 pm", exportsWords: words }) }) }, NONE, NOW);
+    assert.equal(n.stage, "in-app");
+    assert.equal(n.text, `Edit it in HyperFrames. Your last request there was today at 3:41 pm. When you are done, export it on This Mac, as MP4, into ${words}, then say "hand it off".`);
+    for (const exportsWords of [undefined, ""]) {
+      assert.equal(nextFor({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT({ exportsWords }) }) }, NONE, NOW).text, 'Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, then say "hand it off".');
+    }
+  });
   it("shows none of the new stages once a hand-off is written: the BRIMM Ops page's step comes, as it did", () => {
     for (const [over, kind] of [
       [APP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "raw"], [APP({ way: "hyperframes", project: PROJECT() }), "raw"], [APP({ copy: { left: 5, usual: null } }), "raw"],
@@ -513,6 +535,50 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
   });
   it("is the same for a Reel's project: a project here is the main video's, and a copy at work beside it is not said", () => {
     assert.equal(nextFor({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT(), copy: { left: 90, usual: null } }) }, NONE, NOW).stage, "in-app");
+  });
+});
+
+describe("the next step for a video or a session kept on another Mac (Phase 3, L2; D3)", () => {
+  /** What edit.js reads of a video whose record says it is kept on the Mac Studio, on another Mac: `onOtherMac`, with the Mac in `mac`. */
+  const KEPT = { onOtherMac: true, mac: "Mac Studio" };
+  const ON_STUDIO = { stage: "on-other-mac", text: "It is on the Mac Studio. Carry on there." };
+  const PLANNED_FACTS = { kind: null, planned: { route: "script", voice: null, footage: "", waiting: [], joining: false, joinFailed: false, set: true, project: false } };
+  it("is that Mac's, whatever the video's own step would be here, until its hand-off is written", () => {
+    for (const over of [
+      {}, { reading: "running" }, { reading: "none" }, { reading: "failed" }, { readingsOff: true, reading: "none" }, { offersAnswered: false }, { v2: false },
+      RAW({ placeholder: true }), RAW(), APP({ copy: { left: 90, usual: null } }), APP({ way: "hyperframes", project: PROJECT() }), APP({ way: "hyperframes", project: PROJECT({ exported: true }) }),
+      APP({ way: "hyperframes", app: false }), CLIP(), CLIP({ v2: false }), RAW({ gated: true }), RAW({ finishRunning: true }),
+      // A video with no kind, which edit.js does not say is waiting here (its card is not offered on this Mac), and a plan with footage to come.
+      { kind: null }, PLANNED_FACTS, { ...PLANNED_FACTS, planned: { ...PLANNED_FACTS.planned, route: "explainer", voice: "heygen" } },
+      // The other Mac's claim, which a command may still write there, says no more than that it is there.
+      { elsewhere: true }
+    ]) assert.deepEqual(shown(nextFor({ ...BASE, ...over, ...KEPT }, NONE, NOW)), ON_STUDIO, JSON.stringify(over));
+    assert.deepEqual(shown(nextFor({ ...BASE, ...KEPT, mac: "Sallie's laptop" }, NONE, NOW)), { stage: "on-other-mac", text: "It is on Sallie's laptop. Carry on there." });
+  });
+  it("stays that Mac's after a hand-off when it has a conflict or is held beside a session (keeperFirst), for a video and for a session", () => {
+    assert.deepEqual(shown(nextFor({ ...BASE, ...KEPT, keeperFirst: true, handoff: OPS_HANDOFF }, NONE, NOW)), ON_STUDIO);
+    assert.deepEqual(shown(nextFor({ ...BASE, ...RAW(), ...KEPT, keeperFirst: true, handoff: { ...OPS_HANDOFF, kind: "raw" } }, NONE, NOW)), ON_STUDIO);
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), ...KEPT, keeperFirst: true, handoff: { ...OPS_HANDOFF, kind: "session" } }, NONE, NOW)), ON_STUDIO);
+  });
+  it("is a session's that Mac's too: its choice, its reading, its items, its hand-off and its empty revision are all made there", () => {
+    for (const over of [
+      SESSION({ choice: null }), SESSION({ choice: null, teachingsOn: false }), { ...SESSION(), reading: "running" }, { ...SESSION({ teachingsOn: false }), reading: "none" }, { ...SESSION(), reading: "failed" },
+      SESSION({ undecided: 3 }), SESSION(), { ...SESSION(), v2: false }, SESSION({ emptyOwed: true }), { ...SESSION(), elsewhere: true }
+    ]) assert.deepEqual(shown(nextFor({ ...BASE, ...over, ...KEPT }, NONE, NOW)), ON_STUDIO, JSON.stringify(over));
+  });
+  it("is the BRIMM Ops page's step once a hand-off is written, which she takes on any Mac, and done when nothing is left", () => {
+    assert.deepEqual(shown(nextFor({ ...BASE, ...KEPT, handoff: OPS_HANDOFF }, NONE, NOW)), { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.taken}` });
+    assert.equal(nextFor({ ...BASE, ...RAW(), ...KEPT, handoff: { ...OPS_HANDOFF, kind: "raw" } }, NONE, NOW).stage, "ops");
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), ...KEPT, handoff: { ...OPS_HANDOFF, kind: "session" } }, NONE, NOW)), { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.sessionTaken}` });
+    const EMPTY = { ...OPS_HANDOFF, revision: 2, kind: "session", emptyAt: 2, file: "" };
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), ...KEPT, handoff: EMPTY }, NONE, NOW)), { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.withdrawn}` });
+    assert.deepEqual(nextFor({ ...BASE, ...SESSION({ choice: "transcript only" }), ...KEPT }, NONE, NOW), { done: true });
+    assert.deepEqual(nextFor({ ...BASE, ...KEPT, handoff: OPS_HANDOFF }, { ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind: "episode", step: "cascade", revision: 1, at: AT } } }, NOW), { done: true });
+  });
+  it("keeps the words of a video open on the other Mac, which is not kept there", () => {
+    assert.deepEqual(shown(nextFor({ ...BASE, elsewhere: true, mac: "Mac Studio", reading: "running" }, NONE, NOW)), { stage: "open-elsewhere", text: "It is open on the Mac Studio. Carry on there." });
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), elsewhere: true, mac: "Mac Studio" }, NONE, NOW)), { stage: "open-elsewhere", text: "It is open on the Mac Studio. Carry on there." });
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), onOtherMac: false, elsewhere: true, mac: "Mac Studio" }, NONE, NOW)), { stage: "open-elsewhere", text: "It is open on the Mac Studio. Carry on there." });
   });
 });
 
@@ -745,6 +811,21 @@ describe("the guide's lists", () => {
     ]);
     assert.deepEqual(overviewLines({ drop, items: [], old: 1 }), [`Your drop folder: ${drop}`, NOTHING_UNDER_WAY, "1 video from before the switch is not guided."]);
     assert.equal(NOTHING_UNDER_WAY, "Nothing is under way. To start, put the video in your drop folder.");
+  });
+  it("say, right under the drop folder's line, when this Mac does not let BRIMM Video Studio look in it, and then nothing that tells her to put a video in (L1c, finding 6)", () => {
+    assert.equal(dropUnreadable("Desktop › Drop, in your home folder"), "This Mac does not let BRIMM Video Studio look in your drop folder, Desktop › Drop, in your home folder. Allow it in System Settings, under Privacy & Security, Files and Folders, then ask again.");
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 1, unreadable: true }), ["Your drop folder: D", dropUnreadable("D"), "1 video from before the switch is not guided."]);
+    assert.deepEqual(overviewLines({ drop: "D", items: [item("Asked", { at: 0 }, waiting)], old: 0, unreadable: true }), ["Your drop folder: D", dropUnreadable("D"), "Under way:", "  Asked: W."]);
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0 }), ["Your drop folder: D", NOTHING_UNDER_WAY]);
+  });
+  it("add, on a Mac with a drop folder of its own and nothing under way, the AirDrop sentence for a clip (L9)", () => {
+    assert.equal(AIRDROP, "A clip from your iPhone? Send it to this Mac with AirDrop. It lands in Downloads: drag it from there into your drop folder.");
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0, local: true }), ["Your drop folder: D", NOTHING_UNDER_WAY, AIRDROP]);
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 1, local: true }), ["Your drop folder: D", NOTHING_UNDER_WAY, AIRDROP, "1 video from before the switch is not guided."]);
+    // Not on a Mac whose drop folder is in Dropbox, and not when it cannot look in the folder or a video is under way.
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0, local: false }), ["Your drop folder: D", NOTHING_UNDER_WAY]);
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0, local: true, unreadable: true }), ["Your drop folder: D", dropUnreadable("D")]);
+    assert.ok(!overviewLines({ drop: "D", items: [item("Asked", { at: 0 }, waiting)], old: 0, local: true }).includes(AIRDROP));
   });
   it("say after a video's own lines the lines edit.js adds of its own for it, and none for a video that is done", () => {
     const ops = { done: false, stage: "ops", text: "On the BRIMM Ops page: K.", step: "kit", after: "P." };

@@ -7,7 +7,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,6 +68,8 @@ function askWith({ installed = {}, programs = [], files = [], agentPath = "", cl
     const bin = join(dir, "bin");
     mkdirSync(home);
     mkdirSync(bin);
+    // An argument may be a function of the home folder made for the test, which has no name until now: a folder in it.
+    args = args.map((arg) => (typeof arg === "function" ? arg(home) : arg));
     const fileOf = (label) => join(home, "Library", "LaunchAgents", `${label}.plist`);
     for (const [label, text] of Object.entries(installed)) {
       mkdirSync(dirname(fileOf(label)), { recursive: true });
@@ -287,6 +289,24 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
     const other = askOn(installed, "--print", "/Volumes/Work/Main/Unedited Video Transfer");
     assert.deepEqual([other.status, other.agents.map((a) => a.WatchPaths), other.left, other.kept, other.ran], [0, [["/Volumes/Work/Main/Unedited Video Transfer"]], LEFT, installed, ""]);
   });
+  it("refuses a folder the transcript tool watches however either names it: through a link, by its real path, or with a slash at the end (L1c, X4)", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-watched-")));
+    try {
+      const transfer = join(dir, "Main", "Zoom Video Transfer");
+      mkdirSync(transfer, { recursive: true });
+      symlinkSync(join(dir, "Main"), join(dir, "Link"));
+      const viaLink = join(dir, "Link", "Zoom Video Transfer");
+      const installed = { "com.thebrimm.transcribe": transcriptAgent([viaLink]) };
+      for (const named of [viaLink, transfer, `${transfer}/`]) {
+        const r = askOn(installed, "--print", named);
+        assert.deepEqual([r.status, r.agents], [2, []], named);
+        assert.equal(r.out, `A folder is for transcripts or for unedited video, and not for both: ${transfer} is watched for transcripts already, by com.thebrimm.transcribe. Take it off the transcript tool's list first, or name another folder.\n`, named);
+        assert.deepEqual([r.left, r.kept, r.ran], [LEFT, installed, ""]);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("goes by the line alone when the transcript tool's launch agent's file cannot be read, or names no folder", () => {
     for (const text of ["not a launch agent", '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>Label</key><string>com.thebrimm.transcribe</string></dict></plist>\n']) {
       const r = askOn({ "com.thebrimm.transcribe": text }, "--print", "/Volumes/Work/Main");
@@ -500,7 +520,7 @@ describe("the installer's own text", () => {
   });
   it("for one of the two Macs, makes Episodes, marks the drop folder and writes the settings through settings.js, and ends by saying where to drop a video", () => {
     const made = text.slice(text.indexOf('if [[ -n "$machine" ]]; then\n  mkdir -p'), text.indexOf("agent \"$node\" > \"$AGENT_FILE\""));
-    assert.ok(made.includes('mkdir -p "$root/Episodes/.importing" "$root/References"\n'), made);
+    assert.ok(made.includes('mkdir -p "$root/Episodes" "$root/References"\n  [[ -n "$local_drop" ]] || mkdir -p "$root/Episodes/.importing"'), made);
     assert.ok(!text.includes("From Final Cut"), "no folder for Final Cut's work is made or named");
     // A library's backups stay on Final Cut's default (B4, the lead's ruling), so no folder is made for them. The one line that names
     // them says what the open lock keeps from Claude, Final Cut's backups among it.
@@ -1479,7 +1499,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.equal(shown(mended).import, "light");
     d.done();
   });
-  it("refuses to switch while the old folder holds a video, naming it by its file name when the import is today's, and says what to do", () => {
+  it("refuses to switch while the old folder holds a video, naming it by what it is and its size, whatever the import, and says what to do", () => {
     const d = box();
     const old = d.folder("Unedited Video");
     writeFileSync(join(old, "Talk.mov"), "video");
@@ -1487,7 +1507,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const before = d.held();
     refusedWith(ask("--print", "--machine", "Mac Studio", "--drop", "Drop", d.root), [
       "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:",
-      `  Talk.mov: waits in ${old}.`,
+      `  A video of 5 bytes: waits in ${old}.`,
       ADVICE
     ]);
     assert.deepEqual(d.held(), before);
@@ -1495,7 +1515,7 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     assert.equal(ask("--print", "--machine", "Mac Studio", d.root).status, 0);
     d.done();
   });
-  it("refuses to switch while an import of this Mac failed or its late check found a problem, by the video's file name, or its label, and never by the status file's name", () => {
+  it("refuses to switch while an import of this Mac failed or its late check found a problem, counting each, or by its label, and never by the status file's name", () => {
     const d = box();
     d.status("Budget.mov", { failed: "the sound could not be read for Budget.mov" });
     d.status("Talk.mov", { problem: "Talk.rough-cut.mp4 is short" });
@@ -1506,10 +1526,10 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const gone = ", and its video is not in the old folder now: only its status file, in " + `${d.root}/Episodes/.importing` + ", holds this, and a person takes it away by hand";
     assert.equal(r.out, [
       "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:",
-      `  Budget.mov: its import failed${gone}.`,
       `  Video of 22 Oct, 10:40 (Mac Studio): its import failed${gone}.`,
+      `  1 import failed${gone}.`,
       ADVICE,
-      "  Talk.mov: it was copied in, but its late check found a problem, and its video is not in the old folder now.",
+      "  1 late check found a problem, and its video is not in the old folder now.",
       "A late check needs its video: where the video is no longer in the old folder, the check cannot be made again, and Jason looks at it.",
       "",
       "Nothing was changed.",
@@ -1547,15 +1567,17 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   });
   it("refuses --drop, --import and --handoff without --machine, and with no value after them, before anything else", () => {
     const d = box();
-    for (const option of ["--drop", "--import", "--handoff"]) {
+    for (const option of ["--drop", "--import", "--handoff", "--drop-folder", "--exports-folder"]) {
       const without = ask("--print", option, "Drop", "/Volumes/Work/Unedited video");
-      assert.deepEqual([without.status, without.out], [2, '--drop, --import and --handoff are for one of the two Macs, set up with --machine: ./install.sh --machine "Mac Studio" --drop Drop "<path to BRIMM Video>"\n'], option);
+      assert.deepEqual([without.status, without.out], [2, '--drop, --drop-folder, --exports-folder, --switch-back, --switch-local, --import and --handoff are for one of the two Macs, set up with --machine: ./install.sh --machine "Mac Studio" --drop Drop "<path to BRIMM Video>"\n'], option);
       assert.deepEqual([without.agents, without.left, without.ran], [[], [], ""]);
     }
     for (const [args, said] of [
       [["--machine", "Mac Studio", d.root, "--drop"], 'Say which folder after --drop, as --drop Drop or --drop "Unedited Video".'],
       [["--machine", "Mac Studio", "--import", "--print", d.root], "Say which import after --import, as --import light."],
-      [["--machine", "Mac Studio", d.root, "--handoff"], "Say which version after --handoff, as --handoff 1 or --handoff 2."]
+      [["--machine", "Mac Studio", d.root, "--handoff"], "Say which version after --handoff, as --handoff 1 or --handoff 2."],
+      [["--machine", "Mac Studio", d.root, "--drop-folder"], 'Say which folder after --drop-folder, as --drop-folder "<path>".'],
+      [["--machine", "Mac Studio", d.root, "--exports-folder"], 'Say which folder after --exports-folder, as --exports-folder "<path>".']
     ]) {
       const r = ask("--print", ...args);
       assert.deepEqual([r.status, r.out, r.left, r.ran], [2, `${said}\n`, [], ""], args.join(" "));
@@ -1602,20 +1624,36 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     const said = (lines) => `printf '%s\\n' ${lines.map((l) => `'${l}'`).join(" ")}\n`;
     const answers = (lines) => `if [ "$2" = plan ]; then ${said(lines)}exit 0; fi\nexec "${process.execPath}" "$@"\n`;
     const cannot = (lines) => ["The installer could not read what settings.js said of the import and the drop folder, so it changed nothing. It said:", ...lines, "", "Nothing was changed.", ""].join("\n");
+    // Each case between the first and the last is what settings.js says whole but for the one fault named above it, so that each is
+    // refused for its own: a case with a second fault would stay refused were the installer's check of the first taken out.
     for (const lines of [
       ["{", '  "version": 1', "}"],
-      ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Elsewhere"],
-      ["{", '  "version": 1', "}", "The import will be: full", "The drop folder will be: Drop", "The drop folder is now: Unedited Video"],
-      ["{", '  "version": 1', "}", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
-      ["{", '  "version": 1', "}", "The import will be: heavy", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
+      // A drop folder that is not Drop, Unedited Video or a whole path.
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Elsewhere", "The exports folder will be: /x/Downloads"],
+      // No line for the exports folder.
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"],
+      // The full import, which is gone (Phase 2, F4).
+      ["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads"],
+      // An exports folder that is not a whole path.
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: Downloads"],
+      // The old drop folder's line before the Files and Folders line. The drop folder is a whole path, which may need that access.
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: /x/Drop", "The exports folder will be: /x/Downloads", "The old drop folder: /x/old", "The drop folder needs Files and Folders access"],
+      // A cloud folder said of the drop folder Drop, in BRIMM Video, which is no folder of this Mac's own.
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads", "The drop folder is in a cloud folder: Dropbox"],
+      // The drop folder as it will be before the one it is now.
+      ["{", '  "version": 1', "}", "The import will be: light", "The drop folder will be: Drop", "The drop folder is now: Unedited Video", "The exports folder will be: /x/Downloads"],
+      // No line for the import.
+      ["{", '  "version": 1', "}", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads"],
+      // An import that is neither light nor full.
+      ["{", '  "version": 1', "}", "The import will be: heavy", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads"],
       ["nothing of the kind"]
     ]) {
       const r = askWith({ onPath: { node: answers(lines) } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
       assert.deepEqual([r.status, r.out], [2, cannot(lines)], lines.join(" | "));
       assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
     }
-    // What it says whole is read: its own three lines, and the settings above them are what is shown.
-    const good = askWith({ onPath: { node: answers(["{", '  "version": 1', "}", "The import will be: full", "The drop folder is now: Unedited Video", "The drop folder will be: Drop"]) } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
+    // What it says whole is read: its own four lines, and the settings above them are what is shown.
+    const good = askWith({ onPath: { node: answers(["{", '  "version": 1', "}", "The import will be: light", "The drop folder is now: Unedited Video", "The drop folder will be: Drop", "The exports folder will be: /x/Downloads"]) } }, "--print", "--machine", "Mac Studio", "--drop", "Drop", d.root);
     assert.equal(good.status, 0, good.out);
     assert.deepEqual(shown(good), { version: 1 });
     assert.ok(good.out.includes(`\n  Its drop folder, to make in Dropbox and watch:  ${d.root}/Drop/Mac Studio\n`), good.out);
@@ -1725,9 +1763,9 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
   });
   it("refuses --drop, --import and --handoff with --remove, which changes no settings, plainly and before anything else", () => {
     const d = box();
-    for (const args of [["--drop", "Drop"], ["--import", "light"], ["--handoff", "2"], ["--machine", "Mac Studio", "--drop", "Drop", d.root]]) {
+    for (const args of [["--drop", "Drop"], ["--import", "light"], ["--handoff", "2"], ["--drop-folder", "/x"], ["--switch-back"], ["--machine", "Mac Studio", "--drop", "Drop", d.root]]) {
       const r = ask("--print", "--remove", ...args);
-      assert.deepEqual([r.status, r.out], [2, "--remove stops the watching and changes no settings, so it does not take --drop, --import or --handoff.\n"], args.join(" "));
+      assert.deepEqual([r.status, r.out], [2, "--remove stops the watching and changes no settings, so it does not take --drop, --drop-folder, --exports-folder, --switch-back, --switch-local, --import or --handoff.\n"], args.join(" "));
       assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
     }
     // --remove alone is as it was.
@@ -1774,8 +1812,8 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
       // A node that writes down how it was called, and refuses a write, as settings.js does when a video has come into the old folder.
       writeFileSync(join(dir, "node"), `#!/bin/sh\necho "$2" >> "${calls}"\nif [ "$2" = write ]; then echo "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:"; exit 1; fi\n`);
       chmodSync(join(dir, "node"), 0o755);
-      const block = piece('if [[ -n "$machine" ]]; then\n  mkdir -p "$root/Episodes/.importing"', '\nfi\n');
-      const script = `set -euo pipefail\nsay() { print -r -- "$@"; }\nnode="${dir}/node"\nHERE=settings\nmachine="Mac Studio"\nroot="${dir}/BRIMM Video"\nWORK="${dir}/Work"\ndrop="${dir}/BRIMM Video/Drop/Mac Studio"\nCHECKOUT=/x\nswitch_args=(--drop Drop)\nstudio_why=""\nmkdir -p "$drop"\n${block}\nprint -r -- went on`;
+      const block = piece('if [[ -n "$machine" ]]; then\n  mkdir -p "$root/Episodes" "$root/References"', '\nfi\n');
+      const script = `set -euo pipefail\nsay() { print -r -- "$@"; }\nnode="${dir}/node"\nHERE=settings\nmachine="Mac Studio"\nlocal_drop=""\nroot="${dir}/BRIMM Video"\nWORK="${dir}/Work"\ndrop="${dir}/BRIMM Video/Drop/Mac Studio"\nCHECKOUT=/x\nswitch_args=(--drop Drop)\nstudio_why=""\nmkdir -p "$drop"\n${block}\nprint -r -- went on`;
       const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
       assert.deepEqual([r.status, r.stdout, r.stderr], [1, [
         "Not written: the drop folder would change from Unedited Video to Drop, and work is not finished in the old one:",
@@ -1788,6 +1826,31 @@ describe("the drop folder the installer switches (--machine, --drop), asked what
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+  it("says plainly, for a drop folder on this Mac, that the status files were not made in Dropbox, when write refuses after the marker: its own lines run alone in zsh (L9)", { skip: noZsh }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-write-local-"));
+    try {
+      writeFileSync(join(dir, "node"), `#!/bin/sh\nif [ "$2" = write ]; then echo "Not written: the drop folder is not for the settings."; exit 1; fi\n`);
+      chmodSync(join(dir, "node"), 0o755);
+      const block = piece('if [[ -n "$machine" ]]; then\n  mkdir -p "$root/Episodes" "$root/References"', '\nfi\n');
+      const script = `set -euo pipefail\nsay() { print -r -- "$@"; }\nnode="${dir}/node"\nHERE=settings\nmachine="Mac Studio"\nlocal_drop=yes\nroot="${dir}/BRIMM Video"\nWORK="${dir}/Work"\ndrop="${dir}/Work/Drop"\nCHECKOUT=/x\nswitch_args=()\nstudio_why=""\nmkdir -p "$drop"\n${block}\nprint -r -- went on`;
+      const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+      assert.equal(r.status, 1, r.stderr + r.stdout);
+      assert.ok(r.stdout.includes(`The settings were not written, so they and the launch agent are as they were. This run did make ${dir}/Work/Drop and its marker, and the folders for Episodes and for the reference pictures, which a later run uses. Deal with what is said above, then run this again.\n`), r.stdout);
+      assert.ok(!/status files/.test(r.stdout), r.stdout);
+      assert.equal(existsSync(join(dir, "BRIMM Video", "Episodes", ".importing")), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("words its header so that every import is light is said of all the options, and its closing lines tell a picked folder's import in its own words, the old three for a folder in Dropbox: read, not run (L9)", () => {
+    const text = readFileSync(INSTALL, "utf8");
+    const help = text.slice(0, text.indexOf("set -euo pipefail")).replace(/\n# ?/g, " ").replace(/\s+/g, " ");
+    assert.ok(help.includes("or with --switch-local the default, Drop in BRIMM Video Work. Whatever the settings say of the import, every import is light."), help);
+    assert.ok(!help.includes("It takes the light import"), help);
+    const closing = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
+    assert.ok(closing.includes('  if [[ -n "$local_drop" ]]; then\n    say "It is imported on this Mac: its files are kept in a folder of its own in BRIMM Video Work, and its record is written in"\n    say "$root/Episodes, in a folder named for the day, the video and this Mac. The video is taken out of the drop folder once the"\n    say "record is written, and Studio checks the record in Dropbox by itself about 15 minutes later. Then,"\n  else\n'), closing);
+    assert.ok(closing.includes('    say "It is imported into $root/Episodes, in a folder of its own named for the day, the video and this Mac. Its files are"\n    say "copied into Dropbox and checked again 15 minutes later, and only then is the video taken out of the drop folder. Then,"\n  fi\n'), closing);
   });
   it("tells, in the README, how to have Claude asked again: without --rules-only for a folder, and with --machine, where readings stay off, node settings.js set --readings on", () => {
     const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
@@ -1948,12 +2011,420 @@ describe("the installer and her folder's lock (the open lock, K1), asked what it
   });
 });
 
+describe("a drop folder of this Mac's own, asked what the installer would do (--drop-folder, --switch-local, --exports-folder; Phase 3, L1)", { skip: notAMac }, () => {
+  /** BRIMM Video in a made-up Dropbox, in a folder of its own apart from the test's home folder. */
+  function box() {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-local-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    return { dir, root, mine: (more = {}) => ({ machine: "Mac Studio", root, checkout: dirname(HERE), ...more }), done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  const BASE = ["--print", "--machine", "Mac Studio", "--import", "light", "--handoff", "2"];
+  const shown = (r) => JSON.parse(/settings\.json:\n(\{[\s\S]*?\n\})\n/.exec(r.out)[1]);
+  const SYNCING = (name) => `Warning: this drop folder is in ${name}. ${name === "iCloud Drive, if it keeps Desktop & Documents" ? "If it does, every video dropped there goes up to it" : "Every video dropped there goes up to that cloud"}, a client or group session's recording too. A video still syncing there can be imported late, or twice. A folder on this Mac is safer.`;
+  const ACCESS = "  Files and Folders:  macOS may ask whether node may read this folder, and again after node is updated: choose Allow each time (in System Settings, Privacy & Security, Files and Folders, if it was refused); it may ask the same of the app her chat runs in, the first time she asks what's waiting";
+  const lineOf = (r, line) => r.out.includes(`\n${line}\n`);
+
+  it("--switch-local watches Drop in BRIMM Video Work, shows where it looks for exports, offers no offline step and makes no status folder in Dropbox", () => {
+    const d = box();
+    const r = ask(...BASE, "--switch-local", d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    const mine = `${r.home}/BRIMM Video Work/Drop`;
+    assert.ok(lineOf(r, `  Its drop folder, on this Mac:  ${mine}`), r.out);
+    assert.ok(lineOf(r, `  Its marker there, ${mine}/.brimm-watched-by, saying:  Mac Studio`), r.out);
+    assert.ok(lineOf(r, `  Exports from HyperFrames, looked for in:  ${r.home}/Downloads`), r.out);
+    assert.doesNotMatch(r.out, /Make available offline/);
+    assert.doesNotMatch(r.out, /\.importing/);
+    assert.doesNotMatch(r.out, /Warning:/);
+    assert.doesNotMatch(r.out, /Files and Folders/);
+    assert.deepEqual(r.agents.map(held), [agent(r, [mine])]);
+    assert.deepEqual(shown(r), { version: 1, machine: "Mac Studio", root: d.root, checkout: dirname(HERE), import: "light", handoffVersion: 2, dropPath: mine });
+    changedNothing(r);
+    d.done();
+  });
+  it("B1-F20 without Xcode's command line tools, a Mac with a drop folder of its own is told its recordings stay on it, and a Mac on Drop is told the old line", () => {
+    const d = box();
+    const onPath = { "xcode-select": XCODE_MISSING, sw_vers: MACOS("26.5") };
+    const local = askWith({ onPath }, ...BASE, "--switch-local", d.root);
+    assert.equal(local.status, 0, local.err + local.out);
+    assert.ok(lineOf(local, "  Swift, to find the speaker's face:  not here, so a Reel is cropped at the centre of the picture. Without it Studio cannot tell when Dropbox has uploaded a recording's copy in Original files, so the recordings stay on this Mac. To get it: xcode-select --install"), local.out);
+    const plain = askWith({ onPath }, "--print", "--machine", "Mac Studio", "--import", "light", "--handoff", "2", "--drop", "Drop", d.root);
+    assert.equal(plain.status, 0, plain.err + plain.out);
+    assert.ok(lineOf(plain, "  Swift, to find the speaker's face:  not here, so a Reel is cropped at the centre of the picture. To get it: xcode-select --install"), plain.out);
+    d.done();
+  });
+  it("--drop-folder in Dropbox shows it as the folder watched, warns it is in Dropbox, says macOS may ask whether node may read it, and keeps the offline step (L1c, X3)", () => {
+    const d = box();
+    const r = askWith({ files: ["Library/CloudStorage/Dropbox-X/.keep"] }, ...BASE, "--drop-folder", (home) => `${home}/Library/CloudStorage/Dropbox-X/In`, d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    const mine = `${r.home}/Library/CloudStorage/Dropbox-X/In`;
+    assert.ok(lineOf(r, `  Its drop folder, on this Mac:  ${mine}`), r.out);
+    assert.ok(lineOf(r, SYNCING("Dropbox")), r.out);
+    assert.ok(lineOf(r, ACCESS), r.out);
+    assert.ok(r.out.indexOf(SYNCING("Dropbox")) < r.out.indexOf(ACCESS), r.out);
+    assert.ok(lineOf(r, `  Once, in Finder:  Control-click ${mine} and choose Make available offline, so that a video dropped there from another device is brought down at once`), r.out);
+    assert.ok(lineOf(r, `  Exports from HyperFrames, looked for in:  ${r.home}/Downloads`), r.out);
+    assert.deepEqual(r.agents.map(held), [agent(r, [mine])]);
+    assert.equal(shown(r).dropPath, mine);
+    assert.deepEqual([r.ran, r.left.includes("Library/CloudStorage/Dropbox-X/In")], ["", false]);
+    assert.match(r.out, /\nNothing was changed\.\n$/);
+    d.done();
+  });
+  it("--drop-folder under Desktop asks about Files and Folders and warns that iCloud Drive may keep it", () => {
+    const d = box();
+    const r = askWith({ files: ["Desktop/.keep"] }, ...BASE, "--drop-folder", (home) => `${home}/Desktop/Drop`, d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.ok(lineOf(r, `  Its drop folder, on this Mac:  ${r.home}/Desktop/Drop`), r.out);
+    assert.ok(lineOf(r, ACCESS), r.out);
+    assert.ok(lineOf(r, SYNCING("iCloud Drive, if it keeps Desktop & Documents")), r.out);
+    assert.doesNotMatch(r.out, /Make available offline/);
+    assert.match(r.out, /\nNothing was changed\.\n$/);
+    d.done();
+  });
+  const marked = (mac, at) => `the exports folder cannot be a drop folder, and ${mac} has marked ${at} as its own (its marker, .brimm-watched-by, stays there when that Mac moves to another drop folder)`;
+  const markedAbove = (mac, at) => `the exports folder cannot be inside a drop folder, and ${mac} has marked ${at}, which holds it, as its own (its marker, .brimm-watched-by, stays there when that Mac moves to another drop folder)`;
+  const refused = (r, why) => {
+    assert.deepEqual([r.status, r.out], [2, `Not written: ${why}.\n\nNothing was changed.\n`], r.out + r.err);
+    assert.deepEqual([r.agents, r.ran], [[], ""]);
+  };
+  it("--drop-folder in iCloud Drive or in another cloud folder warns, and says macOS may ask whether node may read it (L1c, X3)", () => {
+    const d = box();
+    for (const [folder, name] of [["Library/CloudStorage/GoogleDrive-X/My Drive", "a cloud folder"], ["Library/CloudStorage/OneDrive-Personal", "a cloud folder"], ["Library/Mobile Documents/com~apple~CloudDocs", "iCloud Drive"]]) {
+      const r = askWith({ files: [`${folder}/.keep`] }, ...BASE, "--drop-folder", (home) => `${home}/${folder}/Drop`, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.ok(lineOf(r, `  Its drop folder, on this Mac:  ${r.home}/${folder}/Drop`), r.out);
+      assert.ok(lineOf(r, SYNCING(name)), r.out);
+      assert.ok(lineOf(r, ACCESS), r.out);
+      assert.ok(r.out.indexOf(SYNCING(name)) < r.out.indexOf(ACCESS), r.out);
+      assert.doesNotMatch(r.out, /Make available offline/);
+      assert.deepEqual([r.ran, r.left.includes(`${folder}/Drop`)], ["", false]);
+      assert.match(r.out, /\nNothing was changed\.\n$/);
+    }
+    d.done();
+  });
+  it("refuses a picked folder that holds a video already, in settings.js's words, before anything is changed; one that holds none is taken (L1c, X1)", () => {
+    const d = box();
+    const r = askWith({ files: [["Desktop/Family birthday.mov", "video"], ["Desktop/voice memo.m4a", "sound"], ["Desktop/notes.txt", "notes"]] }, ...BASE, "--drop-folder", (home) => `${home}/Desktop`, d.root);
+    assert.deepEqual([r.status, r.out], [2, "Not written: the drop folder holds 2 videos already, which would be imported as soon as the folder is watched. Pick a new, empty folder instead, or take the videos out first.\n\nNothing was changed.\n"]);
+    assert.deepEqual([r.agents, r.ran], [[], ""]);
+    assert.ok(["Desktop/Family birthday.mov", "Desktop/voice memo.m4a", "Desktop/notes.txt"].every((f) => r.left.includes(f)), r.left.join());
+    const arriving = askWith({ files: [["Desktop/Clip.mov.download", "video"]] }, ...BASE, "--drop-folder", (home) => `${home}/Desktop`, d.root);
+    assert.equal(arriving.status, 2, arriving.out);
+    assert.match(arriving.out, /^Not written: the drop folder holds a video already,/);
+    const ok = askWith({ files: ["Desktop/Drop/.DS_Store", "Desktop/Drop/notes.txt"] }, ...BASE, "--drop-folder", (home) => `${home}/Desktop/Drop`, d.root);
+    assert.equal(ok.status, 0, ok.err + ok.out);
+    assert.deepEqual(ok.agents.map(held), [agent(ok, [`${ok.home}/Desktop/Drop`])]);
+    d.done();
+  });
+  it("refuses a folder another Mac has marked, or that the transcript tool lists, in its own line, whatever the folder holds, and leaves its recordings where they are (L1c, X1)", () => {
+    const d = box();
+    const jasons = join(d.dir, "The BRIMM DB", "Jason drop");
+    mkdirSync(jasons);
+    writeFileSync(join(jasons, ".brimm-watched-by"), "Jason's MacBook\n");
+    for (const f of ["Talk one.mov", "Talk two.mov"]) writeFileSync(join(jasons, f), "v");
+    const r = askWith({ settings: { ...d.mine({ import: "light", drop: "Drop", handoffVersion: 2 }), machine: "Sallie's laptop" } }, "--print", "--machine", "Sallie's laptop", "--import", "light", "--handoff", "2", "--drop-folder", jasons, d.root);
+    assert.deepEqual([r.status, r.out], [2, `The folder ${jasons} is watched by Jason's MacBook already. A drop folder is watched by one Mac only.\n`]);
+    assert.deepEqual([r.agents, r.ran], [[], ""]);
+    assert.deepEqual(readdirSync(jasons).sort(), [".brimm-watched-by", "Talk one.mov", "Talk two.mov"]);
+    const listed = join(d.dir, "Other", "BRIMM Transcripts");
+    mkdirSync(listed, { recursive: true });
+    writeFileSync(join(listed, "Board call.m4a"), "v");
+    const given = { installed: { "com.thebrimm.transcribe": transcriptAgent([listed]) } };
+    const t = askWith(given, ...BASE, "--drop-folder", listed, d.root);
+    assert.deepEqual([t.status, t.out], [2, `A folder is for transcripts or for unedited video, and not for both: ${listed} is watched for transcripts already, by com.thebrimm.transcribe. Take it off the transcript tool's list first, or name another folder.\n`]);
+    assert.deepEqual([t.agents, t.ran], [[], ""]);
+    assert.deepEqual(readdirSync(listed), ["Board call.m4a"]);
+    // The agent's file turned off is not read by this line (settings.js counts what the folder holds, and refuses on that).
+    const off = askWith({ files: [["Library/LaunchAgents/com.thebrimm.transcribe.plist.off", transcriptAgent([listed])]] }, ...BASE, "--drop-folder", listed, d.root);
+    assert.deepEqual([off.status, off.out.startsWith("Not written: the drop folder holds a video already,")], [2, true], off.out);
+    d.done();
+  });
+  it("names again the drop folder this Mac watches now while a video waits in it, and keeps it while only the exports folder changes (L1c, X1)", () => {
+    const d = box();
+    const own = join(d.dir, "Own", "Drop");
+    mkdirSync(own, { recursive: true });
+    writeFileSync(join(own, "Talk.mov"), "v");
+    for (const args of [["--drop-folder", own], ["--exports-folder", join(d.dir, "Exports")]]) {
+      const r = askWith({ settings: d.mine({ import: "light", dropPath: own }) }, ...BASE, ...args, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.ok(lineOf(r, `  Its drop folder, on this Mac:  ${own}`), r.out);
+      assert.deepEqual(r.agents.map(held), [agent(r, [own])]);
+      assert.deepEqual(readdirSync(own), ["Talk.mov"]);
+    }
+    d.done();
+  });
+  it("refuses an exports folder that is the drop folder or nested with it, one of BRIMM Video's own folders, Work, the transcript tool's, her chat's or Zoom's, or a drop folder a Mac has marked, in settings.js's words, before anything is changed (L1c, X2 and finding 8)", () => {
+    const d = box();
+    const hers = join(d.root, "Drop", "Sallie's laptop");
+    mkdirSync(hers, { recursive: true });
+    writeFileSync(join(hers, ".brimm-watched-by"), "Sallie's laptop\n");
+    const jasons = join(d.dir, "Shared", "In");
+    mkdirSync(jasons, { recursive: true });
+    writeFileSync(join(jasons, ".brimm-watched-by"), "Jason's MacBook\n");
+    const macbook = join(d.dir, "The BRIMM DB", "BRIMM VIDEO MacBook");
+    mkdirSync(macbook);
+    const transfer = join(d.dir, "The BRIMM DB", "BRIMM VIDEO Transfer");
+    const cannot = (what) => `the exports folder cannot be ${what}, or inside it`;
+    const NESTED = "the drop folder cannot be the exports folder, or inside it, or hold it";
+    for (const [args, why] of [
+      [["--exports-folder", hers], cannot("Drop in BRIMM Video")],
+      [["--switch-local", "--exports-folder", join(d.root, "Episodes")], cannot("Episodes in BRIMM Video")],
+      [["--exports-folder", join(d.root, "Unedited Video", "Mac Studio")], NESTED],
+      [["--drop", "Drop", "--exports-folder", join(d.root, "Drop", "Mac Studio")], NESTED],
+      [["--drop-folder", (home) => `${home}/Desktop/Drop`, "--exports-folder", (home) => `${home}/BRIMM Video Work/Drop`], cannot("Drop in BRIMM Video Work")],
+      [["--drop-folder", (home) => `${home}/Desktop/Drop`, "--exports-folder", (home) => `${home}/BRIMM Video Work`], cannot("BRIMM Video Work")],
+      [["--switch-local", "--exports-folder", join(transfer, "Zoom Video Transfer")], cannot("BRIMM VIDEO Transfer")],
+      [["--switch-local", "--exports-folder", macbook], cannot("BRIMM VIDEO MacBook")],
+      [["--switch-local", "--exports-folder", (home) => `${home}/BRIMM Video Studio`], cannot("BRIMM Video Studio")],
+      [["--switch-local", "--exports-folder", (home) => `${home}/Documents/Zoom`], cannot("Zoom's recordings")],
+      [["--switch-local", "--exports-folder", jasons], marked("Jason's MacBook", jasons)],
+      [["--switch-local", "--exports-folder", join(jasons, "HF")], markedAbove("Jason's MacBook", jasons)]
+    ]) refused(askWith({ files: ["Desktop/.keep"] }, ...BASE, ...args, d.root), why);
+    const listed = join(d.dir, "Other", "BRIMM Transcripts");
+    const turnedOff = askWith({ files: [["Library/LaunchAgents/com.thebrimm.transcribe.plist.off", transcriptAgent([listed])]] }, ...BASE, "--switch-local", "--exports-folder", join(listed, "HF"), d.root);
+    refused(turnedOff, "the exports folder cannot be a folder the transcript tool watches, or inside it");
+    d.done();
+  });
+  it("refuses BRIMM VIDEO Transfer, Zoom Video Transfer in it and BRIMM VIDEO MacBook, beside BRIMM Video, as the drop folder, empty, whether the transcript tool's launch agent lists it or is not there (L1c, finding 8)", () => {
+    const d = box();
+    const transfer = join(d.dir, "The BRIMM DB", "BRIMM VIDEO Transfer");
+    mkdirSync(join(transfer, "Zoom Video Transfer"), { recursive: true });
+    const macbook = join(d.dir, "The BRIMM DB", "BRIMM VIDEO MacBook");
+    mkdirSync(macbook);
+    const listing = transcriptAgent([transfer, join(transfer, "Zoom Video Transfer"), macbook]);
+    for (const given of [{}, { installed: { "com.thebrimm.transcribe": listing } }]) {
+      for (const pick of [transfer, join(transfer, "Zoom Video Transfer")]) refused(askWith(given, ...BASE, "--drop-folder", pick, d.root), "the drop folder cannot be BRIMM VIDEO Transfer, or inside it, or hold it");
+      refused(askWith(given, ...BASE, "--drop-folder", macbook, d.root), "the drop folder cannot be BRIMM VIDEO MacBook, or inside it, or hold it");
+    }
+    assert.deepEqual(readdirSync(transfer), ["Zoom Video Transfer"]);
+    d.done();
+  });
+  it("refuses a drop folder the transcript tool watches, however either names it: through a link, with a slash at the end, or in other letter case; and one named by way of .. in settings.js's words (L1c, X4)", () => {
+    const d = box();
+    const real = join(d.dir, "Other", "BRIMM Transcripts");
+    mkdirSync(real, { recursive: true });
+    symlinkSync(join(d.dir, "Other"), join(d.dir, "Link"));
+    const viaLink = join(d.dir, "Link", "BRIMM Transcripts");
+    for (const listed of [real, viaLink]) {
+      const installed = { "com.thebrimm.transcribe": transcriptAgent([listed]) };
+      for (const pick of [real, viaLink, `${real}/`, join(d.dir, "Other", "brimm transcripts")]) {
+        const r = askOn(installed, ...BASE, "--drop-folder", pick, d.root);
+        assert.deepEqual([r.status, r.out], [2, `A folder is for transcripts or for unedited video, and not for both: ${pick} is watched for transcripts already, by com.thebrimm.transcribe. Take it off the transcript tool's list first, or name another folder.\n`], `${listed} ${pick}`);
+        assert.deepEqual([r.agents, r.left, r.kept, r.ran], [[], LEFT, installed, ""]);
+      }
+      refused(askOn(installed, ...BASE, "--drop-folder", `${d.dir}/Other/x/../BRIMM Transcripts`, d.root), "the drop folder must be named by a whole path with no . or .. in it");
+    }
+    assert.equal(askWith({}, ...BASE, "--drop-folder", join(d.dir, "Other", "BRIMM Drop"), d.root).status, 0);
+    d.done();
+  });
+  it("refuses a pick spelt through a folder that is not there and .., in settings.js's words, where install.sh's marker line could not see another Mac's marker (L1c, X1)", () => {
+    const d = box();
+    const jasons = join(d.dir, "In");
+    mkdirSync(jasons);
+    writeFileSync(join(jasons, ".brimm-watched-by"), "Jason's MacBook\n");
+    writeFileSync(join(jasons, "Talk.mov"), "v");
+    refused(askWith({ files: ["Desktop/.keep"] }, ...BASE, "--drop-folder", `${d.dir}/Nowhere/../In`, d.root), "the drop folder must be named by a whole path with no . or .. in it");
+    assert.equal(existsSync(join(d.dir, "Nowhere")), false);
+    const plain = askWith({ files: ["Desktop/.keep"] }, ...BASE, "--drop-folder", jasons, d.root);
+    assert.deepEqual([plain.status, plain.out], [2, `The folder ${jasons} is watched by Jason's MacBook already. A drop folder is watched by one Mac only.\n`]);
+    d.done();
+  });
+  it("names the exports folder it refuses when the run named none (L1c, X2)", () => {
+    const d = box();
+    const shared = join(d.dir, "Shared");
+    mkdirSync(shared);
+    writeFileSync(join(shared, ".brimm-watched-by"), "Jason's MacBook\n");
+    const settings = d.mine({ import: "light", drop: "Drop", handoffVersion: 2, exportsPath: shared });
+    const r = askWith({ settings }, ...BASE, d.root);
+    assert.deepEqual([r.status, r.out], [2, `Not written: ${marked("Jason's MacBook", shared)}.\nThe exports folder is ${shared}, kept from before: name another with --exports-folder.\n\nNothing was changed.\n`]);
+    assert.deepEqual([r.agents, r.ran], [[], ""]);
+    const mended = askWith({ settings }, ...BASE, "--exports-folder", join(d.dir, "Exports"), d.root);
+    assert.equal(mended.status, 0, mended.err + mended.out);
+    assert.ok(lineOf(mended, `  Exports from HyperFrames, looked for in:  ${d.dir}/Exports`), mended.out);
+    d.done();
+  });
+  it("takes each MacBook's move: Sallie's laptop with the transcript tool turned off, Jason's MacBook set up fresh with BRIMM VIDEO MacBook in the .plist, and a Mac that keeps its drop folder in Dropbox, each with exports in Dropbox or Downloads; and the letter-case re-pick (L1c)", () => {
+    const d = box();
+    const transfer = join(d.dir, "The BRIMM DB", "BRIMM VIDEO Transfer");
+    mkdirSync(join(transfer, "Zoom Video Transfer"), { recursive: true });
+    const macbook = join(d.dir, "The BRIMM DB", "BRIMM VIDEO MacBook");
+    mkdirSync(macbook);
+    const hers = join(d.root, "Drop", "Sallie's laptop");
+    mkdirSync(hers, { recursive: true });
+    writeFileSync(join(hers, ".brimm-watched-by"), "Sallie's laptop\n");
+    const shared = join(d.dir, "The BRIMM DB", "HyperFrames exports");
+    mkdirSync(shared);
+    const off = ["Library/LaunchAgents/com.thebrimm.transcribe.plist.off", transcriptAgent([transfer, join(transfer, "Zoom Video Transfer")])];
+    const laptop = { ...d.mine({ import: "light", drop: "Drop", handoffVersion: 2 }), machine: "Sallie's laptop" };
+    const MB = ["--print", "--machine", "Sallie's laptop", "--import", "light", "--handoff", "2"];
+    for (const args of [["--switch-local"], ["--drop-folder", (home) => `${home}/Desktop/Drop`]]) {
+      for (const exports of [shared, (home) => `${home}/Downloads`]) {
+        const r = askWith({ settings: laptop, files: [off, "Desktop/.keep", "Downloads/.keep"] }, ...MB, ...args, "--exports-folder", exports, d.root);
+        assert.equal(r.status, 0, r.err + r.out);
+        assert.ok(r.out.includes(`  The old drop folder:  ${hers}, no longer watched once this is done`), r.out);
+      }
+    }
+    const j = askWith({ installed: { "com.thebrimm.transcribe": transcriptAgent([macbook]) }, files: ["Desktop/.keep"] }, "--print", "--machine", "Jason's MacBook", "--import", "light", "--handoff", "2", "--switch-local", "--exports-folder", shared, d.root);
+    assert.equal(j.status, 0, j.err + j.out);
+    assert.ok(lineOf(j, `  Its drop folder, on this Mac:  ${j.home}/BRIMM Video Work/Drop`), j.out);
+    const k = askWith({ settings: laptop }, "--print", "--machine", "Sallie's laptop", "--import", "light", "--handoff", "2", "--drop", "Drop", "--exports-folder", shared, d.root);
+    assert.equal(k.status, 0, k.err + k.out);
+    const own = join(d.dir, "Own", "Drop");
+    mkdirSync(own, { recursive: true });
+    writeFileSync(join(own, "Talk.mov"), "v");
+    const re = askWith({ settings: d.mine({ import: "light", dropPath: own }) }, ...BASE, "--drop-folder", join(d.dir, "own", "drop"), d.root);
+    if (existsSync(join(d.dir, "own", "drop"))) {
+      assert.equal(re.status, 0, re.out);
+      assert.doesNotMatch(re.out, /The old drop folder:/);
+    }
+    assert.deepEqual(readdirSync(own), ["Talk.mov"]);
+    d.done();
+  });
+  it("takes the Mac Studio's switch at P3-3, with Downloads as the exports folder, its old drop folder in Dropbox marked, and the transcript tool watching BRIMM VIDEO Transfer (L1c)", () => {
+    const d = box();
+    const transfer = join(d.dir, "The BRIMM DB", "BRIMM VIDEO Transfer");
+    mkdirSync(join(transfer, "Zoom Video Transfer"), { recursive: true });
+    const old = join(d.root, "Drop", "Mac Studio");
+    mkdirSync(old, { recursive: true });
+    writeFileSync(join(old, ".brimm-watched-by"), "Mac Studio\n");
+    writeFileSync(join(old, ".DS_Store"), "x");
+    const installed = { "com.thebrimm.transcribe": transcriptAgent([transfer, join(transfer, "Zoom Video Transfer")]) };
+    for (const args of [["--switch-local"], ["--drop-folder", (home) => `${home}/BRIMM Video Work/Drop`]]) {
+      const r = askWith({ installed, settings: d.mine({ import: "light", drop: "Drop", handoffVersion: 2 }), files: ["BRIMM Video Studio/CLAUDE.md", "Downloads/.keep"] }, ...BASE, ...args, "--exports-folder", (home) => `${home}/Downloads`, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.ok(lineOf(r, `  Its drop folder, on this Mac:  ${r.home}/BRIMM Video Work/Drop`), r.out);
+      assert.ok(lineOf(r, `  Exports from HyperFrames, looked for in:  ${r.home}/Downloads`), r.out);
+      assert.ok(r.out.includes(`  The old drop folder:  ${old}, no longer watched once this is done`), r.out);
+      assert.doesNotMatch(r.out, /Warning:|Files and Folders|Make available offline/);
+      assert.equal(r.kept["com.thebrimm.transcribe"], installed["com.thebrimm.transcribe"]);
+      assert.match(r.out, /\nNothing was changed\.\n$/);
+    }
+    d.done();
+  });
+  it("says in its help which folders --drop-folder and --exports-folder refuse, that a cloud drop folder takes every video up, and that macOS may ask again after node is updated, never that it asks once (L1c)", () => {
+    const help = ask("--print", "--help").out.replace(/^#\s+/gm, "").replace(/\s+/g, " ");
+    for (const clause of [
+      "It is refused when it is, is inside or holds a folder of BRIMM Video, BRIMM VIDEO Transfer, BRIMM VIDEO MacBook, BRIMM Video Work (but for Drop in it), her chat's folders, Zoom's, Downloads or the exports folder; when it holds a video already, which would be imported at once, or cannot be read, unless it is the folder this Mac watches now; when another Mac has marked it, or the transcript tool's launch agent lists it;",
+      "A folder in Dropbox, iCloud Drive or another cloud folder is allowed with a warning: every video dropped there goes up to that cloud.",
+      "For a folder in a cloud folder, under Desktop or Documents, or on another disk, macOS may ask whether node may read it, and again after node is updated.",
+      "and not Episodes, References, Drop or Unedited Video in BRIMM Video, BRIMM Video Work, BRIMM VIDEO Transfer, BRIMM VIDEO MacBook, a folder the transcript tool watches, her chat's folders, Zoom's, Studio's settings folder, or a drop folder a Mac has marked as its own, nor a folder inside one."
+    ]) assert.ok(help.includes(clause), `${clause}\n---\n${help}`);
+    assert.doesNotMatch(help, /asks once/);
+  });
+  it("refuses a drop folder it must not watch, with settings.js's plain words, before anything is changed", () => {
+    const d = box();
+    for (const [pick, why] of [
+      [() => d.root, "the drop folder cannot be BRIMM Video, or inside it, or hold it"],
+      [() => join(d.root, "Drop", "Mac Studio"), "the drop folder cannot be Drop in BRIMM Video, or inside it, or hold it"],
+      [() => join(d.root, "Episodes", "x"), "the drop folder cannot be Episodes in BRIMM Video, or inside it, or hold it"],
+      [() => join(d.root, "Assets"), "the drop folder cannot be BRIMM Video, or inside it, or hold it"],
+      [() => join(d.root, "Assets", "In"), "the drop folder cannot be BRIMM Video, or inside it, or hold it"],
+      [() => join(d.root, "Inbox"), "the drop folder cannot be BRIMM Video, or inside it, or hold it"],
+      [(home) => `${home}/Downloads`, "the drop folder cannot be Downloads, or inside it, or hold it"],
+      [(home) => `${home}/BRIMM Video Work`, "the drop folder cannot be BRIMM Video Work, or inside it but for Drop, or hold it"],
+      [(home) => `${home}/BRIMM Video Studio/Drop`, "the drop folder cannot be BRIMM Video Studio, or inside it, or hold it"],
+      [() => "Desktop/Drop", "the drop folder must be a whole path"],
+      [(home) => `${home}/Nowhere/Drop`, "the folder that is to hold the drop folder is not there"]
+    ]) {
+      const r = askWith({ files: ["Desktop/.keep"] }, ...BASE, "--drop-folder", pick, d.root);
+      assert.deepEqual([r.status, r.out], [2, `Not written: ${why}.\n\nNothing was changed.\n`], why);
+      assert.deepEqual([r.agents, r.ran], [[], ""]);
+    }
+    // The exports folder is refused too, as the drop folder.
+    const same = askWith({ files: ["Desktop/.keep"] }, ...BASE, "--drop-folder", (home) => `${home}/Desktop/Drop`, "--exports-folder", (home) => `${home}/Desktop`, d.root);
+    assert.deepEqual([same.status, same.out], [2, "Not written: the drop folder cannot be the exports folder, or inside it, or hold it.\n\nNothing was changed.\n"]);
+    d.done();
+  });
+  it("refuses an exports folder that is, is inside or holds a drop folder in Dropbox, before anything is changed: the import would take every export (L1b fix 2)", () => {
+    const d = box();
+    for (const exports of [join(d.root, "Drop", "Mac Studio"), join(d.root, "Drop", "Mac Studio", "Exports"), join(d.root, "Drop")]) {
+      const r = askWith({ settings: d.mine({ import: "light", drop: "Drop" }) }, ...BASE, "--exports-folder", exports, d.root);
+      assert.deepEqual([r.status, r.out], [2, "Not written: the drop folder cannot be the exports folder, or inside it, or hold it.\n\nNothing was changed.\n"], exports);
+      assert.deepEqual([r.agents, r.ran], [[], ""], exports);
+    }
+    d.done();
+  });
+  it("switches a Mac whose file says the full import, or has no import, to a drop folder of its own without --import light, and keeps what the file says (L1b fix 2)", () => {
+    const d = box();
+    const TOLD = ["--print", "--machine", "Mac Studio", "--handoff", "2"];
+    for (const setting of ["full", undefined]) {
+      const settings = d.mine({ drop: "Drop", ...(setting ? { import: setting } : {}) });
+      const local = askWith({ settings }, ...TOLD, "--switch-local", d.root);
+      assert.equal(local.status, 0, local.err + local.out);
+      assert.ok(lineOf(local, `  Its drop folder, on this Mac:  ${local.home}/BRIMM Video Work/Drop`), local.out);
+      assert.deepEqual([shown(local).dropPath, shown(local).import], [`${local.home}/BRIMM Video Work/Drop`, setting], String(setting));
+      assert.deepEqual(local.agents.map(held), [agent(local, [`${local.home}/BRIMM Video Work/Drop`])]);
+      const picked = askWith({ settings }, ...TOLD, "--drop-folder", (home) => `${home}/BRIMM Video Work/Drop`, "--exports-folder", (home) => `${home}/Movies/Exports`, d.root);
+      assert.equal(picked.status, 0, picked.err + picked.out);
+      assert.ok(lineOf(picked, `  Exports from HyperFrames, looked for in:  ${picked.home}/Movies/Exports`), picked.out);
+      assert.deepEqual([shown(picked).dropPath, shown(picked).exportsPath, shown(picked).import], [`${picked.home}/BRIMM Video Work/Drop`, `${picked.home}/Movies/Exports`, setting], String(setting));
+      assert.deepEqual(picked.agents.map(held), [agent(picked, [`${picked.home}/BRIMM Video Work/Drop`])]);
+      for (const r of [local, picked]) {
+        assert.equal(r.ran, "", String(setting));
+        assert.match(r.out, /\nNothing was changed\.\n$/);
+      }
+    }
+    d.done();
+  });
+  it("refuses --drop Drop on a Mac with a drop folder of its own unless --switch-back is given too, and goes back with it", () => {
+    const d = box();
+    const own = join(d.dir, "Own", "Drop");
+    const settings = d.mine({ import: "light", dropPath: own });
+    const refused = askWith({ settings }, ...BASE, "--drop", "Drop", d.root);
+    assert.deepEqual([refused.status, refused.out], [2, `Not written: this Mac's drop folder is ${own}, on this Mac. To go back to a drop folder in Dropbox, give --switch-back as well.\n\nNothing was changed.\n`]);
+    const back = askWith({ settings }, ...BASE, "--drop", "Drop", "--switch-back", d.root);
+    assert.equal(back.status, 0, back.err + back.out);
+    assert.ok(lineOf(back, `  Its drop folder, to make in Dropbox and watch:  ${d.root}/Drop/Mac Studio`), back.out);
+    assert.doesNotMatch(back.out, /on this Mac:/);
+    assert.equal(Object.hasOwn(shown(back), "dropPath"), false);
+    assert.deepEqual(back.agents.map(held), [agent(back, [`${d.root}/Drop/Mac Studio`])]);
+    // A run with no drop option keeps the folder the settings name.
+    const kept = askWith({ settings }, ...BASE, d.root);
+    assert.equal(kept.status, 0, kept.err + kept.out);
+    assert.ok(lineOf(kept, `  Its drop folder, on this Mac:  ${own}`), kept.out);
+    d.done();
+  });
+  it("refuses --switch-local with another way of naming the drop folder, and --drop-folder with --drop, before anything is changed", () => {
+    const d = box();
+    for (const args of [["--switch-local", "--drop", "Drop"], ["--switch-local", "--drop-folder", "/x/Drop"], ["--switch-local", "--switch-back"]]) {
+      const r = ask(...BASE, ...args, d.root);
+      assert.deepEqual([r.status, r.out], [2, "--switch-local picks the default drop folder on this Mac, so it does not go with --drop, --drop-folder or --switch-back.\n"], args.join(" "));
+      assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);
+    }
+    const both = askWith({ files: ["Desktop/.keep"] }, ...BASE, "--drop-folder", (home) => `${home}/Desktop/Drop`, "--drop", "Drop", d.root);
+    assert.deepEqual([both.status, both.out], [2, "Not written: name the drop folder by --drop-folder or by --drop, not both.\n\nNothing was changed.\n"]);
+    d.done();
+  });
+  it("shows an exports folder in Dropbox, with no warning, and keeps Downloads when it is not told one", () => {
+    const d = box();
+    const r = ask(...BASE, "--exports-folder", (home) => `${home}/Library/CloudStorage/Dropbox-X/HyperFrames exports`, d.root);
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.ok(lineOf(r, `  Exports from HyperFrames, looked for in:  ${r.home}/Library/CloudStorage/Dropbox-X/HyperFrames exports`), r.out);
+    assert.doesNotMatch(r.out, /Warning:/);
+    assert.equal(shown(r).exportsPath, `${r.home}/Library/CloudStorage/Dropbox-X/HyperFrames exports`);
+    const plain = ask(...BASE, d.root);
+    assert.ok(lineOf(plain, `  Exports from HyperFrames, looked for in:  ${plain.home}/Downloads`), plain.out);
+    assert.ok(lineOf(plain, `  The import status files, to make in Dropbox:  ${d.root}/Episodes/.importing`), plain.out);
+    assert.ok(lineOf(plain, `  Once, in Finder:  Control-click ${d.root}/Unedited Video/Mac Studio and choose Make available offline, so that a video dropped there from another device is brought down at once`), plain.out);
+    d.done();
+  });
+  it("makes the picked folder, and no status folder in Dropbox for it, in its real lines, and warns again at the end: read, not run", () => {
+    const text = readFileSync(INSTALL, "utf8");
+    assert.ok(text.includes('[[ -n "$local_drop" ]] || mkdir -p "$root/Episodes/.importing"'));
+    const closing = text.slice(text.lastIndexOf('say "Done. Drop a video in:"'));
+    assert.ok(closing.includes('if [[ -z "$local_drop" || "$cloud_name" == Dropbox ]]; then\n    say "Once, in Finder: Control-click that folder and choose Make available offline'), closing);
+    assert.ok(closing.includes('[[ -z "$cloud_name" ]] || say "Warning: this drop folder is in $cloud_name.'), closing);
+    assert.ok(closing.includes('[[ -z "$cloud_name" ]] || say "Warning: this drop folder is in $cloud_name. $cloud_up A video still syncing there can be imported late, or twice. A folder on this Mac is safer."'), closing);
+    assert.ok(text.includes('cloud_up="Every video dropped there goes up to that cloud, a client or group session\'s recording too."') && text.includes('cloud_up="If it does, every video dropped there goes up to it, a client or group session\'s recording too."'), "cloud_up");
+  });
+});
+
 describe("the full import is gone (Phase 2, F4)", { skip: notAMac }, () => {
   it("--import full prints that the full import is gone, changes nothing and ends 2, on a Mac set up with --machine or not", () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
     const root = join(dir, "The BRIMM DB", "BRIMM Video");
     mkdirSync(root, { recursive: true });
-    for (const args of [["--machine", "Mac Studio", "--import", "full", root], ["--import", "full", "/Volumes/Work/Unedited video"], ["--machine", "Mac Studio", "--drop", "Drop", "--import", "full", root]]) {
+    for (const args of [["--machine", "Mac Studio", "--import", "full", root], ["--import", "full", "/Volumes/Work/Unedited video"], ["--machine", "Mac Studio", "--drop", "Drop", "--import", "full", root], ["--machine", "Mac Studio", "--drop", "Drop", "--switch-back", "--import", "full", root]]) {
       const r = ask("--print", ...args);
       assert.deepEqual([r.status, r.out], [2, "The full import is gone: this Mac imports lightly.\n"], args.join(" "));
       assert.deepEqual([r.agents, r.left, r.ran], [[], [], ""]);

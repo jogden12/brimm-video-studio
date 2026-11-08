@@ -24,11 +24,12 @@
 import { appendFileSync, chmodSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PART_KINDS, heldElsewhere, isFromPlan, isPart, isPlannedRecord, kindOf, localStamp, readEpisode, recordNumbers, shownName, undone, acceptRev } from "./episode.js";
-import { episodesFolder, episodeWork } from "./settings.js";
+import { episodesFolder, episodeWork, isLocal } from "./settings.js";
+import { ON_OTHER_MAC, onOtherMac } from "./where.js";
 import { runningCommand, startDetached } from "./detached.js";
 import { linksOf, matchedSession } from "./finish.js";
 import { gatedName } from "./gate.js";
-import { isSeenLine, isZoomName, withoutNames } from "./kinds.js";
+import { isSeenLine, isZoomName, spokenMac, withoutNames } from "./kinds.js";
 import { lockFor } from "./loosened.js";
 import { NO_RECEIPT, expectedFootage, expectedVoiceover, footageOption, notSessionCardOf, partCardOf, plannedCardOf, receiptWhy, voiceoverOption } from "./receipts.js";
 import { localDay } from "./shared/text.js";
@@ -79,12 +80,13 @@ const plannedAt = (record) => {
     - a video of sound alone (`picture` false, and sound) is offered each explainer whose voice is hers or not chosen yet (waitsForVoiceover),
       whose package is set, as The voiceover for its title (receipts.js voiceoverOption) (PR H6). A HeyGen explainer is offered to nothing;
     - a video the import could not read (`picture` null), and a file with no picture and no sound, are offered none. */
-export function plannedOffers(records, { picture = false, sound = true } = {}) {
+export function plannedOffers(records, { picture = false, sound = true, machine } = {}) {
   if (!Array.isArray(records)) return [];
   const aVoice = picture === false && sound !== false;
   if (picture !== true && !aVoice) return [];
+  // A plan is filmed on one Mac (Phase 3, L4): with `machine`, one kept on another Mac is not offered.
   return records
-    .filter((record) => (aVoice ? waitsForVoiceover(record) : takesFootage(record)) && record.planned.set !== null)
+    .filter((record) => (aVoice ? waitsForVoiceover(record) : takesFootage(record)) && record.planned.set !== null && !(machine !== undefined && onOtherMac({ machine }, record)))
     .map((record, order) => ({ record, order }))
     .sort((a, b) => plannedAt(b.record) - plannedAt(a.record) || a.order - b.order)
     .slice(0, MOST_OFFERS)
@@ -281,15 +283,15 @@ export const cardLines = (label, offers) => [plannedLine(label, offers), `    Pa
     could not say whether it has a picture, or no plan is offered to it among `records` (plannedOffers). A video with a picture is offered the
     scripts that wait for footage, and given the planned card and the part card; a video of sound alone (PR H6) is offered the explainers that wait
     for a voice, and given the planned card alone: a voiceover is asked no kind of shot and no client. */
-export function footageCards({ record, label, records, blocked = false }) {
+export function footageCards({ record, label, records, blocked = false, machine }) {
   if (blocked || !isObject(record) || !isObject(record.video) || fromZoom(record)) return [];
   const picture = pictureOf(record);
   if (picture === true) {
-    const offers = plannedOffers(records, { picture: true, sound: record.video.sound !== false });
+    const offers = plannedOffers(records, { picture: true, sound: record.video.sound !== false, machine });
     return offers.length ? cardLines(label, offers) : [];
   }
   if (picture === false && record.video.sound !== false) {
-    const offers = plannedOffers(records, { picture: false, sound: true });
+    const offers = plannedOffers(records, { picture: false, sound: true, machine });
     return offers.length ? [plannedLine(label, offers)] : [];
   }
   return [];
@@ -309,6 +311,9 @@ export function planTitleOf(root, id) {
 
 /** A kind of shot as a shot list is spoken of in a refusal that names a shot of that kind. */
 const NOUN = { screen: "screen recording", "b-roll": "b-roll" };
+
+/** What `footage` says of a plan filmed on another Mac (Phase 3, L4): its footage is dropped there. Nothing was written. */
+export const FILMED_ON = (title, mac) => `"${title}" is filmed on ${spokenMac(mac)}: drop its footage there. Nothing was changed.`;
 
 /** The plans that wait for their footage and are called `said`: by the title they were made with or the name she gave them, in any case and
     spacing. The word as it was given comes first; with its codes turned (plan.js textArg) it is tried only when it fits none. */
@@ -383,8 +388,8 @@ const receiptsAsked = (ctx) => (ctx.deps.env || process.env).CLAUDECODE === "1" 
 /** The plans the cards offer when `plan` was named: the three newest (plannedOffers), and the plan named as well when it is older than those,
     in place of the third, last, as the newest first order has it. For the voiceover of an explainer (`voiceover`, PR H6) they are the explainers
     a video of sound alone is offered, and the plan is named by The voiceover for its title. */
-function offersNaming(records, plan, { voiceover = false } = {}) {
-  const offers = plannedOffers(records, voiceover ? { picture: false, sound: true } : { picture: true });
+function offersNaming(records, plan, { voiceover = false, machine } = {}) {
+  const offers = plannedOffers(records, voiceover ? { picture: false, sound: true, machine } : { picture: true, machine });
   if (offers.some((offer) => offer.record.id === plan.id)) return offers;
   return [...offers.slice(0, MOST_OFFERS - 1), { record: plan, option: (voiceover ? voiceoverOption : footageOption)(shownName(plan)) }];
 }
@@ -409,6 +414,9 @@ async function makePart(ctx, found, record, name, asked, kit) {
   const plan = fits[0].record;
   const title = shownName(plan);
   keepTitle(ctx, title);
+  // A plan is filmed on one Mac (Phase 3, L4): a video answered as footage on another is refused, and nothing is written.
+  const away = onOtherMac(ctx, plan);
+  if (away) return refuse(ctx, FILMED_ON(title, away));
   if (plan.planned.set === null) return refuse(ctx, `The plan for "${title}" isn't made yet: its guide, its shot list and its teleprompter script come first.`);
   const why = videoWhy(ctx, found, record, name, plans, kit);
   if (why) return refuse(ctx, why);
@@ -429,14 +437,21 @@ async function makePart(ctx, found, record, name, asked, kit) {
   if (receiptsAsked(ctx)) {
     // Her receipts are of the card this video's line prints, and of the plan's title among plans that are each still offered now.
     const said = (text) => (ctx.hidden && ctx.hidden.names.length ? withoutNames(text, ctx.hidden.names, ctx.hidden.keep, { paths: false }) : text);
-    const offeredNow = waiting.filter(({ record: one }) => one.planned.set !== null).map(({ record: one }) => footageOption(shownName(one)));
+    const offeredNow = waiting.filter(({ record: one }) => one.planned.set !== null && !onOtherMac(ctx, one)).map(({ record: one }) => footageOption(shownName(one)));
     const now = ctx.now();
     const answered = [...new Set([name, said(name)])].some((label) => receiptWhy({ home: ctx.home, expected: expectedFootage({ label, title, as: asked.as, client: asked.client, offeredNow }), now }) === "");
     if (!answered) {
       ctx.say(NO_RECEIPT);
-      for (const line of cardLines(name, offersNaming(plans.map(({ record: one }) => one), plan))) ctx.say(line);
+      for (const line of cardLines(name, offersNaming(plans.map(({ record: one }) => one), plan, { machine: ctx.machine }))) ctx.say(line);
       return 1;
     }
+  }
+  // The first footage of a plan on a Mac with a drop folder of its own marks the plan as filmed here: its record is written first, adding
+  // `local`, and then the part's. A run stopped between them leaves a plan marked local with no part, which is harmless: the answer is said again.
+  // A plan whose footage began before the switch has no `local` and goes the old way.
+  if (isLocal(ctx.settings) && !isObject(plan.local) && !isFromPlan(plan) && partsOf(ctx.root, plan.id, { newer: true }).length === 0) {
+    const marked = await kit.save({ name: fits[0].name, folder: fits[0].folder, record: plan }, { ...plan, local: { on: ctx.machine } }, "");
+    if (marked !== 0) return marked;
   }
   const answer = { guess: null, seen: "", came: null, ...record.answer, state: "part", by: ctx.machine, on: ctx.machine, at: localStamp(new Date(ctx.now())), private: "no" };
   const partOf = { id: plan.id, as: asked.as, shot, client: asked.client };
@@ -471,6 +486,9 @@ async function makeVoiceover(ctx, found, record, name, asked, kit) {
   const plan = planFound.record;
   const title = shownName(plan);
   keepTitle(ctx, title);
+  // A plan kept on another Mac is that Mac's: nothing is written here (Phase 3, L4).
+  const away = onOtherMac(ctx, plan);
+  if (away) return refuse(ctx, ON_OTHER_MAC(title, away));
   if (plan.planned.route === "script") return refuse(ctx, `"${title}" is a script: it takes footage, and no voiceover.`);
   if (plan.planned.voice === "heygen") return refuse(ctx, `"${title}" is read by a HeyGen voice, so it takes no voiceover.`);
   if (plan.planned.set === null) return refuse(ctx, `The plan for "${title}" isn't made yet: its guide and its teleprompter script come first.`);
@@ -490,18 +508,20 @@ async function makeVoiceover(ctx, found, record, name, asked, kit) {
   if (receiptsAsked(ctx)) {
     // Her receipts are of the cards this video's line prints, and of the plan's title among plans that are each still offered now.
     const said = (text) => (ctx.hidden && ctx.hidden.names.length ? withoutNames(text, ctx.hidden.names, ctx.hidden.keep, { paths: false }) : text);
-    const offeredNow = plans.filter(({ record: one }) => one.planned.set !== null && (takesFootage(one) || waitsForVoiceover(one))).map(({ record: one }) => (waitsForVoiceover(one) ? voiceoverOption : footageOption)(shownName(one)));
+    const offeredNow = plans.filter(({ record: one }) => one.planned.set !== null && !onOtherMac(ctx, one) && (takesFootage(one) || waitsForVoiceover(one))).map(({ record: one }) => (waitsForVoiceover(one) ? voiceoverOption : footageOption)(shownName(one)));
     const now = ctx.now();
     const answered = [...new Set([name, said(name)])].some((label) => receiptWhy({ home: ctx.home, expected: expectedVoiceover({ label, title, came, offeredNow }), now }) === "");
     if (!answered) {
       ctx.say(NO_RECEIPT);
-      ctx.say(plannedLine(name, offersNaming(plans.map(({ record: one }) => one), plan, { voiceover: true })));
+      ctx.say(plannedLine(name, offersNaming(plans.map(({ record: one }) => one), plan, { voiceover: true, machine: ctx.machine })));
       ctx.say(`    Card if not a session: ${JSON.stringify(notSessionCardOf({ label: name, came }))}`);
       return 1;
     }
   }
-  if (plan.planned.voice === null) {
-    const code = await kit.save({ name: planFound.name, folder: planFound.folder, record: plan }, { ...plan, planned: { ...plan.planned, voice: "sallie" } }, "");
+  // On a Mac with a drop folder of its own the plan is marked as filmed here, in the same write (Phase 3, L4): its voiceover is filed into its video/.
+  const mark = isLocal(ctx.settings) && !isObject(plan.local);
+  if (plan.planned.voice === null || mark) {
+    const code = await kit.save({ name: planFound.name, folder: planFound.folder, record: plan }, { ...plan, ...(mark ? { local: { on: ctx.machine } } : {}), planned: { ...plan.planned, ...(plan.planned.voice === null ? { voice: "sallie" } : {}) } }, "");
     if (code !== 0) return code;
   }
   const next = { ...record, answer: { guess: null, seen: "", came: null, ...answer, state: "part", by: ctx.machine, on: ctx.machine, at: localStamp(new Date(ctx.now())), private: "no" }, partOf: { id: plan.id, as: "voiceover", shot: null, client: null } };

@@ -27,7 +27,8 @@ import { CLAUDE_MODEL, AGAIN_MS } from "../unedited.js";
 import { readReels, reelsFile, REELS_VERSION } from "../reel-candidates.js";
 import { READ_LOOK_MS, READ_HOLD_MS } from "../reading.js";
 import { LATE_CHECK_MS, lateCheck } from "../dropbox.js";
-import { removeStatus, writeStatus } from "../importing.js";
+import { removeStatusIn, writeStatusIn } from "../importing.js";
+import { importingFolder } from "../settings.js";
 import { READ_POLL_MS } from "../edit.js";
 import { sessionLabel } from "../kinds.js";
 import { stampedText } from "../lib.js";
@@ -817,11 +818,11 @@ describe("the Reel suggestions of a video she has answered, which BRIMM Video St
 const pendingFor = (t, found, over = {}) => writePending(t.home, { version: 1, id: ID, name: FOLDER, folder: found.folder, video: VIDEO, bytes: 13, seconds: 23.423, drop: "/drop", work: "/work", entries: [], lastCopy: t.now() - 5 * 60 * 1000, root: t.root, machine: "Mac Studio", planTxt: "Pricing talk.cut-plan.txt", ...over });
 /** The other Mac's import of the made-up video, at work: a hold the late check of this Mac's own does not make the reading's to keep in
     step (plan R1c), so the reading waits for it as it always did. */
-const elsewhereAtWork = (t) => writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 4242, import: "z9", video: VIDEO, bytes: 13, seconds: 23.423, step: "Importing", at: new Date(t.now()).toISOString() }, (to, text) => writeFileSync(to, text));
+const elsewhereAtWork = (t) => writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 4242, import: "z9", video: VIDEO, bytes: 13, seconds: 23.423, step: "Importing", at: new Date(t.now()).toISOString() }, (to, text) => writeFileSync(to, text));
 /** The late check made, as the import makes it: the pending check taken away, and the status of an import at work with it. */
 const checkMade = (t) => {
   rmSync(join(pendingFolder(t.home), `${ID}.json`), { force: true });
-  removeStatus(t.root, VIDEO, "Sallie's laptop", "z9");
+  removeStatusIn(importingFolder(t.root), VIDEO, "Sallie's laptop", "z9");
 };
 /** What the record says once the other Mac took the video over and answered it a client or group session. */
 const sessionOver = (rev, by = "Sallie's laptop") => ({ rev, kind: "session", name: { text: sessionLabel("2026-10-14"), placeholder: false }, session: { marked: AT, on: by, teachings: null, cleared: null }, editing: { by, since: AT } });
@@ -1064,7 +1065,7 @@ describe("one reading for each answer (fix 5)", () => {
 
 describe("read gives up waiting for an import at work after READ_HOLD_MS (fix 6, fix 11)", () => {
   /** The status of an import of the video at work on the other Mac, written as of now. */
-  const importing = (t) => writeStatus(t.root, { version: 1, machine: "Sallie's laptop", pid: 2, import: "x1", video: VIDEO, bytes: 13, seconds: 23.423, step: "Waiting for the late check", at: localStamp(new Date(t.now())) }, (to, text) => writeFileSync(to, text));
+  const importing = (t) => writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 2, import: "x1", video: VIDEO, bytes: 13, seconds: 23.423, step: "Waiting for the late check", at: localStamp(new Date(t.now())) }, (to, text) => writeFileSync(to, text));
   it("waits while it is at work, and reads once it is done", async () => {
     const { t, asks } = reading("raw");
     importing(t);
@@ -1350,7 +1351,7 @@ describe("a raw reading starts at once while this Mac's own late check is to com
       `Something went wrong on this Mac before Claude's reading of ${NAME} could be put in, so nothing it read was put in.`,
       `The rough cut of ${NAME} is kept on this Mac, in BRIMM Video Work, as "${basename(renderOf(t))}".`
     ]);
-    assert.equal(readResult(t.home, FOLDER, "read").next, "Nothing was changed. Say what it is again, with --again, to have Claude read it.");
+    assert.equal(readResult(t.home, FOLDER, "read").next, "Nothing was changed. Tell me what it is again, and Claude reads it again.");
     assert.equal(existsSync(lockOfCheck(t)), false);
     assert.equal("reading" in readPendingsOf(t), false);
     assert.ok(logs.some((l) => l.includes("EACCES")) || r.text.includes("EACCES"), "the code is in the log");

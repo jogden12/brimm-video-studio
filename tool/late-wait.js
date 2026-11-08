@@ -12,11 +12,12 @@
 import { statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { LATE_CHECK_MS } from "./dropbox.js";
-import { dueAt, readPendings, releaseLateCheckLock, sameFile, settleReading, takeLateCheckLock, writePending } from "./filing.js";
-import { holdsVideo, importState, readStatuses } from "./importing.js";
+import { dueAt, readPendings, sameFile, statusReadFolders, takeOutOfCheck } from "./filing.js";
+import { holdsVideo, importState, readStatusesIn } from "./importing.js";
 import { currentReading, shownName } from "./episode.js";
 import { readResult, runningCommand, runningRun } from "./detached.js";
 import { clockAt, importHold } from "./unedited.js";
+import { keptOnAMac } from "./where.js";
 
 /** This Mac's pending late check of the episode with `record`: the check it still owes, or undefined. It leaves out one that has found a
     problem, unless `problem` is true (projectWaits holds while the check is owed, with or without a problem). */
@@ -37,6 +38,8 @@ const sizeOf = (path) => {
     record's size. For a video the join made (its drop file is nobody's and not there) it is the `from` of the pending check's
     entry that was put in under the video's name, when that is there, whole, and of the record's size. */
 export function localSource(ctx, record) {
+  // An episode kept on this Mac has its video here, and no late check of Dropbox's reads or holds it (Phase 3, L4, D4).
+  if (keptOnAMac(record)) return null;
   const owed = owedFor(ctx, record);
   const bytes = record.video && record.video.bytes;
   if (!owed || !Number.isFinite(bytes)) return null;
@@ -59,16 +62,17 @@ export function localSource(ctx, record) {
     copied into its episode already. A check that found a problem, or an import that failed or stopped, does not clear by
     itself, and holds nothing here: the reading says why when it meets it. */
 export function lateCheckAt(ctx, record) {
+  // Nothing of an episode kept on this Mac waits for Dropbox's check (D4): the checks that remain run behind, and no one waits for them.
+  if (keptOnAMac(record)) return null;
   const now = ctx.now();
   const owed = owedFor(ctx, record);
   if (owed) return Math.max(dueAt(owed), now);
-  const working = readStatuses(ctx.root, now).map((s) => s.status).find((s) => s && s.video === record.video.file && s.bytes === record.video.bytes && importState(s, now) === "running");
+  const working = readStatusesIn(statusReadFolders(ctx), now).map((s) => s.status).find((s) => s && s.video === record.video.file && s.bytes === record.video.bytes && importState(s, now) === "running");
   return working ? now + LATE_CHECK_MS : null;
 }
 
-/** How often a reading looks again for the lock of the import's late check while the check holds it, and for how long in all. */
-export const LOCK_LOOK_MS = 1000;
-export const LOCK_WAIT_MS = 2 * 60 * 1000;
+/** How often a reading looks again for the lock of the import's late check while the check holds it, and for how long in all (moved to filing.js). */
+export { LOCK_LOOK_MS, LOCK_WAIT_MS } from "./filing.js";
 
 /** Whether the only late check that holds the episode with `record` is this Mac's own, so that a reading here can keep it in step instead
     of waiting for it (plan R1c): this Mac owes the check of the record's import (a pending one of this Mac, of this root, with the
@@ -77,82 +81,21 @@ export const LOCK_WAIT_MS = 2 * 60 * 1000;
 export function ownCheckOnly(ctx, record) {
   if (!owedFor(ctx, record)) return false;
   const now = ctx.now();
-  return readStatuses(ctx.root, now).map((s) => s.status).filter((s) => s && s.video === record.video.file && s.bytes === record.video.bytes && holdsVideo(s, now)).every((s) => s.machine === ctx.machine && importState(s, now) === "running");
+  return readStatusesIn(statusReadFolders(ctx), now).map((s) => s.status).filter((s) => s && s.video === record.video.file && s.bytes === record.video.bytes && holdsVideo(s, now)).every((s) => s.machine === ctx.machine && importState(s, now) === "running");
 }
 
 /** When a reading of the episode with `record` can begin, in milliseconds, or null when it can begin now: the import's late check holds
     nothing of it that it cannot keep in step (`ownCheckOnly`), or nothing holds it. Otherwise the time the check will have been made
     (`lateCheckAt`). */
 export function readingWaitsUntil(ctx, record) {
+  if (keptOnAMac(record)) return null;
   return ownCheckOnly(ctx, record) ? null : lateCheckAt(ctx, record);
 }
 
 /** Take the files a reading is about to put in out of this Mac's own late check of the episode's import, under the lock the check also
-    takes (plan R1c), so that the check never puts an older file back over one the reading wrote, and still looks at every other file.
-    `paths` are the files the reading puts in; `name` is the episode's folder. Resolves:
-    - { none: true } when this Mac owes no check for the record, or none of whose entries is among `paths`, or it was made while the
-      reading waited for the lock: nothing is locked or written;
-    - { why } when the lock was not to be had in LOCK_WAIT_MS (the check holds it that long), or the check found a problem meanwhile,
-      or a mark an earlier reading left cannot be settled yet: then nothing is put in;
-    - { end }, with the lock held and the pending check marked `reading` with the entries among `paths`. `end({ put })` is to be called
-      once, whatever happens, and again does nothing: with `put`, the files went in, and their entries are taken out of the check; without
-      it they did not, and the check is as it was. Either way the mark is taken away and the lock let go. A write that fails is logged
-      and leaves the mark, which the check settles by the episode's record (filing.js settleReading); the lock goes all the same.
-    The lock is held from here to `end`. */
-export async function keepCheckInStep(ctx, { name, record, paths }, { wait, log = () => {} }) {
-  const same = (p) => p.id === record.id && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root);
-  // Both sides are spelled by two sources (the reading's folder, the pending's own), so they are compared resolved and in NFC.
-  const spelled = (path) => resolve(String(path)).normalize("NFC");
-  const wanted = new Set(paths.map(spelled));
-  const among = (p) => p.entries.filter((e) => e && wanted.has(spelled(e.to))).map((e) => e.to);
-  const first = readPendings(ctx.home).find(same);
-  if (!first || !among(first).length) return { none: true };
-  const shown = shownName(record);
-  let held = null;
-  for (let waited = 0; ; waited += LOCK_LOOK_MS) {
-    held = takeLateCheckLock(ctx.home, name, "read", ctx.alive);
-    if (held) break;
-    if (waited >= LOCK_WAIT_MS) return { why: `The import was still checking its copies of ${shown} in Dropbox after two minutes, so nothing Claude read was put in.` };
-    await wait(LOCK_LOOK_MS);
-  }
-  let to = [];
-  let marked = false;
-  try {
-    // Under the lock the pending is read again: the check may have been made, or found a problem, while the lock was waited for.
-    let fresh = readPendings(ctx.home).find(same);
-    if (!fresh) return { none: true };
-    if (fresh.problem) return { why: importHold({ root: ctx.root, home: ctx.home, machine: ctx.machine, record, now: ctx.now() }).why || `Dropbox found a problem with a copy of this episode: ${String(fresh.problem).replace(/\.$/, "")}.` };
-    // A mark an earlier reading left (it stopped while it put its files in) is settled first, by the record, as the check settles it.
-    if (fresh.reading) {
-      const settled = settleReading(fresh, { home: ctx.home, log });
-      if (settled.later) return { why: `The import's check of its copies of ${shown} in Dropbox is not settled yet, so nothing Claude read was put in.` };
-      fresh = settled.pending;
-    }
-    to = among(fresh);
-    if (!to.length) return { none: true };
-    writePending(ctx.home, { ...fresh, reading: { pid: process.pid, at: ctx.now(), to } });
-    marked = true;
-  } finally {
-    if (!marked) releaseLateCheckLock(held);
-  }
-  let ended = false;
-  const end = ({ put }) => {
-    if (ended) return;
-    ended = true;
-    try {
-      const now = readPendings(ctx.home).find(same);
-      if (now) {
-        const { reading, ...rest } = now;
-        writePending(ctx.home, put ? { ...rest, entries: now.entries.filter((e) => !to.includes(e.to)) } : rest);
-      }
-    } catch (e) {
-      log(`The import's late check could not be kept in step with the reading (${e.code || "an error"}). It settles the reading's files at its next look.`);
-    } finally {
-      releaseLateCheckLock(held);
-    }
-  };
-  return { end };
-}
+    takes (plan R1c): filing.js takeOutOfCheck, moved there so that a writer into final/ can use it too; this keeps its old name, and
+    gives the import's problem words (importHold) for a record without `local`. Its results and words are as they always were. */
+export const keepCheckInStep = (ctx, step, opts) => takeOutOfCheck(ctx, step, { ...opts, problemWhy: (record) => importHold({ root: ctx.root, statusFolders: statusReadFolders(ctx), home: ctx.home, machine: ctx.machine, record, now: ctx.now() }).why });
 
 /** When the copy of the episode's video for HyperFrames can begin, in milliseconds, or null when nothing holds it (plan R1a). It
     waits for the import's late check (`lateCheckAt`) unless it starts from the local file (`localSource`): that one waits for
@@ -169,6 +112,7 @@ const clockNear = (ms) => clockAt(Math.round(ms / 60000) * 60000);
     { checkAt, readyAt, inSeconds }, "17:15" for when Dropbox has checked its copies, "17:26" for when the copy is ready ("" when
     `copySeconds` is null) and the seconds from now to then (null); or null when it does not wait. */
 export function waitFacts(ctx, record, copySeconds) {
+  if (keptOnAMac(record)) return null;
   const due = lateWaitFor(ctx, record);
   if (due === null) return null;
   const ready = copySeconds === null || copySeconds === undefined ? null : due + copySeconds * 1000;
@@ -181,6 +125,8 @@ export function waitFacts(ctx, record, copySeconds) {
     work and this Mac owes the import's late check, with or without a problem found: then the project may be made, from the files
     the record lists at the sizes it lists (app.js readListed); "" when nothing holds it. Nothing is locked, written or waited for. */
 export function projectWaits(ctx, { name, record }) {
+  // On an episode kept on this Mac only "reading" stays: its files are here, so there is no Dropbox file to verify (Phase 3, L4, D4).
+  if (keptOnAMac(record)) return runningCommand(ctx.home, name, ctx.alive) === "read" && !currentReading(record) ? "reading" : "";
   if (runningCommand(ctx.home, name, ctx.alive) === "read") return currentReading(record) ? "verify" : "reading";
   return owedFor(ctx, record, { problem: true }) ? "verify" : "";
 }
