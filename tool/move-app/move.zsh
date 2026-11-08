@@ -10,6 +10,11 @@
 #                                    look, say what it would do in order, and change nothing: no log, no report, no key, no
 #                                    clone, and no question. A look that would stop the real run stops this one too
 #
+#   zsh move.zsh --try-chooser [--second-way]
+#                                    run step 5's two folder questions alone, on any Mac, and change nothing: no log, no lock, no
+#                                    report, no marks, no installer. --second-way shows the chooser by its program first. It takes
+#                                    neither --commit nor --print
+#
 # Each step looks first, says what it will change, and asks before it changes it. Answer y and press Return to go ahead. Step 5's two
 # questions (the drop folder, the exports folder) also take c: it opens macOS's own window to choose the folder.
 # Anything else, an empty line, or the end of input is no: the run stops, says what it changed (nothing, before the first
@@ -26,6 +31,7 @@ FRESH_MACHINE="Jason's MacBook"
 # Set once the Mac is known (which_mac): its name and Studio's key comment. The installer's options are set by set_install_options,
 # once step 5 has asked its two questions.
 MACHINE="" KEY_COMMENT="" INSTALL_OPTIONS=()
+FOUND_BRIMM_VIDEO=() # set by search_brimm_video
 FRESH=""             # set by which_mac on a Mac with no brimm-video settings
 SET_UP_FRESH=""      # yes on a Mac set up fresh: FRESH on its first run, and on a later run (the settings are there) the mark fresh=yes
 STUDIO_URL="${BRIMM_STUDIO_REPO:-git@github-brimm-video-studio:jogden12/brimm-video-studio.git}"
@@ -65,6 +71,9 @@ CHOOSER_ROUTE=app
 PRINT_ONLY=""        # set by --print: nothing is changed, written or asked
 LOGGING=""           # set once the run is a real one that has been let through: what is said is also kept in $LOG
 COMMIT=""
+COMMIT_GIVEN=""      # set when --commit is on the line
+TRY=""               # set by --try-chooser: only step 5's two questions are asked, and nothing is changed
+SECOND_WAY=""        # set by --second-way (with --try-chooser)
 changed=()           # each change this run made, in words, for the stop summary
 made_partial=""      # set when this run made $PARTIAL, so that a Ctrl-C takes it away again
 R_MACOS="" R_DISK="" R_SETTINGS="" R_COUNT="" R_PLAN=""   # the report's lines for check 41, in the By-Hand page's own words
@@ -104,6 +113,11 @@ done_already() { say "Already done: $1"; }
 summary() {
   local new_drop=""
   local -a folders
+  # A try of the folder questions changed nothing, and starts again with its own line, never a move.
+  if [[ -n "$TRY" ]]; then
+    say "This was a try of the folder questions: nothing was changed. To try again: open \"${BRIMM_MOVE_APP:-Move to Studio.app}\" --args --try-chooser"
+    return 0
+  fi
   # After the installer started, where the drop folder is now: Studio's own settings say. Nothing here waits, asks or counts the old folder.
   if [[ -n "$INSTALL_STARTED" ]]; then
     folders=("${(@f)$(show_folders)}")
@@ -205,11 +219,25 @@ read_options() {
     shift
     case "$arg" in
       --print) PRINT_ONLY="yes" ;;
-      --commit) COMMIT="${1-}"; (( $# )) && shift ;;
+      --commit) COMMIT_GIVEN="yes"; COMMIT="${1-}"; (( $# )) && shift ;;
+      --try-chooser) TRY="yes" ;;
+      --second-way) SECOND_WAY="yes" ;;
       -h|--help) sed -n '2,/^set -euo pipefail$/p' "$SELF" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 0 ;;
       *) say "Not an option this app knows: $arg"; exit 2 ;;
     esac
   done
+  if [[ -n "$SECOND_WAY" && -z "$TRY" ]]; then
+    say "--second-way goes with --try-chooser."
+    exit 2
+  fi
+  if [[ -n "$TRY" ]]; then
+    if [[ -n "$COMMIT_GIVEN" || -n "$PRINT_ONLY" ]]; then
+      say "The try of the folder questions (--try-chooser) takes neither --commit nor --print."
+      exit 2
+    fi
+    if [[ -n "$SECOND_WAY" ]]; then CHOOSER_ROUTE=program; fi
+    return 0
+  fi
   if [[ ! "$COMMIT" =~ '^[0-9a-f]{40}$' ]]; then
     say "Say the commit this app was made at: --commit and its 40 characters."
     exit 2
@@ -379,18 +407,25 @@ look_at_import_and_drop() {
 
 # Step 1 on a Mac with no brimm-video settings: BRIMM Video is found in Dropbox, and setting the Mac up fresh is asked. Studio's
 # installer makes the settings and the drop folder in step 5.
-set_up_fresh() {
+# The BRIMM Video folders in Dropbox, into FOUND_BRIMM_VIDEO (each folder once, the first spelling kept).
+search_brimm_video() {
   local p
-  local -a found
+  FOUND_BRIMM_VIDEO=()
   # The BRIMM DB is at the top of a Dropbox, or a level deeper, in a team member's folder (as on the Mac Studio:
   # Dropbox-Ogden28.5/Jason Ogden/The BRIMM DB).
   for p in $HOME/Library/CloudStorage/Dropbox*/"The BRIMM DB/BRIMM Video"(N/) $HOME/Library/CloudStorage/Dropbox*/*/"The BRIMM DB/BRIMM Video"(N/) \
       $HOME/Dropbox*/"The BRIMM DB/BRIMM Video"(N/) $HOME/Dropbox*/*/"The BRIMM DB/BRIMM Video"(N/); do
     # Two paths that resolve to the same folder count once, and the first is kept as found.
     local same="" f
-    for f in "${found[@]}"; do [[ "${f:A}" != "${p:A}" ]] || same=yes; done
-    [[ -n "$same" ]] || found+=("$p")
+    for f in "${FOUND_BRIMM_VIDEO[@]}"; do [[ "${f:A}" != "${p:A}" ]] || same=yes; done
+    [[ -n "$same" ]] || FOUND_BRIMM_VIDEO+=("$p")
   done
+}
+set_up_fresh() {
+  local p
+  local -a found
+  search_brimm_video
+  found=("${FOUND_BRIMM_VIDEO[@]}")
   if (( ${#found[@]} == 0 )); then
     stop_here "This Mac has no BRIMM Video folder in Dropbox (The BRIMM DB › BRIMM Video). Sign in to Dropbox, let The BRIMM DB sync, then run the app again."
   fi
@@ -939,7 +974,11 @@ choose_folder() {
   local message="$1" start="$2" rc=0 way
   local -a ways
   CHOSEN=""
-  say "A window to choose the folder is opening. If you don't see it, click the folder icon named Choose a Folder in the Dock. If no window comes at all, press Control-C; on the next run, y uses the suggested folder."
+  if [[ -n "$TRY" ]]; then
+    say "A window to choose the folder is opening. If you don't see it, click the folder icon named Choose a Folder in the Dock. If no window comes at all, press Control-C."
+  else
+    say "A window to choose the folder is opening. If you don't see it, click the folder icon named Choose a Folder in the Dock. If no window comes at all, press Control-C; on the next run, y uses the suggested folder."
+  fi
   if [[ "$CHOOSER_ROUTE" == program ]]; then ways=(program app); else ways=(app program); fi
   for way in "${ways[@]}"; do
     rc=0
@@ -1091,8 +1130,9 @@ exports_folder_fault() {
     return 0
   fi
   if in_downloads "$folder"; then return 0; fi
-  studio_folders=("$ROOT/Drop" "$ROOT/Unedited Video" "$ROOT/Episodes" "$ROOT/References" "$HOME/BRIMM Video Work"
-    "$HOME/Library/Application Support/BRIMM Video" "$HOME/BRIMM Video Studio" "$HOME/BRIMM Video Workshop")
+  studio_folders=()
+  if [[ -n "$ROOT" ]]; then studio_folders+=("$ROOT/Drop" "$ROOT/Unedited Video" "$ROOT/Episodes" "$ROOT/References"); fi
+  studio_folders+=("$HOME/BRIMM Video Work" "$HOME/Library/Application Support/BRIMM Video" "$HOME/BRIMM Video Studio" "$HOME/BRIMM Video Workshop")
   for other in "${studio_folders[@]}"; do
     if same_or_inside "$folder" "$other"; then refuse_studio "$folder"; return 0; fi
   done
@@ -1189,7 +1229,7 @@ say_left_behind() {
 # suggested folder; only c alone stops, with the words that fit the refusal. After the installer refused a folder, $2 is that folder, $3
 # its FAULT_KIND and $4 its reason.
 ask_folder() {
-  local kind="$1" refused="${2-}" refused_kind="${3-}" refused_reason="${4-}" chosen_from own message c_only="" y_kind="" y_reason="" rc cand from started words
+  local kind="$1" refused="${2-}" refused_kind="${3-}" refused_reason="${4-}" chosen_from own message c_only="" y_kind="" y_reason="" rc cand from started words again
   if [[ "$kind" == drop ]]; then message="Move to Studio: choose the folder you will drop videos into, or make a new one with New Folder."
   else message="Move to Studio: choose the folder HyperFrames' exports will go into, or make a new one with New Folder."; fi
   folder_candidate "$kind"
@@ -1224,10 +1264,13 @@ ask_folder() {
       say "The window to choose a folder could not be shown."
       if [[ -n "$c_only" ]]; then
         words="$(words_for "$cand")"
+        # A try says its own stop words after this, never the advice to double-click.
+        again=", then double-click Move to Studio again"
+        if [[ -n "$TRY" ]]; then again=""; fi
         if [[ "$y_kind" == not-empty ]]; then
-          stop_here "The window to choose a folder could not be shown, and $words is not empty. Empty it in Finder, or tell Jason, then double-click Move to Studio again."
+          stop_here "The window to choose a folder could not be shown, and $words is not empty. Empty it in Finder, or tell Jason$again."
         fi
-        stop_here "The window to choose a folder could not be shown, and $words can't be used: $y_reason. Tell Jason, then double-click Move to Studio again."
+        stop_here "The window to choose a folder could not be shown, and $words can't be used: $y_reason. Tell Jason$again."
       fi
       continue
     fi
@@ -1731,8 +1774,50 @@ retire_the_old_key() {
   if [[ -n "$REPORT_WRITTEN" ]]; then save_report; fi
 }
 
+# The try mode (--try-chooser): step 5's two questions alone, on any Mac, needing nothing of Studio's, changing nothing. No lock, no log,
+# no report, no marks, no installer, and which_mac's refusal does not apply. Folders are read from settings.json with plutil, and said
+# in Finder's words only when node and Studio's settings.js answer.
+try_chooser() {
+  local told
+  trap on_int INT
+  trap on_term TERM
+  trap on_hup HUP
+  SET_UP_FRESH="yes"   # no line about the drop folder a brimm-video Mac has today
+  heading "Trying the folder questions. Nothing is changed."
+  NODE="$(find_program node || true)"
+  ROOT="$(setting root)"
+  if [[ -z "$ROOT" ]]; then
+    search_brimm_video
+    if (( ${#FOUND_BRIMM_VIDEO[@]} == 1 )); then ROOT="${FOUND_BRIMM_VIDEO[1]}"; fi
+  fi
+  if [[ -n "$ROOT" ]]; then
+    say "  BRIMM Video: $ROOT"
+  else
+    say "  BRIMM Video: not found in Dropbox on this Mac, so the checks that need it are passed over."
+  fi
+  ask_drop_folder
+  ask_exports_folder
+  heading "What was picked"
+  if [[ "$(words_for "$DROP_FOLDER")" == "$DROP_FOLDER" || "$(words_for "$EXPORTS_FOLDER")" == "$EXPORTS_FOLDER" ]]; then
+    say "Studio's code is not on this Mac yet, so folders are given as paths here. Finder's words come at the move."
+  fi
+  say "  Drop folder:  $(words_for "$DROP_FOLDER")"
+  say "  Exports folder:  $(words_for "$EXPORTS_FOLDER")"
+  say "  macOS:  $(sw_vers -productVersion 2>/dev/null || print "could not be read")"
+  say "  Chip:  $(uname -m 2>/dev/null || print "could not be read")"
+  if (( THROWN > 0 )); then
+    say "  Keys typed while a window was open:  $THROWN, thrown away"
+  else
+    say "  Keys typed while a window was open:  none"
+  fi
+  say ""
+  say "Nothing was changed. Studio's installer checks more at the move."
+  exit 0
+}
+
 main() {
   read_options "$@"
+  if [[ -n "$TRY" ]]; then try_chooser; fi
   which_mac
   trap on_int INT
   trap on_term TERM

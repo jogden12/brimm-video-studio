@@ -492,6 +492,7 @@ esac
     BRIMM_CHOOSER_APP: chooserApp, TMPDIR: join(dir, "tmp")
   };
   mkdirSync(join(dir, "tmp"));
+  if (options.noNode) baseEnv.PATH = `${bin}:/usr/bin:/bin`;
   if (options.noRepo) delete baseEnv.BRIMM_STUDIO_REPO;
   if (options.testFail) baseEnv.BRIMM_TEST_FAIL = "1";
   const text = (file) => (existsSync(file) ? readFileSync(file, "utf8") : "");
@@ -2972,5 +2973,118 @@ describe("the move script, later runs, the marks, the stop summary and the end o
     const p = moveOn({ marks: NOT_INSTALLED }, "--print");
     assert.equal(p.status, 0, p.out);
     for (const label of ["Drop folder:", "Exports folder:", "Cloud warning:"]) assert.ok(p.out.includes(`${label} not checked: this was a print`), `${label}\n${p.out}`);
+  });
+});
+
+describe("the move script, the try mode (--try-chooser)", { skip: notAMac }, () => {
+  const TRY_HEADING = "Trying the folder questions. Nothing is changed.";
+  const TRY_STOP = /This was a try of the folder questions: nothing was changed\. To try again: open ".+" --args --try-chooser/;
+  const PATHS_LINE = "Studio's code is not on this Mac yet, so folders are given as paths here. Finder's words come at the move.";
+  const END_LINE = "Nothing was changed. Studio's installer checks more at the move.";
+  const studioSettings = { version: 1, machine: "Mac Studio", root: "<HOME>/Dropbox/The BRIMM DB/BRIMM Video", checkout: "<HOME>/Claude Code/brimm-video-studio",
+    import: "light", handoffVersion: 2, dropPath: "<HOME>/BRIMM Video Work/Drop", exportsPath: "<HOME>/Exports" };
+  const count = (text, part) => text.split(part).length - 1;
+  const tryOn = (options = {}, ...args) => moveOn({ commit: null, ...options }, "--try-chooser", ...args);
+  const unchanged = (r) => {
+    assert.deepEqual(r.tree, r.before, "the home's files are unchanged");
+    assert.equal(r.log, "", "no log");
+    assert.equal(r.report, "", "no report");
+    assert.ok(!r.tree.some((f) => f.endsWith(".lock")), "no lock");
+    assert.ok(!r.ran.includes("install.sh"), r.ran);
+    assert.ok(!r.ran.includes("ssh") && !r.ran.includes("git "), r.ran);
+  };
+
+  it("--try-chooser on the Mac Studio's settings: asks the two questions, opens the chooser, says the picks, the version and the chip, and changes nothing", () => {
+    const r = tryOn({ settings: studioSettings, picks: ["<HOME>/Picked exports"], answers: "y\nc\n" });
+    assert.equal(r.status, 0, r.out + r.err);
+    assert.ok(r.out.includes(TRY_HEADING), r.out);
+    assert.ok(r.out.includes("This Mac's drop folder is "), r.out);
+    assert.ok(r.out.includes("HyperFrames' exports are looked for in "), r.out);
+    assert.ok(r.ran.includes("chooser Move to Studio: choose the folder HyperFrames' exports will go into, or make a new one with New Folder."), r.ran);
+    assert.equal(count(r.ran, "chooser Move to Studio"), 1, "only the exports question opened the chooser");
+    assert.ok(r.out.includes("A window to choose the folder is opening."), r.out);
+    assert.ok(!/double-click/i.test(r.out), r.out);
+    assert.ok(r.out.includes(`Picked: Picked exports, in your home folder`), r.out);
+    assert.match(r.out, /Drop folder: +BRIMM Video Work › Drop, in your home folder/);
+    assert.match(r.out, /Exports folder: +Picked exports, in your home folder/);
+    assert.match(r.out, /macOS: +15\.1/);
+    assert.match(r.out, /Chip: +\S+/);
+    assert.ok(r.out.includes(END_LINE), r.out);
+    assert.ok(!r.out.includes(PATHS_LINE), "Studio's code answers, so no line about paths");
+    assert.ok(!/Stopped\./.test(r.out), r.out);
+    unchanged(r);
+  });
+
+  it("--try-chooser on the Mac Studio is not refused, and does not run which_mac, nor needs --commit", () => {
+    const r = tryOn({ settings: { ...studioSettings, machine: "Some other Mac" }, answers: "y\ny\n" });
+    assert.equal(r.status, 0, r.out + r.err);
+    unchanged(r);
+  });
+
+  it("--try-chooser with no Studio checkout and no node on PATH says paths and its line, and ends 0", () => {
+    const r = tryOn({ settings: studioSettings, checkout: "absent", noNode: true, answers: "y\ny\n" });
+    assert.equal(r.status, 0, r.out + r.err);
+    assert.equal(count(r.out, PATHS_LINE), 1, r.out);
+    assert.match(r.out, new RegExp(`Drop folder: +${r.home.replaceAll(".", "\\.")}/BRIMM Video Work/Drop\\n`));
+    assert.ok(r.out.includes(END_LINE), r.out);
+    unchanged(r);
+  });
+
+  it("--try-chooser with no settings finds BRIMM Video with no question", () => {
+    const r = tryOn({ settings: null, checkout: "absent", answers: "y\ny\n" });
+    assert.equal(r.status, 0, r.out + r.err);
+    assert.ok(!r.out.includes("set up fresh"), "no set-up-fresh question");
+    assert.ok(r.out.includes(`BRIMM Video: ${r.home}/Dropbox/The BRIMM DB/BRIMM Video`), r.out);
+    assert.ok(r.out.includes("Where videos are dropped for Studio: the drop folder."), r.out);
+    assert.ok(r.out.includes("Where HyperFrames' exports go: the exports folder."), r.out);
+    unchanged(r);
+  });
+
+  it("--try-chooser with no BRIMM Video says so, and still asks", () => {
+    const r = tryOn({ settings: null, brimmVideo: null, checkout: "absent", answers: "y\ny\n" });
+    assert.equal(r.status, 0, r.out + r.err);
+    assert.ok(r.out.includes("BRIMM Video: not found in Dropbox on this Mac, so the checks that need it are passed over."), r.out);
+    assert.ok(r.out.includes("Where videos are dropped for Studio: the drop folder."), r.out);
+    assert.ok(r.out.includes(END_LINE), r.out);
+    unchanged(r);
+  });
+
+  it("--try-chooser --second-way uses the program first", () => {
+    const r = tryOn({ settings: studioSettings, program: ["<HOME>/Picked exports"], picks: ["<HOME>/Wrong"], answers: "y\nc\n" }, "--second-way");
+    assert.equal(r.status, 0, r.out + r.err);
+    assert.ok(r.ran.includes("program Move to Studio: choose the folder HyperFrames' exports will go into"), r.ran);
+    assert.ok(!r.ran.includes("chooser Move"), "the app way was not needed");
+    assert.match(r.out, /Exports folder: +Picked exports, in your home folder/);
+    unchanged(r);
+  });
+
+  it("--try-chooser with --commit, or with --print, is refused with 2", () => {
+    for (const extra of [["--commit", "a".repeat(40)], ["--print"]]) {
+      const r = moveOn({ commit: null, settings: studioSettings }, "--try-chooser", ...extra);
+      assert.equal(r.status, 2, r.out + r.err);
+      assert.ok(!r.out.includes(TRY_HEADING), r.out);
+      assert.deepEqual(r.tree, r.before);
+      assert.ok(!r.ran.includes("chooser"), r.ran);
+    }
+    const alone = moveOn({ commit: null, settings: studioSettings }, "--second-way");
+    assert.equal(alone.status, 2, alone.out);
+  });
+
+  it("--try-chooser stopped at its first question says the try's own stop words, with the open … --args --try-chooser line, and no double-click advice", () => {
+    const r = tryOn({ settings: studioSettings, answers: "" });
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, TRY_STOP);
+    assert.ok(!/double-click|Stopped\./i.test(r.out), r.out);
+    assert.ok(!r.out.includes(END_LINE), r.out);
+    unchanged(r);
+  });
+
+  it("--try-chooser stopped when c alone is offered and no chooser can be shown says the try's own stop words too", () => {
+    const r = tryOn({ settings: { ...studioSettings, dropPath: undefined }, agentWatches: [], folderFiles: { "<HOME>/BRIMM Video Work/Drop": ["a.mov"] }, picks: ["fail"], program: ["two"], answers: "y\nc\n" });
+    assert.equal(r.status, 1, r.out);
+    assert.ok(r.out.includes("is not empty. Empty it in Finder, or tell Jason."), r.out);
+    assert.match(r.out, TRY_STOP);
+    assert.ok(!/double-click/i.test(r.out), r.out);
+    unchanged(r);
   });
 });
