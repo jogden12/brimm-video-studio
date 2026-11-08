@@ -99,14 +99,18 @@ export function cloudFolder(path, home) {
   const p = resolve(path);
   const h = resolve(home);
   const under = (dir) => p === dir || p.startsWith(dir + "/");
-  if (under(join(h, "Dropbox")) || p.startsWith(join(h, "Library", "CloudStorage", "Dropbox"))) return "Dropbox";
+  const storage = join(h, "Library", "CloudStorage");
+  if (under(join(h, "Dropbox")) || p.startsWith(join(storage, "Dropbox"))) return "Dropbox";
   if (under(join(h, "Library", "Mobile Documents"))) return "iCloud Drive";
+  if (under(join(h, "Desktop")) || under(join(h, "Documents"))) return "iCloud Drive, if it keeps Desktop & Documents";
+  if (p.startsWith(storage + "/")) return "a cloud folder";
   return "";
 }
 export function needsFilesAccess(path, home) {
   const p = resolve(path);
   const h = resolve(home);
-  return [join(h, "Desktop"), join(h, "Documents")].some((dir) => p === dir || p.startsWith(dir + "/"));
+  return [join(h, "Desktop"), join(h, "Documents"), "/volumes", join(h, "Library", "Mobile Documents")].some((dir) => p === dir || p.startsWith(dir + "/"))
+    || p.startsWith(join(h, "Library", "CloudStorage") + "/");
 }
 
 function main() {
@@ -2258,7 +2262,7 @@ for f in "$HOME/Downloads" "$HOME/RealDL" "$HOME/Downloads/Sub" "$HOME/Other"; d
         });
       }
       it("a stop gives nothing: the old folder's line, this Mac's drop folder, any other line, no line", () => {
-        for (const text of [OLD_FOLDER + "\n", "Not written: this Mac's drop folder is /x, on this Mac. To go back to a drop folder in Dropbox, give --switch-back as well.\n", "Something else entirely.\n", "", "Not written: name the drop folder by --drop-folder or by --drop, not both.\n"]) {
+        for (const text of ["The folder for --machine is BRIMM Video, where Dropbox keeps it, and this is not: /x/y\n", OLD_FOLDER + "\n", "Not written: this Mac's drop folder is /x, on this Mac. To go back to a drop folder in Dropbox, give --switch-back as well.\n", "Something else entirely.\n", "", "Not written: name the drop folder by --drop-folder or by --drop, not both.\n"]) {
           assert.equal(read(text), "[] [] [] []", text);
         }
       });
@@ -2319,6 +2323,30 @@ for f in "$HOME/Downloads" "$HOME/RealDL" "$HOME/Downloads/Sub" "$HOME/Other"; d
         assert.deepEqual(installCalls(unread), [printed(unread), printed(unread), real(unread)]);
         assert.equal(count(unread.out, DROP_QUESTION[0]), 2, "the question comes again with its y");
         assert.ok(!unread.out.includes(C_ONLY));
+      });
+
+      it("a chooser pick that is the settings' own drop folder is kept, and not held to being empty", () => {
+        const r = moveOn({ marks: NOT_INSTALLED, settingsChange: { dropPath: "<HOME>/My Drop" }, folderFiles: { "<HOME>/My Drop": ["a.mov"] }, picks: ["<HOME>/My Drop"], answers: "c\ny\ny\n\n" });
+        assert.equal(r.status, 0, r.out);
+        assert.ok(!/holds \d+ files? or folders?/.test(r.out) && !r.out.includes(C_ONLY), r.out);
+        assert.deepEqual(installCalls(r), [printed(r, ""), real(r, "")]);
+      });
+
+      it("a refused pick that is the folder y gives, when Terminal cannot look in it, keeps its y", () => {
+        const r = moveOn({ marks: "tests=SHA\ndrop=<HOME>/Locked\n", folderFiles: { "<HOME>/Locked": [] }, folderModes: { "<HOME>/Locked": 0o000 }, picks: ["<HOME>/Locked"], answers: "c\nn\n" });
+        assert.equal(r.status, 1, r.out);
+        assert.equal(count(r.out, "Last time, this folder was picked: Locked, in your home folder."), 2, "the question comes again whole, with its y");
+        assert.ok(!r.out.includes(C_ONLY), r.out);
+      });
+
+      it("an installer refusal, then a chooser that cannot be shown: 'Empty it in Finder' for a video held, the Tell Jason words for any other", () => {
+        const held = moveOn({ marks: NOT_INSTALLED, install: prints(refusal(HOLDS)), picks: ["fail"], program: ["two"], answers: "y\ny\nc\n" });
+        assert.equal(held.status, 1, held.out);
+        assert.ok(held.out.includes("The window to choose a folder could not be shown, and BRIMM Video Work › Drop, in your home folder is not empty. Empty it in Finder, or tell Jason, then double-click Move to Studio again."), held.out);
+        const other = moveOn({ marks: NOT_INSTALLED, install: prints(refusal("Not written: the drop folder cannot be BRIMM VIDEO Transfer, or inside it, or hold it.")), picks: ["fail"], program: ["two"], answers: "y\ny\nc\n" });
+        assert.equal(other.status, 1, other.out);
+        assert.ok(other.out.includes("The window to choose a folder could not be shown, and BRIMM Video Work › Drop, in your home folder can't be used: the drop folder cannot be BRIMM VIDEO Transfer, or inside it, or hold it. Tell Jason, then double-click Move to Studio again."), other.out);
+        assert.ok(!other.out.includes("Empty it in Finder"));
       });
 
       it("a refusal naming the exports folder asks the exports question again, and never says the second line", () => {

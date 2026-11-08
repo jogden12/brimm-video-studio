@@ -1073,7 +1073,7 @@ say_left_behind() {
 # suggested folder; only c alone stops, with the words that fit the refusal. After the installer refused a folder, $2 is that folder, $3
 # its FAULT_KIND and $4 its reason.
 ask_folder() {
-  local kind="$1" refused="${2-}" refused_kind="${3-}" refused_reason="${4-}" message c_only="" y_kind="" y_reason="" rc cand from started words
+  local kind="$1" refused="${2-}" refused_kind="${3-}" refused_reason="${4-}" chosen_from own message c_only="" y_kind="" y_reason="" rc cand from started words
   if [[ "$kind" == drop ]]; then message="Move to Studio: choose the folder you will drop videos into, or make a new one with New Folder."
   else message="Move to Studio: choose the folder HyperFrames' exports will go into, or make a new one with New Folder."; fi
   folder_candidate "$kind"
@@ -1116,14 +1116,20 @@ ask_folder() {
       continue
     fi
     say "  Picked: $(words_for "$CHOSEN")"
-    folder_fault "$kind" "$CHOSEN" picked
+    # A pick that is the settings' own drop folder (by real path) is that folder, kept: it is not held to being empty.
+    chosen_from=picked
+    if [[ "$kind" == drop ]]; then
+      own="$(setting dropPath)"
+      if [[ -n "$own" && "${CHOSEN:A}" == "${own:A}" ]]; then chosen_from=settings; fi
+    fi
+    folder_fault "$kind" "$CHOSEN" "$chosen_from"
     if [[ -n "$FAULT_WORDS" ]]; then
       say "  $FAULT_WORDS"
       # A refused pick that is the folder y gives: y would give it again, so c alone is offered.
       if [[ "$FAULT_KIND" != cannot-look && "${CHOSEN:A}" == "${cand:A}" ]]; then c_only=yes y_kind="$FAULT_KIND" y_reason="$FAULT_REASON"; fi
       continue
     fi
-    settle_folder "$kind" "$CHOSEN" "" picked
+    settle_folder "$kind" "$CHOSEN" "$([[ "$chosen_from" == settings ]] && print yes || true)" "$chosen_from"
     if [[ "$kind" == drop && "$started" == last && "${CHOSEN:A}" != "${cand:A}" ]]; then say_left_behind "$cand"; fi
     break
   done
@@ -1235,7 +1241,7 @@ refused_pick() {
     "Not written: the drop folder cannot be the exports folder, or inside it, or hold it"*) REFUSED=nested ;;
     "Not written: the exports folder "*) REFUSED=exports ;;
     "Not written: the drop folder would change from "*) return 0 ;;
-    "Not written: the drop folder "*|"Not written: the folder that is to hold the drop folder "*|"The folder "*|"A folder is for"*) REFUSED=drop ;;
+    "Not written: the drop folder "*|"Not written: the folder that is to hold the drop folder "*|"The folder "*" is watched by "*|"A folder is for"*) REFUSED=drop ;;
     *) return 0 ;;
   esac
   FAULT_KIND=installer
@@ -1293,12 +1299,8 @@ ask_about_the_cloud() {
 }
 # The report's Cloud warning line: Studio's cloudFolder of the drop folder the installer was given.
 note_the_cloud() {
-  local name warning
+  local name
   name="$(studio_says cloudFolder "$DROP_FOLDER")"
-  if [[ -z "$name" && "$CLOUD_OK_FOR" == "${DROP_FOLDER:A}" ]]; then
-    warning="$(cloud_warning "$PRINT_TOLD")"
-    if [[ "$warning" =~ '^Warning: this drop folder is in (.*)\. (Every video|If it does)' ]]; then name="$match[1]"; fi
-  fi
   if [[ -z "$name" ]]; then R44_CLOUD="none"
   elif [[ -n "$DROP_KEPT" ]]; then R44_CLOUD="$name, kept on a y on an earlier run"
   else R44_CLOUD="$name, kept on a y"
@@ -1315,7 +1317,6 @@ may_ask_about() {
 }
 # Before the real install's question: which questions macOS may still ask.
 privacy_notes() {
-  heading "What macOS may ask"
   say "Studio looks in Downloads for exports, whatever is picked. macOS may ask once whether Claude Code may access files in your Downloads folder, the first time the chat on this Mac hands off a video and looks for its export. About 15 minutes after each hand-off, once the export's copies in Dropbox are checked, Studio's background job deletes the export from Downloads, and macOS may ask once whether node may. Choose Allow each time. If node was refused, allow it in System Settings › Privacy & Security › Files and Folders. Until then, exports stay in Downloads, to be deleted by hand."
   if may_ask_about "$DROP_FOLDER"; then
     say "macOS may also ask whether node may read $(words_for "$DROP_FOLDER"), at the first import, and whether Claude Code may, the first time the chat on this Mac looks there (\"what's waiting?\"). Choose Allow each time. A Don't Allow is undone in System Settings › Privacy & Security › Files and Folders, under that name. macOS may ask node again after Homebrew updates it, and until someone clicks Allow, Studio sees no video dropped there."
@@ -1327,7 +1328,7 @@ privacy_notes() {
 
 run_the_installer() {
   heading "5. Studio's installer (check 44)"
-  local tries=1 matter line
+  local tries=0 matter line
   local -a lines
   if [[ "$(mark_of installed)" == "$COMMIT" ]]; then
     done_already "Studio's installer finished at this commit (${COMMIT[1,7]}), on an earlier run"
@@ -1377,7 +1378,7 @@ run_the_installer() {
       stop_here "Claude Code is not signed in. In Terminal, run: claude auth login (sign in to this Mac's own Claude account in the browser), then run the app again."
     fi
     if print_has "^  Claude Code's version:.*older than"; then
-      if (( tries > 1 )); then
+      if (( tries > 0 )); then
         stop_here "Claude Code is still older than the installer needs after claude update. Tell Jason."
       fi
       if [[ -n "$PRINT_ONLY" ]]; then
@@ -1391,7 +1392,7 @@ run_the_installer() {
       continue
     fi
     if print_has "^  The Claude app's own Claude Code:.*older than"; then
-      if (( tries > 2 )); then
+      if (( tries > 1 )); then
         stop_here "The Claude app's own Claude Code is still older than the installer wants. Tell Jason."
       fi
       if [[ -n "$PRINT_ONLY" ]]; then
