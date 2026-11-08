@@ -3,7 +3,7 @@
 // test asks this Mac's resolver, reads its settings or runs `ps`.
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { GATED_REFUSED, NEVER_REFUSED, NOT_NAMED, RUN_ALONE, WEB_HELD, WORKSHOP_FILES_REFUSED, WRITE_REFUSED, guardAnswer, openDecision } from "../open-lock.js";
@@ -777,7 +777,8 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     symlinkSync(join(w.home, ".claude"), config);
     const env = { CLAUDE_CONFIG_DIR: config };
     assert.equal((await ask({ env })).decision, "allow", "a link to ~/.claude");
-    rmSync(config);
+    // unlinkSync, not rmSync: Node 24's rmSync refuses a link to a folder (ERR_FS_EISDIR), as on Jason's MacBook on 8 November.
+    unlinkSync(config);
     mkdirSync(join(w.home, "elsewhere", "projects"), { recursive: true });
     symlinkSync(join(w.home, "elsewhere"), config);
     assert.deepEqual(await ask({ env }), CHANGED, "the link pointed at another folder");
