@@ -89,7 +89,7 @@ Two questions come first, then the installer's print, then the real install.
 - Asks, then turns HyperFrames on as the editing app (`settings.js set --app hyperframes`).
 - Shows the drop folder in Finder. For a drop folder in Dropbox it says to Control-click it and choose Make available offline (on a Mac set up fresh, also to click Allow if macOS asks whether node may read the Dropbox folder). For any other it says to drag the folder into Finder's sidebar, under Favorites, to hold Option when dragging a video in from Dropbox so that Dropbox keeps its copy, and never to export into the drop folder.
 
-**On a later run.** The folders asked about are remembered in `.git/move-to-studio` (`drop=`, `exports=`) as the folders given to the installer on the last run. A run after the installer finished at the app's commit asks nothing and says "Already done".
+**On a later run.** The folders asked about are remembered in `.git/move-to-studio` (`drop=`, `exports=`) as the folders given to the installer on the last run. A run after the installer finished at the app's commit does not ask the two folder questions or run the installer again, and says "Already done" for them. The later questions still come as they are needed: HyperFrames as the editing app, the Finder step, and the old key.
 
 ### The try mode (step 5's questions alone)
 

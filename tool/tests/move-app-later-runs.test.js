@@ -12,11 +12,8 @@ import { join } from "node:path";
 import {
   notAMac,
   STOPPED_NOTHING,
-  put,
   moveOn,
-  NOT_INSTALLED,
-  suggested,
-  count
+  NOT_INSTALLED
 } from "./move-app-harness.js";
 
 describe("the move script, later runs, the marks, the stop summary and the end of the run (2 of 2: the drop folder, Finder, last lines)", { skip: notAMac }, () => {

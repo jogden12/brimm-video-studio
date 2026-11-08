@@ -245,6 +245,21 @@ describe("the move script, step 5's two questions, the chooser and the installer
         assert.ok(!r.out.includes(DROP_QUESTION[0]) && !r.out.includes(C_ONLY) && !r.ran.includes("chooser"), "nothing is asked");
       });
 
+      it("under --print, the app's own checks run on the folders a y would give: a refused one stops with its words and calls no installer; a clean one prints as before", () => {
+        const held = moveOn({ marks: NOT_INSTALLED, folderFiles: { "<HOME>/BRIMM Video Work/Drop": ["a.mov"] } }, "--print");
+        assert.equal(held.status, 1, held.out);
+        assert.ok(held.out.includes("BRIMM Video Work › Drop, in your home folder holds 1 file or folder."), held.out);
+        assert.deepEqual(installCalls(held), []);
+        assert.ok(!held.out.includes("Studio's installer, with --print first"), held.out);
+        const watched = moveOn({ marks: NOT_INSTALLED, transcribe: { on: ["<HOME>/Downloads"] } }, "--print");
+        assert.equal(watched.status, 1, watched.out);
+        assert.ok(watched.out.includes("is watched by the transcript tool"), watched.out);
+        assert.deepEqual(installCalls(watched), []);
+        const clean = moveOn({ marks: NOT_INSTALLED }, "--print");
+        assert.equal(clean.status, 0, clean.out);
+        assert.deepEqual(installCalls(clean), [printed(clean)]);
+      });
+
       it("a print shown again after a refused pick, then an older Claude Code, still offers claude update", () => {
         const older = printText(PRINT_LINES.signed, PRINT_LINES.older, PRINT_LINES.hdr);
         const r = moveOn({ marks: NOT_INSTALLED, install: prints(refusal(HOLDS), older, DEFAULT_PRINT), picks: ["<HOME>/Other"], answers: "y\ny\nc\ny\ny\n\n" });

@@ -10,7 +10,6 @@ import assert from "node:assert/strict";
 import {
   notAMac,
   STOPPED_NOTHING,
-  put,
   moveOn,
   NOT_INSTALLED,
   installCalls,
@@ -161,9 +160,21 @@ d "$HOME/it's, \\"quoted\\" one"; d "$HOME/Dropbox/The BRIMM DB"; d "$HOME/Off O
         const want = (folder) => `[transcript] [${TRANSCRIPT_WORDS(folder)}] [the transcript tool watches it] []`;
         assert.deepEqual(r.lines, [
           want("<HOME>/Dropbox/The BRIMM DB/BRIMM VIDEO Transfer"), want("<HOME>/Dropbox/The BRIMM DB/BRIMM VIDEO Transfer/inside"), want("<HOME>/Dropbox/The BRIMM DB/BRIMM VIDEO MacBook"),
-          want(`<HOME>/it's, "quoted" one`), want("<HOME>/Dropbox/The BRIMM DB"),
+          want(`<HOME>/it's, "quoted" one`),
+          `[not-empty] [<HOME>/Dropbox/The BRIMM DB holds 2 files or folders. ${NOT_EMPTY_END}] [it is not empty] []`,
           "[] [] [] []", "[] [] [] []"
         ]);
+      });
+
+      it("a pick that holds a transcript folder is refused with the transcript words only when it is empty; one with files gets the not-empty words, the home folder included", () => {
+        const r = drop(`${PLIST}mkdir -p "$HOME/Empty" "$HOME/Dropbox/The BRIMM DB"; touch "$HOME/Dropbox/The BRIMM DB/a.mov" "$HOME/b.mov"
+makeplist ${LAUNCH} "$HOME/Empty/Watched"
+d "$HOME/Empty"; d "$HOME/Dropbox/The BRIMM DB"; d "$HOME"; d "$HOME/Empty/Watched/inside"`);
+        const want = (folder) => `[transcript] [${TRANSCRIPT_WORDS(folder)}] [the transcript tool watches it] []`;
+        assert.equal(r.lines[0], want("<HOME>/Empty"));
+        assert.match(r.lines[1], /^\[not-empty\] \[<HOME>\/Dropbox\/The BRIMM DB holds /);
+        assert.match(r.lines[2], /^\[not-empty\] \[<HOME> holds /);
+        assert.equal(r.lines[3], want("<HOME>/Empty/Watched/inside"));
       });
     });
 
@@ -348,6 +359,8 @@ for f in "$HOME/Downloads" "$HOME/RealDL" "$HOME/Downloads/Sub" "$HOME/Other"; d
         assert.ok(watched.out.includes("The window to choose a folder could not be shown, and BRIMM Video Work › Drop, in your home folder can't be used: the transcript tool watches it. Tell Jason, then double-click Move to Studio again."), watched.out);
         assert.ok(!watched.out.includes("Empty it in Finder"), watched.out);
         assert.deepEqual(installCalls(watched), []);
+        assert.equal(count(watched.out, "The window to choose a folder could not be shown"), 1, "said once, in the stop");
+        assert.equal(count(held.out, "The window to choose a folder could not be shown"), 1, "said once, in the stop");
       });
 
       it("a drop folder Terminal cannot look in keeps its y", () => {

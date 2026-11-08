@@ -119,10 +119,13 @@ summary() {
     # open-in-terminal.zsh writes the app's path beside the copied script; a run by hand has none.
     local app_file="${SELF:A:h}/app.txt" app_path=""
     if [[ -r "$app_file" ]]; then read -r app_path < "$app_file" || true; fi
-    if [[ -n "$app_path" ]]; then
-      say "This was a try of the folder questions: nothing was changed. To try again: open \"$app_path\" --args --try-chooser"
+    local again_way="--try-chooser"
+    if [[ "$CHOOSER_ROUTE" == program ]]; then again_way="--try-chooser --second-way"; fi
+    # A translocated path may not work once the launcher has exited: the app is found by its name then.
+    if [[ -n "$app_path" && "$app_path" != */AppTranslocation/* ]]; then
+      say "This was a try of the folder questions: nothing was changed. To try again: open \"$app_path\" --args $again_way"
     else
-      say "This was a try of the folder questions: nothing was changed. To try again: open -a \"Move to Studio\" --args --try-chooser"
+      say "This was a try of the folder questions: nothing was changed. To try again: open -a \"Move to Studio\" --args $again_way"
     fi
     return 0
   fi
@@ -519,7 +522,8 @@ look_at_this_mac() {
     # This Mac's settings, as the switch of 26 October left them. A checkout that is Studio's is as good as brimm-video's: a later run.
     ROOT="$(setting root)"
     CHECKOUT_NOW="$(setting checkout)"
-    local import="$(setting import)" handoff="$(setting handoffVersion)" drop="$(setting drop)" own="$(setting dropPath)" shown
+    local import="$(setting import)" handoff="$(setting handoffVersion)" drop="$(setting drop)" own shown
+    own="$(setting dropPath)" || own=""
     shown="drop folder $drop"
     if [[ -n "$own" ]]; then shown="drop folder: its own, $own"; fi
     say "  brimm-video's settings:  import $import, hand-off version $handoff, $shown"
@@ -1073,11 +1077,15 @@ refuse_with() { FAULT_KIND="$1" FAULT_WORDS="$2" FAULT_REASON="$3"; }
 watched_by_transcripts() {
   local folder="$1" kind="$2" other
   local -a others
-  others=("${(@f)$(transcript_folders "$kind")}")
+  others=("${(@f)$(transcript_folders "${kind%%-*}")}")
   for other in "${others[@]}"; do
     [[ -n "$other" ]] || continue
     if [[ "$kind" == drop ]]; then
       if same_or_nested "$folder" "$other"; then return 0; fi
+    elif [[ "$kind" == drop-inside ]]; then
+      if same_or_inside "$folder" "$other"; then return 0; fi
+    elif [[ "$kind" == drop-holds ]]; then
+      if same_or_inside "$other" "$folder"; then return 0; fi
     else
       if same_or_inside "$folder" "$other"; then return 0; fi
     fi
@@ -1098,7 +1106,7 @@ drop_folder_fault() {
     refuse_with linebreak "A folder whose name holds a line break can't be used. Choose another." "its name holds a line break"
     return 0
   fi
-  if watched_by_transcripts "$folder" drop; then
+  if watched_by_transcripts "$folder" drop-inside; then
     refuse_with transcript "$(words_for "$folder") is watched by the transcript tool, which takes each video put there. Choose another." "the transcript tool watches it"
     return 0
   fi
@@ -1113,6 +1121,11 @@ drop_folder_fault() {
     shown="$held files or folders"
     if (( held == 1 )); then shown="1 file or folder"; fi
     refuse_with not-empty "$(words_for "$folder") holds $shown. Studio takes every video out of a drop folder, so choose an empty folder that only you drop into, or make one with New Folder." "it is not empty"
+    return 0
+  fi
+  # Last, a pick that holds one of the transcript tool's folders (the home folder, Dropbox) and is otherwise fine.
+  if watched_by_transcripts "$folder" drop-holds; then
+    refuse_with transcript "$(words_for "$folder") is watched by the transcript tool, which takes each video put there. Choose another." "the transcript tool watches it"
   fi
   return 0
 }
@@ -1272,7 +1285,7 @@ ask_folder() {
       continue
     fi
     if (( rc != 0 )); then
-      say "The window to choose a folder could not be shown."
+      if [[ -z "$c_only" ]]; then say "The window to choose a folder could not be shown."; fi
       if [[ -n "$c_only" ]]; then
         words="$(words_for "$cand")"
         # A try says its own stop words after this, never the advice to double-click.
@@ -1537,6 +1550,9 @@ run_the_installer() {
   if [[ -n "$PRINT_ONLY" ]]; then
     would "ask where videos are dropped (suggested: BRIMM Video Work › Drop) and where HyperFrames' exports go (suggested: Downloads)"
     folders_a_y_gives
+    folder_fault drop "$DROP_FOLDER" "$DROP_FROM"
+    if [[ -z "$FAULT_WORDS" ]]; then folder_fault exports "$EXPORTS_FOLDER" "$EXPORTS_FROM"; fi
+    if [[ -n "$FAULT_WORDS" ]]; then stop_here "$FAULT_WORDS"; fi
     set_install_options
   fi
   if [[ -n "$PRINT_ONLY" && ! -f "$STUDIO/tool/install.sh" ]]; then

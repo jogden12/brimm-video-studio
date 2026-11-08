@@ -14,7 +14,6 @@ import {
   printText,
   DEFAULT_PRINT,
   BACKGROUND,
-  git,
   moveOn,
   NOT_INSTALLED,
   installCalls,

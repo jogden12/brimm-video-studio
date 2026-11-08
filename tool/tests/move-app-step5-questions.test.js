@@ -145,6 +145,13 @@ describe("the move script, step 5's two questions, the chooser and the installer
     assert.ok(r.log.includes(name), "and kept in the log");
   });
 
+  it("a name with a leading space, a curly apostrophe, an accent and an emoji reaches the installer whole", () => {
+    const name = " Lead’s café 🎬";
+    const r = moveOn({ marks: NOT_INSTALLED, picks: [`<HOME>/${name}`], answers: "c\ny\ny\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.equal(r.ran.split("\n").filter((l) => l === `install-arg: ${r.home}/${name}`).length, 2, r.ran);
+  });
+
   it("a line break from the chooser is refused by the app's line, and asked again", () => {
     const r = moveOn({ marks: NOT_INSTALLED, picks: ["linebreak", "<HOME>/After Line"], answers: "c\nc\ny\ny\n\n" });
     assert.equal(r.status, 0, r.out);

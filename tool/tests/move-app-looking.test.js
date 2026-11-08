@@ -19,8 +19,6 @@ import {
   SIGNED_OUT,
   STOPPED_NOTHING,
   HEADINGS,
-  git,
-  put,
   dirsToClean,
   moveOn,
   NOT_INSTALLED,
@@ -515,6 +513,26 @@ describe("the move script, the try mode (--try-chooser)", { skip: notAMac }, () 
     const withApp = go();
     assert.equal(withApp.status, 1, withApp.stdout);
     assert.ok(withApp.stdout.includes('To try again: open "/Users/x/Downloads/Move to Studio.app" --args --try-chooser'), withApp.stdout);
+  });
+
+  it("--try-chooser's stop line falls back to open -a for a translocated app, and carries --second-way after a try of the second way", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-try-app-")));
+    dirsToClean.add(dir);
+    const home = join(dir, "home");
+    mkdirSync(home);
+    const copy = join(dir, "copy");
+    mkdirSync(copy);
+    writeFileSync(join(copy, "move.zsh"), readFileSync(MOVE));
+    const go = (...args) => spawnSync("/bin/zsh", [join(copy, "move.zsh"), "--try-chooser", ...args], { encoding: "utf8", input: "", env: { HOME: home, PATH: "/usr/bin:/bin", TMPDIR: dir, BRIMM_HOMEBREW_DIRS: "", BRIMM_CHOOSER_APP: join(dir, "no-chooser.app") } });
+    writeFileSync(join(copy, "app.txt"), "/private/var/folders/xx/AppTranslocation/ABC/d/Move to Studio.app\n");
+    const moved = go();
+    assert.ok(moved.stdout.includes('To try again: open -a "Move to Studio" --args --try-chooser'), moved.stdout);
+    assert.ok(!moved.stdout.includes("AppTranslocation"), moved.stdout);
+    const second = go("--second-way");
+    assert.ok(second.stdout.includes('To try again: open -a "Move to Studio" --args --try-chooser --second-way'), second.stdout);
+    writeFileSync(join(copy, "app.txt"), "/Users/x/Downloads/Move to Studio.app\n");
+    const both = go("--second-way");
+    assert.ok(both.stdout.includes('To try again: open "/Users/x/Downloads/Move to Studio.app" --args --try-chooser --second-way'), both.stdout);
   });
 
   it("the chooser's temp folder lands inside TMPDIR, and is taken away on a stop and on Ctrl-C", () => {

@@ -12,7 +12,6 @@ import { join } from "node:path";
 import {
   notAMac,
   STOPPED_NOTHING,
-  put,
   moveOn,
   NOT_INSTALLED,
   installCalls

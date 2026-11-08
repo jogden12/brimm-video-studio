@@ -17,11 +17,8 @@ import {
   HI,
   STOPPED_NOTHING,
   BACKGROUND,
-  git,
-  put,
   moveOn,
-  NOT_INSTALLED,
-  count
+  NOT_INSTALLED
 } from "./move-app-harness.js";
 
 describe("the move script, Studio's key (check 42)", { skip: notAMac }, () => {
