@@ -63,7 +63,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, answerOf, kindOf as recordKind } from "./episode.js";
-import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf, importingFolderOf, statusFoldersOf } from "./settings.js";
+import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf, importingFolderOf, statusFoldersOf, downloadsFolder, needsFilesAccess } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
@@ -102,7 +102,8 @@ import { SESSION_ID } from "./scan.js";
 import { processTable, readProcesses } from "./chain.js";
 import { SHOWN_MARKER, addShown, cantOpen, clearShownIn, freeShownName, madeShownByIdFolder, revealed, shownByIdFolder } from "./reveal.js";
 import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sessionByFollowUp } from "./receipts.js";
-import { isRunning, lastLine, runProgram } from "./run.js";
+import { isRunning, lastLine, lockFile, runProgram } from "./run.js";
+import { DOWNLOADS_SAY_MS, UNSEEN_MS, accessLine, stepLine, findingOf, placeWordsOf, readAccess, switchFor } from "./access.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
@@ -413,6 +414,10 @@ export function contextFor(deps = {}) {
     openApp: deps.openApp || openApp,
     kickstart: deps.kickstart || kickstart,
     agentRunning: deps.agentRunning || agentRunning,
+    // The launch agent's pid and node, asked only when a finding could need them (accessFinding). A caller that gave agentRunning and
+    // neither of these never reaches launchctl or plutil: the pid is -1 while it runs, and the node is not known.
+    agentPid: deps.agentPid || (deps.agentRunning ? () => (deps.agentRunning() ? -1 : null) : agentPid),
+    agentNode: deps.agentNode || (deps.agentRunning ? () => "" : () => agentNode(home)),
     deps
   };
 }
@@ -1684,6 +1689,77 @@ function agentRunning() {
   return ran.status === 0 && /^\s*pid = \d+/m.test(ran.stdout);
 }
 
+/** The process number launchctl names for the launch agent while it runs (`pid = N`), or null when it is not running or cannot be asked. */
+function agentPid() {
+  const ran = spawnSync("/bin/launchctl", ["print", `gui/${process.getuid()}/${AGENT}`], { encoding: "utf8" });
+  const found = ran.status === 0 ? /^\s*pid = (\d+)/m.exec(ran.stdout) : null;
+  return found ? Number(found[1]) : null;
+}
+
+/** The real path of the node the launch agent's plist names (ProgramArguments.0, in `home`'s LaunchAgents folder, as install.sh writes it),
+    or "" when that cannot be read for any reason. */
+function agentNode(home) {
+  try {
+    const ran = spawnSync("/usr/bin/plutil", ["-extract", "ProgramArguments.0", "raw", "-o", "-", join(home, "Library", "LaunchAgents", `${AGENT}.plist`)], { encoding: "utf8" });
+    const path = ran.status === 0 ? String(ran.stdout).trim() : "";
+    return path ? realpathSync(path) : "";
+  } catch (e) {
+    return "";
+  }
+}
+
+/** What the import's note (access.json) and this Mac's drop folder show, as one finding for her chat: null, or { finding, line, step }
+    (access.js findingOf, accessLine, and stepLine's words for a video's step are the caller's: see `step`). It asks the launch agent
+    nothing unless a finding could need it, and writes nothing. */
+export function accessFinding(ctx) {
+  const now = ctx.now();
+  const home = ctx.home;
+  const note = readAccess(home);
+  const drop = dropFolderOf(ctx.settings, home);
+  const places = { drop, episodes: ctx.episodes };
+  const downloads = note.places.downloads;
+  if (downloads && typeof downloads.at === "number" && now - downloads.at <= DOWNLOADS_SAY_MS) places.downloads = downloadsFolder(home);
+  let pid;
+  const pidOf = () => (pid === undefined ? (pid = ctx.agentPid()) : pid);
+  const agentPidNow = note.looking ? pidOf() : null;
+  const missing = isLocal(ctx.settings) && !existsSync(drop);
+  // A video the import never took: only this Mac's own drop folder, and only while no run is at work.
+  let unseen = [];
+  if (!missing) {
+    let names = [];
+    try {
+      names = readdirSync(drop).filter(isMedia);
+    } catch (e) {
+      names = [];
+    }
+    const old = names.map((name) => ({ name, stat: ctx.stat(join(drop, name)) })).filter(({ stat }) => stat && stat.isFile() && now - stat.ctimeMs > UNSEEN_MS);
+    if (old.length) {
+      const taken = new Set(readStatusesIn(statusReadFolders(ctx), now).filter(({ status }) => status && status.machine === ctx.machine).map(({ status }) => status.video));
+      const seen = readSeen(home);
+      const looked = note.places.drop && note.places.drop.state === "ok" && typeof note.places.drop.at === "number" ? note.places.drop.at : -Infinity;
+      const left = old.filter(({ name, stat }) => !taken.has(name) && !seen[seenKey(name, stat)] && !(looked > stat.ctimeMs));
+      if (left.length && pidOf() === null) {
+        let held = false;
+        try {
+          const lockPid = parseInt(readFileSync(lockFile(drop, runsFolder(home)), "utf8").trim(), 10);
+          held = Number.isInteger(lockPid) && lockPid > 0 && ctx.alive(lockPid);
+        } catch (e) {
+          // no lock, or one that cannot be read: no run holds it
+        }
+        if (!held) unseen = left.map(({ name }) => name);
+      }
+    }
+  }
+  const needsAccess = ["drop", "episodes"].filter((place) => needsFilesAccess(places[place], home));
+  const agentNodeNow = needsAccess.some((place) => (note.places[place] || {}).okNode) ? ctx.agentNode() : "";
+  const finding = findingOf({ note, now, places, agentPid: agentPidNow, missing, unseen, agentNode: agentNodeNow, needsAccess });
+  if (!finding) return null;
+  const folder = places[finding.place];
+  const words = finding.place === "drop" ? `your drop folder, ${dropWords(ctx.settings, ctx.machine, home)}` : folder ? placeWordsOf(finding.place, folder, home) : "";
+  const opts = { placeWords: words, switchName: folder ? switchFor(folder, home) : "its switches" };
+  return { finding, line: accessLine(finding, opts), step: stepLine(finding, opts) };
+}
+
 /** Ask the launch agent to look in this Mac's drop folder now, as it does when something lands there: with its own
     arguments, its own environment and its own lock. When it is running already, nothing more is started, and its run
     looks again within a minute. Throws, saying why in launchctl's words, when it could not be asked. */
@@ -2765,6 +2841,19 @@ async function behind(ctx) {
     const differs = appOf(ctx.settings) ? toolchainDiffers(toolchainHolds(ctx.home)) : "";
     if (differs) ctx.say(`HyperFrames' command line on this Mac is not the one Studio needs. Ask Jason to update it when it suits. (Jason: Studio is pinned to version ${PIN.version}, and this Mac has ${differs}; the installer puts the pinned one in place.)`);
     if (added.length) ctx.say(`(Jason: her folder also allows, on this Mac: ${added.map(({ type, name }) => `${type} ${name}`).join(", ")}.)`);
+    // What the import's note and the drop folder show, last: needs no network. A new node also asks the launch agent to look now, when no
+    // run is at work, so that macOS's question comes up while she is at this Mac.
+    const found = accessFinding(ctx);
+    if (found) {
+      ctx.say(found.line);
+      if (found.finding.kind === "newNode") {
+        try {
+          if (ctx.agentPid() === null) ctx.kickstart();
+        } catch (e) {
+          // the line is said all the same
+        }
+      }
+    }
     return 0;
   };
   const fetched = await git("fetch", "-q", "origin", "main");
