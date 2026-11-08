@@ -6,7 +6,7 @@ import Foundation
 guard let resources = Bundle.main.resourcePath else { exit(1) }
 let helper = Process()
 helper.executableURL = URL(fileURLWithPath: "/bin/zsh")
-helper.arguments = [resources + "/open-in-terminal.zsh"]
+helper.arguments = [resources + "/open-in-terminal.zsh"] + (CommandLine.arguments.dropFirst().contains("--try-chooser") ? ["--try-chooser"] : [])
 do {
     try helper.run()
 } catch {

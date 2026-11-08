@@ -105,6 +105,8 @@ Jason, 6 November: "the app installer should allow the user to pick or create th
 
 Studio can't do that yet: it puts the drop folder at BRIMM Video › Drop › the Mac's name, and looks for exports only in Downloads. Jason decided the same day that Studio's side belongs to Phase 3 of the review plan (the local working folder, `docs/superpowers/plans/2026-11-05-review-changes-plan.md`), and that the app follows once Studio has it. The app will then pick each folder with macOS's own folder chooser (with New Folder), warn when the drop folder is in Dropbox, iCloud Drive or another cloud folder, and hand both to the installer.
 
+That round is designed in `2026-11-06-move-app-folder-pickers-design.md`.
+
 ## Testing
 
 - Tests first, in `tool/tests/`. The move script runs in a home made for each test, with stand-ins for every program that could change something or reach out (`ssh-keygen`, `ssh`, `git`, `claude`, `launchctl`, `brew`, `open`, `pbcopy`, `caffeinate`) and a stand-in installer that only notes how it was called. No test makes a real key, clones from GitHub or runs the real installer. Tests that need a Mac skip themselves elsewhere, as the installer's do.
