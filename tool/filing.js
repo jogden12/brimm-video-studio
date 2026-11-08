@@ -23,7 +23,7 @@ import { releaseEpisodeLock, runningCommand, takeEpisodeLock } from "./detached.
 import { askedAt, endedSinceYes } from "./finish-ended.js";
 import { holdsVideo, importState, leftByCrash, readStatusesIn, removeStatusIn, writeStatusIn } from "./importing.js";
 import { isRunning } from "./run.js";
-import { lookAt, lookLog, placeWordsOf, postIfDue, readAccess } from "./access.js";
+import { lookAt, lookLog, noteState, placeWordsOf, postIfDue, readAccess } from "./access.js";
 // kinds.js takes episodeKind from here: each is used only when called, so neither needs the other to have been read first.
 import { isZoomName, namesOf, withoutNames, zoomTimeOf } from "./kinds.js";
 import { gated, gatedAsOf, withShortId } from "./gate.js";
@@ -1417,6 +1417,18 @@ export function checkFinal(p, deps) {
     return;
   }
   const finished = read.record.finished;
+  // What macOS answered the Downloads export is noted in access.json, with the banner when it is due. Neither changes what the check does, and neither
+  // can stop it.
+  const noteDownloads = (err) => {
+    try {
+      const folder = downloadsFolder(home);
+      const node = deps.node || process.execPath;
+      noteState("downloads", folder, err, { home, clock, node });
+      postIfDue("downloads", readAccess(home), { notify: deps.notify || (() => {}), clock, node, placeWords: err ? placeWordsOf("downloads", folder, home) : "", home });
+    } catch {
+      // a note or banner that fails costs only itself
+    }
+  };
   for (const t of q.took) {
     try {
       if (!statSync(t.path, { throwIfNoEntry: false })) continue;
@@ -1437,8 +1449,10 @@ export function checkFinal(p, deps) {
         continue;
       }
       rmSync(t.path, { recursive: true, force: true });
+      noteDownloads(null);
       log(`${shown}: ${t.name} is taken out of Downloads.`);
     } catch (err) {
+      noteDownloads(err);
       log(`${shown}: ${t.name} could not be looked at or taken out of Downloads (${err.code || "an error"}), so it is kept there. Delete it there by hand.`);
     }
   }

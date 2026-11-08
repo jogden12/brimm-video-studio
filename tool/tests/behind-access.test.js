@@ -122,6 +122,30 @@ describe("behind: says each finding's line last, whatever git answered", () => {
     assert.deepEqual((await on(t)).said, [NEWEST]);
     t.done();
   });
+
+  it("says the Downloads line in behind within a day, and nothing for an ok note (episodes is pinned in edit-guide-access)", async () => {
+    const t = setup();
+    const dl = downloadsFolder(t.home);
+    const line = accessLine({ kind: "refused", place: "downloads", code: "EPERM" }, { placeWords: "the Downloads folder", switchName: "Downloads Folder" });
+    note(t, { downloads: place(t, "refused", { folder: dl }) });
+    assert.equal((await on(t)).said.at(-1), line);
+    note(t, { downloads: place(t, "ok", { folder: dl }) });
+    assert.deepEqual((await on(t)).said, [NEWEST]);
+    t.done();
+  });
+
+  it("names the switch for Dropbox when Downloads is a link into Dropbox", async () => {
+    const t = setup();
+    const dl = downloadsFolder(t.home);
+    const target = join(t.home, "Library", "CloudStorage", "Dropbox-x", "Downloads");
+    mkdirSync(target, { recursive: true });
+    rmSync(dl, { recursive: true, force: true });
+    symlinkSync(target, dl);
+    note(t, { downloads: place(t, "refused", { folder: dl }) });
+    const r = await on(t);
+    assert.equal(r.said.at(-1), accessLine({ kind: "refused", place: "downloads", code: "EPERM" }, { placeWords: "the Downloads folder", switchName: "the switch for Dropbox" }));
+    t.done();
+  });
 });
 
 describe("behind: asking only for the agent's own pid", () => {
