@@ -119,13 +119,11 @@ summary() {
     # open-in-terminal.zsh writes the app's path beside the copied script; a run by hand has none.
     local app_file="${SELF:A:h}/app.txt" app_path=""
     if [[ -r "$app_file" ]]; then read -r app_path < "$app_file" || true; fi
-    local again_way="--try-chooser"
-    if [[ "$CHOOSER_ROUTE" == program ]]; then again_way="--try-chooser --second-way"; fi
     # A translocated path may not work once the launcher has exited: the app is found by its name then.
     if [[ -n "$app_path" && "$app_path" != */AppTranslocation/* ]]; then
-      say "This was a try of the folder questions: nothing was changed. To try again: open \"$app_path\" --args $again_way"
+      say "This was a try of the folder questions: nothing was changed. To try again: open \"$app_path\" --args --try-chooser"
     else
-      say "This was a try of the folder questions: nothing was changed. To try again: open -a \"Move to Studio\" --args $again_way"
+      say "This was a try of the folder questions: nothing was changed. To try again: open -a \"Move to Studio\" --args --try-chooser"
     fi
     return 0
   fi

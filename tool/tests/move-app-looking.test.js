@@ -515,7 +515,7 @@ describe("the move script, the try mode (--try-chooser)", { skip: notAMac }, () 
     assert.ok(withApp.stdout.includes('To try again: open "/Users/x/Downloads/Move to Studio.app" --args --try-chooser'), withApp.stdout);
   });
 
-  it("--try-chooser's stop line falls back to open -a for a translocated app, and carries --second-way after a try of the second way", () => {
+  it("--try-chooser's stop line falls back to open -a for a translocated app, and stays the base line after a try of the second way", () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-try-app-")));
     dirsToClean.add(dir);
     const home = join(dir, "home");
@@ -529,10 +529,12 @@ describe("the move script, the try mode (--try-chooser)", { skip: notAMac }, () 
     assert.ok(moved.stdout.includes('To try again: open -a "Move to Studio" --args --try-chooser'), moved.stdout);
     assert.ok(!moved.stdout.includes("AppTranslocation"), moved.stdout);
     const second = go("--second-way");
-    assert.ok(second.stdout.includes('To try again: open -a "Move to Studio" --args --try-chooser --second-way'), second.stdout);
+    assert.ok(second.stdout.includes('To try again: open -a "Move to Studio" --args --try-chooser\n'), second.stdout);
+    assert.ok(!second.stdout.includes("To try again: open -a \"Move to Studio\" --args --try-chooser --second-way"), second.stdout);
     writeFileSync(join(copy, "app.txt"), "/Users/x/Downloads/Move to Studio.app\n");
     const both = go("--second-way");
-    assert.ok(both.stdout.includes('To try again: open "/Users/x/Downloads/Move to Studio.app" --args --try-chooser --second-way'), both.stdout);
+    assert.ok(both.stdout.includes('To try again: open "/Users/x/Downloads/Move to Studio.app" --args --try-chooser\n'), both.stdout);
+    assert.ok(!both.stdout.includes("--second-way\n"), both.stdout);
   });
 
   it("the chooser's temp folder lands inside TMPDIR, and is taken away on a stop and on Ctrl-C", () => {
