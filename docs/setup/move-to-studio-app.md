@@ -219,8 +219,8 @@ Step 1, looking:
 - **"An import is running now. Wait until its window in the top right closes, then double-click Move to Studio again."** Do that.
 - **"This Mac's checkout (<folder>) has no tool/settings.js to say where its drop folder is."** Tell Jason.
 - **"The drop folder could not be found from this Mac's settings (settings.js show)."** Tell Jason.
-- **"The drop folder holds <n> file(s) still to be imported."** The app never names them. Let the import finish, then run the app again. Step 5 looks at this again right before the real install and stops with the same words.
-- **"The drop folder could not be read. macOS may have asked whether Terminal may read Dropbox…"** In System Settings › Privacy & Security › Files and Folders, allow it, then run the app again.
+- **"The drop folder holds <n> file still to be imported."** (or "<n> files") The app never names them. Let the import finish, then run the app again. Step 5 looks at this again right before the real install and stops with the same words.
+- **"The drop folder could not be read. macOS may have asked whether Terminal may read it, and the answer may have been no. Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again."** Do that.
 - **"Move to Studio is already running in another Terminal window. Use that one, or close it and double-click again."** Do that.
 - **"Claude Code is not on this Mac. Install it, then run the app again."** Do that.
 - **"Claude Code is still not signed in."** after the offered sign-in. Run `claude auth login` in Terminal, then run the app again.
@@ -284,14 +284,12 @@ Step 5, the installer (step 4 only waits, and stops on an n):
 ## The tests
 
 ```
-cd tool && node --test tests/move-app.test.js
-cd tool && node --test tests/move-app-build.test.js
-cd tool && node --test tests/move-app-ties.test.js
+cd tool && node --test tests/move-app-*.test.js
 cd tool && node --test
 ```
 
 - The move script runs in a home made for each test, with stand-ins for every program that could change something or reach out. A stand-in installer only notes how it was called, and a stand-in chooser answers with a pick, a Cancel or a failure.
-- `move-app.test.js` covers the steps, the two folder questions, the app's checks of a pick, the try mode and the stops. `move-app-build.test.js` covers the build, the helper app and the zip.
+- The move script's tests are split into files that `node --test` runs side by side, so that step 3 stays short, and share one harness, `move-app-harness.js` (not a test file): `move-app-looking`, `-key-code`, `-installer` (steps 1 to 5 and the report), `-step5-questions`, `-step5-checks`, `-step5-print` (the two folder questions, the app's checks of a pick, the installer's print), `-marks-summary` and `-later-runs` (later runs, the marks, the stop summary), and the try mode (in `-looking`). `move-app-build.test.js` covers the build, the helper app and the zip.
 - `move-app-ties.test.js` (with `move-app-ties-helpers.js`) ties the app to Studio's real code: the words it reads from `settings.js` and from `install.sh --print`, and the keys typed while the window is open, on a real terminal. A change to either side that the other does not follow fails there.
 - No test makes a real key, clones from GitHub, runs the real installer, signs or notarizes.
 - Tests that need a Mac skip themselves elsewhere.
