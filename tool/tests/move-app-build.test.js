@@ -541,4 +541,22 @@ describe("launcher.swift and choose-folder.swift", { skip: notAMac || (swiftc.st
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("the chooser's line-break check sees a carriage return, a line feed and CRLF, as scalars", () => {
+    const source = readFileSync(join(MOVE_APP, "choose-folder.swift"), "utf8");
+    const fn = source.match(/func holdsLineBreak[\s\S]*?\n}\n/);
+    assert.ok(fn, "holdsLineBreak is there");
+    assert.equal(source.includes('contains("\\n")'), false, "no Character check of a line feed");
+    const dir = mkdtempSync(join(tmpdir(), "brimm-linebreak-"));
+    try {
+      const file = join(dir, "main.swift");
+      writeFileSync(file, `import Foundation\n${fn[0]}\nfor p in ["/a/b", "/a\\nb", "/a\\rb", "/a\\r\\nb"] { print(holdsLineBreak(p)) }\n`);
+      const program = join(dir, "t");
+      const c = run("swiftc", ["-module-cache-path", cache, "-o", program, file]);
+      assert.equal(c.status, 0, c.stderr);
+      assert.equal(run(program, [], { timeout: 10000 }).stdout, "false\ntrue\ntrue\ntrue\n");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

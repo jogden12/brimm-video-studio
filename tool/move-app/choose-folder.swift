@@ -38,12 +38,17 @@ if firstWay {
     if kill(pid, 0) != 0 && errno == ESRCH { fail("The process that asked for the folder is gone.") }
 }
 
+/// Whether a path holds a line break. Unicode scalars, not Characters: "\r\n" is one Character, and would pass a Character check.
+func holdsLineBreak(_ path: String) -> Bool {
+    return path.unicodeScalars.contains { $0 == "\n" || $0 == "\r" }
+}
+
 /// What the panel gave back, as the first way's file holds it.
 func finish(chosen: URL?) -> Never {
     let path = chosen?.path
     if firstWay {
         var text = "cancel\n"
-        if let path = path { text = path.contains("\n") || path.contains("\r") ? "linebreak\n" : "path\n\(path)\n" }
+        if let path = path { text = holdsLineBreak(path) ? "linebreak\n" : "path\n\(path)\n" }
         let part = resultFile + ".part"
         do {
             try text.write(toFile: part, atomically: false, encoding: .utf8)
@@ -54,7 +59,7 @@ func finish(chosen: URL?) -> Never {
         exit(0)
     }
     guard let path = path else { exit(1) }
-    if path.contains("\n") || path.contains("\r") {
+    if holdsLineBreak(path) {
         FileHandle.standardError.write(Data("The folder's path holds a line break.\n".utf8))
         exit(3)
     }

@@ -1,8 +1,8 @@
 #!/bin/zsh
 # Move to Studio.app's helper: it opens Terminal on the move script, with this app's commit.
 # The script is copied, with the .command that runs it, into a fresh temporary folder, and Terminal opens that. Terminal asks
-# nothing because the .command is written fresh by printf here, so it carries no quarantine mark (cp -X also leaves the marks
-# behind). zsh runs the copied script whatever marks it carries.
+# nothing because the .command is written fresh by printf here, so it carries no quarantine mark. cp -X keeps com.apple.quarantine
+# on this macOS, so the copied script may carry the mark; zsh runs it whatever marks it carries.
 # The folder chooser (Helpers/Choose a Folder.app) is recreated beside the move script the same way: each folder with mkdir -p, each
 # file through cat into a redirect. On this macOS, cp -X and ditto --noqtn keep com.apple.quarantine, and a redirect does not. A
 # chooser that carried the mark would ask Gatekeeper's question again when the move opens it.
