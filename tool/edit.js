@@ -62,13 +62,13 @@ import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
-import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, kindOf as recordKind } from "./episode.js";
+import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, answerOf, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf, importingFolderOf, statusFoldersOf } from "./settings.js";
 import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
 import { ORIGINALS_COMMAND, ORIGINALS_PROBLEM, ORIGINALS_RUNNING, ORIGINALS_SESSION, asSession as recordingHeld, listsOriginal } from "./originals.js";
-import { startDetached, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
+import { startDetached, startWhenReady, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { fileSafe, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reel-candidates.js";
@@ -106,7 +106,7 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, copyAtWork, copyIsMade, footageFailed, guidanceOf, isMain as inUse, mediaOf, notWholeYet, openByItself, openInApp, plainName, projectOnAnotherMac, whenReadyLockOf } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, clearOpensAfterSpellings, copyAtWork, copyIsMade, footageFailed, guidanceOf, isMain as inUse, mainIsOnDisk, markOpensAfterSpellings, mediaOf, notWholeYet, openByItself, openInApp, plainName, projectOnAnotherMac, waitsForSpellings, whenReadyLockOf } from "./app.js";
 import { VOICEOVER, projectCues } from "./project.js";
 import { openVoiceProject, voiceProjectWhy } from "./explainer.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelNotWholeYet, reelStretch, reelWhy } from "./app-reel.js";
@@ -1495,7 +1495,12 @@ const couldntBeMade = (name) => `The video for HyperFrames of ${name} couldn't b
     and not an early one, answers. With no token (a copy run was at work already when `app` was said) no result answers by itself: the run waits while the copy
     lock is held, and once it is free the copy is made or it is not. When the lock is free, no other run holds the episode, and the copy is not made, this run
     asks for the main copy itself, once, with a token of its own, and waits for that token's result in the same way. A request whose run was never seen (no lock
-    taken, no result) within WHEN_READY_GRACE_MS is unanswered: the opener's is asked for again by this run, once; this run's own ends the wait, and the notice is posted. */
+    taken, no result) within WHEN_READY_GRACE_MS is unanswered: the opener's is asked for again by this run, once; this run's own ends the wait, and the notice is posted.
+    It opens by itself only once she has answered the spellings card of the current reading, because a project's words and spellings are written once, when it is
+    made (Jason, 7 Nov 2026). It must not wait for that, for its run keeps the Mac awake: where it would open, the card is not answered and this Mac's readings are
+    on, it writes the marker (app.js opensAfterSpellingsOf), reads the record again (an answer may have come in between), and when it is still not answered it ends
+    with no notice. Her answer (answerOffers) removes the marker and starts this run again. With readings off there is no card: it opens at once, writing no marker.
+    A main project on disk by then (she opened it herself, or another run did) is not opened a second time: it ends quietly. */
 async function appWhenReady(ctx, rest) {
   // Only `--when-ready <folder>` and `--when-ready <folder> --asked <n>` (n a whole number) are forms of it.
   const given = rest.length === 4 && rest[2] === "--asked" && /^\d+$/.test(rest[3]) && Number.isSafeInteger(Number(rest[3])) ? Number(rest[3]) : null;
@@ -1536,7 +1541,7 @@ async function appWhenReady(ctx, rest) {
     let ask = given === null ? null : { token: given, at: given };
     let ownAsked = false;
     // The copy run's result is one file for the main video, a Reel's and the footage: only the main video's copy with this request's token answers (never a time).
-    const answerOf = (token) => {
+    const copyAnswerOf = (token) => {
       const ended = readResult(ctx.home, found.name, WORK_COPY_COMMAND);
       return ended && ended.early !== true && ended.copy === "main" && ended.asked === token ? ended : null;
     };
@@ -1547,7 +1552,7 @@ async function appWhenReady(ctx, rest) {
       if (busyWith === "read") sawRead = true;
       if (!copying && !busyWith) {
         if (copyIsMade(ctx, ownRecord() ?? { found, record: found.read.record })) break;
-        if (ask && answerOf(ask.token)) break;
+        if (ask && copyAnswerOf(ask.token)) break;
         // A request is unanswered when its run was seen and is gone with no result of its own, or when it never showed within the grace.
         if (!ask || seen || ctx.now() - ask.at >= WHEN_READY_GRACE_MS) {
           // One own ask at most: when it is unanswered too, or could not be made, the copy is not made.
@@ -1579,6 +1584,22 @@ async function appWhenReady(ctx, rest) {
     if (!currentReading(record) && read && read.early !== true && read.ok === false && (sawRead || read.ended >= began)) {
       notify(`Claude's reading of ${name} did not finish, so HyperFrames did not open it. Say "how far is it?" to see why.`);
       return { ok: false, made: [], failed: ["Claude's reading did not finish, so it was not opened."], next: "" };
+    }
+    // HyperFrames opens it by itself only once she has answered the spellings card of the current reading: the project's words and spellings are written
+    // once, when it is made. This run must not wait for that (it keeps the Mac awake): the marker is written, the record is read again (an answer may have come
+    // between), and when it is still not answered the run ends. Her answer removes the marker and starts this run again (answerOffers).
+    let now = mine;
+    if (waitsForSpellings(ctx, record)) {
+      markOpensAfterSpellings(ctx, found.name);
+      const again = ownRecord();
+      if (!again || waitsForSpellings(ctx, again.record)) return { ok: false, made: [], failed: ["It opens once its spellings card is answered."], next: "" };
+      clearOpensAfterSpellings(ctx.home, found.name);
+      now = again;
+    }
+    // A main project on disk is one she opened herself, or another run did: it is not opened a second time.
+    if (mainIsOnDisk(ctx, now)) {
+      clearOpensAfterSpellings(ctx.home, found.name);
+      return { ok: true, made: [], failed: [], next: "" };
     }
     // The copy is made: the episode's lock is taken now, and what `app` does is done.
     const said = [];
@@ -3963,15 +3984,6 @@ function offersOf(record) {
   return offered.map((o) => ({ heard: String((o && o.heard) ?? ""), spelled: String((o && o.spelled) ?? ""), why: typeof (o && o.why) === "string" ? o.why : "" }));
 }
 
-/** Her answer to the offers of the reading the record holds, { reading, at, on, applied, left }, or null while they are not
-    answered. An answer is of one reading, the current one (currentReading): a reading made again (its `at` is another) has offers
-    of its own. */
-function answerOf(record) {
-  const answer = record.offers && record.offers.answered;
-  const reading = currentReading(record);
-  return answer && reading && answer.reading === reading.at && Array.isArray(answer.applied) && Array.isArray(answer.left) ? answer : null;
-}
-
 /** An iPhone clip she answered: a short video that holds her `answer`. Its hand-off is not written from the spellings card (plan PR 7,
     item 4): `finish` makes it, from the export of its HyperFrames project or, asked, from the import's captions. */
 const isClip = (record) => recordKind(record) === "short video" && !hasFinalCut(record);
@@ -4376,7 +4388,8 @@ function spellCard(ctx, found) {
 /** `spell "<episode>" offers all|none|<n> <n>…`: her answer to Claude's offers. The ones named are applied as the episode's
     spellings, in the card's order, together with the answer, in one record; and, for a finished video or an iPhone clip, the
     hand-off is then written (saveSpellings). "all" applies every offer that can be kept; a number whose offer cannot is refused.
-    An offer for a word the episode spells already is not used: her own spelling stays. Nothing is written when it is refused. */
+    An offer for a word the episode spells already is not used: her own spelling stays. Nothing is written when it is refused. A video kept on this Mac whose `app --when-ready` ended to wait for this
+    answer (the marker, app.js opensAfterSpellingsOf) has the marker taken away once the answer is kept, and the run started again, after any run still at its end (up to 10 s). */
 async function answerOffers(ctx, found, words) {
   const { record } = found;
   const name = shownName(record);
@@ -4414,7 +4427,21 @@ async function answerOffers(ctx, found, words) {
   // No hand-off is written yet and none is due from the card: a raw video's is made when it is finished, and an iPhone clip's when she
   // says "hand it off", edited in HyperFrames first or as it is (or, on a Mac that hands off version 1, once that Mac hands off version 2).
   const later = recordKind(record) === "raw" ? "Its hand-off is made when it is finished." : isClip(record) ? clipNext(ctx, found, record) : "";
-  return saveSpellings(ctx, found, next, done, { set: { offers: { ...record.offers, answered: answer } }, later });
+  const code = await saveSpellings(ctx, found, next, done, { set: { offers: { ...record.offers, answered: answer } }, later });
+  // A video kept on this Mac whose opening by itself waited for this answer (appWhenReady's marker) opens now.
+  if (code === 0 && keptOnAMac(record) && clearOpensAfterSpellings(ctx.home, found.name)) {
+    // A run of it may still hold its lock, on its way to end; it is given up to 10 s. If it is holding still, that run is the one opening it.
+    const lock = whenReadyLockOf(ctx.home, found.name);
+    const waitFor = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+    let held = Boolean(runningCommand(ctx.home, found.name, ctx.alive, lock));
+    for (let looks = 0; held && looks < 20; looks += 1) {
+      await waitFor(500);
+      held = Boolean(runningCommand(ctx.home, found.name, ctx.alive, lock));
+    }
+    if (!held) startWhenReady(ctx, found.name);
+    ctx.say("It opens in HyperFrames by itself in a moment.");
+  }
+  return code;
 }
 
 /** `spell "<episode>" [add "<as heard>" "<as spelled>" [add …]… | drop "<as heard>" | offers [all|none|<n> <n>…]]`: the

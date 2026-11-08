@@ -300,6 +300,15 @@ export function currentReading(record) {
   return Date.parse(reading.at) >= Date.parse(record.answer.at) && reading.kind === kindOf(record) ? reading : null;
 }
 
+/** Her answer to the offers of the reading the record holds, { reading, at, on, applied, left }, or null while they are not
+    answered. An answer is of one reading, the current one (currentReading): a reading made again (its `at` is another) has offers
+    of its own. */
+export function answerOf(record) {
+  const answer = record.offers && record.offers.answered;
+  const reading = currentReading(record);
+  return answer && reading && answer.reading === reading.at && Array.isArray(answer.applied) && Array.isArray(answer.left) ? answer : null;
+}
+
 /** How a record is named in all that edit.js prints, which goes into Sallie's chat (spec 2026-10-22, section 1, "Unanswered and
     session videos are named by a neutral label"): a video not yet answered, or left alone, by its label, as the import made it
     and the record keeps it (it is never made again from when the record says it was imported: the label's moment is its

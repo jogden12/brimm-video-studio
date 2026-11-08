@@ -20,7 +20,7 @@
 //     is made;
 //   - and Claude's reading must be in the episode's record: the project is written from it (the cut plan and the Reel suggestions), and
 //     nothing writes it again afterwards, so a project made while `read` is still at work on it would keep an unfinished reading for
-//     good. Until the record holds the current reading nothing is made, and she is told to say it again when it has finished (a video kept on this Mac is told that once Claude has read it and its video is made, HyperFrames opens it by itself). Once it
+//     good. Until the record holds the current reading nothing is made, and she is told to say it again when it has finished (a video kept on this Mac is told that once Claude has read it, its video is made and she has answered the spellings card, HyperFrames opens it by itself). Once it
 //     does, the project is made even while the reading's own late check is still to come (plan R1d), if the words, the Reel
 //     suggestions and the cut plan are each at the size the record lists (readListed; else she is told some files are not whole yet,
 //     and claimAndBring says so before it claims anything). Only a new project waits for the reading: one made before is opened as it
@@ -44,12 +44,12 @@
 // files is given to it (`deps`), so that no test runs the command line, the app or `claude`; each but `save` has a default, and the
 // defaults fail closed.
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
 import { programHome } from "./home.js";
 import { readResult, runningCommand, startWhenReady, whenReadyLockOf } from "./detached.js";
-import { isFromPlan, kindOf, localStamp } from "./episode.js";
+import { answerOf, isFromPlan, kindOf, localStamp } from "./episode.js";
 import { sessionNotCleared } from "./gate.js";
 import { copyIn as copyTakes, waitWords } from "./guide.js";
 import { projectWaits, readingWaitsUntil, waitFacts } from "./late-wait.js";
@@ -86,6 +86,31 @@ export const KEPT = "kept for an earlier kind";
 export const noWords = (name, local = false) => local ? `${name}'s words are not whole on this Mac. Ask Jason.` : `The words of ${name} are not on this Mac yet, so there is nothing for HyperFrames to start from. Dropbox may still be bringing them: say it again in a few minutes. If it says this again, tell Jason.`;
 /** The lock of an `app --when-ready` run, held while it waits for the video for HyperFrames of an episode kept on this Mac (detached.js). */
 export { whenReadyLockOf };
+/** The marker of a video kept on this Mac whose `app --when-ready` ended to wait for her answer to its spellings card: { at: <ms> }, in the episode's work folder.
+    Her answer removes it and starts the run again (edit.js answerOffers). */
+export const opensAfterSpellingsOf = (home, folder) => join(episodeWork(home, folder), "opens-after-spellings.json");
+/** Write the marker, whole (a temporary file renamed over it): the run that waits for her answer has ended, and her answer is to start it again. */
+export function markOpensAfterSpellings(ctx, folder) {
+  const file = opensAfterSpellingsOf(ctx.home, folder);
+  mkdirSync(dirname(file), { recursive: true });
+  const at = ctx.now();
+  const temporary = `${file}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify({ at })}\n`);
+  renameSync(temporary, file);
+}
+/** Take the marker away: whether it was there. A marker that is not there is no fault. */
+export function clearOpensAfterSpellings(home, folder) {
+  try {
+    unlinkSync(opensAfterSpellingsOf(home, folder));
+    return true;
+  } catch (e) {
+    if (e.code === "ENOENT") return false;
+    throw e;
+  }
+}
+/** Whether a video kept on this Mac is to wait for her answer to its spellings card before HyperFrames opens it by itself: the current reading's card is not
+    answered, and this Mac's readings are on (with readings off there is never a card). Her own `app` opens it at once, answered or not. */
+export const waitsForSpellings = (ctx, record) => ctx.settings.readings !== false && answerOf(record) === null;
 const beingMade = (name, ready = "") => `The video for HyperFrames is being made.${ready} Say "open ${name} in HyperFrames" again when it is done; "how far is it?" shows how far it has got.`;
 /** When the video for HyperFrames will be ready, as a clock time and in minutes, for the line that says it is being made: from the speed
     this Mac measured of making one (guide.js copyIn, which the guide's "It usually takes" is made of) and the recording's length, as
@@ -97,18 +122,22 @@ function readyAt(ctx, record) {
   if (wait) return ` ${waitWords(wait)}`;
   return seconds === null ? "" : ` It is ready about ${clockAt(ctx.now() + seconds * 1000)}, in ${aboutLeft(seconds)}.`;
 }
-/** What she is told of a video kept on this Mac whose video for HyperFrames is being made: HyperFrames opens it by itself (Phase 3, L7), about when this Mac
-    measured the copy would be done, else when it is ready. */
+/** What she is told of a video kept on this Mac whose video for HyperFrames is being made: HyperFrames opens it by itself (Phase 3, L7), once its video is made
+    and she has answered the spellings card (a project's words and spellings are written once, when it is made); when she has answered it, or this Mac's readings are
+    off, about when this Mac measured the copy would be done, else when it is ready. */
 const opensByItself = (ctx, record) => {
+  if (waitsForSpellings(ctx, record)) return `Its video for HyperFrames is being made. HyperFrames opens it by itself once it is made and you have answered the spellings card.`;
   const seconds = copyTakes(readRates(progressFolder(ctx.home)), record.video && record.video.seconds);
   return `Its video for HyperFrames is being made. HyperFrames opens it by itself ${seconds === null ? "when it is ready" : `about ${clockAt(ctx.now() + seconds * 1000)}`}.`;
 };
 /** Say that HyperFrames opens a video kept on this Mac by itself, and start the run that does it (`app --when-ready`) unless one is at work already:
-    resolves 0. Claims nothing and writes no record. */
+    resolves 0. Claims nothing and writes no record. Three things are said of when it opens: while Claude is still reading, that it opens once Claude has read it,
+    its video is made and she has answered the spellings card; while the card is not answered (and readings are on), that it opens once its video is made and she has
+    answered it; else the time (opensByItself). */
 export function openByItself(ctx, { found, record, reading = false, asked }) {
   if (!runningCommand(ctx.home, found.name, ctx.alive, whenReadyLockOf(ctx.home, found.name))) startWhenReady(ctx, found.name, asked);
   // While Claude is still reading, the run waits for the reading too: she is not asked to say it again.
-  ctx.say(reading ? `Claude is still reading it. Once Claude has read it and its video is made, HyperFrames opens it by itself.` : opensByItself(ctx, record));
+  ctx.say(reading ? `Claude is still reading it. Once Claude has read it, its video is made and you have answered the spellings card, HyperFrames opens it by itself.` : opensByItself(ctx, record));
   // The app will open the project in a detached run whose words go to the log alone: the line about its buttons, and where to export, are said here, in her chat.
   ctx.say(BUTTONS);
   const into = exportsWords(ctx.settings, ctx.home);
@@ -119,9 +148,13 @@ export function openByItself(ctx, { found, record, reading = false, asked }) {
     Mac, with no main project of its own on disk yet and no copy made. Then nothing is claimed and nothing is asked for. */
 export function copyAtWork(ctx, { found, record }) {
   if (!keptOnAMac(record) || !runningCommand(ctx.home, found.name, ctx.alive, workCopyLockOf(ctx.home, found.name))) return false;
-  const earlier = (record.app?.projects ?? []).find(isMain);
-  if (earlier && plainName(earlier.name) && existsSync(join(episodeWork(ctx.home, found.name), earlier.name))) return false;
+  if (mainIsOnDisk(ctx, { found, record })) return false;
   return !copyIsMade(ctx, { found, record });
+}
+/** Whether the episode has its main project on disk in its work folder: the record's project in use under a plain name, and its folder there. */
+export function mainIsOnDisk(ctx, { found, record }) {
+  const earlier = (record.app?.projects ?? []).find(isMain);
+  return Boolean(earlier) && plainName(earlier.name) && existsSync(join(episodeWork(ctx.home, found.name), earlier.name));
 }
 /** Whether the video for HyperFrames of the episode `found` is made: its video and its facts are both there (`app --when-ready` goes on once they are). */
 export function copyIsMade(ctx, { found, record }) {
@@ -473,7 +506,7 @@ function adoptProject(ctx, { found, record, at, projects }) {
       to say it again when it is done (0). A project made before has taken the copy into itself and left only its facts, which
       is why openInApp looks for that project first.
     - While Claude's reading of the episode is at work and not yet in the record (`projectWaits` "reading"), nothing is made: the project
-      is written from the reading, and nothing writes it again later. She is told to say it again when it has finished (0), or, for a video kept on this Mac, that HyperFrames opens it by itself after the reading and the copy. With the
+      is written from the reading, and nothing writes it again later. She is told to say it again when it has finished (0), or, for a video kept on this Mac, that HyperFrames opens it by itself after the reading and the copy, and once she has answered the spellings card. With the
       reading in the record ("verify": the read run is at its own late check, or this Mac still owes the import's) the words, the Reel
       suggestions and the cut plan are read through `readListed`, and a file not at the size the record lists makes nothing (0, in
       `notWholeYet`'s words). The working copy
