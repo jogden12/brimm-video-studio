@@ -1910,20 +1910,23 @@ c "$HOME/locked"
 c "$HOME/locked/inner"
 c "$HOME/plain/locked2"
 c "$HOME/plain/locked2/deeper"
-c "$HOME/nothing/at/all"`);
-      assert.deepEqual(r.lines, ["[3] rc=0", "[0] rc=0", "[0] rc=0", "[] rc=2", "[] rc=2", "[] rc=2", "[] rc=2", "[] rc=2"]);
+c "$HOME/nothing/at/all"
+c "$HOME/gone/parent/Last Time"
+c "$HOME/plain/locked2/deeper/more/parts"`);
+      // A missing folder is 0 when the nearest folder above it that is there can be listed; 2 when that one cannot.
+      assert.deepEqual(r.lines, ["[3] rc=0", "[0] rc=0", "[0] rc=0", "[] rc=2", "[] rc=2", "[] rc=2", "[] rc=2", "[0] rc=0", "[0] rc=0", "[] rc=2"]);
       assert.ok(!r.out.includes("Client Name"), "nothing is named");
     });
 
     it("plist_watch_paths and transcript_folders read the paths whole, as install.sh reads them, and the .plist.off only for exports", () => {
-      const r = checks(`${PLIST}makeplist ${LAUNCH} "$HOME/Watched One" "$HOME/it's, \\"quoted\\" one"
-makeplist "$HOME/Library/LaunchAgents/com.thebrimm.transcribe.plist.off" "$HOME/Off Folder"
+      const r = checks(`${PLIST}makeplist ${LAUNCH} "$HOME/Watched One" "$HOME/it's, \\"quoted\\" one" "relative/folder"
+makeplist "$HOME/Library/LaunchAgents/com.thebrimm.transcribe.plist.off" "$HOME/Off Folder" "also/relative"
 print -r -- "--plist"; plist_watch_paths ${LAUNCH}
 print -r -- "--missing"; plist_watch_paths "$HOME/no such file"
 print -r -- "--drop"; transcript_folders drop
 print -r -- "--exports"; transcript_folders exports`);
       assert.deepEqual(r.lines, [
-        "--plist", "<HOME>/Watched One", `<HOME>/it's, "quoted" one`,
+        "--plist", "<HOME>/Watched One", `<HOME>/it's, "quoted" one`, "relative/folder",
         "--missing",
         "--drop", "<HOME>/Dropbox/The BRIMM DB/BRIMM VIDEO Transfer", "<HOME>/Dropbox/The BRIMM DB/BRIMM VIDEO MacBook", "<HOME>/Watched One", `<HOME>/it's, "quoted" one`,
         "--exports", "<HOME>/Dropbox/The BRIMM DB/BRIMM VIDEO Transfer", "<HOME>/Dropbox/The BRIMM DB/BRIMM VIDEO MacBook", "<HOME>/Watched One", `<HOME>/it's, "quoted" one`, "<HOME>/Off Folder"
@@ -1991,6 +1994,15 @@ d "$HOME/it's, \\"quoted\\" one"; d "$HOME/Dropbox/The BRIMM DB"; d "$HOME/Off O
       });
     });
 
+    describe("the drop folder, in Downloads", () => {
+      it("is never read: at mode 000, a pick of Downloads or in it gives no refusal of the app's and no error", () => {
+        const r = checks(`mkdir -p "$HOME/Downloads/X"; chmod 000 "$HOME/Downloads"
+for f in "$HOME/Downloads" "$HOME/Downloads/X" "$HOME/Downloads/Missing"; do drop_folder_fault "$f" picked; show; done`);
+        assert.deepEqual(r.lines, Array(3).fill("[] [] [] []"));
+        assert.equal(r.errors, "");
+      });
+    });
+
     describe("the exports folder", () => {
       const exp = (body, o) => checks(`e() { exports_folder_fault "$1"; show; }\n${body}`, o);
 
@@ -2048,6 +2060,24 @@ e "$HOME/Exports"; e "$HOME/Elsewhere/New"`);
         assert.equal(r.errors, "", "no error from the unreadable folder");
       });
 
+      it("does not compare a pick outside Documents with Zoom's folder under Documents (a link to the pick would refuse it)", () => {
+        const r = exp(`mkdir -p "$HOME/Documents" "$HOME/Exports"; ln -s "$HOME/Exports" "$HOME/Documents/Zoom"
+e "$HOME/Exports"`);
+        assert.deepEqual(r.lines, ["[] [] [] []"]);
+      });
+
+      it("builds Finder's words (node) only when it refuses", () => {
+        const r = exp(`mkdir -p "$HOME/st/tool" "$HOME/Exports" "$HOME/BRIMM Video Work"; touch "$HOME/st/tool/settings.js"
+print -r -- '#!/bin/sh\necho called >> "'"$HOME"'/node-log"' > "$HOME/nodestub"; chmod +x "$HOME/nodestub"
+NODE="$HOME/nodestub"; STUDIO="$HOME/st"
+e "$HOME/Exports"; e "$HOME/Downloads"
+print -r -- "log:[$(cat "$HOME/node-log" 2>/dev/null)]"
+e "$HOME/BRIMM Video Work"
+print -r -- "log:[$(wc -l < "$HOME/node-log" | tr -d ' ')]"`);
+        assert.equal(r.lines[2], "log:[]", "a passing pick brings no node");
+        assert.equal(r.lines[4], "log:[1]");
+      });
+
       it("asks about Zoom's folder when the pick could be in Documents, by real path or as spelled", () => {
         const r = exp(`mkdir -p "$HOME/Documents/Zoom/Call" "$HOME/Documents/Other"; ln -s "$HOME/Documents" "$HOME/Docs"
 e "$HOME/Documents/Zoom/Call"; e "$HOME/Docs/Zoom/Call"; e "$HOME/Documents/Other"`);
@@ -2081,6 +2111,16 @@ e "$HOME/Downloads"; e "$HOME/Downloads/Sub"; e "$HOME/Downloads/a"$'\\n'"b"`);
       });
     });
 
+    it("says the note for a folder in Downloads, and none for Downloads, also when Downloads is a link", () => {
+      const r = checks(`mkdir -p "$HOME/RealDL/Sub" "$HOME/Other"; ln -s "$HOME/RealDL" "$HOME/Downloads"
+for f in "$HOME/Downloads" "$HOME/RealDL" "$HOME/Downloads/Sub" "$HOME/Other"; do print -r -- "== $f"; EXPORTS_FOLDER="$f"; say_exports_note; done`);
+      const parts = r.lines.join("\n").split("== ").slice(1).map((x) => x.split("\n").slice(1).join("\n"));
+      assert.equal(parts[0], "", "Downloads, by its link: no note");
+      assert.equal(parts[1], "", "Downloads, by its real folder: no note");
+      assert.ok(parts[2].includes(EXPORTS_NOTE) && parts[2].includes(TIDY_LINE), parts[2]);
+      assert.ok(parts[3].includes(EXPORTS_NOTE) && !parts[3].includes(TIDY_LINE), parts[3]);
+    });
+
     describe("whole runs", () => {
       it("a refused pick says why and asks again", () => {
         const r = moveOn({ marks: NOT_INSTALLED, folderFiles: { "<HOME>/Full": ["Client Name.mov", "b.mov"], "<HOME>/Empty": [] }, picks: ["<HOME>/Full", "<HOME>/Empty"], answers: "c\nc\ny\ny\n\n" });
@@ -2112,6 +2152,15 @@ e "$HOME/Downloads"; e "$HOME/Downloads/Sub"; e "$HOME/Downloads/a"$'\\n'"b"`);
         const go = moveOn({ marks: NOT_INSTALLED, folderFiles: files, picks: ["<HOME>/Empty"], answers: "y\nc\ny\nn\n" });
         assert.equal(go.status, 1, go.out);
         assert.deepEqual(installCalls(go), [printed(go, `${go.home}/Empty`)]);
+      });
+
+      it("a refused pick that is the folder y gives makes the next ask c alone", () => {
+        const r = moveOn({ marks: NOT_INSTALLED, folderFiles: { "<HOME>/BRIMM Video Work/Drop": ["a.mov"] }, picks: ["<HOME>/BRIMM Video Work/Drop"], answers: "c\ny\n" });
+        assert.equal(r.status, 1, r.out);
+        assert.equal(count(r.out, DROP_QUESTION[0]), 1, "the question is not asked whole again");
+        assert.ok(r.out.includes("Type c and press Return to choose another folder. Anything else stops:"), r.out);
+        assert.deepEqual(installCalls(r), []);
+        assert.equal(r.ran.split("\n").filter((l) => l.startsWith("chooser ")).length, 1, "the y opened no chooser");
       });
 
       it("with c alone offered, and the chooser not shown, the run stops with the not-empty words; after a transcript refusal, with the Tell Jason words", () => {

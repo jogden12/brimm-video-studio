@@ -77,6 +77,7 @@ CAND="" CAND_FROM="" QUESTION_LINES="" QUESTION_PROMPT=""   # what y gives for a
 THROWN=0             # keys typed while a chooser was open, thrown away
 CHOSEN=""            # the folder the chooser gave, made whole
 ANSWER=""            # y or c, from ask_y_or_c
+EXPORTS_PASSED_OVER=""   # yes when the exports check passed over a place Terminal could not look in
 FAULT_KIND="" FAULT_WORDS="" FAULT_REASON=""   # why a folder will not do (empty when it will), set by the checks of a pick: the refusal in the app's words, and its reason alone as a clause
 DROP_FOLDER="" EXPORTS_FOLDER=""   # the folders step 5 gives the installer, whole paths
 DROP_KEPT="" EXPORTS_KEPT=""       # yes when the settings' own folder is kept
@@ -211,10 +212,10 @@ which_mac() {
 }
 
 # The number of entries in a folder but .DS_Store and .brimm-watched-by, counted and never named. A folder that is not there is 0
-# only when the folder that holds it can be listed and the name is absent from it; a folder, or the folder that holds it, that cannot be
-# listed gives 2 (never 0, which would take a folder macOS did not let Terminal look in for an empty one).
+# only when the nearest folder above it that is there can be listed (and the name is absent from it); the folder itself, or that
+# one, that cannot be listed gives 2 (never 0, which would take a folder macOS did not let Terminal look in for an empty one).
 count_entries() {
-  local folder="$1" parent="${1:h}"
+  local folder="$1" at
   local -a held
   if [[ -d "$folder" ]]; then
     ls -A -- "$folder" >/dev/null 2>&1 || return 2
@@ -224,7 +225,12 @@ count_entries() {
     return 0
   fi
   if [[ -e "$folder" || -L "$folder" ]]; then return 2; fi
-  ls -A -- "$parent" >/dev/null 2>&1 || return 2
+  # Not there: the nearest folder above it that is there must be a folder that can be listed. Under a folder macOS does not let
+  # Terminal look in, nothing is "there", and that folder is the nearest, so it is not taken for an empty place.
+  at="${folder:h}"
+  while [[ "$at" != / && ! -e "$at" && ! -L "$at" ]]; do at="${at:h}"; done
+  [[ -d "$at" ]] || return 2
+  ls -A -- "$at" >/dev/null 2>&1 || return 2
   print -r -- 0
 }
 
@@ -876,8 +882,13 @@ transcript_folders() {
     print -r -- "${ROOT:A:h}/BRIMM VIDEO Transfer"
     print -r -- "${ROOT:A:h}/BRIMM VIDEO MacBook"
   fi
-  plist_watch_paths "$HOME/Library/LaunchAgents/com.thebrimm.transcribe.plist"
-  if [[ "${1-}" == exports ]]; then plist_watch_paths "$HOME/Library/LaunchAgents/com.thebrimm.transcribe.plist.off"; fi
+  local listed entry
+  listed="$(plist_watch_paths "$HOME/Library/LaunchAgents/com.thebrimm.transcribe.plist")"
+  if [[ "${1-}" == exports ]]; then listed+=$'\n'"$(plist_watch_paths "$HOME/Library/LaunchAgents/com.thebrimm.transcribe.plist.off")"; fi
+  # Only whole paths, as Studio's transcriptFolders takes them.
+  for entry in "${(@f)listed}"; do
+    if [[ "$entry" == /* ]]; then print -r -- "$entry"; fi
+  done
   return 0
 }
 # Whether $1 is Downloads or inside it, by real path. Nothing is looked at inside it.
@@ -903,6 +914,11 @@ watched_by_transcripts() {
   return 1
 }
 
+# An exports folder that is one of Studio's own, or a drop folder. The words are built only when refusing.
+refuse_studio() {
+  refuse_with studio "Exports can't go in $(words_for "$1"): it is one of Studio's own folders, or a drop folder, where an export would be taken. Choose another." "it is one of Studio's own folders, or a drop folder"
+}
+
 # The drop folder: $1 the folder, $2 where it came from (settings, last, suggested or picked). The settings' own is not held to being empty.
 drop_folder_fault() {
   local folder="$1" from="${2-}" held="" rc=0 shown
@@ -915,12 +931,9 @@ drop_folder_fault() {
     refuse_with transcript "$(words_for "$folder") is watched by the transcript tool, which takes each video put there. Choose another." "the transcript tool watches it"
     return 0
   fi
-  # The suggested folder, when BRIMM Video Work is not there yet: the installer makes both, so what holds them is looked at instead.
-  if [[ "$folder" == "$HOME/BRIMM Video Work/Drop" && ! -e "$HOME/BRIMM Video Work" && ! -L "$HOME/BRIMM Video Work" ]]; then
-    held="$(count_entries "$HOME/BRIMM Video Work")" || rc=$?
-  else
-    held="$(count_entries "$folder")" || rc=$?
-  fi
+  # Downloads, and anything in it, is never looked in: Studio's installer refuses a drop folder there, and the question is asked again.
+  if in_downloads "$folder"; then return 0; fi
+  held="$(count_entries "$folder")" || rc=$?
   if (( rc != 0 )); then
     refuse_with cannot-look "macOS did not let Terminal look in $(words_for "$folder"). Allow Terminal in System Settings › Privacy & Security › Files and Folders, or choose another folder." "macOS did not let Terminal look in it"
     return 0
@@ -957,17 +970,15 @@ exports_folder_fault() {
     return 0
   fi
   if in_downloads "$folder"; then return 0; fi
-  local studio_words="Exports can't go in $(words_for "$folder"): it is one of Studio's own folders, or a drop folder, where an export would be taken. Choose another."
-  local studio_reason="it is one of Studio's own folders, or a drop folder"
   studio_folders=("$ROOT/Drop" "$ROOT/Unedited Video" "$ROOT/Episodes" "$ROOT/References" "$HOME/BRIMM Video Work"
     "$HOME/Library/Application Support/BRIMM Video" "$HOME/BRIMM Video Studio" "$HOME/BRIMM Video Workshop")
   for other in "${studio_folders[@]}"; do
-    if same_or_inside "$folder" "$other"; then refuse_with studio "$studio_words" "$studio_reason"; return 0; fi
+    if same_or_inside "$folder" "$other"; then refuse_studio "$folder"; return 0; fi
   done
   zoom="$(setting zoomFolder)"
   if [[ "$zoom" != /* ]]; then zoom="$HOME/Documents/Zoom"; fi
   if zoom_may_hold "$folder" "$zoom" && same_or_inside "$folder" "$zoom"; then
-    refuse_with studio "$studio_words" "$studio_reason"
+    refuse_studio "$folder"
     return 0
   fi
   # A folder a Mac has marked as its drop folder, or one inside it. A place that is there and that Terminal cannot look in is passed
@@ -975,7 +986,7 @@ exports_folder_fault() {
   at="${folder:A}"
   while true; do
     if [[ -e "$at/.brimm-watched-by" ]]; then
-      refuse_with studio "$studio_words" "$studio_reason"
+      refuse_studio "$folder"
       return 0
     fi
     if [[ -e "$at" ]] && ! ls -A -- "$at" >/dev/null 2>&1; then EXPORTS_PASSED_OVER=yes; fi
@@ -1100,6 +1111,8 @@ ask_folder() {
     folder_fault "$kind" "$CHOSEN" picked
     if [[ -n "$FAULT_WORDS" ]]; then
       say "  $FAULT_WORDS"
+      # A refused pick that is the folder y gives: y would give it again, so c alone is offered.
+      if [[ "$FAULT_KIND" != cannot-look && "${CHOSEN:A}" == "${cand:A}" ]]; then c_only=yes y_kind="$FAULT_KIND" y_reason="$FAULT_REASON"; fi
       continue
     fi
     settle_folder "$kind" "$CHOSEN" "" picked
@@ -1115,7 +1128,8 @@ folder_fault() {
 }
 # After an exports folder other than Downloads: where Studio looks, and that nothing is deleted from it.
 say_exports_note() {
-  if [[ "${EXPORTS_FOLDER:A}" != "${HOME:A}/Downloads" ]]; then
+  local downloads="$HOME/Downloads"
+  if [[ "${EXPORTS_FOLDER:A}" != "${downloads:A}" ]]; then
     say "Studio looks for exports there and in Downloads. It copies each one into its video's final folder in Dropbox, and leaves the one there as it is. When you export in HyperFrames, choose this folder in its Export dialog. Never export into the drop folder."
     if in_downloads "$EXPORTS_FOLDER"; then say "Studio tidies only Downloads itself, so exports in this folder are never tidied."; fi
   fi
