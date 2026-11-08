@@ -27,7 +27,7 @@ FRESH_MACHINE="Jason's MacBook"
 # once step 5 has asked its two questions.
 MACHINE="" KEY_COMMENT="" INSTALL_OPTIONS=()
 FRESH=""             # set by which_mac on a Mac with no brimm-video settings
-SET_UP_FRESH=""      # yes on a Mac set up fresh (the same as FRESH now; a later run reads it from a mark)
+SET_UP_FRESH=""      # yes on a Mac set up fresh: FRESH on its first run, and on a later run (the settings are there) the mark fresh=yes
 STUDIO_URL="${BRIMM_STUDIO_REPO:-git@github-brimm-video-studio:jogden12/brimm-video-studio.git}"
 HOST_ALIAS="github-brimm-video-studio"
 KEY="$HOME/.ssh/brimm_video_studio_deploy"
@@ -86,6 +86,10 @@ DROP_FROM="" EXPORTS_FROM=""       # where each came from: suggested, settings, 
 REFUSED=""                         # what a refused print sends back to: exports, drop, nested, or empty for a stop
 CLOUD_OK_FOR=""                    # the real path of the drop folder that was answered y at the cloud question, for this run
 R44_CLOUD=""                       # the report's Cloud warning line
+R44_DROP="" R44_EXPORTS=""         # the report's Drop folder and Exports folder lines
+INSTALL_STARTED=""                 # yes once the real installer has been started on this run (the marks are written just before)
+BACKGROUND_SEEN=""                 # yes once the installer's output held its "From the background job:" line: the launch agent was started
+START_DROP=""                      # the real path of the drop folder at the start of the run, when step 1 counts it (none on a Mac set up fresh)
 
 say() {
   print -r -- "$@" 2>/dev/null || true
@@ -98,12 +102,27 @@ done_already() { say "Already done: $1"; }
 
 # What this run changed, said the same way when it stops and when it is interrupted.
 summary() {
+  local new_drop=""
+  local -a folders
+  # After the installer started, where the drop folder is now: Studio's own settings say. Nothing here waits, asks or counts the old folder.
+  if [[ -n "$INSTALL_STARTED" ]]; then
+    folders=("${(@f)$(show_folders)}")
+    new_drop="${folders[1]-}"
+  fi
   if (( ${#changed[@]} == 0 )); then
     say "Stopped. This run changed nothing."
   else
     say "Stopped. This run changed:"
     local c
     for c in "${changed[@]}"; do say "  - $c"; done
+  fi
+  if [[ -n "$INSTALL_STARTED" ]]; then
+    if [[ -z "$BACKGROUND_SEEN" ]]; then
+      say "Move to Studio has not finished, so a video dropped now may not be imported. Drop no video until it has finished: double-click it again now."
+    elif [[ -n "$new_drop" && "${new_drop:A}" != "$START_DROP" ]]; then
+      say "This Mac's drop folder is now $(words_for "$new_drop")."
+      if [[ -z "$SET_UP_FRESH" ]]; then say "Videos put in Drop › $MACHINE in Dropbox are no longer imported."; fi
+    fi
   fi
   say "Double-click Move to Studio again to go on from here."
 }
@@ -208,6 +227,8 @@ which_mac() {
       exit 2
     fi
     MACHINE="$machine"
+    # A Mac set up fresh on an earlier run has its settings now: the mark written right before that run's install says so.
+    if [[ "$(mark_of fresh)" == yes ]]; then SET_UP_FRESH="yes"; fi
   else
     FRESH="yes"
     SET_UP_FRESH="yes"
@@ -239,7 +260,46 @@ count_entries() {
   print -r -- 0
 }
 
-# The two looks that must hold when anything is changed: no import is running, and the drop folder holds nothing to import. Step 1
+# The drop folder and the exports folder this Mac's settings name now, one a line (the exports line is empty when settings.js show has
+# none: brimm-video's has no exports line). Printed only, so it may be called inside $(...). Before the installer starts it asks the checkout the
+# settings name (brimm-video's, or Studio's on a later run); once it has started, Studio's. It asks once, and nothing is said when it cannot be
+# asked (no node, no settings, an error).
+show_folders() {
+  local js="" shown="" drop="" exports=""
+  if [[ -n "$INSTALL_STARTED" ]]; then js="$STUDIO/tool/settings.js"
+  elif [[ -n "$CHECKOUT_NOW" ]]; then js="$CHECKOUT_NOW/tool/settings.js"; fi
+  if [[ -n "$js" && -f "$js" && -n "$NODE" && -f "$SETTINGS" ]]; then
+    shown="$("$NODE" "$js" show 2>/dev/null || true)"
+    drop="$(print -r -- "$shown" | sed -n 's/^  Its drop folder:  //p' | head -n 1 || true)"
+    exports="$(print -r -- "$shown" | sed -n 's/^  Exports from HyperFrames, looked for in:  //p' | head -n 1 || true)"
+  fi
+  print -r -- "$drop"
+  print -r -- "$exports"
+  return 0
+}
+# Whether the unedited launch agent watches $1: macOS has the job loaded, and the agent's plist names the folder in its WatchPaths, by real
+# path. It is decided from the job that is loaded, not from the file alone.
+watched_by_agent() {
+  local folder="$1" watched
+  launchctl list com.thebrimm.unedited >/dev/null 2>&1 || return 1
+  for watched in "${(@f)$(plist_watch_paths "$AGENT_FILE")}"; do
+    if [[ -n "$watched" && "${watched:A}" == "${folder:A}" ]]; then return 0; fi
+  done
+  return 1
+}
+# "1 file or folder", "N files or folders".
+files_or_folders() { if (( $1 == 1 )); then print -r -- "1 file or folder"; else print -r -- "$1 files or folders"; fi; }
+# Counts $1 once, with count_entries, into COUNTED. A folder that cannot be read is not an empty one: it stops, without naming the cloud.
+count_or_stop() {
+  local rc=0
+  COUNTED="$(count_entries "$1")" || rc=$?
+  if (( rc != 0 )); then
+    stop_here "The drop folder could not be read. macOS may have asked whether Terminal may read it, and the answer may have been no. Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again."
+  fi
+}
+COUNTED=""
+
+# The two looks that must hold when anything is changed: no import is running, and the drop folders hold nothing to import. Step 1
 # looks, and step 5 looks again right before the real install, because the installer checks the drop folder only when it switches
 # the folder, and a Mac already on Drop would not look again itself. Same words, same stops each time.
 look_at_import_and_drop() {
@@ -253,8 +313,8 @@ look_at_import_and_drop() {
   done
   say "  No import is running."
 
-  # A Mac set up fresh has no drop folder until the installer makes it. Otherwise it is the one this Mac's brimm-video names. It
-  # is counted and never listed: a file's name can be a client's.
+  # A Mac set up fresh has no drop folder until the installer makes it. Otherwise it is the one this Mac's settings name. It is
+  # counted and never listed: a file's name can be a client's.
   if [[ -n "$FRESH" ]]; then
     R_COUNT="none: this Mac had no drop folder before the install"
     return 0
@@ -262,21 +322,59 @@ look_at_import_and_drop() {
   if [[ ! -f "$CHECKOUT_NOW/tool/settings.js" ]]; then
     stop_here "This Mac's checkout ($CHECKOUT_NOW) has no tool/settings.js to say where its drop folder is."
   fi
-  DROP="$("$NODE" "$CHECKOUT_NOW/tool/settings.js" show 2>/dev/null | sed -n 's/^  Its drop folder:  //p' | head -n 1 || true)"
-  if [[ -z "$DROP" || ! -d "$DROP" ]]; then
+  local -a folders
+  folders=("${(@f)$(show_folders)}")
+  DROP="${folders[1]-}"
+  if [[ -z "$DROP" ]]; then
     stop_here "The drop folder could not be found from this Mac's settings (settings.js show)."
   fi
-  # A folder that cannot be listed is not an empty one: count_entries gives 2 for it, never 0.
-  local held rc=0
-  held="$(count_entries "$DROP")" || rc=$?
-  if (( rc != 0 )); then
-    stop_here "The drop folder could not be read. macOS may have asked whether Terminal may read Dropbox, and the answer may have been no. Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again."
+  START_DROP="${DROP:A}"
+  local old="$ROOT/Drop/$MACHINE" old_held="" new_held
+
+  # Once the install has finished at this commit only step 7 and the end are left, and neither changes the drop folder: it is counted
+  # for the report, and a video held there never blocks the run.
+  if [[ "$(mark_of installed)" == "$COMMIT" ]]; then
+    local rc=0
+    new_held="$(count_entries "$DROP")" || rc=$?
+    if (( rc != 0 )); then
+      R_COUNT="could not be read, so it was not counted"
+      say "  The drop folder could not be read, so it was not counted. The install has finished, so this does not stop the run."
+    else
+      R_COUNT="$new_held"
+      if (( new_held > 0 )); then say "  The drop folder holds $(files_or_folders $new_held). The install has finished, so this does not stop the run."
+      else say "  The drop folder is empty."; fi
+    fi
+    return 0
   fi
-  if (( held > 0 )); then
-    stop_here "The drop folder holds $held file$([[ $held -eq 1 ]] || print -rn s) still to be imported."
+
+  # Drop › <Mac> in Dropbox, while it is there, on a Mac moved from brimm-video: any file in it stops the run.
+  if [[ -z "$SET_UP_FRESH" && -d "$old" ]]; then
+    count_or_stop "$old"
+    old_held="$COUNTED"
+    if (( old_held > 0 )); then
+      if watched_by_agent "$old"; then
+        stop_here "The drop folder holds $old_held file$([[ $old_held -eq 1 ]] || print -rn s) still to be imported."
+      fi
+      stop_here "$(files_or_folders $old_held) $([[ $old_held -eq 1 ]] && print -rn waits || print -rn wait) in the old drop folder, Drop › $MACHINE, and nothing imports $([[ $old_held -eq 1 ]] && print -rn it || print -rn them) now. Tell Jason."
+    fi
   fi
-  say "  The drop folder is empty."
-  R_COUNT="$held"
+  # The folder settings.js show names. It is the old folder when the settings name no other, and then it was counted already. A folder
+  # that is not there yet counts as empty: the installer makes it.
+  if [[ -n "$old_held" && "${DROP:A}" == "${old:A}" ]]; then
+    new_held="$old_held"
+  else
+    count_or_stop "$DROP"
+    new_held="$COUNTED"
+    if (( new_held > 0 )); then
+      if watched_by_agent "$DROP"; then
+        stop_here "The drop folder holds $new_held file$([[ $new_held -eq 1 ]] || print -rn s) still to be imported."
+      fi
+      say "  $(files_or_folders $new_held) $([[ $new_held -eq 1 ]] && print -rn waits || print -rn wait) in $(words_for "$DROP"). Nothing watches it yet: the install starts the watching, and they are imported then."
+    fi
+  fi
+  if (( new_held == 0 )); then say "  The drop folder is empty."; fi
+  R_COUNT="$new_held"
+  if [[ -n "$old_held" && "${DROP:A}" != "${old:A}" ]]; then R_COUNT="$new_held in the drop folder, $old_held in Drop › $MACHINE"; fi
 }
 
 # Step 1 on a Mac with no brimm-video settings: BRIMM Video is found in Dropbox, and setting the Mac up fresh is asked. Studio's
@@ -304,7 +402,7 @@ set_up_fresh() {
   if [[ -n "$PRINT_ONLY" ]]; then
     would "ask to set this Mac up fresh as $MACHINE, with BRIMM Video at $ROOT"
   else
-    ask "This Mac has no brimm-video settings (~/Library/Application Support/BRIMM Video/settings.json), so it is set up fresh, as $MACHINE: its own drop folder (Drop › $MACHINE), the light import, hand-off version 2 and a BRIMM Video Studio folder for Claude, all made by Studio's installer in step 5. BRIMM Video is at $ROOT."
+    ask "This Mac has no brimm-video settings (~/Library/Application Support/BRIMM Video/settings.json), so it is set up fresh, as $MACHINE: a drop folder picked in step 5 (suggested: BRIMM Video Work › Drop, on this Mac), the light import, hand-off version 2 and a BRIMM Video Studio folder for Claude, all made by Studio's installer in step 5. BRIMM Video is at $ROOT."
   fi
   R_SETTINGS="none: this Mac had no brimm-video settings, and is set up fresh as $MACHINE"
 }
@@ -366,19 +464,29 @@ look_at_this_mac() {
 
   if [[ -n "$FRESH" ]]; then
     set_up_fresh
+  elif [[ -n "$SET_UP_FRESH" ]]; then
+    # A Mac set up fresh on an earlier run: nothing is asked again, and BRIMM Video and the drop folder come from its settings.
+    ROOT="$(setting root)"
+    CHECKOUT_NOW="$(setting checkout)"
+    say "  brimm-video's settings:  none: this Mac was set up fresh on an earlier run, and Studio's settings are there now"
+    say "  BRIMM Video:  $ROOT"
+    R_SETTINGS="nothing: this Mac was set up fresh on an earlier run, as $MACHINE"
   else
     # This Mac's settings, as the switch of 26 October left them. A checkout that is Studio's is as good as brimm-video's: a later run.
     ROOT="$(setting root)"
     CHECKOUT_NOW="$(setting checkout)"
-    local import="$(setting import)" handoff="$(setting handoffVersion)" drop="$(setting drop)"
-    say "  brimm-video's settings:  import $import, hand-off version $handoff, drop folder $drop"
+    local import="$(setting import)" handoff="$(setting handoffVersion)" drop="$(setting drop)" own="$(setting dropPath)" shown
+    shown="drop folder $drop"
+    if [[ -n "$own" ]]; then shown="drop folder: its own, $own"; fi
+    say "  brimm-video's settings:  import $import, hand-off version $handoff, $shown"
     [[ "$import" == light ]] || stop_here "This Mac's settings are not as the switch of 26 October left them: the import is \"$import\", and it should be \"light\"."
-    [[ "$drop" == Drop ]] || stop_here "This Mac's settings are not as the switch of 26 October left them: the drop folder is \"$drop\", and it should be \"Drop\"."
+    # The installer keeps drop "Drop" on a Mac it switched, and gives a Mac it set up fresh a dropPath and no drop: either is expected.
+    [[ "$drop" == Drop || -n "$own" ]] || stop_here "This Mac's settings are not as the switch of 26 October left them: the drop folder is \"$drop\", and it should be \"Drop\"."
     [[ "$handoff" == 2 ]] || stop_here "This Mac's settings are not as the switch of 26 October left them: the hand-off version is \"$handoff\", and it should be \"2\"."
     if [[ "$CHECKOUT_NOW" != "$OLD_CHECKOUT" && "$CHECKOUT_NOW" != "$STUDIO" ]]; then
       stop_here "This Mac's settings are not as the switch of 26 October left them: the checkout is \"$CHECKOUT_NOW\", and it should be brimm-video's ($OLD_CHECKOUT) or Studio's ($STUDIO)."
     fi
-    R_SETTINGS="nothing: import $import, hand-off version $handoff, drop folder $drop, checkout as expected"
+    R_SETTINGS="nothing: import $import, hand-off version $handoff, $shown, checkout as expected"
   fi
 
   look_at_import_and_drop
@@ -1046,7 +1154,7 @@ folder_question() {
       fi ;;
   esac
   # On a Mac moved from brimm-video, the drop folder it has today stops being watched.
-  if [[ "$kind" == drop && -z "$FRESH" && "$from" != settings ]]; then
+  if [[ "$kind" == drop && -z "$SET_UP_FRESH" && "$from" != settings ]]; then
     lines=("Today the drop folder is Drop › $MACHINE in Dropbox. Once the install has run, it is no longer watched." "${lines[@]}")
   fi
   QUESTION_LINES="${(F)lines}"
@@ -1191,8 +1299,23 @@ print_has() { grep -q -- "$1" <<< "$PRINT_TOLD"; }
 # The last lines of what the installer said, for a stop and for the report.
 last_lines() { print -r -- "$1" | tail -n "${2:-8}"; }
 
+# The Finder step's sentence for the drop folder $1, decided by Studio's cloudFolder of it and by whether this Mac was set up fresh. The
+# folder is named in Finder's words, never by the Mac's name. Printed only.
+finder_sentence() {
+  local folder="$1" cloud words
+  cloud="$(studio_says cloudFolder "$folder")"
+  words="$(words_for "$folder")"
+  if [[ "$cloud" == Dropbox ]]; then
+    local node_too=""
+    if [[ -n "$SET_UP_FRESH" ]]; then node_too=", and click Allow if macOS asks whether node may read the Dropbox folder"; fi
+    print -r -- "The drop folder is shown in Finder: $words. In Finder, Control-click it, choose Make available offline$node_too."
+  else
+    print -r -- "This is the drop folder from now on: $words. Drag it into Finder's sidebar now, under Favorites, so it is one click away. To bring in a video that is in Dropbox, hold Option as you drag it, so that Dropbox keeps its copy. Never export into the drop folder."
+  fi
+}
+
 turn_on_hyperframes() {
-  local shown app drop out fresh="${1-}"
+  local shown app drop out installed="${1-}"
   if [[ ! -f "$STUDIO/tool/settings.js" ]]; then
     stop_here "$STUDIO/tool/settings.js is not there, so the editing app cannot be looked at."
   fi
@@ -1211,10 +1334,9 @@ turn_on_hyperframes() {
     say "  $out"
     R44_APP="$out"
     changed+=("turned HyperFrames on as the editing app")
-    fresh=yes
   fi
-  # The drop folder, shown in Finder, where Dropbox is told to keep it on this Mac.
-  [[ -n "$fresh" ]] || return 0
+  # The drop folder, shown in Finder: when the install finished on this run, and on every later run until the step is done.
+  if [[ -z "$installed" && "$(mark_of finder)" == "$COMMIT" ]]; then return 0; fi
   if [[ -n "$PRINT_ONLY" ]]; then
     would "show the drop folder in Finder with: open -R \"${drop:-the drop folder}\""
     return 0
@@ -1224,7 +1346,8 @@ turn_on_hyperframes() {
     return 0
   fi
   open -R "$drop" || true
-  wait_for "The drop folder, $MACHINE, is shown in Finder. In Finder, Control-click $MACHINE, choose Make available offline, and click Allow if macOS asks whether node may read the Dropbox folder."
+  wait_for "$(finder_sentence "$drop")"
+  write_mark finder "$COMMIT"
 }
 
 # Reads a print that was refused (its status was not 0): REFUSED is the question to ask again (exports, drop or nested), or empty for
@@ -1297,12 +1420,23 @@ ask_about_the_cloud() {
   set_install_options
   return 1
 }
-# The report's Cloud warning line: Studio's cloudFolder of the drop folder the installer was given.
-note_the_cloud() {
-  local name
-  name="$(studio_says cloudFolder "$DROP_FOLDER")"
+# The report's three lines (Drop folder, Exports folder, Cloud warning), filled on every run that is not a print. They hold the folders
+# Studio's settings.js show names: after the install it ran on this run, or on a later run the ones it left. $1 is yes when the install
+# finished on an earlier run, so that the settings' own drop folder was kept on a y then. The cloud's name is Studio's cloudFolder of the
+# drop folder.
+note_the_folders() {
+  local earlier="${1-}" name drop exports
+  local -a folders
+  folders=("${(@f)$(show_folders)}")
+  drop="${folders[1]-}" exports="${folders[2]-}"
+  if [[ -z "$drop" ]]; then drop="$DROP_FOLDER"; fi
+  if [[ -z "$exports" ]]; then exports="$EXPORTS_FOLDER"; fi
+  R44_DROP="${drop:-not named by Studio's settings}"
+  R44_EXPORTS="${exports:-not named by Studio's settings}"
+  name=""
+  if [[ -n "$drop" ]]; then name="$(studio_says cloudFolder "$drop")"; fi
   if [[ -z "$name" ]]; then R44_CLOUD="none"
-  elif [[ -n "$DROP_KEPT" ]]; then R44_CLOUD="$name, kept on a y on an earlier run"
+  elif [[ -n "$earlier" || -n "$DROP_KEPT" ]]; then R44_CLOUD="$name, kept on a y on an earlier run"
   else R44_CLOUD="$name, kept on a y"
   fi
 }
@@ -1333,6 +1467,7 @@ run_the_installer() {
   if [[ "$(mark_of installed)" == "$COMMIT" ]]; then
     done_already "Studio's installer finished at this commit (${COMMIT[1,7]}), on an earlier run"
     R44_RAN="finished at ${COMMIT[1,7]} on an earlier run"
+    if [[ -z "$PRINT_ONLY" ]]; then note_the_folders yes; fi
     turn_on_hyperframes
     return 0
   fi
@@ -1412,7 +1547,6 @@ run_the_installer() {
   say "The lines that matter:"
   [[ -z "$matter" ]] || say "$matter"
   R44_PRINT="$matter"
-  if [[ -z "$PRINT_ONLY" ]]; then note_the_cloud; fi
 
   if [[ -n "$PRINT_ONLY" ]]; then
     would "run Studio's installer for real, after asking, with the same line and --yes in place of --print"
@@ -1424,6 +1558,12 @@ run_the_installer() {
   privacy_notes
   ask "Studio's installer now runs for real, with the same options as its print above. It sets Studio up on this Mac, changes this Mac's brimm-video settings to run from Studio, and ends with one real call to Claude from the background job (up to 90 seconds). It can take a few minutes."
   look_at_import_and_drop
+  # The marks, right before the install runs: the folders given to it on this run, and a Mac set up fresh. A pick kept as it is
+  # (no option) writes none.
+  if (( ${INSTALL_OPTIONS[(Ie)--drop-folder]} )); then write_mark drop "$DROP_FOLDER"; fi
+  if (( ${INSTALL_OPTIONS[(Ie)--exports-folder]} )); then write_mark exports "$EXPORTS_FOLDER"; fi
+  if [[ -n "$SET_UP_FRESH" ]]; then write_mark fresh yes; fi
+  INSTALL_STARTED=yes
   local kept rc
   kept="$(mktemp)"
   # Written before the installer runs, in words that are true however far it gets; made plain once it has finished.
@@ -1433,6 +1573,8 @@ run_the_installer() {
   zsh "$STUDIO/tool/install.sh" --yes "${INSTALL_OPTIONS[@]}" "$ROOT" 2>&1 | while IFS= read -r line; do
     say "$line"
     print -r -- "$line" >> "$kept"
+    # Noted as it is read, before the status is looked at: the agent was started, even if the installer ends 1 after this.
+    if [[ "$line" == "From the background job:"* ]]; then BACKGROUND_SEEN=yes; fi
   done
   rc=${pipestatus[1]}
   set -e
@@ -1460,6 +1602,7 @@ Tell Jason: Claude may not be reachable from the background job, which is where 
   R44_AGENT="${line}; ${CHECK_FILE:t}: gone"
   write_mark installed "$COMMIT"
   say "  Studio's installer finished."
+  note_the_folders
   turn_on_hyperframes yes
 }
 # Step 6: the report Jason carries to the Mac Studio, where each line is copied into the box the By-Hand page labels the same
@@ -1492,7 +1635,9 @@ compose_report() {
   print -r -- "The installer's last lines: $(one_line "$R44_RAN")"
   print -r -- "What the look for the one-shot check printed: $(one_line "$R44_AGENT" "$(unchecked "the installer finished on an earlier run")")"
   print -r -- "What turning HyperFrames on printed: $(one_line "$R44_APP" "nothing: turning it on was not needed on this run")"
-  print -r -- "Cloud warning: $(one_line "$R44_CLOUD" "$(unchecked "not asked on this run (the installer finished on an earlier run)")")"
+  print -r -- "Drop folder: $(one_line "$R44_DROP" "$(unchecked "not named by Studio's settings")")"
+  print -r -- "Exports folder: $(one_line "$R44_EXPORTS" "$(unchecked "not named by Studio's settings")")"
+  print -r -- "Cloud warning: $(one_line "$R44_CLOUD" "$(unchecked "not named by Studio's settings")")"
   print -r -- ""
   print -r -- "48 Afterwards"
   print -r -- "brimm-video's old key: $R48"
@@ -1515,12 +1660,33 @@ write_the_report() {
   open -R "$REPORT" || true
 }
 
+# The last lines, on a Mac moved from brimm-video: said only right before "Done.", never on the way to a stop and never on a Mac set up
+# fresh, while Drop › <Mac> is still in Dropbox. The folder is counted once, as step 1 counts a drop folder (nothing but .DS_Store and
+# .brimm-watched-by, counted and never listed). Nothing here waits or asks, so nothing here can stop the run.
+old_drop_lines() {
+  local old="$ROOT/Drop/$MACHINE" held="" rc=0 new
+  local -a folders
+  if [[ -n "$SET_UP_FRESH" || -n "$PRINT_ONLY" || ! -d "$old" ]]; then return 0; fi
+  held="$(count_entries "$old")" || rc=$?
+  folders=("${(@f)$(show_folders)}")
+  new="the new drop folder"
+  if [[ -n "${folders[1]-}" ]]; then new="$(words_for "${folders[1]}")"; fi
+  say ""
+  if (( rc != 0 )); then
+    say "The old drop folder, Drop › $MACHINE in Dropbox, could not be read, so it was not counted. Jason counts it from the Mac Studio before deleting it."
+  elif (( held == 0 )); then
+    say "The old drop folder, Drop › $MACHINE in Dropbox, is empty and no longer watched. Jason checks it is still empty, then deletes it by hand, and takes it out of Finder's sidebar."
+  else
+    say "The old drop folder, Drop › $MACHINE in Dropbox, holds $(files_or_folders $held) that nothing imports now. Drag each video in it into $new, with a plain drag, which moves it out of Dropbox, and it is imported there. Jason deletes the folder by hand once it is empty."
+  fi
+}
+
 # Step 7, check 48: brimm-video's old key. Once the move is done and Jason has deleted the key on GitHub, its two files can go
 # from this Mac. Asked only then; a no keeps them and does not stop the run.
 retire_the_old_key() {
   heading "7. brimm-video's old key (check 48)"
   # A Mac set up fresh moved nothing from brimm-video, so its key, if there is one, is not this app's to take.
-  if [[ -n "$FRESH" ]]; then
+  if [[ -n "$SET_UP_FRESH" ]]; then
     R48="not asked: this Mac was set up fresh, so it is left as it is"
     if [[ -n "$PRINT_ONLY" ]]; then
       would "leave brimm-video's old key as it is, if there is one: this Mac is set up fresh"
@@ -1584,6 +1750,7 @@ main() {
   run_the_installer
   write_the_report
   retire_the_old_key
+  old_drop_lines
   say ""
   if [[ -n "$PRINT_ONLY" ]]; then
     say "Nothing was changed."

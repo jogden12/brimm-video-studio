@@ -244,7 +244,9 @@ const agentPlist = (paths) => `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE
                the installer finished at the pin, and the Finder step is done)
     hfApp      the version of the HyperFrames app (default "1.4.0"), or null for none; hfAppAfterOpen: the version the app has once
                `open -a Safari` has been run (the stand-in puts it there)
+    dropGone   true: the drop folder settings.js show names is taken away again, so that it is not there
     install    what the stand-in tool/install.sh in the "GitHub" repo does: { print, printExit, ran, ranExit, noBackground, moves, checkLeft }.
+               `ranDrops` (names, separated by spaces) are put in the Mac's old Drop/<Mac> by --yes, and `ranUnreadable` makes that folder mode 000 (the test puts it right).
                `print` and `printExit` are the text and the status of --print (a list: one a call, the last repeating), `ran` the text of
                --yes (noBackground leaves out its "From the background job:" line); `printDrops` (a file name put in her drop folder by every --print), `moves`
                rewrites settings.json's checkout to Studio and writes the agent's plist; `checkLeft` leaves the one-shot plist;
@@ -312,6 +314,8 @@ case "$1" in
     ${inst.writesSettings ? `machine="$3"; for a in "$@"; do root="$a"; done
     mkdir -p "$HOME/Library/Application Support/BRIMM Video" "$root/Drop/$machine"
     node -e 'const [f, root, machine, checkout] = process.argv.slice(1); require("fs").writeFileSync(f, JSON.stringify({ version: 1, machine, root, checkout, import: "light", handoffVersion: 2, drop: "Drop" }))' "$HOME/Library/Application Support/BRIMM Video/settings.json" "$root" "$machine" "$HOME/Claude Code/brimm-video-studio"` : ""}
+    ${inst.ranDrops ? `machine="$3"; for a in "$@"; do root="$a"; done; for n in ${inst.ranDrops}; do touch "$root/Drop/$machine/$n"; done` : ""}
+    ${inst.ranUnreadable ? `machine="$3"; for a in "$@"; do root="$a"; done; chmod 000 "$root/Drop/$machine"` : ""}
     dropf=""; exportsf=""
     while [ $# -gt 0 ]; do case "$1" in --drop-folder) dropf="$2"; shift ;; --exports-folder) exportsf="$2"; shift ;; esac; shift; done
     if [ -n "$dropf$exportsf" ] && [ -f "$HOME/Library/Application Support/BRIMM Video/settings.json" ]; then
@@ -348,6 +352,8 @@ esac
       put(join(drop, ".brimm-watched-by"), `${settings.machine}\n`);
     }
     for (const name of options.dropFiles ?? []) put(join(dropDir, name), "made for the test");
+    // dropGone: the drop folder settings.js show names is not there (yet), as a folder the installer has still to make.
+    if (options.dropGone) rmSync(dropDir, { recursive: true, force: true });
   }
   // A Mac with no settings still has The BRIMM DB in Dropbox, unless the test says it has none (null), two ("two"), or one in
   // CloudStorage with ~/Dropbox a link to it ("linked"), as Dropbox makes it on a newer Mac.
@@ -548,6 +554,8 @@ esac
       }
       const r = spawnSync("/bin/zsh", [MOVE, ...commit, ...runArgs], { encoding: "utf8", input: o.answers ?? "", env });
       if (firstRun) firstRun.kill("SIGKILL");
+      // The stand-in installer made the old drop folder unreadable (ranUnreadable); it is put right for the listing below.
+      if (o.install?.ranUnreadable && oldDrop) { try { chmodSync(oldDrop, 0o755); } catch {} }
       putRight();
       const studioNow = existsSync(studio)
         ? { branch: inStudio("rev-parse", "--abbrev-ref", "HEAD"), head: inStudio("rev-parse", "HEAD"), upstream: inStudio("rev-parse", "--abbrev-ref", "@{u}"),
@@ -610,18 +618,19 @@ describe("the move script, looking at her Mac", { skip: notAMac }, () => {
   });
 
   it("counts the files in her drop folder, never names one, and stops when there are any", () => {
-    const r = moveOn({ dropFiles: ["Client Name Session.mov"] });
+    const r = moveOn({ marks: "tests=SHA\n", dropFiles: ["Client Name Session.mov"] });
     assert.equal(r.status, 1);
     assert.match(r.out, /The drop folder holds 1 file still to be imported\./);
     assert.ok(!r.out.includes("Client Name") && !r.log.includes("Client Name") && !r.err.includes("Client Name"));
-    const two = moveOn({ dropFiles: ["a.mov", "b.mov"] });
+    const two = moveOn({ marks: "tests=SHA\n", dropFiles: ["a.mov", "b.mov"] });
     assert.match(two.out, /The drop folder holds 2 files still to be imported\./);
   });
 
   it("stops, saying to allow Terminal, when her drop folder cannot be read, and does not take it for empty", () => {
-    const r = moveOn({ dropMode: 0o000 });
+    const r = moveOn({ marks: "tests=SHA\n", dropMode: 0o000 });
     assert.equal(r.status, 1, r.out);
-    assert.match(r.out, /The drop folder could not be read\. macOS may have asked whether Terminal may read Dropbox/);
+    assert.match(r.out, /The drop folder could not be read\. macOS may have asked whether Terminal may read it, and the answer may have been no\./);
+    assert.ok(!r.out.includes("may read Dropbox"), "it names no cloud");
     assert.match(r.out, /Allow it in System Settings › Privacy & Security › Files and Folders, then run the app again\./);
     assert.ok(!r.out.includes("The drop folder is empty."), r.out);
     assert.ok(r.out.endsWith(STOPPED_NOTHING), r.out);
@@ -1024,11 +1033,11 @@ describe("the move script, Studio's code (check 42)", { skip: notAMac }, () => {
     assert.match(fail.out, /✖|✔|ok/);
     assert.ok(!/tests=/.test(fail.studioNow.marks), "nothing is marked on a failure");
 
-    const pass = moveOn({ marks: "installed=SHA\n" });
+    const pass = moveOn({ marks: "installed=SHA\nfinder=SHA\n" });
     assert.equal(pass.status, 0, pass.out);
     assert.match(pass.out, /ℹ pass 1/);
     assert.match(pass.out, /ℹ fail 0/);
-    assert.equal(pass.studioNow.marks, `installed=${pass.sha}\ntests=${pass.sha}\n`, "only its own line is written, the rest kept");
+    assert.equal(pass.studioNow.marks, `installed=${pass.sha}\nfinder=${pass.sha}\ntests=${pass.sha}\n`, "only its own line is written, the rest kept");
     assert.match(pass.log, /ℹ pass 1/, "kept in the log");
 
     const again = moveOn({});
@@ -1189,9 +1198,7 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     const r = moveOn({ marks: NOT_INSTALLED, settingsChange: { app: undefined }, answers: "y\ny\ny\ny\n\n" });
     assert.equal(r.status, 0, r.out);
     assert.ok(r.out.includes("The editing app is now hyperframes (it was off)."), r.out);
-    assert.match(r.out, /Make available offline/);
-    assert.match(r.out, /Allow/);
-    assert.match(r.out, /node/);
+    assert.match(r.out, /Drag it into Finder's sidebar now, under Favorites/);
     const calls = r.ran.split("\n");
     assert.ok(calls.includes(`open -R ${r.home}/BRIMM Video Work/Drop`), r.ran);
 
@@ -1226,7 +1233,7 @@ describe("the move script, HyperFrames and Studio's installer (checks 43 and 44)
     assert.equal(installCalls(other).length, 1, "it prints again");
 
     const fresh = moveOn({ marks: "tests=SHA\n", answers: "y\ny\ny\n\n" });
-    assert.equal(fresh.studioNow.marks, `tests=${fresh.sha}\ninstalled=${fresh.sha}\n`, "only its own line is written, the rest kept");
+    assert.equal(fresh.studioNow.marks, `tests=${fresh.sha}\ndrop=${fresh.home}/BRIMM Video Work/Drop\ninstalled=${fresh.sha}\nfinder=${fresh.sha}\n`, "only its own lines are written, the rest kept");
   });
 
   it("with --print and no checkout, says the exact line it would print first", () => {
@@ -1332,7 +1339,7 @@ describe("the move script, the report and brimm-video's old key (check 48)", { s
     "Her macOS:", "Free on her disk:", "Anything unexpected in her settings:", "What the count printed:", "Her Claude account's plan:",
     "Whether the key is on GitHub, and how:", "What the check of the key printed:", "The commit:", "The tests' last lines:",
     "The app's version on each Mac:", "Anything in the print that surprised you, and its HDR line:", "The installer's last lines:",
-    "What the look for the one-shot check printed:", "What turning HyperFrames on printed:", "Cloud warning:"
+    "What the look for the one-shot check printed:", "What turning HyperFrames on printed:", "Drop folder:", "Exports folder:", "Cloud warning:"
   ];
   const CHECKS = ["41 Before you start", "42 Studio's code on her laptop", "43 The HyperFrames app on her laptop", "44 Studio's installer on her laptop", "48 Afterwards"];
 
@@ -2624,5 +2631,327 @@ for f in "$HOME/Downloads" "$HOME/RealDL" "$HOME/Downloads/Sub" "$HOME/Other"; d
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(r.stdout.trimEnd().split("\n"), ["Videos to Drop, in your home folder", `${home}/Videos to Drop`, `${home}/Videos to Drop`, `${home}/Videos to Drop`]);
     assert.equal(r.stderr, "", "node's errors are kept off the screen");
+  });
+});
+
+describe("the move script, later runs, the marks, the stop summary and the end of the run", { skip: notAMac }, () => {
+  const NOT_INSTALLED = "tests=SHA\n";
+  const JASON = "Jason's MacBook";
+  const JASON_KEY = "brimm-video-studio read-only, Jason's MacBook";
+  const STUDIO_AT = "<HOME>/Claude Code/brimm-video-studio";
+  // A moved Mac as Studio's installer leaves it: its checkout is Studio's, and it has a drop folder of its own beside drop "Drop".
+  const MOVED = { checkout: STUDIO_AT, dropPath: "<HOME>/My Drop" };
+  // A Mac set up with a drop folder of its own and no drop.
+  const OWN = { ...MOVED, drop: undefined };
+  const OLD_DROP = "<HOME>/Dropbox/The BRIMM DB/BRIMM Video/Drop/Sallie's laptop";
+  const installCalls = (r) => r.ran.split("\n").filter((l) => l.startsWith("install.sh "));
+  const FRESH_MAC = { settings: null, key: JASON_KEY, marks: NOT_INSTALLED };
+  const NOT_FINISHED = "Move to Studio has not finished, so a video dropped now may not be imported. Drop no video until it has finished: double-click it again now.";
+  const NOW = (words) => `This Mac's drop folder is now ${words}.`;
+  const NO_LONGER = "Videos put in Drop › Sallie's laptop in Dropbox are no longer imported.";
+  const LOCAL_DROP = "BRIMM Video Work › Drop, in your home folder";
+  const FINDER_LOCAL = (words) => `This is the drop folder from now on: ${words}. Drag it into Finder's sidebar now, under Favorites, so it is one click away. To bring in a video that is in Dropbox, hold Option as you drag it, so that Dropbox keeps its copy. Never export into the drop folder.`;
+  const STOP_TAIL = "Double-click Move to Studio again to go on from here.\n";
+  const summaryOf = (r) => r.out.slice(r.out.lastIndexOf("Stopped."));
+
+  it("the marks are written right before the real install, and not on n", () => {
+    const r = moveOn({ marks: NOT_INSTALLED, picks: ["<HOME>/Exports"], answers: "y\nc\ny\n\n" });
+    assert.equal(r.status, 0, r.out);
+    assert.equal(r.studioNow.marks, `tests=${r.sha}\ndrop=${r.home}/BRIMM Video Work/Drop\nexports=${r.home}/Exports\ninstalled=${r.sha}\nfinder=${r.sha}\n`);
+
+    const no = moveOn({ marks: NOT_INSTALLED, picks: ["<HOME>/Exports"], answers: "y\nc\nn\n" });
+    assert.equal(no.status, 1, no.out);
+    assert.equal(no.studioNow.marks, `tests=${no.sha}\n`, "an n writes no mark");
+
+    // Written before the installer runs: a failed install has them, and is not marked finished.
+    const failed = moveOn({ marks: NOT_INSTALLED, install: { ranExit: 1 }, answers: "y\ny\ny\n" });
+    assert.equal(failed.status, 1, failed.out);
+    assert.equal(failed.studioNow.marks, `tests=${failed.sha}\ndrop=${failed.home}/BRIMM Video Work/Drop\n`, "no exports= for a y to Downloads");
+
+    // A stop at the look right before the install writes none.
+    const dropped = moveOn({ marks: NOT_INSTALLED, install: { printDrops: "x.mov" }, answers: "y\ny\ny\n" });
+    assert.equal(dropped.status, 1, dropped.out);
+    assert.equal(dropped.studioNow.marks, `tests=${dropped.sha}\n`);
+
+    // The settings' own drop folder, kept by y, is given to the installer with no option, so no drop= mark.
+    const kept = moveOn({ marks: NOT_INSTALLED, settingsChange: MOVED, answers: "y\ny\ny\n\n" });
+    assert.equal(kept.status, 0, kept.out);
+    assert.equal(kept.studioNow.marks, `tests=${kept.sha}\ninstalled=${kept.sha}\nfinder=${kept.sha}\n`);
+
+    // A Mac set up fresh is marked.
+    const fresh = moveOn({ ...FRESH_MAC, install: { writesSettings: true, ranExit: 1 }, answers: "y\ny\ny\ny\n" });
+    assert.equal(fresh.status, 1, fresh.out);
+    assert.equal(fresh.studioNow.marks, `tests=${fresh.sha}\ndrop=${fresh.home}/BRIMM Video Work/Drop\nfresh=yes\n`);
+  });
+
+  it("a run after a partial install offers to keep the folder, and gives no drop option", () => {
+    const first = moveOn({ marks: NOT_INSTALLED, install: { ranExit: 1 }, answers: "y\ny\ny\n" });
+    assert.equal(first.status, 1, first.out);
+    const second = first.again({ answers: "y\ny\ny\n\n" });
+    assert.equal(second.status, 0, second.out);
+    assert.ok(second.out.includes(`This Mac's drop folder is ${LOCAL_DROP}.`), second.out);
+    assert.ok(second.out.includes("Type y and press Return to keep it, or c and press Return to choose another."), second.out);
+    assert.ok(!second.ran.includes("--drop-folder"), second.ran);
+    assert.deepEqual(installCalls(second).map((l) => l.split(" ")[1]), ["--print", "--yes"]);
+  });
+
+  it("a Mac set up fresh, run again after a partial install, is still fresh", () => {
+    const first = moveOn({ ...FRESH_MAC, oldKey: true, install: { writesSettings: true, ranExit: 1 }, answers: "y\ny\ny\ny\n" });
+    assert.equal(first.status, 1, first.out);
+    const second = first.again({ answers: "y\ny\ny\ny\n\n" });
+    assert.equal(second.status, 0, second.out);
+    assert.ok(second.out.includes("set up fresh on an earlier run"), second.out);
+    assert.ok(!second.out.includes("This Mac has no brimm-video settings"), "no fresh question");
+    assert.ok(!second.out.includes("Today the drop folder is"), second.out);
+    assert.match(second.out, /Not asked: this Mac was set up fresh/);
+    assert.deepEqual(second.oldKeyFiles, [true, true], "step 7 leaves the old key");
+    assert.ok(existsSync(join(second.home, "Dropbox", "The BRIMM DB", "BRIMM Video", "Drop", JASON)), "the installer's stand-in made an old folder");
+    assert.ok(!second.out.includes("The old drop folder"), second.out);
+    assert.ok(second.out.trimEnd().endsWith("Done. Next on the By-Hand page: the rest of the check for Jason's MacBook."), second.out.slice(-300));
+    // No Dropbox search: with Dropbox gone, a third run still does not stop for it.
+    rmSync(join(second.home, "Dropbox"), { recursive: true, force: true });
+    const third = second.again({ answers: "" });
+    assert.equal(third.status, 0, third.out);
+    assert.ok(!third.out.includes("no BRIMM Video folder in Dropbox"), third.out);
+    assert.ok(!third.out.includes("The old drop folder"), third.out);
+  });
+
+  it("step 1 takes a dropPath as a drop folder of its own, counts it, and stops only when it is watched", () => {
+    const ok = moveOn({ marks: NOT_INSTALLED, settingsChange: OWN, answers: "y\ny\nn\n" });
+    assert.equal(ok.status, 1, ok.out);
+    assert.ok(ok.out.includes(`drop folder: its own, ${ok.home}/My Drop`), ok.out);
+    assert.ok(!ok.out.includes("should be \"Drop\""), ok.out);
+    assert.ok(ok.out.includes("The drop folder is empty."), ok.out);
+    assert.ok(ok.out.includes("Type y and press Return to keep it"), "it got as far as step 5");
+
+    // Its folder is not there yet: that counts as empty, the installer makes it.
+    const gone = moveOn({ marks: NOT_INSTALLED, settingsChange: OWN, dropGone: true, answers: "y\ny\ny\n\n" });
+    assert.equal(gone.status, 0, gone.out);
+    assert.ok(gone.out.includes("The drop folder is empty."), gone.out);
+    assert.match(gone.report, /^What the count printed: 0$/m);
+
+    // Files in it, loaded and watched: stop. Nothing is named.
+    const watched = moveOn({ marks: NOT_INSTALLED, settingsChange: OWN, dropFiles: ["Client Name.mov"] });
+    assert.equal(watched.status, 1, watched.out);
+    assert.ok(watched.out.includes("The drop folder holds 1 file still to be imported."), watched.out);
+    assert.ok(watched.out.endsWith(STOPPED_NOTHING), watched.out);
+    for (const text of [watched.out, watched.log, watched.err]) assert.ok(!text.includes("Client Name"));
+
+    // Not loaded, or loaded and not naming it: go on, with the spec's line.
+    const line = "2 files or folders wait in My Drop, in your home folder. Nothing watches it yet: the install starts the watching, and they are imported then.";
+    for (const change of [{ agentLoaded: false }, { agentWatches: ["<HOME>/Elsewhere"] }]) {
+      const r = moveOn({ marks: NOT_INSTALLED, settingsChange: OWN, dropFiles: ["a.mov", "b.mov"], answers: "y\ny\nn\n", ...change });
+      assert.equal(r.status, 1, r.out);
+      assert.ok(r.out.includes(line), r.out);
+      assert.ok(r.out.includes("Type y and press Return to keep it"), "it went on to step 5");
+      assert.ok(!r.out.includes("still to be imported"), r.out);
+    }
+    // The line for a single one.
+    const one = moveOn({ marks: NOT_INSTALLED, settingsChange: OWN, dropFiles: ["a.mov"], agentLoaded: false, answers: "y\ny\nn\n" });
+    assert.ok(one.out.includes("1 file or folder waits in My Drop, in your home folder. Nothing watches it yet"), one.out);
+  });
+
+  it("Drop › <Mac> holding a file stops: 'still to be imported' when watched, 'Tell Jason' when not", () => {
+    const held = { folderFiles: { [OLD_DROP]: ["a.mov", "b.mov"] } };
+    const watched = moveOn({ marks: NOT_INSTALLED, settingsChange: MOVED, ...held });
+    assert.equal(watched.status, 1, watched.out);
+    assert.ok(watched.out.includes("The drop folder holds 2 files still to be imported."), watched.out);
+    assert.ok(watched.out.endsWith(STOPPED_NOTHING), watched.out);
+
+    const not = moveOn({ marks: NOT_INSTALLED, settingsChange: MOVED, agentLoaded: false, ...held });
+    assert.equal(not.status, 1, not.out);
+    assert.ok(not.out.includes("2 files or folders wait in the old drop folder, Drop › Sallie's laptop, and nothing imports them now. Tell Jason."), not.out);
+    assert.ok(not.out.endsWith(STOPPED_NOTHING), not.out);
+    for (const text of [watched.out, not.out, not.log]) assert.ok(!text.includes("a.mov"));
+
+    // Once the install has finished at this commit, the old folder is not counted for the run, and a file in the drop folder does not stop it.
+    const finished = moveOn({ settingsChange: { ...MOVED }, dropFiles: ["a.mov"], ...held });
+    assert.equal(finished.status, 0, finished.out);
+    assert.ok(!finished.out.includes("Tell Jason"), finished.out);
+    assert.ok(!finished.out.includes("still to be imported"), finished.out);
+  });
+
+  it("a later run after the install finished at this commit, with a file in the drop folder: counted for the report, no stop", () => {
+    const r = moveOn({ settingsChange: OWN, dropFiles: ["Client Name.mov", "b.mov"] });
+    assert.equal(r.status, 0, r.out);
+    assert.ok(r.out.includes("The drop folder holds 2 files or folders."), r.out);
+    assert.match(r.report, /^What the count printed: 2$/m);
+    for (const text of [r.out, r.log, r.report, r.err]) assert.ok(!text.includes("Client Name"), "counted and never named");
+    // Unreadable: said, and the run goes on.
+    const unreadable = moveOn({ settingsChange: OWN, dropMode: 0o000 });
+    assert.equal(unreadable.status, 0, unreadable.out);
+    assert.match(unreadable.report, /^What the count printed: could not be read/m);
+  });
+
+  it("a stop after the installer started says whether the drop folder changed, and never counts the old folder", () => {
+    // The background line, then an n at the HyperFrames question: the folder is now the new one.
+    const n = moveOn({ marks: NOT_INSTALLED, settingsChange: { app: undefined }, install: { ranDrops: "a.mov b.mov" }, answers: "y\ny\ny\nn\n" });
+    assert.equal(n.status, 1, n.out);
+    const tail = summaryOf(n);
+    assert.ok(tail.includes(NOW(LOCAL_DROP)), tail);
+    assert.ok(tail.includes(NO_LONGER), tail);
+    assert.ok(tail.indexOf(NOW(LOCAL_DROP)) < tail.indexOf(NO_LONGER), "the Dropbox sentence follows");
+    assert.ok(!tail.includes("has not finished"), tail);
+    assert.ok(n.out.endsWith(STOP_TAIL), n.out);
+    assert.ok(!n.out.includes("The old drop folder"), "a stop says no last lines");
+    assert.ok(!n.out.includes("nothing imports now"), n.out);
+
+    // The installer ended 1 after its background line: the same words.
+    const ended = moveOn({ marks: NOT_INSTALLED, install: { ranExit: 1 }, answers: "y\ny\ny\n" });
+    assert.equal(ended.status, 1, ended.out);
+    assert.ok(summaryOf(ended).includes(NOW(LOCAL_DROP)), ended.out);
+    assert.ok(summaryOf(ended).includes(NO_LONGER), ended.out);
+    assert.ok(!summaryOf(ended).includes("has not finished"));
+
+    // No background line: not finished, whether or not the folder changed, and with or without an end status.
+    for (const install of [{ noBackground: true }, { noBackground: true, ranExit: 1 }]) {
+      const r = moveOn({ marks: NOT_INSTALLED, install, answers: "y\ny\ny\n" });
+      assert.equal(r.status, 1, r.out);
+      assert.ok(summaryOf(r).includes(NOT_FINISHED), r.out);
+      assert.ok(!summaryOf(r).includes("drop folder is now"), summaryOf(r));
+      assert.ok(r.out.endsWith(STOP_TAIL), r.out);
+    }
+    // A kept drop folder did not change, and the installer had not finished.
+    const keptStop = moveOn({ marks: NOT_INSTALLED, settingsChange: MOVED, install: { noBackground: true }, answers: "y\ny\ny\n" });
+    assert.ok(summaryOf(keptStop).includes(NOT_FINISHED), keptStop.out);
+    // And a kept one, finished, says nothing of a change.
+    const keptDone = moveOn({ marks: NOT_INSTALLED, settingsChange: { ...MOVED, app: undefined }, answers: "y\ny\ny\nn\n" });
+    assert.equal(keptDone.status, 1, keptDone.out);
+    assert.ok(!summaryOf(keptDone).includes("drop folder is now"), summaryOf(keptDone));
+    assert.ok(!summaryOf(keptDone).includes("has not finished"), summaryOf(keptDone));
+
+    // Before the installer started, the summary says nothing of it.
+    const before = moveOn({ marks: NOT_INSTALLED, answers: "y\ny\nn\n" });
+    assert.ok(before.out.endsWith(STOPPED_NOTHING), before.out);
+
+    // A Mac set up fresh has no Dropbox sentence.
+    const fresh = moveOn({ ...FRESH_MAC, install: { writesSettings: true, ranExit: 1 }, answers: "y\ny\ny\ny\n" });
+    assert.equal(fresh.status, 1, fresh.out);
+    assert.ok(summaryOf(fresh).includes(NOW(LOCAL_DROP)), fresh.out);
+    assert.ok(!summaryOf(fresh).includes("no longer imported"), fresh.out);
+  });
+
+  it("the set-up-fresh question's new words", () => {
+    const r = moveOn({ ...FRESH_MAC, answers: "n\n" });
+    assert.equal(r.status, 1, r.out);
+    assert.ok(r.out.includes("a drop folder picked in step 5 (suggested: BRIMM Video Work › Drop, on this Mac)"), r.out);
+    assert.ok(!r.out.includes("its own drop folder"), r.out);
+  });
+
+  it("the Finder step: a local drop folder gets the sidebar words, one in Dropbox Make available offline, and a later run shows it until it is done", () => {
+    const local = moveOn({ marks: NOT_INSTALLED, answers: "y\ny\ny\n\n" });
+    assert.equal(local.status, 0, local.out);
+    assert.ok(local.out.includes(FINDER_LOCAL(LOCAL_DROP)), local.out);
+    assert.ok(local.ran.split("\n").includes(`open -R ${local.home}/BRIMM Video Work/Drop`), local.ran);
+    assert.ok(!local.out.includes("Make available offline"), local.out);
+    assert.match(local.studioNow.marks, /finder=/);
+
+    // In Dropbox on a moved Mac: Make available offline, and no sentence about node.
+    const inDropbox = { marks: NOT_INSTALLED, picks: ["<HOME>/Dropbox/My Drops"], folderFiles: { "<HOME>/Dropbox/My Drops": [] } };
+    const moved = moveOn({ ...inDropbox, answers: "c\ny\ny\n\n" });
+    assert.equal(moved.status, 0, moved.out);
+    assert.ok(moved.out.includes("The drop folder is shown in Finder: Dropbox › My Drops, in your home folder. In Finder, Control-click it, choose Make available offline."), moved.out);
+    assert.ok(!moved.out.includes("node may read the Dropbox folder"), moved.out);
+    assert.ok(!moved.out.includes("Drag it into Finder's sidebar"), moved.out);
+    // And on a Mac set up fresh, with the node sentence.
+    const fresh = moveOn({ ...FRESH_MAC, ...inDropbox, install: { writesSettings: true }, answers: "y\nc\ny\ny\ny\n\n" });
+    assert.equal(fresh.status, 0, fresh.out);
+    assert.ok(fresh.out.includes("The drop folder is shown in Finder: Dropbox › My Drops, in your home folder. In Finder, Control-click it, choose Make available offline, and click Allow if macOS asks whether node may read the Dropbox folder."), fresh.out);
+    assert.ok(!fresh.out.includes("Drop › Jason's MacBook"), "the folder is named in Finder's words, not by the Mac's name");
+
+    // An n at Finder leaves the step undone; the next run shows it again, and Return marks it.
+    const first = moveOn({ marks: NOT_INSTALLED, install: { moves: true }, answers: "y\ny\ny\nn\n" });
+    assert.equal(first.status, 1, first.out);
+    assert.ok(!/finder=/.test(first.studioNow.marks), first.studioNow.marks);
+    const second = first.again({ answers: "\n" });
+    assert.equal(second.status, 0, second.out);
+    assert.ok(second.out.includes(FINDER_LOCAL(LOCAL_DROP)), second.out);
+    assert.ok(second.ran.split("\n").includes(`open -R ${second.home}/BRIMM Video Work/Drop`), second.ran);
+    assert.match(second.studioNow.marks, /finder=/);
+    const third = second.again({ answers: "" });
+    assert.equal(third.status, 0, third.out);
+    assert.ok(!third.out.includes("Drag it into Finder's sidebar"), "done: not shown again");
+    assert.ok(!third.ran.includes("open -R " + third.home + "/BRIMM Video Work/Drop"), third.ran);
+  });
+
+  describe("the last lines on a moved Mac", () => {
+    const LINE_0 = "The old drop folder, Drop › Sallie's laptop in Dropbox, is empty and no longer watched. Jason checks it is still empty, then deletes it by hand, and takes it out of Finder's sidebar.";
+    const DONE = "Done. Next on the By-Hand page: checks 45 to 47, on screen.";
+
+    it("at 0: said before Done., once", () => {
+      const r = moveOn({ marks: NOT_INSTALLED, answers: "y\ny\ny\n\n" });
+      assert.equal(r.status, 0, r.out);
+      assert.equal(r.out.split(LINE_0).length - 1, 1, r.out);
+      assert.ok(r.out.indexOf(LINE_0) > r.out.indexOf("7. brimm-video's old key") && r.out.indexOf(LINE_0) < r.out.lastIndexOf(DONE), r.out);
+      assert.ok(r.out.trimEnd().endsWith(DONE), r.out);
+      // A later run (the install finished at this commit) says it too, while the folder is there.
+      const later = moveOn({ settingsChange: MOVED });
+      assert.equal(later.status, 0, later.out);
+      assert.ok(later.out.includes(LINE_0), later.out);
+    });
+
+    it("at 2: counted, never named, said once, with no wait", () => {
+      const r = moveOn({ marks: NOT_INSTALLED, install: { ranDrops: "Client-Name.mov b.mov" }, answers: "y\ny\ny\n\n" });
+      assert.equal(r.status, 0, r.out);
+      const line = `The old drop folder, Drop › Sallie's laptop in Dropbox, holds 2 files or folders that nothing imports now. Drag each video in it into ${LOCAL_DROP}, with a plain drag, which moves it out of Dropbox, and it is imported there. Jason deletes the folder by hand once it is empty.`;
+      assert.equal(r.out.split(line).length - 1, 1, r.out);
+      assert.ok(r.out.indexOf(line) < r.out.lastIndexOf(DONE));
+      assert.ok(r.out.trimEnd().endsWith(DONE), r.out);
+      for (const text of [r.out, r.log, r.report, r.err]) assert.ok(!text.includes("Client-Name"), "never named");
+      const one = moveOn({ marks: NOT_INSTALLED, install: { ranDrops: "b.mov" }, answers: "y\ny\ny\n\n" });
+      assert.ok(one.out.includes("holds 1 file or folder that nothing imports now."), one.out);
+    });
+
+    it("unreadable: said once, without a stop", () => {
+      const r = moveOn({ marks: NOT_INSTALLED, install: { ranUnreadable: true }, answers: "y\ny\ny\n\n" });
+      assert.equal(r.status, 0, r.out);
+      const line = "The old drop folder, Drop › Sallie's laptop in Dropbox, could not be read, so it was not counted. Jason counts it from the Mac Studio before deleting it.";
+      assert.equal(r.out.split(line).length - 1, 1, r.out);
+      assert.ok(r.out.trimEnd().endsWith(DONE), r.out);
+    });
+
+    it("none once the folder is gone, none on a print, and none on a Mac set up fresh", () => {
+      const gone = moveOn({ settingsChange: OWN });
+      assert.equal(gone.status, 0, gone.out);
+      assert.ok(!gone.out.includes("The old drop folder"), gone.out);
+      const printed = moveOn({ marks: NOT_INSTALLED }, "--print");
+      assert.ok(!printed.out.includes("The old drop folder"), printed.out);
+    });
+
+    it("a stop after the install, with a file in the old folder, says no last lines, and ends 1 at once", () => {
+      const r = moveOn({ marks: NOT_INSTALLED, settingsChange: { app: undefined }, install: { ranDrops: "a.mov" }, answers: "y\ny\ny\nn\n" });
+      assert.equal(r.status, 1, r.out);
+      assert.ok(!r.out.includes("The old drop folder"), r.out);
+      assert.ok(r.out.endsWith(STOP_TAIL), r.out);
+    });
+  });
+
+  it("the report's three lines on a first run, on a later run, and under --print", () => {
+    const lines = (r) => r.report.split("\n");
+    const three = (r) => {
+      const at = lines(r).findIndex((l) => l.startsWith("Drop folder: "));
+      assert.ok(at > 0, r.report);
+      assert.ok(lines(r)[at - 1].startsWith("What turning HyperFrames on printed: "), "after check 44's existing lines");
+      assert.ok(lines(r)[at + 1].startsWith("Exports folder: ") && lines(r)[at + 2].startsWith("Cloud warning: "), r.report);
+      return lines(r).slice(at, at + 3);
+    };
+    const first = moveOn({ marks: NOT_INSTALLED, picks: ["<HOME>/Exports"], answers: "y\nc\ny\n\n" });
+    assert.equal(first.status, 0, first.out);
+    assert.deepEqual(three(first), [`Drop folder: ${first.home}/BRIMM Video Work/Drop`, `Exports folder: ${first.home}/Exports`, "Cloud warning: none"]);
+
+    const cloud = moveOn({ marks: NOT_INSTALLED, settingsChange: { ...MOVED, dropPath: "<HOME>/Dropbox/Drop" }, answers: "y\ny\ny\n\n" });
+    assert.deepEqual(three(cloud), [`Drop folder: ${cloud.home}/Dropbox/Drop`, `Exports folder: ${cloud.home}/Downloads`, "Cloud warning: Dropbox, kept on a y on an earlier run"]);
+
+    // A later run, the install finished earlier: filled from Studio's settings, the cloud's name kept from the earlier run.
+    const later = moveOn({ settingsChange: { ...OWN, exportsPath: "<HOME>/Exports" } });
+    assert.equal(later.status, 0, later.out);
+    assert.deepEqual(three(later), [`Drop folder: ${later.home}/My Drop`, `Exports folder: ${later.home}/Exports`, "Cloud warning: none"]);
+    const laterCloud = moveOn({ settingsChange: { ...OWN, dropPath: "<HOME>/Dropbox/Drop" } });
+    assert.deepEqual(three(laterCloud), [`Drop folder: ${laterCloud.home}/Dropbox/Drop`, `Exports folder: ${laterCloud.home}/Downloads`, "Cloud warning: Dropbox, kept on a y on an earlier run"]);
+
+    // A print claims nothing.
+    const p = moveOn({ marks: NOT_INSTALLED }, "--print");
+    assert.equal(p.status, 0, p.out);
+    for (const label of ["Drop folder:", "Exports folder:", "Cloud warning:"]) assert.ok(p.out.includes(`${label} not checked: this was a print`), `${label}\n${p.out}`);
   });
 });
