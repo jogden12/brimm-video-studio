@@ -1029,7 +1029,7 @@ describe("the move script, Studio's code (check 42)", { skip: notAMac }, () => {
   it("runs Studio's tests there with the spec reporter, stops when one fails, and doesn't run them again at the same commit", () => {
     const fail = moveOn({ marks: "", testFail: true });
     assert.equal(fail.status, 1, fail.out);
-    assert.match(fail.out, /about three minutes/);
+    assert.match(fail.out, /about 12 minutes/);
     assert.match(fail.out, /ℹ fail 1/);
     assert.match(fail.out, /✖|✔|ok/);
     assert.ok(!/tests=/.test(fail.studioNow.marks), "nothing is marked on a failure");

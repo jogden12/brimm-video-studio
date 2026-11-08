@@ -832,10 +832,10 @@ run_the_tests() {
     return 0
   fi
   if [[ -n "$PRINT_ONLY" ]]; then
-    would "run Studio's tests in $STUDIO/tool (about three minutes; they change nothing), and mark them passed at $short"
+    would "run Studio's tests in $STUDIO/tool (about 12 minutes; they change nothing), and mark them passed at $short"
     return 0
   fi
-  say "  Now Studio's own tests run, in $STUDIO/tool. They take about three minutes and change nothing."
+  say "  Now Studio's own tests run, in $STUDIO/tool. They take about 12 minutes and change nothing."
   kept="$(mktemp "${TMPDIR:-/tmp}/brimm-move.XXXXXX")"
   { (cd "$STUDIO/tool" && "$NODE" --test --test-reporter=spec) 2>&1 | while IFS= read -r line; do
       say "$line"
