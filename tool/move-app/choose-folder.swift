@@ -97,7 +97,36 @@ func showPanel() {
     finish(chosen: response == .OK ? panel.url : nil)
 }
 
+// The menu bar the panel's boxes need: without an Edit menu, Command-V and the others do nothing there. Every target is nil, so the
+// first responder takes the action.
+func makeMainMenu() -> NSMenu {
+    let main = NSMenu()
+    let appItem = NSMenuItem()
+    appItem.submenu = NSMenu(title: "Choose a Folder")
+    main.addItem(appItem)
+    let editItem = NSMenuItem()
+    let edit = NSMenu(title: "Edit")
+    edit.addItem(NSMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z"))
+    let redo = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+    redo.keyEquivalentModifierMask = [.command, .shift]
+    edit.addItem(redo)
+    edit.addItem(NSMenuItem.separator())
+    edit.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+    edit.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+    edit.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+    edit.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+    edit.addItem(NSMenuItem.separator())
+    let emoji = NSMenuItem(title: "Emoji & Symbols", action: #selector(NSApplication.orderFrontCharacterPalette(_:)), keyEquivalent: " ")
+    emoji.keyEquivalentModifierMask = [.control, .command]
+    edit.addItem(emoji)
+    editItem.submenu = edit
+    main.addItem(editItem)
+    return main
+}
+
 final class Delegate: NSObject, NSApplicationDelegate {
+    // The Edit menu is what makes Command-V and the others, and the emoji picker, work in the panel's boxes.
+    func applicationWillFinishLaunching(_ notification: Notification) { NSApp.mainMenu = makeMainMenu() }
     // Only schedules the panel and returns, so the launch's open event is answered at once. runModal is never called before
     // NSApp.run(), or in here: LaunchServices could time out (-1712) while the panel is still up.
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -114,5 +143,7 @@ let app = NSApplication.shared
 let delegate = Delegate()
 app.delegate = delegate
 app.setActivationPolicy(.regular)
+// Registered, never set: nothing is written. Stops AppKit adding its own Emoji & Symbols item, so it is not listed twice.
+UserDefaults.standard.register(defaults: ["NSDisabledCharacterPaletteMenuItem": true])
 app.run()
 withExtendedLifetime(watched) {}

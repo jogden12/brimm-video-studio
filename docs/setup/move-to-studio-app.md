@@ -74,7 +74,7 @@ Two questions come first, then the installer's print, then the real install.
 - Before the real install, the app says which questions macOS may still ask (Downloads, the drop folder, the exports folder) and to choose Allow.
 - A folder picked on an earlier run and not taken this time is left as it is, and the app says how many files or folders it holds. Jason deletes it by hand once it is empty.
 
-**The folder window.** It is a helper app inside Move to Studio, `Choose a Folder.app`. The first way starts it the way Finder starts an app, so that it comes in front with the keyboard; if it cannot be shown, a second way runs its program directly. It answers through a file, whole or not at all. Keys typed into Terminal while the window is open are thrown away, and Terminal is brought back to the front. If neither way can be shown, y still takes the suggested folder; only a question where c alone is offered stops, with the words in "Where it stops" below.
+**The folder window.** It is a helper app inside Move to Studio, `Choose a Folder.app`. It has an Edit menu, so Command-V, Command-C, Command-X, Command-A and Command-Z work in its boxes (New Folder's name, Go to Folder), and Control-Command-Space opens the emoji picker. The first way starts it the way Finder starts an app, so that it comes in front with the keyboard; if it cannot be shown, a second way runs its program directly. It answers through a file, whole or not at all. Keys typed into Terminal while the window is open are thrown away, and Terminal is brought back to the front. If neither way can be shown, y still takes the suggested folder; only a question where c alone is offered stops, with the words in "Where it stops" below.
 
 **Then the installer.**
 

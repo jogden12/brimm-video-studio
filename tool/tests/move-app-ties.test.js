@@ -554,8 +554,36 @@ describe("keys typed while the chooser is open, on a real terminal", { skip: not
       assert.ok(out.indexOf("Keys typed while the window was open were not taken as answers.") < out.indexOf("Go on? (y/c) "), out);
       assert.ok(out.includes("Stopped. This run changed nothing."), out);
       assert.ok(!out.includes("ANSWER="), `the lone Return was not an answer:\n${out}`);
+      assert.ok(!out.includes("yKeys typed"), `the sentence starts its own line:\n${out}`);
+      assert.match(out, /\nKeys typed while the window was open/);
       const ran = readFileSync(t.files.ran, "utf8");
       assert.ok(ran.includes("open -a Terminal"), ran);
+    } finally {
+      run.finish();
+      rmSync(t.dir, { recursive: true, force: true });
+    }
+  });
+
+  it("puts no extra blank line before the sentence when the last key typed was Return", async () => {
+    const t = terminalWorld();
+    const run = onTerminal(t);
+    try {
+      await waitFor("the stand-in chooser to start", () => existsSync(t.files.started));
+      await waitFor("the chooser's line in the output", () => run.out().includes("A window to choose the folder is opening."));
+      await waitFor("the chooser line's end", () => run.out().includes("y uses the suggested folder."));
+      const mark = run.out().length;
+      run.type("y\r");
+      await waitFor("the echoed y", () => run.out().slice(mark).includes("y"));
+      writeFileSync(t.files.release, "done");
+      await waitFor("the next question's prompt", () => run.out().includes("Go on? (y/c) "));
+      assert.ok(run.out().includes("CHOSE="), run.out());
+      run.type("\r");
+      await waitFor("the stop summary", () => run.out().includes("Double-click Move to Studio again to go on from here."));
+      const out = run.out();
+      assert.ok(out.includes("y\r\nKeys typed while the window was open"), JSON.stringify(out));
+      assert.ok(!out.includes("\r\n\r\nKeys typed while the window was open"), JSON.stringify(out));
+      assert.ok(out.includes("Stopped. This run changed nothing."), out);
+      assert.ok(!out.includes("ANSWER="), `the lone Return was not an answer:\n${out}`);
     } finally {
       run.finish();
       rmSync(t.dir, { recursive: true, force: true });

@@ -572,4 +572,58 @@ describe("launcher.swift and choose-folder.swift", { skip: notAMac || (swiftc.st
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("the chooser has an Edit menu, so its boxes take Command-V, -C, -X, -A, -Z and the emoji picker", () => {
+    const source = readFileSync(join(MOVE_APP, "choose-folder.swift"), "utf8");
+    const fn = source.match(/func makeMainMenu[\s\S]*?\n}\n/);
+    assert.ok(fn, "makeMainMenu is there");
+    const dir = mkdtempSync(join(tmpdir(), "brimm-menu-"));
+    try {
+      const file = join(dir, "main.swift");
+      const printer = [
+        "let menu = makeMainMenu()",
+        "for top in menu.items {",
+        "    guard let sub = top.submenu else { continue }",
+        '    print("menu:" + sub.title)',
+        "    for item in sub.items {",
+        "        if item.isSeparatorItem { print(\"-\"); continue }",
+        "        let action = item.action.map { NSStringFromSelector($0) } ?? \"\"",
+        '        print("\\(item.title)|\\(item.keyEquivalent)|\\(item.keyEquivalentModifierMask.rawValue)|\\(action)")',
+        "    }",
+        "}",
+      ].join("\n");
+      writeFileSync(file, `import AppKit\n_ = NSApplication.shared\n${fn[0]}\n${printer}\n`);
+      const program = join(dir, "t");
+      const c = run("swiftc", ["-module-cache-path", cache, "-o", program, file]);
+      assert.equal(c.status, 0, c.stderr);
+      assert.equal(
+        run(program, [], { timeout: 10000 }).stdout,
+        [
+          "menu:Choose a Folder",
+          "menu:Edit",
+          "Undo|z|1048576|undo:",
+          "Redo|z|1179648|redo:",
+          "-",
+          "Cut|x|1048576|cut:",
+          "Copy|c|1048576|copy:",
+          "Paste|v|1048576|paste:",
+          "Select All|a|1048576|selectAll:",
+          "-",
+          "Emoji & Symbols| |1310720|orderFrontCharacterPalette:",
+          "",
+        ].join("\n"),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the chooser sets that menu as it launches, and registers, never sets, the default that keeps AppKit's own emoji item out", () => {
+    const source = readFileSync(join(MOVE_APP, "choose-folder.swift"), "utf8");
+    assert.ok(source.includes("func applicationWillFinishLaunching(_ notification: Notification) { NSApp.mainMenu = makeMainMenu() }"));
+    const register = 'UserDefaults.standard.register(defaults: ["NSDisabledCharacterPaletteMenuItem": true])';
+    assert.ok(source.includes(register));
+    assert.equal(source.includes(".set("), false, "no default is ever set");
+    assert.ok(source.indexOf(register) < source.indexOf("app.run()"), "registered before the app runs");
+  });
 });

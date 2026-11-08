@@ -917,14 +917,18 @@ ask_y_or_c() {
 
 # Keys typed into Terminal while the chooser was open are not answers: they are read and thrown away, but only from a keyboard, so a
 # test's piped answers are kept. zsh's own terminal read, with no -u, leaves line mode for each key, so a y typed without Return goes
-# too. Written with if, and with $(( )) assignments: either of && or (( )) alone would end the script under set -e at a 0.
+# too. Terminal echoed those keys as they were typed, so a last key that was not Return leaves its line open: the sentence then starts
+# a new line (a bare print, so the log is not changed). Written with if, and with $(( )) assignments: either of && or (( )) alone would end the script under set -e at a 0.
 throw_away_typed_keys() {
-  local thrown=0 _key
+  local thrown=0 _key last=""
   if [[ -t 0 ]]; then
-    while read -t 0 -k 1 -s _key; do thrown=$(( thrown + 1 )); done
+    while read -t 0 -k 1 -s _key; do thrown=$(( thrown + 1 )); last=$_key; done
   fi
   THROWN=$(( THROWN + thrown ))
-  if (( thrown > 0 )); then say "Keys typed while the window was open were not taken as answers."; fi
+  if (( thrown > 0 )); then
+    if [[ "$last" != $'\n' && "$last" != $'\r' ]]; then print -r -- ""; fi
+    say "Keys typed while the window was open were not taken as answers."
+  fi
 }
 
 # The chooser's first way: the helper app started the way Finder starts an app, which brings it in front with the keyboard. It writes
