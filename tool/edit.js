@@ -4429,13 +4429,15 @@ async function answerOffers(ctx, found, words) {
   // says "hand it off", edited in HyperFrames first or as it is (or, on a Mac that hands off version 1, once that Mac hands off version 2).
   // A video kept on this Mac whose opening by itself waited for this answer (appWhenReady's marker) opens now, unless its project holds its video already.
   const marker = opensAfterSpellingsOf(ctx.home, found.name);
-  const waiting = keptOnAMac(record) && existsSync(marker);
-  const opensNow = waiting && mainState(ctx, { found, record }) !== "whole";
+  // The marker is only peeked at here, to choose the clip's line: the decision to start is made from what is on disk after the save, since a run may write the
+  // marker meanwhile (it writes it, reads the record again, and ends).
+  const opensNow = keptOnAMac(record) && existsSync(marker) && mainState(ctx, { found, record }) !== "whole";
   // A kept iPhone clip that is about to open by itself is not asked whether to edit it there or hand it off as it is.
   const later = recordKind(record) === "raw" ? "Its hand-off is made when it is finished." : isClip(record) && !opensNow ? clipNext(ctx, found, record) : "";
   const code = await saveSpellings(ctx, found, next, done, { set: { offers: { ...record.offers, answered: answer } }, later });
-  if (code === 0 && waiting && existsSync(marker)) {
-    if (opensNow) {
+  if (typeof ctx.deps.saved === "function") ctx.deps.saved();
+  if (code === 0 && keptOnAMac(record) && existsSync(marker)) {
+    if (mainState(ctx, { found, record }) !== "whole") {
       // A run may still hold its lock, on its way to end; it is given up to 10 s. If it is holding still, that run is the one opening it.
       const lock = whenReadyLockOf(ctx.home, found.name);
       const waitFor = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));

@@ -724,6 +724,16 @@ describe("opening by itself waits for the spellings card", () => {
     assert.equal(marked(t), false);
     t.done();
   });
+  it("R1 the marker appears while the answer is being saved (after the peek found none): the open is still started, and the last line is the opens line", async () => {
+    const { t } = kept({ answered: false });
+    t.ctx.deps.saved = () => putMarker(t);
+    const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "none");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(argsOf(t), [WHEN_READY]);
+    assert.equal(r.said[r.said.length - 1], ALONE);
+    assert.equal(marked(t), false);
+    t.done();
+  });
   it("M1 a kept iPhone clip whose answer has the marker is not asked how to go on: no clip line, and the last line is the opens line", async () => {
     const without = kept({ answered: false, base: CLIP });
     const plain = await on(without.t.ctx.deps, "spell", FOLDER, "offers", "none");
