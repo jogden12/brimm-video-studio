@@ -221,7 +221,8 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         its command line
   node edit.js status ["<words>"]       what is running on this Mac, the imports, and what detached runs left
   node edit.js retry "<video>"          import again a video in this Mac's drop folder whose import failed or stopped
-  node edit.js look                     ask the import to look in the drop folder now, as after she allowed node in System Settings
+  node edit.js look                     ask the import to look in the drop folder now (after she allowed node in System
+                                        Settings)
   node edit.js name "<episode>" "<name>"
                                         give the episode its name. Nothing is renamed
   node edit.js title "<episode>" [--words "<words>"] [--approve] [--change]
@@ -2029,7 +2030,7 @@ function lateCheckOwed(ctx, video, held, who = video, plain = (text) => text) {
   try {
     ctx.kickstart();
   } catch (e) {
-    say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
+    say(couldNotAsk(e));
     return 1;
   }
   if (problem) say(`${who} is imported, as ${name}. Dropbox found a problem with a copy of it before (${problem}): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is.`);
@@ -2120,11 +2121,16 @@ export async function retry(ctx, rest) {
   try {
     ctx.kickstart();
   } catch (e) {
-    say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
+    say(couldNotAsk(e));
     return 1;
   }
   say(`${who} is imported again${which}: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`);
   return 0;
+}
+
+/** The line for a launch agent that could not be asked to look (retry, lateCheckOwed, look). */
+function couldNotAsk(e) {
+  return `The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`;
 }
 
 /** `look`: "look again", after she allowed node in System Settings (access-notice design, part 4). It names no episode. A look that has
@@ -2144,7 +2150,7 @@ export async function look(ctx) {
   try {
     ctx.kickstart();
   } catch (e) {
-    say(`The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`);
+    say(couldNotAsk(e));
     return 1;
   }
   say(LOOK_ASKED);

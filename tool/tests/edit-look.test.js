@@ -16,7 +16,7 @@ async function on(t, more = {}) {
   const said = [];
   const kicks = [];
   const deps = { ...t.ctx.deps, agentPid: () => null, agentNode: () => "", kickstart: () => kicks.push("kick"), ...more };
-  const code = await editMain(["look"], { ...deps, say: (text) => said.push(text), kicks });
+  const code = await editMain(["look"], { ...deps, say: (text) => said.push(text) });
   return { code, said, kicks };
 }
 const dropOf = (t) => dropFolderOf(readSettings(t.home).settings, t.home);
@@ -50,6 +50,17 @@ describe("look", () => {
     const r = await on(t, { alive: (pid) => pid === 31337 });
     assert.deepEqual(r.said, [LOOK_AT_WORK]);
     assert.equal(r.kicks.length, 0);
+    assert.equal(r.code, 0);
+    t.done();
+  });
+
+  it("a refused drop folder still kicks once (she has just allowed node), and says it asked, ends 0", async () => {
+    const t = setup();
+    writeAccess(t.home, { version: 1, places: { drop: { state: "refused", code: "EPERM", at: t.now(), since: t.now(), folder: dropOf(t), node: "/opt/homebrew/Cellar/node/25.0.0/bin/node" } }, looking: null, told: {} });
+    const r = await on(t);
+    assert.deepEqual(r.said, [LOOK_ASKED]);
+    assert.equal(r.kicks.length, 1);
+    assert.equal(r.code, 0);
     t.done();
   });
 
@@ -70,9 +81,11 @@ describe("look", () => {
     t.done();
   });
 
-  it("is in the help beside retry and behind", async () => {
+  it("is a command, and its help line follows retry's", async () => {
     const { HELP, COMMAND_NAMES } = await import("../edit.js");
     assert.ok(COMMAND_NAMES.includes("look"));
-    assert.match(HELP, /node edit\.js look\s/);
+    const lines = HELP.split("\n");
+    const retry = lines.findIndex((l) => l.startsWith('  node edit.js retry "<video>"'));
+    assert.ok(retry >= 0 && lines[retry + 1].startsWith("  node edit.js look "), lines[retry + 1]);
   });
 });
