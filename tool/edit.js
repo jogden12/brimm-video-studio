@@ -1131,6 +1131,9 @@ export async function episodes(ctx) {
     for (const line of waiting) say(line);
   }
   if (unreadable) say(dropUnreadable(dropWords(ctx.settings, ctx.machine, ctx.home)));
+  // What the import's note and the drop folder show of it: once, after that one (every place, Downloads too; never a new node).
+  const access = accessFinding(ctx);
+  if (access && access.finding.kind !== "newNode" && access.line) say(access.line);
   // The imports, from their status files.
   const imports = importLines(ctx);
   if (imports.length) {
@@ -6590,7 +6593,8 @@ function panelRuns(ctx) {
     and `kind` null. How far a video has got is read from the statuses of its Mac's imports of it, a running import and a hold
     only at the video's size, as heldBy takes them: one dropped again under the same name is another recording. Its import did
     not finish ("retry") when one failed, found a problem in its late check or stopped; it is a Zoom download held there ("zoom");
-    it is being imported ("importing", at its status's step); or it is still coming in ("arriving"). A video an episode holds is
+    it is being imported ("importing", at its status's step); or it is still coming in ("arriving"), or, when the import cannot take it
+    (accessFinding), "blocked", with the import's step line in `blocked`. A video an episode holds is
     imported, and the records say where it has got: it is left out, unless its import is to be tried again. Each is named by its
     label, else by what it is and its size, never by its file's name, which may be a client's: two of one size with no label yet
     are told apart by when they came (guide.js apart). It came when this Mac's import first saw it (seen.json), as `episodes`
@@ -6600,8 +6604,12 @@ function panelRuns(ctx) {
     minute (clockNear). Gives { videos, unreadable }: `unreadable` is whether macOS does not let this Mac's chat look in this Mac's own drop
     folder (EPERM: a folder its own permissions shut, EACCES, or one that is not there is passed over, as another Mac's is), which
     the overview says under the drop folder's line (Phase 3, L1c). */
-function guideDrops(ctx) {
+function guideDrops(ctx, found = null) {
   const now = ctx.now();
+  // The finding that blocks a video (the caller's, once per pass): for a place that is the drop folder or Episodes, every arriving video of
+  // this Mac; for the videos the import never took, only those. A Downloads finding, a new node and a missing folder block nothing.
+  const blocking = found && found.step && (found.finding.kind === "unseen" || ["drop", "episodes"].includes(found.finding.place)) ? found : null;
+  const unseenNames = blocking && blocking.finding.kind === "unseen" ? new Set(blocking.finding.videos) : null;
   const statuses = readStatusesIn(statusReadFolders(ctx), now);
   const seen = readSeen(ctx.home);
   const runs = panelRuns(ctx);
@@ -6621,7 +6629,9 @@ function guideDrops(ctx) {
       const mine = statuses.filter(({ status }) => status && status.video === video && status.machine === mac && (!["running", "held"].includes(importState(status, now)) || status.bytes === found.size));
       const states = mine.map(({ status }) => importState(status, now));
       const running = mine.find(({ status }) => importState(status, now) === "running");
-      const state = states.some((s) => ["failed", "problem", "stopped"].includes(s)) ? "retry" : states.includes("held") ? "zoom" : running ? "importing" : "arriving";
+      let state = states.some((s) => ["failed", "problem", "stopped"].includes(s)) ? "retry" : states.includes("held") ? "zoom" : running ? "importing" : "arriving";
+      const blocked = state === "arriving" && mac === ctx.machine && blocking && (!unseenNames || unseenNames.has(video));
+      if (blocked) state = "blocked";
       if (state !== "retry") {
         const holding = holdingEpisode({ root: ctx.root, video, bytes: found.size });
         if (holding && !holding.unknown) continue;
@@ -6636,7 +6646,7 @@ function guideDrops(ctx) {
       const fresh = (s) => (Number.isFinite(s) && s - since > 0 ? Math.round(s - since) : null);
       const times = run ? { left: fresh(run.left), total: fresh(run.total), n: run.n, of: run.of } : null;
       const ready = times ? readyIn(times) : null;
-      const drop = { here, state, step: state === "importing" ? shownStep(running.status.step) : "", left: times ? times.left : null, total: times ? times.total : null, readyAt: ready === null ? "" : clockNear(now + ready * 1000) };
+      const drop = { here, state, ...(blocked ? { blocked: blocking.step } : {}), step: state === "importing" ? shownStep(running.status.step) : "", left: times ? times.left : null, total: times ? times.total : null, readyAt: ready === null ? "" : clockNear(now + ready * 1000) };
       // `source` is for `guide tell` alone, which follows the video by it: never said.
       videos.push({ name: label || capital(unlabelled(video, found.size)), id: "", aliases: label ? [label] : [], at: noted && Number.isFinite(noted.at) ? noted.at : found.ctimeMs, mac: here ? "" : mac, drop, kind: null, handoff: null, source: { mac, file: video, bytes: found.size } });
     }
@@ -6656,7 +6666,8 @@ function checkSentence({ due, took }) {
     are stopped until it is made (stoppedWords): a spelling and handing the video off again. */
 const ON_THE_CHECK = "You do not need to wait for it. A spelling and handing it off again wait until then.";
 
-/** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old, unreadable }. Each item (guide.js Item) is a
+/** The videos the guide speaks of, from the drop folders (guideDrops) and Episodes: { items, old, unreadable, access }. `access` is the import's line
+    when it cannot look (accessFinding; "" for none, a new node or Downloads), which the overview says under the drop folder's. Each item (guide.js Item) is a
     video in a drop folder, or an answered video, with what was read of it and its one next step, from her notes on this Mac
     (guide-note.js) and the time now. An episode with no record that can be read, one a newer brimm-video wrote, an archived one
     and one she left alone are passed over; one from before the switch, which has no answer, is counted in `old`, and not guided.
@@ -6679,7 +6690,9 @@ function guideItems(ctx) {
   const footageIn = partsReader(ctx.root);
   // The videos whose recording's move or check found a problem with its copy in Original files (L6), by the video whose hand-off owed it.
   const problemOf = new Set(readPendingsOf(ctx.home, "original").filter((p) => p.problem && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root)).map((p) => (p.of && p.of.id) || p.id));
-  const drops = guideDrops(ctx);
+  // The import's finding, read once for the pass (`guide wait` reads every 5 seconds).
+  const found = accessFinding(ctx);
+  const drops = guideDrops(ctx, found);
   const items = drops.videos.map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
   let old = 0;
   for (const name of folders(ctx)) {
@@ -6703,7 +6716,7 @@ function guideItems(ctx) {
     if (h && (!best || h.revision > best.facts.handoff.revision || (h.revision === best.facts.handoff.revision && h.at > best.facts.handoff.at))) newest.set(h.id, item);
   }
   const own = (item) => !item.next.done && item.next.stage !== "ops";
-  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item || own(item)), old, unreadable: drops.unreadable };
+  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item || own(item)), old, unreadable: drops.unreadable, access: found && found.line && found.finding.kind !== "newNode" && found.finding.place !== "downloads" ? found.line : "" };
 }
 
 /** A folder opened in Finder for the guide, as `which` opens QuickTime Player, and said as `what` is, in Finder words (`words`).
@@ -6803,8 +6816,8 @@ function noteFinished(ctx, { facts }) {
 
 /** The guide's overview of what guideItems read: this Mac's drop folder in Finder's words, each video under way with its one next
     step, and how many videos from before the switch it does not guide. */
-function sayOverview(ctx, { items, old, unreadable = false }) {
-  for (const line of overviewLines({ drop: dropWords(ctx.settings, ctx.machine, ctx.home), items, old, unreadable, local: isLocal(ctx.settings) })) ctx.say(line);
+function sayOverview(ctx, { items, old, unreadable = false, access = "" }) {
+  for (const line of overviewLines({ drop: dropWords(ctx.settings, ctx.machine, ctx.home), items, old, unreadable, local: isLocal(ctx.settings), access })) ctx.say(line);
   return 0;
 }
 

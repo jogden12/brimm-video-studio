@@ -818,6 +818,21 @@ describe("the guide's lists", () => {
     assert.deepEqual(overviewLines({ drop: "D", items: [item("Asked", { at: 0 }, waiting)], old: 0, unreadable: true }), ["Your drop folder: D", dropUnreadable("D"), "Under way:", "  Asked: W."]);
     assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0 }), ["Your drop folder: D", NOTHING_UNDER_WAY]);
   });
+  it("the import's line comes after her chat's own, and then nothing tells her to put a video in", () => {
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0, unreadable: true, access: "X" }), ["Your drop folder: D", dropUnreadable("D"), "X"]);
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0, unreadable: false, access: "X" }), ["Your drop folder: D", "X"]);
+    assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0, access: "" }), ["Your drop folder: D", NOTHING_UNDER_WAY]);
+    const local = overviewLines({ drop: "D", items: [], old: 0, local: true, access: "X" });
+    assert.deepEqual(local, ["Your drop folder: D", "X"]);
+    assert.ok(!local.includes(NOTHING_UNDER_WAY) && !local.includes(AIRDROP));
+    assert.deepEqual(overviewLines({ drop: "D", items: [item("Asked", { at: 0 }, waiting)], old: 0, access: "X" }), ["Your drop folder: D", "X", "Under way:", "  Asked: W."]);
+  });
+  it("a blocked video's step is its line, and is not coming", () => {
+    const blocked = { ...BASE, drop: { here: true, state: "blocked", blocked: "X" } };
+    assert.deepEqual(nextFor(blocked, NONE, NOW), { done: false, stage: "blocked", text: "X", step: "", after: "" });
+    assert.ok(!COMING.includes("blocked"));
+    assert.equal(trailOf({ ...blocked, id: "", at: 5, source: { mac: "", file: "a.mov", bytes: 3 } }).growing, true);
+  });
   it("add, on a Mac with a drop folder of its own and nothing under way, the AirDrop sentence for a clip (L9)", () => {
     assert.equal(AIRDROP, "A clip from your iPhone? Send it to this Mac with AirDrop. It lands in Downloads: drag it from there into your drop folder.");
     assert.deepEqual(overviewLines({ drop: "D", items: [], old: 0, local: true }), ["Your drop folder: D", NOTHING_UNDER_WAY, AIRDROP]);
