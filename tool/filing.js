@@ -1968,7 +1968,7 @@ export function noteSeen(home, dir, now, listed) {
     try {
       gone = !entry || !sameFile(entry.path, { ino: Number(ino), size: Number(size) }) || basename(entry.path) !== name;
     } catch (e) {
-      // A file macOS will not let the import look at is not known to be gone: it stays noted.
+      // Any throw (a file macOS will not let the import look at, or a malformed entry) leaves the entry noted: it is not known to be gone.
       continue;
     }
     if (gone) {

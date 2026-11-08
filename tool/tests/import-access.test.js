@@ -67,6 +67,13 @@ describe("the import notes each look (A2)", () => {
       assert.equal(code, 2);
       assert.equal(readAccess(w.home).places.drop.state, "missing");
       assert.ok(r.logs.includes(`There is no folder at ${w.drop}.`), r.logs.join("|"));
+      // The other branch: a Mac with its drop folder in Dropbox (no dropPath) notes it missing too, and goes no further.
+      const dropbox = join(w.root, "Unedited Video", MAC);
+      const r2 = runs(w, L, { settings: { version: 1, machine: MAC, root: w.root, checkout: "/c" }, home: w.home });
+      rmSync(join(w.home, "Library"), { recursive: true, force: true });
+      assert.equal(await uneditedFolders([dropbox], r2.deps), 2);
+      assert.equal(readAccess(w.home).places.drop.state, "missing");
+      assert.equal(readAccess(w.home).places.drop.folder, resolve(dropbox));
     }));
 
   it("a refused drop folder is noted, logged, and nothing more is read there", () =>
@@ -118,7 +125,7 @@ describe("the import notes each look (A2)", () => {
       assert.equal(note.places.episodes.state, "refused");
       assert.equal(note.places.drop.state, "ok");
       assert.equal(existsSync(join(drop, "Talk.mov")), true, "the video stays in the drop folder");
-      assert.deepEqual(w.statuses(), [], "and nothing was started for it");
+      assert.equal(deps.logs.some((l) => /Episodes could not be read|Looked in the folder/.test(l)), false, "importOne never ran, nor its backstop: " + deps.logs.join("|"));
       assert.ok(deps.logs.includes(accessLog("refused", "EPERM", NODE, wordsOf(w, "episodes", episodes))), deps.logs.join("|"));
     }));
 

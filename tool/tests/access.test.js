@@ -352,7 +352,7 @@ describe("the words are the design's", () => {
     const folder = join(home, "Drop");
     assert.equal(lookLog("drop", folder, { state: "refused", code: "EPERM" }, home, NODE), accessLog("refused", "EPERM", NODE, placeWordsOf("drop", folder, home)));
     assert.equal(lookLog("episodes", folder, { state: "locked", code: "EACCES" }, home, NODE), accessLog("locked", "EACCES", NODE, "BRIMM Video in Dropbox"));
-    assert.match(lookLog("drop", folder, { state: "error", code: "EIO" }, home, NODE), /EIO/);
+    assert.equal(lookLog("drop", folder, { state: "error", code: "EIO" }, home, NODE), `node (${NODE}) could not look in ${placeWordsOf("drop", folder, home)} (EIO).`);
     for (const look of [{ names: [] }, { state: "missing", code: "ENOENT" }]) assert.equal(lookLog("drop", folder, look, home, NODE), "");
   });
 

@@ -203,7 +203,7 @@ export function accessLog(state, code, node, placeWords) {
 export function lookLog(place, folder, look, home, node = process.execPath) {
   if (!look || look.names) return "";
   const words = placeWordsOf(place, folder, home);
-  if (look.state === "error") return `node (${node}) could not look in ${words} (${look.code || "an error"}). Jason: see ${LOG_FILE}.`;
+  if (look.state === "error") return `node (${node}) could not look in ${words} (${look.code || "an error"}).`;
   return accessLog(look.state, look.code, node, words);
 }
 

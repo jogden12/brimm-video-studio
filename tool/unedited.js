@@ -1573,11 +1573,11 @@ export async function uneditedFolders(folders, deps) {
     // note; the old folder mode is left as it is.
     const home = deps.home || studioHome();
     const episodic = episodeMode(folder, deps.settings, home);
-    const seen = { home, clock: deps.clock || Date.now };
-    if (!(episodic ? bracket("drop", () => existsSync(folder), seen) : existsSync(folder))) {
+    const noteOpts = { home, clock: deps.clock || Date.now };
+    if (!(episodic ? bracket("drop", () => existsSync(folder), noteOpts) : existsSync(folder))) {
       log(`There is no folder at ${folder}.`);
       code = 2;
-      if (episodic) noteState("drop", folder, Object.assign(new Error("ENOENT"), { code: "ENOENT" }), seen);
+      if (episodic) noteState("drop", folder, Object.assign(new Error("ENOENT"), { code: "ENOENT" }), noteOpts);
       // The checks behind a hand-off or an import (the copies in final/, the export in Downloads, the move of a recording) do not wait for the drop folder: this
       // Mac's own is still worked, and finds nothing waiting in it. Only a Mac with a drop folder of its own does so: on a Dropbox drop folder a missing
       // folder is Dropbox's to bring back, and no check is made into a path that is not there.
