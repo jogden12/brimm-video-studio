@@ -84,14 +84,42 @@ plutil -lint $app/Contents/Info.plist >/dev/null || { print "The Info.plist did 
 swiftc -O -target arm64-apple-macos13.0 -module-cache-path $work/modules -o $app/Contents/MacOS/"Move to Studio" $here/launcher.swift || { print "The launcher did not compile."; exit 1 }
 chmod 755 $app/Contents/MacOS/"Move to Studio"
 
+# The folder chooser: a small helper app inside this one, signed before the app is.
+chooser=$app/Contents/Helpers/"Choose a Folder.app"
+mkdir -p $chooser/Contents/MacOS || exit 1
+cat > $chooser/Contents/Info.plist <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>Choose a Folder</string>
+  <key>CFBundleIdentifier</key><string>com.thebrimm.move-to-studio.choose-folder</string>
+  <key>CFBundleName</key><string>Choose a Folder</string>
+  <key>CFBundleDisplayName</key><string>Choose a Folder</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+</dict>
+</plist>
+PLIST
+plutil -lint $chooser/Contents/Info.plist >/dev/null || { print "The chooser's Info.plist did not pass plutil."; exit 1 }
+swiftc -O -target arm64-apple-macos13.0 -module-cache-path $work/modules -o $chooser/Contents/MacOS/"Choose a Folder" $here/choose-folder.swift || { print "The chooser did not compile."; exit 1 }
+chmod 755 $chooser/Contents/MacOS/"Choose a Folder"
+
 cp -X $here/move.zsh $here/open-in-terminal.zsh $app/Contents/Resources/ || exit 1
 chmod 755 $app/Contents/Resources/move.zsh $app/Contents/Resources/open-in-terminal.zsh
 print -r -- $commit > $app/Contents/Resources/commit.txt
 
 if (( sign )); then
+  codesign --force --options runtime --timestamp --identifier com.thebrimm.move-to-studio.choose-folder --sign $identity $chooser || { print "Signing the chooser failed."; exit 1 }
+  codesign --verify --strict --verbose=2 $chooser || { print "The chooser's signature did not check."; exit 1 }
   codesign --force --options runtime --timestamp --sign $identity $app || { print "Signing failed."; exit 1 }
   codesign --verify --strict --verbose=2 $app || { print "The signature did not check."; exit 1 }
 else
+  codesign --force --sign - --timestamp=none --identifier com.thebrimm.move-to-studio.choose-folder $chooser || { print "The chooser could not be sealed."; exit 1 }
+  codesign --verify --strict --verbose=2 $chooser || { print "The chooser's seal did not check."; exit 1 }
   # The linker leaves only an ad-hoc signature on the program, and nothing seals the bundle's resources, so another Mac would call
   # the copy "damaged". A whole-bundle ad-hoc signature verifies, and gets the plain "rejected" (macOS's Open Anyway). It is local:
   # no identity, and no timestamp server, so nothing is sent.
@@ -99,7 +127,7 @@ else
   codesign --verify --strict --verbose=2 $app || { print "The seal did not check."; exit 1 }
 fi
 
-ditto -c -k --keepParent $app $zip || { print "The zip could not be made."; exit 1 }
+ditto -c -k --norsrc --noextattr --keepParent $app $zip || { print "The zip could not be made."; exit 1 }
 
 print "Made $app"
 print "Made $zip"
@@ -110,7 +138,7 @@ if (( sign )); then
   print "Not notarized yet. That sends the app to Apple, so it is a by-hand step, on Jason's yes. The commands:"
   print "  xcrun notarytool submit \"$zip\" --keychain-profile \"BRIMM notary\" --wait"
   print "  xcrun stapler staple \"$app\""
-  print "  ditto -c -k --keepParent \"$app\" \"$zip\""
+  print "  ditto -c -k --norsrc --noextattr --keepParent \"$app\" \"$zip\""
 else
   print "Not signed with the Developer ID. From AirDrop, macOS asks once: System Settings › Privacy & Security › Open Anyway. From a USB stick it asks nothing. Use --sign for the copy that goes to Sallie."
 fi
