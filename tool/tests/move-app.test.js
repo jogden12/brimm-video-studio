@@ -2748,7 +2748,7 @@ describe("the move script, later runs, the marks, the stop summary and the end o
     }
     // The line for a single one.
     const one = moveOn({ marks: NOT_INSTALLED, settingsChange: OWN, dropFiles: ["a.mov"], agentLoaded: false, answers: "y\ny\nn\n" });
-    assert.ok(one.out.includes("1 file or folder waits in My Drop, in your home folder. Nothing watches it yet"), one.out);
+    assert.ok(one.out.includes("1 file or folder waits in My Drop, in your home folder. Nothing watches it yet: the install starts the watching, and it is imported then."), one.out);
   });
 
   it("Drop › <Mac> holding a file stops: 'still to be imported' when watched, 'Tell Jason' when not", () => {
@@ -2829,6 +2829,25 @@ describe("the move script, later runs, the marks, the stop summary and the end o
     assert.equal(fresh.status, 1, fresh.out);
     assert.ok(summaryOf(fresh).includes(NOW(LOCAL_DROP)), fresh.out);
     assert.ok(!summaryOf(fresh).includes("no longer imported"), fresh.out);
+  });
+
+  it("a stale exports= mark is taken out when a run gives no --exports-folder", () => {
+    const unsetExports = (home) => {
+      const file = join(home, "Library", "Application Support", "BRIMM Video", "settings.json");
+      const s = JSON.parse(readFileSync(file, "utf8"));
+      delete s.exportsPath;
+      writeFileSync(file, JSON.stringify(s));
+    };
+    const one = moveOn({ marks: NOT_INSTALLED, picks: ["<HOME>/Exports"], install: { ranExit: 1 }, answers: "y\nc\ny\n" });
+    assert.match(one.studioNow.marks, /exports=/);
+    unsetExports(one.home); // the first run failed before the settings were written
+    const two = one.again({ answers: "y\nc\ny\n", picks: ["<HOME>/Downloads"], install: { ranExit: 1 } });
+    assert.ok(two.out.includes("Last time, this folder was picked: Exports, in your home folder."), two.out);
+    assert.ok(!two.ran.includes("--exports-folder"), two.ran);
+    assert.ok(!/exports=/.test(two.studioNow.marks), two.studioNow.marks);
+    unsetExports(two.home);
+    const three = two.again({ answers: "y\ny\nn\n" });
+    assert.ok(!three.out.includes("Last time, this folder was picked: Exports"), three.out);
   });
 
   it("the set-up-fresh question's new words", () => {

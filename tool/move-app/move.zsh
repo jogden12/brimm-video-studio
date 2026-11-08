@@ -369,7 +369,7 @@ look_at_import_and_drop() {
       if watched_by_agent "$DROP"; then
         stop_here "The drop folder holds $new_held file$([[ $new_held -eq 1 ]] || print -rn s) still to be imported."
       fi
-      say "  $(files_or_folders $new_held) $([[ $new_held -eq 1 ]] && print -rn waits || print -rn wait) in $(words_for "$DROP"). Nothing watches it yet: the install starts the watching, and they are imported then."
+      say "  $(files_or_folders $new_held) $([[ $new_held -eq 1 ]] && print -rn waits || print -rn wait) in $(words_for "$DROP"). Nothing watches it yet: the install starts the watching, and $([[ $new_held -eq 1 ]] && print -rn it is || print -rn they are) imported then."
     fi
   fi
   if (( new_held == 0 )); then say "  The drop folder is empty."; fi
@@ -709,6 +709,14 @@ write_mark() {
   local key="$1" value="$2" kept=""
   [[ ! -f "$MARKS" ]] || kept="$(grep -v "^$key=" "$MARKS" || true)"
   { [[ -z "$kept" ]] || print -r -- "$kept"; print -r -- "$key=$value"; } > "$MARKS.new"
+  mv "$MARKS.new" "$MARKS"
+}
+# Takes one key out of the marks file: every other line is kept.
+drop_mark() {
+  local kept=""
+  [[ -f "$MARKS" ]] || return 0
+  kept="$(grep -v "^$1=" "$MARKS" || true)"
+  { [[ -z "$kept" ]] || print -r -- "$kept"; } > "$MARKS.new"
   mv "$MARKS.new" "$MARKS"
 }
 # The checkout that is already there: it must be Studio's, clean, and at the app's commit. Anything else stops, in words.
@@ -1561,7 +1569,8 @@ run_the_installer() {
   # The marks, right before the install runs: the folders given to it on this run, and a Mac set up fresh. A pick kept as it is
   # (no option) writes none.
   if (( ${INSTALL_OPTIONS[(Ie)--drop-folder]} )); then write_mark drop "$DROP_FOLDER"; fi
-  if (( ${INSTALL_OPTIONS[(Ie)--exports-folder]} )); then write_mark exports "$EXPORTS_FOLDER"; fi
+  if (( ${INSTALL_OPTIONS[(Ie)--exports-folder]} )); then write_mark exports "$EXPORTS_FOLDER"
+  else drop_mark exports; fi
   if [[ -n "$SET_UP_FRESH" ]]; then write_mark fresh yes; fi
   INSTALL_STARTED=yes
   local kept rc
