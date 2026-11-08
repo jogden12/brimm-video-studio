@@ -27,6 +27,7 @@ FRESH_MACHINE="Jason's MacBook"
 # once step 5 has asked its two questions.
 MACHINE="" KEY_COMMENT="" INSTALL_OPTIONS=()
 FRESH=""             # set by which_mac on a Mac with no brimm-video settings
+SET_UP_FRESH=""      # yes on a Mac set up fresh (the same as FRESH now; a later run reads it from a mark)
 STUDIO_URL="${BRIMM_STUDIO_REPO:-git@github-brimm-video-studio:jogden12/brimm-video-studio.git}"
 HOST_ALIAS="github-brimm-video-studio"
 KEY="$HOME/.ssh/brimm_video_studio_deploy"
@@ -82,6 +83,9 @@ FAULT_KIND="" FAULT_WORDS="" FAULT_REASON=""   # why a folder will not do (empty
 DROP_FOLDER="" EXPORTS_FOLDER=""   # the folders step 5 gives the installer, whole paths
 DROP_KEPT="" EXPORTS_KEPT=""       # yes when the settings' own folder is kept
 DROP_FROM="" EXPORTS_FROM=""       # where each came from: suggested, settings, last or picked
+REFUSED=""                         # what a refused print sends back to: exports, drop, nested, or empty for a stop
+CLOUD_OK_FOR=""                    # the real path of the drop folder that was answered y at the cloud question, for this run
+R44_CLOUD=""                       # the report's Cloud warning line
 
 say() {
   print -r -- "$@" 2>/dev/null || true
@@ -206,6 +210,7 @@ which_mac() {
     MACHINE="$machine"
   else
     FRESH="yes"
+    SET_UP_FRESH="yes"
     MACHINE="$FRESH_MACHINE"
   fi
   KEY_COMMENT="brimm-video-studio read-only, $MACHINE"
@@ -1065,13 +1070,16 @@ say_left_behind() {
 # Asks one of the two questions ($1: drop or exports) until it is answered, and sets its folder (DROP_FOLDER or EXPORTS_FOLDER), whether
 # the settings' own is kept, and where it came from. A pick is checked at once; a refused one is asked again, with c alone when y would
 # give the same refused folder again (unless allowing Terminal cures it). When the chooser cannot be shown, y still takes the
-# suggested folder; only c alone stops, with the words that fit the refusal.
+# suggested folder; only c alone stops, with the words that fit the refusal. After the installer refused a folder, $2 is that folder, $3
+# its FAULT_KIND and $4 its reason.
 ask_folder() {
-  local kind="$1" message c_only="" y_kind="" y_reason="" rc cand from started words
+  local kind="$1" refused="${2-}" refused_kind="${3-}" refused_reason="${4-}" message c_only="" y_kind="" y_reason="" rc cand from started words
   if [[ "$kind" == drop ]]; then message="Move to Studio: choose the folder you will drop videos into, or make a new one with New Folder."
   else message="Move to Studio: choose the folder HyperFrames' exports will go into, or make a new one with New Folder."; fi
   folder_candidate "$kind"
   cand="$CAND" from="$CAND_FROM" started="$CAND_FROM"
+  # Asked again after the installer refused $2: when y would give that folder again, only c is offered (unless allowing cures it).
+  if [[ -n "$refused" && "$refused_kind" != cannot-look && "${cand:A}" == "${refused:A}" ]]; then c_only=yes y_kind="$refused_kind" y_reason="$refused_reason"; fi
   while true; do
     if [[ -n "$c_only" ]]; then
       ask_y_or_c "" "Type c and press Return to choose another folder. Anything else stops: " c-only
@@ -1167,11 +1175,11 @@ installer_line() {
   done
   print -r -- "zsh \"$STUDIO/tool/install.sh\" --print$shown \"$ROOT\""
 }
-# Runs the installer's own --print and shows it. Its text is kept in PRINT_TOLD and its status in PRINT_RC.
+# Runs the installer's own --print. Its text is kept in PRINT_TOLD and its status in PRINT_RC; the caller says it (a refused pick is
+# said by its first line alone).
 installer_print() {
   PRINT_RC=0
   PRINT_TOLD="$(zsh "$STUDIO/tool/install.sh" --print "${INSTALL_OPTIONS[@]}" "$ROOT" 2>&1)" || PRINT_RC=$?
-  say "$PRINT_TOLD"
 }
 print_has() { grep -q -- "$1" <<< "$PRINT_TOLD"; }
 # The last lines of what the installer said, for a stop and for the report.
@@ -1213,9 +1221,113 @@ turn_on_hyperframes() {
   wait_for "The drop folder, $MACHINE, is shown in Finder. In Finder, Control-click $MACHINE, choose Make available offline, and click Allow if macOS asks whether node may read the Dropbox folder."
 }
 
+# Reads a print that was refused (its status was not 0): REFUSED is the question to ask again (exports, drop or nested), or empty for
+# a stop. It reads the first line that starts "Not written:", "The folder " or "A folder is for" (node's own words can come ahead of it)
+# and nothing after it: L1c's second line after an exports refusal is for a person at Terminal, and is never said. Like the app's own
+# checks it is never called inside $(...): FAULT_KIND is cannot-look, not-empty or installer, FAULT_WORDS the line, FAULT_REASON its
+# text after "Not written: " without the final period.
+refused_pick() {
+  local line
+  REFUSED="" FAULT_KIND="" FAULT_WORDS="" FAULT_REASON=""
+  line="$(print -r -- "$1" | grep -m 1 -E '^(Not written:|The folder |A folder is for)' || true)"
+  [[ -n "$line" ]] || return 0
+  case "$line" in
+    "Not written: the drop folder cannot be the exports folder, or inside it, or hold it"*) REFUSED=nested ;;
+    "Not written: the exports folder "*) REFUSED=exports ;;
+    "Not written: the drop folder would change from "*) return 0 ;;
+    "Not written: the drop folder "*|"Not written: the folder that is to hold the drop folder "*|"The folder "*|"A folder is for"*) REFUSED=drop ;;
+    *) return 0 ;;
+  esac
+  FAULT_KIND=installer
+  case "$line" in
+    "Not written: the drop folder could not be read"*) FAULT_KIND=cannot-look ;;
+    "Not written: the drop folder holds"*) FAULT_KIND=not-empty ;;
+  esac
+  FAULT_WORDS="$line"
+  FAULT_REASON="${${line#Not written: }%.}"
+}
+# The first Warning line of a drop folder in a cloud folder (both of L1c's forms start so) in the print $1, or nothing.
+cloud_warning() { print -r -- "$1" | grep -m 1 '^Warning: this drop folder is in ' || true; }
+# Studio's own answer ($1: cloudFolder or needsFilesAccess) for the folder $2: the cloud's name or nothing, or yes or no. Its settings.js
+# is imported (never run), as words_for does, with node's errors kept off the screen. Nothing is said when it cannot be asked.
+studio_says() {
+  local told=""
+  if [[ -n "$NODE" && -f "$STUDIO/tool/settings.js" ]]; then
+    told="$("$NODE" --input-type=module -e '
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+const studio = await import(pathToFileURL(join(process.argv[1], "settings.js")).href);
+const [which, folder, home] = process.argv.slice(2);
+if (which === "cloudFolder") process.stdout.write(studio.cloudFolder(folder, home) || "");
+else process.stdout.write(studio.needsFilesAccess(folder, home) ? "yes" : "no");
+' "$STUDIO/tool" "$1" "$2" "$HOME" 2>/dev/null)" || told=""
+  fi
+  print -r -- "$told"
+}
+
+# After a refusal refused_pick named ($REFUSED): says its line, asks the question again, and makes the options again. A nesting
+# refusal asks the folder picked on this run, or the exports folder when both were or neither was.
+ask_again_after_refusal() {
+  local kind="$REFUSED" folder
+  say "  $FAULT_WORDS"
+  if [[ "$kind" == nested ]]; then
+    if [[ "$DROP_FROM" == picked && "$EXPORTS_FROM" != picked ]]; then kind=drop; else kind=exports; fi
+  fi
+  if [[ "$kind" == drop ]]; then folder="$DROP_FOLDER"; else folder="$EXPORTS_FOLDER"; fi
+  ask_folder "$kind" "$folder" "$FAULT_KIND" "$FAULT_REASON"
+  set_install_options
+}
+# The cloud question, after a print that holds the Warning line for a drop folder the installer is given. A y holds for that folder
+# (by real path) for the rest of the run and writes nothing. Gives 1 for a c (the drop question is asked again, and the print runs
+# again), and 0 when the print goes on.
+ask_about_the_cloud() {
+  local warning
+  [[ -z "$PRINT_ONLY" && -z "$DROP_KEPT" ]] || return 0
+  warning="$(cloud_warning "$PRINT_TOLD")"
+  [[ -n "$warning" && "$CLOUD_OK_FOR" != "${DROP_FOLDER:A}" ]] || return 0
+  ask_y_or_c "$warning" "Type y and press Return to use it anyway, or c and press Return to choose another. Anything else stops: "
+  if [[ "$ANSWER" == y ]]; then CLOUD_OK_FOR="${DROP_FOLDER:A}"; return 0; fi
+  ask_drop_folder
+  set_install_options
+  return 1
+}
+# The report's Cloud warning line: Studio's cloudFolder of the drop folder the installer was given.
+note_the_cloud() {
+  local name warning
+  name="$(studio_says cloudFolder "$DROP_FOLDER")"
+  if [[ -z "$name" && "$CLOUD_OK_FOR" == "${DROP_FOLDER:A}" ]]; then
+    warning="$(cloud_warning "$PRINT_TOLD")"
+    if [[ "$warning" =~ '^Warning: this drop folder is in (.*)\. (Every video|If it does)' ]]; then name="$match[1]"; fi
+  fi
+  if [[ -z "$name" ]]; then R44_CLOUD="none"
+  elif [[ -n "$DROP_KEPT" ]]; then R44_CLOUD="$name, kept on a y on an earlier run"
+  else R44_CLOUD="$name, kept on a y"
+  fi
+}
+# Whether macOS may ask about the folder $1, by Studio's own answers: a cloud folder gives yes (Dropbox only on a Mac set up fresh,
+# since node and Claude Code read it already on a moved Mac), and otherwise needsFilesAccess. Nothing asked is no.
+may_ask_about() {
+  local cloud
+  cloud="$(studio_says cloudFolder "$1")"
+  if [[ "$cloud" == Dropbox ]]; then [[ -n "$SET_UP_FRESH" ]]; return; fi
+  if [[ -n "$cloud" ]]; then return 0; fi
+  [[ "$(studio_says needsFilesAccess "$1")" == yes ]]
+}
+# Before the real install's question: which questions macOS may still ask.
+privacy_notes() {
+  heading "What macOS may ask"
+  say "Studio looks in Downloads for exports, whatever is picked. macOS may ask once whether Claude Code may access files in your Downloads folder, the first time the chat on this Mac hands off a video and looks for its export. About 15 minutes after each hand-off, once the export's copies in Dropbox are checked, Studio's background job deletes the export from Downloads, and macOS may ask once whether node may. Choose Allow each time. If node was refused, allow it in System Settings › Privacy & Security › Files and Folders. Until then, exports stay in Downloads, to be deleted by hand."
+  if may_ask_about "$DROP_FOLDER"; then
+    say "macOS may also ask whether node may read $(words_for "$DROP_FOLDER"), at the first import, and whether Claude Code may, the first time the chat on this Mac looks there (\"what's waiting?\"). Choose Allow each time. A Don't Allow is undone in System Settings › Privacy & Security › Files and Folders, under that name. macOS may ask node again after Homebrew updates it, and until someone clicks Allow, Studio sees no video dropped there."
+  fi
+  if [[ -n "$EXPORTS_PASSED_OVER" ]] || may_ask_about "$EXPORTS_FOLDER"; then
+    say "macOS may ask whether Claude Code may look in $(words_for "$EXPORTS_FOLDER"), at the first hand-off. Choose Allow."
+  fi
+}
+
 run_the_installer() {
   heading "5. Studio's installer (check 44)"
-  local tries=0 matter line
+  local tries=1 matter line
   local -a lines
   if [[ "$(mark_of installed)" == "$COMMIT" ]]; then
     done_already "Studio's installer finished at this commit (${COMMIT[1,7]}), on an earlier run"
@@ -1244,14 +1356,23 @@ run_the_installer() {
     set_install_options
   fi
 
-  # The print, again after Claude Code or the Claude app has been brought up to date.
+  # The print, again after a refused pick has been asked again, after the cloud question's c, and after Claude Code or the Claude app
+  # has been brought up to date. Only the last two count as a try at updating.
   while true; do
-    tries=$(( tries + 1 ))
     say "  Studio's installer, with --print first (this changes nothing):"
     installer_print
     if (( PRINT_RC != 0 )); then
+      REFUSED=""
+      if [[ -z "$PRINT_ONLY" ]]; then refused_pick "$PRINT_TOLD"; fi
+      if [[ -n "$REFUSED" ]]; then
+        ask_again_after_refusal
+        continue
+      fi
+      say "$PRINT_TOLD"
       stop_here "Studio's installer refused (its words are above), so it was not run for real. Nothing it refused has been changed."
     fi
+    say "$PRINT_TOLD"
+    if ! ask_about_the_cloud; then continue; fi
     if print_has '^  Claude Code, signed in:  no'; then
       stop_here "Claude Code is not signed in. In Terminal, run: claude auth login (sign in to this Mac's own Claude account in the browser), then run the app again."
     fi
@@ -1266,6 +1387,7 @@ run_the_installer() {
       ask "Claude Code in Terminal is behind what Studio's installer wants. This runs claude update, which brings it up to date, and then the installer's print is shown again."
       "$CLAUDE" update || true
       changed+=("ran claude update")
+      tries=$(( tries + 1 ))
       continue
     fi
     if print_has "^  The Claude app's own Claude Code:.*older than"; then
@@ -1277,6 +1399,7 @@ run_the_installer() {
         break
       fi
       wait_for "The Claude app's own Claude Code is older than the installer wants. In the Claude app, choose Claude > Check for Updates, let it update, and open the app again."
+      tries=$(( tries + 1 ))
       continue
     fi
     break
@@ -1288,6 +1411,7 @@ run_the_installer() {
   say "The lines that matter:"
   [[ -z "$matter" ]] || say "$matter"
   R44_PRINT="$matter"
+  if [[ -z "$PRINT_ONLY" ]]; then note_the_cloud; fi
 
   if [[ -n "$PRINT_ONLY" ]]; then
     would "run Studio's installer for real, after asking, with the same line and --yes in place of --print"
@@ -1296,6 +1420,7 @@ run_the_installer() {
     return 0
   fi
 
+  privacy_notes
   ask "Studio's installer now runs for real, with the same options as its print above. It sets Studio up on this Mac, changes this Mac's brimm-video settings to run from Studio, and ends with one real call to Claude from the background job (up to 90 seconds). It can take a few minutes."
   look_at_import_and_drop
   local kept rc
@@ -1366,6 +1491,7 @@ compose_report() {
   print -r -- "The installer's last lines: $(one_line "$R44_RAN")"
   print -r -- "What the look for the one-shot check printed: $(one_line "$R44_AGENT" "$(unchecked "the installer finished on an earlier run")")"
   print -r -- "What turning HyperFrames on printed: $(one_line "$R44_APP" "nothing: turning it on was not needed on this run")"
+  print -r -- "Cloud warning: $(one_line "$R44_CLOUD" "$(unchecked "not asked on this run (the installer finished on an earlier run)")")"
   print -r -- ""
   print -r -- "48 Afterwards"
   print -r -- "brimm-video's old key: $R48"
