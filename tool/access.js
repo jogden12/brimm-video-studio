@@ -1,0 +1,211 @@
+// The import's note of each look at a folder, and what to say of it. The launch agent runs Homebrew's node, and macOS decides,
+// program by program, whether node may read a folder under Desktop, Documents, Downloads, iCloud Drive, a cloud drive (Dropbox's
+// among them) or another disk. After a `brew upgrade node` it asks again, and with nobody at the Mac, or on Don't Allow, the import
+// cannot look in the drop folder and a dropped video waits for ever. So each look is written down in `access.json`, beside
+// seen.json on this Mac's own disk (never in Dropbox, never in a watched folder), and this file judges the note and holds every
+// sentence that is said of it: in the log, in a banner, in her chat and in the installer. filing.js, unedited.js and edit.js
+// only call it. Design: docs/superpowers/specs/2026-11-07-import-folder-access-notice-design.md.
+// No note, line or banner names a video by its file. A write that fails costs only the notice.
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { realOf } from "./places.js";
+import { folderWords, seenFile } from "./settings.js";
+
+/** How long a look may wait before it is said that the import is waiting on macOS's question (or on a slow folder). */
+export const ASKING_MS = 60 * 1000;
+/** How old a video in the drop folder is before it is told that the import has not taken it. */
+export const UNSEEN_MS = 3 * 60 * 1000;
+/** How long after a banner for a place that place's banner may come again while nothing has changed. */
+export const BANNER_AGAIN_MS = 60 * 60 * 1000;
+/** Her words for "look again", the command that asks the import to look in the drop folder now. */
+export const LOOK_AT_WORK = "The import is at work now: it looks in your drop folder again within a minute.";
+export const LOOK_ASKED = "The import is asked to look in your drop folder now. The panel shows how far it is.";
+
+const PLACES = ["drop", "episodes", "downloads"];
+const STATES = { EPERM: "refused", EACCES: "locked", ENOENT: "missing" };
+const EMPTY = () => ({ version: 1, places: {}, looking: null, told: {} });
+
+/** Where the note is kept: beside seen.json. */
+export const accessFile = (home) => join(dirname(seenFile(home)), "access.json");
+
+/** The note, or an empty one when there is none or it cannot be read. */
+export function readAccess(home) {
+  try {
+    const note = JSON.parse(readFileSync(accessFile(home), "utf8"));
+    if (note && typeof note === "object" && !Array.isArray(note)) return { ...EMPTY(), ...note, places: note.places || {}, told: note.told || {} };
+  } catch {
+    // none, or not readable: the same as none
+  }
+  return EMPTY();
+}
+
+/** Write the note whole, under another name and then renamed, as seen.json is. A write that fails is passed over. */
+export function writeAccess(home, note) {
+  const file = accessFile(home);
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(`${file}.writing`, JSON.stringify(note, null, 2) + "\n");
+    renameSync(`${file}.writing`, file);
+  } catch {
+    try {
+      rmSync(`${file}.writing`, { force: true });
+    } catch {
+      // nothing more to do
+    }
+  }
+}
+
+/** Run `fn` with the note saying that the import is looking at `place` (its process and the time), and take that out again whatever
+    `fn` does, so that a run stuck in `fn` shows in the note. Gives fn's result; a throw goes on. `fn` is not waited for if it is async. */
+export function bracket(place, fn, { home, clock = Date.now, pid = process.pid }) {
+  const note = readAccess(home);
+  note.looking = { place, pid, at: clock() };
+  writeAccess(home, note);
+  try {
+    return fn();
+  } finally {
+    const after = readAccess(home);
+    after.looking = null;
+    writeAccess(home, after);
+  }
+}
+
+/** Write what a look at `folder` found for `place`: no error is ok, EPERM is refused (macOS's privacy control), EACCES locked (the
+    folder's own permissions), ENOENT missing, any other error. `since` stays while the state does; `okNode` is the node of the last
+    ok look, kept through the other states and absent until a first ok look. */
+export function noteState(place, folder, error, { home, clock = Date.now, node = process.execPath }) {
+  const note = readAccess(home);
+  const before = note.places[place];
+  const state = error ? STATES[error.code] || "error" : "ok";
+  const at = clock();
+  const next = { state, code: error ? String(error.code || "") : "", at, since: before && before.state === state ? before.since : at, folder: resolve(folder), node };
+  if (state === "ok") next.okNode = node;
+  else if (before && before.okNode) next.okNode = before.okNode;
+  note.places[place] = next;
+  writeAccess(home, note);
+}
+
+/** List `folder` in a bracket, and write what came of it. Gives { names }, or { state, code } when the folder could not be read. */
+export function lookAt(place, folder, opts) {
+  let names;
+  let failed = null;
+  try {
+    names = bracket(place, () => readdirSync(folder), opts);
+  } catch (e) {
+    failed = e;
+  }
+  noteState(place, folder, failed, opts);
+  return failed ? { state: STATES[failed.code] || "error", code: String(failed.code || "") } : { names };
+}
+
+/** What, if anything, to tell her or Jason about the import's looks, as one finding. `places` says where each place is now; `missing`
+    is whether this Mac's drop folder is not there as her chat sees it; `unseen` is the videos the import has not taken; `agentNode`
+    is the node the plist names, "" when it is not known; `needsAccess` is whether a noted place is one macOS guards. The first that
+    holds: asking, refused/locked/error (the first noted place, drop then episodes then downloads, that is still where it was),
+    missing, unseen, newNode. */
+export function findingOf({ note, now, places, agentPid, missing = false, unseen = [], agentNode = "", needsAccess = false }) {
+  const looking = note.looking;
+  if (looking && looking.pid === agentPid && now - looking.at > ASKING_MS) return { kind: "asking", place: looking.place };
+  for (const place of PLACES) {
+    const noted = note.places[place];
+    if (!noted || !places[place] || resolve(noted.folder) !== resolve(places[place])) continue;
+    if (noted.state === "refused" || noted.state === "locked" || noted.state === "error") return { kind: noted.state, place, code: noted.code };
+  }
+  if (missing) return { kind: "missing", place: "drop" };
+  if (unseen.length) return { kind: "unseen", videos: unseen };
+  const letIn = Object.values(note.places).map((p) => p.okNode).filter(Boolean);
+  if (needsAccess && agentNode && letIn.length && !letIn.includes(agentNode)) return { kind: "newNode" };
+  return null;
+}
+
+/** A place in her words: her drop folder with where it is, BRIMM Video in Dropbox, or the Downloads folder. */
+export function placeWordsOf(place, folder, home) {
+  if (place === "drop") return `your drop folder, ${folderWords(folder, home)}`;
+  if (place === "downloads") return "the Downloads folder";
+  return "BRIMM Video in Dropbox";
+}
+
+/** The Files and Folders switch that covers `folder`, by its real path, in System Settings' words. */
+export function switchFor(folder, home) {
+  const h = realOf(home);
+  const real = realOf(folder);
+  const under = (dir) => real === dir || real.startsWith(`${dir}/`);
+  if (under(join(h, "Desktop"))) return "Desktop Folder";
+  if (under(join(h, "Documents"))) return "Documents Folder";
+  if (under(join(h, "Downloads"))) return "Downloads Folder";
+  const storage = join(h, "Library", "CloudStorage");
+  if (real.startsWith(`${storage}/`)) return `the switch for ${real.slice(storage.length + 1).split("/")[0].split("-")[0]}`;
+  if (under(join(h, "Library", "Mobile Documents"))) return "the switch for iCloud Drive";
+  if (under("/Volumes")) return "Removable Volumes";
+  return "its switches";
+}
+
+const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+const LOG_FILE = "~/Library/Logs/brimm-video.log";
+
+/** The line for her chat (and the installer) for a finding. `placeWords` is the place in her words, `switchName` the switch to turn on,
+    `code` the error's code when the finding has none. */
+export function accessLine(finding, { placeWords = "", switchName = "", code = "" } = {}) {
+  const gone = finding.place === "downloads" ? ", so the exports HyperFrames put there stay there" : ", so the videos you drop wait";
+  switch (finding.kind) {
+    case "asking":
+      return `The import has waited more than a minute to look in ${placeWords}. If a box on this Mac's screen asks whether "node" may look in it, choose Allow, and the import goes on.`;
+    case "refused":
+      return `This Mac does not let the import look in ${placeWords}${gone}. In System Settings, under Privacy & Security, Files and Folders, turn on ${switchName} under each "node" listed. Then say "look again".`;
+    case "locked":
+      return `The import cannot open ${placeWords}: the folder's own permissions shut it. Ask Jason. (Jason: node gets EACCES there; see Get Info, Sharing & Permissions.)`;
+    case "error":
+      return `The import could not look in ${placeWords} (${finding.code || code}). Ask Jason. (Jason: see ${LOG_FILE}.)`;
+    case "missing":
+      return `${capital(placeWords)}, is not there now. If it is on another disk, connect the disk, then say "look again".`;
+    case "unseen": {
+      const n = finding.videos.length;
+      const [what, it, waits] = n === 1 ? ["1 video", "it", "waits"] : [`${n} videos`, "they", "wait"];
+      return `The import has not taken ${what} in your drop folder, and no import is running. Say "look again". If ${it} still ${waits}, ask Jason. (Jason: see ${LOG_FILE}, and launchctl print gui/$(id -u)/com.thebrimm.unedited.)`;
+    }
+    case "newNode":
+      return "node was updated on this Mac, so macOS may ask whether node may look in your drop folder or in Dropbox. If a box asks, choose Allow.";
+    default:
+      return "";
+  }
+}
+
+/** The line on one waiting video's step: its own for a video the import has not taken, else the finding's line as it is. Nothing for
+    a finding that does not block a video. */
+export function stepLine(finding, opts = {}) {
+  if (finding.kind === "unseen") return 'The import has not taken it, and no import is running. Say "look again". If it still waits, ask Jason.';
+  return ["asking", "refused", "locked", "error"].includes(finding.kind) ? accessLine(finding, opts) : "";
+}
+
+/** The banner for whoever is at the Mac. */
+export function accessBanner(kind, placeWords) {
+  if (kind === "refused") return `This Mac does not let node look in ${placeWords}. Allow it in System Settings › Privacy & Security › Files and Folders.`;
+  if (kind === "locked") return `The import cannot open ${placeWords}. Ask Jason.`;
+  if (kind === "newNode") return "node was updated. If macOS asks whether node may look in a folder, choose Allow.";
+  return "";
+}
+
+/** The log line for a look that macOS or the folder's permissions refused. */
+export function accessLog(state, code, node, placeWords) {
+  if (state === "refused") return `macOS does not let node (${node}) look in ${placeWords} (${code}). Allow node in System Settings, Privacy & Security, Files and Folders; then say "look again" in her chat, or drop the video again.`;
+  if (state === "locked") return `The folder's own permissions do not let node look in ${placeWords} (${code}). Jason checks them in Finder, Get Info, Sharing & Permissions.`;
+  return "";
+}
+
+/** The installer's line, from the note, for what macOS answered at the end of the setup. */
+export function setupLine(note, { home = homedir() } = {}) {
+  const lead = "  Files and Folders, at the end:  ";
+  const words = (place) => placeWordsOf(place, (note.places[place] || {}).folder || "", home);
+  if (note.looking) return lead + accessLine({ kind: "asking", place: note.looking.place }, { placeWords: words(note.looking.place) });
+  for (const place of PLACES) {
+    const noted = note.places[place];
+    if (!noted) continue;
+    if (["refused", "locked", "error", "missing"].includes(noted.state)) {
+      const finding = { kind: noted.state, place, code: noted.code };
+      return lead + accessLine(finding, { placeWords: words(place), switchName: switchFor(noted.folder, home) });
+    }
+  }
+  const both = ["drop", "episodes"].every((place) => note.places[place] && note.places[place].state === "ok");
+  return lead + (both ? "node may look in the drop folder and in Dropbox." : "the import has not looked yet.");
+}
