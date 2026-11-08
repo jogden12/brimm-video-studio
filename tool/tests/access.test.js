@@ -8,8 +8,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { seenFile } from "../settings.js";
 import {
-  ASKING_MS, UNSEEN_MS, BANNER_AGAIN_MS, DOWNLOADS_SAY_MS, accessFile, accessBanner, accessLine, accessLog, bracket, findingOf, lookAt, lookLog, noteState,
-  placeWordsOf, postIfDue, postNewNodeIfDue, readAccess, setupLine, stepLine, switchFor, writeAccess,
+  ASKING_MS, UNSEEN_MS, BANNER_AGAIN_MS, DOWNLOADS_SAY_MS, accessFile, accessBanner, accessLine, accessLog, blocksDrop, bracket, findingOf, lookAt, lookLog, noteState,
+  placeWordsOf, postIfDue, postNewNodeIfDue, readAccess, saysInEpisodes, saysInOverview, setupLine, stepLine, switchFor, writeAccess,
 } from "../access.js";
 import { watched } from "./watched-fs.js";
 
@@ -518,5 +518,31 @@ describe("postIfDue and postNewNodeIfDue (A3)", () => {
     assert.equal(said.length, 1);
     assert.deepEqual(note.told.newNode, { node: NODE2, at: T0 });
     assert.deepEqual(readAccess(home).told.newNode, { node: NODE2, at: T0 });
+  });
+});
+
+describe("which findings the guide and episodes say (A5)", () => {
+  const F = (kind, place) => ({ kind, ...(place ? { place } : {}) });
+  it("blocksDrop: asking, refused, locked and error in the drop folder or Episodes, and unseen; nothing else", () => {
+    for (const kind of ["asking", "refused", "locked", "error"]) {
+      assert.equal(blocksDrop(F(kind, "drop")), true, kind);
+      assert.equal(blocksDrop(F(kind, "episodes")), true, kind);
+      assert.equal(blocksDrop(F(kind, "downloads")), false, kind);
+    }
+    assert.equal(blocksDrop({ kind: "unseen", videos: ["a.mov"] }), true);
+    assert.equal(blocksDrop(F("missing", "drop")), false);
+    assert.equal(blocksDrop(F("newNode")), false);
+  });
+  it("saysInOverview: every finding but a new node and Downloads", () => {
+    for (const kind of ["asking", "refused", "locked", "error", "missing"]) assert.equal(saysInOverview(F(kind, "drop")), true, kind);
+    assert.equal(saysInOverview({ kind: "unseen", videos: ["a.mov"] }), true);
+    assert.equal(saysInOverview(F("refused", "downloads")), false);
+    assert.equal(saysInOverview(F("newNode")), false);
+  });
+  it("saysInEpisodes: every finding but a new node, Downloads included", () => {
+    for (const kind of ["asking", "refused", "locked", "error", "missing"]) assert.equal(saysInEpisodes(F(kind, "drop")), true, kind);
+    assert.equal(saysInEpisodes(F("refused", "downloads")), true);
+    assert.equal(saysInEpisodes({ kind: "unseen", videos: ["a.mov"] }), true);
+    assert.equal(saysInEpisodes(F("newNode")), false);
   });
 });

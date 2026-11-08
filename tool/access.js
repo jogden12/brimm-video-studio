@@ -183,6 +183,16 @@ export function stepLine(finding, opts = {}) {
   return ["asking", "refused", "locked", "error"].includes(finding.kind) ? accessLine(finding, opts) : "";
 }
 
+/** Whether a finding blocks the videos in this Mac's drop folder: the import cannot look in the drop folder or Episodes (every arriving video
+    of this Mac), or it never took a video (only those). Not Downloads, a missing folder or a new node. */
+export const blocksDrop = (finding) => finding.kind === "unseen" || (["asking", "refused", "locked", "error"].includes(finding.kind) && (finding.place === "drop" || finding.place === "episodes"));
+
+/** Whether the guide's overview says a finding: all but a new node and one about Downloads. */
+export const saysInOverview = (finding) => finding.kind !== "newNode" && finding.place !== "downloads";
+
+/** Whether `episodes` says a finding: all but a new node. */
+export const saysInEpisodes = (finding) => finding.kind !== "newNode";
+
 /** The banner for whoever is at the Mac. */
 export function accessBanner(kind, placeWords) {
   if (kind === "refused") return `This Mac does not let node look in ${placeWords}. Allow it in System Settings › Privacy & Security › Files and Folders.`;

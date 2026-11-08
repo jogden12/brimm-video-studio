@@ -4,9 +4,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
+import { importingFolder } from "../settings.js";
+import { writeStatusIn } from "../importing.js";
+import { watched } from "./watched-fs.js";
 import { dirname, join } from "node:path";
 import { editMain } from "../edit.js";
-import { accessLine, stepLine, writeAccess } from "../access.js";
+import { ASKING_MS, UNSEEN_MS, accessLine, placeWordsOf, stepLine, switchFor, writeAccess } from "../access.js";
 import { AIRDROP, NOTHING_UNDER_WAY, dropWords } from "../guide.js";
 import { dropFolderOf, downloadsFolder } from "../settings.js";
 import { setup } from "./episodes.js";
@@ -34,72 +37,84 @@ const OTHER = (t) => {
   writeFileSync(join(t.root, "Drop", "Sallie's laptop", "Theirs.mov"), "123456789");
 };
 
+const ARRIVING = (size) => `  A video of ${size} bytes: It is coming into your drop folder. Wait for the "Ready" notice.`;
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/** The finding's cases: how the note and the agent stand, and the line it makes (the drop folder's, or Episodes'). */
+const CASES = [
+  ["refused (drop)", (t) => ({ places: { drop: place(t, "refused", dropOf(t)) } }), () => ({}), (t) => accessLine({ kind: "refused", place: "drop", code: "EPERM" }, { placeWords: words(t), switchName: switchFor(dropOf(t), t.home) })],
+  ["locked (drop)", (t) => ({ places: { drop: place(t, "locked", dropOf(t)) } }), () => ({}), (t) => accessLine({ kind: "locked", place: "drop", code: "EACCES" }, { placeWords: words(t) })],
+  ["error (drop)", (t) => ({ places: { drop: place(t, "error", dropOf(t)) } }), () => ({}), (t) => accessLine({ kind: "error", place: "drop", code: "EIO" }, { placeWords: words(t) })],
+  ["asking (drop)", (t) => ({ places: {}, looking: { place: "drop", pid: 4242, at: t.now() - ASKING_MS - 1000 } }), () => ({ agentPid: () => 4242 }), (t) => accessLine({ kind: "asking", place: "drop" }, { placeWords: words(t) })],
+  ["refused (Episodes alone)", (t) => ({ places: { drop: place(t, "ok", dropOf(t)), episodes: place(t, "refused", t.ctx.episodes) } }), () => ({}), (t) => accessLine({ kind: "refused", place: "episodes", code: "EPERM" }, { placeWords: placeWordsOf("episodes", t.ctx.episodes, t.home), switchName: switchFor(t.ctx.episodes, t.home) })]
+];
+const start = (t, make) => {
+  const { places, looking } = make(t);
+  note(t, places, looking ? { looking } : {});
+};
+
 describe("guide: the import's line and a blocked video", () => {
-  const kinds = [
-    ["refused", "refused", { switchName: "its switches" }],
-    ["locked", "locked", {}],
-    ["error", "error", {}]
-  ];
-  for (const [name, state] of kinds) {
-    it(`${name} in the drop folder: the line under the drop folder's, the video's step is the line, and guide wait answers at once`, async () => {
+  for (const [name, make, more, lineOf] of CASES) {
+    it(`${name}: the line under the drop folder's, this Mac's video has the line as its step, the other Mac's keeps its own`, async () => {
       const t = setup();
       video(t, "Mine.mov");
       OTHER(t);
-      note(t, { drop: place(t, state, dropOf(t)) });
-      const line = accessLine({ kind: state, place: "drop", code: state === "error" ? "EIO" : "" }, { placeWords: words(t), switchName: "its switches" });
-      const r = await on(light(t), "guide");
-      assert.equal(r.said[0].startsWith("Your drop folder:"), true);
+      start(t, make);
+      const line = lineOf(t);
+      const r = await on(light(t, more(t)), "guide");
+      assert.ok(r.said[0].startsWith("Your drop folder:"));
       assert.equal(r.said[1], line);
       assert.equal(r.said[2], "Under way:");
       assert.ok(r.said.includes(BLOCKED(line)), r.said.join("\n"));
       assert.ok(r.said.some((l) => l.includes("It is in the drop folder of Sallie's laptop")), r.said.join("\n"));
-      assert.ok(!r.said.includes(AIRDROP));
       t.done();
     });
-    it(`${name} in the drop folder: guide wait answers at once`, async () => {
+    it(`${name}: with nothing under way the overview does not tell her to put a video in`, async () => {
+      const t = setup();
+      start(t, make);
+      const r = await on(light(t, more(t)), "guide");
+      assert.equal(r.said.length, 2, r.said.join("\n"));
+      assert.equal(r.said[1], lineOf(t));
+      t.done();
+    });
+    it(`${name}: guide wait answers at once`, async () => {
       const t = setup();
       video(t, "Mine.mov");
-      note(t, { drop: place(t, state, dropOf(t)) });
-      const r = await on(light(t), "guide");
-      const waited = await on(light(t, { wait: () => assert.fail("guide wait must answer at once") }), "guide", "wait");
+      start(t, make);
+      const deps = light(t, more(t));
+      const r = await on(deps, "guide");
+      const waited = await on({ ...deps, wait: () => assert.fail("guide wait must answer at once") }, "guide", "wait");
       assert.deepEqual(waited.said, r.said);
       t.done();
     });
   }
-  it("asking blocks the same way", async () => {
+  it("a blocked video of this Mac answers at once, but another Mac's arriving video is still waited for", async () => {
     const t = setup();
     video(t, "Mine.mov");
-    note(t, {}, { looking: { place: "drop", pid: 4242, at: t.now() - 61000 } });
-    const line = accessLine({ kind: "asking", place: "drop" }, { placeWords: words(t) });
-    const r = await on(light(t, { agentPid: () => 4242 }), "guide");
-    assert.equal(r.said[1], line);
-    assert.ok(r.said.includes(BLOCKED(line)), r.said.join("\n"));
+    OTHER(t);
+    note(t, { drop: place(t, "refused", dropOf(t)) });
+    let waits = 0;
+    let clock = t.now();
+    const deps = light(t, { now: () => clock, wait: async (ms) => { waits += 1; clock += ms; } });
+    const r = await on(deps, "guide", "wait");
+    assert.ok(waits > 0, "waited for the other Mac's video");
+    assert.ok(r.said.includes("Nothing has changed in 120 seconds.") || r.said.some((l) => l.startsWith("Nothing has changed")), r.said.join("\n"));
     t.done();
   });
-  it("an episodes refusal blocks the drop folder's videos too, and takes the 'Nothing is under way' lines away", async () => {
+  it("unseen changes only the unseen video's step: one that is under three minutes old is still arriving", async () => {
     const t = setup();
-    note(t, { drop: place(t, "ok", dropOf(t)), episodes: place(t, "refused", t.ctx.episodes) });
-    const r = await on(light(t), "guide");
-    assert.equal(r.said.length, 2, r.said.join("\n"));
-    assert.ok(r.said[1].includes("BRIMM Video"), r.said[1]);
-    assert.ok(!r.said.includes(NOTHING_UNDER_WAY));
-    video(t, "Mine.mov");
-    const again = await on(light(t), "guide");
-    assert.ok(again.said.includes(BLOCKED(r.said[1])), again.said.join("\n"));
-    t.done();
-  });
-  it("unseen changes only the unseen video's step", async () => {
-    const t = setup();
-    const old = video(t, "Old.mov");
-    const clock = () => statSync(old).ctimeMs + 4 * 60000;
-    // a second, newer video the import has not been late with
-    const fresh = video(t, "Fresh.mov");
-    const later = statSync(fresh).ctimeMs;
-    const deps = light(t, { now: () => Math.max(clock(), later + 1000) });
+    const old = video(t, "Old.mov", "12345");
+    await sleep(60);
+    const fresh = video(t, "Fresh.mov", "1234567");
+    const a = statSync(old).ctimeMs;
+    const b = statSync(fresh).ctimeMs;
+    // `now` is between them: Old has waited a little over UNSEEN_MS, Fresh a little under.
+    const deps = light(t, { now: () => (a + b) / 2 + UNSEEN_MS });
     const r = await on(deps, "guide");
-    const step = stepLine({ kind: "unseen", videos: ["Old.mov"] });
-    assert.ok(r.said.some((l) => l.endsWith(step)), r.said.join("\n"));
-    assert.ok(!r.said.includes(NOTHING_UNDER_WAY));
+    assert.equal(r.said[1], accessLine({ kind: "unseen", videos: ["Old.mov"] }));
+    assert.ok(r.said[1].includes("1 video"), r.said[1]);
+    assert.ok(r.said.includes(`  A video of 5 bytes: ${stepLine({ kind: "unseen", videos: ["Old.mov"] })}`), r.said.join("\n"));
+    assert.ok(r.said.includes(ARRIVING(7)), r.said.join("\n"));
     t.done();
   });
   it("a new node says nothing in the guide and in episodes", async () => {
@@ -108,38 +123,50 @@ describe("guide: the import's line and a blocked video", () => {
     note(t, { drop: place(t, "ok", dropOf(t)) });
     const deps = light(t, { agentNode: () => "/opt/homebrew/Cellar/node/25.1.0/bin/node" });
     const r = await on(deps, "guide");
-    assert.deepEqual(r.said.slice(2), ['  A video of 5 bytes: It is coming into your drop folder. Wait for the "Ready" notice.']);
+    assert.deepEqual(r.said.slice(2), [ARRIVING(5)]);
     const e = await on(deps, "episodes");
     assert.ok(!e.said.some((l) => l.includes("node was updated")), e.said.join("\n"));
     t.done();
   });
-  it("a Downloads finding blocks nothing in the guide, and the overview still says 'Nothing is under way' and the AirDrop line", async () => {
+  it("a Downloads finding blocks no video in the guide, and the overview still says what it said", async () => {
     const t = setup();
     note(t, { downloads: place(t, "refused", downloadsFolder(t.home)) });
-    const deps = light(t, { settings: { ...light(t).settings, dropPath: join(t.dir, "local", "Drop") } });
-    mkdirSync(dropOf({ ...t, ctx: { ...t.ctx } }) && join(t.dir, "local", "Drop"), { recursive: true });
-    const r = await on(deps, "guide");
+    const local = join(t.dir, "local", "Drop");
+    mkdirSync(local, { recursive: true });
+    const deps = light(t, { settings: { ...light(t).settings, dropPath: local } });
+    let r = await on(deps, "guide");
     assert.ok(r.said.includes(NOTHING_UNDER_WAY), r.said.join("\n"));
     assert.ok(r.said.includes(AIRDROP), r.said.join("\n"));
+    assert.ok(!r.said.some((l) => l.includes("the Downloads folder")), r.said.join("\n"));
+    writeFileSync(join(local, "Mine.mov"), "12345");
+    r = await on(deps, "guide");
+    assert.deepEqual(r.said.slice(1), ["Under way:", ARRIVING(5)]);
     const e = await on(deps, "episodes");
-    assert.equal(e.said.filter((l) => l.includes("Downloads")).length, 1, e.said.join("\n"));
+    assert.equal(e.said.filter((l) => l.includes("the Downloads folder")).length, 1, e.said.join("\n"));
     t.done();
   });
 });
 
 describe("episodes: the import's line once, right after her chat's own and before 'Imports:'", () => {
-  it("says it once, before 'On this Mac:'", async () => {
-    const t = setup();
-    video(t, "Mine.mov");
-    note(t, { drop: place(t, "refused", dropOf(t)) });
-    const line = accessLine({ kind: "refused", place: "drop", code: "EPERM" }, { placeWords: words(t), switchName: "its switches" });
-    const r = await on(light(t), "episodes");
-    assert.equal(r.said.filter((l) => l === line).length, 1, r.said.join("\n"));
-    assert.ok(r.said.indexOf(line) < r.said.indexOf("On this Mac:"));
-    const imports = r.said.indexOf("Imports:");
-    if (imports >= 0) assert.ok(r.said.indexOf(line) < imports);
-    t.done();
-  });
+  const shut = (folder) => ({ names: ["readdirSync"], deny: (name, path) => (path === folder ? Object.assign(new Error(`EPERM: operation not permitted, scandir '${path}'`), { code: "EPERM" }) : null) });
+  for (const [name, make, more, lineOf] of CASES) {
+    it(`${name}: comes right after her chat's own line (it is refused too) and before 'Imports:'`, async () => {
+      const t = setup();
+      video(t, "Mine.mov");
+      start(t, make);
+      writeStatusIn(importingFolder(t.root), { version: 1, machine: "Sallie's laptop", pid: 7, import: "k3j9x", video: "Long talk.mov", bytes: 9, seconds: 2400, step: "Importing", at: new Date(t.now()).toISOString() }, (to, text) => writeFileSync(to, text));
+      const deps = light(t, more(t));
+      const { result: r } = await watched(() => on(deps, "episodes"), shut(dropOf(t)));
+      const line = lineOf(t);
+      const own = r.said.findIndex((l) => l.startsWith("This Mac does not let BRIMM Video Studio look in your drop folder"));
+      assert.ok(own >= 0, r.said.join("\n"));
+      assert.equal(r.said.filter((l) => l === line).length, 1, r.said.join("\n"));
+      assert.equal(r.said.indexOf(line), own + 1, r.said.join("\n"));
+      assert.ok(r.said.indexOf("Imports:") > own + 1, r.said.join("\n"));
+      assert.ok(r.said.indexOf("Imports:") < r.said.indexOf("On this Mac:"));
+      t.done();
+    });
+  }
   it("says nothing for a world with no finding", async () => {
     const t = setup();
     const r = await on(light(t), "episodes");

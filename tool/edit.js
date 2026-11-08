@@ -103,7 +103,7 @@ import { processTable, readProcesses } from "./chain.js";
 import { SHOWN_MARKER, addShown, cantOpen, clearShownIn, freeShownName, madeShownByIdFolder, revealed, shownByIdFolder } from "./reveal.js";
 import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sessionByFollowUp } from "./receipts.js";
 import { isRunning, lastLine, lockFile, runProgram } from "./run.js";
-import { DOWNLOADS_SAY_MS, UNSEEN_MS, accessLine, stepLine, findingOf, placeWordsOf, readAccess, switchFor } from "./access.js";
+import { DOWNLOADS_SAY_MS, UNSEEN_MS, accessLine, blocksDrop, saysInEpisodes, saysInOverview, stepLine, findingOf, placeWordsOf, readAccess, switchFor } from "./access.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
@@ -1133,7 +1133,7 @@ export async function episodes(ctx) {
   if (unreadable) say(dropUnreadable(dropWords(ctx.settings, ctx.machine, ctx.home)));
   // What the import's note and the drop folder show of it: once, after that one (every place, Downloads too; never a new node).
   const access = accessFinding(ctx);
-  if (access && access.finding.kind !== "newNode" && access.line) say(access.line);
+  if (access && access.line && saysInEpisodes(access.finding)) say(access.line);
   // The imports, from their status files.
   const imports = importLines(ctx);
   if (imports.length) {
@@ -6604,11 +6604,11 @@ function panelRuns(ctx) {
     minute (clockNear). Gives { videos, unreadable }: `unreadable` is whether macOS does not let this Mac's chat look in this Mac's own drop
     folder (EPERM: a folder its own permissions shut, EACCES, or one that is not there is passed over, as another Mac's is), which
     the overview says under the drop folder's line (Phase 3, L1c). */
-function guideDrops(ctx, found = null) {
+function guideDrops(ctx, access = null) {
   const now = ctx.now();
   // The finding that blocks a video (the caller's, once per pass): for a place that is the drop folder or Episodes, every arriving video of
   // this Mac; for the videos the import never took, only those. A Downloads finding, a new node and a missing folder block nothing.
-  const blocking = found && found.step && (found.finding.kind === "unseen" || ["drop", "episodes"].includes(found.finding.place)) ? found : null;
+  const blocking = access && access.step && blocksDrop(access.finding) ? access : null;
   const unseenNames = blocking && blocking.finding.kind === "unseen" ? new Set(blocking.finding.videos) : null;
   const statuses = readStatusesIn(statusReadFolders(ctx), now);
   const seen = readSeen(ctx.home);
@@ -6691,8 +6691,8 @@ function guideItems(ctx) {
   // The videos whose recording's move or check found a problem with its copy in Original files (L6), by the video whose hand-off owed it.
   const problemOf = new Set(readPendingsOf(ctx.home, "original").filter((p) => p.problem && p.machine === ctx.machine && resolve(String(p.root)) === resolve(ctx.root)).map((p) => (p.of && p.of.id) || p.id));
   // The import's finding, read once for the pass (`guide wait` reads every 5 seconds).
-  const found = accessFinding(ctx);
-  const drops = guideDrops(ctx, found);
+  const finding = accessFinding(ctx);
+  const drops = guideDrops(ctx, finding);
   const items = drops.videos.map((facts) => ({ facts, next: nextFor(facts, notes, ctx.now()), folder: null, record: null }));
   let old = 0;
   for (const name of folders(ctx)) {
@@ -6716,7 +6716,7 @@ function guideItems(ctx) {
     if (h && (!best || h.revision > best.facts.handoff.revision || (h.revision === best.facts.handoff.revision && h.at > best.facts.handoff.at))) newest.set(h.id, item);
   }
   const own = (item) => !item.next.done && item.next.stage !== "ops";
-  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item || own(item)), old, unreadable: drops.unreadable, access: found && found.line && found.finding.kind !== "newNode" && found.finding.place !== "downloads" ? found.line : "" };
+  return { items: items.filter((item) => !item.facts.handoff || newest.get(item.facts.handoff.id) === item || own(item)), old, unreadable: drops.unreadable, access: finding && finding.line && saysInOverview(finding.finding) ? finding.line : "" };
 }
 
 /** A folder opened in Finder for the guide, as `which` opens QuickTime Player, and said as `what` is, in Finder words (`words`).
