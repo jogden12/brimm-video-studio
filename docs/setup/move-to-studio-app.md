@@ -51,7 +51,7 @@ On a Mac with no brimm-video settings, in place of the settings and the drop fol
 
 - Clones Studio into `~/Claude Code/brimm-video-studio.partial`, puts main at the commit the app was made at, and only then renames the folder. A clone cut short never blocks the next run: the next run takes the half-made folder away and clones again.
 - If the folder is already there, it must be Studio's own clone, clean, on main, at the app's commit. Anything else stops the app, and it touches nothing.
-- Runs Studio's own tests (about 12 minutes, changing nothing). A pass is marked in `.git/move-to-studio`, so a later run does not run them again at the same commit. One failing test stops the app.
+- Runs Studio's own tests (about 4 minutes, changing nothing). A pass is marked in `.git/move-to-studio`, so a later run does not run them again at the same commit. One failing test stops the app.
 
 ### 4. The HyperFrames app (check 43)
 
