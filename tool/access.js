@@ -234,3 +234,48 @@ export function setupLine(note, { home = studioHome(), now = Date.now(), alive =
   const both = ["drop", "episodes"].every((place) => note.places[place] && note.places[place].state === "ok");
   return lead + (both ? "node may look in the drop folder and in Dropbox." : "the import has not looked yet.");
 }
+
+/** Post the banner for `place` when its look found the folder refused or locked (`note.places[place].state`) and the rule says it is due:
+    the state or node is not what `told[place]` last said, or the last banner for the place is more than an hour old. An ok look (or any
+    other state) posts nothing and takes `told[place]` away, so the next refusal posts at once. The rule reads `told` from `note` and writes
+    it to `home` each time, never from the run's memory (a run starts again on every dropped video). `notify` failing costs only the banner.
+    Gives whether a banner was posted. */
+export function postIfDue(place, note, { notify, clock = Date.now, node = process.execPath, placeWords = "", home } = {}) {
+  const state = (note.places[place] || {}).state;
+  const told = (note.told = note.told || {});
+  if (state !== "refused" && state !== "locked") {
+    if (place in told) {
+      delete told[place];
+      if (home) writeAccess(home, note);
+    }
+    return false;
+  }
+  const key = `${state}|${node}`;
+  const now = clock();
+  const last = told[place];
+  if (last && last.key === key && now - last.at <= BANNER_AGAIN_MS) return false;
+  try {
+    notify(accessBanner(state, placeWords));
+  } catch {
+    return false;
+  }
+  told[place] = { key, at: now };
+  if (home) writeAccess(home, note);
+  return true;
+}
+
+/** Post the new-node banner once per `node`, when `needs` (the places whose folder needs Files and Folders access) has a place whose last
+    ok look was by another node. Gives whether a banner was posted. */
+export function postNewNodeIfDue(note, { notify, clock = Date.now, node = process.execPath, needs = [], home } = {}) {
+  const told = (note.told = note.told || {});
+  if (told.newNode && told.newNode.node === node) return false;
+  if (!needs.some((place) => (note.places[place] || {}).okNode && note.places[place].okNode !== node)) return false;
+  try {
+    notify(accessBanner("newNode", ""));
+  } catch {
+    return false;
+  }
+  told.newNode = { node, at: clock() };
+  if (home) writeAccess(home, note);
+  return true;
+}

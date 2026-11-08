@@ -23,7 +23,7 @@ import { releaseEpisodeLock, runningCommand, takeEpisodeLock } from "./detached.
 import { askedAt, endedSinceYes } from "./finish-ended.js";
 import { holdsVideo, importState, leftByCrash, readStatusesIn, removeStatusIn, writeStatusIn } from "./importing.js";
 import { isRunning } from "./run.js";
-import { lookAt, lookLog } from "./access.js";
+import { lookAt, lookLog, placeWordsOf, postIfDue, readAccess } from "./access.js";
 // kinds.js takes episodeKind from here: each is used only when called, so neither needs the other to have been read first.
 import { isZoomName, namesOf, withoutNames, zoomTimeOf } from "./kinds.js";
 import { gated, gatedAsOf, withShortId } from "./gate.js";
@@ -1754,14 +1754,21 @@ export async function importEpisodes(dir, deps, importOne) {
   // What the log says of a look that macOS or the folder's permissions refused: once while the look goes on meeting it.
   const lookSaid = new Map();
   const sayLook = (place, folder, look) => {
-    const line = lookLog(place, folder, look, episode.home);
+    // The banner for whoever is at the Mac: access.js says whether it is due, from the note's `told`. It never stops the run.
+    try {
+      postIfDue(place, readAccess(episode.home), { notify: deps.notify || (() => {}), clock, node, placeWords: placeWordsOf(place, folder, episode.home), home: episode.home });
+    } catch {
+      // a banner that fails costs only the banner
+    }
+    const line = lookLog(place, folder, look, episode.home, node);
     if (!line) lookSaid.delete(place);
     else if (lookSaid.get(place) !== line) {
       lookSaid.set(place, line);
       log(line);
     }
   };
-  const noted = { home: episode.home, clock };
+  const node = deps.node || process.execPath;
+  const noted = { home: episode.home, clock, node };
   const episodesAt = episodesFolder(episode.root);
   // Whether Episodes was refused, locked or failed at its last look: nothing is imported then, for each import needs it. Not there is
   // not that: the import makes Episodes itself.

@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { accessLog, placeWordsOf, readAccess } from "../access.js";
+import { accessBanner, accessLog, placeWordsOf, readAccess, writeAccess } from "../access.js";
 import { noteSeen, readEveryPending, readSeen, writePending } from "../filing.js";
 import { episodesFolder, seenFile } from "../settings.js";
 import { uneditedFolders } from "../unedited.js";
@@ -183,5 +183,96 @@ describe("the import notes each look (A2)", () => {
       assert.deepEqual(Object.keys(readSeen(w.home)), key, "a noted file that cannot be looked at stays noted");
       assert.equal(existsSync(seenFile(w.home)), true);
       assert.equal(readEveryPending(w.home).length, 0);
+    }));
+});
+
+const MIN = 60 * 1000;
+describe("the banners (A3)", () => {
+  it("a refused look posts once, not again within the hour, and again after it", () =>
+    withWorld(async (w) => {
+      const deny = { names: READS, deny: denyList(w.drop) };
+      const first = await watched(() => run(w, L, { node: "/n/a" }), deny);
+      const second = await watched(() => run(w, L + 10 * MIN, { node: "/n/a" }), deny);
+      const third = await watched(() => run(w, L + 61 * MIN, { node: "/n/a" }), deny);
+      const said = accessBanner("refused", wordsOf(w, "drop", w.drop));
+      assert.deepEqual(first.result.notices, [said]);
+      assert.deepEqual(second.result.notices, []);
+      assert.deepEqual(third.result.notices, [said]);
+    }));
+
+  it("a change of state, place or node posts at once", () =>
+    withWorld(async (w) => {
+      const drop = wordsOf(w, "drop", w.drop);
+      const a = await watched(() => run(w, L, { node: "/n/a" }), { names: READS, deny: denyList(w.drop) });
+      const b = await watched(() => run(w, L + MIN, { node: "/n/a" }), { names: READS, deny: denyList(w.drop, "EACCES") });
+      assert.deepEqual([a.result.notices, b.result.notices], [[accessBanner("refused", drop)], [accessBanner("locked", drop)]]);
+      // Node A then node B.
+      const c = await watched(() => run(w, L + 2 * MIN, { node: "/n/b" }), { names: READS, deny: denyList(w.drop, "EACCES") });
+      assert.deepEqual(c.result.notices, [accessBanner("locked", drop)]);
+    }));
+
+  it("a drop folder refused then Episodes refused posts twice", () =>
+    withWorld(async (w) => {
+      const a = await watched(() => run(w, L, { node: "/n/a" }), { names: READS, deny: denyList(w.drop) });
+      const b = await watched(() => run(w, L + MIN, { node: "/n/a" }), { names: READS, deny: denyList(episodesFolder(w.root)) });
+      assert.deepEqual(a.result.notices, [accessBanner("refused", wordsOf(w, "drop", w.drop))]);
+      assert.deepEqual(b.result.notices, [accessBanner("refused", wordsOf(w, "episodes", episodesFolder(w.root)))]);
+    }));
+
+  it("an ok look posts nothing, and the next refusal posts at once", () =>
+    withWorld(async (w) => {
+      const deny = { names: READS, deny: denyList(w.drop) };
+      await watched(() => run(w, L, { node: "/n/a" }), deny);
+      const ok = await run(w, L + MIN, { node: "/n/a" });
+      assert.deepEqual(ok.notices, []);
+      const again = await watched(() => run(w, L + 2 * MIN, { node: "/n/a" }), deny);
+      assert.deepEqual(again.result.notices, [accessBanner("refused", wordsOf(w, "drop", w.drop))]);
+    }));
+
+  it("a banner that cannot be posted does not stop the run", () =>
+    withWorld(async (w) => {
+      const out = await watched(() => run(w, L, { node: "/n/a", notify: () => { throw new Error("no notifier"); } }), { names: READS, deny: denyList(w.drop) });
+      assert.equal(readAccess(w.home).places.drop.state, "refused");
+      assert.ok(out.result.logs.length > 0);
+    }));
+
+  const newNodeRun = async (w, places, node, extra = {}) => {
+    writeAccess(w.home, { version: 1, places, looking: null, told: {} });
+    const r = runs(w, L, { settings: settingsOf(w), home: w.home, node, ...extra });
+    let before = null;
+    await watched(() => uneditedFolders([w.drop], r.deps), {
+      names: ["existsSync"],
+      deny: (name, path) => {
+        if (path === w.drop && before === null) before = r.notices.length;
+        return null;
+      }
+    });
+    return { r, before };
+  };
+  const cloud = (w) => join(w.home, "Library", "CloudStorage", "Dropbox-x", "BRIMM Video");
+  const okPlace = (folder, okNode) => ({ state: "ok", code: "", at: L, since: L, folder, node: okNode, okNode });
+
+  it("a new node posts once, before the first touch of the drop folder, when an okNode is known", () =>
+    withWorld(async (w) => {
+      const { r, before } = await newNodeRun(w, { episodes: okPlace(cloud(w), "/n/a") }, "/n/b");
+      assert.equal(before, 1, "posted before the first existsSync on the drop folder");
+      assert.deepEqual(r.notices.slice(0, 1), [accessBanner("newNode", "")]);
+      const two = runs(w, L + MIN, { settings: settingsOf(w), home: w.home, node: "/n/b" });
+      await uneditedFolders([w.drop], two.deps);
+      assert.equal(two.notices.includes(accessBanner("newNode", "")), false, "once per node");
+    }));
+
+  it("a new node posts nothing with no okNode, or when every noted place is in the home folder", () =>
+    withWorld(async (w) => {
+      const none = await newNodeRun(w, { episodes: { ...okPlace(cloud(w), "/n/a"), okNode: undefined } }, "/n/b");
+      assert.equal(none.r.notices.includes(accessBanner("newNode", "")), false);
+      const home = await newNodeRun(w, { episodes: okPlace(join(w.home, "BRIMM Video Work"), "/n/a") }, "/n/b");
+      assert.equal(home.r.notices.includes(accessBanner("newNode", "")), false);
+    }));
+
+  it("a noted Downloads place with an okNode counts", () =>
+    withWorld(async (w) => {
+      const { r } = await newNodeRun(w, { downloads: okPlace(join(w.home, "Downloads"), "/n/a") }, "/n/b");
+      assert.equal(r.notices.includes(accessBanner("newNode", "")), true);
     }));
 });
