@@ -918,7 +918,8 @@ ask_y_or_c() {
 # Keys typed into Terminal while the chooser was open are not answers: they are read and thrown away, but only from a keyboard, so a
 # test's piped answers are kept. zsh's own terminal read, with no -u, leaves line mode for each key, so a y typed without Return goes
 # too. Terminal echoed those keys as they were typed, so a last key that was not Return leaves its line open: the sentence then starts
-# a new line (a bare print, so the log is not changed). Written with if, and with $(( )) assignments: either of && or (( )) alone would end the script under set -e at a 0.
+# a new line (a bare print, so the log is not changed). Written with if, and with $(( )) assignments: either of && or (( )) alone
+# would end the script under set -e at a 0.
 throw_away_typed_keys() {
   local thrown=0 _key last=""
   if [[ -t 0 ]]; then
