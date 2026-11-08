@@ -34,6 +34,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { homeRefusal, studioHome } from "./home.js";
+import { bracket, noteState, postNewNodeIfDue, readAccess } from "./access.js";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { localDay, stamp } from "./shared/text.js";
@@ -47,7 +48,7 @@ import { reelCandidates, reelsFile, readReels, mergeCandidates, REELS_FILE } fro
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, sameBytes, startsAlike, LATE_CHECK_MS } from "./dropbox.js";
 import { heldFolderOf, episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, statusWriteFolder, statusReadFolders, importEpisodes, writePending, removePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
-import { readSettings, runsFolder, episodeWork, episodesFolder, importingFolder, importingFolderOf, statusFoldersOf, isLocal, episodeFilesFolder } from "./settings.js";
+import { readSettings, runsFolder, episodeWork, episodesFolder, importingFolder, importingFolderOf, statusFoldersOf, isLocal, needsFilesAccess, episodeFilesFolder } from "./settings.js";
 import { shownName, localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf } from "./episode.js";
 import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
 import { fingerprintOf, matchVersion } from "./versions.js";
@@ -1568,13 +1569,43 @@ export async function uneditedFolders(folders, deps) {
   let code = 0;
   for (const given of folders) {
     const folder = resolve(given);
-    if (!existsSync(folder)) {
+    // This Mac's drop folder is looked at inside the note's bracket (access.js), so that a run stuck at its very first touch of it shows in the
+    // note; the old folder mode is left as it is.
+    const home = deps.home || studioHome();
+    const episodic = episodeMode(folder, deps.settings, home);
+    const node = deps.node || process.execPath;
+    const noteOpts = { home, clock: deps.clock || Date.now, node };
+    // Once per node, before the run's first touch of the drop folder: macOS is about to ask whether this node may look, in a place that needs it.
+    // The check first answers with no file-system call: only a run whose node changed (a noted place was let in by another node, and this node
+    // has not been told) works out which places need access, and it does so inside the bracket, as the drop folder's own first touch is.
+    if (episodic) {
+      try {
+        const noted = readAccess(home);
+        const told = (noted.told || {}).newNode;
+        const changed = !(told && told.node === node) && Object.values(noted.places).some((place) => place && place.okNode && place.okNode !== node);
+        if (changed) {
+          bracket(
+            "drop",
+            () => {
+              const note = readAccess(home);
+              const needs = Object.keys(note.places).filter((place) => place === "downloads" || (typeof note.places[place].folder === "string" && needsFilesAccess(note.places[place].folder, home)));
+              postNewNodeIfDue(note, { notify: deps.notify || (() => {}), clock: noteOpts.clock, node, needs, home });
+            },
+            noteOpts
+          );
+        }
+      } catch {
+        // a banner that fails costs only the banner
+      }
+    }
+    if (!(episodic ? bracket("drop", () => existsSync(folder), noteOpts) : existsSync(folder))) {
       log(`There is no folder at ${folder}.`);
       code = 2;
+      if (episodic) noteState("drop", folder, Object.assign(new Error("ENOENT"), { code: "ENOENT" }), noteOpts);
       // The checks behind a hand-off or an import (the copies in final/, the export in Downloads, the move of a recording) do not wait for the drop folder: this
       // Mac's own is still worked, and finds nothing waiting in it. Only a Mac with a drop folder of its own does so: on a Dropbox drop folder a missing
       // folder is Dropbox's to bring back, and no check is made into a path that is not there.
-      if (!(isLocal(deps.settings) && episodeMode(folder, deps.settings, deps.home || studioHome()))) continue;
+      if (!(isLocal(deps.settings) && episodic)) continue;
     } else {
       log(`Folder: ${folder}`);
     }

@@ -634,7 +634,7 @@ describe("Studio never writes into the reference folder", () => {
   /** What each command is given, as Claude runs it, for the made-up episode (every command is here, so that one added later is walked). */
   const WALK = {
     episodes: [[]], guide: [[]], kind: [[FOLDER, "finished", "--private", "no"]], leave: [[FOLDER]], which: [[FOLDER]], read: [["--now", FOLDER, "--kind", "finished", "--rev", "1"]], workcopy: [["--now", FOLDER], ["--now", FOLDER, "--footage"]], join: [["--now", FOLDER, "--parts", "e-20261020-aaaaaa"], []],
-    open: [[FOLDER]], app: [[FOLDER], [FOLDER, "reel", "2"]], bring: [["--now", FOLDER]], status: [[]], retry: [["nothing"]], name: [[FOLDER, "A new name"]], title: [[FOLDER]],
+    open: [[FOLDER]], app: [[FOLDER], [FOLDER, "reel", "2"]], bring: [["--now", FOLDER]], status: [[]], retry: [["nothing"]], look: [[]], name: [[FOLDER, "A new name"]], title: [[FOLDER]],
     reel: [["drop", FOLDER, "1"]], reels: [[FOLDER, "--no-play"]], ask: [[FOLDER]], finish: [[FOLDER]], show: [[FOLDER, "transcript"]], behind: [[]], resolve: [[FOLDER]], free: [[FOLDER]],
     spell: [[FOLDER]], graphic: [[FOLDER, "ideas"]],
     teachings: [[FOLDER]], principles: [[FOLDER]], ideas: [[FOLDER]],

@@ -106,6 +106,7 @@ const TODAY_ASKED = {
   finish: [[FOLDER], ["--now", FOLDER], []],
   show: [[FOLDER, "transcript"], [FOLDER, "plan"], []],
   behind: [[]],
+  look: [[]],
   resolve: [[FOLDER], []],
   free: [[]],
   spell: [[FOLDER], []],
@@ -1237,6 +1238,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     finish: [[label], [label, "reels"], ["--now", LIGHT_FOLDER], []],
     show: [[label, "transcript"], [label, "notes"], [label, "plan"], []],
     behind: [[]],
+    look: [[]],
     resolve: [[label], [label, "--keep", "B"], []],
     free: [[label], []],
     spell: [[label], [label, "add", "Jane", "Jayne"], []],
@@ -1426,7 +1428,7 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     const label = record.label;
     for (const name of COMMAND_NAMES) {
       // `kind` and `leave` would answer the video the commands after them are walked for, so they are given words that do not.
-      const words = { episodes: [[]], status: [[], [label]], behind: [[]], retry: [[SECOND_LABEL], [label]], kind: [[label], [label, "finished"], ["nothing fits this", "raw", "--private", "no"]], leave: [["nothing fits this"], []] }[name] || [[label], ["--now", LIGHT_FOLDER], []];
+      const words = { episodes: [[]], status: [[], [label]], behind: [[]], look: [[]], retry: [[SECOND_LABEL], [label]], kind: [[label], [label, "finished"], ["nothing fits this", "raw", "--private", "no"]], leave: [["nothing fits this"], []] }[name] || [[label], ["--now", LIGHT_FOLDER], []];
       for (const given of words) {
         const before = resultsIn(t.home);
         const r = await on(depsOf(t), name, ...given);

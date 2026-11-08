@@ -381,6 +381,19 @@ describe("the installer's own text", () => {
     assert.match(text, /\nAGENT_FILE="\$HOME\/Library\/LaunchAgents\/\$LABEL\.plist"\n/);
     assert.match(text, /\nLOG="\$HOME\/Library\/Logs\/brimm-video\.log"\n/);
   });
+  // The line of what macOS answered the import is printed by a real setup only, after the check of Claude, and never fails it.
+  it("ends a Mac's real setup with the line access.js says of what macOS answered, outside the check, and never fails on it", { skip: notAMac }, () => {
+    const call = 'node "$HERE/access.js" --setup-line';
+    const afterCheck = text.indexOf('\n  say "From the background job: ');
+    const done = text.indexOf('\nif [[ -n "$machine" ]]; then\n  say ""\n  say "Done. Drop a video in:"');
+    const at = text.indexOf(call.replace("node ", '"$node" '));
+    assert.ok(at > afterCheck && at < done, "after the check block, before Done");
+    const block = text.slice(text.lastIndexOf("\nfi\n", at), done);
+    assert.match(block, /\n\n(?:#[^\n]*\n)*if \[\[ -n "\$machine" && -n "\$node" \]\]; then\n {2}"\$node" "\$HERE\/access\.js" --setup-line 2>\/dev\/null \|\| true\nfi\n/);
+    const check = text.slice(text.indexOf("# The check of Claude"), afterCheck);
+    assert.ok(!check.includes("access.js"), "not inside the check block");
+  });
+
   // The check of Claude from the background job's own context is only made when the installer sets a Mac up, which no test
   // does. So its lines are read here, and its launch agent is written by its own writer and read by plutil.
   it("ends a Mac's setup with one real call to Claude from a launch agent's context, then takes that agent away", { skip: notAMac }, () => {

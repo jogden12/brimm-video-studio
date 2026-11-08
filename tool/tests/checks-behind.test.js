@@ -5,6 +5,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { watched } from "./watched-fs.js";
+import { readAccess } from "../access.js";
 import { flagProblem, markChecking, problemFlagged } from "../finish-check.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import * as filing from "../filing.js";
@@ -1146,6 +1148,30 @@ describe("the check of a local finish's copies in final/ (L5)", () => {
     }
     assert.ok(existsSync(h.exportPath));
     assert.ok(gone(w, h));
+  }));
+
+  it("C6c notes a refused Downloads in access.json, posts its banner once, keeps the export, and notes ok once a delete works", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    const refuse = { names: ["statSync"], deny: (name, path) => (path === h.exportPath ? Object.assign(new Error(`EPERM: operation not permitted, stat '${path}'`), { code: "EPERM" }) : null) };
+    const { result: r } = await watched(() => run(w, AT), refuse);
+    const note = readAccess(w.home);
+    assert.equal(note.places.downloads.state, "refused");
+    assert.equal(note.places.downloads.code, "EPERM");
+    assert.equal(r.notices.length, 1, r.notices.join("|"));
+    assert.ok(r.notices[0].includes("Downloads"), r.notices[0]);
+    assert.equal(r.notices.some((n) => n.includes("Talk main.mp4")), false);
+    assert.ok(existsSync(h.exportPath));
+    assert.ok(gone(w, h));
+    // A second refused check within the hour posts no second banner.
+    holdFinal(w, L);
+    const { result: r2 } = await watched(() => run(w, AT + 1000), refuse);
+    assert.deepEqual(r2.notices, []);
+    assert.equal(readAccess(w.home).places.downloads.state, "refused");
+    // Later, a delete that works notes ok.
+    holdFinal(w, L);
+    await run(w, AT + 2000);
+    assert.equal(readAccess(w.home).places.downloads.state, "ok");
+    assert.equal(existsSync(h.exportPath), false);
   }));
 
   it("C7 flags a problem as today", () => withWorld(async (w) => {

@@ -358,7 +358,8 @@ describe("the wait for late checks", () => {
       const results = await importEpisodes(w.folder, deps, importOne);
       assert.deepEqual(imported, ["B.mov"]);
       assert.deepEqual(results, [{ ok: true, name: "B.mov" }]);
-      assert.deepEqual(logs.filter((line) => line.includes("late check")), ["The late check of a video waiting for it could not be made (EACCES). The next run makes it again."]);
+      // finishDue's own guard (A2) now catches it, by the pending's label ("A video" when it has none), in the words a kind's check uses.
+      assert.deepEqual(logs.filter((line) => line.includes("could not be made")), ["A video: its check could not be made (EACCES). The next run makes it again."]);
       // Nothing of X's was put away, so that the next run's look makes its check again.
       assert.deepEqual(ticked, { pending: true, dropFile: false });
       assert.equal(existsSync(pendingFile), true);
