@@ -1520,6 +1520,11 @@ describe("her skill asks Studio's cards as Studio printed them, in short rules, 
       assert.ok(waiting > 0 && at < text.indexOf("Planned card: {…}") && at < waiting, `${name}: before the first card she is asked`);
     }
   });
+  it("tells Claude not to ask how to go on when the spellings answer ends with the opens-by-itself line, in both skills", () => {
+    for (const name of ["SKILL.md", "SKILL-open.md"]) {
+      assert.ok(SKILLS[name].split("\n").includes('- The spellings card: When its last line is "It opens in HyperFrames by itself in a moment.", HyperFrames is opening the video already: do not ask whether to edit it there or hand it off as it is, and tell her only that line.'), name);
+    }
+  });
   it("has the twin hold the same rules, word for word, in the same order", () => {
     const place = (text) => Object.values(RULES).map((rule) => text.indexOf(rule));
     const lineOf = (text, start) => text.split("\n").find((line) => line.startsWith(start));

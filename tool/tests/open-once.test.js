@@ -10,8 +10,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CLAIM_WAIT_MS, WHEN_READY_GRACE_MS, editMain } from "../edit.js";
 import { lockOf, readResult, resultFile, takeEpisodeLock } from "../detached.js";
-import { opensAfterSpellingsOf, whenReadyLockOf } from "../app.js";
-import { recordFile, recordText } from "../episode.js";
+import { mediaOf, opensAfterSpellingsOf, whenReadyLockOf } from "../app.js";
+import { localStamp, recordFile, recordText } from "../episode.js";
 // The buttons line is said in her chat when HyperFrames is to open by itself: the detached run that opens it speaks to the log alone (B0-F8).
 const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
 import { COPY_STEP } from "../guide.js";
@@ -19,7 +19,7 @@ import { addRates, progressFolder } from "../progress.js";
 import { episodeFilesFolder, episodeWork, exportsWords, writeSettings } from "../settings.js";
 import { workCopyLockOf } from "../workcopy.js";
 import { clockAt } from "../unedited.js";
-import { RAW, atWork, world } from "./workcopy-world.js";
+import { CLIP, RAW, atWork, world } from "./workcopy-world.js";
 import { setup, episodeFor, listAll, reread, FOLDER, NAME } from "./episodes.js";
 
 async function on(deps, ...argv) {
@@ -45,9 +45,9 @@ const READ_AT = "2026-10-20T16:00:00-05:00";
 const READING = { kind: "raw", model: "m", at: READ_AT, on: "Mac Studio", account: "", outcome: "read" };
 const ANSWER_OF_IT = { reading: READ_AT, at: READ_AT, on: "Mac Studio", applied: [], left: [] };
 /** The spellings card of the reading: answered (the default: a video opens by itself once it is), still to answer, or (null) no reading in the record at all. */
-const card = (answered) => answered === null ? {} : ({ reading: READING, offers: { spellings: [], ...(answered ? { answered: ANSWER_OF_IT } : {}) } });
-function kept({ answered = true } = {}) {
-  const w = world({ record: { ...RAW, ...LOCAL, ...card(answered) } });
+const card = (answered, kind = "raw") => answered === null ? {} : ({ reading: { ...READING, kind }, offers: { spellings: [], ...(answered ? { answered: ANSWER_OF_IT } : {}) } });
+function kept({ answered = true, base = RAW } = {}) {
+  const w = world({ record: { ...base, ...LOCAL, ...card(answered, base.kind) } });
   const { t, found } = w;
   const own = episodeFilesFolder(t.home, FOLDER);
   mkdirSync(own, { recursive: true });
@@ -587,19 +587,15 @@ describe("opening by itself waits for the spellings card", () => {
     assert.equal(existsSync(whenReadyLockOf(t.home, FOLDER)), false);
     t.done();
   });
-  it("S2 the card is answered between the first read and the read again that follows the marker: it opens, and the marker is gone", async () => {
+  it("S2 the card is answered between the marker and the read again that follows it (the deps.marked seam): it opens, and the marker is gone", async () => {
     const { t, found, paths } = kept({ answered: false });
     madeCopy(paths);
-    const now = t.ctx.deps.now;
     let answered = false;
-    // The marker's helper asks the clock to stamp the marker; her answer lands then, after the first read and before the read again.
-    t.ctx.deps.now = () => {
-      if (!answered && new Error().stack.includes("markOpensAfterSpellings")) {
-        answered = true;
-        const record = reread(found);
-        writeFileSync(recordFile(found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, ...card(true) }));
-      }
-      return now();
+    // The seam right after the marker is in place: her answer lands then, after the first read and before the read again.
+    t.ctx.deps.marked = () => {
+      answered = true;
+      const record = reread(found);
+      writeFileSync(recordFile(found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, ...card(true) }));
     };
     const r = await run(t);
     assert.equal(answered, true, "the marker was written");
@@ -638,6 +634,8 @@ describe("opening by itself waits for the spellings card", () => {
       t.ctx.deps.wait = async (ms) => {
         await wait(ms);
         turns += 1;
+        // M4: the marker is the sign until the start is decided.
+        assert.equal(marked(t), true, "the marker is still on disk while the answer waits");
         if (freed && turns === 2) rmSync(whenReadyLockOf(t.home, FOLDER), { force: true });
       };
       const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "none");
@@ -654,21 +652,90 @@ describe("opening by itself waits for the spellings card", () => {
       t.done();
     }
   });
-  it("S6 the main project is on disk already: when-ready opens nothing, posts nothing, ends ok, and removes the marker", async () => {
-    const { t, found, paths } = kept();
-    madeCopy(paths);
+  /** The main project made, as the record keeps it, with its video in it (`video`) or without (after `free`). */
+  const projectMade = (t, found, { video, raw }) => {
     const record = reread(found);
-    writeFileSync(recordFile(found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, app: { toolchain: "0.8.208", projects: [{ key: "main", name: "Mine already", madeAt: READ_AT, on: "Mac Studio", from: { file: "Talk.mov", bytes: 1, modified: READ_AT }, workingCopy: { bytes: 1, seconds: 2, fps: 30 }, opened: [READ_AT], handover: false, fromSuggestion: null, state: "opened" }] } }));
-    mkdirSync(join(episodeWork(t.home, FOLDER), "Mine already"), { recursive: true });
+    writeFileSync(recordFile(found.folder, record.rev + 1), recordText({ ...record, rev: record.rev + 1, app: { toolchain: "0.8.208", projects: [{ key: "main", name: "Mine already", madeAt: READ_AT, on: "Mac Studio", from: { file: reread(found).video.file, bytes: raw.size, modified: localStamp(new Date(raw.mtimeMs)) }, workingCopy: { bytes: 24, seconds: 23.423, fps: 30 }, opened: [READ_AT], handover: false, fromSuggestion: null, state: "opened" }] } }));
+    const dir = join(episodeWork(t.home, FOLDER), "Mine already");
+    mkdirSync(join(dir, "brimm"), { recursive: true });
+    writeFileSync(join(dir, "brimm", "facts.json"), JSON.stringify({ seconds: 23.423, fps: 30, width: 1280, height: 720 }));
+    if (video) {
+      mkdirSync(dirname(join(dir, mediaOf(reread(found)))), { recursive: true });
+      writeFileSync(join(dir, mediaOf(reread(found))), "the video in the project");
+    }
+  };
+  it("S6 (point 1) a run started when the main project holds its video ends at once: no copy asked for, nothing opened, no notice, ok, and any marker removed", async () => {
+    const { t, found, raw } = kept({ answered: false });
+    projectMade(t, found, { video: true, raw });
     putMarker(t);
     const r = await run(t);
     assert.equal(r.code, 0, r.text);
     assert.equal(existsSync(standInLog(t)), false);
     assert.deepEqual(t.notices, []);
+    assert.deepEqual(argsOf(t), []);
     assert.equal(marked(t), false);
     const ended = readResult(t.home, FOLDER, "when-ready");
     assert.deepEqual([ended.ok, ended.made, ended.failed], [true, [], []]);
     assert.equal(readResult(t.home, FOLDER, "app"), null);
+    t.done();
+  });
+  it("I1 after `free` the project is on disk without its video: the copy is made again, the card is not answered, and it opens and puts the video back, with no marker", async () => {
+    const { t, found, paths, raw } = kept({ answered: false });
+    projectMade(t, found, { video: false, raw });
+    madeCopy(paths);
+    const r = await run(t);
+    assert.equal(r.code, 0, r.text);
+    assert.equal(opensOf(t).length, 1);
+    assert.equal(marked(t), false);
+    assert.equal(existsSync(join(episodeWork(t.home, FOLDER), "Mine already", mediaOf(reread(found)))), true);
+    assert.deepEqual(t.notices, []);
+    t.done();
+  });
+  it("M5 a direct app on a kept video whose copy is made and whose card is not answered opens at once (unchanged)", async () => {
+    const { t, found, paths } = kept({ answered: false });
+    madeCopy(paths);
+    const r = await on(t.ctx.deps, "app", FOLDER);
+    assert.equal(r.code, 0, r.text);
+    assert.equal(opensOf(t).length, 1);
+    assert.equal(reread(found).app.projects[0].state, "opened");
+    t.done();
+  });
+  it("I2 a leftover marker: a direct app that opens the project removes it, and the answer then starts no run and says no line", async () => {
+    const { t, paths } = kept({ answered: false });
+    madeCopy(paths);
+    putMarker(t);
+    const opened = await on(t.ctx.deps, "app", FOLDER);
+    assert.equal(opened.code, 0, opened.text);
+    assert.equal(marked(t), false);
+    const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "none");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(argsOf(t), []);
+    assert.doesNotMatch(r.text, /in a moment/);
+    t.done();
+  });
+  it("I2b the marker is still there and the project holds its video: the answer starts nothing and says no line, and the marker goes", async () => {
+    const { t, found, raw } = kept({ answered: false });
+    projectMade(t, found, { video: true, raw });
+    putMarker(t);
+    const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "none");
+    assert.equal(r.code, 0, r.text);
+    assert.deepEqual(argsOf(t), []);
+    assert.doesNotMatch(r.text, /in a moment/);
+    assert.equal(marked(t), false);
+    t.done();
+  });
+  it("M1 a kept iPhone clip whose answer has the marker is not asked how to go on: no clip line, and the last line is the opens line", async () => {
+    const without = kept({ answered: false, base: CLIP });
+    const plain = await on(without.t.ctx.deps, "spell", FOLDER, "offers", "none");
+    assert.match(plain.text, /open it in HyperFrames|hand it off|Handing it off/i, plain.text);
+    without.t.done();
+    const { t } = kept({ answered: false, base: CLIP });
+    putMarker(t);
+    const r = await on(t.ctx.deps, "spell", FOLDER, "offers", "none");
+    assert.equal(r.code, 0, r.text);
+    assert.doesNotMatch(r.text, /open it in HyperFrames|hand it off|Handing it off/i);
+    assert.equal(r.said[r.said.length - 1], ALONE);
+    assert.deepEqual(argsOf(t), [WHEN_READY]);
     t.done();
   });
   it("S7 readings are off on this Mac: there is no card, so it opens with the record unanswered, as before, and writes no marker", async () => {

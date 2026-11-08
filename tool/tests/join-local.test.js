@@ -32,7 +32,7 @@ const SCRIPT = [
 const SHOT_ARGS = ["--shot", "talking | Open on the problem, to the camera.", "--shot", "b-roll | Sallie at her desk sorting invoices.", "--shot", "talking | Why it matters, to the camera.", ...SCRIPT.flatMap((line) => ["--line", line])];
 const WIDE = (duration = "60.000000") => probed({ picture: { codec_name: "h264", width: 1920, height: 1080, r_frame_rate: "30/1", avg_frame_rate: "30/1", pix_fmt: "yuv420p" }, sound: { codec_name: "aac", sample_rate: "48000", channels: 2 }, duration });
 // The video for HyperFrames is asked for at once on this Mac, so the notice says it opens by itself (Phase 3, L7).
-const READY = `Ready: "${TITLE}" is made from its footage. Say "open ${TITLE} in HyperFrames": it opens by itself once its video is ready.`;
+const READY = `Ready: "${TITLE}" is made from its footage. Say "open ${TITLE} in HyperFrames": it opens by itself once its video is ready and you have answered the spellings card.`;
 
 function world() {
   const t = setup({

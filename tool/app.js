@@ -97,6 +97,8 @@ export function markOpensAfterSpellings(ctx, folder) {
   const temporary = `${file}.${process.pid}.tmp`;
   writeFileSync(temporary, `${JSON.stringify({ at })}\n`);
   renameSync(temporary, file);
+  // A seam for the tests: the marker is in place, and her answer may land now, before the record is read again.
+  if (typeof ctx.deps?.marked === "function") ctx.deps.marked();
 }
 /** Take the marker away: whether it was there. A marker that is not there is no fault. */
 export function clearOpensAfterSpellings(home, folder) {
@@ -150,6 +152,14 @@ export function copyAtWork(ctx, { found, record }) {
   if (!keptOnAMac(record) || !runningCommand(ctx.home, found.name, ctx.alive, workCopyLockOf(ctx.home, found.name))) return false;
   if (mainIsOnDisk(ctx, { found, record })) return false;
   return !copyIsMade(ctx, { found, record });
+}
+/** What the episode has of its main project on disk: "none" (no project in use under a plain name with its folder there), "bare" (the folder is there and the video it
+    holds is not: `free` took it away, or the project holds no media), or "whole" (the folder is there with its video in it). Judged as openInApp judges it (videoIn, nothingAt). */
+export function mainState(ctx, { found, record }) {
+  if (!mainIsOnDisk(ctx, { found, record })) return "none";
+  const earlier = (record.app?.projects ?? []).find(isMain);
+  const media = videoIn(join(episodeWork(ctx.home, found.name), earlier.name), record);
+  return media !== null && !nothingAt(media) ? "whole" : "bare";
 }
 /** Whether the episode has its main project on disk in its work folder: the record's project in use under a plain name, and its folder there. */
 export function mainIsOnDisk(ctx, { found, record }) {
@@ -807,6 +817,8 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
   // What it says of the footage comes after "It's open in HyperFrames." (review changes R4c), not before it.
   const footage = typeof deps.plan === "function" && isFromPlan(record) ? placeFootage(ctx, { found, dir: join(work, project.name), kit: deps.plan({ found, record }), record }, { rename }) : [];
   const opened = await openProjectInApp(ctx, { record, project, dir: join(work, project.name), projects, keeps: (p) => !isMain(p), at, restored }, { save, cli, spawn, env, node, chat: deps.chat });
+  // Opened: nothing is left to open by itself after her answer to the spellings card (a marker left by an earlier `app --when-ready`).
+  if (opened === 0) clearOpensAfterSpellings(home, found.name);
   for (const line of footage) ctx.say(line);
   return opened;
 }

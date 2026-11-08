@@ -106,7 +106,7 @@ import { isRunning, lastLine, runProgram } from "./run.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, clearOpensAfterSpellings, copyAtWork, copyIsMade, footageFailed, guidanceOf, isMain as inUse, mainIsOnDisk, markOpensAfterSpellings, mediaOf, notWholeYet, openByItself, openInApp, plainName, projectOnAnotherMac, waitsForSpellings, whenReadyLockOf } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, clearOpensAfterSpellings, copyAtWork, copyIsMade, footageFailed, guidanceOf, isMain as inUse, mainState, markOpensAfterSpellings, opensAfterSpellingsOf, mediaOf, notWholeYet, openByItself, openInApp, plainName, projectOnAnotherMac, waitsForSpellings, whenReadyLockOf } from "./app.js";
 import { VOICEOVER, projectCues } from "./project.js";
 import { openVoiceProject, voiceProjectWhy } from "./explainer.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelNotWholeYet, reelStretch, reelWhy } from "./app-reel.js";
@@ -1532,6 +1532,11 @@ async function appWhenReady(ctx, rest) {
       const again = readEpisode(found.folder);
       return again.record && !again.newer ? { found: { folder: found.folder, name: found.name, record: again.record }, record: again.record } : null;
     };
+    // A main project that holds its video is open already, or opened by another run, or made since: this run opens nothing, asks for no copy and posts nothing.
+    if (mainState(ctx, ownRecord() ?? { found, record: found.read.record }) === "whole") {
+      clearOpensAfterSpellings(ctx.home, found.name);
+      return { ok: true, made: [], failed: [], next: "" };
+    }
     // Whether a copy's run was seen at work, and whether Claude's reading was seen at work while this run waited: a reading that ended without writing itself
     // into the record is not opened over.
     let seen = false;
@@ -1586,20 +1591,16 @@ async function appWhenReady(ctx, rest) {
       return { ok: false, made: [], failed: ["Claude's reading did not finish, so it was not opened."], next: "" };
     }
     // HyperFrames opens it by itself only once she has answered the spellings card of the current reading: the project's words and spellings are written
-    // once, when it is made. This run must not wait for that (it keeps the Mac awake): the marker is written, the record is read again (an answer may have come
+    // once, when it is made (a project made already, whose video `free` took away, has them: it opens at once). This run must not wait for that (it keeps the Mac awake): the marker is written, the record is read again (an answer may have come
     // between), and when it is still not answered the run ends. Her answer removes the marker and starts this run again (answerOffers).
-    let now = mine;
-    if (waitsForSpellings(ctx, record)) {
+    // A main project on disk without its video (after `free`) has its words and spellings written already: there is nothing to wait for, and `app` puts the video back.
+    if (mainState(ctx, mine) === "bare") {
+      clearOpensAfterSpellings(ctx.home, found.name);
+    } else if (waitsForSpellings(ctx, record)) {
       markOpensAfterSpellings(ctx, found.name);
       const again = ownRecord();
       if (!again || waitsForSpellings(ctx, again.record)) return { ok: false, made: [], failed: ["It opens once its spellings card is answered."], next: "" };
       clearOpensAfterSpellings(ctx.home, found.name);
-      now = again;
-    }
-    // A main project on disk is one she opened herself, or another run did: it is not opened a second time.
-    if (mainIsOnDisk(ctx, now)) {
-      clearOpensAfterSpellings(ctx.home, found.name);
-      return { ok: true, made: [], failed: [], next: "" };
     }
     // The copy is made: the episode's lock is taken now, and what `app` does is done.
     const said = [];
@@ -4426,20 +4427,29 @@ async function answerOffers(ctx, found, words) {
   const done = `${applied.length ? `Spelled now: ${pairsSaid(applied.map((o) => [o.heard, o.spelled]))}.` : "No spelling applied."}${notKept.length ? ` Not kept: ${notKept.join(" ")}` : ""}`;
   // No hand-off is written yet and none is due from the card: a raw video's is made when it is finished, and an iPhone clip's when she
   // says "hand it off", edited in HyperFrames first or as it is (or, on a Mac that hands off version 1, once that Mac hands off version 2).
-  const later = recordKind(record) === "raw" ? "Its hand-off is made when it is finished." : isClip(record) ? clipNext(ctx, found, record) : "";
+  // A video kept on this Mac whose opening by itself waited for this answer (appWhenReady's marker) opens now, unless its project holds its video already.
+  const marker = opensAfterSpellingsOf(ctx.home, found.name);
+  const waiting = keptOnAMac(record) && existsSync(marker);
+  const opensNow = waiting && mainState(ctx, { found, record }) !== "whole";
+  // A kept iPhone clip that is about to open by itself is not asked whether to edit it there or hand it off as it is.
+  const later = recordKind(record) === "raw" ? "Its hand-off is made when it is finished." : isClip(record) && !opensNow ? clipNext(ctx, found, record) : "";
   const code = await saveSpellings(ctx, found, next, done, { set: { offers: { ...record.offers, answered: answer } }, later });
-  // A video kept on this Mac whose opening by itself waited for this answer (appWhenReady's marker) opens now.
-  if (code === 0 && keptOnAMac(record) && clearOpensAfterSpellings(ctx.home, found.name)) {
-    // A run of it may still hold its lock, on its way to end; it is given up to 10 s. If it is holding still, that run is the one opening it.
-    const lock = whenReadyLockOf(ctx.home, found.name);
-    const waitFor = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
-    let held = Boolean(runningCommand(ctx.home, found.name, ctx.alive, lock));
-    for (let looks = 0; held && looks < 20; looks += 1) {
-      await waitFor(500);
-      held = Boolean(runningCommand(ctx.home, found.name, ctx.alive, lock));
+  if (code === 0 && waiting && existsSync(marker)) {
+    if (opensNow) {
+      // A run may still hold its lock, on its way to end; it is given up to 10 s. If it is holding still, that run is the one opening it.
+      const lock = whenReadyLockOf(ctx.home, found.name);
+      const waitFor = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
+      let held = Boolean(runningCommand(ctx.home, found.name, ctx.alive, lock));
+      for (let looks = 0; held && looks < 20; looks += 1) {
+        await waitFor(500);
+        held = Boolean(runningCommand(ctx.home, found.name, ctx.alive, lock));
+      }
+      if (!held) startWhenReady(ctx, found.name);
+      clearOpensAfterSpellings(ctx.home, found.name);
+      ctx.say("It opens in HyperFrames by itself in a moment.");
+    } else {
+      clearOpensAfterSpellings(ctx.home, found.name);
     }
-    if (!held) startWhenReady(ctx, found.name);
-    ctx.say("It opens in HyperFrames by itself in a moment.");
   }
   return code;
 }

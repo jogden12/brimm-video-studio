@@ -629,7 +629,7 @@ export function afterJoin(ctx, found, started, notify = banner) {
   }
   // A video kept on this Mac whose video for HyperFrames is being made opens by itself once it is ready, when she asks for it (Phase 3, L7).
   if (started.explainer !== true && copyAsked && here) {
-    notify(`Ready: "${title}" is made from its footage. Say "open ${title} in HyperFrames": it opens by itself once its video is ready.`);
+    notify(`Ready: "${title}" is made from its footage. Say "open ${title} in HyperFrames": it opens by itself once its video is ready and you have answered the spellings card.`);
     return;
   }
   notify(started.explainer === true ? `Ready: "${title}" has its voice. In Claude, say "what's next?"` : `Ready: "${title}" is made from its footage.${copyAsked && !here ? opensAt(ctx, wrote.record) : ""} In Claude, say "what's next?"`);
