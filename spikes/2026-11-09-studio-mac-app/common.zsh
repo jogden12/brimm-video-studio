@@ -76,7 +76,7 @@ show_pin() {
   local name=$1
   say "  ${PIN_FILE[$name]}, about ${PIN_SIZE[$name]}, from ${PIN_URL[$name]}"
   if [[ -n ${PIN_SHA[$name]} ]]; then
-    say "    SHA-256 ${PIN_SHA[$name]}, read from ${PIN_FROM[$name]}"
+    say "    SHA-256 ${PIN_SHA[$name]}, read from ${PIN_FROM[$name]-}"
   else
     say "    not pinned yet: --fetch fetches it, prints its SHA-256${PIN_SUMS[$name]:+ beside the one in ${PIN_SUMS[$name]}}${PIN_GITHUB[$name]:+ beside the digest GitHub's API gives for it in ${PIN_GITHUB[$name]}}, and stops"
   fi
@@ -118,7 +118,7 @@ fetch() {
   if [[ -z $want ]]; then
     say "Not pinned yet: $name. ${PIN_FILE[$name]} was fetched from ${PIN_URL[$name]}, and its SHA-256 is"
     say "  $have"
-    if [[ -n ${PIN_SUMS[$name]} ]]; then
+    if [[ -n ${PIN_SUMS[$name]-} ]]; then
       sums=$DOWNLOADS/${PIN_FILE[$name]}.sums.txt
       if curl --fail --location --proto '=https' --proto-redir '=https' --silent --show-error --output "$sums" "${PIN_SUMS[$name]}"; then
         line=$(grep -F "  ${PIN_FILE[$name]}" "$sums" | head -1)
@@ -133,7 +133,7 @@ fetch() {
         say "The maker's own list could not be fetched from ${PIN_SUMS[$name]}."
       fi
     fi
-    if [[ -n ${PIN_GITHUB[$name]} ]]; then
+    if [[ -n ${PIN_GITHUB[$name]-} ]]; then
       digest=$(github_digest "${PIN_GITHUB[$name]}" "${PIN_FILE[$name]}")
       if [[ -n $digest ]]; then
         say "GitHub's own record of the release (${PIN_GITHUB[$name]}) gives its digest as"
