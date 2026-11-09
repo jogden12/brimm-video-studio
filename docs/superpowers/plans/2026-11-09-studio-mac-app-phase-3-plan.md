@@ -81,6 +81,7 @@
   - `brokenLine(build) -> string`: `` `This Mac's BRIMM Video Studio cannot read its own build file. ${repairLine(build)}` ``.
   - `UPDATE_SAY = 'Say "update Studio" to update this Mac.'`
   - `commitOf(checkout)` returns `build.short` on an installed checkout ("unknown" when it cannot be read) and starts no program.
+  - (Added by the controller after Phase 1's final review.) The four writers that still name `commitOf(episode.checkout)` (`filing.js`, three places, and `originals.js`, one; grep `commitOf(episode.checkout)` and `commitOf(deps.episode.checkout)`) change to `commitOf(thisCheckout())`, as the other nine writers already do. `buildOf` must read the `build.json` of the code at work, not the settings' path, which can differ until a repair (`thisCheckout`'s own doc says so). A test pins one of them: a record written with a made-up `episode.checkout` names this checkout's commit (or the injected `deps.commit`), never `commitOf` of the made-up path.
 
 **The rules for `buildOf`** (decided here; the spec leaves the malformed case open):
 - A `checkout` that is not a non-empty absolute string is `{ mode: "dev" }`.
