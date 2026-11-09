@@ -15,9 +15,9 @@ import { heldFolder } from "../scan.js";
 import { DRAWING, neverCaught } from "../never.js";
 import { LOCAL_ADDRESS, NUMERIC_ADDRESS } from "../fetchable.js";
 import { claudeDirName, gatedIndex, gatedPlaces, realOf } from "../places.js";
-import { gatedReadRules, guardDecision } from "../studio.js";
+import { gatedReadRules, guardDecision, openSettingsOf } from "../studio.js";
 import { APP_ARGS, MINIMUM, SESSION, appCopy, chatChain, openDeps, openWorld, psText, transcript } from "./open-world.js";
-import { ALLOWED, CHECKOUT, EDIT, NODE } from "./guard-cases.js";
+import { ALLOWED, CHECKOUT, EDIT, NODE, NODE_CASES, UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, spellingsOf } from "./guard-cases.js";
 
 const CONNECTOR = "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__";
 
@@ -374,7 +374,7 @@ describe("the open guard, III: Bash", () => {
     ctx = { checkout: CHECKOUT, node: NODE, folder: w.folder, home: w.home, uid: w.uid, tmp: w.tmp, index: gatedIndex(gatedPlaces(w.facts), [join(realOf(w.root), "Assets")]), allow: w.facts.allow, web: "held", resolve: PUBLIC, loosened: false, held: false };
   });
   after(() => w.done());
-  const bash = (command, more = {}) => openDecision({ session_id: SESSION, transcript_path: join(w.home, ".claude", "projects", "x", `${SESSION}.jsonl`), cwd: w.folder, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command, description: "x", ...more } }, ctx);
+  const bash = (command, more = {}, context = ctx) => openDecision({ session_id: SESSION, transcript_path: join(w.home, ".claude", "projects", "x", `${SESSION}.jsonl`), cwd: w.folder, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command, description: "x", ...more } }, context);
   const ALONE = { decision: "deny", reason: RUN_ALONE };
 
   it("allows edit.js in its one spelling, and every form it allows is one the excluded entry takes", async () => {
@@ -383,6 +383,25 @@ describe("the open guard, III: Bash", () => {
       assert.ok(command.startsWith(`${NODE} "${CHECKOUT}/tool/edit.js" `), command);
     }
     assert.equal(RUN_ALONE, "Run BRIMM Video Studio's commands on their own, exactly as her skill says, and not in the background.");
+  });
+  it("allows node in double quotes alone, the spelling the sandbox's excluded command takes, and nothing else as edit.js", async () => {
+    const OWN = "BRIMM Video Studio's own command";
+    for (const { node, both, strictOnly, refused } of NODE_CASES) {
+      const excluded = openSettingsOf({ checkout: CHECKOUT, node, folder: w.folder, facts: w.facts }).sandbox.excludedCommands[0];
+      for (const command of both) {
+        assert.deepEqual(await bash(command, {}, { ...ctx, node }), { decision: "allow", reason: OWN }, command);
+        assert.ok(command.startsWith(excluded.slice(0, -1)), command);
+      }
+      for (const command of [...strictOnly, ...refused]) {
+        const answer = await bash(command, {}, { ...ctx, node });
+        assert.notEqual(answer.reason, OWN, command);
+        if (command.includes("edit.js")) assert.deepEqual(answer, ALONE, command);
+      }
+    }
+  });
+  it("refuses every spelling when node or the checkout cannot be put in double quotes", async () => {
+    for (const node of UNQUOTABLE_NODES) for (const command of spellingsOf(node)) assert.deepEqual(await bash(command, {}, { ...ctx, node }), ALONE, JSON.stringify(command));
+    for (const checkout of UNQUOTABLE_CHECKOUTS) for (const command of spellingsOf(NODE, checkout)) assert.deepEqual(await bash(command, {}, { ...ctx, checkout }), ALONE, JSON.stringify(command));
   });
   it("refuses edit.js with bare node, &&, ;, |, $(…), an environment prefix, cd … &&, another node or another path", async () => {
     for (const command of [`node "${CHECKOUT}/tool/edit.js" episodes`, `${EDIT} episodes && date`, `${EDIT} episodes; date`, `${EDIT} episodes | cat`, `${EDIT} $(date)`, `${EDIT} "$(date)"`, `A=1 ${EDIT} episodes`, `cd /tmp && ${EDIT} episodes`, `/usr/local/bin/node "${CHECKOUT}/tool/edit.js" episodes`, `${NODE} "/tmp/tool/edit.js" episodes`, `${NODE} '${CHECKOUT}/tool/edit.js' episodes`, `${EDIT}  episodes`, `${EDIT} episodes\ndate`, ` ${EDIT} episodes`]) {
@@ -512,6 +531,16 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
       assert.deepEqual(await guard(w, "Bash", { command: `${w.edit} ${words}` }), { decision: "deny", reason: HELD_NARROWED }, words);
     }
     assert.deepEqual(await guard(w, "Bash", { command: w.edit }), { decision: "deny", reason: HELD_NARROWED });
+    w.done();
+  });
+  it("narrows a held chat the same way whichever spelling today's guard lets through", async () => {
+    const w = chat();
+    untiedMark({ home: w.home, now: Date.parse("2026-10-26T10:30:00.000Z") });
+    for (const start of [`"${w.node}"`, w.node, "node"]) {
+      const edit = `${start} "${w.checkout}/tool/edit.js"`;
+      assert.equal((await guard(w, "Bash", { command: `${edit} episodes` })).decision, "allow", start);
+      assert.deepEqual(await guard(w, "Bash", { command: `${edit} name "Pricing talk" "x"` }), { decision: "deny", reason: HELD_NARROWED }, start);
+    }
     w.done();
   });
   it("keeps a held chat to the commands a session runs while the lock is loosened too, and a call it cannot judge", async () => {
