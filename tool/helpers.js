@@ -38,5 +38,5 @@ export function helperCommand(name, { swift = "", bin = ownBin(), exists = exist
   return swift ? { program: swift, args: [helperSource(name)] } : null;
 }
 
-/** Whether Xcode's command line tools are on this Mac. xcode-select says where they are, and ends badly when they are nowhere. */
+/** Whether Xcode's command line tools are on this Mac. xcode-select says where they are, and ends badly when they are nowhere. The installer asks it the same. */
 export const hasXcodeTools = () => spawnSync("/usr/bin/xcode-select", ["-p"], { stdio: "ignore" }).status === 0;
