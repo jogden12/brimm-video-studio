@@ -77,7 +77,7 @@ const ask = (...args) => askOn({}, ...args);
 function askOn(installed, ...args) {
   return askWith({ installed }, ...args);
 }
-function askWith({ installed = {}, programs = [], files = [], agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, ffmpegSays, settings, bare = false, install = INSTALL }, ...args) {
+function askWith({ installed = {}, programs = [], files = [], launchd, agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, ffmpegSays, settings, bare = false, install = INSTALL }, ...args) {
   // The one rule of this file: nothing is run without --print.
   assert.ok(args.includes("--print"), "the installer is only ever asked what it would do");
   const dir = mkdtempSync(join(tmpdir(), "brimm-install-"));
@@ -108,6 +108,10 @@ function askWith({ installed = {}, programs = [], files = [], agentPath = "", cl
       writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${join(dir, "ran")}"\n`);
       chmodSync(join(bin, name), 0o755);
     }
+    // launchctl answers `print` as launchd does, from the text a test gives (or with 113, as for a job that is not loaded), and writes
+    // down what it was asked in `launchd-asked`, not in `ran`: asking is not a change. Any other call is written into `ran`.
+    if (launchd !== undefined) writeFileSync(join(dir, "launchd-says"), launchd);
+    writeFileSync(join(bin, "launchctl"), `#!/bin/sh\ncase "$1" in\n  print)\n    echo "$*" >> "${join(dir, "launchd-asked")}"\n    [ -f "${join(dir, "launchd-says")}" ] || exit 113\n    cat "${join(dir, "launchd-says")}"\n    exit 0 ;;\nesac\necho "launchctl $*" >> "${join(dir, "ran")}"\n`);
     // The stand-in for Claude Code answers what --print asks, signed out as the real one is, with exit 1, and writes any
     // other call into `ran`, so that a --print that updated it or signed it in would show. So does xcode-select's, for any
     // call but -p.
@@ -142,7 +146,7 @@ function askWith({ installed = {}, programs = [], files = [], agentPath = "", cl
       return { text, ...JSON.parse(spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", file], { encoding: "utf8" }).stdout) };
     });
     const kept = Object.fromEntries(Object.keys(installed).map((label) => [label, readFileSync(fileOf(label), "utf8")]));
-    return { status: r.status, out: r.stdout, err: r.stderr, agents, home, left: readdirSync(home, { recursive: true }).sort(), kept, ran: existsSync(join(dir, "ran")) ? readFileSync(join(dir, "ran"), "utf8") : "", asked: existsSync(join(dir, "ffmpeg-asked")) ? readFileSync(join(dir, "ffmpeg-asked"), "utf8") : "" };
+    return { status: r.status, out: r.stdout, err: r.stderr, agents, home, left: readdirSync(home, { recursive: true }).sort(), kept, ran: existsSync(join(dir, "ran")) ? readFileSync(join(dir, "ran"), "utf8") : "", asked: existsSync(join(dir, "ffmpeg-asked")) ? readFileSync(join(dir, "ffmpeg-asked"), "utf8") : "", launchdAsked: existsSync(join(dir, "launchd-asked")) ? readFileSync(join(dir, "launchd-asked"), "utf8") : "" };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -2959,5 +2963,112 @@ describe("BRIMM Video Studio's background job through the app (--app; Studio app
   it("says in its help that with --app the background job is the app's own program", () => {
     const r = ask("--print", "--help");
     assert.ok(r.out.replace(/\s+/g, " ").includes("With --app the background job is the app's own program, started with --agent, so that macOS names the app when it asks for access and in Login Items; without it, node from <bin>. It takes the other options of --machine"), r.out);
+  });
+});
+
+describe("waiting for nothing at work (Studio app phase 4)", { skip: notAMac }, () => {
+  let copy;
+  before(() => {
+    copy = appCopy();
+  });
+  after(() => copy.done());
+  function dropbox() {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    return { dir, root, done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  const askApp = (extra, root) => askWith({ bare: true, install: copy.install, ...extra }, "--print", "--machine", "Mac Studio", "--tools", copy.tools, "--app", copy.app, root);
+  const NOTHING = "  At work now:  nothing, so the background job can be stopped and started again";
+  const UNTIL = "The real run stops before it touches this Mac's drop folder, its settings and its background job, until that is done";
+  const label = "com.thebrimm.unedited";
+  it("says nothing is at work when nothing is, and asks launchd once", () => {
+    const d = dropbox();
+    try {
+      const r = askApp({}, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.ok(r.out.includes(`\n${NOTHING}\n`), r.out);
+      assert.equal(r.launchdAsked, `print gui/${process.getuid()}/${label}\n`);
+      changedNothing(r);
+    } finally {
+      d.done();
+    }
+  });
+  it("names what is at work: the background job launchd names, or an import's lock", () => {
+    const d = dropbox();
+    try {
+      const job = askApp({ launchd: "\tpid = 4321\n" }, d.root);
+      assert.equal(job.status, 0, job.err + job.out);
+      assert.ok(job.out.includes(`\n  At work now:  The import is at work: its background job, ${label}, is running (process 4321). ${UNTIL}\n`), job.out);
+      assert.equal(job.ran, "");
+      assert.deepEqual(job.left, []);
+      const lock = askApp({ files: [["BRIMM Video Work/.runs/brimm-transcribe-0123456789abcdef.lock", String(process.pid)]] }, d.root);
+      assert.equal(lock.status, 0, lock.err + lock.out);
+      const line = lock.out.split("\n").find((l) => l.startsWith("  At work now:  "));
+      assert.ok(line && line.includes(String(process.pid)) && line.endsWith(` ${UNTIL}`), lock.out);
+      assert.equal(lock.ran, "");
+      assert.deepEqual(lock.left, ["BRIMM Video Work", "BRIMM Video Work/.runs", "BRIMM Video Work/.runs/brimm-transcribe-0123456789abcdef.lock"]);
+    } finally {
+      d.done();
+    }
+  });
+  it("in dev mode asks launchd nothing and says no such line", () => {
+    const d = dropbox();
+    try {
+      const r = ask("--print", "--machine", "Mac Studio", d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.equal(r.launchdAsked, "");
+      assert.doesNotMatch(r.out, /At work now/);
+    } finally {
+      d.done();
+    }
+  });
+  it("stops the real run with 75 right before it touches the Mac, after the downloads (its lines, read, not run)", () => {
+    assert.ok(text.includes("\nBUSY=75\n"));
+    const model = text.indexOf('mv "$MODEL.part" "$MODEL"');
+    const start = text.indexOf('\nif [[ -n "$tools" ]]; then\n', model);
+    const block = text.slice(start, text.indexOf("\nfi\n", start));
+    assert.ok(model > 0 && start > model);
+    assert.ok(block.trimEnd().endsWith("exit $BUSY"), block);
+    const at = (needle) => {
+      const i = text.indexOf(needle);
+      assert.ok(i >= 0, needle);
+      return i;
+    };
+    assert.ok(start > at('curl -L --fail --progress-bar -o "$MODEL.part" "$MODEL_URL"') && start > at("run_hyperframes doctor"));
+    for (const later of ['if ! settings_plan "$node"; then', 'mkdir -p "${folders[@]}"', 'agent "$node" > "$AGENT_FILE"']) assert.ok(start < text.indexOf(later, start), later);
+  });
+  it("its own lines, run alone in zsh, stop while the background job runs, and go on when nothing is at work", { skip: noZsh }, () => {
+    const model = text.indexOf('mv "$MODEL.part" "$MODEL"');
+    const start = text.indexOf('\nif [[ -n "$tools" ]]; then\n', model);
+    const block = text.slice(start + 1, text.indexOf("\nfi\n", start) + 4);
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-busy-")));
+    try {
+      mkdirSync(join(dir, "bin"));
+      const run = (launchctl, node) => {
+        writeFileSync(join(dir, "bin", "launchctl"), `#!/bin/sh\n${launchctl}\n`);
+        chmodSync(join(dir, "bin", "launchctl"), 0o755);
+        const script = `set -euo pipefail\nLABEL="${label}"\nHERE="${HERE}"\nnode="${node}"\ntools=/x\nBUSY=75\n${functionOf("say")}${functionOf("idle_why")}${block}print -r -- "went on"\n`;
+        return spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { HOME: dir, BRIMM_VIDEO_HOME: dir, PATH: `${join(dir, "bin")}:/usr/bin:/bin` } });
+      };
+      const stopped = run("printf '\\tpid = 4321\\n'", process.execPath);
+      assert.deepEqual([stopped.status, stopped.stdout], [75, "\nThe import is at work: its background job, com.thebrimm.unedited, is running (process 4321). Stopped before this Mac's drop folder, its settings and its launch agent were touched: they are as they were. What this run installed or downloaded first stays. Run this again once that is done.\n"], stopped.stderr);
+      const idle = run("exit 113", process.execPath);
+      assert.deepEqual([idle.status, idle.stdout], [0, "went on\n"], idle.stderr);
+      const blind = run("exit 113", "/nowhere/node");
+      assert.equal(blind.status, 75, blind.stderr);
+      assert.ok(blind.stdout.startsWith("\nWhether anything is at work on this Mac could not be told. Stopped before"), blind.stdout);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("says in its help, and in the README, how BRIMM Video Studio sets a Mac up", () => {
+    const help = ask("--print", "--help").out.replace(/\s+/g, " ");
+    assert.ok(help.includes("A real run stops, with 75, before it touches this Mac's drop folder, its settings or its background job, while an import or an episode's command is at work"), help);
+    const readme = readFileSync(join(HERE, "..", "README.md"), "utf8");
+    const at = readme.indexOf("**Installed from the app.**");
+    assert.ok(at >= 0);
+    const paragraph = readme.slice(at, readme.indexOf("\n", at));
+    for (const word of ["`--tools`", "`--app`", "`--agent`", "75", "`tool/busy.js`", "`tool/whisper-model.pin.json`"]) assert.ok(paragraph.includes(word), word);
   });
 });

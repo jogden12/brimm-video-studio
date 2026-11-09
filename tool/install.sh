@@ -66,7 +66,8 @@
 #                                    Studio's compiled helpers. Homebrew is never looked for or run, and Xcode's tools are not
 #                                    needed. With --app the background job is the app's own program, started with --agent, so
 #                                    that macOS names the app when it asks for access and in Login Items; without it, node from
-#                                    <bin>. It takes the other options of --machine
+#                                    <bin>. It takes the other options of --machine. A real run stops, with 75, before it touches this
+#                                    Mac's drop folder, its settings or its background job, while an import or an episode's command is at work
 #   ./install.sh --machine "Sallie's laptop" --user-deny "/path/to/The BRIMM DB/BRIMM Video"
 #                                    also add to her user settings, ~/.claude/settings.json, the Read deny rules for the places
 #                                    her folder's open lock keeps from Claude, so that every Claude Code session on this Mac
@@ -94,6 +95,8 @@ set -euo pipefail
 
 LABEL="com.thebrimm.unedited"
 AGENT_FILE="$HOME/Library/LaunchAgents/$LABEL.plist"
+# The real run's exit in installed mode when something is at work (sysexits' EX_TEMPFAIL, "try again later").
+BUSY=75
 # The transcript tool's launch agent. Its file is only ever read, for the folders it lists: here (watched), for the drop folder's
 # refusal, and by settings.js transcriptFolders, which also reads that file turned off (.plist.off, by-hand check 88) for the exports folder.
 TRANSCRIBE_LABEL="com.thebrimm.transcribe"
@@ -147,6 +150,15 @@ HYPERFRAMES_PROGRAM="$TOOLCHAIN/node_modules/hyperframes/bin/hyperframes.mjs"
 CHROME_DIR="$HOME/.cache/hyperframes/chrome"
 
 say() { print -r -- "$@"; }
+
+# What is at work on this Mac, in a line, by busy.js: what launchd says of the import's background job, the import's lock, an episode's
+# command, a video being made ready. Its status is busy.js's: 0 and no line when nothing is at work, 1 and a line when something is.
+# When launchctl fails, busy.js is told nothing, which is a job that is not loaded.
+idle_why() {
+  local printed
+  printed="$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null || true)"
+  "$node" "$HERE/busy.js" idle-why --launchd - <<< "$printed"
+}
 
 # --print is kept apart from what is asked for, so that with it nothing is ever changed, wherever in the line it comes.
 mode="install"
@@ -1043,6 +1055,16 @@ say "  Log:  $LOG"
 # the traps below, or by a kill -9. launchd runs it at every login. Every setup that goes ahead takes it away first.
 [[ ! -e "$CHECK_FILE" ]] || say "  Left behind by an earlier setup:  its check of Claude, $CHECK_LABEL, at $CHECK_FILE. launchd runs it at every login, so this setup takes it away first"
 
+# Installed mode only: what is at work now, which a real run waits for. Dev mode asks launchd nothing here.
+if [[ -n "$tools" ]]; then
+  if why="$(idle_why)"; then
+    say "  At work now:  nothing, so the background job can be stopped and started again"
+  else
+    why="${why:-Whether anything is at work on this Mac could not be told.}"
+    say "  At work now:  ${why} The real run stops before it touches this Mac's drop folder, its settings and its background job, until that is done"
+  fi
+fi
+
 if [[ "$print" == "yes" ]]; then
   say ""
   say "This is what the Mac would be given, at $AGENT_FILE:"
@@ -1144,6 +1166,17 @@ if [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]];
     exit 1
   fi
   mv "$MODEL.part" "$MODEL"
+fi
+
+# A video may have been dropped, or an import begun, while the programs and the model were fetched. So what is at work is asked again,
+# right before the Mac's drop folder, settings and launch agent are touched, and nothing is touched while anything is.
+if [[ -n "$tools" ]]; then
+  idle=yes
+  why="$(idle_why)" || idle=no
+  why="${why:-Whether anything is at work on this Mac could not be told.}"
+  [[ "$idle" == yes ]] || say ""
+  [[ "$idle" == yes ]] || say "${why} Stopped before this Mac's drop folder, its settings and its launch agent were touched: they are as they were. What this run installed or downloaded first stays. Run this again once that is done."
+  [[ "$idle" == yes ]] || exit $BUSY
 fi
 
 # Things can change while the programs, the command line and the model are fetched, and the first check was made before the
