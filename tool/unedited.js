@@ -34,6 +34,7 @@ import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { homeRefusal, studioHome } from "./home.js";
+import { buildOf, isInstalled } from "./build.js";
 import { bracket, noteState, postNewNodeIfDue, readAccess } from "./access.js";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1574,11 +1575,13 @@ export async function uneditedFolders(folders, deps) {
     const home = deps.home || studioHome();
     const episodic = episodeMode(folder, deps.settings, home);
     const node = deps.node || process.execPath;
+    // An installed Mac runs the job through the app's own executable, so its grants are the app's and a change of node costs nothing.
+    const installed = isInstalled(deps.build ?? buildOf(thisCheckout()));
     const noteOpts = { home, clock: deps.clock || Date.now, node };
     // Once per node, before the run's first touch of the drop folder: macOS is about to ask whether this node may look, in a place that needs it.
     // The check first answers with no file-system call: only a run whose node changed (a noted place was let in by another node, and this node
     // has not been told) works out which places need access, and it does so inside the bracket, as the drop folder's own first touch is.
-    if (episodic) {
+    if (episodic && !installed) {
       try {
         const noted = readAccess(home);
         const told = (noted.told || {}).newNode;
@@ -1589,7 +1592,7 @@ export async function uneditedFolders(folders, deps) {
             () => {
               const note = readAccess(home);
               const needs = Object.keys(note.places).filter((place) => place === "downloads" || (typeof note.places[place].folder === "string" && needsFilesAccess(note.places[place].folder, home)));
-              postNewNodeIfDue(note, { notify: deps.notify || (() => {}), clock: noteOpts.clock, node, needs, home });
+              postNewNodeIfDue(note, { notify: deps.notify || (() => {}), clock: noteOpts.clock, node, needs, home, installed });
             },
             noteOpts
           );
