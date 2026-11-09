@@ -17,18 +17,27 @@ const SPK_HERE = (step) => `zsh "${SPK_SHARED}/in-test-account.zsh" ${step}`;
 /* Where the spare account's own files are, as Terminal prints them there (its account name is studiotest, check 103). */
 const SPK_HOME = '/Users/studiotest';
 const SPK_BIN = `${SPK_HOME}/Applications/BRIMM Node Spike.app/Contents/Resources/node/bin`;
+/* S7: the address updates come from (Jason, 9 November), the same as UPDATE_HOST in the spikes' common.zsh: change both together.
+   And its R2 bucket, and its zone on Cloudflare (the address without its first part). */
+const SPK_UPDATE_HOST = 'updates.thebrimminsights.com';
+const SPK_BUCKET = 'brimm-studio-updates';
+const SPK_ZONE = SPK_UPDATE_HOST.replace(/^[^.]*\./, '');
+/* What S7 makes on the Mac Studio, and where Sparkle's own tools are once --key has unpacked it. */
+const SPK_S7 = `${SPK_WORK}/s7-sparkle`;
+const SPK_S7_SHOWN = '/Users/jasonogden/BRIMM Video Work/App spikes/s7-sparkle';
+const SPK_SPARKLE_BIN = '$HOME/Library/Caches/brimm-studio-spikes/s7/sparkle-2.10.1/bin';
 const SPK_KEYCHAIN = cases([
   ["If macOS asks whether codesign may use your key,", "type your login password and choose Always Allow."],
   ["If it says it found 0 or 2 Developer ID identities,", "check 72 isn't done, or there are two: tell Claude."]
 ]);
-/* The four notarizing steps of an app the spikes made (S3's and S4's), as MOVE_PASTE_GROUP has them, with nothing to fill in: the
-   submission's id is read from what submit wrote. */
-const SPK_NOTARY = (folder, app) => {
+/* The four notarizing steps of an app the spikes made (S3's, S4's, and S7's two builds), as MOVE_PASTE_GROUP has them, with nothing
+   to fill in: the submission's id is read from what submit wrote. `label` names it in the first step, when it is not the app's name. */
+const SPK_NOTARY = (folder, app, label = app) => {
   const zip = `${SPK_WORK}/${folder}/${app}.zip`;
   const bundle = `${SPK_WORK}/${folder}/${app}.app`;
   const told = `${SPK_WORK}/${folder}/notary.json`;
   return [
-    [`On your yes, Claude sends ${app} to Apple to be notarized, which scans it for malware. It takes a few minutes:`,
+    [`On your yes, Claude sends ${label} to Apple to be notarized, which scans it for malware. It takes a few minutes:`,
       code(`xcrun notarytool submit "${zip}" --keychain-profile "BRIMM notary" --wait --output-format json | tee "${told}"`),
       prints("…", '{"message":"Processing complete","id":"…","status":"Accepted"}'),
       note("The three may come in another order."),
@@ -436,9 +445,154 @@ const APP_SPIKES_GROUP = {
       },
       {
         id: "spike-sparkle", title: "S7: an update round trip, through Sparkle and Cloudflare R2",
-        why: "<strong>This waits for your answers, so it has no steps yet.</strong> The app is to offer its updates itself, through Sparkle 2, from a signed list of updates kept on Cloudflare R2 at your own address. The spike needs three things from you first: the address for updates (for example updates.&lt;your domain&gt;), the R2 bucket's name, and the Sparkle signing key (EdDSA), which you make and back up yourself; its private half never goes into chat or into a file in the repo. Once you've given them in chat, the steps here are written: a build 1 and a build 2 of the spike app, the list of updates signed on the Mac Studio, published by you with the cf command, and build 1 in Studio Test finding build 2, checking who signed it, and installing it on your click, with what you allowed in check 107 kept. The spikes' README has the outline. <strong>Decides</strong> whether updates can be offered inside the app from your own address (the design's section 5).",
-        steps: [],
-        questions: []
+        why: `The app is to offer its updates itself, through Sparkle 2, from a signed list of updates (an appcast) kept on Cloudflare R2 at your own address, ${SPK_UPDATE_HOST}. Here a tiny app, Sparkle Spike, is built twice, build 1 (1.0, “first”) and build 2 (1.1, “second”), and each is signed and notarized. Sparkle's own generate_appcast signs the list for build 2 with your Sparkle key, which you make and back up yourself, and which stays in your login keychain. You turn R2 on, make the bucket ${SPK_BUCKET}, attach ${SPK_UPDATE_HOST} to it, and publish the two files, with the cf command, yourself. Then in Studio Test, build 1 finds build 2, Sparkle checks its signature and who signed it, installs it on your click, and the app comes back as build 2. What you allowed it (its Downloads folder) is looked at again, and so is what you allowed BRIMM Spike in check 107. <strong>Decides</strong> whether updates can be offered inside the app from your own address (the design's section 5). <strong>Fails</strong> if Sparkle rejects the signed update, installs one signed by another team, or what you allowed doesn't survive the update. Claude runs steps 1 to 4, 7 to 19 and 27 to 29 on the Mac Studio, each on your yes; steps 5, 6 and 20 to 26 are yours on the Mac Studio, and the rest are yours in Studio Test. <strong>Needs:</strong> check 103 (Studio Test), and check 107 (BRIMM Spike's Downloads grant, looked at again).`,
+        warn: "Your Sparkle key's private half is yours alone: never paste it, or its backup file, into chat, and never put either in the repo. Claude only ever reads its public half, which goes inside the app. Every cf command here is yours, in your own Terminal: Claude runs none of them.",
+        steps: [
+          ["Claude prints what the build would do. It changes nothing:", code(SPK_RUN("sparkle-spike/build.sh", "--print")),
+            prints("S7: a Sparkle 2 update round trip from Cloudflare R2 (spike only). --print changes nothing and fetches nothing.", "", `Updates are offered from https://${SPK_UPDATE_HOST}/spike/ (UPDATE_HOST in common.zsh): the feed https://${SPK_UPDATE_HOST}/spike/appcast.xml,`, `kept in the R2 bucket ${SPK_BUCKET}.`, "…", "Signing: the keychain has 1 Developer ID Application identity (it must have exactly one).", "…", "None of these folders is in Dropbox or inside a folder the import watches.", "", "Build 1 is not notarized yet. …", "  …", "", "Build 2 is not notarized yet. …", "  …", "", "Nothing was changed."),
+            note("Check the address on its third line: it is the one you decided.")],
+          ["On your yes, Claude downloads Sparkle 2.10.1, Sparkle-2.10.1.tar.xz, from Sparkle's own releases on github.com (about 16 MB), and reads GitHub's own record of the file's SHA-256 (a few KB):", code(SPK_RUN("sparkle-spike/build.sh", "--fetch")),
+            prints("Fetching Sparkle-2.10.1.tar.xz, about 16 MB, from https://github.com/sparkle-project/Sparkle/releases/download/2.10.1/Sparkle-2.10.1.tar.xz", "Not pinned yet: sparkle. Sparkle-2.10.1.tar.xz was fetched from https://github.com/sparkle-project/Sparkle/releases/download/2.10.1/Sparkle-2.10.1.tar.xz, and its SHA-256 is", "  …", "GitHub's own record of the release (https://api.github.com/repos/sparkle-project/Sparkle/releases/tags/2.10.1) gives its digest as", "  …", "The two are the same.", "Nothing was unpacked. Once Jason says yes, Claude writes it into pins.zsh (PIN_SHA[sparkle]) and runs this again."),
+            note("On 9 November, GitHub's record gave 1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27."),
+            cases([["If it says The two are NOT the same, or that GitHub's record gives no digest,", "stop: it is not pinned. Claude tells you."]])],
+          ["If the two were the same, say yes in chat. Claude writes Sparkle's SHA-256 into pins.zsh and fetches again:", code(SPK_RUN("sparkle-spike/build.sh", "--fetch")),
+            prints("sparkle: Sparkle-2.10.1.tar.xz matches its pin.")],
+          ["Claude unpacks Sparkle and looks for your Sparkle signing key:", code(SPK_RUN("sparkle-spike/build.sh", "--key")),
+            prints("Unpacked Sparkle 2.10.1 in /Users/jasonogden/Library/Caches/brimm-studio-spikes/s7/sparkle-2.10.1.", "There is no Sparkle signing key in your login keychain yet (generate_keys -p said: No existing signing key found!).", "Jason makes it himself, once, in his own Terminal on the Mac Studio, with Sparkle's own tool. It keeps the private half in his", "login keychain and prints only the public half:", '  "/Users/jasonogden/Library/Caches/brimm-studio-spikes/s7/sparkle-2.10.1/bin/generate_keys"', "…", "Then run --key again."),
+            cases([["If it prints The public half of the Sparkle signing key … instead,", "you made one before: skip step 5, and do step 6 if that key isn't backed up yet."]])],
+          ["In your own account, open Terminal yourself and make the key there with Sparkle's own tool (Claude doesn't run this one). It keeps the private half in your login keychain and prints only the public half:", code(`"${SPK_SPARKLE_BIN}/generate_keys"`),
+            prints("Generating a new signing key. This may take a moment, depending on your machine.", "A key has been generated and saved in your keychain. Add the `SUPublicEDKey` key to", "…", "    <key>SUPublicEDKey</key>", "    <string>…</string>"),
+            note("What is between the string tags is the public half: it's safe to see, and it goes inside the app."),
+            cases([
+              ["If macOS asks whether generate_keys may save to your keychain,", "type your login password and click Allow."],
+              ["If it says A pre-existing signing key was found,", "you have one already: that one is used. Go on to step 6."]
+            ])],
+          ["Still in your own Terminal, back the key up yourself, to a file of your own choosing that only you can reach: on a drive you keep safe, or to move into your password manager. Never in the repo, and never in chat: the file is the private key itself.", code(`"${SPK_SPARKLE_BIN}/generate_keys" -x "<a file of your choosing>"`),
+            expect("It prints nothing, and the file is there. Where you keep it is yours alone: don't write it in the answer."),
+            cases([
+              ["If macOS asks whether generate_keys may use your keychain,", "type your login password and click Allow."],
+              ["If it says private-key-file already exists,", "choose another name: it never writes over a file."]
+            ])],
+          ["Claude reads the key's public half, which goes into the app:", code(SPK_RUN("sparkle-spike/build.sh", "--key")),
+            prints("The public half of the Sparkle signing key in your login keychain (SUPublicEDKey) is", "  …"),
+            note("The same string as between the string tags in step 5."),
+            cases([["If macOS asks whether generate_keys may use your keychain,", "type your login password and click Allow."]])],
+          ["On your yes, Claude builds build 1 of Sparkle Spike, with Sparkle inside it, and signs it:", code(SPK_RUN("sparkle-spike/build.sh", "--build 1")),
+            prints("Signed Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc.", "Signed Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc.", "Signed Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate.", "Signed Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app.", "Signed Contents/Frameworks/Sparkle.framework.", "…/Sparkle Spike.app: valid on disk", "…/Sparkle Spike.app: satisfies its Designated Requirement", "The app's signature checks.", `Made ${SPK_S7_SHOWN}/build-1/Sparkle Spike.app`, `  version 1.0 (1), "first", feed https://${SPK_UPDATE_HOST}/spike/appcast.xml, SUPublicEDKey …`, `Made ${SPK_S7_SHOWN}/build-1/Sparkle Spike.zip`, "Signed as Developer ID Application: Jason Ogden (…) (team …).", "", "Build 1 is not notarized yet. That sends the app to Apple, so it is a by-hand step, on Jason's yes. The commands:", "  …"),
+            note("A replacing existing signature line before each Signed line is expected: Sparkle signs its own parts, and each is signed again as yours, in the order Sparkle's documentation gives."),
+            SPK_KEYCHAIN],
+          ...SPK_NOTARY("s7-sparkle/build-1", "Sparkle Spike", "build 1 of Sparkle Spike"),
+          ["On your yes, Claude builds build 2, the same app with only its version and its word changed, and signs it:", code(SPK_RUN("sparkle-spike/build.sh", "--build 2")),
+            prints("Signed Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc.", "…", "The app's signature checks.", `Made ${SPK_S7_SHOWN}/build-2/Sparkle Spike.app`, `  version 1.1 (2), "second", feed https://${SPK_UPDATE_HOST}/spike/appcast.xml, SUPublicEDKey …`, `Made ${SPK_S7_SHOWN}/build-2/Sparkle Spike.zip`, "Signed as Developer ID Application: Jason Ogden (…) (team …).", "", "Build 2 is not notarized yet. …", "  …"),
+            note("The same key and the same team as build 1's."),
+            SPK_KEYCHAIN],
+          ...SPK_NOTARY("s7-sparkle/build-2", "Sparkle Spike", "build 2 of Sparkle Spike"),
+          ["On your yes, Claude has Sparkle's own generate_appcast write the list of updates for build 2 and sign it with your key, which stays in your keychain:", code(SPK_RUN("sparkle-spike/build.sh", "--appcast")),
+            prints("generate_appcast is signing the update with the key in your login keychain. macOS may ask whether generate_appcast may use", "your confidential information in the keychain: Jason types his login password and clicks Allow.", "Wrote 1 new update, updated 0 existing updates, and removed 0 old updates in appcast.xml", "", `The appcast it wrote, ${SPK_S7_SHOWN}/appcast/appcast.xml:`, '  <?xml version="1.0" encoding="utf-8"?>', "  …", "  <sparkle:version>2</sparkle:version>", "  <sparkle:shortVersionString>1.1</sparkle:shortVersionString>", "  …", `  <enclosure url="https://${SPK_UPDATE_HOST}/spike/Sparkle-Spike-1.1.zip" length="…" type="application/octet-stream" sparkle:edSignature="…"/>`, "  …", "", "It holds an sparkle:edSignature.", "It has no channel tag.", `Its download is https://${SPK_UPDATE_HOST}/spike/Sparkle-Spike-1.1.zip.`, "Its item is build 2.", `In ${SPK_S7_SHOWN}/appcast: Sparkle-Spike-1.1.zip, appcast.xml`, "", "Next: --publish-print prints the commands Jason runs to publish them."),
+            note("Its lines may be indented differently, and in another order."),
+            cases([
+              ["If macOS asks whether generate_appcast may use confidential information in your keychain,", "type your login password and click Allow. Claude waits for you."],
+              ["If it says SUPublicEDKey in the app … does not match, or the appcast holds no sparkle:edSignature,", "stop: nothing is to be published. Claude tells you."]
+            ])],
+          ["Claude prints the Cloudflare commands for you. It runs none of them:", code(SPK_RUN("sparkle-spike/build.sh", "--publish-print")),
+            prints("S7: the Cloudflare commands Jason runs himself, in his own Terminal, with the cf command (his rule for Cloudflare). This prints", "them and runs none of them; it changes nothing.", "…", "Nothing was changed."),
+            note("Steps 20 to 26 are those commands, in that order.")],
+          ["In your browser, sign in to the Cloudflare dashboard yourself, and open R2 Object Storage. If R2 isn't turned on for the account yet, turn it on.",
+            expect("R2's overview, with its list of buckets (perhaps empty)."),
+            note("If Cloudflare asks for a payment method, or to accept R2's terms, those are yours to decide: Claude does neither. The spike keeps two files of a few MB there.")],
+          ["In your own Terminal, check that cf is signed in to your Cloudflare account:", code("cf auth whoami"),
+            expect("Your account, signed in."),
+            cases([["If it says you aren't signed in,", "run cf auth login, sign in in the browser yourself, and run this again."]])],
+          ["In your own Terminal, make the bucket:", code(`cf r2 buckets create --name ${SPK_BUCKET}`),
+            prints("…"),
+            note(`cf's own words: the bucket's name, ${SPK_BUCKET}, in them is the pass.`),
+            cases([["If it says R2 isn't turned on, or there is no subscription,", "do step 20 again, then this."]])],
+          [`In your own Terminal, read the zone ID of ${SPK_ZONE}, which the next step needs:`, code(`cf zones list --name ${SPK_ZONE}`),
+            expect(`One zone, ${SPK_ZONE}, with its id: 32 letters and digits. Copy the id.`)],
+          [`In your own Terminal, attach ${SPK_UPDATE_HOST} to the bucket as its custom domain, open to the public, with TLS 1.2 or later. Put the id from step 23 in place of the words in angle brackets:`,
+            code(`cf r2 buckets domains custom create ${SPK_BUCKET} --domain ${SPK_UPDATE_HOST} --zone-id <the id from step 23> --enabled --min-tls 1.2`),
+            prints("…"),
+            note(`cf's own words: ${SPK_UPDATE_HOST}, enabled, is the pass. It can take a few minutes to become active.`),
+            cases([["If cf refuses it,", `copy its words into the answer, and attach it in the dashboard instead: R2 › ${SPK_BUCKET} › Settings › Custom Domains › Add, type ${SPK_UPDATE_HOST}, and confirm.`]])],
+          ["In your own Terminal, publish build 2's zip:", code(`cf r2 objects put spike/Sparkle-Spike-1.1.zip --bucket-name ${SPK_BUCKET} --file "${SPK_S7}/appcast/Sparkle-Spike-1.1.zip" --content-type application/zip`),
+            prints("…"),
+            note("The zip goes first, so that the list never names a zip that isn't there yet.")],
+          ["In your own Terminal, publish the list of updates:", code(`cf r2 objects put spike/appcast.xml --bucket-name ${SPK_BUCKET} --file "${SPK_S7}/appcast/appcast.xml" --content-type application/xml`),
+            prints("…")],
+          [`Claude checks that both answer at ${SPK_UPDATE_HOST}:`, code(`curl -sI https://${SPK_UPDATE_HOST}/spike/appcast.xml\ncurl -sI https://${SPK_UPDATE_HOST}/spike/Sparkle-Spike-1.1.zip`),
+            prints("HTTP/2 200", "…", "content-type: application/xml", "…", "HTTP/2 200", "…", "content-type: application/zip", "…"),
+            cases([
+              ["If curl says it could not resolve the host,", "the custom domain isn't active yet: wait a few minutes, and Claude runs it again."],
+              ["If either says 404,", `in your own Terminal, list the bucket with cf r2 objects list --bucket-name ${SPK_BUCKET} (it only reads) and copy the names into the answer. If they read spike%2F… in place of spike/…, cf kept the slash encoded (its preview of the command shows the address that way): tell Claude.`]
+            ])],
+          ["Claude puts the spare account's helper there again, so that it has S7's two steps (take s7 and sparkle-version):", code(SPK_RUN("stage.sh", "helper")),
+            prints(`Staged in ${SPK_SHARED}: in-test-account.zsh, test-account.mjs, s2-compare.mjs, and tool/ at … (without tests or move-app).`)],
+          ["Claude puts build 1 where Studio Test can read it (build 2 it fetches from your address):", code(SPK_RUN("stage.sh", "s7")),
+            prints(`Staged: ${SPK_SHARED}/S7/Sparkle Spike.zip (build 1, version 1.0)`),
+            cases([["If it says the zip holds no stapled app,", "the stapling step's zip wasn't made again: Claude makes it, and runs this again."]])],
+          ["In the Studio Test account's Terminal, run:", code(SPK_HERE("take s7")),
+            prints(`Copied into Downloads, and marked as downloaded from the internet: ${SPK_HOME}/Downloads/Sparkle Spike.zip`, "Its mark: 0081;…;Safari;")],
+          ["In the Studio Test account, in Finder, open Downloads and double-click Sparkle Spike.zip.", expect("Sparkle Spike appears beside it in Downloads.")],
+          ["In the Studio Test account, drag Sparkle Spike from Downloads into the Applications folder in your home folder.",
+            expect("It is in that Applications folder, beside BRIMM Spike.")],
+          ["In the Studio Test account, double-click Sparkle Spike in that Applications folder, and answer what macOS asks: Open, if a box says it was downloaded from the internet; Allow, if a box asks about your Downloads folder.",
+            expect(`Its window: Sparkle Spike 1.0 (1), first, Updates from: https://${SPK_UPDATE_HOST}/spike/appcast.xml, and once you've allowed it, Downloads: listed, … entries, after … ms. Write down every box's words, and the name each one gave.`),
+            cases([["If the Downloads line says not listed,", "write its words: macOS refused, or no box came."]])],
+          ["In the Studio Test account's Terminal, run:", code(SPK_HERE("sparkle-version")),
+            prints(`Sparkle Spike: version 1.0 (1), "first", at ${SPK_HOME}/Applications/Sparkle Spike.app`, "Signed by: Developer ID Application: Jason Ogden (…), team …", "Its signature checks: yes.", `Its feed: https://${SPK_UPDATE_HOST}/spike/appcast.xml`),
+            note("Step 38 compares its team with this one.")],
+          ["In the Studio Test account, in Sparkle Spike, choose Sparkle Spike › Check for Updates… in the menu bar.",
+            expect("Sparkle's window: A new version of Sparkle Spike is available! Sparkle Spike 1.1 is now available—you have 1.0, with Skip This Version, Remind Me Later and Install Update. Write its words exactly."),
+            cases([
+              ["If it says you're up to date,", "it didn't see build 2: write its words, and tell Claude."],
+              ["If it says an error occurred in retrieving update information,", "it couldn't read the list: write its words, and tell Claude."],
+              ["If it says the update is improperly signed,", "S7 fails there: Sparkle rejected the signature. Write its words."]
+            ])],
+          ["In the Studio Test account, click Install Update. When Sparkle has it, click Install and Relaunch.",
+            expect("Sparkle downloads it, says it is ready to install, and on your click quits Sparkle Spike."),
+            cases([["If macOS asks for a name and password,", "write its words, then click Cancel and tell Claude: the Applications folder in your home folder should need none."]])],
+          ["In the Studio Test account, wait for Sparkle Spike to open again by itself.",
+            expect("Its window: Sparkle Spike 1.1 (2), second, and its Downloads line, with no box asking this time."),
+            cases([
+              ["If a box asks about your Downloads folder again,", "what you allowed didn't survive the update: write its words, then click Allow."],
+              ["If it doesn't open again by itself within a minute,", "open it from the Applications folder in your home folder, and write that you had to."]
+            ])],
+          ["In the Studio Test account's Terminal, run:", code(SPK_HERE("sparkle-version")),
+            prints(`Sparkle Spike: version 1.1 (2), "second", at ${SPK_HOME}/Applications/Sparkle Spike.app`, "Signed by: Developer ID Application: Jason Ogden (…), team …", "Its signature checks: yes.", `Its feed: https://${SPK_UPDATE_HOST}/spike/appcast.xml`),
+            cases([["If the team differs from step 34's,", "S7 fails there: Sparkle installed an update signed by another team. Write both."]])],
+          ["In the Studio Test account, open System Settings › Privacy & Security › Files and Folders.",
+            expect("Sparkle Spike, with its Downloads Folder switch on, and BRIMM Spike, from check 107, with its switch as you left it. Write each entry's name and switch.")],
+          ["In the Studio Test account, quit Sparkle Spike (Command-Q).", expect("It closes.")]
+        ],
+        questions: [
+          { id: "fetch", label: "What the first fetch printed, both SHA-256s" },
+          { id: "pin", label: "What the second fetch printed" },
+          { id: "made", label: "That generate_keys made the key, or found one (its public half may be pasted, never its private half)" },
+          { id: "backup", label: "That the backup is made (not where you keep it)" },
+          { id: "key", label: "What the second --key printed" },
+          { id: "build1", label: "What build 1's build printed" },
+          { id: "notarized1", label: "Build 1's notarizing status" },
+          { id: "log1", label: "What Apple's log said of build 1" },
+          { id: "gatekeeper1", label: "What the Gatekeeper check printed for build 1" },
+          { id: "build2", label: "What build 2's build printed" },
+          { id: "notarized2", label: "Build 2's notarizing status" },
+          { id: "log2", label: "What Apple's log said of build 2" },
+          { id: "gatekeeper2", label: "What the Gatekeeper check printed for build 2" },
+          { id: "appcast", label: "What --appcast printed, and any box macOS showed" },
+          { id: "r2", label: "Whether R2 was on already, and what turning it on asked" },
+          { id: "bucket", label: "What making the bucket printed" },
+          { id: "domain", label: "What attaching the custom domain printed" },
+          { id: "zip", label: "What publishing the zip printed" },
+          { id: "list", label: "What publishing the list of updates printed" },
+          { id: "answers", label: "What the two curl checks printed" },
+          { id: "first", label: "Build 1's window, and every box macOS showed, word for word" },
+          { id: "before", label: "What sparkle-version printed before the update" },
+          { id: "offered", label: "Sparkle's window, word for word" },
+          { id: "install", label: "What happened when you clicked Install Update and Install and Relaunch" },
+          { id: "after", label: "Build 2's window after it opened again, and whether any box came" },
+          { id: "version", label: "What sparkle-version printed after the update" },
+          { id: "files", label: "The Files and Folders entries: Sparkle Spike's and BRIMM Spike's, each with its switch" }
+        ]
       }
     ]
 };
@@ -450,5 +604,5 @@ const APP_SPIKES_STEP_OF = {
   "spike-agent": { build: "Step 2", notarized: "Step 3", log: "Step 4", gatekeeper: "Step 6", plist: "Step 11", shown: "Step 13", first: "Step 15", second: "Step 17", loginitems: "Step 18", files: "Step 19", removed: "Step 20", after: "Step 21" },
   "spike-login": { installed: "Step 1", before: "Step 2", window: "Step 4", browser: "Step 5", asked: "Step 6", result: "Step 7", status: "Step 10", signedout: "Step 11" },
   "spike-hyperframes": { project: "Step 1", lint: "Step 2", download: "Step 3", applications: "Step 5", firstrun: "Step 8", homebrew: "Step 9", open: "Step 10", play: "Step 11", export: "Step 12", during: "Step 13", exported: "Step 14", runtimes: "Step 15" },
-  "spike-sparkle": {}
+  "spike-sparkle": { fetch: "Step 2", pin: "Step 3", made: "Step 5", backup: "Step 6", key: "Step 7", build1: "Step 8", notarized1: "Step 9", log1: "Step 10", gatekeeper1: "Step 12", build2: "Step 13", notarized2: "Step 14", log2: "Step 15", gatekeeper2: "Step 17", appcast: "Step 18", r2: "Step 20", bucket: "Step 22", domain: "Step 24", zip: "Step 25", list: "Step 26", answers: "Step 27", first: "Step 33", before: "Step 34", offered: "Step 35", install: "Step 36", after: "Step 37", version: "Step 38", files: "Step 39" }
 };

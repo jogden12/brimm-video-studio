@@ -6,7 +6,7 @@
 #   setup          takes Homebrew off this account's PATH and makes Xcode's tools answer as if they were missing (in ~/.zprofile),
 #                  and makes ~/Applications. Terminal is then quit and opened again.
 #   look           says which programs this account finds, and whether it is an admin.
-#   take s3|s4     copies S3's or S4's zip into ~/Downloads and marks it as downloaded from the internet, as Safari would.
+#   take s3|s4|s7  copies S3's, S4's or S7's zip into ~/Downloads and marks it as downloaded from the internet, as Safari would.
 #   node           S3: runs the node inside BRIMM Node Spike.app, and says what Gatekeeper says of the app.
 #   cli            S3: that node's npm installs the pinned HyperFrames command line, as install.sh does, and Studio's own check of it.
 #   version, chrome, doctor   S3: the command line's --version, browser ensure and doctor, run as Studio runs it.
@@ -18,6 +18,7 @@
 #   homebrew       S6: any program of this account's running from /opt/homebrew, and where HyperFrames runs from.
 #   exported       S6: the newest video in ~/Downloads, read by the app's own ffprobe.
 #   runtimes       S6: what the HyperFrames app keeps in its runtimes folder.
+#   sparkle-version   S7: the version, build and word of the Sparkle Spike in ~/Applications, and who signed it.
 # It refuses every step that changes anything in an account that is an admin: it is for the standard Studio Test account alone.
 set -u
 
@@ -26,6 +27,7 @@ TOOLCOPY="$SHARED/tool"
 NODE_APP="$HOME/Applications/BRIMM Node Spike.app"
 BIN="$NODE_APP/Contents/Resources/node/bin"
 SPIKE_APP="$HOME/Applications/BRIMM Spike.app"
+SPARKLE_APP="$HOME/Applications/Sparkle Spike.app"
 LABEL=com.thebrimm.spike-agent
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 WATCH="$HOME/BRIMM Spike Watch"
@@ -122,7 +124,8 @@ step_take() {
   case $which in
     s3) zip="$SHARED/S3/BRIMM Node Spike.zip" ;;
     s4) zip="$SHARED/S4/BRIMM Spike.zip" ;;
-    *) stop "Say which: take s3 or take s4." ;;
+    s7) zip="$SHARED/S7/Sparkle Spike.zip" ;;
+    *) stop "Say which: take s3, take s4 or take s7." ;;
   esac
   would "copy $zip into ~/Downloads and mark it as downloaded from the internet, as Safari would (the com.apple.quarantine mark)"
   refuse_admin
@@ -352,6 +355,19 @@ step_runtimes() {
   du -sh "$r"/*(N) | sed "s|$r/||; s/^/  /"
 }
 
+# --- S7 ---
+
+step_sparkle_version() {
+  would "say the version, build and word of $SPARKLE_APP, the team that signed it, and whether its signature checks"
+  [[ -d $SPARKLE_APP ]] || stop "Stopped: there is no Sparkle Spike.app in the Applications folder in your home folder. Do S7's steps first."
+  local plist="$SPARKLE_APP/Contents/Info.plist" told
+  say "Sparkle Spike: version $(plutil -extract CFBundleShortVersionString raw -o - "$plist" 2>/dev/null) ($(plutil -extract CFBundleVersion raw -o - "$plist" 2>/dev/null)), \"$(plutil -extract BRIMMSpikeWord raw -o - "$plist" 2>/dev/null)\", at $SPARKLE_APP"
+  told=$(codesign -dv --verbose=2 "$SPARKLE_APP" 2>&1)
+  say "Signed by: $(print -r -- "$told" | sed -n 's/^Authority=//p' | head -1), team $(print -r -- "$told" | sed -n 's/^TeamIdentifier=//p')"
+  if codesign --verify --strict --deep "$SPARKLE_APP" 2>/dev/null; then say "Its signature checks: yes."; else say "Its signature checks: no."; fi
+  say "Its feed: $(plutil -extract SUFeedURL raw -o - "$plist" 2>/dev/null)"
+}
+
 # --- Which step ---
 
 if [[ ${1-} == --print ]]; then
@@ -380,5 +396,6 @@ case ${1-} in
   homebrew) step_homebrew ;;
   exported) step_exported ;;
   runtimes) step_runtimes ;;
-  *) stop "Say which step: setup, look, take s3, take s4, node, cli, version, chrome, doctor, sharp, whisper, agent-plist, agent-load, agent-log, agent-remove, claude-status, project, lint, open-app, homebrew, exported or runtimes." ;;
+  sparkle-version) step_sparkle_version ;;
+  *) stop "Say which step: setup, look, take s3, take s4, take s7, node, cli, version, chrome, doctor, sharp, whisper, agent-plist, agent-load, agent-log, agent-remove, claude-status, project, lint, open-app, homebrew, exported, runtimes or sparkle-version." ;;
 esac

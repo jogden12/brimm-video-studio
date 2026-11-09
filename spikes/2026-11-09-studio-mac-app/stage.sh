@@ -7,6 +7,7 @@
 #   zsh stage.sh [--print] s3       S3's notarized and stapled zip; the model (a clone, which on the same disk takes no room); and the
 #                                   .srt S2's new whisper-cli wrote on the Mac Studio, for the spare account's whisper step to compare with.
 #   zsh stage.sh [--print] s4       S4's notarized and stapled zip, and the launch agent's template.
+#   zsh stage.sh [--print] s7       S7's build 1, its notarized and stapled zip. Build 2 is not staged: Sparkle fetches it from R2.
 # --print says what it would copy, and changes nothing.
 set -u
 source ${0:A:h}/common.zsh
@@ -15,6 +16,8 @@ APP3="$WORK/s3-node/BRIMM Node Spike.app"
 ZIP3="$WORK/s3-node/BRIMM Node Spike.zip"
 APP4="$WORK/s4-agent/BRIMM Spike.app"
 ZIP4="$WORK/s4-agent/BRIMM Spike.zip"
+APP7="$WORK/s7-sparkle/build-1/Sparkle Spike.app"
+ZIP7="$WORK/s7-sparkle/build-1/Sparkle Spike.zip"
 S2_SRT="$WORK/s2-whisper/out/compare/the-new-one-import/captions.srt"
 PRINT=0
 
@@ -79,6 +82,20 @@ stage_s4() {
   say "Staged: $SHARED/S4/${ZIP4:t} and $SHARED/S4/com.thebrimm.spike-agent.plist"
 }
 
+stage_s7() {
+  would "copy $ZIP7 (build 1) into $SHARED/S7"
+  need_stapled $APP7
+  [[ -f $ZIP7 ]] || stop "Stopped: $ZIP7 is not there."
+  # The zip must be the one made after the stapling: Apple's ticket is then in it, in the app's Contents/CodeResources.
+  unzip -l $ZIP7 2>/dev/null | grep -q -F "Sparkle Spike.app/Contents/CodeResources" || stop "Stopped: $ZIP7 holds no stapled app: it was made before the stapling. Make it again with the stapling step's ditto line; nothing was staged."
+  [[ $(plutil -extract CFBundleVersion raw -o - "$APP7/Contents/Info.plist" 2>/dev/null) == 1 ]] || stop "Stopped: the app in ${APP7:h} is not build 1. Nothing was staged."
+  [[ -d $SHARED ]] || stop "Stopped: $SHARED is not there yet. Stage the helper first."
+  mkdir -p $SHARED/S7 || stop "Stopped: $SHARED/S7 could not be made."
+  cp $ZIP7 $SHARED/S7/ || stop "Stopped: S7's zip could not be copied."
+  chmod -R a+rX $SHARED
+  say "Staged: $SHARED/S7/${ZIP7:t} (build 1, version 1.0)"
+}
+
 if [[ ${1-} == --print ]]; then
   PRINT=1
   shift
@@ -87,5 +104,6 @@ case ${1-} in
   helper) stage_helper ;;
   s3) stage_s3 ;;
   s4) stage_s4 ;;
-  *) stop "Say what to stage: helper, s3 or s4." ;;
+  s7) stage_s7 ;;
+  *) stop "Say what to stage: helper, s3, s4 or s7." ;;
 esac

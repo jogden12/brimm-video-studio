@@ -18,7 +18,7 @@ spare account and everything on screen.
 |---|---|
 | The spike scripts | this folder |
 | Downloads, each checked against its pin | `~/BRIMM Video Work/App spikes/downloads/` |
-| What each spike makes | `~/BRIMM Video Work/App spikes/s1-ffmpeg/`, `s2-whisper/`, `s3-node/`, `s4-agent/` |
+| What each spike makes | `~/BRIMM Video Work/App spikes/s1-ffmpeg/`, `s2-whisper/`, `s3-node/`, `s4-agent/`, `s7-sparkle/` |
 | Where the sources are compiled | `~/Library/Caches/brimm-studio-spikes/` (see below) |
 | What the spare account reads | `/Users/Shared/BRIMM Studio spikes/` (readable by both accounts; `stage.sh` puts things there) |
 | The spike clip | `/Users/Shared/BRIMM Studio spikes/Spike clip.mov`: an iPhone recording of Jason's own, a minute or less, in which he talks, recorded in HDR (the iPhone's default) |
@@ -42,12 +42,14 @@ looks for any program of that account running from `/opt/homebrew`.
   that is not pinned yet: the script that needs it fetches it, prints the SHA-256 it found (beside the one the maker publishes, when
   the maker publishes one), and stops. Claude fills it in only after Jason's yes.
 - `common.zsh`: the shared paths, the one way a download is fetched and checked, the guard against watched folders, the check that
-  a program loads only macOS's own libraries, and the signing identity, found by name as `tool/move-app/build-app.sh` finds it.
+  a program loads only macOS's own libraries, and the signing identity, found by name as `tool/move-app/build-app.sh` finds it. It
+  also holds S7's update address, `UPDATE_HOST`, the one place it is spelled, and its R2 bucket, `UPDATE_BUCKET`.
 - `build-ffmpeg.sh` (S1), with `s1-check.mjs`.
 - `build-whisper.sh` (S2), with `s2-compare.mjs`.
 - `node-app.sh` (S3), with `node-app/launcher.swift` and `node-app/node.entitlements`.
 - `agent-spike/` (S4 and S5): `BRIMMSpike.swift`, `probe.mjs`, `build.sh`, and the launch agent's template
   `com.thebrimm.spike-agent.plist`.
+- `sparkle-spike/` (S7): `SparkleSpike.swift` and `build.sh`.
 - `in-test-account.zsh`: the steps run in the spare account, each by name (`setup`, `look`, `node`, `cli`, `doctor`, …), with
   `test-account.mjs`. It refuses to run in an admin account.
 - `stage.sh`: puts in `/Users/Shared/BRIMM Studio spikes/` what the spare account needs: the helper, a copy of Studio's `tool/`
@@ -151,17 +153,39 @@ from Homebrew.
   installed first.
 - **Fails** if the app needs a Homebrew program, or cannot open or export the project, in the spare account.
 
-### S7: a Sparkle update round trip on Cloudflare R2 (waits)
-It needs three things Jason has not given yet: the update domain (for example `updates.<his domain>`), the R2 bucket, and the
-Sparkle EdDSA key, which he makes and backs up himself (its private half never goes into chat or into a file in the repo). Until
-then there is no script and no command. The outline, for when they are given:
-1. Sparkle 2, pinned by URL and SHA-256 like everything here, goes into a build 1 of the spike app, with `SUFeedURL` on the
-   update domain, `SUPublicEDKey`, automatic installs off and no system profile.
-2. A build 2 of the same app (only its version and a word in its window change) is signed, notarized and stapled like S4's.
-3. Sparkle's own `generate_appcast` signs an appcast for build 2 with the EdDSA key, in Jason's keychain, on the Mac Studio.
-4. Jason publishes the appcast and the build 2 zip to the bucket with the `cf` CLI (his global rule), by his own step.
-5. In the spare account, build 1's "Check for Updates…" finds build 2, checks its EdDSA signature and its team, installs it on his
-   click, and relaunches; the privacy grant S4 made is looked at again (it should survive, as the design says it does).
+### S7: a Sparkle update round trip on Cloudflare R2 (`sparkle-spike/`)
+Jason's decisions of 9 November: updates come from `https://updates.thebrimminsights.com/spike/` (`UPDATE_HOST` in `common.zsh`,
+the one place the host is spelled), kept in the R2 bucket `brimm-studio-updates` (`UPDATE_BUCKET`). The Sparkle EdDSA key is his:
+he makes it himself with Sparkle's own `generate_keys`, which keeps the private half in his login keychain, and backs it up himself
+(`generate_keys -x`, to a file of his choosing). Its private half never goes into chat, into a file in the repo, or into anything a
+script prints: the scripts read only its public half (`generate_keys -p`), and `generate_appcast` signs with the keychain's key.
+
+`sparkle-spike/build.sh`:
+- `--fetch` fetches Sparkle 2.10.1 (`Sparkle-2.10.1.tar.xz` from Sparkle's own GitHub releases), pinned like everything here.
+  Its first fetch prints its SHA-256 beside the digest GitHub's API gives for the file, and stops for Jason's yes.
+- `--key` unpacks Sparkle in `~/Library/Caches/brimm-studio-spikes/s7/` and prints the key's public half; when there is no key
+  yet, it prints the `generate_keys` command Jason makes it with, and stops.
+- `--build 1` and `--build 2` build `Sparkle Spike.app` (bundle id `com.thebrimm.sparkle-spike`; 1.0 (1) "first" and 1.1 (2)
+  "second", nothing else differs), from `SparkleSpike.swift`: a window naming its version and its word, a "Check for Updates…"
+  item wired to Sparkle's `SPUStandardUpdaterController`, and a listing of the Downloads folder at every launch, so that macOS asks
+  once for it, naming the app. `Sparkle.framework` is in `Contents/Frameworks`. The Info.plist has `SUFeedURL`, `SUPublicEDKey`
+  (it will not build without it), and `SUEnableAutomaticChecks`, `SUAutomaticallyUpdate` and `SUEnableSystemProfiling` all false.
+  It is signed inside-out, as Sparkle's documentation signs Sparkle outside Xcode (its two XPC services, the Downloader keeping its
+  entitlements; Autoupdate; Updater.app; the framework; then the app), each with the hardened runtime and a timestamp, never
+  `--deep`, and zipped with `ditto -c -k --norsrc --noextattr --keepParent`. The notarizing commands are printed, never run.
+- `--appcast` runs `generate_appcast` on a folder holding only build 2's notarized, stapled zip, named `Sparkle-Spike-1.1.zip`, with
+  `--download-url-prefix https://updates.thebrimminsights.com/spike/`. It signs with the keychain's key (macOS may ask Jason to
+  allow it), and the item has no channel tag (stable items stay untagged). It prints the appcast and checks that it holds an
+  `sparkle:edSignature`.
+- `--publish-print` prints, and never runs, the `cf` commands Jason runs himself: `cf r2 buckets create`, the zone lookup and
+  `cf r2 buckets domains custom create` for the custom domain, then `cf r2 objects put` for the zip and the appcast. Each was
+  checked with its `--help`, `cf schema` and `--dry-run` (which sends nothing). Turning R2 on is a step in the Cloudflare dashboard.
+
+`stage.sh s7` puts build 1's stapled zip in `/Users/Shared/BRIMM Studio spikes/S7/`. In the spare account, `take s7` brings it into
+Downloads as a download, and `sparkle-version` says which build is installed, and who signed it. There, build 1's "Check for
+Updates…" finds build 2, Sparkle checks its EdDSA signature and its team and installs it on Jason's click, and the app relaunches.
+Sparkle Spike's own Downloads grant is looked at again (build 2 should list Downloads without asking), and so is BRIMM Spike's,
+from S4.
 
 - **Decides** design section 5: whether updates can be offered in the app from Jason's own domain.
 - **Fails** if Sparkle rejects the signed update, installs one signed by another team, or the grants do not survive.

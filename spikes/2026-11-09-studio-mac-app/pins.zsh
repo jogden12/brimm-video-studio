@@ -1,10 +1,10 @@
 # Every download the spikes make (spike only; see README.md). Sourced by common.zsh, never run.
 # For each: the file, where it comes from, its rough size, its SHA-256, and where the SHA-256 was read. An empty SHA-256 is one that
 # is not pinned yet: the script that needs it fetches it, prints the SHA-256 it found (beside the maker's own list, when the maker
-# publishes one), and stops. Claude fills it in here only after Jason's yes. A file that does not match its pin is moved aside and
-# never used.
+# publishes one, or beside the digest GitHub's API gives for a release file), and stops. Claude fills it in here only after Jason's
+# yes. A file that does not match its pin is moved aside and never used.
 
-typeset -gA PIN_URL PIN_FILE PIN_SIZE PIN_SHA PIN_FROM PIN_SUMS
+typeset -gA PIN_URL PIN_FILE PIN_SIZE PIN_SHA PIN_FROM PIN_SUMS PIN_GITHUB
 
 # S1: ffmpeg's source, the release the Mac Studio's own ffmpeg is.
 PIN_FILE[ffmpeg]=ffmpeg-9.0.2.tar.xz
@@ -54,3 +54,15 @@ PIN_SIZE[node]="50 MB"
 PIN_SHA[node]=d916511b55965e91be7a88e17f88d895b6793ceaba3e6c9b194aefe51c2c65ac
 PIN_FROM[node]="nodejs.org's own list of the SHA-256s of its v26.11.1 files (SHASUMS256.txt), which the file fetched on 2026-11-09 matched; pinned on Jason's yes"
 PIN_SUMS[node]=https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt
+
+# S7: Sparkle 2, the newest stable release on github.com/sparkle-project/Sparkle on 9 November 2026 (2.10.1, of 25 October): its
+# framework, and its own tools, generate_keys and generate_appcast. Not pinned yet: GitHub's API gives the SHA-256 GitHub worked out
+# itself when the file was uploaded (the release file's "digest"), from the record PIN_GITHUB names, which the fetch prints beside
+# the one it found.
+SPARKLE_VERSION=2.10.1
+PIN_FILE[sparkle]=Sparkle-$SPARKLE_VERSION.tar.xz
+PIN_URL[sparkle]=https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz
+PIN_SIZE[sparkle]="16 MB"
+PIN_SHA[sparkle]=
+PIN_FROM[sparkle]="not pinned yet; the second source is GitHub's own record of Sparkle's $SPARKLE_VERSION release, whose API gives a digest (SHA-256) for this file"
+PIN_GITHUB[sparkle]=https://api.github.com/repos/sparkle-project/Sparkle/releases/tags/$SPARKLE_VERSION

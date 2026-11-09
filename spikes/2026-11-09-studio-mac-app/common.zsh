@@ -21,6 +21,11 @@ MODEL_SHA256=1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69
 SYSTEM_PATH=/usr/bin:/bin:/usr/sbin:/sbin
 # The default drop folder (Phase 3). Never written in, whether or not a launch agent watches it now.
 DROP_DEFAULT="$HOME/BRIMM Video Work/Drop"
+# S7: the address updates are offered from (Jason, 9 November 2026). This is the one place the host is spelled: every script and
+# every command a script prints reads it from here, so changing it here changes it everywhere.
+UPDATE_HOST=updates.thebrimminsights.com
+# S7: the Cloudflare R2 bucket that holds the updates, behind UPDATE_HOST (Jason, 9 November 2026).
+UPDATE_BUCKET=brimm-studio-updates
 
 source $SPIKE/pins.zsh
 
@@ -73,7 +78,7 @@ show_pin() {
   if [[ -n ${PIN_SHA[$name]} ]]; then
     say "    SHA-256 ${PIN_SHA[$name]}, read from ${PIN_FROM[$name]}"
   else
-    say "    not pinned yet: --fetch fetches it, prints its SHA-256${PIN_SUMS[$name]:+ beside the one in ${PIN_SUMS[$name]}}, and stops"
+    say "    not pinned yet: --fetch fetches it, prints its SHA-256${PIN_SUMS[$name]:+ beside the one in ${PIN_SUMS[$name]}}${PIN_GITHUB[$name]:+ beside the digest GitHub's API gives for it in ${PIN_GITHUB[$name]}}, and stops"
   fi
   if [[ -f $DOWNLOADS/${PIN_FILE[$name]} ]]; then say "    (fetched already, in $DOWNLOADS)"; fi
 }
@@ -81,13 +86,25 @@ show_pin() {
 # The SHA-256 of a file.
 sha256_of() { shasum -a 256 "$1" | cut -c1-64 }
 
+# The SHA-256 GitHub's API gives for one file of a release (the file's "digest", which GitHub works out itself when the file is
+# uploaded), read from the release's record at the address given; or nothing, when the record has no digest for that file or could
+# not be fetched. It is read with grep and awk, which every Mac has: the record's name and digest lines, in order, each file's digest
+# coming after its name.
+github_digest() {
+  local api=$1 file=$2
+  curl --fail --location --proto '=https' --proto-redir '=https' --silent --show-error -H 'Accept: application/vnd.github+json' "$api" |
+    grep -o -E '"(name|digest)": ?"[^"]*"' |
+    awk -v file="$file" -F'"' '$2 == "name" { n = $4 } $2 == "digest" && n == file && $4 ~ /^sha256:[0-9a-f]+$/ { print substr($4, 8); exit }'
+}
+
 # Fetches one pinned download into DOWNLOADS, unless it is there already, and checks it against its pin. Returns 0 when it matches.
 # A download that is not pinned yet is fetched and its SHA-256 printed, with the maker's own line for it when the maker publishes a
-# list, and it returns 3: nothing is unpacked, and Claude pins it in pins.zsh only after Jason's yes. One that does not match is
-# moved aside (…rejected) and never used, and the script stops.
+# list, or the digest GitHub's API gives for it when it is a release file on GitHub, and it returns 3: nothing is unpacked, and
+# Claude pins it in pins.zsh only after Jason's yes. One that does not match is moved aside (…rejected) and never used, and the
+# script stops.
 fetch() {
   local name=$1
-  local file=$DOWNLOADS/${PIN_FILE[$name]} want=${PIN_SHA[$name]} have sums line
+  local file=$DOWNLOADS/${PIN_FILE[$name]} want=${PIN_SHA[$name]} have sums line digest
   mkdir -p $DOWNLOADS || stop "Stopped: $DOWNLOADS could not be made."
   if [[ ! -f $file ]]; then
     say "Fetching ${PIN_FILE[$name]}, about ${PIN_SIZE[$name]}, from ${PIN_URL[$name]}"
@@ -114,6 +131,16 @@ fetch() {
         fi
       else
         say "The maker's own list could not be fetched from ${PIN_SUMS[$name]}."
+      fi
+    fi
+    if [[ -n ${PIN_GITHUB[$name]} ]]; then
+      digest=$(github_digest "${PIN_GITHUB[$name]}" "${PIN_FILE[$name]}")
+      if [[ -n $digest ]]; then
+        say "GitHub's own record of the release (${PIN_GITHUB[$name]}) gives its digest as"
+        say "  $digest"
+        if [[ $digest == $have ]]; then say "The two are the same."; else say "The two are NOT the same: do not pin it."; fi
+      else
+        say "GitHub's own record of the release (${PIN_GITHUB[$name]}) gives no digest for ${PIN_FILE[$name]}, or could not be fetched."
       fi
     fi
     say "Nothing was unpacked. Once Jason says yes, Claude writes it into pins.zsh (PIN_SHA[$name]) and runs this again."
