@@ -10,6 +10,7 @@ export const EDIT = `"${NODE}" "${CHECKOUT}/tool/edit.js"`;
 /** Commands the guard lets through, each with the words edit.js must be given, in zsh and in bash. */
 export const ALLOWED = [
   [`${EDIT} episodes`, ["episodes"]],
+  [`${EDIT} update`, ["update"]],
   [`${EDIT} open "Pricing talk"`, ["open", "Pricing talk"]],
   [`node "${CHECKOUT}/tool/edit.js" open "Talk (Sallie's laptop)"`, ["open", "Talk (Sallie's laptop)"]],
   [`${EDIT} title "Pricing talk" --words "Price it right" --approve`, ["title", "Pricing talk", "--words", "Price it right", "--approve"]],

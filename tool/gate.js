@@ -11,7 +11,7 @@
 import { isPlannedRecord, kindOf, shownName } from "./episode.js";
 
 /** The commands that name no episode: their output is built from labels alone, and is not gated here. */
-export const UNSCOPED = ["episodes", "status", "behind", "retry", "look", "guide"];
+export const UNSCOPED = ["episodes", "status", "behind", "update", "retry", "look", "guide"];
 /** The commands that run for a video not yet answered: `kind` answers it, `leave` leaves it, `which` says which it is, `show`
     opens a copy of it on this Mac, and `resolve` sorts out its conflicted copies. */
 export const UNANSWERED = ["kind", "leave", "which", "show", "resolve"];

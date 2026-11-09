@@ -635,7 +635,7 @@ describe("Studio never writes into the reference folder", () => {
   const WALK = {
     episodes: [[]], guide: [[]], kind: [[FOLDER, "finished", "--private", "no"]], leave: [[FOLDER]], which: [[FOLDER]], read: [["--now", FOLDER, "--kind", "finished", "--rev", "1"]], workcopy: [["--now", FOLDER], ["--now", FOLDER, "--footage"]], join: [["--now", FOLDER, "--parts", "e-20261020-aaaaaa"], []],
     open: [[FOLDER]], app: [[FOLDER], [FOLDER, "reel", "2"]], bring: [["--now", FOLDER]], status: [[]], retry: [["nothing"]], look: [[]], name: [[FOLDER, "A new name"]], title: [[FOLDER]],
-    reel: [["drop", FOLDER, "1"]], reels: [[FOLDER, "--no-play"]], ask: [[FOLDER]], finish: [[FOLDER]], show: [[FOLDER, "transcript"]], behind: [[]], resolve: [[FOLDER]], free: [[FOLDER]],
+    reel: [["drop", FOLDER, "1"]], reels: [[FOLDER, "--no-play"]], ask: [[FOLDER]], finish: [[FOLDER]], show: [[FOLDER, "transcript"]], behind: [[]], update: [[]], resolve: [[FOLDER]], free: [[FOLDER]],
     spell: [[FOLDER]], graphic: [[FOLDER, "ideas"]],
     teachings: [[FOLDER]], principles: [[FOLDER]], ideas: [[FOLDER]],
     refs: [[], ["look", "blue carousel"], ["look", "title style"], ["look", "launch"], ["look", "nothing like it"], ["use", FOLDER, "blue carousel"], ["use", FOLDER, "title style", "reel", "2"], ["use", FOLDER, "launch"], ["use", FOLDER, "nothing like it"]],
