@@ -2627,7 +2627,8 @@ async function finish(ctx, rest) {
       return 1;
     }
     // The progress panel shows the finish as it shows an import (phase P).
-    const progress = ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: findPrograms().swift });
+    const programs = ctx.deps.progress ? null : findPrograms();
+    const progress = ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: programs.swift, bin: programs.bin });
     const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "finish", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, ({ nonce }) => finishNow(ctx, { folder: found.folder, name: found.name, record: found.read.record }, { progress, nonce, notify: ctx.deps.notify || banner }));
     if (result.taking || result.running) {
       ctx.say(result.taking ? `Another run is taking over ${calledAs(ctx, found)}'s lock. Say finish again in a moment.` : `${result.running} is running for ${calledAs(ctx, found)} already.`);
@@ -3968,7 +3969,7 @@ async function workcopy(ctx, rest) {
   const tools = ctx.deps.tools || findPrograms();
   const deps = {
     run: ctx.deps.run || runProgram, tools, now: ctx.now, log: (line) => ctx.say(line),
-    progress: ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: tools.swift }),
+    progress: ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: tools.swift, bin: tools.bin }),
     ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {})
   };
   const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
@@ -7090,7 +7091,7 @@ async function joinCommand(ctx, rest) {
   const deps = {
     run: ctx.deps.run || runProgram, tools, model: tools.model, home: ctx.home, settings: ctx.settings, now: () => new Date(ctx.now()), clock: ctx.now, checkout: thisCheckout(),
     log: (line) => ctx.say(line), wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole,
-    progress: ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: tools.swift }),
+    progress: ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: tools.swift, bin: tools.bin }),
     ...(ctx.deps.readAll ? { readAll: ctx.deps.readAll } : {}), ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {}), ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {})
   };
   let started = null;

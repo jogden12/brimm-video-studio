@@ -1684,7 +1684,7 @@ export function depsFor(found, log, env = process.env, args = {}) {
   const home = studioHome(env);
   // This Mac's settings for episodes, when it has them: with them, the import of its own drop folder makes episodes.
   const settings = readSettings(home).settings || null;
-  return { run: runProgram, tools: found, model: found.model, home, settings, log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)), progress: reporter({ folder: progressFolder(home), swift: found.swift, log }) };
+  return { run: runProgram, tools: found, model: found.model, home, settings, log, notify: banner, wait: (ms) => new Promise((r) => setTimeout(r, ms)), progress: reporter({ folder: progressFolder(home), swift: found.swift, bin: found.bin, log }) };
 }
 
 /** Do what a run was asked to do, with what it was given: the watched folders, or the one video. Resolves what the run ends

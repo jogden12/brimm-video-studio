@@ -8,11 +8,21 @@ import { EventEmitter } from "node:events";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { hasXcodeTools } from "../helpers.js";
 import { progressFolder, PANEL, PANEL_PID, RATES, ffmpegProgress, aboutLeft, detailOf, readRates, blended, addRates, reporter, noProgress } from "../progress.js";
+
+/** A folder that holds an empty file of this name, and is not node's own. */
+const helperFolder = (name) => {
+  const bin = mkdtempSync(join(tmpdir(), "brimm-bin-"));
+  writeFileSync(join(bin, name), "");
+  return bin;
+};
+/** A folder that has no helper in it. */
+const NO_BIN = "/no/such/folder";
 
 /** One test's progress folder, a clock that moves only when told, a timer whose ticks a test runs by hand, a stand-in for
     starting a program, and what the log said. */
-function setup({ swift = "", alive = () => false, bootedAt } = {}) {
+function setup({ swift = "", bin = NO_BIN, alive = () => false, bootedAt } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "brimm-progress-"));
   const folder = join(dir, "progress");
   const clock = { t: 1_000_000 };
@@ -26,7 +36,7 @@ function setup({ swift = "", alive = () => false, bootedAt } = {}) {
     child.unref = () => {};
     return child;
   };
-  const r = reporter({ folder, swift, log: (line) => logs.push(line), pid: 4242, now: () => clock.t, start, alive, ...(bootedAt === undefined ? {} : { bootedAt }), timer: { every: (fn) => (ticks.push(fn), ticks.length), cancel: (h) => cancelled.push(h) } });
+  const r = reporter({ folder, swift, bin, log: (line) => logs.push(line), pid: 4242, now: () => clock.t, start, alive, ...(bootedAt === undefined ? {} : { bootedAt }), timer: { every: (fn) => (ticks.push(fn), ticks.length), cancel: (h) => cancelled.push(h) } });
   const file = () => JSON.parse(readFileSync(join(folder, "4242.json"), "utf8"));
   return { dir, folder, clock, ticks, cancelled, started, logs, r, file, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
@@ -453,6 +463,26 @@ describe("the panel", () => {
     assert.deepEqual(t.started, [{ cmd: "/usr/bin/swift", args: [PANEL, t.folder], options: { detached: true, stdio: "ignore" } }]);
     t.done();
   });
+  it("is the app's own panel, brimm-progress beside node, when it is there, with the folder its one argument, swift or no swift", () => {
+    const bin = helperFolder("brimm-progress");
+    for (const swift of ["", "/usr/bin/swift"]) {
+      const t = setup({ swift, bin });
+      t.r.begin("a.mov");
+      assert.deepEqual(t.started, [{ cmd: join(bin, "brimm-progress"), args: [t.folder], options: { detached: true, stdio: "ignore" } }]);
+      t.done();
+    }
+  });
+  it("says an app's panel that cannot be started once in the log, as it says swift's, and never tries swift after it", () => {
+    const bin = helperFolder("brimm-progress");
+    const tried = [];
+    const logs = [];
+    const r = reporter({ folder: join(bin, "progress"), swift: "/usr/bin/swift", bin, log: (l) => logs.push(l), now: () => 0,
+      start: (cmd) => { tried.push(cmd); throw Object.assign(new Error("spawn EACCES"), { code: "EACCES" }); } });
+    r.begin("a.mov");
+    r.begin("b.mov");
+    assert.deepEqual([...new Set(tried)], [join(bin, "brimm-progress")]);
+    assert.deepEqual(logs, ["The progress panel could not be shown (EACCES). The work goes on without it."]);
+  });
   it("is not started again while one is showing, by the number of its process in panel.pid", () => {
     const t = setup({ swift: "/usr/bin/swift", alive: (pid) => pid === 77 });
     mkdirSync(t.folder, { recursive: true });
@@ -472,7 +502,7 @@ describe("the panel", () => {
     assert.deepEqual([none.started, none.logs], [[], ["No progress panel is shown: swift, which draws it, is not installed."]]);
     none.done();
     const t = setup({ swift: "/usr/bin/swift" });
-    const r = reporter({ folder: t.folder, swift: "/usr/bin/swift", log: (line) => t.logs.push(line), now: () => 0, start: () => { throw Object.assign(new Error("spawn EAGAIN"), { code: "EAGAIN" }); } });
+    const r = reporter({ folder: t.folder, swift: "/usr/bin/swift", bin: NO_BIN, log: (line) => t.logs.push(line), now: () => 0, start: () => { throw Object.assign(new Error("spawn EAGAIN"), { code: "EAGAIN" }); } });
     r.begin("a.mov");
     r.begin("b.mov");
     assert.deepEqual(t.logs, ["The progress panel could not be shown (EAGAIN). The work goes on without it."]);
@@ -482,7 +512,7 @@ describe("the panel", () => {
 
 describe("progress.swift, the panel itself", () => {
   const cannot = process.platform !== "darwin" ? "the panel is drawn with AppKit, which is only on a Mac"
-    : spawnSync("swift", ["--version"]).status !== 0 ? "swift is not installed, so the panel cannot be run" : false;
+    : !hasXcodeTools() ? "swift is not installed, so the panel cannot be run" : false;
   it("shows each run whose process is still going, oldest first, and nothing of a run that has gone or a file it cannot read", { skip: cannot }, () => {
     const dir = mkdtempSync(join(tmpdir(), "brimm-panel-"));
     const gone = spawnSync("/usr/bin/true").pid;

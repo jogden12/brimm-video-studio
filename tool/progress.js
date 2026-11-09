@@ -8,13 +8,13 @@ import { spawn } from "node:child_process";
 import { closeSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { uptime } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { isRunning } from "./run.js";
+import { helperCommand, helperSource } from "./helpers.js";
 
 /** The folder the runs' files are in: in Application Support, on this Mac's own disk. */
 export const progressFolder = (home) => join(home, "Library", "Application Support", "BRIMM Video", "progress");
-/** The panel, which swift runs. */
-export const PANEL = fileURLToPath(new URL("./progress.swift", import.meta.url));
+/** The panel's source, which swift runs when the app's compiled panel is not there. */
+export const PANEL = helperSource("progress");
 /** The file in the folder that holds the number of the panel's process while one is showing. */
 export const PANEL_PID = "panel.pid";
 /** The file in the folder that holds what the runs on this Mac have measured: for each step, the seconds it took for each
@@ -113,8 +113,9 @@ function tail(file, bytes) {
 /** A reporter that says nothing: what a run is given when nobody watches it, as in the tests. */
 export const noProgress = { begin() {}, length() {}, steps() {}, step() {}, fraction() {}, encoding: () => ({ args: [], stop() {} }), end() {} };
 
-/** The reporter for the runs of one process. `folder` is where its file goes. `swift` is the program that runs the panel, ""
-    when there is none. `log` is the run's log. The rest are for a test to give: the process's number, the clock in
+/** The reporter for the runs of one process. `folder` is where its file goes. `swift` is the program that runs the panel's source, ""
+    when there is none, and is used only when the compiled panel, brimm-progress, is not in `bin`: the folder of node, which is the
+    default and is given only by a test. With neither, no panel is shown. `log` is the run's log. The rest are for a test to give: the process's number, the clock in
     milliseconds, how a program is started, how a process is known to be running, when this Mac last started (a process's
     number from before then may now belong to another program), and the timer that reads ffmpeg's progress.
     Gives back:
@@ -133,7 +134,7 @@ export const noProgress = { begin() {}, length() {}, steps() {}, step() {}, frac
       a finish does once its hand-off is written and only the late check is left: until the next begin, every call after the
       end does nothing, so that the bar does not come back.
     No call ever throws. */
-export function reporter({ folder, swift = "", log = () => {}, pid = process.pid, now = () => Date.now(), start = spawn, alive = isRunning, bootedAt = Date.now() - uptime() * 1000, timer = { every: setInterval, cancel: clearInterval } }) {
+export function reporter({ folder, swift = "", bin, log = () => {}, pid = process.pid, now = () => Date.now(), start = spawn, alive = isRunning, bootedAt = Date.now() - uptime() * 1000, timer = { every: setInterval, cancel: clearInterval } }) {
   const file = join(folder, `${pid}.json`);
   const ffmpegFile = join(folder, `${pid}.ffmpeg.txt`);
   const said = new Set();
@@ -204,7 +205,8 @@ export function reporter({ folder, swift = "", log = () => {}, pid = process.pid
 
   /** Start the panel, unless one is showing. It is started on its own, and never waited for. */
   const showPanel = () => {
-    if (!swift) return once("swift", "No progress panel is shown: swift, which draws it, is not installed.");
+    const panel = helperCommand("progress", { swift, bin });
+    if (!panel) return once("swift", "No progress panel is shown: swift, which draws it, is not installed.");
     try {
       const held = Number(readFileSync(join(folder, PANEL_PID), "utf8")) || 0;
       if (held && alive(held) && sinceBoot(join(folder, PANEL_PID))) return once("showing", `A progress panel is showing already (process ${held}), and this run's bar goes into it.`);
@@ -213,7 +215,7 @@ export function reporter({ folder, swift = "", log = () => {}, pid = process.pid
     }
     const failed = (e) => once("panel", `The progress panel could not be shown (${e.code || e.message}). The work goes on without it.`);
     try {
-      const child = start(swift, [PANEL, folder], { detached: true, stdio: "ignore" });
+      const child = start(panel.program, [...panel.args, folder], { detached: true, stdio: "ignore" });
       child.on("error", failed);
       child.unref();
     } catch (e) {
