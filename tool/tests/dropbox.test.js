@@ -62,6 +62,8 @@ function arriving(looks) {
   };
 }
 
+const NO_BIN = "/no/such/folder";
+
 describe("a file put into Dropbox by the rule", () => {
   it("is cloned in under its final name, and its work copy is kept for the late check", () => {
     const t = setup();
@@ -469,12 +471,12 @@ describe("textWriter's onCopy, and sameBytes (L5)", () => {
       calls.push(args);
       return text;
     };
-    assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", exec: giving('{"uploaded": true}\n') }), true);
-    assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", exec: giving('{"uploaded": false}') }), false);
-    assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", exec: giving('{"uploaded": null}') }), null);
+    assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", bin: NO_BIN, exec: giving('{"uploaded": true}\n') }), true);
+    assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", bin: NO_BIN, exec: giving('{"uploaded": false}') }), false);
+    assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", bin: NO_BIN, exec: giving('{"uploaded": null}') }), null);
     assert.deepEqual(calls[0], ["SWIFT", [UPLOADED, "/x/f.mov"], { encoding: "utf8", timeout: UPLOADED_TIMEOUT_MS, stdio: ["ignore", "pipe", "ignore"] }]);
     assert.equal(UPLOADED_TIMEOUT_MS, 20 * 1000);
-    const got = uploadedOf("/x/f.mov", { swift: "SWIFT", exec: giving('{"uploaded": true}') });
+    const got = uploadedOf("/x/f.mov", { swift: "SWIFT", bin: NO_BIN, exec: giving('{"uploaded": true}') });
     assert.equal(typeof got.then, "undefined");
   });
 
@@ -488,19 +490,19 @@ describe("textWriter's onCopy, and sameBytes (L5)", () => {
     const boom = () => {
       throw new Error("t");
     };
-    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": true}\n') }), true);
-    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": false, "error": "NSCocoaErrorDomain 256"}') }), false);
-    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving("garbage") }), null);
-    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: boom }), null);
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", bin: NO_BIN, exec: giving('{"onlineOnly": true}\n') }), true);
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", bin: NO_BIN, exec: giving('{"onlineOnly": false, "error": "NSCocoaErrorDomain 256"}') }), false);
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", bin: NO_BIN, exec: giving("garbage") }), null);
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "SWIFT", bin: NO_BIN, exec: boom }), null);
     assert.deepEqual(calls[0], ["SWIFT", [ONLINE_ONLY, "/x/f.mov"], { encoding: "utf8", timeout: ONLINE_ONLY_TIMEOUT_MS, stdio: ["ignore", "pipe", "ignore"] }]);
     assert.equal(ONLINE_ONLY_TIMEOUT_MS, 20 * 1000);
-    assert.equal(typeof makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": true}') }).then, "undefined");
+    assert.equal(typeof makeOnlineOnly("/x/f.mov", { swift: "SWIFT", bin: NO_BIN, exec: giving('{"onlineOnly": true}') }).then, "undefined");
     const said = [];
-    makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": false, "error": "NSCocoaErrorDomain 256"}'), said: (m) => said.push(m) });
-    makeOnlineOnly("/x/f.mov", { swift: "SWIFT", exec: giving('{"onlineOnly": true}'), said: (m) => said.push(m) });
+    makeOnlineOnly("/x/f.mov", { swift: "SWIFT", bin: NO_BIN, exec: giving('{"onlineOnly": false, "error": "NSCocoaErrorDomain 256"}'), said: (m) => said.push(m) });
+    makeOnlineOnly("/x/f.mov", { swift: "SWIFT", bin: NO_BIN, exec: giving('{"onlineOnly": true}'), said: (m) => said.push(m) });
     assert.deepEqual(said, ["NSCocoaErrorDomain 256"]);
     const before = calls.length;
-    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "", exec: giving('{"onlineOnly": true}') }), null);
+    assert.equal(makeOnlineOnly("/x/f.mov", { swift: "", bin: NO_BIN, exec: giving('{"onlineOnly": true}') }), null);
     assert.equal(calls.length, before);
   });
 
@@ -511,11 +513,11 @@ describe("textWriter's onCopy, and sameBytes (L5)", () => {
     };
     const giving = (text) => () => text;
     for (const exec of [throwing(Object.assign(new Error("t"), { code: "ETIMEDOUT" })), throwing(Object.assign(new Error("end"), { status: 1 })), giving("yes"), giving("{}")]) {
-      assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", exec }), null);
+      assert.equal(uploadedOf("/x/f.mov", { swift: "SWIFT", bin: NO_BIN, exec }), null);
     }
     let called = 0;
-    assert.equal(uploadedOf("/x/f.mov", { swift: "", exec: () => { called += 1; return '{"uploaded": true}'; } }), null);
-    assert.equal(uploadedOf("/x/f.mov", { exec: () => { called += 1; return '{"uploaded": true}'; } }), null);
+    assert.equal(uploadedOf("/x/f.mov", { swift: "", bin: NO_BIN, exec: () => { called += 1; return '{"uploaded": true}'; } }), null);
+    assert.equal(uploadedOf("/x/f.mov", { bin: NO_BIN, exec: () => { called += 1; return '{"uploaded": true}'; } }), null);
     assert.equal(called, 0);
   });
 
@@ -524,5 +526,19 @@ describe("textWriter's onCopy, and sameBytes (L5)", () => {
     assert.ok(UPLOADED.endsWith("/tool/uploaded.swift"));
     assert.equal(existsSync(UPLOADED), true);
     assert.match(readFileSync(UPLOADED, "utf8"), /ubiquitousItemIsUploadedKey/);
+  });
+
+  it("U4: asks brimm-uploaded and brimm-online-only beside node when they are there, with the file their one argument, and needs no swift", async () => {
+    const { uploadedOf, makeOnlineOnly, UPLOADED_TIMEOUT_MS } = await import("../dropbox.js");
+    const bin = mkdtempSync(join(tmpdir(), "brimm-bin-"));
+    for (const name of ["brimm-uploaded", "brimm-online-only"]) writeFileSync(join(bin, name), "");
+    const calls = [];
+    const giving = (text) => (...args) => (calls.push(args), text);
+    const file = "/Users/sallie/Dropbox/BRIMM Video/Episodes/2026-11-09 Sallie's talk (Mac Studio)/Original files/talk.mov";
+    assert.equal(uploadedOf(file, { swift: "", bin, exec: giving('{"uploaded": true}') }), true);
+    assert.equal(makeOnlineOnly(file, { swift: "/usr/bin/swift", bin, exec: giving('{"onlineOnly": true}') }), true);
+    assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [[join(bin, "brimm-uploaded"), [file]], [join(bin, "brimm-online-only"), [file]]]);
+    assert.equal(calls[0][2].timeout, UPLOADED_TIMEOUT_MS);
+    rmSync(bin, { recursive: true, force: true });
   });
 });

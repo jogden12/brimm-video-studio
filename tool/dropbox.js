@@ -12,7 +12,7 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { helperCommand, helperSource } from "./helpers.js";
 import { lastLine } from "./run.js";
 
 /** How long after the last copy into Dropbox the late check is made: 15 minutes. On 2026-10-14 Dropbox undid two renames
@@ -266,17 +266,19 @@ export function sameBytes(a, b) {
   return Boolean(sa && sb) && sa.size === sb.size && startsAlike(a, b, sa.size);
 }
 
-/** The helper that asks macOS whether Dropbox reports a file uploaded (ubiquitousItemIsUploadedKey): uploaded.swift, beside the tool. */
-export const UPLOADED = fileURLToPath(new URL("./uploaded.swift", import.meta.url));
-/** How long the helper may take: swift compiles it each time. */
+/** The source of the helper that asks macOS whether Dropbox reports a file uploaded (ubiquitousItemIsUploadedKey): uploaded.swift, beside the tool. Compiled, it is
+    brimm-uploaded beside node. */
+export const UPLOADED = helperSource("uploaded");
+/** How long the helper may take: swift compiles it each time, when there is no compiled helper. */
 export const UPLOADED_TIMEOUT_MS = 20 * 1000;
 
-/** Whether Dropbox reports the file at `path` uploaded: true or false, or null when that cannot be told (no swift, a file outside Dropbox, a timeout, a failure, an
+/** Whether Dropbox reports the file at `path` uploaded: true or false, or null when that cannot be told (no helper: neither brimm-uploaded beside node nor swift, a file outside Dropbox, a timeout, a failure, an
     answer that is not the helper's JSON). Synchronous: it never gives a promise. */
-export function uploadedOf(path, { swift = "", exec = execFileSync, timeoutMs = UPLOADED_TIMEOUT_MS } = {}) {
-  if (!swift) return null;
+export function uploadedOf(path, { swift = "", bin, exec = execFileSync, timeoutMs = UPLOADED_TIMEOUT_MS } = {}) {
+  const helper = helperCommand("uploaded", { swift, bin });
+  if (!helper) return null;
   try {
-    const out = exec(swift, [UPLOADED, path], { encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"] });
+    const out = exec(helper.program, [...helper.args, path], { encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"] });
     const said = JSON.parse(String(out).trim());
     return said && (said.uploaded === true || said.uploaded === false) ? said.uploaded : null;
   } catch (e) {
@@ -284,17 +286,19 @@ export function uploadedOf(path, { swift = "", exec = execFileSync, timeoutMs = 
   }
 }
 
-/** The helper that asks Dropbox to make a file online-only (evictUbiquitousItem): online-only.swift, beside the tool. */
-export const ONLINE_ONLY = fileURLToPath(new URL("./online-only.swift", import.meta.url));
-/** How long the helper may take: swift compiles it each time. */
+/** The source of the helper that asks Dropbox to make a file online-only (evictUbiquitousItem): online-only.swift, beside the tool. Compiled, it is
+    brimm-online-only beside node. */
+export const ONLINE_ONLY = helperSource("online-only");
+/** How long the helper may take: swift compiles it each time, when there is no compiled helper. */
 export const ONLINE_ONLY_TIMEOUT_MS = 20 * 1000;
 
-/** Asks Dropbox to make the file at `path` online-only: true or false from the helper's document, or null when that cannot be told (no swift, a timeout, a failure, an
+/** Asks Dropbox to make the file at `path` online-only: true or false from the helper's document, or null when that cannot be told (no helper: neither brimm-online-only beside node nor swift, a timeout, a failure, an
     answer that is not the helper's JSON). On false, `said` is given the helper's error text. Synchronous: it never gives a promise. */
-export function makeOnlineOnly(path, { swift = "", exec = execFileSync, timeoutMs = ONLINE_ONLY_TIMEOUT_MS, said = () => {} } = {}) {
-  if (!swift) return null;
+export function makeOnlineOnly(path, { swift = "", bin, exec = execFileSync, timeoutMs = ONLINE_ONLY_TIMEOUT_MS, said = () => {} } = {}) {
+  const helper = helperCommand("online-only", { swift, bin });
+  if (!helper) return null;
   try {
-    const out = exec(swift, [ONLINE_ONLY, path], { encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"] });
+    const out = exec(helper.program, [...helper.args, path], { encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"] });
     const doc = JSON.parse(String(out).trim());
     if (!doc || (doc.onlineOnly !== true && doc.onlineOnly !== false)) return null;
     if (doc.onlineOnly === false && typeof doc.error === "string") said(doc.error);

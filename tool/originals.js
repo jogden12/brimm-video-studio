@@ -343,7 +343,7 @@ export function checkOriginal(p, deps) {
     const stat = statSync(e.to, { throwIfNoEntry: false });
     if (!stat || stat.size !== e.bytes) return putBack(!stat ? "it is not there" : `it is ${stat.size} bytes there, not ${e.bytes}`);
     // 6 and 7. The flag is asked next: a copy Dropbox has not uploaded yet costs no read of the recording. Table J's byte compare comes once it says uploaded.
-    const asked = deps.uploaded || ((path) => uploadedOf(path, { swift: (deps.tools && deps.tools.swift) || "" }));
+    const asked = deps.uploaded || ((path) => uploadedOf(path, { swift: (deps.tools && deps.tools.swift) || "", bin: deps.tools && deps.tools.bin }));
     if (asked(e.to) !== true) {
       writePending(home, { ...base(p), nextLook: clock() + UPLOAD_LOOK_MS, lookUntil: Number.isFinite(p.lookUntil) ? p.lookUntil : clock() + WAIT_LOOK_FOR_MS });
       once(`${shown}: Dropbox has not uploaded its copy in Original files yet, so the recording stays on this Mac. It is looked at again later.`);
@@ -398,7 +398,7 @@ export function checkOriginal(p, deps) {
     let made = null;
     let why = "no answer";
     try {
-      made = (deps.onlineOnly || ((path, said) => makeOnlineOnly(path, { swift: (deps.tools && deps.tools.swift) || "", said })))(e.to, (m) => { if (m) why = String(m); });
+      made = (deps.onlineOnly || ((path, said) => makeOnlineOnly(path, { swift: (deps.tools && deps.tools.swift) || "", bin: deps.tools && deps.tools.bin, said })))(e.to, (m) => { if (m) why = String(m); });
     } catch (err) {
       why = (err && err.message) || why;
     }
