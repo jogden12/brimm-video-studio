@@ -1,10 +1,10 @@
 // The recordings moved into Original files after the hand-off (Phase 3, L6; design D6). A video kept on this Mac, handed off, owes each recording she
 // dropped for it a copy in its episode's Original files/ in Dropbox; the Mac's copy is deleted only once Dropbox's check of that copy has passed and
-// Dropbox says it is uploaded (a stand-in gives that flag: no test runs swift). A session's recording never moves. Nothing here runs a real program,
+// Dropbox says it is uploaded (a stand-in gives that flag, or, in O12, two stand-in helpers, short shell scripts in the test's own folder. No test runs swift). A session's recording never moves. Nothing here runs a real program,
 // touches Dropbox or asks launchctl: each test has a root and a home of its own, episodes.js's clone and clock, and a kick stand-in.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync as renameSyncSafe, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync as renameSyncSafe, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { acceptRev, layoutOf, newEpisode, newPlannedEpisode, readEpisode, recordFile, recordText } from "../episode.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
@@ -763,6 +763,27 @@ describe("L6: the check", () => {
     const p = readPendingAt(t.home, `original/${ID}.json`);
     assert.deepEqual([p.nextLook, Number.isFinite(p.lookUntil)], [t.now() + WAIT_LOOK_MS, true]);
     assert.equal(existsSync(join(found.video, FILE)), true);
+    t.done();
+  });
+
+  it("O12: with no swift, the flag and the request to make the copy online-only are asked of the helpers beside node (tools.bin)", () => {
+    const t = world();
+    const found = local(t);
+    moveIt(t, found);
+    t.advance(LATE_CHECK_MS);
+    const bin = join(t.dir, "bin");
+    const asked = join(t.dir, "asked.txt");
+    mkdirSync(bin, { recursive: true });
+    const standIn = (name, said) => {
+      writeFileSync(join(bin, name), `#!/bin/sh\nprintf '%s\\n' "$1" >> '${asked}'\nprintf '%s' '${said}'\n`);
+      chmodSync(join(bin, name), 0o755);
+    };
+    standIn("brimm-uploaded", '{"uploaded": true}');
+    standIn("brimm-online-only", '{"onlineOnly": true}');
+    look(t, depsOf(t, { uploaded: undefined, onlineOnly: undefined, tools: { swift: "", bin } }));
+    assert.equal(existsSync(join(found.video, FILE)), false);
+    assert.deepEqual(readFileSync(asked, "utf8").trim().split("\n"), [originalOf(found), originalOf(found)]);
+    assert.ok(t.logs.some((l) => l.endsWith("its recording in Original files is made online-only.")), t.logs.join("\n"));
     t.done();
   });
 });
