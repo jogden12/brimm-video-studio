@@ -5,7 +5,8 @@
 import { dirname } from "node:path";
 export const CHECKOUT = "/Users/sallie/Claude Code/BRIMM video";
 export const NODE = "/opt/homebrew/bin/node";
-export const EDIT = `${NODE} "${CHECKOUT}/tool/edit.js"`;
+// The skill's spelling: node in double quotes, then edit.js in double quotes.
+export const EDIT = `"${NODE}" "${CHECKOUT}/tool/edit.js"`;
 /** Commands the guard lets through, each with the words edit.js must be given, in zsh and in bash. */
 export const ALLOWED = [
   [`${EDIT} episodes`, ["episodes"]],

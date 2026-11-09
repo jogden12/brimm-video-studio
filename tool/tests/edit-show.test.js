@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { SHOWN_MARKER, editMain } from "../edit.js";
 import { episodeWork, workFolder } from "../settings.js";
 import { setup, episodeFor, reread, FOLDER } from "./episodes.js";
+import { APP_NODE } from "./guard-cases.js";
 
 const notAMac = process.platform !== "darwin" ? "managed preferences are a Mac's, and plutil, which reads them, is a Mac's" : false;
 
@@ -279,6 +280,20 @@ describe("behind", () => {
     // It needs no network: when git cannot fetch, the folder is still looked at (behind-studio-1).
     const offline = await on({ ...t.ctx.deps, run: git({ code: 128, stderr: "fatal: Could not read from remote repository." }).run }, "behind");
     assert.deepEqual([offline.code, offline.text], [0, `Could not check for a newer BRIMM Video Studio. Is this Mac offline?\n${stale}`]);
+    t.done();
+  });
+  it("finds her folder up to date when this checkout wrote it with a node whose path has spaces, and out of date, not changed, when it was written before node was quoted", async () => {
+    const t = setup();
+    const newest = () => git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" }).run;
+    writeStudio(t.home, { checkout: "/checkout", node: APP_NODE });
+    assert.equal((await on({ ...t.ctx.deps, run: newest() }, "behind")).text, "This Mac has the newest BRIMM Video Studio.");
+    const folder = writeStudio(t.home, { checkout: "/checkout", node: "/opt/homebrew/bin/node" });
+    const skill = join(folder, ".claude", "skills", "brimm-edit", "SKILL.md");
+    const before = readFileSync(skill, "utf8");
+    assert.ok(before.includes('"/opt/homebrew/bin/node" "/checkout/tool/edit.js"'));
+    writeFileSync(skill, before.replace('"/opt/homebrew/bin/node" "/checkout/tool/edit.js"', '/opt/homebrew/bin/node "/checkout/tool/edit.js"'));
+    const r = await on({ ...t.ctx.deps, run: newest() }, "behind");
+    assert.deepEqual([r.code, r.text], [0, `This Mac has the newest BRIMM Video Studio.\n${stale}`]);
     t.done();
   });
   it("asks git nothing where this Mac's checkout has no .git of its own, and still says what needs no network", async () => {

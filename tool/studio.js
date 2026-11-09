@@ -68,7 +68,7 @@ function settingsOf({ checkout, node, folder }) {
   return {
     permissions: {
       defaultMode: "default",
-      allow: [`Bash(${node} "${checkout}/tool/edit.js" *)`],
+      allow: [`Bash("${node}" "${checkout}/tool/edit.js" *)`],
       deny: ["Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "mcp__*", "Monitor", "RemoteTrigger", "SendMessage"],
       disableBypassPermissionsMode: "disable",
       disableAutoMode: "disable"
@@ -123,7 +123,7 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
   return {
     permissions: {
       defaultMode: "default",
-      allow: [`Bash(${node} "${checkout}/tool/edit.js" *)`, ...(facts.web === "open" ? ["WebFetch", "WebSearch"] : [])],
+      allow: [`Bash("${node}" "${checkout}/tool/edit.js" *)`, ...(facts.web === "open" ? ["WebFetch", "WebSearch"] : [])],
       deny: [
         ...neverDenyRules(facts.allow),
         ...gatedReadRules(facts),
@@ -137,7 +137,7 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
       enabled: true,
       failIfUnavailable: true,
       allowUnsandboxedCommands: false,
-      excludedCommands: [`${node} "${checkout}/tool/edit.js" *`],
+      excludedCommands: [`"${node}" "${checkout}/tool/edit.js" *`],
       network: { deniedDomains: ["*"], httpProxyPort: facts.port, socksProxyPort: facts.port },
       filesystem: {
         allowWrite: [W],
@@ -342,9 +342,24 @@ export const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     runs. The guard is given the command as written, before the rewrite. */
 export const WORD = String.raw`(?:[A-Za-z0-9_.,:+@%/-][A-Za-z0-9_.,:+=@%/-]*|"[^"$` + "`" + String.raw`\\\r\n]*"|'[^'\r\n]*')`;
 
+/** The start of an edit.js command, as a regular expression's source with no anchors: the node, then the checkout's edit.js in
+    double quotes. Three spellings of the node: this Mac's node in double quotes (her skill's, and the only one when `quotedOnly`,
+    which is the open lock's one spelling), the word node, and the path bare. The bare path is kept for a Mac whose folder still
+    has today's skill (between a git pull and the folder's rewrite), and only for a plain path, one of a plain word's letters
+    starting with /: such a word holds nothing the shells split or expand, while a path with a space bare would run only its first
+    part. Null when the checkout or the node cannot go inside double quotes (quotable): then no command is let through, node the
+    word included. */
+export function editStart({ checkout, node }, { quotedOnly = false } = {}) {
+  if (!quotable(checkout) || !quotable(node)) return null;
+  const quoted = `"${literally(node)}"`;
+  const starts = quotedOnly ? [quoted] : ["node", quoted, ...(/^\/[A-Za-z0-9_.,:+=@%/-]*$/.test(node) ? [literally(node)] : [])];
+  return `(?:${starts.join("|")}) "${literally(checkout)}/tool/edit\\.js"`;
+}
+
 /** What the guard answers to a tool call Claude Code is about to make, `input` as the PreToolUse hook is given it:
     { decision, reason }. "allow" for brimm-video's edit.js run with node (the word node, or the node the installer found)
-    from the checkout, followed only by words one space apart (WORD), and for her skill; "pass" for a tool left to Claude
+    from the checkout (editStart names the three spellings of the start), followed only by words one space apart (WORD), and for
+    her skill; "pass" for a tool left to Claude
     Code's own rules, which gives no answer, and for a read inside her folder, `folder`; and "deny" for everything else, any
     other read, any other skill and any tool added later among them. */
 export function guardDecision(input, { checkout, node, folder = "", tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp", uid = process.getuid() }) {
@@ -354,8 +369,8 @@ export function guardDecision(input, { checkout, node, folder = "", tmp = proces
   if (name === "Skill" && input.tool_input && input.tool_input.skill === SKILL) return { decision: "allow", reason: "her skill" };
   if (name === "Bash") {
     const command = input.tool_input && input.tool_input.command;
-    const edit = new RegExp(`^(?:node|${literally(node)}) "${literally(checkout)}/tool/edit\\.js"(?: ${WORD})*$`);
-    if (typeof command === "string" && edit.test(command)) return { decision: "allow", reason: "BRIMM Video Studio's own command" };
+    const start = editStart({ checkout, node });
+    if (start && typeof command === "string" && new RegExp(`^${start}(?: ${WORD})*$`).test(command)) return { decision: "allow", reason: "BRIMM Video Studio's own command" };
   }
   return { decision: "deny", reason: REFUSED };
 }

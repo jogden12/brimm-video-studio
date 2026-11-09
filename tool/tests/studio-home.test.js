@@ -180,7 +180,7 @@ describe("Claude can never set BRIMM_VIDEO_HOME in her folder", () => {
     `${edit} episodes; BRIMM_VIDEO_HOME=/tmp/x`
   ];
   it("today's guard refuses each form, with edit.js or without", () => {
-    const edit = `${NODE} "${CHECKOUT}/tool/edit.js"`;
+    const edit = `"${NODE}" "${CHECKOUT}/tool/edit.js"`;
     for (const command of [...forms(edit), "BRIMM_VIDEO_HOME=/tmp/x date", "export BRIMM_VIDEO_HOME=/tmp/x", "env BRIMM_VIDEO_HOME=/tmp/x"]) {
       assert.equal(guardDecision({ tool_name: "Bash", tool_input: { command } }, { checkout: CHECKOUT, node: NODE }).decision, "deny", command);
     }
@@ -190,7 +190,7 @@ describe("Claude can never set BRIMM_VIDEO_HOME in her folder", () => {
     try {
       const ctx = { checkout: w.checkout, node: w.node, folder: w.folder, home: w.home, uid: w.uid, tmp: w.tmp, index: gatedIndex(gatedPlaces(w.facts), []), allow: w.facts.allow, web: "held", resolve: async () => ["93.184.215.14"], loosened: false, held: false };
       const bash = (command) => openDecision({ session_id: SESSION, transcript_path: join(w.home, ".claude", "projects", "x", `${SESSION}.jsonl`), cwd: w.folder, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command, description: "x" } }, ctx);
-      const edit = `${w.node} "${w.checkout}/tool/edit.js"`;
+      const edit = `"${w.node}" "${w.checkout}/tool/edit.js"`;
       const commands = [
         ...forms(edit),
         `BRIMM_VIDEO_HOME=/tmp/x ${w.node} "${w.checkout}/tool/settings.js" show`,

@@ -17,7 +17,7 @@ import { LOCAL_ADDRESS, NUMERIC_ADDRESS } from "../fetchable.js";
 import { claudeDirName, gatedIndex, gatedPlaces, realOf } from "../places.js";
 import { gatedReadRules, guardDecision, openSettingsOf } from "../studio.js";
 import { APP_ARGS, MINIMUM, SESSION, appCopy, chatChain, openDeps, openWorld, psText, transcript } from "./open-world.js";
-import { ALLOWED, CHECKOUT, EDIT, NODE, NODE_CASES, UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, spellingsOf, APP_NODE, openStartsOf, tailRefusals } from "./guard-cases.js";
+import { ALLOWED, CHECKOUT, EDIT, EDIT_BARE, NODE, NODE_CASES, UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, spellingsOf, APP_NODE, openStartsOf, tailRefusals } from "./guard-cases.js";
 
 const CONNECTOR = "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__";
 
@@ -377,10 +377,11 @@ describe("the open guard, III: Bash", () => {
   const bash = (command, more = {}, context = ctx) => openDecision({ session_id: SESSION, transcript_path: join(w.home, ".claude", "projects", "x", `${SESSION}.jsonl`), cwd: w.folder, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command, description: "x", ...more } }, context);
   const ALONE = { decision: "deny", reason: RUN_ALONE };
 
-  it("allows edit.js in its one spelling, and every form it allows is one the excluded entry takes", async () => {
+  it("allows edit.js in its one spelling, and every form it allows starts as the excluded entry does", async () => {
+    const excluded = openSettingsOf({ checkout: CHECKOUT, node: NODE, folder: w.folder, facts: w.facts }).sandbox.excludedCommands[0];
     for (const [command] of ALLOWED.filter(([c]) => !c.startsWith("node "))) {
       assert.equal((await bash(command)).decision, "allow", command);
-      assert.ok(command.startsWith(`${NODE} "${CHECKOUT}/tool/edit.js" `), command);
+      assert.ok(command.startsWith(excluded.slice(0, -1)), command);
     }
     assert.equal(RUN_ALONE, "Run BRIMM Video Studio's commands on their own, exactly as her skill says, and not in the background.");
   });
@@ -431,8 +432,8 @@ describe("the open guard, III: Bash", () => {
     for (const node of UNQUOTABLE_NODES) for (const command of spellingsOf(node)) assert.deepEqual(await bash(command, {}, { ...ctx, node }), ALONE, JSON.stringify(command));
     for (const checkout of UNQUOTABLE_CHECKOUTS) for (const command of spellingsOf(NODE, checkout)) assert.deepEqual(await bash(command, {}, { ...ctx, checkout }), ALONE, JSON.stringify(command));
   });
-  it("refuses edit.js with bare node, &&, ;, |, $(…), an environment prefix, cd … &&, another node or another path", async () => {
-    for (const command of [`node "${CHECKOUT}/tool/edit.js" episodes`, `${EDIT} episodes && date`, `${EDIT} episodes; date`, `${EDIT} episodes | cat`, `${EDIT} $(date)`, `${EDIT} "$(date)"`, `A=1 ${EDIT} episodes`, `cd /tmp && ${EDIT} episodes`, `/usr/local/bin/node "${CHECKOUT}/tool/edit.js" episodes`, `${NODE} "/tmp/tool/edit.js" episodes`, `${NODE} '${CHECKOUT}/tool/edit.js' episodes`, `${EDIT}  episodes`, `${EDIT} episodes\ndate`, ` ${EDIT} episodes`]) {
+  it("refuses edit.js with the bare node path or the word node, &&, ;, |, $(…), an environment prefix, cd … &&, another node or another path", async () => {
+    for (const command of [`node "${CHECKOUT}/tool/edit.js" episodes`, `${EDIT_BARE} episodes`, `${EDIT} episodes && date`, `${EDIT} episodes; date`, `${EDIT} episodes | cat`, `${EDIT} $(date)`, `${EDIT} "$(date)"`, `A=1 ${EDIT} episodes`, `cd /tmp && ${EDIT} episodes`, `/usr/local/bin/node "${CHECKOUT}/tool/edit.js" episodes`, `${NODE} "/tmp/tool/edit.js" episodes`, `${NODE} '${CHECKOUT}/tool/edit.js' episodes`, `${EDIT}  episodes`, `${EDIT} episodes\ndate`, ` ${EDIT} episodes`]) {
       assert.deepEqual(await bash(command), ALONE, command);
     }
   });
@@ -478,7 +479,7 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
     const w = openWorld();
     w.projects = join(w.home, ".claude", "projects", claudeDirName(w.folder));
     w.transcript = transcript(w.projects, [{ type: "user", uuid: "u-1", timestamp: AT }]);
-    w.edit = `${w.node} "${w.checkout}/tool/edit.js"`;
+    w.edit = `"${w.node}" "${w.checkout}/tool/edit.js"`;
     w.words = join(w.home, "Library", "Application Support", "BRIMM Video Words");
     return w;
   }
