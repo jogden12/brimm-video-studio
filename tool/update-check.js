@@ -2,7 +2,7 @@
 // Application Support, and gives the line to tell. It sends a plain User-Agent and nothing else about the Mac. It never throws, and git is never run.
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { isInstalled } from "./build.js";
+import { VERSION, isInstalled } from "./build.js";
 
 export const UPDATE_TIMEOUT_MS = 3000;
 export const UPDATE_EVERY_MS = 86400000;
@@ -10,7 +10,6 @@ export const USER_AGENT = "BRIMM Video Studio";
 export const APPCAST_MAX_CHARS = 1000000;
 
 const SYSTEM_PLIST = "/System/Library/CoreServices/SystemVersion.plist";
-const VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 const DOTTED = /^\d+(\.\d+)*$/;
 
 /** Where the answer of the last read of the feed is kept. */
@@ -29,13 +28,46 @@ function attributeOf(xml, name) {
   return found ? (found[1] ?? found[2]).trim() : undefined;
 }
 
+/** `xml` without its comments, found by walking with indexOf so that the time taken follows the length of the text. A comment that is
+    never closed takes the rest of the text with it. */
+function withoutComments(xml) {
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const open = xml.indexOf("<!--", at);
+    if (open < 0) return out + xml.slice(at);
+    out += xml.slice(at, open);
+    const close = xml.indexOf("-->", open + 4);
+    if (close < 0) return out;
+    at = close + 3;
+  }
+}
+
+/** The text of each `<item …>…</item>` of `xml`, found by walking with indexOf. An `<item` with no `</item>` after it ends the walk. */
+function itemsIn(xml) {
+  const bodies = [];
+  let at = 0;
+  for (;;) {
+    const open = xml.indexOf("<item", at);
+    if (open < 0) return bodies;
+    const next = xml[open + 5];
+    if (next !== undefined && !/[\s>/]/.test(next)) {
+      at = open + 5;
+      continue;
+    }
+    const start = xml.indexOf(">", open);
+    const close = start < 0 ? -1 : xml.indexOf("</item>", start);
+    if (close < 0) return bodies;
+    bodies.push(xml.slice(start + 1, close));
+    at = close + 7;
+  }
+}
+
 /** The items of an appcast, each { build, version, channel, minimumSystemVersion }. An item without a whole build above 0 or without a
     version of the form 1.2.3 is skipped. Comments are ignored. */
 export function parseAppcast(xml) {
   const items = [];
-  const clean = String(xml).replace(/<!--[\s\S]*?-->/g, "");
-  for (const found of clean.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/g)) {
-    const body = found[1];
+  for (const body of itemsIn(withoutComments(String(xml)))) {
     const build = elementOf(body, "version") ?? attributeOf(body, "version") ?? "";
     const version = elementOf(body, "shortVersionString") ?? attributeOf(body, "shortVersionString") ?? "";
     if (!/^\d+$/.test(build) || !Number.isSafeInteger(Number(build)) || Number(build) <= 0 || !VERSION.test(version)) continue;
@@ -56,11 +88,13 @@ function atLeast(have, need) {
   return true;
 }
 
-/** The item with the highest build among those that count: its channel is "" or `channel`, and its minimum system version is met. */
+/** The item with the highest build among those that count: an item with no channel counts for every build; one with a channel counts only
+    when it is this build's `channel` and that is not "stable", since Sparkle offers a tagged item only to an app that allows its channel and
+    a stable app allows none. Its minimum system version must be met too. */
 export function newestFor(items, { channel, system }) {
   let best = null;
   for (const it of items) {
-    if (it.channel !== "" && it.channel !== channel) continue;
+    if (it.channel !== "" && (it.channel !== channel || channel === "stable")) continue;
     const min = it.minimumSystemVersion;
     if (min !== "" && DOTTED.test(min) && system !== "" && !atLeast(system, min)) continue;
     if (!best || it.build > best.build) best = it;
@@ -135,7 +169,7 @@ async function readFeed(feed, fetch, timeoutMs) {
 
 /** Whether the items hold a newer build than this Mac's: { state: "newer", version, have } or { state: "newest", have }. */
 function answerFrom(items, build, system) {
-  const usable = items.filter((it) => it && Number.isSafeInteger(it.build) && typeof it.version === "string" && typeof it.channel === "string" && typeof it.minimumSystemVersion === "string");
+  const usable = items.filter((it) => it && Number.isSafeInteger(it.build) && it.build > 0 && typeof it.version === "string" && VERSION.test(it.version) && typeof it.channel === "string" && typeof it.minimumSystemVersion === "string");
   const best = newestFor(usable, { channel: build.channel, system });
   return best && best.build > build.build ? { state: "newer", version: best.version, have: build.version } : { state: "newest", have: build.version };
 }

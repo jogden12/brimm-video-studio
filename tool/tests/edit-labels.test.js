@@ -1617,7 +1617,7 @@ describe("an error that leaves a command for a gated video (fix 2)", () => {
     writeFileSync(join(drop, VIDEO), "video");
     const logs = [];
     const deps = {
-      run: async () => ({ code: 1, stderr: "" }), tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", swift: "", claude: "" }, model: "/m", home: t.home, lockDir: join(t.dir, "locks"),
+      build: { mode: "dev" }, run: async () => ({ code: 1, stderr: "" }), tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", swift: "", claude: "" }, model: "/m", home: t.home, lockDir: join(t.dir, "locks"),
       settings: { version: 1, machine: "Mac Studio", root: t.root, checkout: "/checkout", import: "light" }, light: true, log: (line) => logs.push(line), wait: async () => {}, alive: () => false,
       // Something nobody foresaw, which names the video's file, stops the folder's work.
       keepAwake: () => {

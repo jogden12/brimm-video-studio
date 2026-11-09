@@ -676,6 +676,17 @@ describe("plan … join, a talking part that must not be joined (ruling 1)", () 
     assert.deepEqual([snapshot(t), t.started], [before, []]);
     t.done();
   });
+  it("tells an installed Mac to say \"update Studio\" for a talking part a newer BRIMM Video Studio wrote, where a checkout is told to ask Jason", async () => {
+    const t = world();
+    await planned(t);
+    const one = part(t, 1, { words: SCRIPT[0].split(" ") });
+    writeFileSync(recordFile(one.folder, 3), recordText({ ...one.record, rev: 3, version: 9 }));
+    const build = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "", broken: false };
+    const r = await on(depsOf(t, { build }), "plan", TITLE, "join");
+    assert.deepEqual([r.code, r.said], [1, [`${labelOf(1)}: That is an episode a newer BRIMM Video Studio wrote (a11111). Say "update Studio" to update this Mac.`]]);
+    assert.ok(!r.text.includes("Jason has a newer"));
+    t.done();
+  });
   it("does not stop for a b-roll or screen part in conflict: only the talking parts are joined", async () => {
     const t = world();
     await planned(t);
