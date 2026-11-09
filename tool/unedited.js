@@ -37,7 +37,7 @@ import { homeRefusal, studioHome } from "./home.js";
 import { buildOf, isInstalled } from "./build.js";
 import { bracket, noteState, postNewNodeIfDue, readAccess } from "./access.js";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { isMain } from "./is-main.js";
 import { localDay, stamp } from "./shared/text.js";
 import { dayFolder, ffmpegArgs, whisperArgs, silenceArgs, silences, dropSilent, spellNames, stampedText, captionCount, settled } from "./lib.js";
 import { runProgram, findTools, lockFile, takeLock, isRunning, lastLine, sizeOnDisk } from "./run.js";
@@ -1800,6 +1800,6 @@ export function finish(code, { exit = process.exit, out = process.stdout } = {})
   out.write("", () => exit(code));
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).then((code) => finish(code));
 }

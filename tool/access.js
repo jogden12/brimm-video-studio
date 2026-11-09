@@ -8,7 +8,7 @@
 // No note, line or banner names a video by its file. A write that fails costs only the notice.
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { isMain } from "./is-main.js";
 import { studioHome } from "./home.js";
 import { realOf } from "./places.js";
 import { isRunning } from "./run.js";
@@ -335,4 +335,4 @@ export function main(argv, { out = process.stdout, home } = {}) {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = main(process.argv.slice(2));

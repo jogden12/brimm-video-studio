@@ -62,6 +62,7 @@ import { appendFileSync, chmodSync, constants as fsConstants, copyFileSync, exis
 import { homeRefusal, studioHome } from "./home.js";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMain } from "./is-main.js";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, answerOf, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf, importingFolderOf, statusFoldersOf, downloadsFolder, needsFilesAccess } from "./settings.js";
@@ -7216,7 +7217,7 @@ export async function editMain(argv, deps = {}) {
   return handOverWords(ctx, code);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   // Inside Claude Code's sandbox nothing runs: it would fail partway through a command (sandboxed.js). The check is the open lock's:
   // a Mac whose lock in effect is strict runs edit.js as it did before the open lock was built, and never asks ps.
   const refusedHome = homeRefusal();

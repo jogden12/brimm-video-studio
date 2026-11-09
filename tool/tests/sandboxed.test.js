@@ -76,7 +76,7 @@ describe("edit.js inside Claude Code's sandbox", () => {
   });
 
   it("is checked at edit.js's entry before anything else runs", () => {
-    const entry = readFileSync(new URL("../edit.js", import.meta.url), "utf8").split("if (process.argv[1]").at(-1);
+    const entry = readFileSync(new URL("../edit.js", import.meta.url), "utf8").split("if (isMain(import.meta.url))").at(-1);
     assert.ok(entry.indexOf("sandboxedWhy(") >= 0 && entry.indexOf("sandboxedWhy(") < entry.indexOf("editMain("));
     assert.ok(entry.includes("pid: process.pid") && !entry.includes("process.ppid"));
   });
@@ -85,7 +85,7 @@ describe("edit.js inside Claude Code's sandbox", () => {
   // SANDBOX_RUNTIME set or not, and never asks ps. It is run here as a program, with a made-up home and SANDBOX_RUNTIME=1, which is
   // refused without ps being asked (above), so no test asks the real ps.
   it("does not refuse a Mac whose lock in effect is strict, and asks ps nothing, under SANDBOX_RUNTIME=1", () => {
-    const entry = readFileSync(new URL("../edit.js", import.meta.url), "utf8").split("if (process.argv[1]").at(-1);
+    const entry = readFileSync(new URL("../edit.js", import.meta.url), "utf8").split("if (isMain(import.meta.url))").at(-1);
     assert.match(entry, /effectiveLock\(/);
     assert.ok(entry.indexOf("effectiveLock(") < entry.indexOf("sandboxedWhy("));
     assert.match(entry, /\? sandboxedWhy\(/, "sandboxedWhy is called only when the lock in effect is open");
