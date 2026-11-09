@@ -59,6 +59,12 @@
 #                                    write the import (light; full is gone and refused) and the version of the hand-off (1 or 2) in this Mac's
 #                                    settings, with --drop's own rules: a setting that is not named is left as it is. With
 #                                    --machine, --rules-only also writes readings off. These three options are for --machine only
+#   ./install.sh --machine "<this Mac>" --tools "<bin>" [--app "<BRIMM Video Studio.app>"] "/path/to/The BRIMM DB/BRIMM Video"
+#                                    set this Mac up as BRIMM Video Studio does, from the app's own copy of Studio, which has a
+#                                    build.json beside tool/ and is never set up without --tools (and a git checkout never with
+#                                    it). Every program is the app's own, in <bin>: node, npm, ffmpeg, ffprobe, whisper-cli and
+#                                    Studio's compiled helpers. Homebrew is never looked for or run, and Xcode's tools are not
+#                                    needed. The background job runs node from <bin>. It takes the other options of --machine
 #   ./install.sh --machine "Sallie's laptop" --user-deny "/path/to/The BRIMM DB/BRIMM Video"
 #                                    also add to her user settings, ~/.claude/settings.json, the Read deny rules for the places
 #                                    her folder's open lock keeps from Claude, so that every Claude Code session on this Mac
@@ -160,6 +166,10 @@ switch_missing=""
 switch_local=""
 # --user-deny: her user settings are given the Read deny rules of the places her folder's open lock keeps from Claude.
 user_deny=""
+# --tools: the folder of BRIMM Video Studio's own programs, as given; --app: the app, as given (Task 4 checks it and uses it).
+# Neither goes to settings.js, so neither is in switch_options.
+tools_given=""
+app_given=""
 # Set, with --machine, when her folder gets the open lock: the settings say open and a Claude Code is named for it.
 open_lock=""
 while (( $# )); do
@@ -176,6 +186,11 @@ while (( $# )); do
     # --switch-back goes with --drop, and --switch-local picks the default drop folder: both say what to do with no value.
     --switch-back) switch_options+=("$arg") ;;
     --switch-local) switch_local="yes" ;;
+    --tools|--app)
+      if (( $# )) && [[ -n "$1" && "$1" != -* ]]; then
+        if [[ "$arg" == --tools ]]; then tools_given="$1"; else app_given="$1"; fi
+        shift
+      else switch_missing="${switch_missing:-$arg}"; fi ;;
     --machine)
       machined="yes"
       if [[ "${1-}" == -* ]]; then machine_option="$1"; else machine="${1-}"; (( $# )) && shift; fi ;;
@@ -193,6 +208,8 @@ if [[ -n "$switch_missing" ]]; then
     --handoff) say "Say which version after --handoff, as --handoff 1 or --handoff 2." ;;
     --drop-folder) say 'Say which folder after --drop-folder, as --drop-folder "<path>".' ;;
     --exports-folder) say 'Say which folder after --exports-folder, as --exports-folder "<path>".' ;;
+    --tools) say 'Say which folder after --tools, as --tools "<path>".' ;;
+    --app) say 'Say which app after --app, as --app "<path>".' ;;
   esac
   exit 2
 fi
@@ -238,12 +255,40 @@ if [[ ${#folders[@]} -eq 0 && "$mode" != "remove" && "$machined" != "yes" ]]; th
   say 'Name the folder to watch for unedited video: ./install.sh "<folder>"'
   exit 2
 fi
+# --tools and --app are for BRIMM Video Studio, which sets a Mac up with --machine from the app's own programs. In installed mode
+# (--tools) every program is looked for in that folder alone, and the background job runs the node there.
+if [[ ( -n "$tools_given" || -n "$app_given" ) && "$mode" == "remove" ]]; then
+  say "--remove stops the watching and changes no settings, so it does not take --tools or --app."
+  exit 2
+fi
+if [[ -n "$app_given" && -z "$tools_given" ]]; then
+  say "--app goes with --tools, the folder of the app's own programs: ./install.sh --machine \"<this Mac>\" --tools \"<bin>\" --app \"<BRIMM Video Studio.app>\" \"<path to BRIMM Video>\""
+  exit 2
+fi
+if [[ ( -n "$tools_given" || -n "$app_given" ) && "$machined" != "yes" ]]; then
+  say "--tools and --app are for a Mac set up with --machine, as BRIMM Video Studio sets one up: ./install.sh --machine \"<this Mac>\" --tools \"<bin>\" --app \"<BRIMM Video Studio.app>\" \"<path to BRIMM Video>\""
+  exit 2
+fi
+tools=""
+if [[ -n "$tools_given" ]]; then
+  tools="${tools_given:A}"
+  AGENT_PATH="${BRIMM_AGENT_PATH:-$tools:/usr/bin:/bin}"
+fi
+# The programs in the folder after --tools besides Studio's compiled helpers, which are the ones helpers.js names (each is brimm-<name>).
+TOOLS_PROGRAMS=(node npm ffmpeg ffprobe whisper-cli)
+helper_line="$(sed -n 's/^export const HELPERS = \[\(.*\)\];$/\1/p' "$HERE/helpers.js" 2>/dev/null || true)"
+helper_line="${helper_line//\"/}"
+TOOLS_HELPERS=("${(@)${(@s:, :)helper_line}/#/brimm-}")
+DAMAGED="This copy of BRIMM Video Studio may be damaged: download it again, then open it and choose Repair."
 
 xml() { print -rn -- "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 find_program() {
   local name dir
+  local -a dirs
+  # With --tools every program is the app's own, and the PATH and Homebrew's folders are not looked in.
+  if [[ -n "$tools" ]]; then dirs=("$tools"); else dirs=(${(s.:.)PATH} ${(s.:.)HOMEBREW_DIRS}); fi
   for name in "$@"; do
-    for dir in ${(s.:.)PATH} ${(s.:.)HOMEBREW_DIRS}; do
+    for dir in "${dirs[@]}"; do
       if [[ -x "$dir/$name" ]]; then print -r -- "$dir/$name"; return 0; fi
     done
   done
@@ -462,6 +507,33 @@ if [[ "$mode" == "remove" ]]; then
   exit 0
 fi
 
+# Which kind of Studio this is. BRIMM Video Studio's own copy has a build.json beside tool/ (a link to nowhere counts, as build.js
+# buildOf counts it) and is set up only with the app's own programs, never Homebrew's; a git checkout has none and is set up with
+# Homebrew's, and never with --tools. The two are never mixed, and each refusal comes before anything is changed.
+refuse() {
+  say "$1"
+  say ""
+  say "Nothing was changed."
+  exit 2
+}
+if [[ -e "$CHECKOUT/build.json" || -L "$CHECKOUT/build.json" ]]; then
+  [[ -n "$tools" ]] || refuse "This is BRIMM Video Studio's own copy of Studio (it has a build.json beside tool/), so it is set up only with the app's own programs, never Homebrew's. Open BRIMM Video Studio and choose Repair."
+elif [[ -n "$tools" ]]; then
+  refuse "--tools and --app are for BRIMM Video Studio's own copy of Studio, which has a build.json beside tool/. This is a git checkout, which is set up with Homebrew's programs: run this again without them."
+fi
+# The app's own programs (installed mode): the folder is there, every program and helper in it can be run, and its node is 22 or later.
+if [[ -n "$tools" ]]; then
+  [[ -d "$tools" ]] || refuse "The folder after --tools is not a folder: ${tools}. ${DAMAGED}"
+  tools_missing=()
+  for name in "${TOOLS_PROGRAMS[@]}" "${TOOLS_HELPERS[@]}"; do
+    [[ -f "$tools/$name" && -x "$tools/$name" ]] || tools_missing+=("$name")
+  done
+  (( ${#tools_missing[@]} == 0 )) || refuse "BRIMM Video Studio's own programs are not all in ${tools}. Missing: ${(j:, :)tools_missing}. ${DAMAGED}"
+  if node_old "$tools/node"; then
+    refuse "BRIMM Video Studio's own node, in ${tools}, is $("$tools/node" --version), and Studio needs 22 or later. ${DAMAGED}"
+  fi
+fi
+
 # The pin of the transcriber's model is looked at before anything is, whether or not the model is here, since a model already here is
 # checked against it too: a pin read as nothing would download whatever the address gave, and keep it.
 if [[ ! "$MODEL_URL" =~ '^https://huggingface\.co/ggerganov/whisper\.cpp/resolve/[0-9a-f]{40}/ggml-large-v3-turbo\.bin$' || ! "$MODEL_SHA256" =~ '^[0-9a-f]{64}$' ]]; then
@@ -669,7 +741,9 @@ for f in "${folders[@]}"; do
   done
 done
 
-brew="$(find_program brew || true)"
+# With --tools Homebrew is never looked for (brew stays empty), and nothing is installed with it.
+brew=""
+[[ -n "$tools" ]] || brew="$(find_program brew || true)"
 ffmpeg="$(find_program ffmpeg || true)"
 whisper="$(find_program whisper-cli whisper-cpp || true)"
 node="$(find_program node || true)"
@@ -736,7 +810,11 @@ fi
 # swift finds the speaker's face for a Reel's crop. It comes with Xcode's command line tools, and nothing here installs it.
 swift_more=""
 [[ -n "$local_drop" ]] && swift_more=" Without it Studio cannot tell when Dropbox has uploaded a recording's copy in Original files, so the recordings stay on this Mac."
-say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here, so a Reel is cropped at the centre of the picture.$swift_more To get it: xcode-select --install")"
+if [[ -n "$tools" ]]; then
+  say "  Studio's helpers, compiled:  in ${tools}: ${(j:, :)TOOLS_HELPERS}"
+else
+  say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here, so a Reel is cropped at the centre of the picture.$swift_more To get it: xcode-select --install")"
+fi
 # For one of the two Macs, what it has of what the tool needs, and what Jason does by hand when something is not here. Nothing
 # here installs Xcode's command line tools, Homebrew or Claude Code, or signs in to Claude.
 autoload -Uz is-at-least
@@ -748,11 +826,15 @@ user_deny_why=""
 # --rules-only, which asks Claude nothing.
 check_line=""
 if [[ -n "$machine" ]]; then
-  say "  Xcode's command line tools (git, swift):  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here. Jason runs: xcode-select --install")"
-  if [[ -n "$brew" ]]; then
-    say "  Homebrew:  here already"
+  if [[ -n "$tools" ]]; then
+    say "  Programs, BRIMM Video Studio's own:  in ${tools}: node $("$tools/node" --version), npm, ffmpeg, ffprobe, whisper-cli"
   else
-    say '  Homebrew:  not here. In Terminal, Sallie runs this (it asks for her password, which she types herself): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+    say "  Xcode's command line tools (git, swift):  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here. Jason runs: xcode-select --install")"
+    if [[ -n "$brew" ]]; then
+      say "  Homebrew:  here already"
+    else
+      say '  Homebrew:  not here. In Terminal, Sallie runs this (it asks for her password, which she types herself): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+    fi
   fi
   macos="$(sw_vers -productVersion 2>/dev/null || true)"
   if [[ -z "$macos" ]]; then
@@ -786,7 +868,9 @@ if [[ -n "$machine" ]]; then
     if (( ${#hdr_missing[@]} == 0 )); then
       say "  HDR video:  $hdr_whose can make an HDR video standard, which an iPhone's clip is by default: it has the videotoolbox hwaccel and the scale_vt filter that the working copy needs for it"
     else
-      say "  HDR video:  $hdr_whose cannot make an HDR video standard, which an iPhone's clip is by default, so the working copy refuses every one: it has ${(j: and :)hdr_missing}. Jason: brew upgrade ffmpeg, which builds VideoToolbox in, or the clip is recorded in standard colour"
+      hdr_fix="Jason: brew upgrade ffmpeg, which builds VideoToolbox in, or the clip is recorded in standard colour"
+      [[ -z "$tools" ]] || hdr_fix="$DAMAGED"
+      say "  HDR video:  $hdr_whose cannot make an HDR video standard, which an iPhone's clip is by default, so the working copy refuses every one: it has ${(j: and :)hdr_missing}. $hdr_fix"
     fi
   fi
   # The pinned HyperFrames command line, in a folder of its own for its version: what would be installed there, and how the download
@@ -882,7 +966,11 @@ if [[ -n "$machine" ]]; then
     say "  The Claude app's own Claude Code:  $app_newest, the newest copy the app keeps here (her folder's guard needs $GUARD_CLAUDE or later; /status in the Code tab says which copy runs)"
   fi
   [[ -z "$check_line" ]] || say "  At the end:  one real call to Claude from the background job (a launch agent of its own, $CHECK_LABEL, taken away when it answers or after 90 seconds), to prove that the sign-in her readings use is seen there (the import itself never asks Claude)"
-  say "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
+  if [[ -n "$tools" ]]; then
+    say "  By hand afterwards:  the Getting Started guide, which BRIMM Video Studio opens when the setup is done"
+  else
+    say "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
+  fi
 fi
 # Claude reads a video through Claude Code once its person has said what it is. Nothing here installs that or signs in to it. When
 # Claude is going to be asked, this says what is sent to it, before anything is changed. The import itself sends nothing.
@@ -895,7 +983,7 @@ elif claude="$(find_claude)"; then
 else
   say "  Claude Code, to read a video once its person has said what it is:  not here, so nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac"
 fi
-say "  Programs to install with Homebrew:  ${need[*]:-none, they are all here}"
+[[ -n "$tools" ]] || say "  Programs to install with Homebrew:  ${need[*]:-none, they are all here}"
 # A model that is here is checked against the pin, by the node found above (about 3 seconds). Before Homebrew's node is installed there
 # is none to check with, and that is said.
 if [[ ! -f "$MODEL" ]]; then

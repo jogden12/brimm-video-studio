@@ -7,12 +7,13 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
+import { HELPERS } from "../helpers.js";
 import { hasFilters, hasHwaccel } from "../workcopy.js";
 
 const INSTALL = fileURLToPath(new URL("../install.sh", import.meta.url));
@@ -1900,6 +1901,45 @@ function checkoutWithOpenLock(version) {
   return { install: join(tool, "install.sh"), done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
+/** What a build of BRIMM Video Studio writes into build.json (Phase 3), as tests/build.test.js has it. */
+const WHOLE = { version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid" };
+/** The programs in the folder after --tools besides Studio's compiled helpers (HELPERS, each named brimm-<name>). */
+const TOOLS_PROGRAMS = ["node", "npm", "ffmpeg", "ffprobe", "whisper-cli"];
+/** What the installer says of a copy of BRIMM Video Studio that is not whole. */
+const DAMAGED = "This copy of BRIMM Video Studio may be damaged: download it again, then open it and choose Repair.";
+/** What the app's ffmpeg prints for the three calls --print asks of it: it can make an HDR video standard. */
+const HDR_LISTS = { hwaccels: "Hardware acceleration methods:\nvideotoolbox\n", filters: "Filters:\n .. scale_vt          V->V       Scale Videotoolbox frames\n", version: "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers" };
+
+/** A copy of BRIMM Video Studio.app as its build lays it out, in a folder made for the test, with stand-ins for every program: `app`,
+    its `checkout` (Contents/Resources/Studio, which holds this checkout's tool without its tests, and beside it a build.json unless
+    `build` is false), `tool`, `install` (the installer in that copy) and `tools` (Contents/Resources/node/bin). Each stand-in writes
+    what it is given into `ran()` but node, which runs the real one (an old one with `oldNode`), and ffmpeg, which prints `lists` for
+    -hwaccels, -filters and -version. */
+function appCopy({ under = "Applications", id = "com.thebrimm.video-studio", exe = "BRIMM Video Studio", build = true, lists = HDR_LISTS, oldNode = false } = {}) {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-app-")));
+  const app = join(dir, under, "BRIMM Video Studio.app");
+  const ranFile = join(dir, "ran");
+  const stand = (file, script) => {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `#!/bin/sh\n${script}`);
+    chmodSync(file, 0o755);
+  };
+  mkdirSync(join(app, "Contents"), { recursive: true });
+  writeFileSync(join(app, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleIdentifier</key><string>${xml(id)}</string>\n  <key>CFBundleExecutable</key><string>${xml(exe)}</string>\n  <key>CFBundleName</key><string>BRIMM Video Studio</string>\n</dict>\n</plist>\n`);
+  stand(join(app, "Contents", "MacOS", exe), `echo "app $*" >> "${ranFile}"\n`);
+  const checkout = join(app, "Contents", "Resources", "Studio");
+  const tool = join(checkout, "tool");
+  cpSync(HERE, tool, { recursive: true, filter: (src) => src !== join(HERE, "tests") });
+  if (build) writeFileSync(join(checkout, "build.json"), JSON.stringify(WHOLE));
+  const tools = join(app, "Contents", "Resources", "node", "bin");
+  const old = oldNode ? `case "$1" in\n  --version) echo v20.11.0; exit 0 ;;\n  -e) case "$2" in *process.versions.node*) exit 1 ;; esac ;;\nesac\n` : "";
+  stand(join(tools, "node"), `${old}exec "${process.execPath}" "$@"\n`);
+  for (const [name, text] of Object.entries(lists)) writeFileSync(join(dir, `ffmpeg-${name}`), text);
+  stand(join(tools, "ffmpeg"), `case "$*" in\n  *-hwaccels*) cat "${join(dir, "ffmpeg-hwaccels")}" ;;\n  *-filters*) cat "${join(dir, "ffmpeg-filters")}" ;;\n  *-version*) cat "${join(dir, "ffmpeg-version")}" ;;\n  *) echo "$0 $*" >> "${ranFile}" ;;\nesac\n`);
+  for (const name of ["npm", "ffprobe", "whisper-cli", ...HELPERS.map((h) => `brimm-${h}`)]) stand(join(tools, name), `echo "$0 $*" >> "${ranFile}"\n`);
+  return { dir, app, tools, tool, checkout, install: join(tool, "install.sh"), ran: () => (existsSync(ranFile) ? readFileSync(ranFile, "utf8") : ""), done: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
 describe("the installer and her folder's lock (the open lock, K1), asked what it would do", { skip: notAMac }, () => {
   let copy;
   before(() => {
@@ -2600,5 +2640,189 @@ describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac
   it("says in its help that the model is downloaded at the pinned revision, and kept only when its SHA-256 is the pin's", () => {
     const r = ask("--print", "--help");
     assert.ok(r.out.replace(/\s+/g, " ").includes("downloads the transcriber's model once (about 1.6 GB) when it is not here, at the revision tool/whisper-model.pin.json pins, and keeps it only when its SHA-256 is the pin's,"), r.out);
+  });
+});
+
+describe("BRIMM Video Studio's own copy of Studio (--tools; Studio app phase 4), asked what it would do", { skip: notAMac }, () => {
+  let copy;
+  before(() => {
+    copy = appCopy();
+  });
+  after(() => copy.done());
+  /** A folder made for one test that stands for The BRIMM DB in Dropbox, with BRIMM Video in it, as the --machine tests make it. */
+  function dropbox() {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    return { dir, root, done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  const ALSO = "\n\nNothing was changed.\n";
+  const APPS_COPY_LINE = "This is BRIMM Video Studio's own copy of Studio (it has a build.json beside tool/), so it is set up only with the app's own programs, never Homebrew's. Open BRIMM Video Studio and choose Repair.";
+  const GIT_CHECKOUT_LINE = "--tools and --app are for BRIMM Video Studio's own copy of Studio, which has a build.json beside tool/. This is a git checkout, which is set up with Homebrew's programs: run this again without them.";
+  const HELPERS_LINE = (tools) => `  Studio's helpers, compiled:  in ${tools}: ${HELPERS.map((h) => `brimm-${h}`).join(", ")}`;
+  it("takes every program from the folder after --tools on a Mac with no Homebrew, and runs the background job with node from there", () => {
+    const d = dropbox();
+    try {
+      const drop = `${d.root}/Unedited Video/Mac Studio`;
+      const r = askWith({ bare: true, install: copy.install }, "--print", "--machine", "Mac Studio", "--tools", copy.tools, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.deepEqual(r.agents[0].ProgramArguments, [`${copy.tools}/node`, `${copy.tool}/unedited.js`, "--watch", drop]);
+      assert.equal(r.agents[0].EnvironmentVariables.PATH, `${copy.tools}:/usr/bin:/bin`);
+      assert.ok(!("AssociatedBundleIdentifiers" in r.agents[0]));
+      for (const line of [
+        HELPERS_LINE(copy.tools),
+        `  Programs, BRIMM Video Studio's own:  in ${copy.tools}: node ${process.version}, npm, ffmpeg, ffprobe, whisper-cli`,
+        "  By hand afterwards:  the Getting Started guide, which BRIMM Video Studio opens when the setup is done"
+      ]) assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
+      assert.ok(r.out.includes(`"checkout": "${copy.checkout}"`), r.out);
+      assert.doesNotMatch(r.out, /Homebrew|brew |Xcode|xcode-select|Swift/);
+      changedNothing(r);
+      assert.equal(copy.ran(), "");
+    } finally {
+      d.done();
+    }
+  });
+  it("takes the app's programs over Homebrew's and the PATH's", () => {
+    const d = dropbox();
+    try {
+      const r = askWith({ install: copy.install, ffmpegSays: { hwaccels: "Hardware acceleration methods:\n", filters: "Filters:\n", version: "ffmpeg version 1.0 from the PATH" } }, "--print", "--machine", "Mac Studio", "--tools", copy.tools, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.equal(r.asked, "");
+      assert.equal(r.agents[0].ProgramArguments[0], `${copy.tools}/node`);
+      assert.ok(r.out.includes("this Mac's ffmpeg (ffmpeg version 9.0.2) can make an HDR video standard"), r.out);
+      assert.ok(!r.out.includes("from the PATH"), r.out);
+    } finally {
+      d.done();
+    }
+  });
+  it("says the app's ffmpeg may be damaged, and never names brew, when it lacks what an HDR video needs", () => {
+    const bad = appCopy({ lists: { ...HDR_LISTS, hwaccels: "Hardware acceleration methods:\n" } });
+    const d = dropbox();
+    try {
+      const r = askWith({ bare: true, install: bad.install }, "--print", "--machine", "Mac Studio", "--tools", bad.tools, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.ok(r.out.includes(`\n  HDR video:  this Mac's ffmpeg (ffmpeg version 9.0.2) cannot make an HDR video standard, which an iPhone's clip is by default, so the working copy refuses every one: it has no videotoolbox hwaccel. ${DAMAGED}\n`), r.out);
+      assert.doesNotMatch(r.out, /brew/);
+    } finally {
+      d.done();
+      bad.done();
+    }
+  });
+  it("refuses a program or a helper missing from the folder, naming each, before anything is changed", () => {
+    const d = dropbox();
+    const ask1 = () => askWith({ bare: true, install: copy.install }, "--print", "--machine", "Mac Studio", "--tools", copy.tools, d.root);
+    const away = (names, then) => {
+      for (const name of names) renameSync(join(copy.tools, name), join(copy.tools, `${name}.away`));
+      try {
+        return then();
+      } finally {
+        for (const name of names) renameSync(join(copy.tools, `${name}.away`), join(copy.tools, name));
+      }
+    };
+    try {
+      for (const name of [...TOOLS_PROGRAMS, ...HELPERS.map((h) => `brimm-${h}`)]) {
+        const r = away([name], ask1);
+        assert.deepEqual([r.status, r.out], [2, `BRIMM Video Studio's own programs are not all in ${copy.tools}. Missing: ${name}. ${DAMAGED}${ALSO}`], name);
+        assert.deepEqual([r.left, r.ran], [[], ""], name);
+      }
+      const two = away(["ffprobe", "brimm-faces"], ask1);
+      assert.deepEqual([two.status, two.out], [2, `BRIMM Video Studio's own programs are not all in ${copy.tools}. Missing: ffprobe, brimm-faces. ${DAMAGED}${ALSO}`]);
+      assert.deepEqual([two.left, two.ran], [[], ""]);
+      // A file that cannot be run counts as missing.
+      chmodSync(join(copy.tools, "whisper-cli"), 0o644);
+      try {
+        const r = ask1();
+        assert.deepEqual([r.status, r.out], [2, `BRIMM Video Studio's own programs are not all in ${copy.tools}. Missing: whisper-cli. ${DAMAGED}${ALSO}`]);
+      } finally {
+        chmodSync(join(copy.tools, "whisper-cli"), 0o755);
+      }
+      assert.equal(copy.ran(), "");
+    } finally {
+      d.done();
+    }
+  });
+  it("refuses a folder after --tools that is not a folder", () => {
+    const d = dropbox();
+    try {
+      const gone = join(copy.dir, "no such folder");
+      const r = askWith({ bare: true, install: copy.install }, "--print", "--machine", "Mac Studio", "--tools", gone, d.root);
+      assert.deepEqual([r.status, r.out], [2, `The folder after --tools is not a folder: ${gone}. ${DAMAGED}${ALSO}`]);
+      assert.deepEqual([r.left, r.ran], [[], ""]);
+    } finally {
+      d.done();
+    }
+  });
+  it("refuses a node older than 22 in the folder", () => {
+    const old = appCopy({ oldNode: true });
+    const d = dropbox();
+    try {
+      const r = askWith({ bare: true, install: old.install }, "--print", "--machine", "Mac Studio", "--tools", old.tools, d.root);
+      assert.deepEqual([r.status, r.out], [2, `BRIMM Video Studio's own node, in ${old.tools}, is v20.11.0, and Studio needs 22 or later. ${DAMAGED}${ALSO}`]);
+      assert.deepEqual([r.left, r.ran], [[], ""]);
+    } finally {
+      d.done();
+      old.done();
+    }
+  });
+  it("refuses --tools from a git checkout, and the app's own copy without --tools, before anything is changed", () => {
+    const d = dropbox();
+    try {
+      const git = ask("--print", "--machine", "Mac Studio", "--tools", copy.tools, d.root);
+      assert.deepEqual([git.status, git.out], [2, GIT_CHECKOUT_LINE + ALSO]);
+      assert.deepEqual([git.left, git.ran], [[], ""]);
+      const same = (r) => {
+        assert.deepEqual([r.status, r.out], [2, APPS_COPY_LINE + ALSO]);
+        assert.deepEqual([r.left, r.ran], [[], ""]);
+      };
+      same(askWith({ install: copy.install }, "--print", "--machine", "Mac Studio", d.root));
+      same(askWith({ install: copy.install }, "--print", "/Volumes/Work/Unedited video"));
+      // A build file that is a folder, or a link to nowhere, is there all the same.
+      const file = join(copy.checkout, "build.json");
+      const kept = readFileSync(file, "utf8");
+      rmSync(file);
+      try {
+        mkdirSync(file);
+        same(askWith({ install: copy.install }, "--print", "--machine", "Mac Studio", d.root));
+        rmSync(file, { recursive: true });
+        symlinkSync(join(copy.dir, "nowhere.json"), file);
+        same(askWith({ install: copy.install }, "--print", "--machine", "Mac Studio", d.root));
+      } finally {
+        rmSync(file, { recursive: true, force: true });
+        writeFileSync(file, kept);
+      }
+    } finally {
+      d.done();
+    }
+  });
+  it("refuses --tools and --app where they do not belong, plainly and before anything else", () => {
+    const d = dropbox();
+    const SET = '--machine "<this Mac>" --tools "<bin>" --app "<BRIMM Video Studio.app>" "<path to BRIMM Video>"';
+    try {
+      for (const [args, line] of [
+        [["--machine", "Mac Studio", d.root, "--tools"], 'Say which folder after --tools, as --tools "<path>".'],
+        [["--tools", "--machine", "Mac Studio", d.root], 'Say which folder after --tools, as --tools "<path>".'],
+        [["--machine", "Mac Studio", d.root, "--app"], 'Say which app after --app, as --app "<path>".'],
+        [["--remove", "--tools", "/x"], "--remove stops the watching and changes no settings, so it does not take --tools or --app."],
+        [["--remove", "--app", "/x"], "--remove stops the watching and changes no settings, so it does not take --tools or --app."],
+        [["--machine", "Mac Studio", "--app", "/x", d.root], `--app goes with --tools, the folder of the app's own programs: ./install.sh ${SET}`],
+        [["--tools", "/x", "/Volumes/Work/Unedited video"], `--tools and --app are for a Mac set up with --machine, as BRIMM Video Studio sets one up: ./install.sh ${SET}`]
+      ]) {
+        const r = ask("--print", ...args);
+        assert.deepEqual([r.status, r.out], [2, line + "\n"], args.join(" "));
+        assert.deepEqual([r.left, r.ran], [[], ""], args.join(" "));
+      }
+    } finally {
+      d.done();
+    }
+  });
+  it("never looks for brew with --tools: its lines, read", () => {
+    assert.equal(text.split('"$brew" install').length - 1, 1);
+    assert.equal(text.split('brew=""').length - 1, 1);
+    assert.equal(text.split('brew="$(find_program brew || true)"').length - 1, 1);
+    assert.ok(text.includes('\nbrew=""\n[[ -n "$tools" ]] || brew="$(find_program brew || true)"\n'));
+  });
+  it("says in its help how BRIMM Video Studio sets a Mac up with --tools", () => {
+    const r = ask("--print", "--help");
+    assert.ok(r.out.replace(/\s+/g, " ").includes("set this Mac up as BRIMM Video Studio does, from the app's own copy of Studio, which has a build.json beside tool/ and is never set up without --tools (and a git checkout never with it). Every program is the app's own, in <bin>: node, npm, ffmpeg, ffprobe, whisper-cli and Studio's compiled helpers. Homebrew is never looked for or run, and Xcode's tools are not needed."), r.out);
   });
 });
