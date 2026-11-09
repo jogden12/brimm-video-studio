@@ -60,7 +60,7 @@ import { spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
 import { appendFileSync, chmodSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { homeRefusal, studioHome } from "./home.js";
-import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, answerOf, kindOf as recordKind } from "./episode.js";
@@ -95,7 +95,7 @@ import { readEpisodeNow, accountOf, askReelCues, READ_KINDS, READ_HOLD_MS, READ_
 import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
-import { quotable, studioFiles, studioFolder } from "./studio.js";
+import { quotable, shellWord, studioFiles, studioFolder } from "./studio.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
 import { afterAllNoted, clearOldWords, markChat, noteAfterAll, writeWords } from "./held.js";
@@ -2893,7 +2893,7 @@ async function behind(ctx) {
   // Her folder is looked at whatever git answers: that needs no network.
   const stale = studioStale(ctx);
   const folderLine = () => {
-    if (stale) ctx.say(`Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${stale.node}, then start a new session in her Claude folder)`);
+    if (stale) ctx.say(`Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${shellWord(stale.node)}, then start a new session in her Claude folder)`);
     // On a Mac that opens episodes in the app, the pinned command line must be in its toolchain folder (architecture 6.1: `behind` also
     // checks the toolchain). This needs no network either, so it is said whatever git answered. It is not said when the lock refused first.
     const differs = appOf(ctx.settings) ? toolchainDiffers(toolchainHolds(ctx.home)) : "";

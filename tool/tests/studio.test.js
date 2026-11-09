@@ -933,12 +933,12 @@ describe("the guard", () => {
 
 describe("the guard and paths that hold a regular expression's own characters", () => {
   it("matches the checkout and node letter for letter", () => {
-    const checkout = "/Users/o.hara/Claude Code/BRIMM video (1)+";
+    const checkout = "/Users/o.hara/Claude Code/BRIMM video {1}+";
     const node = "/Users/o.hara/.nvm/versions/node/v22.11.0/bin/node";
     const decide = (command) => guardDecision({ tool_name: "Bash", tool_input: { command } }, { checkout, node }).decision;
     assert.equal(decide(`${node} "${checkout}/tool/edit.js" episodes`), "allow");
     assert.equal(decide(`node "${checkout}/tool/edit.js" episodes`), "allow");
-    for (const c of [`node "/Users/oXhara/Claude Code/BRIMM video (1)+/tool/edit.js" episodes`, `node "/Users/o.hara/Claude Code/BRIMM video 1/tool/edit.js" episodes`,
+    for (const c of [`node "/Users/oXhara/Claude Code/BRIMM video {1}+/tool/edit.js" episodes`, `node "/Users/o.hara/Claude Code/BRIMM video 1/tool/edit.js" episodes`,
       `node "${checkout}/tool/editXjs" episodes`, `/Users/oXhara/.nvm/versions/node/v22X11X0/bin/node "${checkout}/tool/edit.js" episodes`])
       assert.equal(decide(c), "deny", c);
   });
@@ -968,7 +968,7 @@ describe("the guard and node's path in double quotes (design 2026-11-09, part 6)
   it("is given a node in double quotes that zsh and bash run as that one program, with edit.js and its words; bare, the shells run no such program", async (t) => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-quoted-node-")));
     try {
-      const node = join(dir, "Sallie's BRIMM (1) & Co; ok! é", "node");
+      const node = join(dir, "Sallie's BRIMM 1 & Co; ok! é", "node");
       mkdirSync(dirname(node), { recursive: true });
       writeFileSync(node, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o755 });
       const quoted = `"${node}" "${CHECKOUT}/tool/edit.js" open "Pricing talk"`;

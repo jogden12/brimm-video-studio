@@ -29,7 +29,7 @@ export const HOME_APP_NODE = "/Users/sallie/Applications/BRIMM Video Studio.app/
 export const APOSTROPHE_NODE = "/Users/o'hara/.nvm/versions/node/v22.11.0/bin/node";
 /** Nodes whose paths can stand in double quotes but are not plain words, so the strict guard refuses them bare. */
 export const BRACE_NODE = "/Users/sallie/a{b,c}/bin/node";
-export const STAR_NODE = "/Users/sallie/a*b/bin/node";
+export const SHELL_NODE = "/Users/sallie/a&b;c!d/bin/node";
 export const ACCENT_NODE = "/Users/sallie/Médias/bin/node";
 /** Node bare, as her folder was written before node was quoted. */
 export const EDIT_BARE = `${NODE} "${CHECKOUT}/tool/edit.js"`;
@@ -59,18 +59,21 @@ export const NODE_CASES = [
   ...[[APP_NODE, HOME_APP_NODE], [HOME_APP_NODE, APP_NODE]].map(([node, other]) => ({ node, both: [run(`"${node}"`), run(`"${node}"`, 'open "Pricing talk"')], strictOnly: [run("node")], refused: [run(node), run(NODE), run(`"${NODE}"`), run(`"${other}"`), ...refusedFor(node)] })),
   { node: NODE, both: [run(`"${NODE}"`), run(`"${NODE}"`, 'open "Pricing talk"')], strictOnly: [run("node"), run(NODE), run(NODE, 'open "Pricing talk"')], refused: [run(`"${APP_NODE}"`), run(`"${HOME_APP_NODE}"`), ...refusedFor(NODE)] },
   { node: APOSTROPHE_NODE, both: [run(`"${APOSTROPHE_NODE}"`)], strictOnly: [run("node")], refused: [run(APOSTROPHE_NODE), ...refusedFor(APOSTROPHE_NODE)] },
-  quotableRow(BRACE_NODE), quotableRow(STAR_NODE), quotableRow(ACCENT_NODE)
+  quotableRow(BRACE_NODE), quotableRow(SHELL_NODE), quotableRow(ACCENT_NODE)
 ];
 /** Paths that cannot stand inside double quotes: her folder is never written with one, and no command is let through with one. */
 export const UNQUOTABLE_NODES = ['/Users/sallie/odd"dir/bin/node', "/Users/sallie/$HOME/bin/node", "/Users/sallie/back`tick/bin/node", "/Users/sallie/back\\slash/bin/node", "/Users/sallie/line\nbreak/bin/node", "/Users/sallie/tab\tstop/bin/node",
-  "/Users/sallie/carriage\rreturn/bin/node", "/Users/sallie/nul\u0000byte/bin/node", "/Users/sallie/unit\u001fsep/bin/node", "/Users/sallie/del\u007fchar/bin/node", "bin/node"];
-export const UNQUOTABLE_CHECKOUTS = ['/Users/sallie/Claude Code/BRIMM" video', "/Users/sallie/Claude Code/$BRIMM video", "/Users/sallie/Claude Code/BRIMM`video", "/Users/sallie/Claude Code/BRIMM\\video", "/Users/sallie/Claude Code/BRIMM\nvideo", "Claude Code/BRIMM video"];
+  "/Users/sallie/carriage\rreturn/bin/node", "/Users/sallie/nul\u0000byte/bin/node", "/Users/sallie/unit\u001fsep/bin/node", "/Users/sallie/del\u007fchar/bin/node",
+  // Letters Claude Code or the allow rule read: >nul is rewritten to >/dev/null even inside quotes; the rest are wildcards and parse hazards.
+  "/Users/sallie/a >nul b/bin/node", "/Users/sallie/a>b/bin/node", "/Users/sallie/a<b/bin/node", "/Users/sallie/a*b/bin/node", "/Users/sallie/a?b/bin/node", "/Users/sallie/a[b/bin/node", "/Users/sallie/a]b/bin/node", "/Users/sallie/a(b/bin/node", "/Users/sallie/a)b/bin/node", "bin/node"];
+export const UNQUOTABLE_CHECKOUTS = ['/Users/sallie/Claude Code/BRIMM" video', "/Users/sallie/Claude Code/$BRIMM video", "/Users/sallie/Claude Code/BRIMM`video", "/Users/sallie/Claude Code/BRIMM\\video", "/Users/sallie/Claude Code/BRIMM\nvideo",
+  "/Users/sallie/Claude Code/BRIMM >nul video", "/Users/sallie/Claude Code/BRIMM>video", "/Users/sallie/Claude Code/BRIMM<video", "/Users/sallie/Claude Code/BRIMM*video", "/Users/sallie/Claude Code/BRIMM?video", "/Users/sallie/Claude Code/BRIMM[video", "/Users/sallie/Claude Code/BRIMM]video", "/Users/sallie/Claude Code/BRIMM (1) video", "/Users/sallie/Claude Code/BRIMM)video", "Claude Code/BRIMM video"];
 /** What a guard answers to a command it lets through (the strict guard's reason) and to one it refuses. */
 export const OWN = { decision: "allow", reason: "BRIMM Video Studio's own command" };
 export const REFUSED = { decision: "deny", reason: "In this folder Claude runs only BRIMM Video Studio's own commands. Ask Jason for anything else." };
 /** What the studio command and writeStudio say when node or the checkout cannot stand inside double quotes (pinned text). */
-export const NODE_FAULT = 'the path to node holds a letter that cannot go inside double quotes (", $, `, \\ or a control character)';
-export const CHECKOUT_FAULT = 'the path to the checkout of BRIMM Video Studio holds a letter that cannot go inside double quotes (", $, `, \\ or a control character)';
+export const NODE_FAULT = 'the path to node holds a letter that cannot go inside double quotes (", $, `, \\, >, <, *, ?, [, ], (, ) or a control character)';
+export const CHECKOUT_FAULT = 'the path to the checkout of BRIMM Video Studio holds a letter that cannot go inside double quotes (", $, `, \\, >, <, *, ?, [, ], (, ) or a control character)';
 /** The starts of an edit.js command the strict guard lets through for `node`: node in double quotes, the word node, and node bare when its path is a plain word. */
 export const strictStartsOf = (node) => [`"${node}"`, "node", ...(/^\/[A-Za-z0-9_.,:+=@%/-]*$/.test(node) ? [node] : [])];
 /** The one start the open guard lets through. */

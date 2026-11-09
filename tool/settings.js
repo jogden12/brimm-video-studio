@@ -38,7 +38,7 @@ import { fileURLToPath } from "node:url";
 import { waitingToCut } from "./cuts.js";
 import { textWriter } from "./dropbox.js";
 import { homeRefusal, programHome, studioHome } from "./home.js";
-import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, gatedReadRules, studioFiles, quotingFault, studioFolder, workshopFolder, writeStudio } from "./studio.js";
+import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, gatedReadRules, quotingFault, studioFiles, studioFolder, workshopFolder, writeStudio } from "./studio.js";
 import { isConnector, neverCaught } from "./never.js";
 import { claudeDirName, fold, realOf } from "./places.js";
 import { clearStrictSeen, strictSeen, untiedMark } from "./held.js";
