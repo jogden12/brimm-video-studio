@@ -16,7 +16,7 @@ import { NO_RECEIPT, cardOf } from "../receipts.js";
 import { EDITS } from "../sessions.js";
 import { episodeAs, FOLDER as FOLDER_NAME } from "./episodes.js";
 import { episode } from "./phase4.js";
-import { CHECKOUT, NODE, EDIT, ALLOWED } from "./guard-cases.js";
+import { CHECKOUT, NODE, EDIT, ALLOWED, NODE_CASES, UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, spellingsOf } from "./guard-cases.js";
 import { openWorld } from "./open-world.js";
 import { rowWithRules, rulesOf, rulesOfRow, withRules } from "./skill-rows.js";
 
@@ -937,6 +937,57 @@ describe("the guard and paths that hold a regular expression's own characters", 
   });
 });
 
+describe("the guard and node's path in double quotes (design 2026-11-09, part 6)", () => {
+  const NODE_FAULT = 'the path to node holds a letter that cannot go inside double quotes (", $, `, \\ or a control character)';
+  const CHECKOUT_FAULT = 'the path to the checkout of BRIMM Video Studio holds a letter that cannot go inside double quotes (", $, `, \\ or a control character)';
+  const decide = (command, node, checkout = CHECKOUT) => guardDecision({ tool_name: "Bash", tool_input: { command } }, { checkout, node }).decision;
+  it("lets through node in double quotes, the word node, and a plain node bare, and refuses every other spelling", () => {
+    for (const { node, both, strictOnly, refused } of NODE_CASES) {
+      for (const command of [...both, ...strictOnly]) assert.equal(decide(command, node), "allow", command);
+      for (const command of refused) assert.equal(decide(command, node), "deny", command);
+    }
+  });
+  it("refuses every spelling when node or the checkout cannot be put in double quotes", () => {
+    for (const node of UNQUOTABLE_NODES) for (const command of spellingsOf(node)) assert.equal(decide(command, node), "deny", JSON.stringify(command));
+    for (const checkout of UNQUOTABLE_CHECKOUTS) for (const command of spellingsOf(NODE, checkout)) assert.equal(decide(command, NODE, checkout), "deny", JSON.stringify(command));
+  });
+  it("is given a node in double quotes that zsh and bash run as that one program, with edit.js and its words; bare, the shells run no such program", async (t) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-quoted-node-")));
+    try {
+      const node = join(dir, "Sallie's BRIMM (1) & Co; ok! é", "node");
+      mkdirSync(dirname(node), { recursive: true });
+      writeFileSync(node, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o755 });
+      const quoted = `"${node}" "${CHECKOUT}/tool/edit.js" open "Pricing talk"`;
+      const bare = quoted.slice(1).replace('" "', ' "');
+      assert.equal(decide(quoted, node), "allow");
+      assert.equal(decide(bare, node), "deny");
+      await inEachShell(t, ([shell, flags]) => {
+        const r = spawnSync(shell, [...flags, quoted], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+        assert.equal(r.status, 0, `${shell}: ${r.stderr}`);
+        assert.deepEqual(r.stdout.split("\n").slice(0, -1), [`${CHECKOUT}/tool/edit.js`, "open", "Pricing talk"]);
+        const b = spawnSync(shell, [...flags, bare], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+        assert.notEqual(b.status, 0, shell);
+        assert.equal(b.stdout, "", shell);
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("is never written into her folder for a node or checkout that cannot be put in double quotes", () => {
+    const attempt = (options, message) => {
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "brimm-unquotable-")));
+      try {
+        assert.throws(() => writeStudio(home, options), { message });
+        assert.equal(existsSync(studioFolder(home)), false);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    };
+    for (const node of UNQUOTABLE_NODES) attempt({ checkout: CHECKOUT, node }, NODE_FAULT);
+    for (const checkout of UNQUOTABLE_CHECKOUTS) attempt({ checkout, node: NODE }, CHECKOUT_FAULT);
+  });
+});
+
 describe("the guard and reading", () => {
   /** Her folder, a file outside it, a link in Pictures to that file, and a session's own folder of tool results, in a
       folder of the test's own. */
@@ -1016,6 +1067,23 @@ describe("the guard, run as Claude Code runs the hook", () => {
     const refused = hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "date" } });
     assert.equal(refused.status, 0, refused.stderr);
     assert.deepEqual(decision(refused), { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "In this folder Claude runs only BRIMM Video Studio's own commands. Ask Jason for anything else." });
+  });
+  it("answers so with a node whose path has spaces: in double quotes allowed, bare refused", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-app-node-")));
+    try {
+      const node = join(dir, "BRIMM Video Studio.app", "Contents", "Resources", "bin", "node");
+      mkdirSync(dirname(node), { recursive: true });
+      symlinkSync(process.execPath, node);
+      const ask = (command) => {
+        const r = hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } }, node);
+        assert.equal(r.status, 0, r.stderr);
+        return decision(r).permissionDecision;
+      };
+      assert.equal(ask(`"${node}" "${THIS_CHECKOUT}/tool/edit.js" episodes`), "allow");
+      assert.equal(ask(`${node} "${THIS_CHECKOUT}/tool/edit.js" episodes`), "deny");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
   it("says nothing of a read inside her folder, so Claude Code's own rules decide, and refuses one outside it", () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "brimm-guard-hook-")));
