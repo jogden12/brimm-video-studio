@@ -106,5 +106,7 @@ export const openDeps = (w, more = {}) => ({
   lsof: () => "",
   appFlags: RECORD,
   minimum: MINIMUM,
+  // No test looks for a real .git: the made-up checkout is a git checkout unless a test says otherwise (filing.js isGitCheckout).
+  isGitCheckout: () => true,
   ...more,
 });
