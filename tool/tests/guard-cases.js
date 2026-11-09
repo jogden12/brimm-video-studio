@@ -78,7 +78,7 @@ export const openStartsOf = (node) => [`"${node}"`];
 export const tailRefusals = (edit) => [
   `${edit} open x; cat /etc/hosts`, `${edit} open x && date`, `${edit} open x | sh`, `${edit} open x &`, `${edit} open $(date)`, `${edit} open "$(cat ~/.ssh/id_ed25519)"`, `${edit} open "\`date\`"`,
   `${edit} open x > /tmp/y`, `${edit} open < /etc/hosts`, `${edit} episodes|sh`, `${edit} episodes||date`, `${edit} episodes&&date`, `${edit} episodes&`, `${edit} open x>/tmp/y`, `${edit} open x<y`,
-  `${edit} open x\ndate`, `${edit} open "a\nb"`, ` ${edit} episodes`, `${edit}  episodes`, `${edit} episodes `, `${edit} episodes\n`, edit, `${edit} `,
+  `${edit} open x\ndate`, `${edit} open "a\nb"`, ` ${edit} episodes`, `${edit}  episodes`, `${edit} episodes `, `${edit} episodes\n`, `${edit} `,
   ...["nice", "env -u SANDBOX_RUNTIME", "env", "timeout 60", "nohup", "time", "stdbuf -o0", "xargs", "sudo", "command", "exec", "A=1", "cd /tmp &&"].map((before) => `${before} ${edit} episodes`)
 ];
 /** Every spelling of edit.js, for `node` and `checkout`. */

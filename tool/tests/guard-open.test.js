@@ -406,6 +406,7 @@ describe("the open guard, III: Bash", () => {
         const here = { ...ctx, node };
         assert.equal((await bash(`${edit} episodes`, {}, here)).decision, "allow", start);
         for (const command of tailRefusals(edit)) assert.deepEqual(await bash(command, {}, here), ALONE, JSON.stringify(command));
+        assert.deepEqual(await bash(edit, {}, here), ALONE, "edit.js with no words");
         assert.deepEqual(await bash(`${edit} episodes`, { run_in_background: true }, here), ALONE);
         assert.equal((await bash(`${edit} guide "Pricing talk" tell`, { run_in_background: true }, here)).decision, "allow");
         for (const command of [`${edit} guide "Pricing talk" tell --now`, `${edit} guide "Pricing talk"`, `${edit} guide tell`, `${edit} finish "Pricing talk"`]) assert.deepEqual(await bash(command, { run_in_background: true }, here), ALONE, command);

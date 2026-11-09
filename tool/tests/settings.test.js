@@ -532,7 +532,13 @@ describe("node settings.js studio, for both locks (the open lock, K1)", () => {
   it("refuses a node or a checkout that cannot be put in double quotes, and writes nothing", () => {
     const t = studioWorld();
     let before = readFileSync(settingsFile(t.home), "utf8");
-    for (const node of UNQUOTABLE_NODES) {
+    // A relative --node is refused before any quoting check, as a wrong asking: the help, exit 2, nothing written, no port.
+    assert.equal(t.run(MINIMUM, "studio", "--node", "bin/node"), 2);
+    assert.ok(t.said[0].includes("node settings.js studio --node"));
+    assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+    assert.equal(existsSync(studioFolder(t.home)), false);
+    assert.equal(t.ports(), 0);
+    for (const node of UNQUOTABLE_NODES.filter((n) => n.startsWith("/"))) {
       for (const extra of [[], ["--print"]]) {
         assert.equal(t.run(MINIMUM, "studio", "--node", node, ...extra), 1, JSON.stringify(node));
         assert.deepEqual(t.said, [`Not written: ${NODE_FAULT}.`], JSON.stringify(node));
