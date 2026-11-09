@@ -34,6 +34,7 @@ import { checkOriginal, oweForgotten } from "./originals.js";
 import { linksOf } from "./finish.js";
 import { clearChecking, clearProblem, flagProblem, problemNotice } from "./finish-check.js";
 import { randomUUID } from "node:crypto";
+import { buildOf, isInstalled } from "./build.js";
 
 /** How long a recording must be to be an episode, in seconds. One that is shorter is a short video. */
 const SHORT_UNDER = 90;
@@ -164,9 +165,12 @@ function gitCommitOf(checkout, spawn) {
   return /^[0-9a-f]{7,}$/.test(commit) ? commit : "unknown";
 }
 
-/** Which brimm-video is at work: the short commit the checkout `checkout` is at, as git says it, or "unknown", where the folder has
+/** Which brimm-video is at work: on an installed Mac (a build.json, build.js) the short commit build.json names, or "unknown" when it cannot be
+    read, and no program is started. Otherwise the short commit the checkout `checkout` is at, as git says it, or "unknown", where the folder has
     no .git of its own (isGitCheckout), and then git is not asked. It goes into each record's writer, for information only. */
 export function commitOf(checkout, { spawn = spawnSync, exists = existsSync } = {}) {
+  const build = buildOf(checkout);
+  if (isInstalled(build)) return build.short;
   if (!isGitCheckout(checkout, { exists })) return "unknown";
   return gitCommitOf(checkout, spawn);
 }
@@ -240,7 +244,7 @@ export function fileEpisode({ file, made, at, facts, printed, kind, read, reels 
     entries.push({ from, to, bytes: statSync(from).size });
     files[rel] = statSync(from).size;
   };
-  const writer = { commit: deps.commit || commitOf(episode.checkout), on: episode.machine };
+  const writer = { commit: deps.commit || commitOf(thisCheckout()), on: episode.machine };
   const write = textWriter({ work: join(work, "record"), keep: true, ...opts });
   const title = read && typeof read.title === "string" && read.title.trim() ? { text: read.title.trim(), from: "claude", approved: false } : null;
   let record;
@@ -289,7 +293,7 @@ function fileIntoPlanHere({ file, made, at, facts, printed, kind, work, fingerpr
   const bytes = statSync(file).size;
   const list = [{ rel: video, from: file }, ...made.map((to) => ({ rel: relative(dirname(file), to).split(sep).join("/"), from: at(to) }))];
   const files = Object.fromEntries(list.map(({ rel, from }) => [rel, statSync(from).size]));
-  const writer = { commit: deps.commit || commitOf(episode.checkout), on: episode.machine };
+  const writer = { commit: deps.commit || commitOf(thisCheckout()), on: episode.machine };
   const first = newEpisode({
     id: into.record.id,
     machine: episode.machine,
@@ -373,7 +377,7 @@ function fileLocal({ file, made, at, facts, printed, kind, read, reels, work, dr
   // What this run wrote in video/, to take away if it cannot finish, and whether it wrote the marker.
   const wrote = [];
   let marked = false;
-  const writer = { commit: deps.commit || commitOf(episode.checkout), on: episode.machine };
+  const writer = { commit: deps.commit || commitOf(thisCheckout()), on: episode.machine };
   const write = textWriter({ work: join(work, "record"), keep: true, ...(deps.onRecordCopy ? { onCopy: deps.onRecordCopy } : {}), ...opts });
   let record;
   try {

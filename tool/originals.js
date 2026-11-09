@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { cloneIn, isWhole, makeOnlineOnly, replaceIn, sameBytes, textWriter, uploadedOf } from "./dropbox.js";
 import { acceptRev, isFromPlan, isPart, kindOf, lastWritten, readEpisode, recordNumbers, shownName, undone, writeEpisode } from "./episode.js";
-import { FOLDER_GONE, LOCK_AGAIN_MS, WAIT_LOOK_FOR_MS, WAIT_LOOK_MS, askAgent, commitOf, dueAt, fileId, judgeEntry, logTo, putOwnRecordBack, ruleOpts, readEveryPending, readPendingAt, recordHolds, removePending, sameFile, settleReading, writePending } from "./filing.js";
+import { FOLDER_GONE, LOCK_AGAIN_MS, WAIT_LOOK_FOR_MS, WAIT_LOOK_MS, askAgent, commitOf, thisCheckout, dueAt, fileId, judgeEntry, logTo, putOwnRecordBack, ruleOpts, readEveryPending, readPendingAt, recordHolds, removePending, sameFile, settleReading, writePending } from "./filing.js";
 import { linksOf, matchedSession } from "./finish.js";
 import { partsOf } from "./footage.js";
 import { gated, heldName, withShortId } from "./gate.js";
@@ -285,7 +285,7 @@ export function checkOriginal(p, deps) {
       const work = join(runsFolder(home), `originals-${process.pid}-${clock()}`);
       let wrote;
       try {
-        wrote = writeEpisode(p.folder, next, { expectRev: read.record.rev, writeText: textWriter({ work, ...opts }), writer: { commit: deps.commit || commitOf(deps.episode.checkout), on: machine }, home });
+        wrote = writeEpisode(p.folder, next, { expectRev: read.record.rev, writeText: textWriter({ work, ...opts }), writer: { commit: deps.commit || commitOf(thisCheckout()), on: machine }, home });
       } catch (e) {
         if (ours()) {
           try {
