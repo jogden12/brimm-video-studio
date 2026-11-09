@@ -9,7 +9,8 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
 import { hasFilters, hasHwaccel } from "../workcopy.js";
@@ -21,6 +22,22 @@ const notAMac = process.platform !== "darwin" ? "the installer is for a Mac, and
 const noZsh = existsSync("/bin/zsh") ? false : "the installer is a zsh script, and there is no /bin/zsh here to run its lines with";
 const PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
 const MODEL = "Library/Application Support/BRIMM Transcribe/ggml-large-v3-turbo.bin";
+/** The pin of the transcriber's model, which the installer and the engine both read. */
+const PINNED = JSON.parse(readFileSync(join(HERE, "whisper-model.pin.json"), "utf8"));
+/** The installer's text, for the tests that read it or run some of its lines alone. */
+const text = readFileSync(INSTALL, "utf8");
+/** Each of these, as install.sh has it: a line that gives a name its value, or a function, whole. */
+const valueOf = (name) => {
+  const found = new RegExp(`\\n(${name}="[^"\\n]*")\\n`).exec(text);
+  assert.ok(found, `${name}=, in install.sh`);
+  return found[1];
+};
+const functionOf = (name) => {
+  const at = text.indexOf(`\n${name}() {`);
+  assert.ok(at >= 0, `${name}(), in install.sh`);
+  const end = text.indexOf("\n", at + 1);
+  return text.slice(at + 1, text.slice(at + 1, end).endsWith("}") ? end + 1 : text.indexOf("\n}\n", at) + 3);
+};
 /** What Claude Code prints for `claude auth status --json` when it is signed in: its email is never to be shown. */
 const SIGNED_IN = '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max","email":"sallie@example.com","orgName":"The BRIMM"}';
 /** Stand-ins for the programs that say what the Mac has: Xcode's command line tools there or not, and the Mac's macOS. */
@@ -264,14 +281,14 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
     assert.deepEqual(r.agents[0].WatchPaths, ["/Volumes/Work/R&D <raw> \"takes\""]);
     assert.deepEqual(r.agents[0].ProgramArguments.slice(2), ["--watch", "/Volumes/Work/R&D <raw> \"takes\""]);
   });
-  it("says whether the transcriber's model is here, where the transcript tool keeps it, and offers the download only when it is not", () => {
+  it("says whether the transcriber's model is here, where the transcript tool keeps it, and offers the download when it is not here or is not the pin's", () => {
     const missing = ask("--print", "/Volumes/Work/Unedited video");
-    assert.ok(missing.out.includes(`\n  Model:  to download, about 1.6 GB, to ${missing.home}/${MODEL}\n`), missing.out);
+    assert.ok(missing.out.includes(`\n  Model:  to download, about 1.6 GB, to ${missing.home}/${MODEL}, from ${PINNED.url}, and kept only when its SHA-256 is the pin's, ${PINNED.sha256} (tool/whisper-model.pin.json)\n`), missing.out);
     changedNothing(missing);
+    // The harness's stand-in is not the pinned model.
     const here = askWith({ files: [MODEL] }, "--print", "/Volumes/Work/Unedited video");
     assert.equal(here.status, 0, here.err);
-    assert.ok(here.out.includes("\n  Model:  here already\n"), here.out);
-    assert.doesNotMatch(here.out, /to download/);
+    assert.ok(here.out.includes(`\n  Model:  here, but its SHA-256 is not the pin's, so the pinned one is downloaded, about 1.6 GB, from ${PINNED.url}, and replaces it only when its SHA-256 is the pin's, ${PINNED.sha256} (tool/whisper-model.pin.json)\n`), here.out);
     assert.equal(here.ran, "");
   });
   // The transcript tool's launch agent goes on watching its folders, and whichever tool looked first in a folder would file the
@@ -435,18 +452,6 @@ describe("the installer's own text", () => {
     // Once the wait is over, the check takes the agent away itself, and only then lifts the traps.
     assert.match(text, /\n {2}done\n {2}drop_check\n {2}trap - EXIT INT TERM\n {2}say "From the background job: /);
   });
-  /** Each of these, as install.sh has it: a line that gives a name its value, or a function, whole. */
-  const valueOf = (name) => {
-    const found = new RegExp(`\\n(${name}="[^"\\n]*")\\n`).exec(text);
-    assert.ok(found, `${name}=, in install.sh`);
-    return found[1];
-  };
-  const functionOf = (name) => {
-    const at = text.indexOf(`\n${name}() {`);
-    assert.ok(at >= 0, `${name}(), in install.sh`);
-    const end = text.indexOf("\n", at + 1);
-    return text.slice(at + 1, text.slice(at + 1, end).endsWith("}") ? end + 1 : text.indexOf("\n}\n", at) + 3);
-  };
   /** A folder made for one test, with a stand-in for launchctl that only writes down how it was called. */
   const standIn = () => {
     const dir = mkdtempSync(join(tmpdir(), "brimm-launchctl-"));
@@ -638,7 +643,7 @@ describe("the installer's own text", () => {
     const toolchainStep = text.indexOf('if [[ -n "$machine" ]] && ! toolchain_here "$TOOLCHAIN" "$node"; then\n');
     assert.ok(toolchainStep > 0 && start > text.indexOf("\nfi\n", toolchainStep) + 4, "after the step that installs the command line");
     assert.ok(start > text.indexOf('if node_old "$node" say; then\n  exit 1\nfi'), "after node is in place");
-    for (const later of ['if [[ ! -f "$MODEL" ]]; then', 'if ! settings_plan "$node"; then', 'mkdir -p "${folders[@]}"', '"$node" "$HERE/settings.js" marker "$drop" "$machine"', '"$node" "$HERE/settings.js" write ', 'agent "$node" > "$AGENT_FILE"']) {
+    for (const later of ['if [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then', 'if ! settings_plan "$node"; then', 'mkdir -p "${folders[@]}"', '"$node" "$HERE/settings.js" marker "$drop" "$machine"', '"$node" "$HERE/settings.js" write ', 'agent "$node" > "$AGENT_FILE"']) {
       assert.ok(start < text.indexOf(later), later);
     }
     // The Chrome first, then the check, and the check is the step's last.
@@ -2445,5 +2450,155 @@ describe("the full import is gone (Phase 2, F4)", { skip: notAMac }, () => {
     // --import light is as it was.
     assert.equal(ask("--print", "--machine", "Mac Studio", "--import", "light", root).status, 0);
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac }, () => {
+  const sha = (words) => createHash("sha256").update(words).digest("hex");
+  const WHY = "The pin of the transcriber's model, tool/whisper-model.pin.json, does not hold its address on Hugging Face at one revision and its SHA-256, so the installer changed nothing.";
+  /** A copy of the tool, without its tests, in a folder made for the test, as the pin test for the command line makes it. */
+  const copyOfTheTool = () => {
+    const copy = realpathSync(mkdtempSync(join(tmpdir(), "brimm-checkout-")));
+    const tool = join(copy, "BRIMM video", "tool");
+    cpSync(HERE, tool, { recursive: true, filter: (src) => src !== join(HERE, "tests") });
+    return { copy, tool, install: join(tool, "install.sh"), pin: join(tool, "whisper-model.pin.json") };
+  };
+  const dropboxRoot = () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    return { root, done: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+  it("pins the model at one revision of Hugging Face's whisper.cpp, by its SHA-256, under the name run.js and the installer give it", () => {
+    assert.deepEqual(Object.keys(PINNED).sort(), ["sha256", "url"]);
+    assert.match(PINNED.url, /^https:\/\/huggingface\.co\/ggerganov\/whisper\.cpp\/resolve\/[0-9a-f]{40}\/ggml-large-v3-turbo\.bin$/);
+    assert.match(PINNED.sha256, /^[0-9a-f]{64}$/);
+    const name = /const MODEL_NAME = "([^"]+)";/.exec(readFileSync(join(HERE, "run.js"), "utf8"))?.[1];
+    assert.equal(basename(PINNED.url), name);
+    assert.equal(basename(PINNED.url), basename(MODEL));
+    assert.doesNotMatch(text, /resolve\/main/);
+  });
+  /** Nothing was changed: the home folder holds only the model the test put there, and nothing was run. */
+  const unchanged = (r) => {
+    assert.deepEqual([r.left, r.ran], [["Library", "Library/Application Support", "Library/Application Support/BRIMM Transcribe", `${MODEL}`], ""]);
+    assert.match(r.out, /\nNothing was changed\.\n$/);
+  };
+  it("checks a model already here against the pin: here already when its SHA-256 is the pin's, downloaded again when it is not", () => {
+    const { copy, install, pin } = copyOfTheTool();
+    try {
+      writeFileSync(pin, JSON.stringify({ url: PINNED.url, sha256: sha("the model, made for the test") }, null, 2) + "\n");
+      const right = askWith({ install, files: [[MODEL, "the model, made for the test"]] }, "--print", "/Volumes/Work/Unedited video");
+      assert.equal(right.status, 0, right.err);
+      assert.ok(right.out.includes("\n  Model:  here already, and its SHA-256 is the pin's\n"), right.out);
+      unchanged(right);
+      const wrong = askWith({ install, files: [[MODEL, "another model"]] }, "--print", "/Volumes/Work/Unedited video");
+      assert.equal(wrong.status, 0, wrong.err);
+      assert.ok(wrong.out.includes(`\n  Model:  here, but its SHA-256 is not the pin's, so the pinned one is downloaded, about 1.6 GB, from ${PINNED.url}, and replaces it only when its SHA-256 is the pin's, ${sha("the model, made for the test")} (tool/whisper-model.pin.json)\n`), wrong.out);
+      unchanged(wrong);
+    } finally {
+      rmSync(copy, { recursive: true, force: true });
+    }
+  });
+  it("refuses, before it changes anything, a pin it cannot read an address at one revision and a SHA-256 from, whether or not the model is here", () => {
+    const { copy, install, pin } = copyOfTheTool();
+    const d = dropboxRoot();
+    const pinned = (more) => JSON.stringify({ url: PINNED.url, sha256: PINNED.sha256, ...more }, null, 2) + "\n";
+    try {
+      for (const [what, text] of [
+        ["no pin file", null],
+        ["an empty one", ""],
+        ["one that is not JSON", "url and sha"],
+        ["an address at main", pinned({ url: PINNED.url.replace(/resolve\/[0-9a-f]{40}\//, "resolve/main/") })],
+        ["an address on another host", pinned({ url: PINNED.url.replace("huggingface.co", "huggingface.co.example.invalid") })],
+        ["an address with http", pinned({ url: PINNED.url.replace("https:", "http:") })],
+        ["a SHA-256 cut short", pinned({ sha256: PINNED.sha256.slice(0, 63) })],
+        ["a SHA-256 in capitals", pinned({ sha256: PINNED.sha256.toUpperCase() })],
+        ["a SHA-256 alone", JSON.stringify({ sha256: PINNED.sha256 }, null, 2) + "\n"]
+      ]) {
+        if (text === null) rmSync(pin, { force: true });
+        else writeFileSync(pin, text);
+        for (const args of [["--print", "/Volumes/Work/Unedited video"], ["--print", "--machine", "Mac Studio", d.root]]) {
+          for (const files of [[], [MODEL]]) {
+            const r = askWith({ install, files }, ...args);
+            assert.deepEqual([r.status, r.out], [2, WHY + "\n\nNothing was changed.\n"], what + " " + args.join(" "));
+            assert.deepEqual([r.left, r.ran], [files.length ? ["Library", "Library/Application Support", "Library/Application Support/BRIMM Transcribe", MODEL] : [], ""], what);
+          }
+        }
+      }
+    } finally {
+      rmSync(copy, { recursive: true, force: true });
+      d.done();
+    }
+  });
+  it("tells the model's SHA-256 as node reads it (the function alone, in zsh)", { skip: noZsh }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-sha-"));
+    try {
+      const file = join(dir, "model.bin");
+      writeFileSync(file, "made for the test\n");
+      const script = (path) => `node="${process.execPath}"\n${functionOf("model_sha256")}model_sha256 "${path}"`;
+      const r = spawnSync("/bin/zsh", ["-c", script(file)], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+      assert.deepEqual([r.status, r.stdout], [0, sha("made for the test\n") + "\n"], r.stderr);
+      const gone = spawnSync("/bin/zsh", ["-c", script(join(dir, "missing.bin"))], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+      assert.equal(gone.stdout, "");
+      assert.notEqual(gone.status, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("keeps a download only when its SHA-256 is the pin's: a page that is not the model, or a cut-short file, is taken away and said (its own lines, run alone in zsh)", { skip: noZsh }, () => {
+    const from = '\nif [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then\n';
+    const at = text.indexOf(from);
+    assert.ok(at >= 0, "the download's block, in install.sh");
+    const block = text.slice(at + 1, text.indexOf("\nfi\n", at) + 4);
+    const WIFI = "<html><body>Sign in to the Wi-Fi</body></html>";
+    const MODEL_WORDS = "the model, made for the test";
+    const run = ({ gives, sha256, here }) => {
+      const dir = mkdtempSync(join(tmpdir(), "brimm-download-"));
+      try {
+        mkdirSync(join(dir, "bin"));
+        writeFileSync(join(dir, "bin", "curl"), '#!/bin/sh\necho "$*" > "$ASKED"\nwhile [ "$1" != "-o" ]; do shift; done\nprintf %s "$GIVES" > "$2"\n');
+        chmodSync(join(dir, "bin", "curl"), 0o755);
+        const modelDir = join(dir, "models");
+        const model = join(modelDir, "ggml-large-v3-turbo.bin");
+        if (here !== undefined) {
+          mkdirSync(modelDir);
+          writeFileSync(model, here);
+        }
+        const script = `set -euo pipefail\nMODEL_DIR="${modelDir}"\nMODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"\nMODEL_URL="${PINNED.url}"\nMODEL_SHA256="${sha256}"\nnode="${process.execPath}"\n${functionOf("say")}${functionOf("model_sha256")}${block}\nprint -r -- "went on"\n`;
+        const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { PATH: `${join(dir, "bin")}:/usr/bin:/bin`, GIVES: gives, ASKED: join(dir, "curl-asked") } });
+        const read = (file) => (existsSync(file) ? readFileSync(file, "utf8") : null);
+        return { status: r.status, out: r.stdout, err: r.stderr, model: read(model), part: existsSync(`${model}.part`), asked: read(join(dir, "curl-asked")), modelPath: model };
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+    // Not here: a page that is not the model is not kept.
+    let r = run({ gives: WIFI, sha256: PINNED.sha256 });
+    assert.equal(r.status, 1, r.err);
+    assert.ok(r.out.includes("It was not kept. Run this again."), r.out);
+    assert.ok(r.out.includes(`its SHA-256 is ${sha(WIFI)}, and the pin's is ${PINNED.sha256}`), r.out);
+    assert.deepEqual([r.model, r.part], [null, false]);
+    assert.equal(r.asked.trim(), `-L --fail --progress-bar -o ${r.modelPath}.part ${PINNED.url}`);
+    // Not here: the model, whole, is kept and the run goes on.
+    r = run({ gives: MODEL_WORDS, sha256: sha(MODEL_WORDS) });
+    assert.equal(r.status, 0, r.err);
+    assert.ok(r.out.endsWith("went on\n"), r.out);
+    assert.deepEqual([r.model, r.part], [MODEL_WORDS, false]);
+    // Here, but not the pin's: a bad download leaves it as it was, and a good one replaces it.
+    r = run({ gives: WIFI, sha256: PINNED.sha256, here: "another model" });
+    assert.equal(r.status, 1, r.err);
+    assert.deepEqual([r.model, r.part], ["another model", false]);
+    r = run({ gives: MODEL_WORDS, sha256: sha(MODEL_WORDS), here: "another model" });
+    assert.equal(r.status, 0, r.err);
+    assert.deepEqual([r.model, r.part], [MODEL_WORDS, false]);
+    // Here and the pin's: nothing is asked of curl.
+    r = run({ gives: MODEL_WORDS, sha256: sha(MODEL_WORDS), here: MODEL_WORDS });
+    assert.equal(r.status, 0, r.err);
+    assert.equal(r.out, "went on\n");
+    assert.deepEqual([r.model, r.part, r.asked], [MODEL_WORDS, false, null]);
+  });
+  it("says in its help that the model is downloaded at the pinned revision, and kept only when its SHA-256 is the pin's", () => {
+    const r = ask("--print", "--help");
+    assert.ok(r.out.replace(/\s+/g, " ").includes("downloads the transcriber's model once (about 1.6 GB) when it is not here, at the revision tool/whisper-model.pin.json pins, and keeps it only when its SHA-256 is the pin's,"), r.out);
   });
 });

@@ -64,8 +64,8 @@
 #                                    her folder's open lock keeps from Claude, so that every Claude Code session on this Mac
 #                                    takes them. Only where her folder gets the open lock, which --print says
 #
-# It installs ffmpeg, whisper-cpp and Node with Homebrew when they are missing, downloads the transcriber's model once (about
-# 1.6 GB) when it is not here, and has the Mac run unedited.js whenever something lands in a watched folder. It asks before it
+# It installs ffmpeg, whisper-cpp and Node with Homebrew when they are missing, downloads the transcriber's model once (about 1.6 GB)
+# when it is not here, at the revision tool/whisper-model.pin.json pins, and keeps it only when its SHA-256 is the pin's, and has the Mac run unedited.js whenever something lands in a watched folder. It asks before it
 # installs or downloads. The model is the transcript tool's own, in the same place, so a Mac that has that tool has it
 # already. With --machine it also installs the HyperFrames command line that tool/hyperframes.pin.json pins, with npm and none of
 # the package's own scripts, into ~/BRIMM Video Work/.toolchain/hyperframes-<version>, unless that folder holds it already. It
@@ -106,7 +106,12 @@ CHECK_FILE="$HOME/Library/LaunchAgents/$CHECK_LABEL.plist"
 CHECK_LOG="$HOME/Library/Logs/brimm-video-claude-check.log"
 MODEL_DIR="$HOME/Library/Application Support/BRIMM Transcribe"
 MODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"
-MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+# The model's address, at one revision of Hugging Face's whisper.cpp, and its SHA-256, from tool/whisper-model.pin.json, which the
+# engine reads too. Read with sed, as the pin above is: only the pin's own two lines, indented two spaces. A pin that will not do is
+# refused before anything is changed (below, right after --remove).
+MODEL_PIN="$HERE/whisper-model.pin.json"
+MODEL_URL="$(sed -n 's/^  "url": "\([^"]*\)",\{0,1\}$/\1/p' "$MODEL_PIN" 2>/dev/null || true)"
+MODEL_SHA256="$(sed -n 's/^  "sha256": "\([^"]*\)",\{0,1\}$/\1/p' "$MODEL_PIN" 2>/dev/null || true)"
 # This Mac's settings for episodes, which settings.js writes and checks (and reads here, to see what a run would change), the
 # work folder, and the checkout this runs from.
 SETTINGS_FILE="$HOME/Library/Application Support/BRIMM Video/settings.json"
@@ -298,6 +303,19 @@ const locked = read("package-lock.json")?.packages?.["node_modules/hyperframes"]
 console.log(fit(installed?.version, /^\d+\.\d+\.\d+$/) + "\n" + fit(locked?.integrity, /^sha512-[A-Za-z0-9+\/]{86}==$/));
 ' "$1" 2>/dev/null; } || true
 }
+# The SHA-256 of the file $1, as lowercase hex, as the node at $node reads it. The file is read as a stream, since the model is 1.6 GB.
+# A file that cannot be read, or a node that is not here, says nothing and ends non-zero.
+model_sha256() {
+  [[ -x "$node" ]] && "$node" -e '
+const { createHash } = require("node:crypto");
+const { createReadStream } = require("node:fs");
+const hash = createHash("sha256");
+const input = createReadStream(process.argv[1]);
+input.on("error", () => process.exit(1));
+input.on("data", (chunk) => hash.update(chunk));
+input.on("end", () => console.log(hash.digest("hex")));
+' "$1" 2>/dev/null
+}
 # Whether the folder $1 holds the pinned command line: installed, at the pinned version, with its program, and with the pin's
 # integrity string in npm's lock file, as the node at $2 reads them. Gives 0 when it does. The one place that is looked at: the
 # summary says it, the real run leaves a folder that passes as it is, and checks what npm fetched with it before going on.
@@ -442,6 +460,15 @@ if [[ "$mode" == "remove" ]]; then
   drop_check
   say "Stopped watching for unedited video. The folders, the model, the programs and the transcript tool's own launch agent are still here."
   exit 0
+fi
+
+# The pin of the transcriber's model is looked at before anything is, whether or not the model is here, since a model already here is
+# checked against it too: a pin read as nothing would download whatever the address gave, and keep it.
+if [[ ! "$MODEL_URL" =~ '^https://huggingface\.co/ggerganov/whisper\.cpp/resolve/[0-9a-f]{40}/ggml-large-v3-turbo\.bin$' || ! "$MODEL_SHA256" =~ '^[0-9a-f]{64}$' ]]; then
+  say "The pin of the transcriber's model, tool/whisper-model.pin.json, does not hold its address on Hugging Face at one revision and its SHA-256, so the installer changed nothing."
+  say ""
+  say "Nothing was changed."
+  exit 2
 fi
 
 # For one of the two Macs (--machine): the one folder named is BRIMM Video, in The BRIMM DB in Dropbox, and the folder watched
@@ -869,7 +896,17 @@ else
   say "  Claude Code, to read a video once its person has said what it is:  not here, so nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac"
 fi
 say "  Programs to install with Homebrew:  ${need[*]:-none, they are all here}"
-say "  Model:  $([[ -f "$MODEL" ]] && echo "here already" || echo "to download, about 1.6 GB, to $MODEL")"
+# A model that is here is checked against the pin, by the node found above (about 3 seconds). Before Homebrew's node is installed there
+# is none to check with, and that is said.
+if [[ ! -f "$MODEL" ]]; then
+  say "  Model:  to download, about 1.6 GB, to ${MODEL}, from ${MODEL_URL}, and kept only when its SHA-256 is the pin's, ${MODEL_SHA256} (tool/whisper-model.pin.json)"
+elif [[ ! -x "$node" ]]; then
+  say "  Model:  here; its SHA-256 is checked against the pin's once node is installed"
+elif [[ "$(model_sha256 "$MODEL" || true)" == "$MODEL_SHA256" ]]; then
+  say "  Model:  here already, and its SHA-256 is the pin's"
+else
+  say "  Model:  here, but its SHA-256 is not the pin's, so the pinned one is downloaded, about 1.6 GB, from ${MODEL_URL}, and replaces it only when its SHA-256 is the pin's, ${MODEL_SHA256} (tool/whisper-model.pin.json)"
+fi
 say "  Log:  $LOG"
 # A check of Claude that an earlier setup left behind, cut short before it could take it away: by an installer from before
 # the traps below, or by a kill -9. launchd runs it at every login. Every setup that goes ahead takes it away first.
@@ -965,13 +1002,14 @@ if [[ -n "$machine" ]]; then
   say "That is all doctor says. The setup reads none of it and installs nothing it suggests. Jason looks for a tick against Node.js, FFmpeg, FFprobe and Chrome; a cross against whisper-cpp, TTS, BGM or Docker is expected, and so is one against Version when a newer command line is out, since the pin moves only by a pull request."
 fi
 
-if [[ ! -f "$MODEL" ]]; then
+if [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then
   mkdir -p "$MODEL_DIR"
   say "Downloading the model. This is done once."
   curl -L --fail --progress-bar -o "$MODEL.part" "$MODEL_URL"
-  if [[ "$(stat -f %z "$MODEL.part")" -lt 1000000000 ]]; then
+  got="$(model_sha256 "$MODEL.part" || true)"
+  if [[ "$got" != "$MODEL_SHA256" ]]; then
     rm -f "$MODEL.part"
-    say "The model did not download whole. Run this again."
+    say "The model downloaded is not the one tool/whisper-model.pin.json pins: its SHA-256 is ${got:-one that could not be read}, and the pin's is ${MODEL_SHA256}. It may not have downloaded whole. It was not kept. Run this again."
     exit 1
   fi
   mv "$MODEL.part" "$MODEL"
