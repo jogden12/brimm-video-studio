@@ -14,6 +14,9 @@ import { runsFolder, workFolder } from "./settings.js";
 /** The import's launch agent. */
 export const AGENT_LABEL = "com.thebrimm.unedited";
 
+/** What is said when the check itself fails: that it could not be told counts as busy. The same words as install.sh's. */
+export const CANNOT_TELL = "Whether anything is at work on this Mac could not be told.";
+
 /** How old an import's lock may be and still count: run.js's STALE_LOCK_MS (half a day), which run.js does not export. */
 export const RUNS_LOCK_STALE_MS = 43200000;
 
@@ -73,11 +76,12 @@ function importLockPid(home, alive, now) {
   return 0;
 }
 
-/** Why the Mac is not idle, in one line, or "" when nothing is at work. Never throws. */
+/** Why the Mac is not idle, in one line, or "" when nothing is at work; CANNOT_TELL when it fails. Never throws. */
 export function idleWhy(options = {}) {
   try {
-    const { home = studioHome(), agentPid = launchdPid(), alive = isRunning, now = Date.now() } = options;
+    const { agentPid = launchdPid(), alive = isRunning, now = Date.now() } = options;
     if (Number.isInteger(agentPid) && agentPid > 0) return `The import is at work: its background job, ${AGENT_LABEL}, is running (process ${agentPid}).`;
+    const { home = studioHome() } = options;
     const lockPid = importLockPid(home, alive, now);
     if (lockPid) return `An import is at work: it holds its lock (process ${lockPid}).`;
     const folders = foldersIn(workFolder(home));
@@ -94,7 +98,7 @@ export function idleWhy(options = {}) {
     }
     return "";
   } catch (e) {
-    return "";
+    return CANNOT_TELL;
   }
 }
 
@@ -112,11 +116,12 @@ if (isMain(import.meta.url)) {
   }
   let agentPid;
   if (fromStdin) {
-    let printed = "";
+    let printed;
     try {
       printed = readFileSync(0, "utf8");
     } catch (e) {
-      printed = "";
+      process.stderr.write("Standard input could not be read.\n");
+      process.exit(2);
     }
     agentPid = pidFromPrint(printed);
   } else {

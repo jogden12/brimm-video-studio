@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RUNS_LOCK_STALE_MS, idleWhy, launchdPid, pidFromPrint } from "../busy.js";
+import { CANNOT_TELL, RUNS_LOCK_STALE_MS, idleWhy, launchdPid, pidFromPrint } from "../busy.js";
 import { lockOf, whenReadyLockOf } from "../detached.js";
 import { lockFile } from "../run.js";
 import { runsFolder, workFolder } from "../settings.js";
@@ -122,11 +122,17 @@ describe("idleWhy", () => {
     const was = process.env.BRIMM_VIDEO_HOME;
     process.env.BRIMM_VIDEO_HOME = "relative";
     try {
-      assert.equal(idleWhy({ agentPid: null }), "");
+      assert.equal(idleWhy({ agentPid: null }), CANNOT_TELL);
+      assert.equal(idleWhy({ agentPid: 4321 }), JOB);
     } finally {
       if (was === undefined) delete process.env.BRIMM_VIDEO_HOME;
       else process.env.BRIMM_VIDEO_HOME = was;
     }
+  });
+
+  it("says it could not be told, in install.sh's own words, when something unexpected fails", () => {
+    assert.equal(CANNOT_TELL, "Whether anything is at work on this Mac could not be told.");
+    assert.ok(readFileSync(join(TOOL, "install.sh"), "utf8").includes(`why="\${why:-${CANNOT_TELL}}"`));
   });
 
   it("keeps run.js's half day", () => {
@@ -149,11 +155,26 @@ describe("node busy.js idle-why", () => {
       importLock(home, String(process.pid));
       const held = ask(home, words, "");
       assert.deepEqual([held.status, held.stdout], [1, `An import is at work: it holds its lock (process ${process.pid}).\n`]);
-      for (const bad of [["idle-why", "--what"], ["idle"]]) {
+      for (const bad of [["idle-why", "--what"], ["idle"], ["idle-why", "--launchd", "x"], ["idle-why", "--launchd", "-", "extra"]]) {
         const ran = ask(home, bad);
         assert.equal(ran.status, 2);
         assert.match(ran.stderr, /Say: node busy\.js idle-why \[--launchd -\]/);
       }
+    });
+  });
+
+  it("ends 2 and says why on standard error when BRIMM_VIDEO_HOME is refused", () => {
+    const r = spawnSync(process.execPath, [BUSY, "idle-why"], { env: { PATH: "/usr/bin:/bin", BRIMM_VIDEO_HOME: "relative" }, encoding: "utf8" });
+    assert.equal(r.status, 2);
+    assert.equal(r.stdout, "");
+    assert.ok(r.stderr.trim().length > 0, "a refusal is said");
+  });
+
+  it("ends 2 and says so on standard error when standard input cannot be read", () => {
+    withHome((home) => {
+      // A folder given as standard input cannot be read.
+      const closed = spawnSync("/bin/sh", ["-c", `exec 0<"${home}"; "${process.execPath}" "${BUSY}" idle-why --launchd -`], { env: { PATH: "/usr/bin:/bin", HOME: home, BRIMM_VIDEO_HOME: home }, encoding: "utf8" });
+      assert.deepEqual([closed.status, closed.stdout, closed.stderr], [2, "", "Standard input could not be read.\n"]);
     });
   });
 });
