@@ -422,18 +422,18 @@ describe("the open guard, III: Bash", () => {
     }
   });
   it("matches a node in double quotes letter for letter, as the regular expression's own characters", async () => {
-    const node = "/Users/o.hara/App (1)+/bin/node";
+    const node = "/Users/o.hara/App {1}+/bin/node";
     const here = { ...ctx, node };
     assert.equal((await bash(`"${node}" "${CHECKOUT}/tool/edit.js" episodes`, {}, here)).decision, "allow");
-    assert.deepEqual(await bash(`"${node.replace(/[.+()]/g, "X")}" "${CHECKOUT}/tool/edit.js" episodes`, {}, here), ALONE);
-    for (const letter of [".", "+", "(", ")"]) assert.deepEqual(await bash(`"${node.replace(letter, "X")}" "${CHECKOUT}/tool/edit.js" episodes`, {}, here), ALONE, letter);
+    assert.deepEqual(await bash(`"${node.replace(/[.+{}]/g, "X")}" "${CHECKOUT}/tool/edit.js" episodes`, {}, here), ALONE);
+    for (const letter of [".", "+", "{", "}"]) assert.deepEqual(await bash(`"${node.replace(letter, "X")}" "${CHECKOUT}/tool/edit.js" episodes`, {}, here), ALONE, letter);
   });
   it("refuses every spelling when node or the checkout cannot be put in double quotes", async () => {
     for (const node of UNQUOTABLE_NODES) for (const command of spellingsOf(node)) assert.deepEqual(await bash(command, {}, { ...ctx, node }), ALONE, JSON.stringify(command));
     for (const checkout of UNQUOTABLE_CHECKOUTS) for (const command of spellingsOf(NODE, checkout)) assert.deepEqual(await bash(command, {}, { ...ctx, checkout }), ALONE, JSON.stringify(command));
   });
   it("refuses edit.js with the bare node path or the word node, &&, ;, |, $(…), an environment prefix, cd … &&, another node or another path", async () => {
-    for (const command of [`node "${CHECKOUT}/tool/edit.js" episodes`, `${EDIT_BARE} episodes`, `${EDIT} episodes && date`, `${EDIT} episodes; date`, `${EDIT} episodes | cat`, `${EDIT} $(date)`, `${EDIT} "$(date)"`, `A=1 ${EDIT} episodes`, `cd /tmp && ${EDIT} episodes`, `/usr/local/bin/node "${CHECKOUT}/tool/edit.js" episodes`, `${NODE} "/tmp/tool/edit.js" episodes`, `${NODE} '${CHECKOUT}/tool/edit.js' episodes`, `${EDIT}  episodes`, `${EDIT} episodes\ndate`, ` ${EDIT} episodes`]) {
+    for (const command of [`node "${CHECKOUT}/tool/edit.js" episodes`, `${EDIT_BARE} episodes`, `${EDIT} episodes && date`, `${EDIT} episodes; date`, `${EDIT} episodes | cat`, `${EDIT} $(date)`, `${EDIT} "$(date)"`, `A=1 ${EDIT} episodes`, `cd /tmp && ${EDIT} episodes`, `"/usr/local/bin/node" "${CHECKOUT}/tool/edit.js" episodes`, `"${NODE}" "/tmp/tool/edit.js" episodes`, `"${NODE}" '${CHECKOUT}/tool/edit.js' episodes`, `${EDIT}  episodes`, `${EDIT} episodes\ndate`, ` ${EDIT} episodes`]) {
       assert.deepEqual(await bash(command), ALONE, command);
     }
   });

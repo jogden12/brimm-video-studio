@@ -294,7 +294,46 @@ describe("behind", () => {
     writeFileSync(skill, before.replace('"/opt/homebrew/bin/node" "/checkout/tool/edit.js"', '/opt/homebrew/bin/node "/checkout/tool/edit.js"'));
     const r = await on({ ...t.ctx.deps, run: newest() }, "behind");
     assert.deepEqual([r.code, r.text], [0, `This Mac has the newest BRIMM Video Studio.\n${stale}`]);
+    // A pulled Mac's settings.json allow rule has the bare spelling too: still out of date, never "lock changed".
+    const settings = join(folder, ".claude", "settings.json");
+    const allowed = readFileSync(settings, "utf8");
+    assert.ok(allowed.includes('Bash(\\"/opt/homebrew/bin/node\\" \\"/checkout/tool/edit.js\\"'));
+    writeFileSync(settings, allowed.replace('Bash(\\"/opt/homebrew/bin/node\\" \\"/checkout/tool/edit.js\\"', 'Bash(/opt/homebrew/bin/node \\"/checkout/tool/edit.js\\"'));
+    const bare = await on({ ...t.ctx.deps, run: newest() }, "behind");
+    assert.deepEqual([bare.code, bare.text], [0, `This Mac has the newest BRIMM Video Studio.\n${stale}`]);
+    assert.ok(!bare.text.includes("lock"), bare.text);
     t.done();
+  });
+  it("names a node whose path is not a plain word in single quotes in the line for Jason, so each shell gives it to settings.js as one word", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-named-node-")));
+    try {
+      const standIn = join(dir, "args.sh");
+      writeFileSync(standIn, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o755 });
+      const nodes = {
+        spaces: [join(dir, "BRIMM Video Studio.app", "bin", "node"), (p) => `'${p}'`],
+        apostrophe: [join(dir, "o'hara", "bin", "node"), (p) => `'${p.replace(/'/g, "'\\''")}'`],
+        shell: [join(dir, "Sallie's BRIMM 1 & Co; ok! é", "node"), (p) => `'${p.replace(/'/g, "'\\''")}'`]
+      };
+      for (const [name, [node, spelled]] of Object.entries(nodes)) {
+        mkdirSync(dirname(node), { recursive: true });
+        writeFileSync(node, "#!/bin/sh\n", { mode: 0o755 });
+        const t = setup();
+        const folder = writeStudio(t.home, { checkout: "/checkout", node });
+        const skill = join(folder, ".claude", "skills", "brimm-edit", "SKILL.md");
+        writeFileSync(skill, readFileSync(skill, "utf8").replace(/\| "Show me the Reels".*\n/, ""));
+        const r = await on({ ...t.ctx.deps, run: git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" }).run }, "behind");
+        const given = r.text.match(/--node (.*), then start a new session/)[1];
+        assert.equal(given, spelled(node), name);
+        for (const shell of [["/bin/zsh", ["-f", "-c"]], ["/bin/bash", ["-c"]]]) {
+          const run = spawnSync(shell[0], [...shell[1], `${standIn} --node ${given}`], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+          assert.equal(run.status, 0, `${name} ${shell[0]}: ${run.stderr}`);
+          assert.deepEqual(run.stdout.split("\n").slice(0, -1), ["--node", node], `${name} ${shell[0]}`);
+        }
+        t.done();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
   it("asks git nothing where this Mac's checkout has no .git of its own, and still says what needs no network", async () => {
     const t = setup();
