@@ -96,7 +96,7 @@ import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
 import { quotable, shellWord, studioFiles, studioFolder } from "./studio.js";
-import { brokenLine, buildOf, isInstalled } from "./build.js";
+import { UPDATE_SAY, brokenLine, buildOf, isInstalled, repairLine } from "./build.js";
 import { checkForUpdate, updateLine } from "./update-check.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
@@ -387,7 +387,9 @@ export function contextFor(deps = {}) {
   // set up yet needs it too.
   const build = deps.build ?? buildOf(thisCheckout());
   const got = deps.settings ? { settings: deps.settings } : readSettings(home);
-  if (!got.settings) return { why: "This Mac is not set up for episodes yet. Jason runs install.sh --machine on it." };
+  if (!got.settings) {
+    return { why: isInstalled(build) ? `This Mac is not set up for episodes yet. ${repairLine(build)}` : "This Mac is not set up for episodes yet. Jason runs install.sh --machine on it." };
+  }
   const { settings } = got;
   // The names of a gated video that a command has found (findEpisode, hideNames), which no line it says after may hold.
   const hidden = { names: [], keep: [] };
@@ -453,8 +455,10 @@ const listed = (things) => (things.length < 2 ? things.join("") : `${things.slic
     answered, and this brimm-video cannot read the label a newer one names it by. */
 const newerName = (record) => `an episode a newer BRIMM Video Studio wrote (${record.id.slice(-6)})`;
 
-/** Why a command ends at an episode written by a newer brimm-video, in the words it has always used: by its short id alone. */
-const newerWhy = (record) => `That is ${newerName(record)}. Jason has a newer BRIMM Video Studio. Ask him to update this Mac.`;
+/** Why a command ends at an episode written by a newer brimm-video, in the words it has always used: by its short id alone. On an installed
+    Mac (build.js) it is told to update Studio instead. */
+const newerWhy = (record, build) =>
+  isInstalled(build) ? `That is ${newerName(record)}. ${UPDATE_SAY}` : `That is ${newerName(record)}. Jason has a newer BRIMM Video Studio. Ask him to update this Mac.`;
 
 /** What the gate says when the record in force is not the newest file in the episode's record folder, for a record that may be a
     session: Dropbox is still bringing the newer one, or it is one this code rejects. */
@@ -485,7 +489,7 @@ const recordShaped = (r) => typeof r.id === "string" && Number.isInteger(r.versi
 function gateOf(ctx, e, records, said, inForce) {
   if (!ctx.asked || UNSCOPED.includes(ctx.asked.command)) return null;
   const refused = (why, more = {}) => ({ why, name: e.name, folder: e.folder, gate: true, ...more });
-  if (e.read.newer) return refused(newerWhy(e.read.record), { newer: true });
+  if (e.read.newer) return refused(newerWhy(e.read.record, ctx.build), { newer: true });
   if (inForce && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
   const there = keptOn(ctx, e);
   if (there) return refused(ON_OTHER_MAC(isGated(e) ? gatedName(gatedRecord(e), e.held) : shownName(inForce ?? records.find(recordShaped)), there));
@@ -1187,7 +1191,7 @@ function episodeFor(ctx, rest, { newerEnds = 0, codes = false } = {}) {
     return { code: 1 };
   }
   if (read.newer) {
-    ctx.say(newerWhy(read.record));
+    ctx.say(newerWhy(read.record, ctx.build));
     return { code: newerEnds };
   }
   return { found, record: read.record };
@@ -1531,7 +1535,7 @@ async function appWhenReady(ctx, rest) {
     return 1;
   }
   if (found.read.newer) {
-    ctx.say(newerWhy(found.read.record));
+    ctx.say(newerWhy(found.read.record, ctx.build));
     return 1;
   }
   if (!keptOnAMac(found.read.record)) {
@@ -2041,7 +2045,7 @@ function lateCheckOwed(ctx, video, held, who = video, plain = (text) => text) {
   try {
     ctx.kickstart();
   } catch (e) {
-    say(couldNotAsk(e));
+    say(couldNotAsk(e, ctx.build));
     return 1;
   }
   if (problem) say(`${who} is imported, as ${name}. Dropbox found a problem with a copy of it before (${problem}): the Mac's import of its drop folder is asked to make it again now. The panel shows how far it is.`);
@@ -2132,7 +2136,7 @@ export async function retry(ctx, rest) {
   try {
     ctx.kickstart();
   } catch (e) {
-    say(couldNotAsk(e));
+    say(couldNotAsk(e, ctx.build));
     return 1;
   }
   say(`${who} is imported again${which}: the Mac's import of its drop folder is asked to look. The panel shows how far it is.`);
@@ -2140,8 +2144,9 @@ export async function retry(ctx, rest) {
 }
 
 /** The line for a launch agent that could not be asked to look (retry, lateCheckOwed, look). */
-function couldNotAsk(e) {
-  return `The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}). Jason runs install.sh --machine on this Mac.`;
+function couldNotAsk(e, build) {
+  const did = `The launch agent ${AGENT} could not be asked to look (${String(e.message).replace(/\.$/, "")}).`;
+  return isInstalled(build) ? `${did} ${repairLine(build)}` : `${did} Jason runs install.sh --machine on this Mac.`;
 }
 
 /** `look`: "look again", after she allowed node in System Settings (access-notice design, part 4). It names no episode. A look that has
@@ -2161,7 +2166,7 @@ export async function look(ctx) {
   try {
     ctx.kickstart();
   } catch (e) {
-    say(couldNotAsk(e));
+    say(couldNotAsk(e, ctx.build));
     return 1;
   }
   say(LOOK_ASKED);
@@ -3611,7 +3616,7 @@ async function noteAgreement(ctx, found, record, n) {
   // gave them: Jason may have turned the training gate off meanwhile.
   const now = readEpisode(found.folder);
   if (!now.record) return stop(notRead(ctx, { ...found, read: now }));
-  if (now.newer) return stop(newerWhy(now.record));
+  if (now.newer) return stop(newerWhy(now.record, ctx.build));
   if (now.record.rev !== record.rev) return stop(`${name} changed on the other Mac meanwhile. Say it again.`);
   const again = await checks(now.record, ctx.deps.settings ? ctx.settings : readSettings(ctx.home).settings || {});
   if (again.why) return stop(again.why);
@@ -3751,7 +3756,7 @@ async function ask(ctx, rest) {
     // A record a newer brimm-video wrote may be a session or a video not yet answered, whose fields this one cannot read: it is
     // named by its short id alone, nothing is asked of Claude, and nothing is written, not even the result of a run.
     if (found.read.newer) {
-      ctx.say(newerWhy(found.read.record));
+      ctx.say(newerWhy(found.read.record, ctx.build));
       return 1;
     }
     const deps = {
@@ -3809,7 +3814,7 @@ async function read(ctx, rest) {
     return 1;
   }
   if (found.read.newer) {
-    ctx.say(newerWhy(found.read.record));
+    ctx.say(newerWhy(found.read.record, ctx.build));
     return 1;
   }
   const deps = {
@@ -3890,7 +3895,7 @@ async function waitForImport(ctx, { found, record, wait, progress, log, kinds = 
       waited += READ_LOOK_MS;
       const again = findEpisode(ctx, found.name);
       if (!again.read || !again.read.record) return { why: again.why || notRead(ctx, again, found.name) };
-      if (again.read.newer) return { why: newerWhy(again.read.record) };
+      if (again.read.newer) return { why: newerWhy(again.read.record, ctx.build) };
       if (!kinds.includes(recordKind(again.read.record))) return { why: notFor };
       record = again.read.record;
     }
@@ -3983,7 +3988,7 @@ async function workcopy(ctx, rest) {
     return 1;
   }
   if (found.read.newer) {
-    ctx.say(newerWhy(found.read.record));
+    ctx.say(newerWhy(found.read.record, ctx.build));
     return 1;
   }
   const { record } = found.read;
@@ -5227,7 +5232,7 @@ async function clickedClear(ctx, label) {
 function clearedAfterClick(ctx, found, record, plan, began) {
   const now = readEpisode(found.folder);
   if (!now.record) return notRead(ctx, { ...found, read: now });
-  if (now.newer) return newerWhy(now.record);
+  if (now.newer) return newerWhy(now.record, ctx.build);
   if (now.record.rev !== record.rev) return changedMeanwhile(shownName(record));
   const why = answerWhy(ctx, found, now.record, plan);
   if (why) return why;
@@ -5270,7 +5275,7 @@ async function answerKind(ctx, found, plan, began) {
     return 1;
   }
   if (read.newer) {
-    say(newerWhy(read.record));
+    say(newerWhy(read.record, ctx.build));
     return 1;
   }
   const { record } = read;
@@ -5963,7 +5968,7 @@ export async function leaveCommand(ctx, rest) {
       return 1;
     }
     if (read.newer) {
-      ctx.say(newerWhy(read.record));
+      ctx.say(newerWhy(read.record, ctx.build));
       return 1;
     }
     const { record } = read;
@@ -6179,7 +6184,7 @@ async function askTeachings(ctx, found, began) {
     return 1;
   }
   if (read.newer) {
-    ctx.say(newerWhy(read.record));
+    ctx.say(newerWhy(read.record, ctx.build));
     return 1;
   }
   const { record } = read;
@@ -7047,7 +7052,7 @@ function editKit(ctx) {
     beingAnswered,
     kindSaid: KIND_SAID,
     notRead: (found, read) => notRead(ctx, { ...found, read }),
-    newerWhy,
+    newerWhy: (record) => newerWhy(record, ctx.build),
     pending: PENDING_WHY,
     hide: (name) => hideNames(ctx, episodeAt(ctx, name)),
     // A read-only copy of text in the episode's shown folder on this Mac, which `plan … script` opens (plan-script.js).
@@ -7105,7 +7110,7 @@ async function joinCommand(ctx, rest) {
     return 1;
   }
   if (found.read.newer) {
-    ctx.say(newerWhy(found.read.record));
+    ctx.say(newerWhy(found.read.record, ctx.build));
     return 1;
   }
   const tools = ctx.deps.tools || findPrograms();
