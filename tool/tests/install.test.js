@@ -294,7 +294,12 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
     const here = askWith({ files: [MODEL] }, "--print", "/Volumes/Work/Unedited video");
     assert.equal(here.status, 0, here.err);
     assert.ok(here.out.includes(`\n  Model:  here, but its SHA-256 is not the pin's, so the pinned one is downloaded, about 1.6 GB, from ${PINNED.url}, and replaces it only when its SHA-256 is the pin's, ${PINNED.sha256} (tool/whisper-model.pin.json)\n`), here.out);
+    assert.doesNotMatch(here.out, /to download/);
     assert.equal(here.ran, "");
+    // With no node on this Mac yet, a model that is here cannot be checked, and that is said.
+    const blind = askWith({ files: [MODEL], bare: true }, "--print", "/Volumes/Work/Unedited video");
+    assert.equal(blind.status, 0, blind.err);
+    assert.ok(blind.out.includes("\n  Model:  here; its SHA-256 is checked against the pin's once node is installed\n"), blind.out);
   });
   // The transcript tool's launch agent goes on watching its folders, and whichever tool looked first in a folder would file the
   // video away. So a folder it watches is refused here, and its file is only ever read.
@@ -1919,7 +1924,7 @@ const HDR_LISTS = { hwaccels: "Hardware acceleration methods:\nvideotoolbox\n", 
     `build` is false), `tool`, `install` (the installer in that copy) and `tools` (Contents/Resources/node/bin). Each stand-in writes
     what it is given into `ran()` but node, which runs the real one (an old one with `oldNode`), and ffmpeg, which prints `lists` for
     -hwaccels, -filters and -version. */
-function appCopy({ under = "Applications", id = "com.thebrimm.video-studio", exe = "BRIMM Video Studio", build = true, lists = HDR_LISTS, oldNode = false } = {}) {
+function appCopy({ under = "Applications", id = "com.thebrimm.video-studio", exe = "BRIMM Video Studio", build = true, lists = HDR_LISTS, oldNode = false, deadNode = false } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-app-")));
   const app = join(dir, under, "BRIMM Video Studio.app");
   const ranFile = join(dir, "ran");
@@ -1937,7 +1942,7 @@ function appCopy({ under = "Applications", id = "com.thebrimm.video-studio", exe
   if (build) writeFileSync(join(checkout, "build.json"), JSON.stringify(WHOLE));
   const tools = join(app, "Contents", "Resources", "node", "bin");
   const old = oldNode ? `case "$1" in\n  --version) echo v20.11.0; exit 0 ;;\n  -e) case "$2" in *process.versions.node*) exit 1 ;; esac ;;\nesac\n` : "";
-  stand(join(tools, "node"), `${old}exec "${process.execPath}" "$@"\n`);
+  stand(join(tools, "node"), deadNode ? "exit 1\n" : `${old}exec "${process.execPath}" "$@"\n`);
   for (const [name, text] of Object.entries(lists)) writeFileSync(join(dir, `ffmpeg-${name}`), text);
   stand(join(tools, "ffmpeg"), `case "$*" in\n  *-hwaccels*) cat "${join(dir, "ffmpeg-hwaccels")}" ;;\n  *-filters*) cat "${join(dir, "ffmpeg-filters")}" ;;\n  *-version*) cat "${join(dir, "ffmpeg-version")}" ;;\n  *) echo "$0 $*" >> "${ranFile}" ;;\nesac\n`);
   for (const name of ["npm", "ffprobe", "whisper-cli", ...HELPERS.map((h) => `brimm-${h}`)]) stand(join(tools, name), `echo "$0 $*" >> "${ranFile}"\n`);
@@ -2776,6 +2781,18 @@ describe("BRIMM Video Studio's own copy of Studio (--tools; Studio app phase 4),
       old.done();
     }
   });
+  it("refuses a node that cannot be run at all, in words that do not name a version", () => {
+    const dead = appCopy({ deadNode: true });
+    const d = dropbox();
+    try {
+      const r = askWith({ bare: true, install: dead.install }, "--print", "--machine", "Mac Studio", "--tools", dead.tools, d.root);
+      assert.deepEqual([r.status, r.out], [2, `BRIMM Video Studio's own node, in ${dead.tools}, cannot be run. ${DAMAGED}${ALSO}`]);
+      assert.deepEqual([r.left, r.ran], [[], ""]);
+    } finally {
+      d.done();
+      dead.done();
+    }
+  });
   it("refuses --tools from a git checkout, and the app's own copy without --tools, before anything is changed", () => {
     const d = dropbox();
     try {
@@ -3072,11 +3089,11 @@ describe("waiting for nothing at work (Studio app phase 4)", { skip: notAMac }, 
   });
   it("says in its help, and in the README, how BRIMM Video Studio sets a Mac up", () => {
     const help = ask("--print", "--help").out.replace(/\s+/g, " ");
-    assert.ok(help.includes("A real run stops, with 75, before it touches this Mac's drop folder, its settings or its background job, while an import or an episode's command is at work"), help);
+    assert.ok(help.includes("A real run stops, with 75, before it touches this Mac's drop folder, its settings or its background job, while an import, an episode's command or a video being made ready for HyperFrames is at work"), help);
     const readme = readFileSync(join(HERE, "..", "README.md"), "utf8");
     const at = readme.indexOf("**Installed from the app.**");
     assert.ok(at >= 0);
     const paragraph = readme.slice(at, readme.indexOf("\n", at));
-    for (const word of ["`--tools`", "`--app`", "`--agent`", "75", "`tool/busy.js`", "`tool/whisper-model.pin.json`"]) assert.ok(paragraph.includes(word), word);
+    for (const word of ["none of these programs is taken from the PATH or Homebrew", "with --app, that folder must be inside the app", "`--tools`", "`--app`", "`--agent`", "75", "`tool/busy.js`", "`tool/whisper-model.pin.json`"]) assert.ok(paragraph.includes(word), word);
   });
 });

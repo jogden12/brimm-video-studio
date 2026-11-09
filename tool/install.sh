@@ -67,7 +67,7 @@
 #                                    needed. With --app the background job is the app's own program, started with --agent, so
 #                                    that macOS names the app when it asks for access and in Login Items; without it, node from
 #                                    <bin>. It takes the other options of --machine. A real run stops, with 75, before it touches this
-#                                    Mac's drop folder, its settings or its background job, while an import or an episode's command is at work
+#                                    Mac's drop folder, its settings or its background job, while an import, an episode's command or a video being made ready for HyperFrames is at work
 #   ./install.sh --machine "Sallie's laptop" --user-deny "/path/to/The BRIMM DB/BRIMM Video"
 #                                    also add to her user settings, ~/.claude/settings.json, the Read deny rules for the places
 #                                    her folder's open lock keeps from Claude, so that every Claude Code session on this Mac
@@ -180,7 +180,7 @@ switch_missing=""
 switch_local=""
 # --user-deny: her user settings are given the Read deny rules of the places her folder's open lock keeps from Claude.
 user_deny=""
-# --tools: the folder of BRIMM Video Studio's own programs, as given; --app: the app, as given (Task 4 checks it and uses it).
+# --tools: the folder of BRIMM Video Studio's own programs, as given; --app: the app, as given (the app checks below check it, and the background job's program is made from it).
 # Neither goes to settings.js, so neither is in switch_options.
 tools_given=""
 app_given=""
@@ -270,7 +270,7 @@ if [[ ${#folders[@]} -eq 0 && "$mode" != "remove" && "$machined" != "yes" ]]; th
   exit 2
 fi
 # --tools and --app are for BRIMM Video Studio, which sets a Mac up with --machine from the app's own programs. In installed mode
-# (--tools) every program is looked for in that folder alone, and the background job runs the node there.
+# (--tools) every program is looked for in that folder alone, and the background job runs the node there or, with --app, the app's own program (agent_program).
 if [[ ( -n "$tools_given" || -n "$app_given" ) && "$mode" == "remove" ]]; then
   say "--remove stops the watching and changes no settings, so it does not take --tools or --app."
   exit 2
@@ -442,8 +442,8 @@ agent_bundle() {
   print -rn -- "  </array>"
 }
 
-# The launch agent: under its label the Mac runs unedited.js with node, on the folders named, whenever one of those folders
-# changes and once when the agent is loaded. $1 is the node it is run with. --print shows this and the Mac is given this, so
+# The launch agent: under its label the Mac runs unedited.js with node (or, with --app, the app's own program, agent_program), on the folders named, whenever one of those folders
+# changes and once when the agent is loaded. $1 is the node it is run with (not used with --app: agent_program). --print shows this and the Mac is given this, so
 # the two cannot differ.
 agent() {
   cat <<EOF
@@ -472,7 +472,7 @@ EOF
 }
 
 # The one-shot launch agent of the check of Claude: unedited.js --check-claude, run once when it is loaded, with the main
-# agent's PATH, into a log of its own. $1 is the node it is run with. It watches nothing, and is taken away once it has run.
+# agent's PATH, into a log of its own. $1 is the node it is run with (or, with --app, the app's own program, agent_program). It watches nothing, and is taken away once it has run.
 # $2 is the time, in seconds since 1970, after which it asks Claude nothing (--until). launchd runs one that a kill -9 or a
 # power cut left behind at every login, and past that time it only says in its log that Claude was not asked.
 check_agent() {
@@ -568,8 +568,10 @@ if [[ -n "$tools" ]]; then
     [[ -f "$tools/$name" && -x "$tools/$name" ]] || tools_missing+=("$name")
   done
   (( ${#tools_missing[@]} == 0 )) || refuse "BRIMM Video Studio's own programs are not all in ${tools}. Missing: ${(j:, :)tools_missing}. ${DAMAGED}"
+  tools_node_version="$("$tools/node" --version 2>/dev/null || true)"
+  [[ -n "$tools_node_version" ]] || refuse "BRIMM Video Studio's own node, in ${tools}, cannot be run. ${DAMAGED}"
   if node_old "$tools/node"; then
-    refuse "BRIMM Video Studio's own node, in ${tools}, is $("$tools/node" --version), and Studio needs 22 or later. ${DAMAGED}"
+    refuse "BRIMM Video Studio's own node, in ${tools}, is ${tools_node_version}, and Studio needs 22 or later. ${DAMAGED}"
   fi
 fi
 # The app (--app): a whole bundle that names its identifier and its program, whose program can be run, and that holds the programs
