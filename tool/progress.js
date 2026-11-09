@@ -114,8 +114,8 @@ function tail(file, bytes) {
 export const noProgress = { begin() {}, length() {}, steps() {}, step() {}, fraction() {}, encoding: () => ({ args: [], stop() {} }), end() {} };
 
 /** The reporter for the runs of one process. `folder` is where its file goes. `swift` is the program that runs the panel's source, ""
-    when there is none, and is used only when the compiled panel, brimm-progress, is not in `bin`: the folder of node, which is the
-    default and is given only by a test. With neither, no panel is shown. `log` is the run's log. The rest are for a test to give: the process's number, the clock in
+    when there is none, and is used only when the compiled panel, brimm-progress, is not in `bin`: at run time always node's own folder (from findPrograms),
+    and a test gives another. With neither, no panel is shown. `log` is the run's log. The rest are for a test to give: the process's number, the clock in
     milliseconds, how a program is started, how a process is known to be running, when this Mac last started (a process's
     number from before then may now belong to another program), and the timer that reads ffmpeg's progress.
     Gives back:

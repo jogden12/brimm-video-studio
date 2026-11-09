@@ -22,7 +22,7 @@
 //
 // ffprobe reads the file's facts. ffmpeg takes the sound out and finds the pauses. whisper.cpp writes the captions and the time
 // of every word. They are the transcript tool's programs, and install.sh sets them up. While it works, it says how far it has
-// got in a small file on this Mac's own disk (progress.js), and swift runs progress.swift to show that in a small window: closing
+// got in a small file on this Mac's own disk (progress.js), and brimm-progress beside node, or swift with progress.swift, shows that in a small window: closing
 // the window, or its failing to open, changes nothing about the work.
 // "install.sh <folder>" has the Mac run the --watch form whenever something lands in that folder.
 // A video in this Mac's drop folder is made into an episode whose record waits for her to say what the video is, and until then the
@@ -101,9 +101,8 @@ const CLAUDE_PRINTED = 2000000;
     is looked for. swift comes with Xcode's command line tools, in /usr/bin. A file of that name is there on every Mac: until
     the tools are installed it is macOS's own stand-in, which finds no face and puts up a window offering to install them. So
     swift counts as found only when `xcodeTools` says the tools are here, and it is asked only when a file of that name is
-    there. swift is never looked for in `bin`. claude is Claude Code, which Claude is asked through. It is looked for in `bin`,
-    where the other programs are, and then in .local/bin in the home folder, where its own installer puts it: the launch agent's
-    PATH has no home folder in it. `missing` says what is not there, in plain words. swift and claude are never among it: without
+    there. swift is never looked for in `bin`. claude is Claude Code, which Claude is asked through. It is looked for in `bin` (node's own folder), then on PATH, then in /opt/homebrew/bin and /usr/local/bin, and last in .local/bin in the home folder,
+    where its own installer puts it: the launch agent's PATH has no home folder in it. `missing` says what is not there, in plain words. swift and claude are never among it: without
     swift the work goes on, and a Reel candidate is cropped at the centre of the picture, and without claude a reading and `ask` cannot ask
     Claude (the import never does). */
 export function findPrograms(given = {}) {
