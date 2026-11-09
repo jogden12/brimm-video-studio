@@ -79,7 +79,7 @@ describe("behind: on an installed Mac", () => {
     const t = setup();
     const f = NEWER_FEED();
     const r = await on(t, f.fetch, { build: { ...INSTALLED, broken: true, feed: "" } });
-    assert.deepEqual(r.said, [OFFLINE, "This Mac's BRIMM Video Studio cannot read its own build file. Open BRIMM Video Studio and choose Repair. If that does not help, ask help@example.invalid."]);
+    assert.deepEqual(r.said, ["This Mac's BRIMM Video Studio cannot read its own build file. Open BRIMM Video Studio and choose Repair. If that does not help, ask help@example.invalid."]);
     assert.deepEqual([f.calls.length, r.runs], [0, []]);
     t.done();
   });

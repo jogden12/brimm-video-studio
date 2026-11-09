@@ -3,7 +3,7 @@
 // temp home, and no program is real.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COMMAND_NAMES, contextFor, editMain } from "../edit.js";
@@ -39,9 +39,13 @@ const SCOPED = COMMAND_NAMES.filter((name) => !UNSCOPED.includes(name));
 describe("an installed Mac's words", () => {
   it("says a Mac that is not set up to choose Repair", () => {
     const home = mkdtempSync(join(tmpdir(), "installed-words-"));
-    assert.equal(contextFor({ home, build: INSTALLED }).why, "This Mac is not set up for episodes yet. Open BRIMM Video Studio and choose Repair. If that does not help, ask help@example.invalid.");
-    assert.equal(contextFor({ home, build: { ...INSTALLED, support: "" } }).why, "This Mac is not set up for episodes yet. Open BRIMM Video Studio and choose Repair.");
-    assert.equal(contextFor({ home, build: { mode: "dev" } }).why, "This Mac is not set up for episodes yet. Jason runs install.sh --machine on it.");
+    try {
+      assert.equal(contextFor({ home, build: INSTALLED }).why, "This Mac is not set up for episodes yet. Open BRIMM Video Studio and choose Repair. If that does not help, ask help@example.invalid.");
+      assert.equal(contextFor({ home, build: { ...INSTALLED, support: "" } }).why, "This Mac is not set up for episodes yet. Open BRIMM Video Studio and choose Repair.");
+      assert.equal(contextFor({ home, build: { mode: "dev" } }).why, "This Mac is not set up for episodes yet. Jason runs install.sh --machine on it.");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("says an episode a newer Studio wrote is for an update, for every command that names an episode", async () => {

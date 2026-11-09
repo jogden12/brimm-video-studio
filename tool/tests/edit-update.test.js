@@ -15,10 +15,11 @@ const DEV = "This Mac runs BRIMM Video Studio from a git checkout, so it is not 
 async function on(t, build, answer = { code: 0, stderr: "" }, words = []) {
   const said = [];
   const runs = [];
-  const deps = { ...t.ctx.deps, run: async (cmd, args) => { runs.push([cmd, ...args]); return answer; }, say: (x) => said.push(x) };
+  const limits = [];
+  const deps = { ...t.ctx.deps, run: async (cmd, args, asked) => { runs.push([cmd, ...args]); limits.push(asked?.limit); return answer; }, say: (x) => said.push(x) };
   if (build) deps.build = build;
   const code = await editMain(["update", ...words], deps);
-  return { code, said, runs };
+  return { code, said, runs, limits };
 }
 
 describe("update", () => {
@@ -26,6 +27,7 @@ describe("update", () => {
     const t = setup();
     const r = await on(t, INSTALLED);
     assert.deepEqual(r.runs, [["/usr/bin/open", "brimm-video-studio://check-for-updates"]]);
+    assert.deepEqual(r.limits, [10000]);
     assert.deepEqual([r.code, r.said], [0, [CHECKING]]);
     t.done();
   });
@@ -33,6 +35,18 @@ describe("update", () => {
     const t = setup();
     const r = await on(t, INSTALLED, { code: 1, stderr: "No application knows how to open URL" });
     assert.deepEqual([r.code, r.said], [1, ["BRIMM Video Studio could not be opened to check for updates. Open it from the Applications folder and choose Check for Updates…. If that does not help, ask help@example.invalid."]]);
+    t.done();
+  });
+  it("says the same when the open ran out of time", async () => {
+    const t = setup();
+    const r = await on(t, INSTALLED, { code: 0, outOfTime: true });
+    assert.deepEqual([r.code, r.said], [1, ["BRIMM Video Studio could not be opened to check for updates. Open it from the Applications folder and choose Check for Updates…. If that does not help, ask help@example.invalid."]]);
+    t.done();
+  });
+  it("ends at the menu item when the build file names no support contact", async () => {
+    const t = setup();
+    const r = await on(t, { ...INSTALLED, support: "" }, { code: 1, stderr: "" });
+    assert.deepEqual([r.code, r.said], [1, ["BRIMM Video Studio could not be opened to check for updates. Open it from the Applications folder and choose Check for Updates…."]]);
     t.done();
   });
   it("in a git checkout says how that Mac is updated, and runs nothing", async () => {

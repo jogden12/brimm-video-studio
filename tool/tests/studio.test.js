@@ -12,6 +12,8 @@ import { studioFiles, writeStudio, guardDecision, studioFolder } from "../studio
 import { COMMAND_NAMES, HELP, LOCK_CHANGED, editMain, wordsLine } from "../edit.js";
 import { HELD_NARROWED, HELD_REFUSED } from "../held.js";
 import { UNTRUSTED } from "../loosened.js";
+import { REPAIR } from "../build.js";
+import { updateLine } from "../update-check.js";
 import { NO_RECEIPT, cardOf } from "../receipts.js";
 import { EDITS } from "../sessions.js";
 import { episodeAs, FOLDER as FOLDER_NAME } from "./episodes.js";
@@ -541,6 +543,9 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
         'If it says "Her folder for Claude is out of date", tell her: "Your Claude folder needs an update from Jason; ask him when it suits."',
         "If a line says to open BRIMM Video Studio and choose Repair, tell her that line as it is said."
       ]) assert.ok(start.includes(words), `${name}: ${words}`);
+      // The skill listens for the first words of what edit.js prints, which are said word for word.
+      assert.ok(updateLine({ state: "newer", version: "1.5.0", have: "1.4.2" }).startsWith("A newer BRIMM Video Studio is ready"), name);
+      assert.ok(REPAIR.includes("Open BRIMM Video Studio and choose Repair"), name);
       assert.equal(lineOf(text, '| "Update Studio" |'), '| "Update Studio" | `update`: tell her what it says, in plain words. |', name);
     }
   });

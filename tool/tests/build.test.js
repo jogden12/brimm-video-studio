@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BUILD_FILE, REPAIR, UPDATE_SAY, brokenLine, buildOf, isInstalled, repairLine } from "../build.js";
+import { BUILD_FILE, REPAIR, VERSION, UPDATE_SAY, brokenLine, buildOf, isInstalled, repairLine } from "../build.js";
 import { commitOf, thisCheckout } from "../filing.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
 
@@ -56,7 +56,8 @@ describe("whether a Mac has BRIMM Video Studio installed", () => {
       [{ commit: "xyz" }, { commit: "" }, false],
       [{ short: "ABC1234" }, { short: "unknown" }, true], [{ short: "abc12" }, { short: "unknown" }, true], [{ short: "fedcba9" }, { short: "unknown" }, true],
       [{ feed: "http://updates.example.invalid/appcast.xml" }, { feed: "" }, true], [{ feed: "https://updates.example.invalid/appcast.xml?mac=1" }, { feed: "" }, true],
-      [{ feed: "https://updates.example.invalid/appcast.xml#x" }, { feed: "" }, true], [{ feed: "https://me:pw@updates.example.invalid/a.xml" }, { feed: "" }, true], [{ feed: "not a url" }, { feed: "" }, true],
+      [{ feed: "https://updates.example.invalid/appcast.xml#x" }, { feed: "" }, true],
+      [{ feed: "https://updates.example.invalid/appcast.xml?" }, { feed: "" }, true], [{ feed: "https://updates.example.invalid/appcast.xml#" }, { feed: "" }, true], [{ feed: "https://me:pw@updates.example.invalid/a.xml" }, { feed: "" }, true], [{ feed: "not a url" }, { feed: "" }, true],
       [{ channel: "nightly" }, { channel: "stable" }, false], [{ channel: "beta" }, { channel: "beta" }, false],
       [{ support: "a\u0007b" }, { support: "" }, false], [{ support: "x".repeat(201) }, { support: "" }, false], [{ support: "  help@example.invalid  " }, { support: "help@example.invalid" }, false]
     ];
@@ -77,7 +78,7 @@ describe("whether a Mac has BRIMM Video Studio installed", () => {
   it("gives an installed Mac's commit from build.json, beside a .git too, and starts no program", () => {
     const real = childProcess.spawnSync;
     let spawned = 0;
-    childProcess.spawnSync = (...a) => (spawned++, real(...a));
+    childProcess.spawnSync = () => (spawned++, { status: 1, stdout: "" });
     syncBuiltinESMExports();
     try {
       const dir = checkout(WHOLE);
@@ -96,6 +97,11 @@ describe("whether a Mac has BRIMM Video Studio installed", () => {
   it("makes a madeBy the hand-off contract takes, whole or broken", () => {
     const h = JSON.parse(readFileSync(new URL("./fixtures/handoff-v2-finished.json", import.meta.url), "utf8"));
     for (const dir of [checkout(WHOLE), checkout("{")]) assert.equal(handoffFaultV2({ ...h, madeBy: `brimm-video ${commitOf(dir)}` }), "");
+  });
+  it("exports the version form it checks", () => {
+    assert.equal(VERSION.test("1.4.2"), true);
+    assert.equal(VERSION.test("1.4.2-beta.1"), true);
+    assert.equal(VERSION.test("1.4"), false);
   });
   it("says to choose Repair, with the support contact when build.json has one", () => {
     assert.equal(repairLine(buildOf(checkout(WHOLE))), "Open BRIMM Video Studio and choose Repair. If that does not help, ask help@example.invalid.");

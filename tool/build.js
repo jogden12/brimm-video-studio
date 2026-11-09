@@ -26,14 +26,15 @@ const BROKEN = { mode: "installed", version: "", build: 0, commit: "", short: "u
 
 const HEX40 = /^[0-9a-f]{40}$/;
 const SHORT = /^[0-9a-f]{7,40}$/;
-const VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+/** The form of a version: 1.2.3, or 1.2.3-beta.1. */
+export const VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 
 /** The feed address as given, if it is an https address with nothing after the path but the path itself. Otherwise "". */
 function feedOf(feed) {
   if (typeof feed !== "string") return "";
   try {
     const url = new URL(feed);
-    return url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash ? feed : "";
+    return url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash && !/[?#]/.test(feed) ? feed : "";
   } catch (e) {
     return "";
   }

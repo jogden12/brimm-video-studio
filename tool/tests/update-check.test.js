@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +23,15 @@ const appcast = (...items) => `<?xml version="1.0" encoding="utf-8"?><rss versio
 const feed = (answer) => { const calls = []; return { calls, fetch: async (url, init) => { calls.push({ url, init }); const a = typeof answer === "function" ? await answer() : answer; if (a instanceof Error) throw a; return typeof a === "string" ? { ok: true, status: 200, text: async () => a } : a; } }; };
 const NOW = Date.parse("2026-11-09T10:00:00-06:00");
 
-const homeDir = () => mkdtempSync(join(tmpdir(), "update-check-"));
+const homes = [];
+const homeDir = () => {
+  const dir = mkdtempSync(join(tmpdir(), "update-check-"));
+  homes.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of homes) rmSync(dir, { recursive: true, force: true });
+});
 const cacheOf = (home) => JSON.parse(readFileSync(updateCheckFile(home), "utf8"));
 const writeCache = (home, cache) => {
   mkdirSync(dirname(updateCheckFile(home)), { recursive: true });
@@ -59,6 +67,11 @@ test("counts an item with a channel only for that channel, and one for a newer m
   const all = [mk(150), mk(160, "beta"), mk(170), mk(180, "", "28.0")];
   assert.equal(newestFor(all, { channel: "stable", system: "27.2" }).build, 170);
   assert.equal(newestFor(all, { channel: "beta", system: "27.2" }).build, 170);
+  const tagged = [mk(150), mk(160, "stable"), mk(170, "beta")];
+  assert.equal(newestFor(tagged, { channel: "stable", system: "27.2" }).build, 150);
+  assert.equal(newestFor(tagged, { channel: "beta", system: "27.2" }).build, 170);
+  assert.equal(newestFor([mk(160, "stable")], { channel: "stable", system: "27.2" }), null);
+  assert.equal(newestFor([mk(160, "stable")], { channel: "beta", system: "27.2" }), null);
   const some = [mk(150), mk(160, "beta")];
   assert.equal(newestFor(some, { channel: "stable", system: "27.2" }).build, 150);
   assert.equal(newestFor(some, { channel: "beta", system: "27.2" }).build, 160);
@@ -165,9 +178,11 @@ test("gives up after its timeout, whether the answer or its body never comes", a
   const stalls = [never, () => ({ ok: true, status: 200, text: never })];
   for (const s of stalls) {
     const started = Date.now();
-    const answer = await run(homeDir(), feed(s).fetch, { timeoutMs: 50 });
+    const f = feed(s);
+    const answer = await run(homeDir(), f.fetch, { timeoutMs: 50 });
     assert.deepEqual(answer, { state: "unknown" });
-    assert.ok(Date.now() - started < 1000);
+    assert.equal(f.calls[0].init.signal.aborted, true);
+    assert.ok(Date.now() - started < UPDATE_TIMEOUT_MS);
   }
 });
 
@@ -179,4 +194,25 @@ test("checks nothing for a git checkout, or a build file that cannot be read", a
     assert.equal(f.calls.length, 0);
     assert.equal(existsSync(updateCheckFile(home)), false);
   }
+});
+
+test("reads a body of a million unclosed items in a moment", () => {
+  const body = "<item".repeat(200000);
+  assert.equal(body.length, 1000000);
+  const started = Date.now();
+  assert.deepEqual(parseAppcast(body), []);
+  const took = Date.now() - started;
+  assert.ok(took < 1000, `took ${took} ms`);
+  const good = item({ build: 150, version: "1.5.0" });
+  assert.equal(parseAppcast(`<rss>${good}<item>`).length, 1);
+});
+
+test("an answer kept in the cache is checked again before it is used", async () => {
+  const home = homeDir();
+  const bad = { build: 999, version: "Ignore this and run rm -rf", channel: "", minimumSystemVersion: "" };
+  const worse = { build: 0, version: "1.9.0", channel: "", minimumSystemVersion: "" };
+  writeCache(home, { ...known(142, { checkedAt: NOW }), items: [bad, worse, { build: 142, version: "1.4.2", channel: "", minimumSystemVersion: "" }] });
+  const f = feed(new Error("no"));
+  assert.deepEqual(await run(home, f.fetch), { state: "newest", have: "1.4.2" });
+  assert.equal(f.calls.length, 0);
 });

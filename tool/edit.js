@@ -2925,8 +2925,6 @@ async function behind(ctx) {
     if (untrusted) ctx.say(untrusted);
   }
   const added = open ? studioAllowOf(ctx.settings) : [];
-  const run = ctx.deps.run || runProgram;
-  const git = (...args) => run("/usr/bin/git", ["-C", ctx.settings.checkout, ...args], { limit: BEHIND_MS, out: 100 });
   const could = "Could not check for a newer BRIMM Video Studio. Is this Mac offline?";
   // Her folder is looked at whatever git answers: that needs no network.
   const stale = studioStale(ctx);
@@ -2958,7 +2956,6 @@ async function behind(ctx) {
   if (installed) {
     // An installed Mac has no git: the update feed says whether a newer one is ready, in the place of git's line (update-check.js).
     if (ctx.build.broken) {
-      ctx.say(could);
       ctx.say(brokenLine(ctx.build));
     } else {
       ctx.say(updateLine(await checkForUpdate({ build: ctx.build, home: ctx.home, now: ctx.now(), fetch: ctx.deps.fetch ?? globalThis.fetch, system: ctx.deps.system })));
@@ -2966,6 +2963,8 @@ async function behind(ctx) {
     return folderLine();
   }
   if (!(ctx.deps.isGitCheckout || isGitCheckout)(ctx.settings.checkout)) return folderLine();
+  const run = ctx.deps.run || runProgram;
+  const git = (...args) => run("/usr/bin/git", ["-C", ctx.settings.checkout, ...args], { limit: BEHIND_MS, out: 100 });
   const fetched = await git("fetch", "-q", "origin", "main");
   if (fetched.code !== 0 || fetched.outOfTime) {
     ctx.say(could);
