@@ -109,6 +109,8 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     agentRunning: () => false, kickstart: () => kicks.push("kickstart"),
     // Nor the pid and node it runs (edit.js agentPid, agentNode: launchctl print, plutil): the launch agent names neither here.
     agentPid: () => null, agentNode: () => "",
+    // No test looks for a real .git: the made-up checkout is a git checkout unless a test says otherwise (filing.js isGitCheckout).
+    isGitCheckout: () => true,
     // No test posts a notice on the Mac's screen (unedited.js banner runs osascript): the notices a run posts are written down.
     notify: (text) => notices.push(text),
     // No test waits for the process `finish … --yes` starts: the stand-in for it starts nothing, so there is no lock to wait for. A test of
