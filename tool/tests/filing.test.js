@@ -7,7 +7,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { episodeMode, episodeKind, findFolder, commitOf, isGitCheckout, thisCheckout, importEpisodes, clearRuns, clearCrashes, heldBy, dueAt, lateCheckLockOf, takeLateCheckLock, releaseLateCheckLock, LOCK_AGAIN_MS } from "../filing.js";
+import { episodeMode, episodeKind, fileEpisode, findFolder, commitOf, isGitCheckout, thisCheckout, importEpisodes, clearRuns, clearCrashes, heldBy, dueAt, lateCheckLockOf, takeLateCheckLock, releaseLateCheckLock, LOCK_AGAIN_MS } from "../filing.js";
 import { episodeWork } from "../settings.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
@@ -700,5 +700,37 @@ describe("heldBy, for a video whose episode has a conflicted copy of its record"
     writeFileSync(join(folder, "record", "0001 (Sallie's laptop's conflicted copy 2026-10-22).json"), recordText(record));
     assert.equal(heldBy({ root, video: "Coaching call Jane Doe.mp4", bytes: 5 }), "already imported as a client or group session (3fa9c1). It stays in the drop folder until Dropbox's check of its copies passes, or for a person to delete.");
     rmSync(dirname(root), { recursive: true, force: true });
+  });
+});
+
+describe("which commit a record names when the episode's checkout is made up", () => {
+  it("is this checkout's commit, or the one given, never that of the path the episode names", () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-filing-"));
+    try {
+      // The made-up checkout is an installed Mac's, so commitOf of it would say abcdef0.
+      const made = join(dir, "made up");
+      mkdirSync(made);
+      writeFileSync(join(made, "build.json"), JSON.stringify({ version: "1.4.2", build: 142, commit: "abcdef0".padEnd(40, "1"), short: "abcdef0", feed: "https://updates.example.invalid/a.xml" }));
+      const root = join(dir, "root");
+      const home = join(dir, "home");
+      const work = join(dir, "work");
+      const drop = join(dir, "drop");
+      for (const d of [root, home, work, drop]) mkdirSync(d, { recursive: true });
+      const file = join(drop, "Talk.mov");
+      writeFileSync(file, "a talk");
+      const facts = { duration: 60, width: 1920, height: 1080, fps: "30/1", sound: true };
+      const wrote = (extra) => {
+        const filed = fileEpisode({ file, made: [], at: (to) => to, facts, printed: "", kind: "episode", read: null, reels: [], work, dropFile: file, fingerprint: "" }, { episode: { root, machine: "Mac Studio", checkout: made, home }, clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, log: () => {}, ...extra });
+        return filed.record.writer.commit;
+      };
+      assert.equal(wrote({ commit: "c709b57" }), "c709b57");
+      rmSync(root, { recursive: true, force: true });
+      mkdirSync(root);
+      const own = wrote({});
+      assert.notEqual(own, "abcdef0");
+      assert.equal(own, commitOf(thisCheckout()));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
