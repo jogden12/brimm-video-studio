@@ -17,7 +17,7 @@ import { LOCAL_ADDRESS, NUMERIC_ADDRESS } from "../fetchable.js";
 import { claudeDirName, gatedIndex, gatedPlaces, realOf } from "../places.js";
 import { gatedReadRules, guardDecision, openSettingsOf } from "../studio.js";
 import { APP_ARGS, MINIMUM, SESSION, appCopy, chatChain, openDeps, openWorld, psText, transcript } from "./open-world.js";
-import { ALLOWED, CHECKOUT, EDIT, NODE, NODE_CASES, UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, spellingsOf } from "./guard-cases.js";
+import { ALLOWED, CHECKOUT, EDIT, NODE, NODE_CASES, UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, spellingsOf, APP_NODE, openStartsOf, tailRefusals } from "./guard-cases.js";
 
 const CONNECTOR = "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__";
 
@@ -399,6 +399,33 @@ describe("the open guard, III: Bash", () => {
       }
     }
   });
+  it("refuses what could run more after edit.js, or in front of it, and edit.js in the background, with node in double quotes", async () => {
+    for (const node of [NODE, APP_NODE]) {
+      for (const start of openStartsOf(node)) {
+        const edit = `${start} "${CHECKOUT}/tool/edit.js"`;
+        const here = { ...ctx, node };
+        assert.equal((await bash(`${edit} episodes`, {}, here)).decision, "allow", start);
+        for (const command of tailRefusals(edit)) assert.deepEqual(await bash(command, {}, here), ALONE, JSON.stringify(command));
+        assert.deepEqual(await bash(`${edit} episodes`, { run_in_background: true }, here), ALONE);
+        assert.equal((await bash(`${edit} guide "Pricing talk" tell`, { run_in_background: true }, here)).decision, "allow");
+        for (const command of [`${edit} guide "Pricing talk" tell --now`, `${edit} guide "Pricing talk"`, `${edit} guide tell`, `${edit} finish "Pricing talk"`]) assert.deepEqual(await bash(command, { run_in_background: true }, here), ALONE, command);
+      }
+    }
+  });
+  it("answers the two commands with node in double quotes that do not run edit.js: one is run alone, the other is a command in the sandbox", async () => {
+    for (const node of [NODE, APP_NODE]) {
+      const here = { ...ctx, node };
+      assert.deepEqual(await bash(`"${node}" "${CHECKOUT}/tool/unedited.js" --from-plan x`, {}, here), ALONE, node);
+      assert.deepEqual(await bash(`"${node}" -e "1"`, {}, here), { decision: "allow", reason: "a command in the sandbox" }, node);
+    }
+  });
+  it("matches a node in double quotes letter for letter, as the regular expression's own characters", async () => {
+    const node = "/Users/o.hara/App (1)+/bin/node";
+    const here = { ...ctx, node };
+    assert.equal((await bash(`"${node}" "${CHECKOUT}/tool/edit.js" episodes`, {}, here)).decision, "allow");
+    assert.deepEqual(await bash(`"${node.replace(/[.+()]/g, "X")}" "${CHECKOUT}/tool/edit.js" episodes`, {}, here), ALONE);
+    for (const letter of [".", "+", "(", ")"]) assert.deepEqual(await bash(`"${node.replace(letter, "X")}" "${CHECKOUT}/tool/edit.js" episodes`, {}, here), ALONE, letter);
+  });
   it("refuses every spelling when node or the checkout cannot be put in double quotes", async () => {
     for (const node of UNQUOTABLE_NODES) for (const command of spellingsOf(node)) assert.deepEqual(await bash(command, {}, { ...ctx, node }), ALONE, JSON.stringify(command));
     for (const checkout of UNQUOTABLE_CHECKOUTS) for (const command of spellingsOf(NODE, checkout)) assert.deepEqual(await bash(command, {}, { ...ctx, checkout }), ALONE, JSON.stringify(command));
@@ -541,6 +568,15 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
       assert.equal((await guard(w, "Bash", { command: `${edit} episodes` })).decision, "allow", start);
       assert.deepEqual(await guard(w, "Bash", { command: `${edit} name "Pricing talk" "x"` }), { decision: "deny", reason: HELD_NARROWED }, start);
     }
+    w.done();
+  });
+  it("narrows a held chat whose node is the app's, written in double quotes", async () => {
+    const w = chat();
+    w.node = APP_NODE;
+    untiedMark({ home: w.home, now: Date.parse("2026-10-26T10:30:00.000Z") });
+    const edit = `"${APP_NODE}" "${w.checkout}/tool/edit.js"`;
+    assert.equal((await guard(w, "Bash", { command: `${edit} episodes` })).decision, "allow");
+    assert.deepEqual(await guard(w, "Bash", { command: `${edit} name "Pricing talk" "x"` }), { decision: "deny", reason: HELD_NARROWED });
     w.done();
   });
   it("keeps a held chat to the commands a session runs while the lock is loosened too, and a call it cannot judge", async () => {

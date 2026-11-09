@@ -15,7 +15,7 @@ import { heldFolder } from "../scan.js";
 import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, runsFolder, episodeWork, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, appOf, appHandoverOn, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf, effectiveLock, factsOf, isLocal, defaultDropFolder, dropFolderOf, episodeFilesFolder, importingFolderOf, statusFoldersOf, exportsFolderOf, exportsWords, cloudFolder, folderWords, dropFolderFault, exportsFolderFault, needsFilesAccess, transcriptFolders } from "../settings.js";
 import { isMedia } from "../lib.js";
 import { watched } from "./watched-fs.js";
-import { UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS } from "./guard-cases.js";
+import { UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, NODE_FAULT, CHECKOUT_FAULT } from "./guard-cases.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
 
@@ -530,8 +530,6 @@ describe("node settings.js studio, for both locks (the open lock, K1)", () => {
     t.done();
   });
   it("refuses a node or a checkout that cannot be put in double quotes, and writes nothing", () => {
-    const NODE_FAULT = 'the path to node holds a letter that cannot go inside double quotes (", $, `, \\ or a control character)';
-    const CHECKOUT_FAULT = 'the path to the checkout of BRIMM Video Studio holds a letter that cannot go inside double quotes (", $, `, \\ or a control character)';
     const t = studioWorld();
     let before = readFileSync(settingsFile(t.home), "utf8");
     for (const node of UNQUOTABLE_NODES) {
@@ -542,12 +540,15 @@ describe("node settings.js studio, for both locks (the open lock, K1)", () => {
         assert.equal(existsSync(studioFolder(t.home)), false);
       }
     }
-    writeSettings(t.home, { checkout: UNQUOTABLE_CHECKOUTS[0] });
-    before = readFileSync(settingsFile(t.home), "utf8");
-    assert.equal(t.run(MINIMUM, "studio", "--node", NODE), 1);
-    assert.deepEqual(t.said, [`Not written: ${CHECKOUT_FAULT}.`]);
-    assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
-    assert.equal(existsSync(studioFolder(t.home)), false);
+    // A relative checkout never gets into the settings file: settings.js refuses it as not a whole path, which is its own test.
+    for (const checkout of UNQUOTABLE_CHECKOUTS.filter((c) => c.startsWith("/"))) {
+      writeSettings(t.home, { checkout });
+      before = readFileSync(settingsFile(t.home), "utf8");
+      assert.equal(t.run(MINIMUM, "studio", "--node", NODE), 1, JSON.stringify(checkout));
+      assert.deepEqual(t.said, [`Not written: ${CHECKOUT_FAULT}.`], JSON.stringify(checkout));
+      assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+      assert.equal(existsSync(studioFolder(t.home)), false);
+    }
     assert.equal(t.ports(), 0);
     t.done();
   });

@@ -16,7 +16,7 @@ import { NO_RECEIPT, cardOf } from "../receipts.js";
 import { EDITS } from "../sessions.js";
 import { episodeAs, FOLDER as FOLDER_NAME } from "./episodes.js";
 import { episode } from "./phase4.js";
-import { CHECKOUT, NODE, EDIT, ALLOWED, NODE_CASES, UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, spellingsOf } from "./guard-cases.js";
+import { CHECKOUT, NODE, EDIT, ALLOWED, NODE_CASES, UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, spellingsOf, APP_NODE, OWN, REFUSED as NOT_OWN, NODE_FAULT, CHECKOUT_FAULT, strictStartsOf, tailRefusals } from "./guard-cases.js";
 import { openWorld } from "./open-world.js";
 import { rowWithRules, rulesOf, rulesOfRow, withRules } from "./skill-rows.js";
 
@@ -938,18 +938,25 @@ describe("the guard and paths that hold a regular expression's own characters", 
 });
 
 describe("the guard and node's path in double quotes (design 2026-11-09, part 6)", () => {
-  const NODE_FAULT = 'the path to node holds a letter that cannot go inside double quotes (", $, `, \\ or a control character)';
-  const CHECKOUT_FAULT = 'the path to the checkout of BRIMM Video Studio holds a letter that cannot go inside double quotes (", $, `, \\ or a control character)';
-  const decide = (command, node, checkout = CHECKOUT) => guardDecision({ tool_name: "Bash", tool_input: { command } }, { checkout, node }).decision;
+  const answer = (command, node, checkout = CHECKOUT) => guardDecision({ tool_name: "Bash", tool_input: { command } }, { checkout, node });
   it("lets through node in double quotes, the word node, and a plain node bare, and refuses every other spelling", () => {
     for (const { node, both, strictOnly, refused } of NODE_CASES) {
-      for (const command of [...both, ...strictOnly]) assert.equal(decide(command, node), "allow", command);
-      for (const command of refused) assert.equal(decide(command, node), "deny", command);
+      for (const command of [...both, ...strictOnly]) assert.deepEqual(answer(command, node), OWN, command);
+      for (const command of refused) assert.deepEqual(answer(command, node), NOT_OWN, command);
+    }
+  });
+  it("refuses what could run more after edit.js, or in front of it, whichever start is let through", () => {
+    for (const node of [NODE, APP_NODE]) {
+      for (const start of strictStartsOf(node)) {
+        const edit = `${start} "${CHECKOUT}/tool/edit.js"`;
+        assert.deepEqual(answer(`${edit} episodes`, node), OWN, start);
+        for (const command of tailRefusals(edit)) assert.deepEqual(answer(command, node), NOT_OWN, JSON.stringify(command));
+      }
     }
   });
   it("refuses every spelling when node or the checkout cannot be put in double quotes", () => {
-    for (const node of UNQUOTABLE_NODES) for (const command of spellingsOf(node)) assert.equal(decide(command, node), "deny", JSON.stringify(command));
-    for (const checkout of UNQUOTABLE_CHECKOUTS) for (const command of spellingsOf(NODE, checkout)) assert.equal(decide(command, NODE, checkout), "deny", JSON.stringify(command));
+    for (const node of UNQUOTABLE_NODES) for (const command of spellingsOf(node)) assert.deepEqual(answer(command, node), NOT_OWN, JSON.stringify(command));
+    for (const checkout of UNQUOTABLE_CHECKOUTS) for (const command of spellingsOf(NODE, checkout)) assert.deepEqual(answer(command, NODE, checkout), NOT_OWN, JSON.stringify(command));
   });
   it("is given a node in double quotes that zsh and bash run as that one program, with edit.js and its words; bare, the shells run no such program", async (t) => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-quoted-node-")));
@@ -959,15 +966,46 @@ describe("the guard and node's path in double quotes (design 2026-11-09, part 6)
       writeFileSync(node, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o755 });
       const quoted = `"${node}" "${CHECKOUT}/tool/edit.js" open "Pricing talk"`;
       const bare = quoted.slice(1).replace('" "', ' "');
-      assert.equal(decide(quoted, node), "allow");
-      assert.equal(decide(bare, node), "deny");
+      assert.deepEqual(answer(quoted, node), OWN);
+      assert.deepEqual(answer(bare, node), NOT_OWN);
       await inEachShell(t, ([shell, flags]) => {
         const r = spawnSync(shell, [...flags, quoted], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
         assert.equal(r.status, 0, `${shell}: ${r.stderr}`);
+        assert.equal(r.stderr, "", shell);
         assert.deepEqual(r.stdout.split("\n").slice(0, -1), [`${CHECKOUT}/tool/edit.js`, "open", "Pricing talk"]);
         const b = spawnSync(shell, [...flags, bare], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
         assert.notEqual(b.status, 0, shell);
         assert.equal(b.stdout, "", shell);
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("is given a node whose path has only spaces: in double quotes the shells run it, bare they run the program the first space cuts off and never the node", async (t) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-spaced-node-")));
+    try {
+      const node = join(dir, "BRIMM Video Studio.app", "Contents", "Resources", "bin", "node");
+      mkdirSync(dirname(node), { recursive: true });
+      writeFileSync(node, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o755 });
+      // The recorder stands where the shells look for the program before the first space, and writes its words to a marker file.
+      const marker = join(dir, "marker");
+      writeFileSync(join(dir, "BRIMM"), `#!/bin/sh\nprintf '%s\\n' "$@" > "${marker}"\n`, { mode: 0o755 });
+      const quoted = `"${node}" "${CHECKOUT}/tool/edit.js" open "Pricing talk"`;
+      const bare = `${node} "${CHECKOUT}/tool/edit.js" open "Pricing talk"`;
+      assert.deepEqual(answer(quoted, node), OWN);
+      assert.deepEqual(answer(bare, node), NOT_OWN);
+      await inEachShell(t, ([shell, flags]) => {
+        const env = { PATH: "/usr/bin:/bin" };
+        rmSync(marker, { force: true });
+        const r = spawnSync(shell, [...flags, quoted], { encoding: "utf8", env });
+        assert.equal(r.status, 0, `${shell}: ${r.stderr}`);
+        assert.equal(r.stderr, "", shell);
+        assert.deepEqual(r.stdout.split("\n").slice(0, -1), [`${CHECKOUT}/tool/edit.js`, "open", "Pricing talk"]);
+        assert.equal(existsSync(marker), false, `${shell}: the recorder ran for the quoted command`);
+        const b = spawnSync(shell, [...flags, bare], { encoding: "utf8", env });
+        assert.equal(b.stdout, "", `${shell}: the node ran`);
+        assert.equal(existsSync(marker), true, `${shell}: the recorder did not run for the bare command`);
+        assert.deepEqual(readFileSync(marker, "utf8").split("\n").slice(0, 2), ["Video", "Studio.app/Contents/Resources/bin/node"], shell);
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });
