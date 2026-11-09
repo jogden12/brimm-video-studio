@@ -56,13 +56,12 @@ PIN_FROM[node]="nodejs.org's own list of the SHA-256s of its v26.11.1 files (SHA
 PIN_SUMS[node]=https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt
 
 # S7: Sparkle 2, the newest stable release on github.com/sparkle-project/Sparkle on 9 November 2026 (2.10.1, of 25 October): its
-# framework, and its own tools, generate_keys and generate_appcast. Not pinned yet: GitHub's API gives the SHA-256 GitHub worked out
-# itself when the file was uploaded (the release file's "digest"), from the record PIN_GITHUB names, which the fetch prints beside
-# the one it found.
+# framework, and its own tools, generate_keys and generate_appcast. GitHub's API gives the SHA-256 GitHub worked out itself when
+# the file was uploaded (the release file's "digest"), in the record PIN_GITHUB names.
 SPARKLE_VERSION=2.10.1
 PIN_FILE[sparkle]=Sparkle-$SPARKLE_VERSION.tar.xz
 PIN_URL[sparkle]=https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz
 PIN_SIZE[sparkle]="16 MB"
-PIN_SHA[sparkle]=
-PIN_FROM[sparkle]="not pinned yet; the second source is GitHub's own record of Sparkle's $SPARKLE_VERSION release, whose API gives a digest (SHA-256) for this file"
+PIN_SHA[sparkle]=1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27
+PIN_FROM[sparkle]="GitHub's own digest for the release file in its record of Sparkle's $SPARKLE_VERSION release (sha256:1a856d2a…4244cf27, 16346336 bytes), which the file fetched on 2026-11-09 matched; pinned on Jason's yes"
 PIN_GITHUB[sparkle]=https://api.github.com/repos/sparkle-project/Sparkle/releases/tags/$SPARKLE_VERSION
