@@ -64,7 +64,9 @@
 #                                    build.json beside tool/ and is never set up without --tools (and a git checkout never with
 #                                    it). Every program is the app's own, in <bin>: node, npm, ffmpeg, ffprobe, whisper-cli and
 #                                    Studio's compiled helpers. Homebrew is never looked for or run, and Xcode's tools are not
-#                                    needed. The background job runs node from <bin>. It takes the other options of --machine
+#                                    needed. With --app the background job is the app's own program, started with --agent, so
+#                                    that macOS names the app when it asks for access and in Login Items; without it, node from
+#                                    <bin>. It takes the other options of --machine
 #   ./install.sh --machine "Sallie's laptop" --user-deny "/path/to/The BRIMM DB/BRIMM Video"
 #                                    also add to her user settings, ~/.claude/settings.json, the Read deny rules for the places
 #                                    her folder's open lock keeps from Claude, so that every Claude Code session on this Mac
@@ -270,6 +272,10 @@ if [[ ( -n "$tools_given" || -n "$app_given" ) && "$machined" != "yes" ]]; then
   exit 2
 fi
 tools=""
+# --app: the app, by its real path, its CFBundleIdentifier and its program. All "" until the checks below have read them.
+app=""
+app_id=""
+app_exe=""
 if [[ -n "$tools_given" ]]; then
   tools="${tools_given:A}"
   AGENT_PATH="${BRIMM_AGENT_PATH:-$tools:/usr/bin:/bin}"
@@ -401,6 +407,29 @@ watch_paths() {
   for f in "${folders[@]}"; do print -r -- "    <string>$(xml "$f")</string>"; done
 }
 
+# The first ProgramArguments of a launch agent, the program and what it is told first. This is S4's one assumption, kept in one place.
+# With --app the program is the app's own, started with --agent, which has it run its own node on its own unedited.js; so the plist
+# names no node and no script. Otherwise it is $1, the node, and unedited.js. Each goes through xml.
+agent_program() {
+  if [[ -n "$app_exe" ]]; then
+    print -r -- "    <string>$(xml "$app_exe")</string>"
+    print -r -- "    <string>--agent</string>"
+  else
+    print -r -- "    <string>$(xml "$1")</string>"
+    print -r -- "    <string>$(xml "$HERE/unedited.js")</string>"
+  fi
+}
+# The key that has macOS name the app for the background job. With --app it starts with a newline, so that it follows the line
+# before it; otherwise it prints nothing, and no line is left behind.
+agent_bundle() {
+  [[ -n "$app_id" ]] || return 0
+  print -r -- ""
+  print -r -- "  <key>AssociatedBundleIdentifiers</key>"
+  print -r -- "  <array>"
+  print -r -- "    <string>$(xml "$app_id")</string>"
+  print -rn -- "  </array>"
+}
+
 # The launch agent: under its label the Mac runs unedited.js with node, on the folders named, whenever one of those folders
 # changes and once when the agent is loaded. $1 is the node it is run with. --print shows this and the Mac is given this, so
 # the two cannot differ.
@@ -413,17 +442,16 @@ agent() {
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$(xml "$1")</string>
-    <string>$(xml "$HERE/unedited.js")</string>
+$(agent_program "$1")
 $(tool_arguments)
-  </array>
+  </array>$(agent_bundle)
   <key>WatchPaths</key>
   <array>
 $(watch_paths)
   </array>
   <key>RunAtLoad</key><true/>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>$AGENT_PATH</string></dict>
+  <dict><key>PATH</key><string>$(xml "$AGENT_PATH")</string></dict>
   <key>StandardOutPath</key><string>$(xml "$LOG")</string>
   <key>StandardErrorPath</key><string>$(xml "$LOG")</string>
 </dict>
@@ -444,15 +472,14 @@ check_agent() {
   <key>Label</key><string>$CHECK_LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$(xml "$1")</string>
-    <string>$(xml "$HERE/unedited.js")</string>
+$(agent_program "$1")
     <string>--check-claude</string>
     <string>--until</string>
     <string>$(xml "$2")</string>
-  </array>
+  </array>$(agent_bundle)
   <key>RunAtLoad</key><true/>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>$AGENT_PATH</string></dict>
+  <dict><key>PATH</key><string>$(xml "$AGENT_PATH")</string></dict>
   <key>StandardOutPath</key><string>$(xml "$CHECK_LOG")</string>
   <key>StandardErrorPath</key><string>$(xml "$CHECK_LOG")</string>
 </dict>
@@ -532,6 +559,22 @@ if [[ -n "$tools" ]]; then
   if node_old "$tools/node"; then
     refuse "BRIMM Video Studio's own node, in ${tools}, is $("$tools/node" --version), and Studio needs 22 or later. ${DAMAGED}"
   fi
+fi
+# The app (--app): a whole bundle that names its identifier and its program, whose program can be run, and that holds the programs
+# after --tools and this installer. A bundle that is not is refused, since the background job would be named for it in macOS.
+if [[ -n "$app_given" ]]; then
+  app="${app_given:A}"
+  app_refuse() { refuse "The app after --app is not a whole BRIMM Video Studio (${app}): $1 ${DAMAGED}"; }
+  [[ -d "$app" && "$app" == *.app ]] || app_refuse "it is not a folder whose name ends in .app."
+  app_id="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist" 2>/dev/null || true)"
+  exe="$(/usr/bin/plutil -extract CFBundleExecutable raw -o - "$app/Contents/Info.plist" 2>/dev/null || true)"
+  if [[ ! "$app_id" =~ '^[A-Za-z0-9.-]+$' || -z "$exe" || "$exe" == */* || "$exe" == . || "$exe" == .. ]]; then
+    app_refuse "its Contents/Info.plist does not name its identifier and its program."
+  fi
+  app_exe="$app/Contents/MacOS/$exe"
+  [[ -f "$app_exe" && -x "$app_exe" ]] || app_refuse "its program, Contents/MacOS/${exe}, is not there or cannot be run."
+  [[ "$tools" == "$app"/* ]] || app_refuse "the programs after --tools, ${tools}, are not inside it."
+  [[ "${HERE:A}" == "$app"/* ]] || app_refuse "this installer, ${HERE}/install.sh, is not inside it."
 fi
 
 # The pin of the transcriber's model is looked at before anything is, whether or not the model is here, since a model already here is

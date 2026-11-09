@@ -429,7 +429,7 @@ describe("the installer's own text", () => {
     const xml = text.slice(text.indexOf("xml() {"), text.indexOf("\n", text.indexOf("xml() {")) + 1);
     const dir = mkdtempSync(join(tmpdir(), "brimm-check-agent-"));
     const file = join(dir, "check.plist");
-    const r = spawnSync("/bin/zsh", ["-c", `${xml}${writer}\nLABEL=x; CHECK_LABEL=com.thebrimm.claude-check; HERE="/the tool"; AGENT_PATH=/opt/homebrew/bin:/usr/bin; CHECK_LOG="/home/Library/Logs/brimm-video-claude-check.log"\ncheck_agent /opt/homebrew/bin/node 1800000180 > "${file}"`], { encoding: "utf8" });
+    const r = spawnSync("/bin/zsh", ["-c", `${xml}${writer}${functionOf("agent_program")}${functionOf("agent_bundle")}\napp_exe=""; app_id=""\nLABEL=x; CHECK_LABEL=com.thebrimm.claude-check; HERE="/the tool"; AGENT_PATH=/opt/homebrew/bin:/usr/bin; CHECK_LOG="/home/Library/Logs/brimm-video-claude-check.log"\ncheck_agent /opt/homebrew/bin/node 1800000180 > "${file}"`], { encoding: "utf8" });
     assert.equal(r.status, 0, r.stderr);
     assert.equal(spawnSync("/usr/bin/plutil", ["-lint", file], { encoding: "utf8" }).status, 0);
     assert.deepEqual(JSON.parse(spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", file], { encoding: "utf8" }).stdout), {
@@ -840,7 +840,7 @@ describe("the installer's own text", () => {
   it("gives the launch agent the one PATH, and looks for Claude Code along that same PATH", () => {
     // It is this PATH unless another is named in BRIMM_AGENT_PATH, as a test names one.
     assert.match(text, /\nAGENT_PATH="\$\{BRIMM_AGENT_PATH:-\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin\}"\n/);
-    assert.ok(text.includes('<dict><key>PATH</key><string>$AGENT_PATH</string></dict>'));
+    assert.equal(text.split('<dict><key>PATH</key><string>$(xml "$AGENT_PATH")</string></dict>').length - 1, 2);
     assert.match(text, /\n {2}for dir in \$\{\(s\.:\.\)AGENT_PATH\} "\$HOME\/\.local\/bin"; do\n/);
   });
   it("stops its own launch agents when it is asked to stop the watching, and never writes, loads or stops the transcript tool's", () => {
@@ -851,10 +851,10 @@ describe("the installer's own text", () => {
     const naming = text.split("\n").filter((line) => /TRANSCRIBE_LABEL|com\.thebrimm\.transcribe/.test(line) && !line.startsWith("#"));
     assert.ok(naming.length >= 2, naming.join("\n"));
     for (const line of naming) assert.doesNotMatch(line, /launchctl|rm |> ?"/, line);
-    // plutil reads a launch agent's file in two places, both in watched(); its other reads are of what Claude Code says
-    // of its sign-in. None reads what settings.js says: that is read as lines.
+    // plutil reads a launch agent's file in two places, both in watched(); two reads are of the app's Info.plist (--app), and its
+    // other reads are of what Claude Code says of its sign-in. None reads what settings.js says: that is read as lines.
     const reads = text.split("\n").filter((line) => line.includes("plutil -extract"));
-    assert.deepEqual(reads.map((line) => (line.includes('"$file"') ? "agent" : / -o - - /.test(line) ? "Claude" : line)), ["agent", "agent", "Claude", "Claude"]);
+    assert.deepEqual(reads.map((line) => (line.includes('"$file"') ? "agent" : line.includes('"$app/Contents/Info.plist"') ? "app" : / -o - - /.test(line) ? "Claude" : line)), ["agent", "agent", "app", "app", "Claude", "Claude"]);
   });
 });
 
@@ -2824,5 +2824,140 @@ describe("BRIMM Video Studio's own copy of Studio (--tools; Studio app phase 4),
   it("says in its help how BRIMM Video Studio sets a Mac up with --tools", () => {
     const r = ask("--print", "--help");
     assert.ok(r.out.replace(/\s+/g, " ").includes("set this Mac up as BRIMM Video Studio does, from the app's own copy of Studio, which has a build.json beside tool/ and is never set up without --tools (and a git checkout never with it). Every program is the app's own, in <bin>: node, npm, ffmpeg, ffprobe, whisper-cli and Studio's compiled helpers. Homebrew is never looked for or run, and Xcode's tools are not needed."), r.out);
+  });
+});
+
+describe("BRIMM Video Studio's background job through the app (--app; Studio app phase 4), asked what it would do", { skip: notAMac }, () => {
+  let copy;
+  let other;
+  before(() => {
+    copy = appCopy();
+    other = appCopy();
+  });
+  after(() => {
+    copy.done();
+    other.done();
+  });
+  function dropbox() {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    return { dir, root, done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  const ALSO = "\n\nNothing was changed.\n";
+  const askApp = (c, ...more) => askWith({ bare: true, install: c.install }, "--print", "--machine", "Mac Studio", "--tools", c.tools, "--app", c.app, ...more);
+  const NOT_WHOLE = (app, reason) => `The app after --app is not a whole BRIMM Video Studio (${app}): ${reason} ${DAMAGED}${ALSO}`;
+  it("runs the background job as the app's own program with --agent, and names the app to macOS", () => {
+    const d = dropbox();
+    try {
+      const drop = `${d.root}/Unedited Video/Mac Studio`;
+      const r = askApp(copy, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      const log = join(r.home, "Library/Logs/brimm-video.log");
+      assert.deepEqual(held(r.agents[0]), {
+        Label: "com.thebrimm.unedited",
+        ProgramArguments: [`${copy.app}/Contents/MacOS/BRIMM Video Studio`, "--agent", "--watch", drop],
+        AssociatedBundleIdentifiers: ["com.thebrimm.video-studio"],
+        WatchPaths: [drop],
+        RunAtLoad: true,
+        EnvironmentVariables: { PATH: `${copy.tools}:/usr/bin:/bin` },
+        StandardOutPath: log,
+        StandardErrorPath: log
+      });
+      changedNothing(r);
+      assert.equal(copy.ran(), "");
+    } finally {
+      d.done();
+    }
+  });
+  it("passes --rules-only on after --agent", () => {
+    const d = dropbox();
+    try {
+      const r = askApp(copy, "--rules-only", d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.deepEqual(r.agents[0].ProgramArguments, [`${copy.app}/Contents/MacOS/BRIMM Video Studio`, "--agent", "--rules-only", "--watch", `${d.root}/Unedited Video/Mac Studio`]);
+    } finally {
+      d.done();
+    }
+  });
+  it("runs the check of Claude through the app too (its writer, run alone)", { skip: noZsh }, () => {
+    const writer = text.slice(text.indexOf("check_agent() {"), text.indexOf("\n}\n", text.indexOf("check_agent() {")) + 3);
+    const xmlFn = text.slice(text.indexOf("xml() {"), text.indexOf("\n", text.indexOf("xml() {")) + 1);
+    const dir = mkdtempSync(join(tmpdir(), "brimm-check-agent-"));
+    const file = join(dir, "check.plist");
+    const exe = "/Applications/BRIMM Video Studio.app/Contents/MacOS/BRIMM Video Studio";
+    try {
+      const r = spawnSync("/bin/zsh", ["-c", `${xmlFn}${writer}${functionOf("agent_program")}${functionOf("agent_bundle")}\napp_exe="${exe}"; app_id=com.thebrimm.video-studio\nLABEL=x; CHECK_LABEL=com.thebrimm.claude-check; HERE="/the tool"; AGENT_PATH=/opt/homebrew/bin:/usr/bin; CHECK_LOG="/home/Library/Logs/brimm-video-claude-check.log"\ncheck_agent /opt/homebrew/bin/node 1800000180 > "${file}"`], { encoding: "utf8" });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(spawnSync("/usr/bin/plutil", ["-lint", file], { encoding: "utf8" }).status, 0);
+      assert.deepEqual(JSON.parse(spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", file], { encoding: "utf8" }).stdout), {
+        Label: "com.thebrimm.claude-check",
+        ProgramArguments: [exe, "--agent", "--check-claude", "--until", "1800000180"],
+        AssociatedBundleIdentifiers: ["com.thebrimm.video-studio"],
+        RunAtLoad: true,
+        EnvironmentVariables: { PATH: "/opt/homebrew/bin:/usr/bin" },
+        StandardOutPath: "/home/Library/Logs/brimm-video-claude-check.log",
+        StandardErrorPath: "/home/Library/Logs/brimm-video-claude-check.log"
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("an app in a folder whose name has spaces, & and < > is named exactly", () => {
+    const odd = appCopy({ under: "R&D <apps>" });
+    const d = dropbox();
+    try {
+      const r = askApp(odd, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.equal(r.agents[0].ProgramArguments[0], `${odd.app}/Contents/MacOS/BRIMM Video Studio`);
+      assert.equal(r.agents[0].EnvironmentVariables.PATH, `${odd.tools}:/usr/bin:/bin`);
+      assert.deepEqual(r.agents[0].WatchPaths, [`${d.root}/Unedited Video/Mac Studio`]);
+    } finally {
+      d.done();
+      odd.done();
+    }
+  });
+  it("refuses an app that is not whole, or that does not hold the programs and this installer, before anything is changed", () => {
+    const d = dropbox();
+    const same = (r, line) => {
+      assert.deepEqual([r.status, r.out], [2, line], line);
+      assert.deepEqual([r.left, r.ran], [[], ""], line);
+    };
+    const plist = join(copy.app, "Contents", "Info.plist");
+    const exe = join(copy.app, "Contents", "MacOS", "BRIMM Video Studio");
+    const kept = readFileSync(plist, "utf8");
+    try {
+      same(askApp({ install: copy.install, tools: copy.tools, app: copy.tools }, d.root), NOT_WHOLE(copy.tools, "it is not a folder whose name ends in .app."));
+      try {
+        writeFileSync(plist, kept.replace(/\s*<key>CFBundleIdentifier<\/key><string>[^<]*<\/string>/, ""));
+        same(askApp(copy, d.root), NOT_WHOLE(copy.app, "its Contents/Info.plist does not name its identifier and its program."));
+        writeFileSync(plist, kept.replace("<string>BRIMM Video Studio</string>\n  <key>CFBundleName", "<string>../x</string>\n  <key>CFBundleName"));
+        same(askApp(copy, d.root), NOT_WHOLE(copy.app, "its Contents/Info.plist does not name its identifier and its program."));
+      } finally {
+        writeFileSync(plist, kept);
+      }
+      chmodSync(exe, 0o644);
+      try {
+        same(askApp(copy, d.root), NOT_WHOLE(copy.app, "its program, Contents/MacOS/BRIMM Video Studio, is not there or cannot be run."));
+      } finally {
+        chmodSync(exe, 0o755);
+      }
+      same(askWith({ bare: true, install: copy.install }, "--print", "--machine", "Mac Studio", "--tools", other.tools, "--app", copy.app, d.root), NOT_WHOLE(copy.app, `the programs after --tools, ${other.tools}, are not inside it.`));
+      same(askWith({ bare: true, install: other.install }, "--print", "--machine", "Mac Studio", "--tools", copy.tools, "--app", copy.app, d.root), NOT_WHOLE(copy.app, `this installer, ${other.tool}/install.sh, is not inside it.`));
+      assert.equal(copy.ran(), "");
+    } finally {
+      d.done();
+    }
+  });
+  it("keeps dev mode's launch agent as it was: node and unedited.js, no AssociatedBundleIdentifiers, no blank line", () => {
+    const r = ask("--print", "/Volumes/Work/Unedited video");
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.ok(!r.agents[0].text.includes("AssociatedBundleIdentifiers"));
+    assert.ok(!r.agents[0].text.includes("\n\n"));
+    assert.deepEqual(r.agents[0].ProgramArguments.slice(1, 2), [join(HERE, "unedited.js")]);
+  });
+  it("says in its help that with --app the background job is the app's own program", () => {
+    const r = ask("--print", "--help");
+    assert.ok(r.out.replace(/\s+/g, " ").includes("With --app the background job is the app's own program, started with --agent, so that macOS names the app when it asks for access and in Login Items; without it, node from <bin>. It takes the other options of --machine"), r.out);
   });
 });
