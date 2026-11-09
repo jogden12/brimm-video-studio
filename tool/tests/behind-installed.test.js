@@ -2,11 +2,12 @@
 // told in the app's words ("choose Repair"). The feed is a stand-in, git is never reached, and every program `behind` runs is written down.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, LOCK_CHANGED } from "../edit.js";
 import { PIN } from "../hyperframes.js";
-import { writeSettings } from "../settings.js";
+import { writeAccess } from "../access.js";
+import { dropFolderOf, readSettings, writeSettings } from "../settings.js";
 import { writeStudio } from "../studio.js";
 import { UPDATE_EVERY_MS, updateCheckFile } from "../update-check.js";
 import { setup } from "./episodes.js";
@@ -119,6 +120,24 @@ describe("behind: in a git checkout", () => {
     const code = await editMain(["behind"], { ...t.ctx.deps, build: { mode: "dev" }, fetch: f.fetch, run: behindBy(3), say: (x) => said.push(x) });
     assert.deepEqual([code, said], [0, ["Jason has a newer BRIMM Video Studio (3 changes). Ask him to update this Mac when it suits."]]);
     assert.equal(f.calls.length, 0);
+    t.done();
+  });
+});
+
+describe("behind: on an installed Mac, a new node", () => {
+  it("says nothing of a new node, and asks no plutil", async () => {
+    const t = setup();
+    writeSettings(t.home, { dropPath: join(t.home, "Desktop", "Drop") });
+    const drop = dropFolderOf(readSettings(t.home).settings, t.home);
+    mkdirSync(drop, { recursive: true });
+    const OLD = "/opt/homebrew/Cellar/node/25.0.0/bin/node";
+    writeAccess(t.home, { version: 1, places: { drop: { state: "ok", code: "", at: t.now(), since: t.now(), folder: drop, node: OLD, okNode: OLD } }, looking: null, told: {} });
+    let asked = 0;
+    const kicks = [];
+    const r = await on(t, NEWEST_FEED().fetch, { agentPid: () => null, agentNode: () => { asked++; return "/opt/homebrew/Cellar/node/25.1.0/bin/node"; }, kickstart: () => kicks.push("kick") });
+    assert.deepEqual(r.said, [NEWEST]);
+    assert.equal(asked, 0);
+    assert.deepEqual(kicks, []);
     t.done();
   });
 });

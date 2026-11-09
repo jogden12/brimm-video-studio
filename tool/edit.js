@@ -1782,7 +1782,8 @@ function accessFindingOf(ctx) {
   const args = { note, now, places, agentPid: agentPidNow, missing, unseen };
   let finding = findingOf(args);
   // A new node is the last finding: the places that need access, and the plist's node (plutil), are worked out only when nothing else is to be said.
-  if (!finding) {
+  // An installed Mac has none: its job runs through the app's own executable, so macOS's grants are the app's and survive a change of node.
+  if (!finding && !isInstalled(ctx.build)) {
     const noted = ["drop", "episodes"].filter((place) => (note.places[place] || {}).okNode);
     const needsAccess = noted.filter((place) => needsFilesAccess(places[place], home));
     finding = findingOf({ ...args, agentNode: needsAccess.length ? ctx.agentNode() : "", needsAccess });

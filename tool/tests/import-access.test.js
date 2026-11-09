@@ -267,6 +267,7 @@ describe("the banners (A3)", () => {
     });
     return { r, before };
   };
+  const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "", broken: false };
   const cloud = (w) => join(w.home, "Library", "CloudStorage", "Dropbox-x", "BRIMM Video");
   const okPlace = (folder, okNode) => ({ state: "ok", code: "", at: L, since: L, folder, node: okNode, okNode });
 
@@ -282,6 +283,13 @@ describe("the banners (A3)", () => {
       const two = runs(w, L + MIN, { settings: settingsOf(w), home: w.home, node: "/n/b" });
       await uneditedFolders([w.drop], two.deps);
       assert.equal(two.notices.includes(accessBanner("newNode", "")), false, "once per node");
+    }));
+
+  it("an installed Mac posts no new-node banner, though a place has a foreign okNode", () =>
+    withWorld(async (w) => {
+      const { r } = await newNodeRun(w, { episodes: okPlace(cloud(w), "/n/a") }, "/n/b", { build: INSTALLED });
+      assert.equal(r.notices.includes(accessBanner("newNode", "")), false);
+      assert.equal(readAccess(w.home).told.newNode, undefined);
     }));
 
   it("a new node posts nothing with no okNode, or when every noted place is in the home folder", () =>
