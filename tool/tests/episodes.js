@@ -119,6 +119,10 @@ export function setup({ machine = "Mac Studio", programs = {} } = {}) {
     run, runGuarded, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", model: "MODEL", sips: "SIPS" }, running: async () => false, progress: noProgress,
     // No test looks anything up on the network: this Mac is online unless a test says otherwise.
     online: async () => true,
+    // Nor is the update feed read: no test reaches the network, and one that needs the feed gives its own `fetch`.
+    fetch: async () => {
+      throw new Error("No test reaches the network.");
+    },
     // No test reads this computer's own Claude settings: `behind` looks at the environment, the managed settings folder and the
     // managed preferences (loosened.js lockLoosened), and here they are empty and in the test's own folder. Its session runs in her
     // folder for Claude, as her sessions do, whether or not a test has written that folder.

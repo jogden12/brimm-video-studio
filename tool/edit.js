@@ -96,6 +96,8 @@ import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
 import { quotable, shellWord, studioFiles, studioFolder } from "./studio.js";
+import { brokenLine, buildOf, isInstalled } from "./build.js";
+import { checkForUpdate, updateLine } from "./update-check.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
 import { afterAllNoted, clearOldWords, markChat, noteAfterAll, writeWords } from "./held.js";
@@ -381,6 +383,9 @@ const homeOf = (deps) => deps.home || studioHome();
     each the Mac's own unless a test gives another. {why} when this Mac has no settings for episodes. */
 export function contextFor(deps = {}) {
   const home = homeOf(deps);
+  // Which kind of BRIMM Video Studio this is (build.js): worked out first, before the settings are read, since the line for a Mac that is not
+  // set up yet needs it too.
+  const build = deps.build ?? buildOf(thisCheckout());
   const got = deps.settings ? { settings: deps.settings } : readSettings(home);
   if (!got.settings) return { why: "This Mac is not set up for episodes yet. Jason runs install.sh --machine on it." };
   const { settings } = got;
@@ -391,6 +396,7 @@ export function contextFor(deps = {}) {
   const words = { marked: false, lines: null, session: null, label: "" };
   const say = deps.say || ((line) => process.stdout.write(`${line}\n`));
   return {
+    build,
     settings,
     machine: settings.machine,
     root: settings.root,
@@ -2892,12 +2898,15 @@ async function behind(ctx) {
   const could = "Could not check for a newer BRIMM Video Studio. Is this Mac offline?";
   // Her folder is looked at whatever git answers: that needs no network.
   const stale = studioStale(ctx);
+  const installed = isInstalled(ctx.build);
   const folderLine = () => {
-    if (stale) ctx.say(`Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${shellWord(stale.node)}, then start a new session in her Claude folder)`);
+    if (stale && installed) ctx.say("The folder for Claude on this Mac is out of date: an older BRIMM Video Studio wrote it. Open BRIMM Video Studio and choose Repair when it suits, then start a new chat.");
+    else if (stale) ctx.say(`Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${shellWord(stale.node)}, then start a new session in her Claude folder)`);
     // On a Mac that opens episodes in the app, the pinned command line must be in its toolchain folder (architecture 6.1: `behind` also
     // checks the toolchain). This needs no network either, so it is said whatever git answered. It is not said when the lock refused first.
     const differs = appOf(ctx.settings) ? toolchainDiffers(toolchainHolds(ctx.home)) : "";
-    if (differs) ctx.say(`HyperFrames' command line on this Mac is not the one Studio needs. Ask Jason to update it when it suits. (Jason: Studio is pinned to version ${PIN.version}, and this Mac has ${differs}; the installer puts the pinned one in place.)`);
+    if (differs && installed) ctx.say(`HyperFrames' command line on this Mac is not the one Studio needs. Open BRIMM Video Studio and choose Repair when it suits. (Studio is pinned to version ${PIN.version}, and this Mac has ${differs}.)`);
+    else if (differs) ctx.say(`HyperFrames' command line on this Mac is not the one Studio needs. Ask Jason to update it when it suits. (Jason: Studio is pinned to version ${PIN.version}, and this Mac has ${differs}; the installer puts the pinned one in place.)`);
     if (added.length) ctx.say(`(Jason: her folder also allows, on this Mac: ${added.map(({ type, name }) => `${type} ${name}`).join(", ")}.)`);
     // What the import's note and the drop folder show, last: needs no network. A new node also asks the launch agent to look now, when no
     // run is at work, so that macOS's question comes up while she is at this Mac.
@@ -2914,6 +2923,16 @@ async function behind(ctx) {
     }
     return 0;
   };
+  if (installed) {
+    // An installed Mac has no git: the update feed says whether a newer one is ready, in the place of git's line (update-check.js).
+    if (ctx.build.broken) {
+      ctx.say(could);
+      ctx.say(brokenLine(ctx.build));
+    } else {
+      ctx.say(updateLine(await checkForUpdate({ build: ctx.build, home: ctx.home, now: ctx.now(), fetch: ctx.deps.fetch ?? globalThis.fetch, system: ctx.deps.system })));
+    }
+    return folderLine();
+  }
   if (!(ctx.deps.isGitCheckout || isGitCheckout)(ctx.settings.checkout)) return folderLine();
   const fetched = await git("fetch", "-q", "origin", "main");
   if (fetched.code !== 0 || fetched.outOfTime) {
