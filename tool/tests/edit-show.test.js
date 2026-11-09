@@ -324,7 +324,10 @@ describe("behind", () => {
         const r = await on({ ...t.ctx.deps, run: git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" }).run }, "behind");
         const given = r.text.match(/--node (.*), then start a new session/)[1];
         assert.equal(given, spelled(node), name);
-        for (const shell of [["/bin/zsh", ["-f", "-c"]], ["/bin/bash", ["-c"]]]) {
+        // Each shell this computer has: the Linux that runs the tests on GitHub has no zsh, and bash alone is asked there.
+        const shells = [["/bin/zsh", ["-f", "-c"]], ["/bin/bash", ["-c"]]].filter(([path]) => existsSync(path));
+        assert.ok(shells.length > 0, "neither zsh nor bash is on this computer");
+        for (const shell of shells) {
           const run = spawnSync(shell[0], [...shell[1], `${standIn} --node ${given}`], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
           assert.equal(run.status, 0, `${name} ${shell[0]}: ${run.stderr}`);
           assert.deepEqual(run.stdout.split("\n").slice(0, -1), ["--node", node], `${name} ${shell[0]}`);
