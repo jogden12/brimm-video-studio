@@ -30,7 +30,7 @@
 // them is left where it is, with a status that says so (filing.js). A watched folder that is not this Mac's drop folder, and the
 // one file given on the command line, are imported the same way, and name the video by its file.
 // What Claude is still asked from here: askClaude and askAgain (Reel candidates, asked for in her chat) and the readings (reading.js).
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { homeRefusal, studioHome } from "./home.js";
@@ -57,15 +57,15 @@ import { STUDIO_NAME } from "./name.js";
 import { readStatusesIn, importState, shownStep } from "./importing.js";
 import { ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, notWholeHere, recordingAt } from "./where.js";
 import { putHereNow } from "./put-here.js";
+import { hasXcodeTools, helperCommand, ownBin } from "./helpers.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
     transcript tool's own numbers. */
 const LOOK_MS = 5000;
 const MAX_LOOKS = 120;
 
-/** The face finder, which swift runs, and how much of what it prints is read. It prints a line for each still, and there is a
+/** How much of what the face finder prints is read. It prints a line for each still, and there is a
     still for every two seconds, so a whole day of video is well within this. */
-const FACES = fileURLToPath(new URL("./faces.swift", import.meta.url));
 const FACES_PRINTED = 20000000;
 
 /** The Claude model a plan is read with. It is named, and not left to the account's default, so that both Macs pick the same
@@ -93,29 +93,29 @@ export const AGAIN_MS = 3000;
     characters, so this is all of it. */
 const CLAUDE_PRINTED = 2000000;
 
-/** Are Xcode's command line tools on this Mac? xcode-select says where they are, and ends badly when they are nowhere. The
-    installer asks it the same. */
-const hasXcodeTools = () => spawnSync("/usr/bin/xcode-select", ["-p"], { stdio: "ignore" }).status === 0;
-
-/** Where the programs are on this Mac: the transcript tool's own, ffprobe, swift and claude. ffprobe is installed with ffmpeg,
-    so it is looked for beside ffmpeg first, and then where ffmpeg itself is looked for. swift comes with Xcode's command
-    line tools, in /usr/bin. A file of that name is there on every Mac: until the tools are installed it is macOS's own
-    stand-in, which finds no face and puts up a window offering to install them. So swift counts as found only when
-    `xcodeTools` says the tools are here. claude is Claude Code, which Claude is asked through. It is looked for where the
-    other programs are, and then in .local/bin in the home folder, where its own installer puts it: the launch agent's PATH
-    has no home folder in it. `missing` says what is not there, in plain words. swift and claude are never among it: without
+/** Where the programs are on this Mac: the transcript tool's own, ffprobe, swift and claude, and `bin`, the folder looked in
+    first and the one compiled helpers are looked for in. It is node's own folder: in the app, the programs it comes with are
+    kept beside the node that runs Studio, and `findTools` (a copy from brimm-operations that does not change) is given a PATH
+    with that folder first. On a Mac where node's folder holds only node, as Homebrew's does, every program is found where it was
+    before. ffprobe is installed with ffmpeg, so it is looked for beside ffmpeg first, then in `bin`, and then where ffmpeg itself
+    is looked for. swift comes with Xcode's command line tools, in /usr/bin. A file of that name is there on every Mac: until
+    the tools are installed it is macOS's own stand-in, which finds no face and puts up a window offering to install them. So
+    swift counts as found only when `xcodeTools` says the tools are here, and it is asked only when a file of that name is
+    there. swift is never looked for in `bin`. claude is Claude Code, which Claude is asked through. It is looked for in `bin`,
+    where the other programs are, and then in .local/bin in the home folder, where its own installer puts it: the launch agent's
+    PATH has no home folder in it. `missing` says what is not there, in plain words. swift and claude are never among it: without
     swift the work goes on, and a Reel candidate is cropped at the centre of the picture, and without claude a reading and `ask` cannot ask
     Claude (the import never does). */
 export function findPrograms(given = {}) {
-  const { exists = existsSync, env = process.env, xcodeTools = hasXcodeTools } = given;
-  const found = findTools(given);
+  const { exists = existsSync, env = process.env, xcodeTools = hasXcodeTools, bin = ownBin() } = given;
   const path = String(env.PATH || "").split(":").filter(Boolean);
-  const dirs = [...(found.ffmpeg ? [dirname(found.ffmpeg)] : []), ...path, "/opt/homebrew/bin", "/usr/local/bin"];
+  const found = findTools({ ...given, env: { ...env, PATH: [bin, ...path].join(":") } });
+  const dirs = [...(found.ffmpeg ? [dirname(found.ffmpeg)] : []), bin, ...path, "/opt/homebrew/bin", "/usr/local/bin"];
   const ffprobe = dirs.map((dir) => join(dir, "ffprobe")).find((file) => exists(file)) || "";
   const named = [...path, "/usr/bin"].map((dir) => join(dir, "swift")).find((file) => exists(file)) || "";
   const swift = named && xcodeTools() ? named : "";
-  const claude = [...path, "/opt/homebrew/bin", "/usr/local/bin", join(env.HOME || homedir(), ".local", "bin")].map((dir) => join(dir, "claude")).find((file) => exists(file)) || "";
-  return { ...found, ffprobe, swift, claude, missing: ffprobe ? found.missing : [...found.missing, "ffprobe is not installed. It comes with ffmpeg."] };
+  const claude = [bin, ...path, "/opt/homebrew/bin", "/usr/local/bin", join(env.HOME || homedir(), ".local", "bin")].map((dir) => join(dir, "claude")).find((file) => exists(file)) || "";
+  return { ...found, ffprobe, swift, claude, bin, missing: ffprobe ? found.missing : [...found.missing, "ffprobe is not installed. It comes with ffmpeg."] };
 }
 
 /** Put a file that is whole, at `from` in the run's own folder, where it belongs, at `to`: one move, so that it appears there
@@ -378,7 +378,8 @@ const limitText = (ms) => (ms % 60000 === 0 ? `${ms / 60000} minute${ms === 6000
     good (workcopy.js REEL_FACES_MS). Given none, a program has all the time it takes, as the upright version of the import (now gone)
     always gave it: the stills of a long recording take as long as they take. */
 export async function facesIn(file, work, { run, tools, limit = 0 }) {
-  if (!tools.swift) return { why: "swift, which finds the faces, is not installed" };
+  const finder = helperCommand("faces", { swift: tools.swift, bin: tools.bin });
+  if (!finder) return { why: "swift, which finds the faces, is not installed" };
   const folder = join(work, "stills");
   mkdirSync(folder, { recursive: true });
   const asked = limit > 0 ? { limit } : {};
@@ -386,7 +387,7 @@ export async function facesIn(file, work, { run, tools, limit = 0 }) {
   const cut = await run(tools.ffmpeg, stillsArgs(file, folder), asked);
   if (cut.code !== 0) return { why: `the stills to look in could not be made (${cut.outOfTime ? stoppedFor(cut) : lastLine(cut.stderr)})` };
   // What the face finder prints is its answer, so that is kept, whole.
-  const found = await run(tools.swift, [FACES, folder], { out: FACES_PRINTED, ...asked });
+  const found = await run(finder.program, [...finder.args, folder], { out: FACES_PRINTED, ...asked });
   if (found.code !== 0) return { why: `the face finder stopped (${stoppedFor(found)})` };
   try {
     const stills = JSON.parse(found.stdout);

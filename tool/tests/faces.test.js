@@ -1,4 +1,4 @@
-// The face finder's two programs (unedited.js facesIn): ffmpeg cuts stills of a video, and the finder swift runs looks in them. A Reel's
+// The face finder's two programs (unedited.js facesIn): ffmpeg cuts stills of a video, and the finder: brimm-faces beside node, or swift with faces.swift looks in them. A Reel's
 // video is looked in by the working copy's run (plan PR 5), which holds the working copy's lock for as long as it works, so a finder
 // that hangs would hold the lock for good: each of the two programs is given a time limit, and one that is stopped for its time is
 // said so in the words of the others. The full import's own use of the finder gives none, as it never did. No test runs ffmpeg or
@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { facesIn } from "../unedited.js";
 
+const NO_BIN = "/no/such/folder";
 const BOX = { x: 0.41, y: 0.22, w: 0.18, h: 0.3 };
 const STILLS = [{ file: "0001.jpg", faces: [BOX] }];
 
@@ -28,7 +29,7 @@ function world(c, answers = {}) {
     }
     return answers.finder ?? { code: 0, stderr: "", stdout: JSON.stringify(STILLS) };
   };
-  return { work, asked, run, tools: { ffmpeg: "FFMPEG", swift: "SWIFT" } };
+  return { work, asked, run, tools: { ffmpeg: "FFMPEG", swift: "SWIFT", bin: NO_BIN } };
 }
 const OUT_OF_TIME = { code: 1, stderr: "", signal: "SIGKILL", outOfTime: true };
 
@@ -62,7 +63,19 @@ describe("the faces looked for in a video (facesIn), with a time limit", () => {
   });
   it("has no finder to run without swift, and runs nothing", async (c) => {
     const w = world(c);
-    assert.deepEqual(await facesIn("/in/reel.mp4", w.work, { run: w.run, tools: { ffmpeg: "FFMPEG" }, limit: 180000 }), { why: "swift, which finds the faces, is not installed" });
+    assert.deepEqual(await facesIn("/in/reel.mp4", w.work, { run: w.run, tools: { ffmpeg: "FFMPEG", bin: NO_BIN }, limit: 180000 }), { why: "swift, which finds the faces, is not installed" });
     assert.deepEqual(w.asked, []);
+  });
+  it("runs the app's own finder, brimm-faces beside node, when it is there, with the stills' folder its one argument, swift or no swift", async (c) => {
+    const bin = mkdtempSync(join(tmpdir(), "brimm-bin-"));
+    c.after(() => rmSync(bin, { recursive: true, force: true }));
+    writeFileSync(join(bin, "brimm-faces"), "");
+    for (const swift of ["", "SWIFT"]) {
+      const w = world(c);
+      assert.deepEqual(await facesIn("/in/reel.mp4", w.work, { run: w.run, tools: { ffmpeg: "FFMPEG", swift, bin }, limit: 180000 }), { stills: STILLS });
+      const finder = w.asked[1];
+      assert.deepEqual([finder.cmd, finder.args, finder.options.limit], [join(bin, "brimm-faces"), [join(w.work, "stills")], 180000]);
+      assert.ok(finder.options.out >= 1000000);
+    }
   });
 });
