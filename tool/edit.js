@@ -280,9 +280,12 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         HyperFrames project in use, the recording's own), Claude's notes or its cut plan,
                                         whole. Of a video not yet answered, or a session, nothing is printed: a read-only
                                         copy of it opens in TextEdit on this Mac
-  node edit.js behind                   whether Jason has a newer BRIMM Video Studio than this Mac's; and the copies show
+  node edit.js behind                   whether there is a newer BRIMM Video Studio than this Mac's (on a Mac with the app, read
+                                        from its update feed; in a git checkout, asked of git); and the copies show
                                         opened are cleared. It refuses, and says to ask Jason, when her folder's lock is
                                         changed on this Mac: a settings.local.json in it, or hooks turned off
+  node edit.js update                   open BRIMM Video Studio's own check for updates, whose window takes over from
+                                        there; in a git checkout it says how that Mac is updated instead, and opens nothing
   node edit.js resolve "<episode>" [--keep A|B]
                                         show the two sides of a conflicted copy Dropbox kept, and keep the one picked:
                                         the other is set aside in the episode's history/
@@ -2855,6 +2858,28 @@ function clearShown(ctx) {
   } catch (e) {
     // A copy, or something brimm-video did not put there, is in it still.
   }
+}
+
+/** The address the app registers, which opens its own check for updates (Sparkle's window takes over). */
+export const CHECK_FOR_UPDATES_URL = "brimm-video-studio://check-for-updates";
+
+/** How long `update` gives /usr/bin/open: it only hands the address to the app. */
+const UPDATE_OPEN_MS = 10000;
+
+/** `update`: on an installed Mac, opens the app's own check for updates, whose window takes over from there; in a git checkout it
+    runs nothing and says how that Mac is updated. It takes no words, as `behind` takes none, and prints no session's words. */
+async function updateCommand(ctx) {
+  if (!isInstalled(ctx.build)) {
+    ctx.say("This Mac runs BRIMM Video Studio from a git checkout, so it is not updated from here. Ask Jason to update it when it suits. (Jason: when no import is at work, pull main in the checkout.)");
+    return 0;
+  }
+  const opened = await (ctx.deps.run || runProgram)("/usr/bin/open", [CHECK_FOR_UPDATES_URL], { limit: UPDATE_OPEN_MS });
+  if (opened.code === 0 && !opened.outOfTime) {
+    ctx.say("BRIMM Video Studio is checking for updates: its own window takes over from here. Once it has updated and opened again, start a new chat.");
+    return 0;
+  }
+  ctx.say(`BRIMM Video Studio could not be opened to check for updates. Open it from the Applications folder and choose Check for Updates….${ctx.build.support ? ` If that does not help, ask ${ctx.build.support}.` : ""}`);
+  return 1;
 }
 
 /** How long `behind` gives git, each time: well inside the two minutes the Code tab gives a command. */
@@ -7138,7 +7163,7 @@ async function joinCommand(ctx, rest) {
 
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and so are `workcopy` (`kind` and `app` start it) and `join` (`plan … join` starts it): all three are in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, bring, status, retry, look, name, title, reel, reels, ask, finish, show, behind: (ctx) => behind(ctx), resolve: resolveConflict, free, spell, graphic, teachings: teachingsCommand, principles, ideas, refs, plan, footage };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, bring, status, retry, look, name, title, reel, reels, ask, finish, show, behind: (ctx) => behind(ctx), update: updateCommand, resolve: resolveConflict, free, spell, graphic, teachings: teachingsCommand, principles, ideas, refs, plan, footage };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

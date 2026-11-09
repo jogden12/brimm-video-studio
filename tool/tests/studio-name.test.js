@@ -82,6 +82,7 @@ export function stringsOf(src) {
 
 /** What may still hold an old name, in the file it is in: the whole string (`exact`) or a part of it (`has`), and why. */
 const ALLOWED = [
+  { file: "edit.js", has: "brimm-video-studio://", why: "the app's URL scheme (design 5), which the app registers" },
   { file: "episode.js", exact: "not for brimm-video", why: "the answer state a record stores for a video she left alone: an id on disk, read by every Mac and by BRIMM Ops" },
   { file: "gate.js", exact: "not for brimm-video", why: "the same stored answer state, compared with" },
   { file: "edit.js", exact: "not for brimm-video", why: "the same stored answer state" },
