@@ -1,10 +1,10 @@
 // The rule for writing into Dropbox (dropbox.js): each file is made whole outside Dropbox, put in under its final name as a
 // clone, never over a file there, and checked again at least 15 minutes later: Dropbox undid two renames minutes after they
 // had returned on 2026-10-14. Here the clone is a stand-in that copies into a folder made for the test, the late check is
-// asked at once, a placeholder is a stand-in for what the disk says of a file, and python3, which reads a placeholder through,
-// is a stand-in for the program. One test, on a Mac only, runs the Mac's own /bin/cp -c, one its own python3 and one its own swift
+// asked at once, a placeholder is a stand-in for what the disk says of a file, and the reader (brimm-read-through, or python3 as the
+// fallback), which reads a placeholder through, is a stand-in for the program. One test, on a Mac only, runs the Mac's own /bin/cp -c, one its own python3 and one its own swift
 // on read-through.swift, each in a folder made for it. Nothing here touches Dropbox, and nothing reads a real placeholder.
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
@@ -15,13 +15,14 @@ import { LATE_CHECK_MS, READ_QUIET_MS, NO_READ_THROUGH, cloneIn, replaceIn, late
 import { helperSource, hasXcodeTools } from "../helpers.js";
 
 const notAMac = process.platform !== "darwin" ? "/bin/cp -c makes a clone on a Mac only" : false;
-const noPython = process.platform !== "darwin" || !existsSync("/usr/bin/python3") ? "only a Mac's python3 can turn on the reads that bring a file down" : false;
+const noPython = process.platform !== "darwin" || !hasXcodeTools() ? "only a Mac's python3 can turn on the reads that bring a file down" : false;
 /** NO_BIN holds nothing; APP_BIN is the app's own bin, which holds the compiled reader (an empty file, as nothing here starts it). */
 const NO_BIN = "/no/such/folder";
 const APP_BIN = mkdtempSync(join(tmpdir(), "BRIMM Video Studio's bin-"));
 writeFileSync(join(APP_BIN, "brimm-read-through"), "");
+after(() => rmSync(APP_BIN, { recursive: true, force: true }));
 const READERS = [
-  { name: "brimm-read-through", bin: APP_BIN, xcodeTools: () => false },
+  { name: "brimm-read-through", bin: APP_BIN, xcodeTools: () => true },
   { name: "python3", bin: NO_BIN, xcodeTools: () => true }
 ];
 const GB = 2 ** 30;
@@ -327,7 +328,7 @@ describe("what the lead's review of PR 11 found in the rule", () => {
 });
 
 // A program the launch agent starts cannot have a placeholder brought down by reading it: macOS refuses the read at once,
-// "Resource deadlock avoided" (EDEADLK), the transcript tool's failure on the Mac Studio on 2026-10-15. So the read is python3's.
+// "Resource deadlock avoided" (EDEADLK), the transcript tool's failure on the Mac Studio on 2026-10-15. So the read is the reader's (brimm-read-through, or python3 as the fallback).
 describe("reading a file through, so that Dropbox brings it down", () => {
   /** A stand-in for the reader as spawn starts it, listed in `runs` as {cmd, args}. It says how much of the file it has read, as
       `reads` says, each after its pause in milliseconds, and then ends with `code`, having said `why` on standard error; with
@@ -414,6 +415,7 @@ describe("reading a file through, so that Dropbox brings it down", () => {
     it(`${r.name}: says why, in the reader's own words, when the file cannot be read`, async () => {
       const p = reader({ reads: [[5, 4194304]], code: 1, why: "Resource deadlock avoided\n" });
       await assert.rejects(readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 100, ...opts }), { message: "Resource deadlock avoided" });
+      assert.equal(p.runs.length, 1);
     });
     it(`${r.name}: says why when the reader cannot be started, and tries nothing else`, async () => {
       const p = reader({ refused: Object.assign(new Error(`spawn ${r.name} EACCES`), { code: "EACCES" }) });

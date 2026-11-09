@@ -150,7 +150,7 @@ const spoken = (ms) => (ms < 60000 ? `${ms} ms` : `${ms / 60000} minute${ms === 
     cannot change the setting, so python3 turns it on first, for itself alone, with setiopolicy_np:
     IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES (3), IOPOL_SCOPE_PROCESS (0), IOPOL_MATERIALIZE_DATALESS_FILES_ON (2). When the
     file cannot be read, python3 says why in plain words, on its standard error. python3 comes with Xcode's command line
-    tools, which each Mac has. brimm-operations' transcript tool brings a placeholder down the same way. */
+    tools. brimm-operations' transcript tool brings a placeholder down the same way. */
 const READ_THROUGH = [
   "import ctypes, sys",
   "if ctypes.CDLL(None).setiopolicy_np(3, 0, 2) != 0:",
