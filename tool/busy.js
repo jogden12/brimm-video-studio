@@ -31,8 +31,9 @@ export function pidFromPrint(printed) {
 }
 
 /** The process number launchd gives the import's background job, or null when the job is not loaded or is not running. */
-export function launchdPid({ run = spawnSync, uid = process.getuid() } = {}) {
+export function launchdPid(options = {}) {
   try {
+    const { run = spawnSync, uid = process.getuid() } = options;
     const ran = run("/bin/launchctl", ["print", `gui/${uid}/${AGENT_LABEL}`], { encoding: "utf8" });
     return ran && ran.status === 0 ? pidFromPrint(ran.stdout) : null;
   } catch (e) {
@@ -73,8 +74,9 @@ function importLockPid(home, alive, now) {
 }
 
 /** Why the Mac is not idle, in one line, or "" when nothing is at work. Never throws. */
-export function idleWhy({ home = studioHome(), agentPid = launchdPid(), alive = isRunning, now = Date.now() } = {}) {
+export function idleWhy(options = {}) {
   try {
+    const { home = studioHome(), agentPid = launchdPid(), alive = isRunning, now = Date.now() } = options;
     if (Number.isInteger(agentPid) && agentPid > 0) return `The import is at work: its background job, ${AGENT_LABEL}, is running (process ${agentPid}).`;
     const lockPid = importLockPid(home, alive, now);
     if (lockPid) return `An import is at work: it holds its lock (process ${lockPid}).`;

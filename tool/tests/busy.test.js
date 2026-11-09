@@ -118,6 +118,17 @@ describe("idleWhy", () => {
     });
   });
 
+  it("never throws, even when BRIMM_VIDEO_HOME is refused", () => {
+    const was = process.env.BRIMM_VIDEO_HOME;
+    process.env.BRIMM_VIDEO_HOME = "relative";
+    try {
+      assert.equal(idleWhy({ agentPid: null }), "");
+    } finally {
+      if (was === undefined) delete process.env.BRIMM_VIDEO_HOME;
+      else process.env.BRIMM_VIDEO_HOME = was;
+    }
+  });
+
   it("keeps run.js's half day", () => {
     assert.equal(RUNS_LOCK_STALE_MS, 43200000);
     assert.ok(readFileSync(join(TOOL, "run.js"), "utf8").includes("const STALE_LOCK_MS = 12 * 3600 * 1000;"));
