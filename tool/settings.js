@@ -34,7 +34,7 @@ import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { isMain } from "./is-main.js";
 import { waitingToCut } from "./cuts.js";
 import { textWriter } from "./dropbox.js";
 import { homeRefusal, programHome, studioHome } from "./home.js";
@@ -1399,7 +1399,7 @@ export function settingsMain(argv, { home, say = (line) => process.stdout.write(
   return 2;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   // Whatever else goes wrong ends it with 1 and a plain line, never an unhandled rejection with a stack trace, which holds paths.
   Promise.resolve()
     .then(() => settingsMain(process.argv.slice(2)))
