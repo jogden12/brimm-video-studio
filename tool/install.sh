@@ -1158,7 +1158,11 @@ fi
 if [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then
   mkdir -p "$MODEL_DIR"
   say "Downloading the model. This is done once."
-  curl -L --fail --progress-bar -o "$MODEL.part" "$MODEL_URL"
+  if ! curl -L --fail --progress-bar -o "$MODEL.part" "$MODEL_URL"; then
+    rm -f "$MODEL.part"
+    say "The model could not be downloaded whole (what curl said is above). It was not kept. Check that this Mac is online, then run this again."
+    exit 1
+  fi
   got="$(model_sha256 "$MODEL.part" || true)"
   if [[ "$got" != "$MODEL_SHA256" ]]; then
     rm -f "$MODEL.part"

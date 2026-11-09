@@ -2596,11 +2596,11 @@ describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac
     const block = text.slice(at + 1, text.indexOf("\nfi\n", at) + 4);
     const WIFI = "<html><body>Sign in to the Wi-Fi</body></html>";
     const MODEL_WORDS = "the model, made for the test";
-    const run = ({ gives, sha256, here }) => {
+    const run = ({ gives, sha256, here, curlExit }) => {
       const dir = mkdtempSync(join(tmpdir(), "brimm-download-"));
       try {
         mkdirSync(join(dir, "bin"));
-        writeFileSync(join(dir, "bin", "curl"), '#!/bin/sh\necho "$*" > "$ASKED"\nwhile [ "$1" != "-o" ]; do shift; done\nprintf %s "$GIVES" > "$2"\n');
+        writeFileSync(join(dir, "bin", "curl"), '#!/bin/sh\necho "$*" > "$ASKED"\nwhile [ "$1" != "-o" ]; do shift; done\nprintf %s "$GIVES" > "$2"\n[ -z "${CURL_EXIT:-}" ] || exit "$CURL_EXIT"\n');
         chmodSync(join(dir, "bin", "curl"), 0o755);
         const modelDir = join(dir, "models");
         const model = join(modelDir, "ggml-large-v3-turbo.bin");
@@ -2609,7 +2609,7 @@ describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac
           writeFileSync(model, here);
         }
         const script = `set -euo pipefail\nMODEL_DIR="${modelDir}"\nMODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"\nMODEL_URL="${PINNED.url}"\nMODEL_SHA256="${sha256}"\nnode="${process.execPath}"\n${functionOf("say")}${functionOf("model_sha256")}${block}\nprint -r -- "went on"\n`;
-        const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { PATH: `${join(dir, "bin")}:/usr/bin:/bin`, GIVES: gives, ASKED: join(dir, "curl-asked") } });
+        const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { PATH: `${join(dir, "bin")}:/usr/bin:/bin`, GIVES: gives, ASKED: join(dir, "curl-asked"), ...(curlExit ? { CURL_EXIT: String(curlExit) } : {}) } });
         const read = (file) => (existsSync(file) ? readFileSync(file, "utf8") : null);
         return { status: r.status, out: r.stdout, err: r.stderr, model: read(model), part: existsSync(`${model}.part`), asked: read(join(dir, "curl-asked")), modelPath: model };
       } finally {
@@ -2635,6 +2635,14 @@ describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac
     r = run({ gives: MODEL_WORDS, sha256: sha(MODEL_WORDS), here: "another model" });
     assert.equal(r.status, 0, r.err);
     assert.deepEqual([r.model, r.part], [MODEL_WORDS, false]);
+    // Curl itself fails part-way (its exit 18): the part is taken away, the installer says so and ends 1, and a model that was here is left as it was.
+    for (const here of [undefined, "another model"]) {
+      r = run({ gives: MODEL_WORDS.slice(0, 7), sha256: sha(MODEL_WORDS), here, curlExit: 18 });
+      assert.equal(r.status, 1, r.err);
+      assert.ok(r.out.includes("The model could not be downloaded whole"), r.out);
+      assert.ok(!r.out.includes("went on"), r.out);
+      assert.deepEqual([r.model, r.part], [here ?? null, false]);
+    }
     // Here and the pin's: nothing is asked of curl.
     r = run({ gives: MODEL_WORDS, sha256: sha(MODEL_WORDS), here: MODEL_WORDS });
     assert.equal(r.status, 0, r.err);
