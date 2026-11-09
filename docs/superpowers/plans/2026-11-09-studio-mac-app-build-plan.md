@@ -23,12 +23,17 @@ requests and merges wait for Jason's yes.
 
 Phases 1 to 3 are useful on their own: they make the current Macs independent of git and Xcode's tools. Phase 0 comes first, because a failed S1 or S2 (portable ffmpeg or whisper) would change what goes in the bundle.
 
+## Decided by Jason (9 November 2026)
+- The update address: `updates.thebrimminsights.com`. thebrimminsights.com is already a zone on Jason's Cloudflare account, so its DNS needs no move. The spikes spell it in one place, `UPDATE_HOST` in `spikes/2026-11-09-studio-mac-app/common.zsh`.
+- The R2 bucket: `brimm-studio-updates`.
+- The support contact shown in the app and the PDF: `admin@growwiththebrimm.com`.
+- The Sparkle EdDSA key: Jason makes it himself on the Mac Studio with Sparkle's own `generate_keys`, which keeps the private half in his login keychain, and backs it up himself (`generate_keys -x` to a file of his choosing). The private half never appears in chat, in a file in the repo, or in anything a script prints: scripts read only the public half (`generate_keys -p`), and `generate_appcast` signs with the keychain's key itself.
+
 ## Still open, for Jason in the build session
-- The update domain, for example `updates.<your domain>`, and the R2 bucket.
 - The bundle ID: suggested `com.thebrimm.video-studio`.
-- The support contact shown in the app and the PDF.
+- R2 must be turned on in the Cloudflare dashboard.
 - ffmpeg with libx264 is GPL software. Shipping it to third parties means offering its source; the build keeps the matching source zip on R2.
-- One-time by-hand steps: the Sparkle EdDSA key and its backup, the R2 bucket, custom domain and `cf` token.
+- One-time by-hand steps: the R2 bucket, its custom domain and the `cf` sign-in (S7 does the bucket and the domain).
 
 ## Verification
 - **Every phase:** `cd tool && node --test` passes, including `contract.test.js` with unchanged hashes. Installer tests stay `--print` only. No test calls the real claude, HyperFrames or HeyGen.
