@@ -95,7 +95,7 @@ import { readEpisodeNow, accountOf, askReelCues, READ_KINDS, READ_HOLD_MS, READ_
 import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
-import { studioFiles, studioFolder } from "./studio.js";
+import { quotable, studioFiles, studioFolder } from "./studio.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
 import { afterAllNoted, clearOldWords, markChat, noteAfterAll, writeWords } from "./held.js";
@@ -2962,9 +2962,9 @@ function studioStale(ctx) {
 const HOMEBREW_NODE = "/opt/homebrew/bin/node";
 
 /** The node `behind` tells Jason to rewrite her folder with, from what her folder's settings name (a file she may have changed, and
-    Jason is told to run what is printed): only an absolute path that ends in /node, holds no control character and is there;
+    Jason is told to run what is printed): only an absolute path that ends in /node, can go inside double quotes (studio.js quotable) and is there;
     otherwise Homebrew's. */
-const nameableNode = (node) => (typeof node === "string" && isAbsolute(node) && basename(node) === "node" && !/[\u0000-\u001f\u007f]/.test(node) && existsSync(node) ? node : HOMEBREW_NODE);
+const nameableNode = (node) => (quotable(node) && basename(node) === "node" && existsSync(node) ? node : HOMEBREW_NODE);
 
 /** How two sides of a record differ, in what a person reads of it: each [what, A's, B's] where they differ, the sizes of the
     files each lists and of the files each handed over among them, so that two sides that differ only there do not read the

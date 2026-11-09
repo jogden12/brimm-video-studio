@@ -38,7 +38,7 @@ import { fileURLToPath } from "node:url";
 import { waitingToCut } from "./cuts.js";
 import { textWriter } from "./dropbox.js";
 import { homeRefusal, programHome, studioHome } from "./home.js";
-import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, gatedReadRules, studioFiles, studioFolder, workshopFolder, writeStudio } from "./studio.js";
+import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, gatedReadRules, studioFiles, quotingFault, studioFolder, workshopFolder, writeStudio } from "./studio.js";
 import { isConnector, neverCaught } from "./never.js";
 import { claudeDirName, fold, realOf } from "./places.js";
 import { clearStrictSeen, strictSeen, untiedMark } from "./held.js";
@@ -1175,7 +1175,7 @@ function studio(home, rest, say, { openMinimum, freePort, tmp, uid, now }) {
   const added = told.allow.filter((entry, i) => !allowed.some((a) => same(a, entry)) && told.allow.findIndex((e) => same(e, entry)) === i);
   if (added.length) given.studioAllow = [...allowed, ...added];
   const would = { ...got.settings, ...given };
-  const fault = settingsFault(would);
+  const fault = settingsFault(would) || quotingFault({ checkout: would.checkout, node: told.node });
   if (fault) {
     say(`Not written: ${fault}.`);
     return 1;

@@ -27,7 +27,7 @@
 // records is data here (studio/allow.json, environment.json, app-flags.json), and starts so that the open lock fails closed.
 import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { neverDenyRules } from "./never.js";
 import { bothSpellings, gatedPlaces, readAllowed, realOf } from "./places.js";
@@ -239,8 +239,11 @@ export function studioFiles({ checkout, node, folder, lock = "strict", facts }) 
 /** Write her folder in `home`: its files, written over the ones there, and Pictures/ and Scripts/. Nothing else in it is touched.
     It is on this Mac's own disk, so the files are written in place. The hook is given the folder as the disk spells it,
     which is the folder Claude Code runs in, even when it was made by hand in another case. With the open lock it also makes
-    the workshop, readable by her alone. Gives back the folder. */
+    the workshop, readable by her alone. A node or a checkout that cannot go inside double quotes (quotable) makes it throw before
+    it makes anything. Gives back the folder. */
 export function writeStudio(home, { checkout, node, lock = "strict", facts }) {
+  const fault = quotingFault({ checkout, node });
+  if (fault) throw new Error(fault);
   if (lock === "open") {
     mkdirSync(workshopFolder(home), { recursive: true, mode: 0o700 });
     chmodSync(workshopFolder(home), 0o700);
@@ -302,6 +305,20 @@ function readable(input, folder, tmp, uid) {
   const results = session ? join(dirname(input.transcript_path), input.session_id, "tool-results") : "";
   const tasks = session ? join(tmp, `claude-${uid}`, basename(dirname(input.transcript_path)), input.session_id, "tasks") : "";
   return within(path, folder) || Boolean(results && within(path, results)) || Boolean(tasks && within(path, tasks));
+}
+
+/** Whether `path` can stand inside double quotes in her folder's files, as the guard's spelling of node does: a string, absolute,
+    with none of the letters zsh and bash read inside double quotes (", $, a backtick, a backslash) and no control character
+    (U+0000 to U+001F, U+007F). These are the letters WORD's double-quoted word refuses. A space, !, and letters outside ASCII are
+    let through: Claude Code runs commands in a shell that does not expand history, and inside quotes the rest are only themselves. */
+export const quotable = (path) => typeof path === "string" && isAbsolute(path) && !/["$`\\\u0000-\u001f\u007f]/.test(path);
+
+/** Why her folder is not written for this node and checkout, or null when both can go inside double quotes. The node is looked at
+    first. The text is one the settings command prints after "Not written: ". */
+export function quotingFault({ checkout, node }) {
+  if (!quotable(node)) return "the path to node holds a letter that cannot go inside double quotes (\", $, `, \\ or a control character)";
+  if (!quotable(checkout)) return "the path to the checkout of BRIMM Video Studio holds a letter that cannot go inside double quotes (\", $, `, \\ or a control character)";
+  return null;
 }
 
 /** Her skill, the one the guard lets her session use. */

@@ -889,19 +889,24 @@ describe("behind", () => {
       }
     });
   });
-  it("names the node that rewrites her folder only when her folder's settings give a real one: an absolute path ending in /node that is there; otherwise Homebrew's", async () => {
+  it("names the node that rewrites her folder only when her folder's settings give a real one: an absolute path ending in /node that is there and that can go inside double quotes; otherwise Homebrew's", async () => {
     // The folder's settings are a file she can change, and Jason is told to run what this line prints.
     const HOMEBREW = "/opt/homebrew/bin/node";
     const said = (node) => `Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${node}, then start a new session in her Claude folder)`;
     const t = setup();
     const bin = join(t.home, "bin");
+    const unquotable = ['quo"te', "back\\slash", "dollar$x"];
     mkdirSync(join(bin, "newline\n--evil"), { recursive: true });
-    for (const file of [join(bin, "node"), join(bin, "sh"), join(bin, "newline\n--evil", "node")]) writeFileSync(file, "");
+    for (const name of unquotable) mkdirSync(join(bin, name), { recursive: true });
+    for (const file of [join(bin, "node"), join(bin, "sh"), join(bin, "newline\n--evil", "node"), ...unquotable.map((name) => join(bin, name, "node"))]) writeFileSync(file, "");
     const cases = [
       [join(bin, "node"), join(bin, "node")],
       [join(t.home, "nowhere", "node"), HOMEBREW],
       [join(bin, "sh"), HOMEBREW],
       [join(bin, "newline\n--evil", "node"), HOMEBREW],
+      [join(bin, 'quo"te', "node"), HOMEBREW],
+      [join(bin, "back\\slash", "node"), HOMEBREW],
+      [join(bin, "dollar$x", "node"), HOMEBREW],
       ["node", HOMEBREW],
       ["../bin/node", HOMEBREW],
       [`${join(bin, "node")}; echo hi`, HOMEBREW],
