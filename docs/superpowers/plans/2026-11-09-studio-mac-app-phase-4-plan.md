@@ -90,48 +90,64 @@ S3 and S4 have not been run. Where Phase 4 rests on them it takes the design's a
     - Hugging Face's own record of that revision of `ggerganov/whisper.cpp`, which is `main` since 2024-10-29: the file's LFS `oid`, for 1,624,555,275 bytes.
     - `shasum -a 256` of the Mac Studio's own model.
 
-    Jason confirms them before this task's commit (Open for Jason, 1). Phase 5's engine reads the same file.
+    Jason said yes to them on 2026-11-09 (Decided, 1). Phase 5's engine reads the same file.
   - In install.sh, `MODEL_PIN="$HERE/whisper-model.pin.json"`, and `MODEL_URL` and `MODEL_SHA256` read from it with sed. Read them as `HYPERFRAMES_VERSION` is read, taking only the pin's own two-space-indented lines.
   - `model_sha256 FILE` prints FILE's SHA-256 as lowercase hex, read by `$node` with `node:crypto`. It reads the file as a stream, since the model is 1.6 GB. When the file cannot be read, it prints nothing and ends non-zero.
 
 **Decisions:**
 - **When the pin will do.** `MODEL_URL` must match `^https://huggingface\.co/ggerganov/whisper\.cpp/resolve/[0-9a-f]{40}/ggml-large-v3-turbo\.bin$`, and `MODEL_SHA256` must match `^[0-9a-f]{64}$`.
-- **When it is checked.** The pin is checked only when the model is not here, since it is not used otherwise. It is checked right after the `--remove` block, in folder mode and with `--machine`.
+- **When it is checked.** The pin is checked right after the `--remove` block, in folder mode and with `--machine`, whether or not the model is here, since a model already here is checked against it too (Decided, 2).
 - **A pin that will not do is refused.** `WHY` (the tests' name for it) is this line:
   `The pin of the transcriber's model, tool/whisper-model.pin.json, does not hold its address on Hugging Face at one revision and its SHA-256, so the installer changed nothing.`
   It is followed by a blank line and `Nothing was changed.`, and the run ends with 2.
-- **A model already here is kept unchecked**, as today (Open for Jason, 2). Its line stays `  Model:  here already`.
-- **The summary's line when the model is not here:**
-  `` `  Model:  to download, about 1.6 GB, to ${MODEL}, from ${MODEL_URL}, and kept only when its SHA-256 is the pin's, ${MODEL_SHA256} (tool/whisper-model.pin.json)` ``
+- **A model already here is checked against the pin** (Jason, 2026-11-09; Decided, 2). It takes about 3 seconds, by `model_sha256`. The summary's model line is the first of these that holds:
+  - the model is not here:
+    `` `  Model:  to download, about 1.6 GB, to ${MODEL}, from ${MODEL_URL}, and kept only when its SHA-256 is the pin's, ${MODEL_SHA256} (tool/whisper-model.pin.json)` ``
+  - `$node` cannot be run yet (dev mode, before Homebrew's node is installed):
+    `  Model:  here; its SHA-256 is checked against the pin's once node is installed`
+  - its SHA-256 is the pin's: `  Model:  here already, and its SHA-256 is the pin's`
+  - otherwise:
+    `` `  Model:  here, but its SHA-256 is not the pin's, so the pinned one is downloaded, about 1.6 GB, from ${MODEL_URL}, and replaces it only when its SHA-256 is the pin's, ${MODEL_SHA256} (tool/whisper-model.pin.json)` ``
 - **The download.**
+  - The block's first line becomes `if [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then`. The real run reaches it after node is installed, so a model already here is checked there too.
   - Keep `curl -L --fail --progress-bar -o "$MODEL.part" "$MODEL_URL"` word for word: two tests find it.
   - In place of the size check, run `model_sha256 "$MODEL.part"`. `stat -f %z` goes.
-  - When the answer is not `MODEL_SHA256`, take `$MODEL.part` away, say this, and end with 1:
+  - When the answer is not `MODEL_SHA256`, take `$MODEL.part` away, say this, and end with 1. A model that was already here is left as it was:
     `` `The model downloaded is not the one tool/whisper-model.pin.json pins: its SHA-256 is ${got:-one that could not be read}, and the pin's is ${MODEL_SHA256}. It may not have downloaded whole. It was not kept. Run this again.` ``
+  - When it is the pin's, `mv "$MODEL.part" "$MODEL"`. This replaces a model that was here only after the new one has passed the check.
 - **The help's sentence** becomes "downloads the transcriber's model once (about 1.6 GB) when it is not here, at the revision tool/whisper-model.pin.json pins, and keeps it only when its SHA-256 is the pin's,". The rest of that paragraph stays as it is.
 
 - [ ] **Step 1: Write the failing tests.**
   - At the top level, add `const PINNED = JSON.parse(readFileSync(join(HERE, "whisper-model.pin.json"), "utf8"));`.
-  - Change the test at :267, "says whether the transcriber's model is here…". The missing model's line becomes `` `\n  Model:  to download, about 1.6 GB, to ${missing.home}/${MODEL}, from ${PINNED.url}, and kept only when its SHA-256 is the pin's, ${PINNED.sha256} (tool/whisper-model.pin.json)\n` ``. The rest of the test is unchanged.
+  - Change the test at :267, "says whether the transcriber's model is here…":
+    - The missing model's line becomes `` `\n  Model:  to download, about 1.6 GB, to ${missing.home}/${MODEL}, from ${PINNED.url}, and kept only when its SHA-256 is the pin's, ${PINNED.sha256} (tool/whisper-model.pin.json)\n` ``.
+    - The model that is here is the harness's stand-in, which is not the pinned model. Its line becomes `` `\n  Model:  here, but its SHA-256 is not the pin's, so the pinned one is downloaded, about 1.6 GB, from ${PINNED.url}, and replaces it only when its SHA-256 is the pin's, ${PINNED.sha256} (tool/whisper-model.pin.json)\n` ``.
+    - The rest of the test is unchanged.
+    - Any other test that holds `Model:  here already` changes the same way. Find them with `grep -n 'here already' tool/tests/*.js`.
   - Add a new `describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac }, …)` with these tests:
     - `"pins the model at one revision of Hugging Face's whisper.cpp, by its SHA-256, under the name run.js and the installer give it"`:
       - `Object.keys(PINNED).sort()` deep-equals `["sha256", "url"]`;
       - `PINNED.url` matches the address pattern above, and `PINNED.sha256` matches `/^[0-9a-f]{64}$/`;
       - `basename(PINNED.url)` equals `run.js`'s `MODEL_NAME` (read from its text with `/const MODEL_NAME = "([^"]+)";/`), and equals `basename(MODEL)`;
       - install.sh's text holds no `resolve/main`.
-    - `"refuses, before it changes anything, a pin it cannot read an address at one revision and a SHA-256 from, when the model is not here; with the model here it goes on"`:
+    - `"checks a model already here against the pin: here already when its SHA-256 is the pin's, downloaded again when it is not"`:
+      - Make a copy of the tool as the test at :1121 does, and give its pin `PINNED.url` and the SHA-256 of `"the model, made for the test"`.
+      - With the model file holding those words, the out holds `"\n  Model:  here already, and its SHA-256 is the pin's\n"`.
+      - With it holding `"another model"`, the out holds the "here, but its SHA-256 is not the pin's" line, naming `PINNED.url` and that SHA-256.
+      - Both end with 0, and `changedNothing(r)`.
+    - `"refuses, before it changes anything, a pin it cannot read an address at one revision and a SHA-256 from, whether or not the model is here"`:
       - Make a copy of the tool as the test at :1121 does.
       - Give the copy's pin each of these in turn: no file; `""`; `"url and sha"`; the address at `resolve/main/`; the address on `huggingface.co.example.invalid`; the address with `http:`; a SHA-256 cut to 63 characters; a SHA-256 in capitals; `{ "sha256": … }` alone.
       - Ask `--print "/Volumes/Work/Unedited video"`, and `--print --machine "Mac Studio" <root>`.
       - Each gives `[status, out]` deep-equal to `[2, WHY + "\n\nNothing was changed.\n"]`, and `[left, ran]` deep-equal to `[[], ""]`.
-      - With `files: [MODEL]` and no pin file, the status is 0 and the out holds `"\n  Model:  here already\n"`.
+      - With `files: [MODEL]` and no pin file, it refuses in the same way.
     - `"tells the model's SHA-256 as node reads it (the function alone, in zsh)"`, `{ skip: noZsh }`:
       - Write a file with `"made for the test\n"`.
       - Run `` `node="${process.execPath}"\n${functionOf("model_sha256")}model_sha256 "<file>"` `` in zsh.
       - The stdout is `createHash("sha256")` of those bytes, as hex, with a newline, and the status is 0.
       - For a missing file, the stdout is `""` and the status is not 0.
     - `"keeps a download only when its SHA-256 is the pin's: a page that is not the model, or a cut-short file, is taken away and said (its own lines, run alone in zsh)"`, `{ skip: noZsh }`:
-      - The block is the text from `\nif [[ ! -f "$MODEL" ]]; then\n` to its own `\nfi\n`.
+      - The block is the text from `\nif [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then\n` to its own `\nfi\n`.
       - A stand-in `curl` first on the PATH writes `$GIVES` (from its environment) into the file after `-o`, and writes its arguments into `curl-asked`.
       - The script is `set -euo pipefail`, then `MODEL_DIR`, `MODEL` (`$MODEL_DIR/ggml-large-v3-turbo.bin`), `MODEL_URL=PINNED.url`, `MODEL_SHA256` and `node`, then `functionOf("say")`, `functionOf("model_sha256")`, the block, and `print -r -- "went on"`.
       - With `GIVES="<html><body>Sign in to the Wi-Fi</body></html>"` and `MODEL_SHA256=PINNED.sha256`:
@@ -141,11 +157,15 @@ S3 and S4 have not been run. Where Phase 4 rests on them it takes the design's a
       - With `GIVES="the model, made for the test"` and `MODEL_SHA256` set to its SHA-256:
         - the status is 0, and the stdout ends `"went on\n"`;
         - `$MODEL` holds `GIVES`, and there is no `.part`.
+      - With `$MODEL` already holding `"another model"`, and `MODEL_SHA256` the SHA-256 of `GIVES`:
+        - with `GIVES` the Wi-Fi page and `MODEL_SHA256` the pin's: the status is 1, `$MODEL` still holds `"another model"`, and there is no `.part`;
+        - with `GIVES="the model, made for the test"` and `MODEL_SHA256` its SHA-256: the status is 0, and `$MODEL` holds `GIVES`.
+      - With `$MODEL` already holding `GIVES`, and `MODEL_SHA256` its SHA-256: the status is 0, the stdout is `"went on\n"`, and there is no `curl-asked`.
     - `"says in its help that the model is downloaded at the pinned revision, and kept only when its SHA-256 is the pin's"`: `ask("--print", "--help")`, with the white space folded, holds the sentence above.
 - [ ] **Step 2: Run `cd tool && node --test tests/install.test.js`.** Expected: FAIL in the new tests and at :267, since the pin file is not there.
 - [ ] **Step 3: Write the pin and the code** to the decisions above.
 - [ ] **Step 4: Run `cd tool && node --test tests/install.test.js`.** Expected: PASS.
-- [ ] **Step 5: Commit, after Jason's yes to the pin's values.** `git add tool/whisper-model.pin.json tool/install.sh tool/tests/install.test.js`, then `git commit -m "Studio app phase 4: the transcriber's model is downloaded at a pinned revision, and kept only when its SHA-256 is the pin's"`. Add the Co-Authored-By line from the session's attribution to every commit in this plan.
+- [ ] **Step 5: Commit.** Jason said yes to the pin's values on 2026-11-09. `git add tool/whisper-model.pin.json tool/install.sh tool/tests/install.test.js`, then `git commit -m "Studio app phase 4: the transcriber's model is downloaded at a pinned revision, and kept only when its SHA-256 is the pin's"`. Add the Co-Authored-By line from the session's attribution to every commit in this plan.
 
 ---
 
@@ -465,7 +485,7 @@ The checks, and their reasons, in this order:
   - `idle_why` prints `busy.js`'s line for what `launchctl print "gui/$(id -u)/$LABEL"` says. Nothing is passed on when launchctl fails. It runs `"$node" "$HERE/busy.js" idle-why --launchd -`, and its status is busy.js's. launchctl is found on the PATH, as every launchctl in install.sh is.
   - The callers take a failure that says nothing as busy, with this line: `Whether anything is at work on this Mac could not be told.` Write it as `why="$(idle_why)" || why="${why:-…}"`, so that `set -e` does not end the run there.
 
-**Where, and the words.** Installed mode only. Dev mode asks launchd nothing here (Open for Jason, 3).
+**Where, and the words.** Installed mode only. Dev mode asks launchd nothing here (Decided, 3).
 - **In `--print`**, after the `Left behind by an earlier setup` line:
   - nothing at work: `  At work now:  nothing, so the background job can be stopped and started again`;
   - something at work: `` `  At work now:  ${why} The real run stops before it touches this Mac's drop folder, its settings and its background job, until that is done` ``.
@@ -524,14 +544,17 @@ The checks, and their reasons, in this order:
 - [ ] Run `grep -n 'resolve/main\|stat -f %z' tool/install.sh`. Expected: nothing.
 - [ ] Run `grep -n 'launchctl' tool/busy.js`. Expected: only `/bin/launchctl`, in `launchdPid`.
 
-## Open for Jason
+## Decided
 
-1. The model pin: revision `5359861c739e955e79d9a303bcbc70fb988958b1` and SHA-256 `1fc70f77…2bc69`. Hugging Face and the Mac Studio's own copy agree on them: yes to commit them?
-2. A model already on a Mac is kept unchecked, as today. Should it be checked against the pin too (about 3 seconds each run)?
-3. Should a dev-mode run (the Mac Studio, with no `--tools`) also stop while an import is at work? This phase does it only in installed mode.
-4. The design marks the Mac Studio `"mode": "dev"` in its settings. Nothing writes or reads that yet: is it Phase 5's engine check?
-5. `busy.js` is made here for `idleWhy`, and Phase 7 adds the `updating.json` marker to it. The build plan calls busy.js new in Phase 7.
-6. The S4 shape: the plist names only the app and `--agent`, and the app runs its own node on its own `unedited.js`. Is that right for Phase 6 to build to?
-7. Exit code 75 means "busy, try again later" for a real run of install.sh in installed mode.
+Jason, 2026-11-09:
+1. The model pin, revision `5359861c739e955e79d9a303bcbc70fb988958b1` and SHA-256 `1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69`: yes. Hugging Face and the Mac Studio's own copy agree on them.
+2. A model already on a Mac is checked against the pin too (about 3 seconds each run): yes (Task 1).
+3. A dev-mode run (the Mac Studio, with no `--tools`) does not stop while an import is at work: no. Dev mode stays as it is, and the installer runs there only on Jason's yes, once he has checked nothing is at work.
+
+Claude's rulings, 2026-11-09:
+4. The Mac Studio's `"mode": "dev"` mark in its settings is Phase 5's: the setup engine writes and checks it. Phase 4 neither writes nor reads it.
+5. `busy.js` is made here for `idleWhy`, and Phase 7 adds the `updating.json` marker to it. The build plan's Phase 7 row is corrected when Phase 7 is planned.
+6. The S4 shape (the plist names only the app and `--agent`, and the app runs its own node on its own `unedited.js`) is the assumption, kept in `agent_program`. Spike S4 confirms it or changes that one function.
+7. Exit code 75 (`EX_TEMPFAIL`) means "busy, try again later" for a real run of install.sh in installed mode.
 8. The bundle id is read from the app's own Info.plist, so install.sh fixes none. `com.thebrimm.video-studio` stays Phase 6's to settle.
 9. Claude Code's summary lines keep their Terminal words in installed mode until S5 says how sign-in works without Terminal.
