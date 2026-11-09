@@ -368,6 +368,13 @@ describe("the card's receipt", () => {
       assert.deepEqual([r.status, r.stdout], [0, ""], input);
     }
     assert.equal(receiptsIn(h.home).length, 1);
+    // A node whose path has a space reaches the script as one word: the hook's args hold the path as it is.
+    const spaced = join(h.home, "BRIMM Video Studio.app", "Contents", "Resources", "bin");
+    mkdirSync(spaced, { recursive: true });
+    symlinkSync(process.execPath, join(spaced, "node"));
+    const again = spawnSync("/bin/sh", [RECEIPT_SH, join(spaced, "node"), h.folder], { input: JSON.stringify(hookInput(RESULT)), encoding: "utf8" });
+    assert.deepEqual([again.status, again.stdout, again.stderr], [0, "", ""]);
+    assert.equal(receiptsIn(h.home).length, 2);
     h.done();
   });
 });

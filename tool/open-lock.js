@@ -38,8 +38,8 @@
 // Code's temp folder, which the sandbox may write too: that is no carve-out either (Jason, 2026-10-26), and a command's saved
 // output is read with `cat` or `head`, which the sandbox's allowRead for her temp subfolder lets through (places.js readAllowed).
 //
-// Step 5 lets edit.js through in one spelling only, the one the sandbox's excluded command takes: this Mac's node, the checkout's
-// edit.js in double quotes, and one or more words (studio.js WORD), with nothing before it and nothing after; and not in the
+// Step 5 lets edit.js through in one spelling only, the one the sandbox's excluded command takes: this Mac's node in double quotes, the
+// checkout's edit.js in double quotes, and one or more words (studio.js WORD), with nothing before it and nothing after; and not in the
 // background, but for her skill's `guide <label> tell` (R6). Any other command naming edit.js or the checkout's tool folder is
 // refused; any naming a gated place too, as a courtesy, since the sandbox holds it anyway; and any other runs in the sandbox.
 import { lstatSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
@@ -55,7 +55,7 @@ import { SESSION_ID } from "./scan.js";
 import { HELD_NARROWED, HELD_REFUSED, chatHeld, noteStrictSeen, strictSeenFile, wordsFolder } from "./held.js";
 import { programHome } from "./home.js";
 import { LOCK_CHANGED, addedWhy, beyondWhy, environmentWhy, lockLoosened, skillFolders } from "./loosened.js";
-import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, WORD, guardDecision, literally, openSettingsOf, workshopFolder } from "./studio.js";
+import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, WORD, editStart, guardDecision, openSettingsOf, workshopFolder } from "./studio.js";
 import { TOOLS_WITH_RULES, effectiveLock, factsOf, readSettings, settingsFile, studioAllowOf, studioNodeOf } from "./settings.js";
 import { UNSCOPED, SESSION_TAUGHT } from "./gate.js";
 import { argsOf, chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
@@ -151,9 +151,9 @@ function wordsOf(command) {
 /** What step 5 answers to the Bash command `command`, run in the background when `background`. */
 function bashDecision(command, background, cwd, ctx) {
   if (typeof command !== "string") return deny(NOT_NAMED);
-  const edit = `^${literally(ctx.node)} "${literally(ctx.checkout)}/tool/edit\\.js"`;
-  if (new RegExp(`${edit}(?: ${WORD})+$`).test(command)) {
-    if (!background || new RegExp(`${edit} guide ${WORD} tell$`).test(command)) return allow("BRIMM Video Studio's own command");
+  const start = editStart(ctx, { quotedOnly: true });
+  if (start && new RegExp(`^${start}(?: ${WORD})+$`).test(command)) {
+    if (!background || new RegExp(`^${start} guide ${WORD} tell$`).test(command)) return allow("BRIMM Video Studio's own command");
     return deny(RUN_ALONE);
   }
   // The command as written, and its words with quotes and backslashes taken off, as the shell would run them.
@@ -183,7 +183,9 @@ function ownWords(input, ctx) {
 
 /** The first word after edit.js in a command today's guard allows, its quotes taken off; null when there is none. */
 function firstWord(command, ctx) {
-  const found = new RegExp(`^(?:node|${literally(ctx.node)}) "${literally(ctx.checkout)}/tool/edit\\.js" (${WORD})`).exec(String(command));
+  const start = editStart(ctx);
+  if (!start) return null;
+  const found = new RegExp(`^${start} (${WORD})`).exec(String(command));
   if (!found) return null;
   const word = found[1];
   return word.startsWith('"') || word.startsWith("'") ? word.slice(1, -1) : word;

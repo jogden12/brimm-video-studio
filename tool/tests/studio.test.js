@@ -150,6 +150,13 @@ describe("her folder's settings", () => {
       PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: ["/Users/o'hara/Claude Code/BRIMM video/tool/studio/guard.sh", NODE, "/Users/o'hara/BRIMM Video Studio"], onFailure: "block" }] }]
     });
   });
+  it("names node in double quotes in the skill and the allow rule for a node whose path has spaces, and gives the hook that path as it is", () => {
+    const files = studioFiles({ checkout: CHECKOUT, node: APP_NODE, folder: FOLDER });
+    assert.ok(files[".claude/skills/brimm-edit/SKILL.md"].includes(`exactly so: "${APP_NODE}" "${CHECKOUT}/tool/edit.js" <command> …\n`));
+    const s = JSON.parse(files[".claude/settings.json"]);
+    assert.deepEqual(s.permissions.allow, [`Bash("${APP_NODE}" "${CHECKOUT}/tool/edit.js" *)`]);
+    assert.deepEqual(s.hooks.PreToolUse[0].hooks[0].args, [`${CHECKOUT}/tool/studio/guard.sh`, APP_NODE, FOLDER]);
+  });
   it("name the checkout in the skill, with its spaces, and leave no {{ }} behind", () => {
     const files = studioFiles({ checkout: CHECKOUT, node: NODE });
     assert.deepEqual(Object.keys(files).sort(), [".claude/settings.json", ".claude/skills/brimm-edit/SKILL.md", ".claude/skills/brimm-edit/script.md", "CLAUDE.md"]);
