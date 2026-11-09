@@ -2,8 +2,8 @@
 // clone, never over a file there, and checked again at least 15 minutes later: Dropbox undid two renames minutes after they
 // had returned on 2026-10-14. Here the clone is a stand-in that copies into a folder made for the test, the late check is
 // asked at once, a placeholder is a stand-in for what the disk says of a file, and python3, which reads a placeholder through,
-// is a stand-in for the program. One test, on a Mac only, runs the Mac's own /bin/cp -c, and one its own python3, each in a
-// folder made for it. Nothing here touches Dropbox, and nothing reads a real placeholder.
+// is a stand-in for the program. One test, on a Mac only, runs the Mac's own /bin/cp -c, one its own python3 and one its own swift
+// on read-through.swift, each in a folder made for it. Nothing here touches Dropbox, and nothing reads a real placeholder.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -11,10 +11,19 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { EventEmitter } from "node:events";
-import { LATE_CHECK_MS, READ_QUIET_MS, cloneIn, replaceIn, lateCheck, isWhole, waitWhole, textWriter, cloneFile, onSameDisk, readThrough } from "../dropbox.js";
+import { LATE_CHECK_MS, READ_QUIET_MS, NO_READ_THROUGH, cloneIn, replaceIn, lateCheck, isWhole, waitWhole, textWriter, cloneFile, onSameDisk, readThrough } from "../dropbox.js";
+import { helperSource, hasXcodeTools } from "../helpers.js";
 
 const notAMac = process.platform !== "darwin" ? "/bin/cp -c makes a clone on a Mac only" : false;
 const noPython = process.platform !== "darwin" || !existsSync("/usr/bin/python3") ? "only a Mac's python3 can turn on the reads that bring a file down" : false;
+/** NO_BIN holds nothing; APP_BIN is the app's own bin, which holds the compiled reader (an empty file, as nothing here starts it). */
+const NO_BIN = "/no/such/folder";
+const APP_BIN = mkdtempSync(join(tmpdir(), "BRIMM Video Studio's bin-"));
+writeFileSync(join(APP_BIN, "brimm-read-through"), "");
+const READERS = [
+  { name: "brimm-read-through", bin: APP_BIN, xcodeTools: () => false },
+  { name: "python3", bin: NO_BIN, xcodeTools: () => true }
+];
 const GB = 2 ** 30;
 /** The flag macOS sets on a file whose data is not on this Mac yet. */
 const DATALESS = 0x40000000;
@@ -61,8 +70,6 @@ function arriving(looks) {
     flags: (path) => (whole(path) ? 0 : DATALESS)
   };
 }
-
-const NO_BIN = "/no/such/folder";
 
 describe("a file put into Dropbox by the rule", () => {
   it("is cloned in under its final name, and its work copy is kept for the late check", () => {
@@ -322,11 +329,11 @@ describe("what the lead's review of PR 11 found in the rule", () => {
 // A program the launch agent starts cannot have a placeholder brought down by reading it: macOS refuses the read at once,
 // "Resource deadlock avoided" (EDEADLK), the transcript tool's failure on the Mac Studio on 2026-10-15. So the read is python3's.
 describe("reading a file through, so that Dropbox brings it down", () => {
-  /** A stand-in for python3 as spawn starts it, listed in `runs` as {cmd, args}. It says how much of the file it has read, as
+  /** A stand-in for the reader as spawn starts it, listed in `runs` as {cmd, args}. It says how much of the file it has read, as
       `reads` says, each after its pause in milliseconds, and then ends with `code`, having said `why` on standard error; with
       `code` null it says nothing more. A kill is listed in `kills` and ends it, as the signal would. `refused` is the error it
       cannot be started with, which spawn gives, as node's does, before the close. */
-  const python = ({ reads = [], code = 0, why = "", refused = null } = {}) => {
+  const reader = ({ reads = [], code = 0, why = "", refused = null } = {}) => {
     const runs = [];
     const kills = [];
     const start = (cmd, args) => {
@@ -360,10 +367,28 @@ describe("reading a file through, so that Dropbox brings it down", () => {
     };
     return { spawn: start, runs, kills };
   };
-  it("reads it with python3, which first turns on, for itself alone, the reads that have Dropbox bring a file down", async () => {
-    const p = python({ reads: [[5, 4194304], [5, 6291456]] });
+  it("reads it with brimm-read-through beside node when it is there, the file its one argument, and asks nothing of Xcode's tools", async () => {
+    let asked = 0;
+    const p = reader({ reads: [[5, 4194304]] });
+    const file = "/Users/sallie/Dropbox/BRIMM Video/Sallie's \"talk\" $HOME.mp4";
+    await readThrough(file, { spawn: p.spawn, quietMs: 100, bin: APP_BIN, xcodeTools: () => ((asked += 1), true) });
+    assert.deepEqual(p.runs, [{ cmd: join(APP_BIN, "brimm-read-through"), args: [file] }]);
+    assert.equal(asked, 0);
+  });
+  it("with neither the app's reader nor Xcode's command line tools, starts nothing and says why in plain words", async () => {
+    const p = reader();
+    await assert.rejects(readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, bin: NO_BIN, xcodeTools: () => false }), { message: NO_READ_THROUGH });
+    assert.deepEqual(p.runs, []);
+  });
+  it("has read-through.swift turn on the reads that bring a file down before it opens the file, and read a mebibyte at a time", () => {
+    const src = readFileSync(helperSource("read-through"), "utf8");
+    assert.ok(src.includes("setiopolicy_np(3, 0, 2)") && src.indexOf("setiopolicy_np(") < src.indexOf("open("), "setiopolicy_np first");
+    assert.match(src, /1048576/);
+  });
+  it("falls back to python3 only when Xcode's command line tools are here: it first turns on, for itself alone, the reads that have Dropbox bring a file down", async () => {
+    const p = reader({ reads: [[5, 4194304], [5, 6291456]] });
     const file = "/Users/sallie/Dropbox/BRIMM Video/Sallie's talk.mp4";
-    await readThrough(file, { spawn: p.spawn, quietMs: 100 });
+    await readThrough(file, { spawn: p.spawn, quietMs: 100, bin: NO_BIN, xcodeTools: () => true });
     assert.equal(p.runs.length, 1);
     const [{ cmd, args }] = p.runs;
     // The file is named to python3 as an argument of its own, never inside the program, whatever is in its name.
@@ -372,26 +397,30 @@ describe("reading a file through, so that Dropbox brings it down", () => {
     // IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES (3), IOPOL_SCOPE_PROCESS (0) and IOPOL_MATERIALIZE_DATALESS_FILES_ON (2).
     assert.match(args[2], /setiopolicy_np\(3, 0, 2\)/);
   });
-  it("waits as long as more of it keeps coming, however long the whole read takes, and stops nothing once it is read", async () => {
-    // Twelve reads 20 ms apart take 240 ms in all, twice the 120 ms it may stay quiet.
-    const p = python({ reads: Array.from({ length: 12 }, (_, i) => [20, (i + 1) * 4194304]) });
-    await readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 120 });
-    await new Promise((r) => setTimeout(r, 200));
-    assert.deepEqual(p.kills, []);
-  });
-  it("gives up, in plain words, when nothing more comes for the quiet time, as from a placeholder Dropbox does not bring down, and stops python3", async () => {
-    const p = python({ reads: [[5, 4194304]], code: null });
-    await assert.rejects(readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 50 }), { message: "Dropbox sent nothing of it for 50 ms, so it was given up" });
-    assert.deepEqual(p.kills, ["SIGKILL"]);
-  });
-  it("says why, in python3's own words, when the file cannot be read", async () => {
-    const p = python({ reads: [[5, 4194304]], code: 1, why: "Resource deadlock avoided\n" });
-    await assert.rejects(readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 100 }), { message: "Resource deadlock avoided" });
-  });
-  it("says why when python3 cannot be started", async () => {
-    const p = python({ refused: Object.assign(new Error("spawn /usr/bin/python3 ENOENT"), { code: "ENOENT" }) });
-    await assert.rejects(readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 100 }), { message: "spawn /usr/bin/python3 ENOENT" });
-  });
+  for (const r of READERS) {
+    const opts = { bin: r.bin, xcodeTools: r.xcodeTools };
+    it(`${r.name}: waits as long as more of it keeps coming, however long the whole read takes, and stops nothing once it is read`, async () => {
+      // Twelve reads 20 ms apart take 240 ms in all, twice the 120 ms it may stay quiet.
+      const p = reader({ reads: Array.from({ length: 12 }, (_, i) => [20, (i + 1) * 4194304]) });
+      await readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 120, ...opts });
+      await new Promise((res) => setTimeout(res, 200));
+      assert.deepEqual(p.kills, []);
+    });
+    it(`${r.name}: gives up, in plain words, when nothing more comes for the quiet time, as from a placeholder Dropbox does not bring down, and stops the reader`, async () => {
+      const p = reader({ reads: [[5, 4194304]], code: null });
+      await assert.rejects(readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 50, ...opts }), { message: "Dropbox sent nothing of it for 50 ms, so it was given up" });
+      assert.deepEqual(p.kills, ["SIGKILL"]);
+    });
+    it(`${r.name}: says why, in the reader's own words, when the file cannot be read`, async () => {
+      const p = reader({ reads: [[5, 4194304]], code: 1, why: "Resource deadlock avoided\n" });
+      await assert.rejects(readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 100, ...opts }), { message: "Resource deadlock avoided" });
+    });
+    it(`${r.name}: says why when the reader cannot be started, and tries nothing else`, async () => {
+      const p = reader({ refused: Object.assign(new Error(`spawn ${r.name} EACCES`), { code: "EACCES" }) });
+      await assert.rejects(readThrough("/Dropbox/talk.mp4", { spawn: p.spawn, quietMs: 100, ...opts }), { message: `spawn ${r.name} EACCES` });
+      assert.equal(p.runs.length, 1);
+    });
+  }
   it("waits two minutes of quiet by default", () => {
     assert.equal(READ_QUIET_MS, 2 * 60 * 1000);
   });
@@ -406,12 +435,34 @@ describe("reading a file through, so that Dropbox brings it down", () => {
         child.stdout.on("data", (d) => (said += d));
         return child;
       };
-      await readThrough(join(dir, "here.mp4"), { spawn: heard });
+      await readThrough(join(dir, "here.mp4"), { spawn: heard, bin: NO_BIN, xcodeTools: () => true });
       // It says how far it has got as it goes, and last that it has read every byte.
       const lines = said.trim().split("\n");
       assert.ok(lines.length > 1, said);
       assert.equal(lines[lines.length - 1], "9437185");
-      await assert.rejects(readThrough(join(dir, "gone.mp4")), { message: "No such file or directory" });
+      await assert.rejects(readThrough(join(dir, "gone.mp4"), { bin: NO_BIN, xcodeTools: () => true }), { message: "No such file or directory" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  const noSwift = process.platform !== "darwin" || !hasXcodeTools() ? "only a Mac with Xcode's command line tools has swift to run read-through.swift" : false;
+  it("reads a file that is here to its end with read-through.swift, run by the Mac's own swift, and says why for one that is not there", { skip: noSwift }, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-read-"));
+    try {
+      // Nine mebibytes and one byte: 9437185 bytes. bin is APP_BIN, so the compiled reader is the one chosen, and spawn runs
+      // the real program: swift on the source, in its place.
+      writeFileSync(join(dir, "here.mp4"), Buffer.alloc(9 * 1048576 + 1, 1));
+      let said = "";
+      const heard = (cmd, args, opts) => {
+        const child = spawn("swift", [helperSource("read-through"), ...args], opts);
+        child.stdout.on("data", (d) => (said += d));
+        return child;
+      };
+      await readThrough(join(dir, "here.mp4"), { spawn: heard, bin: APP_BIN, xcodeTools: () => false });
+      const lines = said.trim().split("\n");
+      assert.ok(lines.length > 1, said);
+      assert.equal(lines[lines.length - 1], "9437185");
+      await assert.rejects(readThrough(join(dir, "gone.mp4"), { spawn: heard, bin: APP_BIN, xcodeTools: () => false }), { message: "No such file or directory" });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

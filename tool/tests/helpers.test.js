@@ -3,10 +3,12 @@
 // exist" check are stand-ins here. Nothing here starts a program, and nothing compiles or runs swift.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { HELPERS, ownBin, helperSource, compiledHelper, helperCommand } from "../helpers.js";
 
+const TOOL = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN = "/app/BRIMM Video Studio/bin";
 describe("where a helper is", () => {
   it("is one of five, each named for its Swift file beside the tool", () => {
@@ -15,6 +17,9 @@ describe("where a helper is", () => {
       assert.ok(helperSource(name).endsWith(`/tool/${name}.swift`), name);
       assert.ok(existsSync(helperSource(name)), name);
     }
+  });
+  it("has one helper for each .swift file beside the tool", () => {
+    assert.deepEqual(readdirSync(TOOL).filter((n) => n.endsWith(".swift")).map((n) => n.slice(0, -".swift".length)).sort(), [...HELPERS].sort());
   });
   it("is brimm-<name> in node's own folder, when it is there", () => {
     const there = (p) => p === `${BIN}/brimm-online-only`;
