@@ -262,6 +262,7 @@ describe("behind", () => {
     assert.equal((await on({ ...t.ctx.deps, run: git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" }).run }, "behind")).text, "This Mac has the newest BRIMM Video Studio.");
     t.done();
   });
+  const stale = "Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
   it("says her folder for Claude is out of date when this checkout would write it otherwise, and the one command that rewrites it (PR 19, the architect's 1.1)", async () => {
     const t = setup();
     const newest = () => git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" }).run;
@@ -274,11 +275,25 @@ describe("behind", () => {
     const skill = join(folder, ".claude", "skills", "brimm-edit", "SKILL.md");
     writeFileSync(skill, readFileSync(skill, "utf8").replace(/\| "Show me the Reels".*\n/, ""));
     const r = await on({ ...t.ctx.deps, run: newest() }, "behind");
-    const stale = "Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
     assert.deepEqual([r.code, r.text], [0, `This Mac has the newest BRIMM Video Studio.\n${stale}`]);
     // It needs no network: when git cannot fetch, the folder is still looked at (behind-studio-1).
     const offline = await on({ ...t.ctx.deps, run: git({ code: 128, stderr: "fatal: Could not read from remote repository." }).run }, "behind");
     assert.deepEqual([offline.code, offline.text], [0, `Could not check for a newer BRIMM Video Studio. Is this Mac offline?\n${stale}`]);
+    t.done();
+  });
+  it("asks git nothing where this Mac's checkout has no .git of its own, and still says what needs no network", async () => {
+    const t = setup();
+    const g = git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "3\n" });
+    const looked = [];
+    const none = (checkout) => (looked.push(checkout), false);
+    const quiet = await on({ ...t.ctx.deps, run: g.run, isGitCheckout: none }, "behind");
+    assert.deepEqual([quiet.code, quiet.text], [0, ""]);
+    const folder = writeStudio(t.home, { checkout: "/checkout", node: "/opt/homebrew/bin/node" });
+    const skill = join(folder, ".claude", "skills", "brimm-edit", "SKILL.md");
+    writeFileSync(skill, readFileSync(skill, "utf8").replace(/\| "Show me the Reels".*\n/, ""));
+    const r = await on({ ...t.ctx.deps, run: g.run, isGitCheckout: none }, "behind");
+    assert.deepEqual([r.code, r.text], [0, stale]);
+    assert.deepEqual([g.calls, looked], [[], ["/checkout", "/checkout"]]);
     t.done();
   });
   describe("her folder's lock (spec 2026-10-22, section 7)", () => {

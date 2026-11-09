@@ -12,7 +12,7 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { compiledHelper, hasXcodeTools, helperCommand, helperSource } from "./helpers.js";
 import { lastLine } from "./run.js";
 
 /** How long after the last copy into Dropbox the late check is made: 15 minutes. On 2026-10-14 Dropbox undid two renames
@@ -142,14 +142,15 @@ export const READ_QUIET_MS = 2 * 60 * 1000;
 /** A stretch of time as a person reads it: "50 ms", "2 minutes". */
 const spoken = (ms) => (ms < 60000 ? `${ms} ms` : `${ms / 60000} minute${ms === 60000 ? "" : "s"}`);
 
-/** What python3 runs to read a file through: it reads the file to its end, a mebibyte at a time, and after each read says on
+/** The fallback read, for a Mac with Xcode's command line tools and no compiled brimm-read-through (read-through.swift does the
+    same work). What python3 runs to read a file through: it reads the file to its end, a mebibyte at a time, and after each read says on
     its standard output how much of it it has read. Each program on a Mac has a setting for whether its reads of a file that is
     not here yet have the file brought down, and one the launch agent starts has it off, as have the programs it starts: such
     a read is refused at once, with "Resource deadlock avoided" (EDEADLK; Apple's TN3150 and the getiopolicy_np manual). Node
     cannot change the setting, so python3 turns it on first, for itself alone, with setiopolicy_np:
     IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES (3), IOPOL_SCOPE_PROCESS (0), IOPOL_MATERIALIZE_DATALESS_FILES_ON (2). When the
     file cannot be read, python3 says why in plain words, on its standard error. python3 comes with Xcode's command line
-    tools, which each Mac has. brimm-operations' transcript tool brings a placeholder down the same way. */
+    tools. brimm-operations' transcript tool brings a placeholder down the same way. */
 const READ_THROUGH = [
   "import ctypes, sys",
   "if ctypes.CDLL(None).setiopolicy_np(3, 0, 2) != 0:",
@@ -168,32 +169,45 @@ const READ_THROUGH = [
   "    sys.exit(e.strerror or str(e))"
 ].join("\n");
 
+/** What is said when there is no way to read a file through: neither the app's own reader nor Xcode's command line tools. */
+export const NO_READ_THROUGH = "nothing on this Mac can bring it down: BRIMM Video Studio's own reader is not here, and nor are Xcode's command line tools";
+
+/** How to start the read: brimm-read-through beside node when it is there, else python3 with READ_THROUGH when Xcode's command
+    line tools are here, else none. Xcode's tools are asked about only when there is no compiled reader. `bin`, `exists` and
+    `xcodeTools` are the Mac's own unless a test gives others. */
+export function readThroughCommand({ bin, exists, xcodeTools = hasXcodeTools } = {}) {
+  return compiledHelper("read-through", { bin, exists }) || (xcodeTools() ? { program: "/usr/bin/python3", args: ["-I", "-c", READ_THROUGH] } : null);
+}
+
 /** Read a file to its end and let what is read go: Dropbox then brings all of it down to this Mac, as it does for a file that
-    is there only as a placeholder. python3 reads it (READ_THROUGH), the file named to it as an argument of its own. Resolves
-    when it is read. Rejects when it cannot be read, saying why in python3's words, and, in plain words, when no bytes come
-    for `quietMs`, so that a placeholder Dropbox does not bring down never holds a run: python3 is then stopped. `spawn` is
-    how python3 is started, for a test to give another. */
-export const readThrough = (path, { spawn: start = spawn, quietMs = READ_QUIET_MS } = {}) => new Promise((done, fail) => {
-  const python = start("/usr/bin/python3", ["-I", "-c", READ_THROUGH, path], { stdio: ["ignore", "pipe", "pipe"] });
+    is there only as a placeholder. The reader (readThroughCommand) is given the file as an argument of its own. Resolves
+    when it is read. Rejects when it cannot be read, saying why in the reader's words, in plain words when no bytes come
+    for `quietMs`, so that a placeholder Dropbox does not bring down never holds a run: the reader is then stopped, and with
+    NO_READ_THROUGH, starting nothing, when there is no reader. `spawn` is how the reader is started, for a test to give
+    another. */
+export const readThrough = (path, { spawn: start = spawn, quietMs = READ_QUIET_MS, bin, xcodeTools } = {}) => new Promise((done, fail) => {
+  const cmd = readThroughCommand({ bin, xcodeTools });
+  if (!cmd) return fail(new Error(NO_READ_THROUGH));
+  const reader = start(cmd.program, [...cmd.args, path], { stdio: ["ignore", "pipe", "pipe"] });
   let why = "";
   let timer = null;
   const quiet = () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
-      python.kill("SIGKILL");
+      reader.kill("SIGKILL");
       fail(new Error(`Dropbox sent nothing of it for ${spoken(quietMs)}, so it was given up`));
     }, quietMs);
   };
   quiet();
-  python.stdout.on("data", quiet);
-  python.stderr.on("data", (d) => {
+  reader.stdout.on("data", quiet);
+  reader.stderr.on("data", (d) => {
     why = (why + d).slice(-4000);
   });
-  python.on("error", (e) => {
+  reader.on("error", (e) => {
     clearTimeout(timer);
     fail(e);
   });
-  python.on("close", (code) => {
+  reader.on("close", (code) => {
     clearTimeout(timer);
     if (code === 0) done();
     else fail(new Error(lastLine(why)));
@@ -266,17 +280,19 @@ export function sameBytes(a, b) {
   return Boolean(sa && sb) && sa.size === sb.size && startsAlike(a, b, sa.size);
 }
 
-/** The helper that asks macOS whether Dropbox reports a file uploaded (ubiquitousItemIsUploadedKey): uploaded.swift, beside the tool. */
-export const UPLOADED = fileURLToPath(new URL("./uploaded.swift", import.meta.url));
-/** How long the helper may take: swift compiles it each time. */
+/** The source of the helper that asks macOS whether Dropbox reports a file uploaded (ubiquitousItemIsUploadedKey): uploaded.swift, beside the tool. Compiled, it is
+    brimm-uploaded beside node. */
+export const UPLOADED = helperSource("uploaded");
+/** How long the helper may take: swift compiles it each time, when there is no compiled helper. */
 export const UPLOADED_TIMEOUT_MS = 20 * 1000;
 
-/** Whether Dropbox reports the file at `path` uploaded: true or false, or null when that cannot be told (no swift, a file outside Dropbox, a timeout, a failure, an
+/** Whether Dropbox reports the file at `path` uploaded: true or false, or null when that cannot be told (no helper: neither brimm-uploaded beside node nor swift, a file outside Dropbox, a timeout, a failure, an
     answer that is not the helper's JSON). Synchronous: it never gives a promise. */
-export function uploadedOf(path, { swift = "", exec = execFileSync, timeoutMs = UPLOADED_TIMEOUT_MS } = {}) {
-  if (!swift) return null;
+export function uploadedOf(path, { swift = "", bin, exec = execFileSync, timeoutMs = UPLOADED_TIMEOUT_MS } = {}) {
+  const helper = helperCommand("uploaded", { swift, bin });
+  if (!helper) return null;
   try {
-    const out = exec(swift, [UPLOADED, path], { encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"] });
+    const out = exec(helper.program, [...helper.args, path], { encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"] });
     const said = JSON.parse(String(out).trim());
     return said && (said.uploaded === true || said.uploaded === false) ? said.uploaded : null;
   } catch (e) {
@@ -284,17 +300,19 @@ export function uploadedOf(path, { swift = "", exec = execFileSync, timeoutMs = 
   }
 }
 
-/** The helper that asks Dropbox to make a file online-only (evictUbiquitousItem): online-only.swift, beside the tool. */
-export const ONLINE_ONLY = fileURLToPath(new URL("./online-only.swift", import.meta.url));
-/** How long the helper may take: swift compiles it each time. */
+/** The source of the helper that asks Dropbox to make a file online-only (evictUbiquitousItem): online-only.swift, beside the tool. Compiled, it is
+    brimm-online-only beside node. */
+export const ONLINE_ONLY = helperSource("online-only");
+/** How long the helper may take: swift compiles it each time, when there is no compiled helper. */
 export const ONLINE_ONLY_TIMEOUT_MS = 20 * 1000;
 
-/** Asks Dropbox to make the file at `path` online-only: true or false from the helper's document, or null when that cannot be told (no swift, a timeout, a failure, an
+/** Asks Dropbox to make the file at `path` online-only: true or false from the helper's document, or null when that cannot be told (no helper: neither brimm-online-only beside node nor swift, a timeout, a failure, an
     answer that is not the helper's JSON). On false, `said` is given the helper's error text. Synchronous: it never gives a promise. */
-export function makeOnlineOnly(path, { swift = "", exec = execFileSync, timeoutMs = ONLINE_ONLY_TIMEOUT_MS, said = () => {} } = {}) {
-  if (!swift) return null;
+export function makeOnlineOnly(path, { swift = "", bin, exec = execFileSync, timeoutMs = ONLINE_ONLY_TIMEOUT_MS, said = () => {} } = {}) {
+  const helper = helperCommand("online-only", { swift, bin });
+  if (!helper) return null;
   try {
-    const out = exec(swift, [ONLINE_ONLY, path], { encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"] });
+    const out = exec(helper.program, [...helper.args, path], { encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"] });
     const doc = JSON.parse(String(out).trim());
     if (!doc || (doc.onlineOnly !== true && doc.onlineOnly !== false)) return null;
     if (doc.onlineOnly === false && typeof doc.error === "string") said(doc.error);

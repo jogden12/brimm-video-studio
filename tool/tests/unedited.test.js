@@ -982,11 +982,33 @@ describe("several folders of unedited videos", () => {
 describe("before it starts", () => {
   const HOME = "/Users/someone";
   const MODEL = HOME + "/Library/Application Support/BRIMM Transcribe/ggml-large-v3-turbo.bin";
+  const BIN = "/app/BRIMM Video Studio/bin";
   /** What is found on a Mac that holds the files `there`. `xcodeTools` says whether Xcode's command line tools are on it. */
-  const found = (there, PATH, xcodeTools = () => true) => findPrograms({ exists: (p) => there.includes(p), env: { HOME, PATH }, xcodeTools });
+  const found = (there, PATH, xcodeTools = () => true) => findPrograms({ exists: (p) => there.includes(p), env: { HOME, PATH }, xcodeTools, bin: BIN });
   it("finds ffprobe with the transcript tool's own programs, where Homebrew puts them", () => {
     const there = ["/opt/homebrew/bin/ffmpeg", "/opt/homebrew/bin/ffprobe", "/opt/homebrew/bin/whisper-cli", MODEL];
-    assert.deepEqual(found(there, "/usr/bin:/bin"), { ffmpeg: "/opt/homebrew/bin/ffmpeg", whisper: "/opt/homebrew/bin/whisper-cli", model: MODEL, ffprobe: "/opt/homebrew/bin/ffprobe", swift: "", claude: "", missing: [] });
+    assert.deepEqual(found(there, "/usr/bin:/bin"), { ffmpeg: "/opt/homebrew/bin/ffmpeg", whisper: "/opt/homebrew/bin/whisper-cli", model: MODEL, ffprobe: "/opt/homebrew/bin/ffprobe", swift: "", claude: "", bin: BIN, missing: [] });
+  });
+  it("looks first in node's own folder, where the app keeps its programs, for ffmpeg, ffprobe, the transcriber and Claude Code", () => {
+    const brew = ["/opt/homebrew/bin/ffmpeg", "/opt/homebrew/bin/ffprobe", "/opt/homebrew/bin/whisper-cli", "/opt/homebrew/bin/claude", MODEL];
+    const app = ["ffmpeg", "ffprobe", "whisper-cli", "claude"].map((n) => `${BIN}/${n}`);
+    const got = found([...brew, ...app], "/opt/homebrew/bin:/usr/bin");
+    assert.deepEqual([got.ffmpeg, got.ffprobe, got.whisper, got.claude, got.missing], [...app, []]);
+    // The transcriber's other name, whisper-cpp, is found there too.
+    assert.equal(found([...brew.filter((p) => !p.endsWith("whisper-cli")), `${BIN}/whisper-cpp`], "/opt/homebrew/bin").whisper, `${BIN}/whisper-cpp`);
+  });
+  it("finds each program where it did before when node's folder holds only node, as Homebrew's does", () => {
+    const cellar = "/opt/homebrew/Cellar/node/26.11.1/bin";
+    const there = ["/opt/homebrew/bin/ffmpeg", "/opt/homebrew/bin/ffprobe", "/opt/homebrew/bin/whisper-cli", MODEL, `${cellar}/node`, `${cellar}/npm`];
+    assert.deepEqual(findPrograms({ exists: (p) => there.includes(p), env: { HOME, PATH: "/usr/bin:/bin" }, xcodeTools: () => true, bin: cellar }),
+      { ffmpeg: "/opt/homebrew/bin/ffmpeg", whisper: "/opt/homebrew/bin/whisper-cli", model: MODEL, ffprobe: "/opt/homebrew/bin/ffprobe", swift: "", claude: "", bin: cellar, missing: [] });
+  });
+  it("keeps the rest of the environment for the transcript tool's own finder: its model setting and the home folder", () => {
+    assert.equal(findPrograms({ exists: () => true, env: { HOME, PATH: "/usr/bin", BRIMM_WHISPER_MODEL: "/models/m.bin" }, xcodeTools: () => false, bin: BIN }).model, "/models/m.bin");
+    assert.equal(found([], "/usr/bin").model, MODEL);
+  });
+  it("names node's own folder as bin when it is given none", () => {
+    assert.equal(findPrograms({ exists: () => false, env: { HOME, PATH: "" }, xcodeTools: () => false }).bin, dirname(process.execPath));
   });
   it("finds Claude Code on the PATH, then where Homebrew puts programs, then in the home folder's own .local/bin, and goes on without it", () => {
     const there = ["/opt/homebrew/bin/ffmpeg", "/opt/homebrew/bin/ffprobe", "/opt/homebrew/bin/whisper-cli", MODEL];

@@ -153,12 +153,22 @@ export function heldFolderOf(file, dropFile, { episode, today }) {
   }
 }
 
-/** Which brimm-video is at work: the short commit the checkout `checkout` is at, as git says it, or "unknown". It goes into
-    each record's writer, for information only. */
-export function commitOf(checkout) {
-  const ran = spawnSync("git", ["-C", checkout, "rev-parse", "--short", "HEAD"], { encoding: "utf8" });
+/** Whether the folder `checkout` has a .git of its own, which is a folder, or a worktree's file. The app's copy of the code has none,
+    and a folder inside a checkout (tool/) has none of its own, so git is asked only where this is true. */
+export const isGitCheckout = (checkout, { exists = existsSync } = {}) => typeof checkout === "string" && checkout !== "" && exists(join(checkout, ".git"));
+
+/** What git says: the short commit the checkout `checkout` is at, or "unknown". */
+function gitCommitOf(checkout, spawn) {
+  const ran = spawn("git", ["-C", checkout, "rev-parse", "--short", "HEAD"], { encoding: "utf8" });
   const commit = ran.status === 0 ? String(ran.stdout).trim() : "";
   return /^[0-9a-f]{7,}$/.test(commit) ? commit : "unknown";
+}
+
+/** Which brimm-video is at work: the short commit the checkout `checkout` is at, as git says it, or "unknown", where the folder has
+    no .git of its own (isGitCheckout), and then git is not asked. It goes into each record's writer, for information only. */
+export function commitOf(checkout, { spawn = spawnSync, exists = existsSync } = {}) {
+  if (!isGitCheckout(checkout, { exists })) return "unknown";
+  return gitCommitOf(checkout, spawn);
 }
 
 /** The checkout this code is in: the folder above tool/, where this file is. It is the checkout at work, so it is the one a

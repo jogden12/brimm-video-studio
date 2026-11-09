@@ -7,7 +7,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { episodeMode, episodeKind, findFolder, commitOf, thisCheckout, importEpisodes, clearRuns, clearCrashes, heldBy, dueAt, lateCheckLockOf, takeLateCheckLock, releaseLateCheckLock, LOCK_AGAIN_MS } from "../filing.js";
+import { episodeMode, episodeKind, findFolder, commitOf, isGitCheckout, thisCheckout, importEpisodes, clearRuns, clearCrashes, heldBy, dueAt, lateCheckLockOf, takeLateCheckLock, releaseLateCheckLock, LOCK_AGAIN_MS } from "../filing.js";
 import { episodeWork } from "../settings.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
@@ -199,14 +199,44 @@ describe("the folder a local import goes into (Phase 3, L3)", () => {
 });
 
 describe("which BRIMM Video Studio wrote a record", () => {
-  it("is the short commit the checkout is at", () => {
-    assert.match(commitOf(REPO), /^[0-9a-f]{7,}$/);
-  });
   it("is unknown when the folder is not a checkout", () => {
     const dir = mkdtempSync(join(tmpdir(), "brimm-filing-"));
     assert.equal(commitOf(dir), "unknown");
     assert.equal(commitOf(join(dir, "not there")), "unknown");
     rmSync(dir, { recursive: true, force: true });
+  });
+  it("is a git checkout only where the folder has a .git of its own: a folder, or a worktree's file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-filing-"));
+    for (const name of ["main", "worktree", "copy"]) mkdirSync(join(dir, name));
+    mkdirSync(join(dir, "main", ".git"));
+    writeFileSync(join(dir, "worktree", ".git"), "gitdir: /somewhere/.git/worktrees/x\n");
+    assert.deepEqual(["main", "worktree", "copy", "not there"].map((n) => isGitCheckout(join(dir, n))), [true, true, false, false]);
+    assert.equal(isGitCheckout(REPO), false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+  it("is unknown, and git is not asked, where the folder has no .git of its own, as the app's copy of the code has none", () => {
+    const asked = [];
+    const spawn = (...a) => (asked.push(a), { status: 0, stdout: "abc1234\n" });
+    assert.equal(commitOf("/Applications/BRIMM Video Studio.app/Contents/Resources/studio", { spawn, exists: () => false }), "unknown");
+    assert.equal(commitOf(REPO, { spawn }), "unknown");
+    assert.deepEqual(asked, []);
+  });
+  it("is unknown, and git is not asked, for a checkout that is not a folder's name, as an episode with none", () => {
+    const spawn = () => assert.fail("git was asked");
+    for (const none of [undefined, null, ""]) {
+      assert.equal(isGitCheckout(none, { exists: () => true }), false);
+      assert.equal(commitOf(none, { spawn, exists: () => true }), "unknown");
+    }
+  });
+  it("is unknown when git fails", () => {
+    assert.equal(commitOf("/checkout", { spawn: () => ({ status: 128, stdout: "abc1234\n" }), exists: () => true }), "unknown");
+  });
+  it("is asked of git as before where there is one", () => {
+    const asked = [];
+    const spawn = (...a) => (asked.push(a), { status: 0, stdout: "abc1234\n" });
+    assert.equal(commitOf("/checkout", { spawn, exists: (p) => p === "/checkout/.git" }), "abc1234");
+    assert.deepEqual(asked, [["git", ["-C", "/checkout", "rev-parse", "--short", "HEAD"], { encoding: "utf8" }]]);
+    assert.equal(commitOf("/checkout", { spawn: () => ({ status: 0, stdout: "not a commit\n" }), exists: () => true }), "unknown");
   });
   it("is, for the checkout this code is in, the folder above tool/: no setting names it", () => {
     assert.equal(thisCheckout(), OWN_CHECKOUT);

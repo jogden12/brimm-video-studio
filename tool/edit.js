@@ -75,7 +75,7 @@ import { fileSafe, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reel-candidates.js";
 import { readStatusesIn, importState, removeStatusIn, shownStep } from "./importing.js";
 import { localSource, projectWaits, readingCheckAt, readingWaitsUntil, waitFacts } from "./late-wait.js";
-import { askAgent, busyWords, fileId, heldBy, commitOf, thisCheckout, episodeHolding, holdingEpisode, logTo, ownRecordBack, readPendings, readPendingsOf, readSeen, restoreReads, seenKey, dueAt, statusReadFolders, takeOutOfCheck } from "./filing.js";
+import { askAgent, busyWords, fileId, heldBy, commitOf, isGitCheckout, thisCheckout, episodeHolding, holdingEpisode, logTo, ownRecordBack, readPendings, readPendingsOf, readSeen, restoreReads, seenKey, dueAt, statusReadFolders, takeOutOfCheck } from "./filing.js";
 import { HAND_OFF_ASK, REELS_ASK, finishNow, finishFinished, finishSession, madeFromImport, importKind, whatIs, letGoClaim, cannotFinish, handoffTarget, writesV2For, numbersTakenWords, linksOf, matchedSession, handedOff, chainGap, chainGapWords, movedIdWords, ownHandoffs, handoffIdIn, reelsBase } from "./finish.js";
 import { BRINGING, REEL_KEY, SAY_AGAIN, exportAgainWords, keepOldWords, nextHandoff, noReelWords, nothingNewWords, rawWords, reelsAsked, retitledReels } from "./finish-reels.js";
 import { checkingNow, problemFlagged } from "./finish-check.js";
@@ -2627,7 +2627,8 @@ async function finish(ctx, rest) {
       return 1;
     }
     // The progress panel shows the finish as it shows an import (phase P).
-    const progress = ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: findPrograms().swift });
+    const programs = ctx.deps.progress ? null : findPrograms();
+    const progress = ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: programs.swift, bin: programs.bin });
     const result = await runDetached({ home: ctx.home, folder: found.name, clean: resultClean(ctx), command: "finish", alive: ctx.alive, ...(ctx.deps.keepAwake ? { keepAwake: ctx.deps.keepAwake } : {}) }, ({ nonce }) => finishNow(ctx, { folder: found.folder, name: found.name, record: found.read.record }, { progress, nonce, notify: ctx.deps.notify || banner }));
     if (result.taking || result.running) {
       ctx.say(result.taking ? `Another run is taking over ${calledAs(ctx, found)}'s lock. Say finish again in a moment.` : `${result.running} is running for ${calledAs(ctx, found)} already.`);
@@ -2863,7 +2864,7 @@ function refuseIfLoosened(lock, say) {
     main, and counts the changes there that this checkout has not. First it clears the copies `show` opened (clearShown), the one thing it
     writes. Then it looks at the lock on her folder for Claude (lockLoosened): when that is loosened it says so, to ask Jason, and
     ends with 1 without asking git, since she is not to go on (editMain asks it too when this Mac has no settings for episodes). On her laptop git reaches GitHub with the deploy key. It changes nothing in the
-    checkout, and otherwise always ends with 0: a check that could not be made is said. With the open lock in effect on this Mac it
+    checkout, and otherwise always ends with 0: a check that could not be made is said. A checkout with no .git of its own is not asked of git (phase 1); phase 3 says the update check's line there. With the open lock in effect on this Mac it
     also says, and goes on, when Claude Code has not trusted her folder yet (UNTRUSTED, first), and, after its other lines, the entries
     this Mac's settings add to what her folder allows, so that a change shows (design section 2). On a Mac whose settings turn the app
     on it also says, whatever git answered and before those entries, one line when the pinned HyperFrames command line is not the one
@@ -2913,6 +2914,7 @@ async function behind(ctx) {
     }
     return 0;
   };
+  if (!(ctx.deps.isGitCheckout || isGitCheckout)(ctx.settings.checkout)) return folderLine();
   const fetched = await git("fetch", "-q", "origin", "main");
   if (fetched.code !== 0 || fetched.outOfTime) {
     ctx.say(could);
@@ -3968,7 +3970,7 @@ async function workcopy(ctx, rest) {
   const tools = ctx.deps.tools || findPrograms();
   const deps = {
     run: ctx.deps.run || runProgram, tools, now: ctx.now, log: (line) => ctx.say(line),
-    progress: ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: tools.swift }),
+    progress: ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: tools.swift, bin: tools.bin }),
     ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {})
   };
   const wait = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
@@ -7090,7 +7092,7 @@ async function joinCommand(ctx, rest) {
   const deps = {
     run: ctx.deps.run || runProgram, tools, model: tools.model, home: ctx.home, settings: ctx.settings, now: () => new Date(ctx.now()), clock: ctx.now, checkout: thisCheckout(),
     log: (line) => ctx.say(line), wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole,
-    progress: ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: tools.swift }),
+    progress: ctx.deps.progress || reporter({ folder: progressFolder(ctx.home), swift: tools.swift, bin: tools.bin }),
     ...(ctx.deps.readAll ? { readAll: ctx.deps.readAll } : {}), ...(ctx.deps.runGuarded ? { runGuarded: ctx.deps.runGuarded } : {}), ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {})
   };
   let started = null;
