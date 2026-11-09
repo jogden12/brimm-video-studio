@@ -262,6 +262,7 @@ describe("behind", () => {
     assert.equal((await on({ ...t.ctx.deps, run: git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" }).run }, "behind")).text, "This Mac has the newest BRIMM Video Studio.");
     t.done();
   });
+  const stale = "Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
   it("says her folder for Claude is out of date when this checkout would write it otherwise, and the one command that rewrites it (PR 19, the architect's 1.1)", async () => {
     const t = setup();
     const newest = () => git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" }).run;
@@ -280,7 +281,6 @@ describe("behind", () => {
     assert.deepEqual([offline.code, offline.text], [0, `Could not check for a newer BRIMM Video Studio. Is this Mac offline?\n${stale}`]);
     t.done();
   });
-  const stale = "Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node /opt/homebrew/bin/node, then start a new session in her Claude folder)";
   it("asks git nothing where this Mac's checkout has no .git of its own, and still says what needs no network", async () => {
     const t = setup();
     const g = git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "3\n" });

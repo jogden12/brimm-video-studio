@@ -155,7 +155,7 @@ export function heldFolderOf(file, dropFile, { episode, today }) {
 
 /** Whether the folder `checkout` has a .git of its own, which is a folder, or a worktree's file. The app's copy of the code has none,
     and a folder inside a checkout (tool/) has none of its own, so git is asked only where this is true. */
-export const isGitCheckout = (checkout, { exists = existsSync } = {}) => exists(join(checkout, ".git"));
+export const isGitCheckout = (checkout, { exists = existsSync } = {}) => typeof checkout === "string" && checkout !== "" && exists(join(checkout, ".git"));
 
 /** What git says: the short commit the checkout `checkout` is at, or "unknown". */
 function gitCommitOf(checkout, spawn) {
