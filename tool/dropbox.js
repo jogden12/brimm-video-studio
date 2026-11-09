@@ -12,7 +12,7 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { helperCommand, helperSource } from "./helpers.js";
+import { compiledHelper, hasXcodeTools, helperCommand, helperSource } from "./helpers.js";
 import { lastLine } from "./run.js";
 
 /** How long after the last copy into Dropbox the late check is made: 15 minutes. On 2026-10-14 Dropbox undid two renames
@@ -142,7 +142,8 @@ export const READ_QUIET_MS = 2 * 60 * 1000;
 /** A stretch of time as a person reads it: "50 ms", "2 minutes". */
 const spoken = (ms) => (ms < 60000 ? `${ms} ms` : `${ms / 60000} minute${ms === 60000 ? "" : "s"}`);
 
-/** What python3 runs to read a file through: it reads the file to its end, a mebibyte at a time, and after each read says on
+/** The fallback read, for a Mac with Xcode's command line tools and no compiled brimm-read-through (read-through.swift does the
+    same work). What python3 runs to read a file through: it reads the file to its end, a mebibyte at a time, and after each read says on
     its standard output how much of it it has read. Each program on a Mac has a setting for whether its reads of a file that is
     not here yet have the file brought down, and one the launch agent starts has it off, as have the programs it starts: such
     a read is refused at once, with "Resource deadlock avoided" (EDEADLK; Apple's TN3150 and the getiopolicy_np manual). Node
@@ -168,32 +169,45 @@ const READ_THROUGH = [
   "    sys.exit(e.strerror or str(e))"
 ].join("\n");
 
+/** What is said when there is no way to read a file through: neither the app's own reader nor Xcode's command line tools. */
+export const NO_READ_THROUGH = "nothing on this Mac can bring it down: BRIMM Video Studio's own reader is not here, and nor are Xcode's command line tools";
+
+/** How to start the read: brimm-read-through beside node when it is there, else python3 with READ_THROUGH when Xcode's command
+    line tools are here, else none. Xcode's tools are asked about only when there is no compiled reader. `bin`, `exists` and
+    `xcodeTools` are the Mac's own unless a test gives others. */
+export function readThroughCommand({ bin, exists, xcodeTools = hasXcodeTools } = {}) {
+  return compiledHelper("read-through", { bin, exists }) || (xcodeTools() ? { program: "/usr/bin/python3", args: ["-I", "-c", READ_THROUGH] } : null);
+}
+
 /** Read a file to its end and let what is read go: Dropbox then brings all of it down to this Mac, as it does for a file that
-    is there only as a placeholder. python3 reads it (READ_THROUGH), the file named to it as an argument of its own. Resolves
-    when it is read. Rejects when it cannot be read, saying why in python3's words, and, in plain words, when no bytes come
-    for `quietMs`, so that a placeholder Dropbox does not bring down never holds a run: python3 is then stopped. `spawn` is
-    how python3 is started, for a test to give another. */
-export const readThrough = (path, { spawn: start = spawn, quietMs = READ_QUIET_MS } = {}) => new Promise((done, fail) => {
-  const python = start("/usr/bin/python3", ["-I", "-c", READ_THROUGH, path], { stdio: ["ignore", "pipe", "pipe"] });
+    is there only as a placeholder. The reader (readThroughCommand) is given the file as an argument of its own. Resolves
+    when it is read. Rejects when it cannot be read, saying why in the reader's words, in plain words when no bytes come
+    for `quietMs`, so that a placeholder Dropbox does not bring down never holds a run: the reader is then stopped, and with
+    NO_READ_THROUGH, starting nothing, when there is no reader. `spawn` is how the reader is started, for a test to give
+    another. */
+export const readThrough = (path, { spawn: start = spawn, quietMs = READ_QUIET_MS, bin, xcodeTools } = {}) => new Promise((done, fail) => {
+  const cmd = readThroughCommand({ bin, xcodeTools });
+  if (!cmd) return fail(new Error(NO_READ_THROUGH));
+  const reader = start(cmd.program, [...cmd.args, path], { stdio: ["ignore", "pipe", "pipe"] });
   let why = "";
   let timer = null;
   const quiet = () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
-      python.kill("SIGKILL");
+      reader.kill("SIGKILL");
       fail(new Error(`Dropbox sent nothing of it for ${spoken(quietMs)}, so it was given up`));
     }, quietMs);
   };
   quiet();
-  python.stdout.on("data", quiet);
-  python.stderr.on("data", (d) => {
+  reader.stdout.on("data", quiet);
+  reader.stderr.on("data", (d) => {
     why = (why + d).slice(-4000);
   });
-  python.on("error", (e) => {
+  reader.on("error", (e) => {
     clearTimeout(timer);
     fail(e);
   });
-  python.on("close", (code) => {
+  reader.on("close", (code) => {
     clearTimeout(timer);
     if (code === 0) done();
     else fail(new Error(lastLine(why)));
