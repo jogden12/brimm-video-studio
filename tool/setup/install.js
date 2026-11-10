@@ -7,6 +7,7 @@ import { chmodSync, createReadStream, existsSync, mkdirSync, readFileSync, renam
 import { dirname, join } from "node:path";
 import { GUARD_CLAUDE, claudeAt, claudeEnv, claudeState, versionAtLeast } from "./checks.js";
 import { signInQuestion } from "./questions.js";
+import { idleWhy } from "../busy.js";
 import { PIN, childEnv, cliPath, toolchainDiffers, toolchainDir, toolchainHolds } from "../hyperframes.js";
 
 /** The label of each part of the setup, as the shell shows it. */
@@ -385,4 +386,92 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
   if (leave) return { signedIn: false, plan: "" };
   const state = claudeState({ home, tools });
   return state.signedIn ? { signedIn: true, plan: state.plan } : { signedIn: false, plan: null, fault: timedOut ? TOO_LONG : NOT_SIGNED_IN };
+}
+
+/** The arguments the installer is given. A fresh Mac names its folders; a held, taken-over or installed Mac gives only its machine and
+    the root of its settings, and the installer keeps the folders those hold. With `print`, --print stands where --yes stood. */
+export function installerArgs(answers, { app, tools, print = false }) {
+  const head = [print ? "--print" : "--yes", "--machine", answers.machine, "--tools", tools, "--app", app];
+  return answers.kind === "fresh" ? [...head, "--drop-folder", answers.drop, "--exports-folder", answers.exports, answers.root] : [...head, answers.root];
+}
+
+/** The installer's environment, built from scratch: never the whole of `base`. */
+export function installerEnv(home, base = process.env) {
+  const env = { HOME: home, PATH: "/usr/bin:/bin:/usr/sbin:/sbin", LANG: "en_US.UTF-8", NPM_CONFIG_UPDATE_NOTIFIER: "false" };
+  for (const name of ["TMPDIR", "USER", "LOGNAME"]) if (base[name]) env[name] = base[name];
+  return env;
+}
+
+/** Runs the installer to its end: its exit code, and what it printed as one text, through quiet. It has no time limit and is never
+    ended by the engine: half an install is worse than a late answer to a cancel. */
+export function runInstaller({ args, home, programs }) {
+  return new Promise((resolve) => {
+    const [program, ...first] = programs.installer;
+    const child = spawn(program, [...first, ...args], { env: installerEnv(home), stdio: ["ignore", "pipe", "pipe"] });
+    let printed = "";
+    child.stdout.on("data", (chunk) => (printed += chunk));
+    child.stderr.on("data", (chunk) => (printed += chunk));
+    let settled = false;
+    const end = (code) => {
+      if (settled) return;
+      settled = true;
+      resolve({ code, text: quiet(printed) });
+    };
+    child.on("error", () => end(1));
+    child.on("close", (code) => end(code ?? 1));
+  });
+}
+
+/** What the installer's exit code means: 0 done, 2 refused (nothing was changed), 75 something is at work, and any other code failed. */
+export function installerOutcome(code) {
+  return code === 0 ? "done" : code === 2 ? "refused" : code === 75 ? "busy" : "failed";
+}
+
+export const BUSY_TRIES = 5;
+export const BUSY_WAIT_MS = 30000;
+const BUSY_GIVEN_UP = "BRIMM Video Studio is at work on this Mac, so setup cannot finish yet. Wait until it is done, then choose Repair.";
+
+/** Runs the installer once nothing is at work on this Mac. Each try asks `why()` first: a line is shown (progress, waiting) and
+    `wait(waitMs)` follows. An exit of 75 counts as a try the same way, and its line is asked again from `why()`: the installer's own
+    text is never shown. After `tries` it rejects with code "busy". */
+export async function installWhenIdle({ args, home, programs, why = () => idleWhy({ home }), wait, progress, tries = BUSY_TRIES, waitMs = BUSY_WAIT_MS }) {
+  const hold = async (line) => {
+    progress({ part: "installer", label: LABELS.installer, done: 0, total: null, state: "waiting", detail: line });
+    await wait(waitMs);
+  };
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const line = why();
+    if (line) {
+      await hold(line);
+      continue;
+    }
+    const result = await runInstaller({ args, home, programs });
+    if (installerOutcome(result.code) !== "busy") return result;
+    await hold(why() || "Something is at work on this Mac.");
+  }
+  throw Object.assign(new Error(BUSY_GIVEN_UP), { code: "busy" });
+}
+
+const checkLogFile = (home) => join(home, "Library", "Logs", "brimm-video-claude-check.log");
+
+/** The size of the installer's check log, 0 when it is not there. Taken before the installer runs, which takes the old log away first. */
+export function checkLogSize(home) {
+  return sizeOf(checkLogFile(home));
+}
+
+/** Whether Claude answered from the background job, read from the check log from byte `from` (from 0 when the log is now shorter):
+    the first line that says so or says it could not be asked, else a line saying there was no answer. */
+export function checkLogSays(home, { from = 0 } = {}) {
+  let text = "";
+  try {
+    const bytes = readFileSync(checkLogFile(home));
+    text = bytes.subarray(bytes.length < from ? 0 : from).toString("utf8");
+  } catch {
+    // No log: no answer.
+  }
+  for (const line of text.split("\n")) {
+    if (line.startsWith("Claude answered from here")) return { answered: true, line };
+    if (line.startsWith("Claude could not be asked from here")) return { answered: false, line };
+  }
+  return { answered: false, line: "Claude did not answer from the background job within 90 seconds." };
 }

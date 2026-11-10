@@ -8,10 +8,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
 import { PARTS } from "../setup/protocol.js";
-import { CLAUDE_INSTALL_ARGS, LABELS, MODEL_BYTES, claudePin, installClaudeCode, modelPath, modelPin, npmArgs, quiet, runProgram, sha256Of, signIn, signInLinkOf, stageChrome, stageCli, stageModel } from "../setup/install.js";
+import { BUSY_TRIES, BUSY_WAIT_MS, CLAUDE_INSTALL_ARGS, LABELS, MODEL_BYTES, claudePin, installClaudeCode, modelPath, modelPin, npmArgs, checkLogSays, checkLogSize, installWhenIdle, installerArgs, installerEnv, installerOutcome, quiet, runInstaller, runProgram, sha256Of, signIn, signInLinkOf, stageChrome, stageCli, stageModel } from "../setup/install.js";
 import { claudeAt } from "../setup/checks.js";
 import { signInQuestion } from "../setup/questions.js";
-import { mac } from "./setup-harness.js";
+import { installCalls, mac, notAMac, printOnly, settingsOf } from "./setup-harness.js";
 
 const INSTALL = readFileSync(fileURLToPath(new URL("../install.sh", import.meta.url)), "utf8");
 const RUN = readFileSync(fileURLToPath(new URL("../run.js", import.meta.url)), "utf8");
@@ -603,5 +603,216 @@ describe("signIn", () => {
       assert.equal(m.ran().includes("script"), false);
       assert.deepEqual(result, { signedIn: true, plan: "max" });
     });
+  });
+});
+
+const UNEDITED = readFileSync(fileURLToPath(new URL("../unedited.js", import.meta.url)), "utf8");
+const FRESH = { kind: "fresh", machine: "Studio Test", root: "/r/BRIMM Video", drop: "/d/Drop", exports: "/e/Exports" };
+const WHERE = { app: "/a/BRIMM Video Studio.app", tools: "/a/tools" };
+const LOG = (home) => join(home, "Library", "Logs", "brimm-video-claude-check.log");
+
+describe("the installer's arguments", () => {
+  it("a fresh Mac's arguments carry its name, the tools, the app, both folders and BRIMM Video, in install.sh's order", () => {
+    assert.deepEqual(installerArgs(FRESH, WHERE), ["--yes", "--machine", "Studio Test", "--tools", "/a/tools", "--app", "/a/BRIMM Video Studio.app", "--drop-folder", "/d/Drop", "--exports-folder", "/e/Exports", "/r/BRIMM Video"]);
+  });
+
+  it("a takeover's arguments name no drop folder and no exports folder", () => {
+    const args = installerArgs({ kind: "held", machine: "Studio Test", root: "/r/BRIMM Video", drop: "/x", exports: "/y" }, WHERE);
+    assert.deepEqual(args, ["--yes", "--machine", "Studio Test", "--tools", "/a/tools", "--app", "/a/BRIMM Video Studio.app", "/r/BRIMM Video"]);
+  });
+
+  it("a print has --print where a real run has --yes, and nothing else differs", () => {
+    for (const answers of [FRESH, { kind: "held", machine: "M", root: "/r" }]) {
+      const real = installerArgs(answers, WHERE);
+      const printed = installerArgs(answers, { ...WHERE, print: true });
+      assert.equal(printed[0], "--print");
+      assert.deepEqual(printed.slice(1), real.slice(1));
+    }
+  });
+
+  it("every option the engine gives is one install.sh reads", () => {
+    const cases = INSTALL.slice(INSTALL.indexOf('case "$arg" in'));
+    for (const option of ["--print", "--yes", "--machine", "--tools", "--app", "--drop-folder", "--exports-folder"]) {
+      assert.match(cases, new RegExp(`(^|[\\s|])${option}([|)])`, "m"), option);
+    }
+  });
+});
+
+describe("the installer's environment", () => {
+  it("is built from scratch", () => {
+    assert.deepEqual(installerEnv("/h", { HOME: "/other", PATH: "/x", TMPDIR: "/t/", USER: "jane", LOGNAME: "jane", BRIMM_LEAK: "1" }), {
+      HOME: "/h", PATH: "/usr/bin:/bin:/usr/sbin:/sbin", LANG: "en_US.UTF-8", NPM_CONFIG_UPDATE_NOTIFIER: "false", TMPDIR: "/t/", USER: "jane", LOGNAME: "jane"
+    });
+    assert.deepEqual(Object.keys(installerEnv("/h", {})).sort(), ["HOME", "LANG", "NPM_CONFIG_UPDATE_NOTIFIER", "PATH"]);
+  });
+});
+
+describe("runInstaller and installerOutcome", () => {
+  it("the installer is started with exactly the arguments, and with an environment built from scratch", async () => {
+    const m = mac();
+    const file = join(m.dir, "spy.out");
+    const spy = join(m.dir, "bin", "spy");
+    writeFileSync(spy, `#!/bin/sh\nfor a in "$@"; do printf 'arg:%s\\n' "$a"; done > "${file}"\nenv >> "${file}"\n[ -t 0 ] && echo TTY >> "${file}"\nexit 0\n`);
+    chmodSync(spy, 0o755);
+    process.env.BRIMM_LEAK = "1";
+    try {
+      const args = ["--yes", "a b", "c"];
+      const result = await runInstaller({ args, home: m.home, programs: { installer: [spy, "first"] } });
+      assert.equal(result.code, 0);
+      const text = readFileSync(file, "utf8");
+      assert.match(text, /^arg:first\narg:--yes\narg:a b\narg:c\n/);
+      assert.equal(text.includes("BRIMM_LEAK"), false);
+      assert.match(text, /^PATH=\/usr\/bin:\/bin:\/usr\/sbin:\/sbin$/m);
+      assert.match(text, new RegExp(`^HOME=${m.home}$`, "m"));
+    } finally {
+      delete process.env.BRIMM_LEAK;
+      m.done();
+    }
+  });
+
+  it("exit 0 is done, exit 1 failed, exit 2 refused, each with the installer's text", async () => {
+    const m = mac();
+    try {
+      writeFileSync(join(m.dir, "says", "installer"), "It said this.\n/bin/sh: docker: command not found\n");
+      for (const [code, outcome] of [[0, "done"], [1, "failed"], [2, "refused"], [75, "busy"], [3, "failed"]]) {
+        writeFileSync(join(m.dir, "exits", "installer"), String(code));
+        const result = await runInstaller({ args: ["--yes"], home: m.home, programs: m.programs });
+        assert.equal(result.code, code);
+        assert.equal(installerOutcome(result.code), outcome);
+        assert.match(result.text, /It said this\./);
+        assert.equal(result.text.includes("docker"), false);
+      }
+    } finally {
+      m.done();
+    }
+  });
+});
+
+describe("installWhenIdle", () => {
+  const events = () => {
+    const sent = [];
+    const waits = [];
+    return { sent, waits, progress: (e) => sent.push(e), wait: async (ms) => void waits.push(ms) };
+  };
+
+  it("something at work: the line is shown, and after five tries the run ends with error busy", async () => {
+    const m = mac();
+    try {
+      const e = events();
+      await assert.rejects(installWhenIdle({ args: ["--yes"], home: m.home, programs: m.programs, why: () => "BRIMM Video Studio is transcribing a video.", wait: e.wait, progress: e.progress }), (error) => error.code === "busy" && error.message === "BRIMM Video Studio is at work on this Mac, so setup cannot finish yet. Wait until it is done, then choose Repair.");
+      assert.equal(BUSY_TRIES, 5);
+      assert.equal(BUSY_WAIT_MS, 30000);
+      assert.equal(e.sent.length, 5);
+      for (const event of e.sent) {
+        assert.deepEqual(event, { part: "installer", label: LABELS.installer, done: 0, total: null, state: "waiting", detail: "BRIMM Video Studio is transcribing a video." });
+      }
+      assert.deepEqual(e.waits, [30000, 30000, 30000, 30000, 30000]);
+      assert.deepEqual(installCalls(m.ran()), []);
+    } finally {
+      m.done();
+    }
+  });
+
+  it("an exit 75 from the installer itself is waited for the same way, and the line comes from idleWhy, not from the installer's text", async () => {
+    const m = mac();
+    try {
+      writeFileSync(join(m.dir, "exits", "installer"), "75");
+      writeFileSync(join(m.dir, "says", "installer"), "2026-11-01 Client Jane (Old Mac) is being read\n");
+      const e = events();
+      let asked = 0;
+      await assert.rejects(installWhenIdle({ args: ["--yes"], home: m.home, programs: m.programs, why: () => (++asked, ""), wait: e.wait, progress: e.progress, tries: 3 }), (error) => error.code === "busy");
+      assert.equal(installCalls(m.ran()).length, 3);
+      assert.equal(e.waits.length, 3);
+      assert.equal(JSON.stringify(e.sent).includes("Jane"), false);
+      assert.equal(e.sent.length, 3);
+      assert.equal(e.sent.every((event) => event.state === "waiting" && typeof event.detail === "string"), true);
+    } finally {
+      m.done();
+    }
+  });
+
+  it("once nothing is at work the installer runs", async () => {
+    const m = mac();
+    try {
+      writeFileSync(join(m.dir, "says", "installer"), "Installed.\n");
+      const lines = ["A command is at work.", "A command is at work.", ""];
+      const e = events();
+      const result = await installWhenIdle({ args: ["--yes", "x"], home: m.home, programs: m.programs, why: () => lines.shift() ?? "", wait: e.wait, progress: e.progress });
+      assert.equal(result.code, 0);
+      assert.match(result.text, /Installed\./);
+      assert.equal(e.sent.length, 2);
+      assert.deepEqual(installCalls(m.ran()), [["--yes", "x"]]);
+    } finally {
+      m.done();
+    }
+  });
+});
+
+describe("the check log", () => {
+  const put = (m, text) => {
+    mkdirSync(dirname(LOG(m.home)), { recursive: true });
+    writeFileSync(LOG(m.home), text);
+  };
+
+  it("the size is 0 when there is no log", () => {
+    const m = mac();
+    try {
+      assert.equal(checkLogSize(m.home), 0);
+      put(m, "abc\n");
+      assert.equal(checkLogSize(m.home), 4);
+    } finally {
+      m.done();
+    }
+  });
+
+  it("answered, could not be asked, and no line at all", () => {
+    const m = mac();
+    try {
+      assert.deepEqual(checkLogSays(m.home), { answered: false, line: "Claude did not answer from the background job within 90 seconds." });
+      put(m, "starting\nClaude answered from here.\n");
+      assert.deepEqual(checkLogSays(m.home), { answered: true, line: "Claude answered from here." });
+      put(m, "starting\nClaude could not be asked from here: Claude Code is not on this Mac.\n");
+      assert.deepEqual(checkLogSays(m.home), { answered: false, line: "Claude could not be asked from here: Claude Code is not on this Mac." });
+      put(m, "starting\nnothing useful\n");
+      assert.deepEqual(checkLogSays(m.home), { answered: false, line: "Claude did not answer from the background job within 90 seconds." });
+    } finally {
+      m.done();
+    }
+  });
+
+  it("an old line in the check log, from before this run, is not read", () => {
+    const m = mac();
+    try {
+      put(m, "Claude answered from here.\n");
+      const from = checkLogSize(m.home);
+      assert.equal(checkLogSays(m.home, { from }).answered, false);
+      writeFileSync(LOG(m.home), "Claude answered from here.\nClaude could not be asked from here: late.\n");
+      assert.deepEqual(checkLogSays(m.home, { from }), { answered: false, line: "Claude could not be asked from here: late." });
+      put(m, "Claude answered from here.\n");
+      assert.equal(checkLogSays(m.home, { from: 9999 }).answered, true);
+    } finally {
+      m.done();
+    }
+  });
+
+  it("the engine's two phrases are unedited.js's", () => {
+    assert.equal(UNEDITED.includes("Claude answered from here."), true);
+    assert.equal(UNEDITED.includes("Claude could not be asked from here: "), true);
+  });
+});
+
+describe("the real installer", () => {
+  it("with --print, from an app's copy: exit 0, and nothing changed", { skip: notAMac }, async () => {
+    const m = mac();
+    try {
+      const fresh = { kind: "fresh", machine: "Studio Test", root: m.root, drop: join(m.home, "BRIMM Video Work", "Drop"), exports: join(m.home, "Exports") };
+      const args = installerArgs(fresh, { app: m.app, tools: m.tools, print: true });
+      const result = await runInstaller({ args, home: m.home, programs: { installer: printOnly(m) } });
+      assert.equal(result.code, 0, result.text);
+      assert.equal(settingsOf(m.home), null);
+      assert.equal(existsSync(join(m.home, "Library", "LaunchAgents")), false);
+    } finally {
+      m.done();
+    }
   });
 });
