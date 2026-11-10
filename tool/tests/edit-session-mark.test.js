@@ -265,6 +265,24 @@ describe("teachings refuses, in this order, asking Claude nothing and writing no
       mac.t.done();
     }
   });
+  it("sends her to the support contact, not to Jason, on an installed Mac: the gate off, lapsed, another account, readings off (the sweep)", async () => {
+    const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+    const worlds = [
+      [{ taught: null }, "Teachings from sessions are not turned on for this Mac yet: ask help@example.invalid.", "Teachings from sessions are not turned on for this Mac yet."],
+      [{ taught: { ...TAUGHT, at: "2026-07-01T09:00:00-05:00" } }, "Teachings from sessions were turned on more than 90 days ago on this Mac: ask help@example.invalid to check the training setting again.", "Teachings from sessions were turned on more than 90 days ago on this Mac."],
+      [{ status: { ...STATUS, email: "jason@example.com" } }, "The claude command on this Mac is signed in to another account than the one that was checked: ask help@example.invalid.", "The claude command on this Mac is signed in to another account than the one that was checked."],
+      [{ settings: { readings: false } }, "Readings are off on this Mac: ask help@example.invalid.", "Readings are off on this Mac."]
+    ];
+    for (const [world, named, bare] of worlds) {
+      for (const [build, words] of [[INSTALLED, named], [{ ...INSTALLED, support: "" }, bare]]) {
+        const mac = sessionMac(world);
+        const r = await on({ ...mac.t.ctx.deps, build }, "teachings", LABEL);
+        assert.deepEqual([r.code, r.said], [1, [words]]);
+        assert.doesNotMatch(words, /Jason/);
+        mac.t.done();
+      }
+    }
+  });
   it("for words it does not take, with the help and 2", async () => {
     const mac = sessionMac();
     const r = await on(mac.t.ctx.deps, "teachings", LABEL, "--now");

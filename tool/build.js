@@ -39,12 +39,15 @@ export const askWords = (build, dev, bare = "") => (!isInstalled(build) ? dev : 
     build.json names no support contact, what stands for them where it names one (left out where the contact simply takes Jason's place)].
     The longest come first, so that a line is taken by the most of it that fits. */
 const ASK_ENDS = [
+  ["; if it still says a file is not whole, a conflict needs Jason: tell him the episode's name.", ".", (support) => `; if it still says a file is not whole, a conflict needs ${support}: tell them the episode's name.`],
+  [" If it is still not here later, a conflict needs Jason: tell him the episode's name.", "", (support) => ` If it is still not here later, a conflict needs ${support}: tell them the episode's name.`],
   [" than the one Jason checked: ask Jason.", " than the one that was checked.", (support) => ` than the one that was checked: ask ${support}.`],
   [" A conflict needs Jason: tell him the episode's name.", "", (support) => ` A conflict needs ${support}: tell them the episode's name.`],
   [" Tell Jason: the episode needs him.", "", (support) => ` Tell ${support}: the episode needs help.`],
   [" Jason removes it by hand if he wants.", " It can be removed there by hand.", () => " It can be removed there by hand."],
   ["; if it still says a file is not whole, tell Jason the episode's name.", "."],
   [": ask Jason to check the training setting again.", "."],
+  [": ask Jason, or choose the transcript only.", ": choose the transcript only."],
   [", or ask Jason. Nothing was written.", ". Nothing was written."],
   [": ask Jason. Nothing was written.", ". Nothing was written."],
   [" Ask Jason. Nothing was written.", " Nothing was written."],
@@ -52,14 +55,17 @@ const ASK_ENDS = [
   [" If it says this again, tell Jason.", ""],
   ["; if it says this again, ask Jason.", "."],
   [", and ask Jason what to do with it.", "."],
+  [" If it is still missing, tell Jason.", ""],
   [" If it does not come, tell Jason.", ""],
   [" If it still won't, tell Jason.", ""],
   [" Ask Jason for anything else.", ""],
   [": ask Jason to put it back.", "."],
+  [", and tell Jason.", "."],
   [" and tell Jason.", "."],
   [", or ask Jason.", "."],
   [": tell Jason.", "."],
   [": ask Jason.", "."],
+  [" If not, tell Jason.", ""],
   [" Tell Jason.", ""],
   [" Ask Jason.", ""]
 ];

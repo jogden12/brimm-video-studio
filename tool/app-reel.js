@@ -60,6 +60,7 @@ import {
 } from "./app.js";
 import { reelCopyKey, reelCopyPaths, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
 import { fileAt, keptOnAMac, recordingStat } from "./where.js";
+import { saidHere } from "./build.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -165,7 +166,7 @@ function adoptReel(ctx, { found, record, n, at, dir }) {
   if (!existsSync(dir)) return null;
   const workingCopy = copyIn(dir);
   if (!workingCopy) {
-    ctx.say(notWhole(`Reel ${n} of ${record.name.text}`));
+    ctx.say(saidHere(notWhole(`Reel ${n} of ${record.name.text}`), ctx.build));
     return { code: 1 };
   }
   return { project: madeEntry(ctx, { n, name: basename(dir), at, from: fromOf(record, recordingStat(ctx, { folder: found.folder, record }) ?? statSync(fileOf(ctx, found, record.video.file))), workingCopy }) };
@@ -217,12 +218,12 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   // record lists, judged by the bytes read.
   const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel, i) => (i === 0 ? readWords : readListed)(dirname(fileOf(ctx, found, rel)), record, rel)) : null;
   if (checked && checked.some((got) => got.notWhole)) {
-    ctx.say(reelNotWholeYet(n, name));
+    ctx.say(saidHere(reelNotWholeYet(n, name), ctx.build));
     return { code: 0 };
   }
   const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(fileOf(ctx, found, `${stem}.words.json`));
   if (!words) {
-    ctx.say(noWords(name, keptOnAMac(record)));
+    ctx.say(saidHere(noWords(name, keptOnAMac(record)), ctx.build));
     return { code: 1 };
   }
   if (wait === "reading") {
@@ -231,7 +232,7 @@ async function makeReel(ctx, { found, record, n, at, dir }, { cli, guidance }) {
   }
   const listed = suggestion(dirname(fileOf(ctx, found, REELS_FILE)), n, checked ? checked[1].text ?? "" : undefined);
   if (!listed.candidate) {
-    ctx.say(listed.gone ? noSuchReel(n, listed.numbers) : listed.nothing ? `Reel ${n} has nothing to show: ${listed.nothing}.` : unreadable(name));
+    ctx.say(listed.gone ? noSuchReel(n, listed.numbers) : listed.nothing ? `Reel ${n} has nothing to show: ${listed.nothing}.` : saidHere(unreadable(name), ctx.build));
     return { code: 1 };
   }
   const asked = { n, start: listed.candidate.start, end: listed.candidate.end };
@@ -291,11 +292,11 @@ function putReelVideoBack(ctx, { found, record, n, project, dir }, { rename }) {
   const of = `Reel ${n} of ${name}`;
   const raw = recordingStat(ctx, { folder: found.folder, record });
   if (raw === undefined) {
-    ctx.say(noRecording(name));
+    ctx.say(saidHere(noRecording(name), ctx.build));
     return { code: 1 };
   }
   if (changedSince(project, { found, record, ctx })) {
-    ctx.say(videoGoneAndChanged(name));
+    ctx.say(saidHere(videoGoneAndChanged(name), ctx.build));
     return { code: 1 };
   }
   const wait = projectWaits(ctx, { name: found.name, record });
@@ -305,12 +306,12 @@ function putReelVideoBack(ctx, { found, record, n, project, dir }, { rename }) {
   }
   const checked = wait === "verify" ? readListed(dirname(fileOf(ctx, found, REELS_FILE)), record, REELS_FILE) : null;
   if (checked && checked.notWhole) {
-    ctx.say(reelNotWholeYet(n, name));
+    ctx.say(saidHere(reelNotWholeYet(n, name), ctx.build));
     return { code: 0 };
   }
   const listed = suggestion(dirname(fileOf(ctx, found, REELS_FILE)), n, checked ? checked.text ?? "" : undefined);
   if (!listed.candidate) {
-    ctx.say(listed.gone ? noSuchReel(n, listed.numbers) : listed.nothing ? `Reel ${n} has nothing to show: ${listed.nothing}.` : unreadable(name));
+    ctx.say(listed.gone ? noSuchReel(n, listed.numbers) : listed.nothing ? `Reel ${n} has nothing to show: ${listed.nothing}.` : saidHere(unreadable(name), ctx.build));
     return { code: 1 };
   }
   const copy = reelCopyPaths(home, found.name, n, reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, { n, start: listed.candidate.start, end: listed.candidate.end }));
@@ -329,11 +330,11 @@ function putReelVideoBack(ctx, { found, record, n, project, dir }, { rename }) {
   }
   const fits = copyFits({ was, made, size: statOf(copy.video)?.size, starts });
   if (fits.no) {
-    ctx.say({ project: notWhole, copy: notPutBack, other: notTheSame }[fits.no](of));
+    ctx.say(saidHere({ project: notWhole, copy: notPutBack, other: notTheSame }[fits.no](of), ctx.build));
     return { code: 1 };
   }
   if (!moveIn(copy.video, videoIn(dir), rename)) {
-    ctx.say(notPutBack(of));
+    ctx.say(saidHere(notPutBack(of), ctx.build));
     return { code: 1 };
   }
   ctx.say(videoBack(of));

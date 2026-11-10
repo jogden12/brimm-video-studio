@@ -256,6 +256,28 @@ describe("app: a project whose video has been taken away is not made again, and 
     assert.deepEqual([e.said, e.runs().length, e.saved.length, existsSync(e.paths.video), existsSync(join(e.project, "media", "recording.mp4"))], [[NOT_PUT_BACK], e.opened, 1, true, false]);
     plain(e.said);
   });
+  it("sends her to the support contact, not to Jason, on an installed Mac, for each video that cannot be put back (the sweep)", async (c) => {
+    const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+    const installed = (line) => line.replace(/ Ask Jason\.$/, " Ask help@example.invalid.");
+    const worlds = [
+      [CHANGED, (e) => { const later = new Date("2026-10-29T08:00:00-04:00"); utimesSync(e.raw, later, later); }],
+      [NO_RECORDING, (e) => rmSync(e.raw)],
+      [NOT_THE_SAME, (e) => madeAgain(e, { ...FACTS, width: 640, height: 360, bytes: 4 })],
+      [NOT_PUT_BACK, (e) => madeAgain(e, { ...FACTS, bytes: 0 })],
+      [NOT_READABLE, (e) => { madeAgain(e); writeFileSync(join(e.project, "brimm", "facts.json"), "not json"); }]
+    ];
+    for (const [dev, make] of worlds) {
+      for (const [build, line] of [[INSTALLED, installed(dev)], [{ ...INSTALLED, support: "" }, dev.replace(/ Ask Jason\.$/, "")], [{ mode: "dev" }, dev]]) {
+        const e = await freed(c);
+        make(e);
+        e.ctx.build = build;
+        assert.equal(await run(e, e.saved[0]), 1, dev);
+        assert.deepEqual(e.said, [line]);
+        if (build.mode === "installed") assert.doesNotMatch(line, /Jason/);
+      }
+    }
+    assert.equal(installed(NO_RECORDING), `The recording of ${NAME} is not in its folder, so the video of its HyperFrames project could not be made again. Ask help@example.invalid.`);
+  });
   it("leaves a project whose video is there as it was, and says the recording changed only then", async (c) => {
     const e = episode(c);
     assert.equal(await run(e), 0);

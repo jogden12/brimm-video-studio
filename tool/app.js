@@ -67,6 +67,7 @@ import { studioFolder } from "./studio.js";
 import { clockAt } from "./unedited.js";
 import { requestWorkCopy, voiceCopyPaths, workCopyKey, workCopyLockOf, workCopyPaths } from "./workcopy.js";
 import { fileAt, keptOnAMac, recordingStat } from "./where.js";
+import { saidHere } from "./build.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -503,7 +504,7 @@ function adoptProject(ctx, { found, record, at, projects }) {
   const copy = copyPathsOf(home, found.name, record, raw);
   const workingCopy = copyOf(factsIn(copy.facts)) ?? copyIn(dir, record);
   if (!workingCopy) {
-    ctx.say(notWhole(record.name.text));
+    ctx.say(saidHere(notWhole(record.name.text), ctx.build));
     return { code: 1 };
   }
   return { project: madeEntry(ctx, { name, at, from: fromOf(record, raw), workingCopy }) };
@@ -538,12 +539,12 @@ async function makeProject(ctx, { found, record, at, projects }, { cli, guidance
   // sizes the record lists, judged by the bytes read; one that is not whole makes nothing.
   const checked = wait === "verify" ? [`${stem}.words.json`, REELS_FILE, `${stem}.cut-plan.json`].map((rel, i) => (i === 0 ? readWords : readListed)(dirname(fileOf(ctx, found, rel)), record, rel)) : null;
   if (checked && checked.some((got) => got.notWhole)) {
-    ctx.say(notWholeYet(record.name.text));
+    ctx.say(saidHere(notWholeYet(record.name.text), ctx.build));
     return { code: 0 };
   }
   const words = checked ? (checked[0].text === undefined ? null : wordsOfText(checked[0].text)) : wordsIn(fileOf(ctx, found, `${stem}.words.json`));
   if (!words) {
-    ctx.say(noWords(record.name.text, keptOnAMac(record)));
+    ctx.say(saidHere(noWords(record.name.text, keptOnAMac(record)), ctx.build));
     return { code: 1 };
   }
   const raw = recordingStat(ctx, { folder: found.folder, record }) ?? statSync(fileOf(ctx, found, record.video.file));
@@ -628,11 +629,11 @@ function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
   const name = record.name.text;
   const raw = recordingStat(ctx, { folder: found.folder, record });
   if (raw === undefined) {
-    ctx.say(noRecording(name));
+    ctx.say(saidHere(noRecording(name), ctx.build));
     return { code: 1 };
   }
   if (changedSince(project, { found, record, ctx })) {
-    ctx.say(videoGoneAndChanged(name));
+    ctx.say(saidHere(videoGoneAndChanged(name), ctx.build));
     return { code: 1 };
   }
   const copy = copyPathsOf(home, found.name, record, raw);
@@ -648,11 +649,11 @@ function putVideoBack(ctx, { found, record, project, dir }, { rename }) {
   // The copy's own facts say how large it is when the job puts it in place whole; a file of another size is not that copy.
   const fits = copyFits({ was, made, size: statOf(copy.video)?.size });
   if (fits.no) {
-    ctx.say({ project: notWhole, copy: notPutBack, other: notTheSame }[fits.no](name));
+    ctx.say(saidHere({ project: notWhole, copy: notPutBack, other: notTheSame }[fits.no](name), ctx.build));
     return { code: 1 };
   }
   if (!moveIn(copy.video, videoIn(dir, record), rename)) {
-    ctx.say(notPutBack(name));
+    ctx.say(saidHere(notPutBack(name), ctx.build));
     return { code: 1 };
   }
   ctx.say(videoBack(name));
@@ -729,8 +730,8 @@ function placeFootage(ctx, { found, dir, kit, record }, { rename }) {
     requestWorkCopy(ctx, { folder: found.name, footage: true });
     after.push(FOOTAGE_COMING);
   }
-  if (unmade) after.push(footageNotMadeWords(record.name.text));
-  if (stuck) after.push(footageNotInWords(record.name.text));
+  if (unmade) after.push(saidHere(footageNotMadeWords(record.name.text), ctx.build));
+  if (stuck) after.push(saidHere(footageNotInWords(record.name.text), ctx.build));
   return after;
 }
 
@@ -805,7 +806,7 @@ export async function openInApp(ctx, { found, record }, deps = {}) {
     // An explainer in a HeyGen voice whose project is not on this Mac has no media to make it again from (PR H6): its voice was made in the project, by the
     // app's agent, and what is in the plan's folder is a sound with no page to play it. Nothing is made.
     if (mediaOf(record) === null) {
-      ctx.say(projectGone(record.name.text));
+      ctx.say(saidHere(projectGone(record.name.text), ctx.build));
       return 1;
     }
     const taken = adoptProject(ctx, { found, record, at, projects }) ?? await makeProject(ctx, { found, record, at, projects }, { cli, guidance: deps.guidance ?? guidanceOf(home), planned: deps.plan });
@@ -846,7 +847,7 @@ export function openOnly(ctx, { record, dir }, { cli, spawn = spawnSync, env = p
     encoding: "utf8", timeout: OPEN_MS
   });
   const read = readOpen(ran.stdout, ran.status, { handoverWanted: wanted });
-  ctx.say(read.words);
+  ctx.say(saidHere(read.words, ctx.build));
   if (wanted && read.opened && !read.handedOver) ctx.say(Object.hasOwn(STAYS, handover.why) ? STAYS[handover.why] : STAYS_OTHERWISE);
   // The buttons Studio cannot control are named whenever the app opened, after the opening and whatever is said of her chat. The app
   // is open whether or not the record can be written, so the reminder does not wait for it.

@@ -4,8 +4,11 @@
 // program is real.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { editMain } from "../edit.js";
-import { setup, episodeFor, FOLDER } from "./episodes.js";
+import { NEWEST_VERSION, recordFile } from "../episode.js";
+import { setup, episodeFor, FOLDER, ID } from "./episodes.js";
 
 const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
 const UNNAMED = { ...INSTALLED, support: "" };
@@ -45,5 +48,28 @@ describe("a command's refusal, on an installed Mac", () => {
     assert.deepEqual(dev, ["There's no reference folder on this Mac yet: ask Jason."]);
     assert.deepEqual(installed, ["There's no reference folder on this Mac yet: ask help@example.invalid."]);
     assert.deepEqual(unnamed, ["There's no reference folder on this Mac yet."]);
+  });
+});
+
+describe("what is said of an episode, on an installed Mac", () => {
+  it("says an episode a newer BRIMM Video Studio wrote is for an update, in the list of episodes", async () => {
+    const before = (t) => {
+      const found = episodeFor(t);
+      writeFileSync(recordFile(found.folder, 2), JSON.stringify({ version: NEWEST_VERSION + 1, id: ID, rev: 2, kind: "podcast" }));
+    };
+    const [dev, installed, unnamed] = await thrice(["episodes"], { before });
+    assert.equal(dev[1], "  An episode a newer BRIMM Video Studio wrote (3fa9c1): Jason updates this Mac before it is changed here.");
+    assert.equal(installed[1], '  An episode a newer BRIMM Video Studio wrote (3fa9c1). Say "update Studio" to update this Mac.');
+    assert.equal(unnamed[1], installed[1]);
+  });
+
+  it("names the support contact for an episode whose record cannot be read, in the list and when it is asked for", async () => {
+    const before = (t) => writeFileSync(join(t.root, "Episodes", FOLDER), "not a folder");
+    for (const [argv, at] of [[["episodes"], 1], [["show", FOLDER, "transcript"], 0]]) {
+      const [dev, installed, unnamed] = await thrice(argv, { before });
+      assert.equal(dev[at].trim(), "An episode of 2026-10-14 from the Mac Studio whose record cannot be read: ask Jason.");
+      assert.equal(installed[at].trim(), "An episode of 2026-10-14 from the Mac Studio whose record cannot be read: ask help@example.invalid.");
+      assert.equal(unnamed[at].trim(), "An episode of 2026-10-14 from the Mac Studio whose record cannot be read.");
+    }
   });
 });

@@ -492,7 +492,7 @@ const recordShaped = (r) => typeof r.id === "string" && Number.isInteger(r.versi
       lets run, the commands of a video not yet answered. */
 function gateOf(ctx, e, records, said, inForce) {
   if (!ctx.asked || UNSCOPED.includes(ctx.asked.command)) return null;
-  const refused = (why, more = {}) => ({ why, name: e.name, folder: e.folder, gate: true, ...more });
+  const refused = (why, more = {}) => ({ why: asSaid(ctx, why), name: e.name, folder: e.folder, gate: true, ...more });
   if (e.read.newer) return refused(newerWhy(e.read.record, ctx.build), { newer: true });
   if (inForce && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
   const there = keptOn(ctx, e);
@@ -688,7 +688,7 @@ function notRead(ctx, found, said = found.name) {
   const e = episodeAt(ctx, found.name);
   const shown = listedAs(ctx, e);
   if (shown === e.name) return `${said}: ${found.read.why}.`;
-  if (!e.inForce) return `${capital(shown)}: ask Jason.`;
+  if (!e.inForce) return asSaid(ctx, `${capital(shown)}: ask Jason.`);
   const clean = e.newer ? (text) => withoutNames(text, [e.name, ...namesOf(e.newer.video && e.newer.video.file)], [], { paths: false }) : cleanFor(ctx, e);
   return `${capital(shown)}: ${clean(found.read.why)}.`;
 }
@@ -722,12 +722,12 @@ function holdWords(ctx, e) {
     const table = processTable((ctx.deps.ps || readProcesses)());
     markChat({ home: ctx.home, env, table, pid: ctx.deps.pid !== undefined ? ctx.deps.pid : process.pid, now: ctx.now() });
   } catch (err) {
-    return { why: MARK_FAILED };
+    return { why: asSaid(ctx, MARK_FAILED) };
   }
   ctx.words.marked = true;
   if (lockFor(ctx.settings, ctx.deps) !== "open") return null;
   const id = env.CLAUDE_CODE_SESSION_ID;
-  if (typeof id !== "string" || !SESSION_ID.test(id)) return { why: MARK_FAILED };
+  if (typeof id !== "string" || !SESSION_ID.test(id)) return { why: asSaid(ctx, MARK_FAILED) };
   Object.assign(ctx.words, { lines: [], session: id, label: shownName(session) });
   return null;
 }
@@ -745,7 +745,7 @@ function handOverWords(ctx, code) {
   try {
     path = writeWords({ home: ctx.home, sessionId: words.session, label: words.label, what: ctx.asked.command, text: `${lines.join("\n")}\n`, now: ctx.now() });
   } catch (e) {
-    ctx.say(MARK_FAILED);
+    ctx.say(asSaid(ctx, MARK_FAILED));
     return 1;
   }
   ctx.say(wordsLine(words.label, path));
@@ -1012,10 +1012,11 @@ export const unreadWords = (named, read) => (read && read.code === "NONE"
     fileProblems). */
 function episodeLines(ctx, e, left, all, links) {
   const r = e.read.record;
-  if (e.newer) return [`  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
+  // An installed Mac is told how to update, as newerWhy tells it: no Jason is at hand there.
+  if (e.newer) return [isInstalled(ctx.build) ? `  ${capital(newerName(e.newer))}. ${UPDATE_SAY}` : `  ${capital(newerName(e.newer))}: Jason updates this Mac before it is changed here.`];
   const there = keptOn(ctx, e);
-  if (!r && !there && listedAs(ctx, e) === e.name) return [`  ${e.name}`, `    ${readTrouble(e.read)}`];
-  if (!e.inForce) return [`  ${unreadWords(capital(listedAs(ctx, e)), e.read)}`];
+  if (!r && !there && listedAs(ctx, e) === e.name) return [`  ${e.name}`, `    ${asSaid(ctx, readTrouble(e.read))}`];
+  if (!e.inForce) return [`  ${asSaid(ctx, unreadWords(capital(listedAs(ctx, e)), e.read))}`];
   const record = e.inForce;
   const lines = [];
   const clean = cleanFor(ctx, e);
@@ -1027,7 +1028,7 @@ function episodeLines(ctx, e, left, all, links) {
     const long = record.video ? ` ${stamp(record.video.seconds)}` : "";
     lines.push(`  ${gatedName(named, e.held)}: ${long ? what : what.replace(/, of$/, "")}${long}, id ${String(named.id).slice(-6)}`);
     if (!left && recordKind(named) === null && !there) lines.push(...cardLines(named, gatedName(named, e.held), all, links));
-    if (!r && !there) lines.push(`    ${clean(readTrouble(e.read))}`);
+    if (!r && !there) lines.push(`    ${clean(asSaid(ctx, readTrouble(e.read)))}`);
   } else if (isPlannedRecord(record)) {
     // A planned episode (PR H4) has no video to give a length: it is said by its title and what it waits for.
     lines.push(`  ${plannedLine(record)}`);
@@ -1040,12 +1041,12 @@ function episodeLines(ctx, e, left, all, links) {
   if (record.title && !isGated(e)) lines.push(`    Title: ${record.title.text}${record.title.approved ? "" : " (recommended)"}`);
   if (record.finished) lines.push(`    Finished: revision ${record.finished.revision}, on ${record.finished.on}`);
   // A video that became a session after its recording was copied into Original files says so, for as long as the copy is listed (L6).
-  if (listsOriginal(record) && recordingHeld(links, { folder: e.folder, record })) lines.push(`    ${ORIGINALS_SESSION(heldName(record))}`);
+  if (listsOriginal(record) && recordingHeld(links, { folder: e.folder, record })) lines.push(`    ${asSaid(ctx, ORIGINALS_SESSION(heldName(record)))}`);
   if (there) return lines;
   // A script file changed outside the chat is said in its own plain line, not as "Not right" (plan-script.js; review changes R5).
   const handEdited = scriptHandEdited(e.folder, record);
   const looked = { machine: ctx.machine, localFolder: folderAt(ctx, { folder: e.folder, record }, "local") };
-  for (const problem of fileProblems(e.folder, record, looked)) if (!(handEdited && problem.file === "teleprompter.txt")) lines.push(`    ${clean(filePlace(record, problem.file) === "local" && keptOnAMac(record) ? `${notWholeHere(isGated(e) ? listedAs(ctx, e) : shownName(record), problem.file)}` : fileProblemWords(problem))}`);
+  for (const problem of fileProblems(e.folder, record, looked)) if (!(handEdited && problem.file === "teleprompter.txt")) lines.push(`    ${clean(filePlace(record, problem.file) === "local" && keptOnAMac(record) ? asSaid(ctx, notWholeHere(isGated(e) ? listedAs(ctx, e) : shownName(record), problem.file)) : fileProblemSaid(ctx, problem))}`);
   if (handEdited) lines.push(`    ${HAND_EDITED(record)}`);
   return lines;
 }
@@ -1217,6 +1218,14 @@ function offlineStep(ctx, found) {
   }
 }
 
+/** episode.js fileProblemWords of `problem`, as this Mac says it. Its words to tell Jason come before the names Dropbox may have kept the
+    file under, so they are changed in the line without those names, and the names follow as they were. */
+function fileProblemSaid(ctx, problem) {
+  const whole = fileProblemWords(problem);
+  const first = fileProblemWords({ ...problem, kept: [] });
+  return whole.startsWith(first) ? `${asSaid(ctx, first)}${whole.slice(first.length)}` : whole;
+}
+
 /** What fileProblems and filesProblems are given to look for a record's own files where they are (episode.js): this Mac, and the folder of its own files here. */
 const lookedFor = (ctx, found, record) => ({ machine: ctx.machine, localFolder: folderAt(ctx, { folder: found.folder, record }, "local") });
 
@@ -1225,7 +1234,7 @@ const lookedFor = (ctx, found, record) => ({ machine: ctx.machine, localFolder: 
 function problemsOf(ctx, found, record) {
   const own = [];
   const dropbox = filesProblems(found.folder, record, { ...lookedFor(ctx, found, record), onMac: (file) => (own.push(file), null) }).filter((line) => line !== null);
-  return { dropbox, mac: own.map((file) => notWholeHere(shownName(record), file)) };
+  return { dropbox, mac: own.map((file) => asSaid(ctx, notWholeHere(shownName(record), file))) };
 }
 
 /** The episode's files that are not whole on this Mac yet, as Dropbox brings them over: by the record's list. */
@@ -1309,7 +1318,7 @@ async function claimAndBring(ctx, found, record, { again, by = "", notYet = null
   // missing or not at its listed size, with no other name Dropbox may have kept it under, it is a wait, not a refusal; nothing is
   // claimed or written. Judged by the record's list and the sizes, not by the words of the problems.
   if (problems.length && !onThisMac.length && notYet && projectWaits(ctx, { name: found.name, record }) === "verify" && plainShort(ctx, found.folder, record).length === problems.length) {
-    say(notYet());
+    say(asSaid(ctx, notYet()));
     return { code: 0 };
   }
   if (problems.length || onThisMac.length) {
@@ -1410,7 +1419,7 @@ function clipWords(ctx, { found, record }, key, of) {
   const project = (record.app?.projects ?? []).find((p) => (key === "main" ? inUse(p) : p.key === key));
   if (!project || !plainName(project.name)) return "";
   const work = episodeWork(ctx.home, found.name);
-  return clipTrouble(work, clipFolders(work, record), project.name) ? `The folder for ${of} on this Mac is not as it was made, so it wasn't opened. Ask Jason.` : "";
+  return clipTrouble(work, clipFolders(work, record), project.name) ? asSaid(ctx, `The folder for ${of} on this Mac is not as it was made, so it wasn't opened. Ask Jason.`) : "";
 }
 
 /** What she says to open an episode in the app, which is what she is told to say again when the files are not here yet: `open
@@ -1600,7 +1609,7 @@ async function appWhenReady(ctx, rest) {
     const record = mine ? mine.record : null;
     const name = record ? record.name.text : found.read.record.name.text;
     if (!record || !copyIsMade(ctx, mine)) {
-      notify(couldntBeMade(name));
+      notify(asSaid(ctx, couldntBeMade(name)));
       return { ok: false, made: [], failed: ["The video for HyperFrames was not made, so it was not opened."], next: "" };
     }
     if (busyWith) {
@@ -1634,10 +1643,10 @@ async function appWhenReady(ctx, rest) {
       return { ok: code === 0, made: code === 0 ? ["the project, opened in HyperFrames"] : [], failed: code === 0 ? [] : said.slice(), next: "" };
     });
     if (opened.running || opened.taking) {
-      notify(couldntBeMade(name));
+      notify(asSaid(ctx, couldntBeMade(name)));
       return { ok: false, made: [], failed: ["Another run was at work on it, so it was not opened."], next: "" };
     }
-    if (!opened.ok) notify(said.length ? said.join(" ") : couldntBeMade(name));
+    if (!opened.ok) notify(said.length ? said.join(" ") : asSaid(ctx, couldntBeMade(name)));
     return { ok: opened.ok, made: opened.made, failed: opened.failed, next: "" };
   });
   if (result.taking || result.running) {
@@ -1878,11 +1887,12 @@ export async function bring(ctx, rest) {
     when it put that in, and that the late check of its copies is still to come while its run is at work (`live`), or that the
     run stopped before it was made. */
 function ranLine(ctx, shown, r, clean, next, live = false, voicing = false) {
-  const done = r.failed.length ? ` Not done: ${clean(r.failed.join(" ")).replace(/([^.])$/, "$1.")}` : "";
+  // What a run could not do, and what to say next, are the code's own lines, each said as this Mac says it.
+  const done = r.failed.length ? ` Not done: ${clean(r.failed.map((line) => asSaid(ctx, line)).join(" ")).replace(/([^.])$/, "$1.")}` : "";
   const when = r.early
     ? `put in what it made ${ageText(ctx.now() - r.ended)} ago; ${live ? "Dropbox's check of its copies is still to come" : "it stopped before Dropbox's check of its copies was made"}`
     : `ended ${ageText(ctx.now() - r.ended)} ago`;
-  return `${shown}: ${r.command === "join" && voicing ? VOICE_RUN_SAID : Object.hasOwn(RUN_SAID, r.command) ? RUN_SAID[r.command] : r.command} ${when}.${r.made.length ? ` Made: ${r.made.map(clean).join(", ")}.` : ""}${done}${next ? ` ${clean(next)}` : ""}`;
+  return `${shown}: ${r.command === "join" && voicing ? VOICE_RUN_SAID : Object.hasOwn(RUN_SAID, r.command) ? RUN_SAID[r.command] : r.command} ${when}.${r.made.length ? ` Made: ${r.made.map(clean).join(", ")}.` : ""}${done}${next ? ` ${clean(asSaid(ctx, next))}` : ""}`;
 }
 
 /** What `status` says while the working copy of an episode is made, in the words `app` uses for it. */
@@ -1903,10 +1913,10 @@ function checkProblemLines(ctx, folder, shown, gated_) {
   const lines = [];
   for (const p of readPendingsOf(ctx.home, "final").filter(mine)) {
     const stays = p.took.length === 0 ? "" : p.took.length === 1 ? "The export stays in Downloads" : "The exports stay in Downloads";
-    if (p.problem) lines.push(gated_ ? `${shown}: the check of its copies in Dropbox found a problem. Ask Jason.` : `${shown}: the check of its copies in Dropbox found a problem: ${p.problem}${stays ? ` ${stays}.` : ""} Ask Jason.`);
+    if (p.problem) lines.push(asSaid(ctx, gated_ ? `${shown}: the check of its copies in Dropbox found a problem. Ask Jason.` : `${shown}: the check of its copies in Dropbox found a problem: ${p.problem}${stays ? ` ${stays}.` : ""} Ask Jason.`));
     else if (p.wasProblem) lines.push(gated_ ? `${shown}: the check of its copies in Dropbox found a problem, and Studio checks them again in a few minutes.` : `${shown}: the check of its copies in Dropbox found a problem: ${p.wasProblem} A change since may have put it right, and Studio checks them again in a few minutes.${stays ? ` ${stays} until then.` : ""}`);
   }
-  for (const p of readPendingsOf(ctx.home, "record").filter(mine)) if (p.problem) lines.push(`${p.label || shown}: Dropbox lost a file of it, and it could not be put back. Ask Jason.`);
+  for (const p of readPendingsOf(ctx.home, "record").filter(mine)) if (p.problem) lines.push(asSaid(ctx, `${p.label || shown}: Dropbox lost a file of it, and it could not be put back. Ask Jason.`));
   return lines;
 }
 
@@ -2006,8 +2016,8 @@ export async function status(ctx, rest) {
     // A copy of footage the last run could not make (its result; none while a run of the copy is at work) is said once, with what to do first.
     // A gated video is named by its label alone, and is not told to open it, which the gate refuses.
     if (footageFailed(ctx, folder)) {
-      lines.push(isGated(e) ? `Some of the footage for "${gatedName(gatedRecord(e), e.held)}" could not be made. Ask Jason.`
-        : `Some of the footage for "${shown}" could not be made, and opening it again won't change that. Ask Jason.`);
+      lines.push(asSaid(ctx, isGated(e) ? `Some of the footage for "${gatedName(gatedRecord(e), e.held)}" could not be made. Ask Jason.`
+        : `Some of the footage for "${shown}" could not be made, and opening it again won't change that. Ask Jason.`));
     }
   }
   for (const line of lines.length ? lines : ["Nothing is running, and nothing is waiting."]) say(line);
@@ -2220,9 +2230,12 @@ async function save(ctx, found, record, done) {
   if (done) ctx.say(done);
   return 0;
 }
-/** A refusal is the code's own line, so it is said as this Mac says it: an installed Mac's sends her to no Jason (build.js saidHere). */
+/** A line the code made, as this Mac says it: an installed Mac's sends her to no Jason, but to the support contact its build names
+    (build.js saidHere). For the code's own lines only, never a transcript's or any other words it shows. */
+const asSaid = (ctx, line) => saidHere(line, ctx.build);
+/** A refusal is the code's own line, so it is said as this Mac says it. */
 const refuse = (ctx, why) => {
-  ctx.say(saidHere(why, ctx.build));
+  ctx.say(asSaid(ctx, why));
   return 1;
 };
 /** What a command says when the run at work on the episode stops it: `generic`, the words it has always said, unless that run is a finish
@@ -2371,7 +2384,7 @@ function reelsWhy(ctx, found, record) {
   const kind = recordKind(record);
   if (kind === "short video") return { why: NO_REELS };
   if (kind === "raw") return { why: rawWords(name) };
-  if (!writesV2For(ctx.settings, found.folder, record)) return { why: handoffFromSpellingsWaits(name) };
+  if (!writesV2For(ctx.settings, found.folder, record)) return { why: asSaid(ctx, handoffFromSpellingsWaits(name)) };
   const got = reelsBase(found.folder, record, { isWhole: ctx.isWhole });
   if (got.coming) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: [got.coming] });
@@ -2539,7 +2552,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
     if (reel && String(reel.title || "").trim()) continue;
     // A Reel project must have its Reel in the record, whose title and numbers the hand-off takes; one finished another way is kept as it is.
     if (!reel) {
-      if (part.project) stops.push(`The record has no Reel ${part.reel} for its HyperFrames project: ask Jason.`);
+      if (part.project) stops.push(asSaid(ctx, `The record has no Reel ${part.reel} for its HyperFrames project: ask Jason.`));
       continue;
     }
     const opening = suggestionOpening(ctx, found, part.fromSuggestion);
@@ -2939,7 +2952,7 @@ async function behind(ctx) {
     const differs = appOf(ctx.settings) ? toolchainDiffers(toolchainHolds(ctx.home)) : "";
     if (differs && installed) ctx.say(`HyperFrames' command line on this Mac is not the one Studio needs. Open BRIMM Video Studio and choose Repair when it suits. (Studio is pinned to version ${PIN.version}, and this Mac has ${differs}.)`);
     else if (differs) ctx.say(`HyperFrames' command line on this Mac is not the one Studio needs. Ask Jason to update it when it suits. (Jason: Studio is pinned to version ${PIN.version}, and this Mac has ${differs}; the installer puts the pinned one in place.)`);
-    if (added.length) ctx.say(`(Jason: her folder also allows, on this Mac: ${added.map(({ type, name }) => `${type} ${name}`).join(", ")}.)`);
+    if (added.length) ctx.say(`(${installed ? "The folder for Claude also allows, on this Mac" : "Jason: her folder also allows, on this Mac"}: ${added.map(({ type, name }) => `${type} ${name}`).join(", ")}.)`);
     // What the import's note and the drop folder show, last: needs no network. A new node also asks the launch agent to look now, when no
     // run is at work, so that macOS's question comes up while she is at this Mac.
     const found = accessFinding(ctx);
@@ -3473,7 +3486,7 @@ async function resolveIn(ctx, found, keep) {
     // resolve again would say there is no conflict: open is what says again whether a file is not whole (the final check). A file kept on
     // this Mac is not Dropbox's to bring: it is said in this Mac's words, on its own.
     return [
-      ...(dropbox.length ? [`The files are not as the record now lists them: ${dropbox.join("; ")}. Once Dropbox has finished, say "open" again; if it still says a file is not whole, ${NEEDS_JASON[0].toLowerCase()}${NEEDS_JASON.slice(1)}`] : []),
+      ...(dropbox.length ? [asSaid(ctx, `The files are not as the record now lists them: ${dropbox.join("; ")}. Once Dropbox has finished, say "open" again; if it still says a file is not whole, ${NEEDS_JASON[0].toLowerCase()}${NEEDS_JASON.slice(1)}`)] : []),
       ...mac
     ].map((line) => `\n${line}`).join("");
   };
@@ -3766,7 +3779,7 @@ function askRefusal(ctx, found, record) {
     Dropbox to bring it. */
 const keptOrWait = (ctx, found, record) => {
   const kept = keptList({ folder: found.folder, record, home: ctx.home });
-  return kept ? `The one its record lists is kept at ${kept}: ask Jason to put it back.` : "Say this again once Dropbox has it back.";
+  return kept ? asSaid(ctx, `The one its record lists is kept at ${kept}: ask Jason to put it back.`) : "Say this again once Dropbox has it back.";
 };
 
 /** Why Claude cannot be asked on a Mac without Claude Code, as `ask` says it. */
@@ -4168,7 +4181,7 @@ const handoffFromSpellingsWaits = (name) => `${name}'s hand-off is written from 
     that its hand-off waits for version 2; once it is written, its revision; otherwise that it comes from the spellings card. */
 function notInFinalCut(ctx, found, record) {
   const name = shownName(record);
-  if (!writesV2For(ctx.settings, found.folder, record)) return handoffFromSpellingsWaits(name);
+  if (!writesV2For(ctx.settings, found.folder, record)) return asSaid(ctx, handoffFromSpellingsWaits(name));
   // A finished video whose Reels were made in HyperFrames is told where they go (plan PR 9): `finish … reels` adds them to this hand-off.
   if (record.finished && Number.isInteger(record.finished.revision)) return `${name}'s hand-off is written already, as revision ${record.finished.revision}: a spelling changed writes its next revision.${recordKind(record) === "finished" && reelProjectsOf(record).length ? ' Its Reels are added after you export them from HyperFrames: say "hand off the Reels".' : ""}`;
   return `${name} is not edited here: its hand-off is written once its spellings are answered. Say "show me the spellings".`;
@@ -4211,8 +4224,8 @@ const handoffPending = (record) => !record.finished && !hasFinalCut(record) && a
     left out when this Mac's settings have the app off, and with it nothing is left to offer on a Mac that hands off version 1. */
 function clipNext(ctx, found, record) {
   const v2 = writesV2For(ctx.settings, found.folder, record);
-  if (appOf(ctx.settings)) return v2 ? 'Say "open it in HyperFrames" to edit it, or "hand it off" to hand it off as it is.' : 'Say "open it in HyperFrames" to edit it. Handing it off as it is waits until this Mac hands off version 2: ask Jason.';
-  return v2 ? 'Say "hand it off" to hand it off as it is.' : HANDOFF_WAITS;
+  if (appOf(ctx.settings)) return v2 ? 'Say "open it in HyperFrames" to edit it, or "hand it off" to hand it off as it is.' : asSaid(ctx, 'Say "open it in HyperFrames" to edit it. Handing it off as it is waits until this Mac hands off version 2: ask Jason.');
+  return v2 ? 'Say "hand it off" to hand it off as it is.' : asSaid(ctx, HANDOFF_WAITS);
 }
 
 /** What `finish` does for an iPhone clip the app has not opened (plan PR 7, item 4; architecture 4.2): it checks, in this order, a Mac that
@@ -4230,7 +4243,7 @@ async function finishClip(ctx, found, answers) {
   const app = Boolean(appOf(ctx.settings));
   // An explainer (PR H6) is made in HyperFrames, and is never handed off as it is, whether she asked for it or not.
   if (isFromPlan(record) && record.planned.route === "explainer") return refuse(ctx, EXPLAINER_EXPORT);
-  if (!writesV2For(ctx.settings, found.folder, record)) return refuse(ctx, `${handoffFromSpellingsWaits(name)}${app ? ' Or open it in HyperFrames, export it on this Mac and say "hand it off".' : ""}`);
+  if (!writesV2For(ctx.settings, found.folder, record)) return refuse(ctx, `${asSaid(ctx, handoffFromSpellingsWaits(name))}${app ? ' Or open it in HyperFrames, export it on this Mac and say "hand it off".' : ""}`);
   if (record.finished && Number.isInteger(record.finished.revision)) {
     const how = madeFromImport(record) ? `, from the clip as it was filmed.${app ? " To hand off an edited version, open it in HyperFrames first." : ""}` : ": a spelling changed writes its next revision.";
     return refuse(ctx, `${name}'s hand-off is written already, as revision ${record.finished.revision}${how}`);
@@ -4262,7 +4275,7 @@ function offerFault(record, offer) {
     keepOldWords is on follows as it did. It is not said when the hand-off comes out as it was, nor when nothing is written. */
 async function importHandoff(ctx, found, record, done, unhanded = "") {
   const wrote = await finishFinished(ctx, found, { record });
-  if (wrote.waits) return save(ctx, found, record, `${done} ${HANDOFF_WAITS}${unhanded}`);
+  if (wrote.waits) return save(ctx, found, record, `${done} ${asSaid(ctx, HANDOFF_WAITS)}${unhanded}`);
   if (wrote.coming) {
     if (runningCommand(ctx.home, found.name, ctx.alive) !== "bring") startDetached(ctx, { command: "bring", folder: found.name, args: wrote.coming });
     return refuse(ctx, `Dropbox is still bringing ${listed([...new Set(wrote.coming.map(whatIs))])} over: say it again in a minute.`);
@@ -4277,7 +4290,7 @@ async function importHandoff(ctx, found, record, done, unhanded = "") {
   // A Reel whose captions keep the spelling they were made with (a spelling cannot be put into them, or taken out) says so, and the way back.
   if (Array.isArray(wrote.kept) && wrote.kept.length) ctx.say(keepOldWords(wrote.kept));
   // On an open-lock Mac a hand-off whose copy could not be made is not shown in Finder (reveal.js).
-  if (wrote.shown === false) ctx.say(cantOpen(shownName(record)));
+  if (wrote.shown === false) ctx.say(asSaid(ctx, cantOpen(shownName(record))));
   return 0;
 }
 
@@ -4531,7 +4544,7 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
     const code = await save(ctx, found, { ...record, files: { ...record.files, ...files }, finished: { ...withHeld(held), revision, at, on: ctx.machine } }, `${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${revision}: drop it on the BRIMM Ops page again.${still}${keptNote}${asked ? "" : unhanded}`);
     if (code !== 0) {
       const lost = putBack();
-      if (lost.length) ctx.say(`${listed(lost)} could not be put back as it was. Tell Jason: the episode needs him.`);
+      if (lost.length) ctx.say(asSaid(ctx, `${listed(lost)} could not be put back as it was. Tell Jason: the episode needs him.`));
     }
     if (hold) {
       const ended = hold.end({ put: code === 0 });
@@ -4577,7 +4590,7 @@ function spellCard(ctx, found) {
   if (answer) {
     ctx.say(`Claude's spellings for ${name} were answered on ${shownAt(answer.at)}:`);
     offers.forEach((o, i) => ctx.say(`${i + 1}. "${o.heard}" as "${o.spelled}": ${answer.applied.includes(o.heard) ? "applied" : "left"}.`));
-    if (handoffPending(record) && !writesV2For(ctx.settings, found.folder, record)) ctx.say(isClip(record) ? clipNext(ctx, found, record) : HANDOFF_WAITS);
+    if (handoffPending(record) && !writesV2For(ctx.settings, found.folder, record)) ctx.say(isClip(record) ? clipNext(ctx, found, record) : asSaid(ctx, HANDOFF_WAITS));
     return 0;
   }
   if (!offers.length) {
@@ -4917,7 +4930,7 @@ function receiptHeld(ctx, record, plan, name) {
 /** Refuse `kind` for `why`, of the video called `name` whose record is `record`: when it says to ask first whether the video is a
     session, the card that asks it follows, by the video's label and how it came when the record says (R10). */
 function refuseAnswer(ctx, name, record, why) {
-  ctx.say(why);
+  ctx.say(asSaid(ctx, why));
   if (why === ASK_IF_SESSION) {
     const came = record.answer && typeof record.answer === "object" ? record.answer.came : null;
     ctx.say(`    Card if not a session: ${JSON.stringify(notSessionCardOf({ label: name, came: came === "zoom" || came === "sound" ? came : null }))}`);
@@ -5445,9 +5458,9 @@ async function answerKind(ctx, found, plan, began) {
     const shown = !(empty && empty.handoff) || (await showInFinder(ctx, { record: next, label: next.name.text, path: fileOf(ctx, found, empty.handoff.rel) }));
     say(`${next.name.text}: marked a client or group session. ${ASK_FOR_TEACHINGS}`);
     if (empty) sayEmpty(ctx, next.name.text, empty, written.stayed, shown);
-    if (!shown) say(cantOpen(next.name.text));
+    if (!shown) say(asSaid(ctx, cantOpen(next.name.text)));
     if (owed.length) say(owedWords(next.name.text));
-    if (keeps) say(keptProjectWords(kindWas, stored, next.name.text));
+    if (keeps) say(asSaid(ctx, keptProjectWords(kindWas, stored, next.name.text)));
     sayVersionsToMark(ctx, found, next);
     return 0;
   }
@@ -5457,8 +5470,8 @@ async function answerKind(ctx, found, plan, began) {
     toolLog(ctx, `${at} ${base.id} (${name}): the session mark was cleared by a click on this Mac's dialog; it is now ${becomes}.`);
   }
   if (aside && aside.rels.some((rel) => rel.startsWith("final/") && rel.endsWith(".brimm-ops.json"))) say(handoffAside(name));
-  if (written.stayed.length) say(stayedWords(name, whatsInFinal(written.stayed)));
-  if (keeps) say(keptProjectWords(kindWas, stored, name));
+  if (written.stayed.length) say(asSaid(ctx, stayedWords(name, whatsInFinal(written.stayed))));
+  if (keeps) say(asSaid(ctx, keptProjectWords(kindWas, stored, name)));
   // A mark cleared while another of its versions is still marked: it is held as a session, its names stay out of the chat, and
   // Claude reads nothing of it.
   if (plan.clearSession && linksOf(ctx.root).sessionsBeside(next, found.folder).length) {
@@ -5471,7 +5484,7 @@ async function answerKind(ctx, found, plan, began) {
     ctx.hidden.keep.length = 0;
   }
   if (ctx.settings.readings === false) {
-    say(`${name}: answered. Readings are off on this Mac: ask Jason.`);
+    say(asSaid(ctx, `${name}: answered. Readings are off on this Mac: ask Jason.`));
     return 0;
   }
   // Right before the reading is started the record is the answer written, and nothing is at work on the episode.
@@ -5802,7 +5815,7 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { 
     if (hold) hold.end({ put: false });
     const changed = e.code === "CHANGED";
     const why = changed ? "this episode changed on the other Mac: open it again" : plainWhy(e, ctx.build);
-    if (lost) ctx.say(quiet ? "Its earlier files could not all be put back as they were; a copy of each is in history/. Tell Jason: the episode needs him." : `${capital(why)}. A file could not be put back as it was; a copy of it is in history/. Tell Jason: the episode needs him.`);
+    if (lost) ctx.say(asSaid(ctx, quiet ? "Its earlier files could not all be put back as they were; a copy of each is in history/. Tell Jason: the episode needs him." : `${capital(why)}. A file could not be put back as it was; a copy of it is in history/. Tell Jason: the episode needs him.`));
     else ctx.say(quiet && !changed ? asideFailed(e.code || "an error") : `Nothing was changed: ${why}.`);
     return { code: 1 };
   } finally {
@@ -5838,19 +5851,19 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { 
 function emptyRevisionOf(ctx, found, record, at, { gone = true } = {}) {
   const label = shownName(record);
   const own = ownHandoffs(found.folder);
-  if (!writesV2For(ctx.settings, found.folder, record) && !own.some((h) => h.version === 2)) return { words: emptyV1(label) };
+  if (!writesV2For(ctx.settings, found.folder, record) && !own.some((h) => h.version === 2)) return { words: asSaid(ctx, emptyV1(label)) };
   const target = handoffTarget({ root: ctx.root, settings: { ...ctx.settings, handoffVersion: 2 } }, { folder: found.folder, record });
   if (target.refusal) {
     const gap = chainGap(ctx.root, record);
-    return { words: gap ? emptyWaits(label, gap) : emptyRefused(label, target.refusal) };
+    return { words: asSaid(ctx, gap ? emptyWaits(label, gap) : emptyRefused(label, target.refusal)) };
   }
   const elsewhere = own.map(handoffIdIn).find((id) => id && id !== target.id);
-  if (elsewhere) return { words: emptyElsewhere(label, elsewhere) };
+  if (elsewhere) return { words: asSaid(ctx, emptyElsewhere(label, elsewhere)) };
   const made = buildHandoffV2({ record, id: target.id, revision: target.revision, made: at, madeOn: ctx.machine, commit: writerOf(ctx).commit, reels: [], session: {} });
   const fault = handoffFaultV2(made);
   if (fault) return { words: emptyRefused(label, `the hand-off could not be made: ${fault}`) };
   const rel = `final/${fileSafe(record.name.text)}.brimm-ops.json`;
-  return { revision: target.revision, handoff: { rel, text: handoffText(made) }, finished: { revision: target.revision, at, on: ctx.machine, handoff: rel, parts: {} }, words: emptyWritten(label, target.revision, gone), unshown: emptyWritten(label, target.revision, gone, false) };
+  return { revision: target.revision, handoff: { rel, text: handoffText(made) }, finished: { revision: target.revision, at, on: ctx.machine, handoff: rel, parts: {} }, words: asSaid(ctx, emptyWritten(label, target.revision, gone)), unshown: asSaid(ctx, emptyWritten(label, target.revision, gone, false)) };
 }
 
 /** What is said of a session's empty revision once its files are written (`empty`, emptyRevisionOf's; `stayed`, setAsideWritten's):
@@ -5859,7 +5872,7 @@ function emptyRevisionOf(ctx, found, record, at, { gone = true } = {}) {
 function sayEmpty(ctx, label, empty, stayed, shown = true) {
   const words = shown ? empty.words : empty.unshown;
   ctx.say(empty.handoff || stayed.length ? words : `${words} ${OUT_OF_SHARED}`);
-  if (stayed.length) ctx.say(stayedWords(label, whatsInFinal(stayed)));
+  if (stayed.length) ctx.say(asSaid(ctx, stayedWords(label, whatsInFinal(stayed))));
 }
 
 /** Show the file at `path`, of the video whose record is `record` and which is called `label`, in Finder, through this Mac's program
@@ -5897,9 +5910,9 @@ async function emptyRevisionAgain(ctx, found, record) {
   if (empty) sayEmpty(ctx, label, empty, wrote.stayed, shown);
   else {
     ctx.say(`${label}: its earlier files are set aside in history/. ${OUT_OF_SHARED}`);
-    if (wrote.stayed.length) ctx.say(stayedWords(label, whatsInFinal(wrote.stayed)));
+    if (wrote.stayed.length) ctx.say(asSaid(ctx, stayedWords(label, whatsInFinal(wrote.stayed))));
   }
-  if (!shown) ctx.say(cantOpen(label));
+  if (!shown) ctx.say(asSaid(ctx, cantOpen(label)));
   sayVersionsToMark(ctx, found, next);
   return !empty || handoff ? 0 : 1;
 }
@@ -6393,7 +6406,7 @@ async function finishSessionCommand(ctx, found) {
   const { principles: p, recurringPrinciples: r, reelsToFilm: f } = done.counts;
   ctx.say(`${name}: its hand-off is written, revision ${done.revision}, with ${listed([counted(p, "principle"), counted(r, "recurring principle"), counted(f, "Reel idea")])} to film.${done.shown === false ? "" : " It is shown in Finder: drop it on the BRIMM Ops page."}`);
   // On an open-lock Mac a hand-off whose copy could not be made is not shown in Finder (reveal.js).
-  if (done.shown === false) ctx.say(cantOpen(name));
+  if (done.shown === false) ctx.say(asSaid(ctx, cantOpen(name)));
   return 0;
 }
 
@@ -6805,7 +6818,7 @@ function guideItems(ctx) {
     const facts = guideFacts(ctx, e, links, rates, notes, downloads, footageIn);
     // A plan that has a part which shows a client says, after its step, which are waiting for the client's agreement.
     const waiting = facts.planned && Array.isArray(facts.planned.waiting) ? facts.planned.waiting.map((label) => `${label} shows a client: it stays out until you say "the client agreed".`) : [];
-    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r, also: [...waiting, ...(facts.checking ? [`${checkSentence(facts.checking)} ${ON_THE_CHECK}`] : []), ...(problemOf.has(r.id) ? [ORIGINALS_PROBLEM(facts.name)] : []), ...(listsOriginal(r) && recordingHeld(links, { folder: e.folder, record: r }) ? [ORIGINALS_SESSION(heldName(r))] : [])] });
+    items.push({ facts, next: nextFor(facts, notes, ctx.now()), folder: e.folder, record: r, also: [...waiting, ...(facts.checking ? [`${checkSentence(facts.checking)} ${ON_THE_CHECK}`] : []), ...(problemOf.has(r.id) ? [asSaid(ctx, ORIGINALS_PROBLEM(facts.name))] : []), ...(listsOriginal(r) && recordingHeld(links, { folder: e.folder, record: r }) ? [asSaid(ctx, ORIGINALS_SESSION(heldName(r)))] : [])] });
   }
   const newest = new Map();
   for (const item of items) {
@@ -6893,7 +6906,7 @@ function noteDone(ctx, { facts, next }, step) {
   // The version she noted has the newest hand-off under its id, and is read again; only a newer one come in since would take its
   // place, and then nothing more is said.
   const again = guideItems(ctx).items.find((item) => item.facts.id === facts.id);
-  for (const line of again ? videoLines(again) : []) ctx.say(line);
+  for (const line of again ? videoLines(again) : []) ctx.say(asSaid(ctx, line));
   return 0;
 }
 
@@ -6915,7 +6928,7 @@ function noteFinished(ctx, { facts }) {
 /** The guide's overview of what guideItems read: this Mac's drop folder in Finder's words, each video under way with its one next
     step, and how many videos from before the switch it does not guide. */
 function sayOverview(ctx, { items, old, unreadable = false, access = "" }) {
-  for (const line of overviewLines({ drop: dropWords(ctx.settings, ctx.machine, ctx.home), items, old, unreadable, local: isLocal(ctx.settings), access })) ctx.say(line);
+  for (const line of overviewLines({ drop: dropWords(ctx.settings, ctx.machine, ctx.home), items, old, unreadable, local: isLocal(ctx.settings), access })) ctx.say(asSaid(ctx, line));
   return 0;
 }
 
@@ -6999,7 +7012,7 @@ export async function guideCommand(ctx, rest) {
   if (form === "done") return noteDone(ctx, found.item, rest[2]);
   if (form === "finished") return noteFinished(ctx, found.item);
   if (form === "tell") return tellWhen(ctx, found.item);
-  for (const line of videoLines(found.item)) ctx.say(line);
+  for (const line of videoLines(found.item)) ctx.say(asSaid(ctx, line));
   return 0;
 }
 

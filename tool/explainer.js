@@ -20,6 +20,7 @@ import { projectCues, projectFiles, projectName, writeProject } from "./project.
 import { refNamesOf, withReferences } from "./references.js";
 import { episodeWork } from "./settings.js";
 import { teleprompterText } from "./sentences.js";
+import { saidHere } from "./build.js";
 
 // --- The voice a project plays ---
 
@@ -101,7 +102,7 @@ export async function openVoiceProject(ctx, { found, record }, { cli, guidance, 
   const dir = join(episodeWork(ctx.home, found.name), name);
   const at = localStamp(new Date(ctx.now()));
   if (known && !existsSync(dir)) {
-    ctx.say(projectGone(record.name.text));
+    ctx.say(saidHere(projectGone(record.name.text), ctx.build));
     return 1;
   }
   if (!existsSync(dir)) {
@@ -175,7 +176,7 @@ export function voiceFor(ctx, got, kit) {
   keepTitle(ctx, title);
   const heard = voiceCase(ctx, found, record);
   if (heard.why) {
-    ctx.say(heard.why);
+    ctx.say(saidHere(heard.why, ctx.build));
     return 1;
   }
   const running = runningCommand(ctx.home, found.name, ctx.alive);
