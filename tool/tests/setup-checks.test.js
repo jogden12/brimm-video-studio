@@ -2,6 +2,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { userInfo } from "node:os";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,7 +11,7 @@ import { HELPERS } from "../helpers.js";
 import { readSettings, writeSettings } from "../settings.js";
 import { DAMAGED as INSTALL_DAMAGED, HDR_LISTS, appCopy } from "./app-copy.js";
 import { installCalls, mac, notAMac, printOnly } from "./setup-harness.js";
-import { APPS, DAMAGED, GUARD_CLAUDE, NO_BRIMM_VIDEO, PROGRAMS, appsHere, brimmVideoFolders, claudeAt, claudeState, copyFault, kindOf, nameClash, nameSuggestion, namesInUse, peekAt, versionAtLeast } from "../setup/checks.js";
+import { APPS, DAMAGED, GUARD_CLAUDE, NO_BRIMM_VIDEO, PROGRAMS, appsHere, brimmVideoFolders, claudeAt, claudeEnv, claudeState, copyFault, kindOf, nameClash, nameSuggestion, namesInUse, peekAt, versionAtLeast } from "../setup/checks.js";
 
 const INSTALL = readFileSync(fileURLToPath(new URL("../install.sh", import.meta.url)), "utf8");
 
@@ -458,7 +459,53 @@ describe("Claude Code on this Mac", () => {
         delete process.env.BRIMM_LEAK;
       }
       assert.deepEqual(seen.map((c) => c.args), [["--version"], ["auth", "status", "--json"]]);
-      for (const c of seen) assert.deepEqual(c.env, { HOME: m.home, PATH: `${m.tools}:/usr/bin:/bin`, LANG: "en_US.UTF-8" });
+      const login = process.env.USER || userInfo().username;
+      const logname = process.env.LOGNAME || userInfo().username;
+      for (const c of seen) assert.deepEqual(c.env, { HOME: m.home, PATH: `${m.tools}:/usr/bin:/bin`, LANG: "en_US.UTF-8", USER: login, LOGNAME: logname });
+    });
+  });
+
+  it("claude's environment carries USER and LOGNAME from the base, and nothing else of it", () => {
+    const env = claudeEnv({ home: "/h", tools: "/t" }, { USER: "jane", LOGNAME: "jane", SECRET: "x", HOME: "/other", PATH: "/elsewhere" });
+    assert.deepEqual(env, { HOME: "/h", PATH: "/t:/usr/bin:/bin", LANG: "en_US.UTF-8", USER: "jane", LOGNAME: "jane" });
+    assert.equal("SECRET" in env, false);
+  });
+
+  it("claude's environment names the account's login when the base has no USER or LOGNAME", () => {
+    const name = userInfo().username;
+    assert.deepEqual(claudeEnv({ home: "/h", tools: "/t" }, {}), { HOME: "/h", PATH: "/t:/usr/bin:/bin", LANG: "en_US.UTF-8", USER: name, LOGNAME: name });
+    assert.equal(claudeEnv({ home: "/h", tools: "/t" }, { USER: "jane" }).LOGNAME, name);
+  });
+
+  it("claude's sign-in is read as the signed-in user: a claude that keys it on USER sees it signed in", () => {
+    withMac({ claude: "signed-out" }, (m) => {
+      const where = join(m.home, ".local", "bin", "claude");
+      writeFileSync(where, [
+        "#!/bin/sh",
+        `case "$*" in`,
+        `  --version) echo "2.1.296 (Claude Code)" ;;`,
+        `  "auth status --json") if [ -n "$USER" ]; then echo '{"loggedIn":true,"subscriptionType":"max"}'; else echo '{"loggedIn": false}'; fi ;;`,
+        `esac`,
+        ""
+      ].join("\n"));
+      chmodSync(where, 0o755);
+      const was = process.env.USER;
+      process.env.USER = "jane-test";
+      try {
+        assert.equal(claudeState({ home: m.home, tools: m.tools }).signedIn, true);
+      } finally {
+        if (was === undefined) delete process.env.USER;
+        else process.env.USER = was;
+      }
+      // With no USER in the process either, the account's own login is passed, so it still sees the sign-in.
+      const kept = { USER: process.env.USER, LOGNAME: process.env.LOGNAME };
+      delete process.env.USER;
+      delete process.env.LOGNAME;
+      try {
+        assert.equal(claudeState({ home: m.home, tools: m.tools }).signedIn, true);
+      } finally {
+        for (const [k, v] of Object.entries(kept)) if (v !== undefined) process.env[k] = v;
+      }
     });
   });
 
