@@ -251,11 +251,11 @@ describe("findingOf", () => {
     assert.equal(findingOf({ ...base, note: noted, needsAccess: ["drop"], agentNode: "" }), null);
   });
 
-  it("never gives newNode on an installed Mac, whose grants are the app's", () => {
+  it("takes no word on whether the Mac is installed: its callers know that, and ask for no newNode there (behind-installed.test.js)", () => {
     const noted = note({ drop: place("ok", { okNode: "/a/node" }) });
     const args = { ...base, note: noted, needsAccess: ["drop"], agentNode: "/b/node" };
     assert.deepEqual(findingOf(args), { kind: "newNode" });
-    assert.equal(findingOf({ ...args, installed: true }), null);
+    assert.deepEqual(findingOf({ ...args, installed: true }), { kind: "newNode" });
   });
 
   it("judges newNode by the places that need access, not by any place", () => {
@@ -541,14 +541,13 @@ describe("postIfDue and postNewNodeIfDue (A3)", () => {
     }
   });
 
-  it("postNewNodeIfDue on an installed Mac gives false, posts nothing and writes nothing", () => {
+  it("postNewNodeIfDue takes no word on whether the Mac is installed: its caller never calls it there (import-access.test.js)", () => {
     const note = { version: 1, places: { drop: { state: "ok", okNode: "/a/node" } }, looking: null, told: {} };
     const said = [];
     const opts = { notify: (t) => said.push(t), clock: () => T0, node: "/b/node", needs: ["drop"], home, installed: true };
-    assert.equal(postNewNodeIfDue(note, opts), false);
-    assert.deepEqual(said, []);
-    assert.equal(note.told.newNode, undefined);
-    assert.equal(readAccess(home).told.newNode, undefined);
+    assert.equal(postNewNodeIfDue(note, opts), true);
+    assert.deepEqual(said, [accessBanner("newNode", "")]);
+    assert.deepEqual(readAccess(home).told.newNode, { node: "/b/node", at: T0 });
   });
 
   it("postNewNodeIfDue posts once per node when called twice on the same note", () => {

@@ -1592,7 +1592,7 @@ export async function uneditedFolders(folders, deps) {
             () => {
               const note = readAccess(home);
               const needs = Object.keys(note.places).filter((place) => place === "downloads" || (typeof note.places[place].folder === "string" && needsFilesAccess(note.places[place].folder, home)));
-              postNewNodeIfDue(note, { notify: deps.notify || (() => {}), clock: noteOpts.clock, node, needs, home, installed });
+              postNewNodeIfDue(note, { notify: deps.notify || (() => {}), clock: noteOpts.clock, node, needs, home });
             },
             noteOpts
           );
