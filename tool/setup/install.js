@@ -277,7 +277,18 @@ export const LINK_QUIET_MS = 150;
 const TOO_LONG = "Signing in took too long. Try again.";
 const NOT_SIGNED_IN = "Claude Code is not signed in yet. Try again.";
 
-/** Signs Claude Code in: runs `claude auth login` under `programs.script`, so that it has a terminal of its own, asks `ask` for the
+/** The shell that starts a sign-in. Its arguments are, after "sh": $1 claude's pid file, $2 claude, $3 the pid file of the copier of the
+    input, $4 script. Script's input has to be a real pipe: node's own pipes are sockets, and macOS script asks its input about its terminal
+    and gives up at once on a socket (a named pipe is a socket on macOS too). So the shell copies node's socket into a pipe with cat, and runs
+    script on the far end of that pipe. Once script ends, cat is ended too: otherwise the shell would wait for it until node closes its end,
+    and a claude that ends by itself would not be seen to end. Cat's pid is read before script is started, and its file is removed at once,
+    so that nothing reads it later: a later read could end the copier of a sign-in begun after this one. The wait for it is bounded (5 s) and
+    normally runs no time. Node starts this shell in a process group of its own, so that ending the group reaches the copier, this subshell
+    and script together. */
+const SIGN_IN_SHELL = `/bin/sh -c 'echo $$ > "$0"; exec /bin/cat' "$3" | { i=0; while [ ! -s "$3" ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i+1)); done; c=; read c < "$3" 2>/dev/null; rm -f "$3"; "$4" -q /dev/null /bin/sh -c 'echo $$ > "$1"; exec "$2" auth login' sh "$1" "$2"; s=$?; [ -n "$c" ] && kill "$c" 2>/dev/null; exit "$s"; }`;
+
+/** Signs Claude Code in: runs `claude auth login` under `programs.script`, so that it has a terminal of its own (script's input goes
+    through cat and a shell pipe, see SIGN_IN_SHELL), asks `ask` for the
     sign-in (with the link, once claude printed an allowed one), writes a pasted code to claude's input and nowhere else, ends claude, and
     gives back only whether Claude Code is then signed in, its plan, and a `fault` when it is not. With `pty` false it starts nothing and only
     asks claude's state (the shell then runs the terminal itself). Nothing claude prints is shown or kept: only a link of it is read. */
@@ -290,8 +301,14 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
     const folder = join(home, "Library", "Caches", "BRIMM Video Studio");
     mkdirSync(folder, { recursive: true });
     const pidFile = join(folder, "claude-login.pid");
+    const catPidFile = join(folder, "claude-login-cat.pid");
     rmSync(pidFile, { force: true });
-    const child = spawn(programs.script, ["-q", "/dev/null", "/bin/sh", "-c", 'echo $$ > "$1"; exec "$2" auth login', "sh", pidFile, claude], { env: claudeEnv({ home, tools }), stdio: ["pipe", "pipe", "pipe"] });
+    rmSync(catPidFile, { force: true });
+    // Node starts the shell above, not script: see SIGN_IN_SHELL for why script's input goes through cat and a pipe. Detached gives it a
+    // session and process group of its own, which stop() ends whole; the engine's own group (a Ctrl-C) no longer reaches it. If the
+    // engine is itself killed, its end of the input closes and cat ends, and script and claude are left as they were when node started
+    // script itself.
+    const child = spawn("/bin/sh", ["-c", SIGN_IN_SHELL, "sh", pidFile, claude, catPidFile, programs.script], { env: claudeEnv({ home, tools }), stdio: ["pipe", "pipe", "pipe"], detached: true });
     let ended = false;
     const endedP = new Promise((resolve) => {
       child.on("exit", () => ((ended = true), resolve("ended")));
@@ -307,7 +324,10 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
           // No pid yet, or claude is already gone.
         }
         try {
-          child.kill("SIGTERM");
+          // The shell is no longer script: ending it alone would leave the copier, the subshell and script running (and the subshell
+          // would start script and claude after an early stop). It leads a process group of its own, which is ended whole, as ending
+          // script once ended the terminal and so claude. Claude is in a session of its own under a real script, hence its pid first.
+          process.kill(-child.pid, "SIGTERM");
         } catch {
           // Already gone.
         }
@@ -385,6 +405,7 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
     } finally {
       stop();
       rmSync(pidFile, { force: true });
+      rmSync(catPidFile, { force: true });
       for (const timer of timers) clearTimeout(timer);
       child.stdout.destroy();
       child.stderr.destroy();

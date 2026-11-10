@@ -518,6 +518,28 @@ describe("signIn", () => {
     });
   });
 
+  it("gives script a pipe for its input, never node's own socket, which macOS script refuses", async () => {
+    await withLogin(async (m) => {
+      const result = await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => ({ code: "x" }) });
+      assert.ok(m.ran().split("\n").includes("script-stdin pipe"), m.ran());
+      assert.equal(m.ran().includes("Operation not supported on socket"), false);
+      assert.deepEqual(result, { signedIn: true, plan: "max" });
+    });
+  });
+
+  it("is back at once when claude ends by itself: the copier of the input ends with script", async () => {
+    await withLogin(async (m, { asked }) => {
+      const quick = join(m.home, ".local", "bin", "claude");
+      writeFileSync(quick, `#!/bin/sh\ncase "$*" in\n  "auth login") echo "Signed in already." ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
+      chmodSync(quick, 0o755);
+      const started = Date.now();
+      const result = await signIn({ ...base(m), linkWaitMs: 8000, settleMs: 8000, ask: async (q) => (asked.push(q), {}) });
+      assert.ok(Date.now() - started < 5000, `took ${Date.now() - started} ms`);
+      assert.deepEqual(asked, []);
+      assert.equal(result.signedIn, true);
+    });
+  });
+
   it("takes a link only once it is whole: one that comes in two writes is asked with whole", async () => {
     await withLogin(async (m, { asked }) => {
       const mine = join(m.home, ".local", "bin", "claude");
@@ -592,6 +614,35 @@ describe("signIn", () => {
         assert.deepEqual(leftBehind(m), []);
       });
     }
+  });
+
+  it("a sign-in ended at once leaves no claude running, and starts none afterwards", async () => {
+    await withLogin(async (m) => {
+      // A claude that writes its pid and then becomes a sleep that does not end when its input does: only being ended stops it.
+      const slow = join(m.home, ".local", "bin", "claude");
+      writeFileSync(slow, `#!/bin/sh\ncase "$*" in\n  "auth login") echo $$ > "${join(m.dir, "claude-pid")}"; exec sleep 8 ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
+      chmodSync(slow, 0o755);
+      const result = await signIn({ ...base(m), linkWaitMs: 0, settleMs: 2000, ask: async () => "cancel" });
+      assert.deepEqual(result, { signedIn: false, plan: "" });
+      // Long enough for a shell left running to have started script and claude after the end.
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // No claude-pid: claude never started. One: it must be gone (and is ended here if not, so that no sleep is left behind).
+      if (existsSync(join(m.dir, "claude-pid"))) {
+        const ended = await gone(m);
+        if (!ended) process.kill(Number(readFileSync(join(m.dir, "claude-pid"), "utf8")), "SIGKILL");
+        assert.equal(ended, true, "claude was left running");
+      }
+    });
+  });
+
+  it("a cancel followed at once by a second sign-in: the second still gets the code", async () => {
+    await withLogin(async (m) => {
+      pidClaude(m);
+      assert.deepEqual(await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => "cancel" }), { signedIn: false, plan: "" });
+      const result = await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => ({ code: "x2" }) });
+      assert.equal(result.signedIn, true);
+      assert.equal(readFileSync(join(m.dir, "claude-got"), "utf8"), "x2\n");
+    });
   });
 
   it("goes on without an answer when claude ends by itself first", async () => {
