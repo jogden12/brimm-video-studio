@@ -557,6 +557,26 @@ describe("ask's late checks never put this Mac's list back over the other Mac's 
   });
 });
 
+describe("ask and reels, on an installed Mac, when the list this Mac kept must be put back (the sweep)", () => {
+  const SWEPT = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+  it("names the support contact, not Jason, in the run's result and in what reels says", async () => {
+    for (const [build, end] of [[SWEPT, ": ask help@example.invalid to put it back."], [{ ...SWEPT, support: "" }, "."]]) {
+      const p = askable();
+      p.t.ctx.deps.build = build;
+      p.t.ctx.deps.clone = ((clone) => (from, to) => {
+        if (to.endsWith("reels.json")) throw new Error("Operation not permitted");
+        clone(from, to);
+      })(p.t.ctx.deps.clone);
+      assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
+      const kept = join(p.t.home, "BRIMM Video Work", FOLDER, "put back", "reels.json");
+      assert.equal(readResult(p.t.home, FOLDER, "ask").next, `reels.json is not in the episode now. A copy of it is kept at ${kept}${end}`);
+      assert.equal(await editMain(["reels", "Pricing", "--no-play"], p.t.ctx.deps), 1);
+      assert.equal(p.t.said().split("\n").pop(), `reels.json is missing from this episode, though its record lists it, so its Reel candidates cannot be shown. The one its record lists is kept at ${kept}${end}`);
+      p.t.done();
+    }
+  });
+});
+
 describe("ask, when its list cannot be put back (PR 19's re-review, N2, N14, N5)", () => {
   it("does not say the candidates are as they were when reels.json could not be put back, and says where its copy is", async () => {
     const p = askable();

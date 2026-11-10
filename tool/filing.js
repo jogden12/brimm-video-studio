@@ -34,7 +34,7 @@ import { checkOriginal, oweForgotten } from "./originals.js";
 import { linksOf } from "./finish.js";
 import { clearChecking, clearProblem, flagProblem, problemNotice } from "./finish-check.js";
 import { randomUUID } from "node:crypto";
-import { buildOf, forThisMac, isInstalled } from "./build.js";
+import { buildOf, forThisMac, isInstalled, saidHere } from "./build.js";
 
 /** How long a recording must be to be an episode, in seconds. One that is shorter is a short video. */
 const SHORT_UNDER = 90;
@@ -1099,6 +1099,10 @@ export async function restoreReads(ctx, { name, record, folder, rels, rev }, { w
   return "";
 }
 
+/** A line a check posts or logs that sends her to Jason, as this Mac says it: an installed Mac's names its support contact (build.js saidHere).
+    `deps` are the check's, whose `build` is this Mac's build, or the build of this checkout where none is given. */
+const asHere = (deps, line) => saidHere(line, deps.build ?? buildOf(thisCheckout()));
+
 /** The notice of a first record that cannot be put back. */
 export const RECORD_LOST = (label) => `Dropbox lost a file of ${label}, and it could not be put back. Ask Jason.`;
 
@@ -1131,8 +1135,8 @@ export function checkRecord(p, deps) {
   };
   const goneAway = () => {
     if (!putAway()) return;
-    log(FOLDER_GONE(who));
-    (deps.notify || (() => {}))(FOLDER_GONE(who));
+    log(asHere(deps, FOLDER_GONE(who)));
+    (deps.notify || (() => {}))(asHere(deps, FOLDER_GONE(who)));
   };
   const wait = (line) => {
     writePending(home, { ...p, nextLook: clock() + WAIT_LOOK_MS, lookUntil: Number.isFinite(p.lookUntil) ? p.lookUntil : clock() + WAIT_LOOK_FOR_MS });
@@ -1248,7 +1252,7 @@ export function checkRecord(p, deps) {
     return;
   }
   log(`${who}: Dropbox lost its first record: ${problem}`);
-  if (!p.problem) (deps.notify || (() => {}))(RECORD_LOST(who));
+  if (!p.problem) (deps.notify || (() => {}))(asHere(deps, RECORD_LOST(who)));
   const { nextLook, ...rest } = p;
   writePending(home, { ...rest, problem });
 }
@@ -1350,8 +1354,8 @@ export function checkFinal(p, deps) {
   const unreadable = () => wait(`${who}: its check waits: its folder in Episodes cannot be read now. It is looked at again later.`);
   const goneAway = () => {
     if (!putAway()) return;
-    log(FOLDER_GONE(who));
-    (deps.notify || (() => {}))(FOLDER_GONE(who));
+    log(asHere(deps, FOLDER_GONE(who)));
+    (deps.notify || (() => {}))(asHere(deps, FOLDER_GONE(who)));
   };
   let list;
   try {

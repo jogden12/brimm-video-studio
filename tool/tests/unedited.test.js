@@ -9,7 +9,7 @@ import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFil
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { uneditedFile, uneditedFolder, uneditedFolders, doAsked, findPrograms, depsFor, parseArgs, CLAUDE_MODEL, checkClaude, importHold, importHolds, clockAt, askOnce } from "../unedited.js";
+import { uneditedFile, uneditedFolder, uneditedFolders, doAsked, findPrograms, depsFor, parseArgs, CLAUDE_MODEL, checkClaude, importHold, importHolds, clockAt, askOnce, setUpWords } from "../unedited.js";
 import { lockFile, runProgram } from "../run.js";
 import { stampedText, whisperArgs } from "../lib.js";
 import { wordsOf, pausesOf, phrasesOf, cutPlan, planText, keptSpans, roughCaptions, roughRate } from "../cuts.js";
@@ -3139,6 +3139,20 @@ describe("an episode filed on a Mac with a drop folder of its own (Phase 3, L3)"
     assert.ok(t.logs.some((l) => l.endsWith("so it stays in the drop folder. Ask Jason.")), t.logs.join("|"));
     t.done();
   });
+  it("B0-F2, on an installed Mac: the log's line for a held folder names the support contact, not Jason (the sweep)", async () => {
+    const SWEPT = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+    for (const [build, end] of [[SWEPT, "so it stays in the drop folder. Ask help@example.invalid."], [{ ...SWEPT, support: "" }, "so it stays in the drop folder."]]) {
+      const t = local();
+      const file = t.put("Talk.mov");
+      const folder = stopped(t, file);
+      mkdirSync(join(t.episodes, folder, "record"), { recursive: true });
+      writeFileSync(join(t.episodes, folder, "record", "0001.json"), "{");
+      await uneditedFolder(t.drop, { ...t.deps, build });
+      assert.ok(t.logs.some((l) => l.endsWith(end)), t.logs.join("|"));
+      assert.doesNotMatch(t.logs.join("|"), /Jason/);
+      t.done();
+    }
+  });
   it("B0-F2 (video/ worked on) a marked folder whose video/ holds history, with an empty record/, is held", async () => {
     const t = local();
     const file = t.put("Talk.mov");
@@ -3502,5 +3516,14 @@ describe("a local import's record pending, its record checked behind (Phase 3, L
     assert.deepEqual(t.recordPendings(), []);
     assert.deepEqual(t.runs(), []);
     t.done();
+  });
+});
+
+describe("a Mac that lacks a program the import needs (the sweep)", () => {
+  it("is told in the log to run the installer on a checkout, and to choose Repair on an installed Mac, which has no installer to run", () => {
+    const SWEPT = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+    for (const build of [{ mode: "dev" }, undefined]) assert.equal(setUpWords(build), "Run tool/install.sh to set this Mac up.");
+    assert.equal(setUpWords(SWEPT), "Open BRIMM Video Studio and choose Repair. If that does not help, ask help@example.invalid.");
+    assert.equal(setUpWords({ ...SWEPT, support: "" }), "Open BRIMM Video Studio and choose Repair.");
   });
 });

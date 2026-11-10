@@ -16,7 +16,7 @@ import { probeArgs, factsOf, colourOf, pauseArgs, pausesOf } from "./cuts.js";
 import { clipArgs, storyCuts, STORY_MAX } from "./reframe.js";
 import { captionsOf, settled, stampedText } from "./lib.js";
 import { finalTranscript, spelled, spelledPairs, spelledCaptions } from "./final-transcript.js";
-import { buildOf, forThisMac, isInstalled } from "./build.js";
+import { askWords, buildOf, forThisMac, isInstalled, saidHere } from "./build.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredths, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, readThrough, LATE_CHECK_MS } from "./dropbox.js";
@@ -662,7 +662,7 @@ export function letGoClaim(ctx, found) {
     // A record written since (one not whole yet, say: the other Mac's claim on its way) is not this Mac's claim to keep
     // (round 3, t1-5).
     if (e.code === "CHANGED") return "The episode changed on the other Mac while finish ran, so nothing was let go here: say open to see who has it now.";
-    return `This Mac still has the episode open: it could not be let go (${String(forThisMac(e, buildFor(ctx)).message).replace(/\.$/, "")}). Ask Jason.`;
+    return saidHere(`This Mac still has the episode open: it could not be let go (${String(forThisMac(e, buildFor(ctx)).message).replace(/\.$/, "")}). Ask Jason.`, buildFor(ctx));
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -1091,7 +1091,8 @@ export async function finishNow(ctx, found, deps = {}) {
     // When it is not written, final/ holds what this finish copied all the same: the record in force is written again with
     // its list of files as final/ holds them, so that neither Mac is stuck on "not whole", and with no finish, as final/ now
     // mixes this finish's files with the last one's: the next finish makes every part again (the P1 check, T1; round 3, t1-3).
-    const NEEDS_JASON = " If the episode then says it is not whole in Dropbox, that needs Jason.";
+    // On an installed Mac, where no Jason is at hand, the episode needs the support contact its build names, and the sentence is left out where it names none.
+    const NEEDS_JASON = askWords(buildFor(ctx), " If the episode then says it is not whole in Dropbox, that needs Jason.");
     const listWhatFinalHolds = () => {
       const newest = readEpisode(found.folder);
       if (!newest.record) return ` The record could not be read to list what final/ holds now.${NEEDS_JASON}`;
@@ -1168,7 +1169,7 @@ export async function finishNow(ctx, found, deps = {}) {
 
     // The hand-off, shown in Finder, for her to drop on the BRIMM Ops page: only when the record says it is the finish. On an
     // open-lock Mac a copy of it is shown (reveal.js), and one that cannot be made is not shown, which is said.
-    if (written && !(await revealed({ home: ctx.home, settings: ctx.settings, minimum: ctx.deps.minimum, run: my.run, record: nextRecord, label: shownName(nextRecord), path: join(finalDir, handoffName) }))) next.push(cantOpen(shownName(nextRecord)));
+    if (written && !(await revealed({ home: ctx.home, settings: ctx.settings, minimum: ctx.deps.minimum, run: my.run, record: nextRecord, label: shownName(nextRecord), path: join(finalDir, handoffName) }))) next.push(saidHere(cantOpen(shownName(nextRecord)), buildFor(ctx)));
 
     // She need not wait for the late check: the record holds this finish, and the hand-off is written and shown. So that the guide and
     // `status` can say so, the run leaves a marker on this Mac's own disk from here until it ends, however it ends (finish-check.js),

@@ -36,7 +36,7 @@ const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "01
 
 /** What a finish says failed when a record a newer BRIMM Video Studio wrote lands while it copies into final/: Sallie's laptop taking the
     episode over, or (`takeOver` false) the record as it was. `build` is this Mac's build, a checkout's when it is left out. */
-async function failedUnderNewer(build, takeOver) {
+async function failedUnderNewer(build, takeOver, land = null) {
   const { t, found } = exported();
   if (build) t.ctx.deps.build = build;
   assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
@@ -48,7 +48,9 @@ async function failedUnderNewer(build, takeOver) {
       landed = true;
       const now = reread(found);
       const next = takeOver ? claimed(now, "Sallie's laptop", "2026-10-20T15:10:00-05:00") : now;
-      writeFileSync(recordFile(found.folder, now.rev + 1), recordText({ ...next, version: 99, rev: now.rev + 1, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+      // `land`, when given, writes what lands in place of the newer BRIMM Video Studio's record.
+      if (land) land(found, now);
+      else writeFileSync(recordFile(found.folder, now.rev + 1), recordText({ ...next, version: 99, rev: now.rev + 1, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
     }
   };
   assert.equal(await editMain(["finish", "--now", FOLDER], t.ctx.deps), 1);
@@ -208,6 +210,17 @@ describe("the two Macs, as the P1 check found them", () => {
     const installed = await failedUnderNewer(INSTALLED, false);
     assert.equal(installed, `${REFUSED}the episode was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac. Say "hand it off" again.`);
     assert.doesNotMatch(installed, /Jason|install\.sh/);
+  });
+  it("sends her to the support contact, not to Jason, on an installed Mac, when the record cannot be written to list what final/ holds and no update would mend it (the sweep)", async () => {
+    // What lands while the finish copies is no record a newer BRIMM Video Studio wrote: no update mends that, so the line still says whom the episode needs.
+    const unreadable = (found, now) => writeFileSync(recordFile(found.folder, now.rev + 1), "not a record");
+    const dev = await failedUnderNewer(undefined, false, unreadable);
+    const installed = await failedUnderNewer(INSTALLED, false, unreadable);
+    assert.match(dev, / If the episode then says it is not whole in Dropbox, that needs Jason\./);
+    assert.equal(installed, dev.replace(" that needs Jason.", " that needs help@example.invalid."));
+    assert.doesNotMatch(installed, /Jason|install\.sh/);
+    const unnamed = await failedUnderNewer({ ...INSTALLED, support: "" }, false, unreadable);
+    assert.equal(unnamed, dev.replace(" If the episode then says it is not whole in Dropbox, that needs Jason.", ""));
   });
   it("writes no claim when this Mac already has the episode it finishes (T19)", async () => {
     const { t, found } = exported({ over: { editing: MINE2 } });

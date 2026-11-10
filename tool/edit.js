@@ -5762,7 +5762,7 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { 
     const waitFor = ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms)));
     const got = await takeOutOfCheck(ctx, { name: found.name, record: base, paths: [...inFinal.map(pathOf), ...(handoff ? [pathOf(handoff.rel)] : [])], reads: inFinal.map((rel) => ({ path: pathOf(rel), id: null })), rev: base.rev + 1 }, { wait: waitFor, log: logTo(ctx.home) });
     if (got.busy) {
-      ctx.say(busyWords(got.busy, quiet ? null : shownName(base), { done: "nothing was changed", again: "Say it again in a minute." }));
+      ctx.say(asSaid(ctx, busyWords(got.busy, quiet ? null : shownName(base), { done: "nothing was changed", again: "Say it again in a minute." })));
       return { code: 1 };
     }
     hold = got;
@@ -6399,7 +6399,7 @@ async function finishSessionCommand(ctx, found) {
   if (done.waits) return refuse(ctx, SESSION_V1);
   if (done.coming) return refuse(ctx, "Dropbox is still bringing its teachings, or the words they are checked against, over to this Mac: say it again in a minute.");
   if (done.why) {
-    for (const line of done.why.split("\n")) ctx.say(line);
+    for (const line of done.why.split("\n")) ctx.say(asSaid(ctx, line));
     return 1;
   }
   for (const d of done.dropped) ctx.say(`Taken out of the hand-off: ${d.field}: ${d.why}.`);

@@ -1044,3 +1044,53 @@ describe("L6b: the copy in Original files made online-only", () => {
     t.done();
   });
 });
+
+describe("L6: on an installed Mac the move's notices and its log send nobody to Jason (the sweep)", () => {
+  const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+  const NEVER = /Jason|install\.sh|Terminal/;
+
+  it("a copy Dropbox did not keep whole, and a folder gone from Episodes: the notice names the support contact", () => {
+    const t = world();
+    const found = local(t);
+    mkdirSync(join(found.folder, "Original files"), { recursive: true });
+    writeFileSync(originalOf(found), "the recordinG");
+    oweOriginals(t.ctx2, found);
+    look(t, depsOf(t, { build: INSTALLED }));
+    assert.deepEqual(t.notices, [`The recording of ${SHOWN} stays on this Mac: Dropbox didn't keep its copy whole. Ask help@example.invalid.`]);
+    t.done();
+    const u = world();
+    const gone = local(u);
+    oweOriginals(u.ctx2, gone);
+    renameSyncSafe(gone.folder, `${gone.folder}.away`);
+    look(u, depsOf(u, { build: { ...INSTALLED, support: "" } }));
+    assert.deepEqual(u.notices, ["The folder of an episode (3fa9c1) is gone from Episodes, so the check of its copies in Dropbox is not made."]);
+    assert.equal(u.logs.filter((l) => l === u.notices[0]).length, 1, u.logs.join("|"));
+    for (const line of [...t.notices, ...t.logs, ...u.notices, ...u.logs]) assert.doesNotMatch(line, NEVER, line);
+    u.done();
+  });
+
+  it("a copy the record does not list, of a video that became a session: the log says it can be removed by hand, and names nobody", () => {
+    const t = world();
+    const found = local(t);
+    mkdirSync(join(found.folder, "Original files"), { recursive: true });
+    copyFileSync(join(found.video, FILE), originalOf(found));
+    oweOriginals(t.ctx2, found);
+    writeRecord(found, 3, sessionRecord(found));
+    look(t, depsOf(t, { build: INSTALLED, isWhole: (path) => path !== originalOf(found) }));
+    assert.equal(t.logs.filter((l) => l.endsWith("is in Original files in Dropbox, and the record does not list it. It can be removed there by hand.")).length, 1, t.logs.join("|"));
+    for (const line of t.logs) assert.doesNotMatch(line, NEVER, line);
+    t.done();
+  });
+
+  it("a video that became a session after its recording was copied: the log's line, as an installed Mac says it", () => {
+    const t = world();
+    const found = local(t);
+    moveIt(t, found);
+    writeRecord(found, 4, sessionRecord(found));
+    t.advance(LATE_CHECK_MS);
+    look(t, depsOf(t, { build: INSTALLED, uploaded: () => true }));
+    assert.equal(count(t, "The recording of Video of 14 Oct, 09:00 (Mac Studio) was copied into Dropbox, in Original files, before it became a session. Dropbox keeps it there and in its history. It can be removed there by hand."), 1, t.logs.join("|"));
+    for (const line of t.logs) assert.doesNotMatch(line, NEVER, line);
+    t.done();
+  });
+});

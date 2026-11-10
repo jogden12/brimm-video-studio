@@ -17,6 +17,7 @@ import { releaseEpisodeLock, takeEpisodeLock, lockOf, runningRun } from "./detac
 import { episodeFilesFolder, episodeWork, episodesFolder, runsFolder, workFolder } from "./settings.js";
 import { workCopyLockOf } from "./workcopy.js";
 import { ORIGINALS_FOLDER, keptOnAMac } from "./where.js";
+import { buildOf, saidHere } from "./build.js";
 
 /** The name the move's and the check's lock holds for the episode's own lock, what `status` and a stopped command say it is. */
 export const ORIGINALS_COMMAND = "originals";
@@ -138,6 +139,9 @@ export function checkOriginal(p, deps) {
   const to = join(p.folder, ORIGINALS_FOLDER, p.file);
   const who = whoOf(p);
   let shown = who;
+  // A line that sends her to Jason is said as this Mac says it: an installed Mac's notice and log name its support contact (build.js saidHere).
+  const build = deps.build ?? buildOf(thisCheckout());
+  const asHere = (line) => saidHere(line, build);
   const code = (e) => e.code || "an error";
   const base = ({ problem: _problem, nextLook: _nextLook, lookUntil: _lookUntil, ...rest }) => rest;
   const putAway = () => {
@@ -159,14 +163,14 @@ export function checkOriginal(p, deps) {
   };
   const problem = (text) => {
     log(`${shown}: its recording stays on this Mac: ${text}`);
-    if (!p.problem) notify(ORIGINALS_PROBLEM(shown));
+    if (!p.problem) notify(asHere(ORIGINALS_PROBLEM(shown)));
     const { nextLook: _nextLook, ...rest } = p;
     writePending(home, { ...rest, problem: text });
   };
   const goneAway = () => {
     if (!putAway()) return;
-    log(FOLDER_GONE(who));
-    notify(FOLDER_GONE(who));
+    log(asHere(FOLDER_GONE(who)));
+    notify(asHere(FOLDER_GONE(who)));
   };
   // 1. The folder, as the checks of final/ have it.
   let list;
@@ -206,13 +210,13 @@ export function checkOriginal(p, deps) {
       const mine = statSync(from, { throwIfNoEntry: false });
       const copy = statSync(to, { throwIfNoEntry: false });
       const alike = Boolean(mine && copy && copy.size === mine.size);
-      log(`${as}: ${alike ? "a copy of its recording" : "a file of its recording's name"} is in Original files in Dropbox, and the record does not list it. Jason removes it by hand if he wants.`);
+      log(asHere(`${as}: ${alike ? "a copy of its recording" : "a file of its recording's name"} is in Original files in Dropbox, and the record does not list it. Jason removes it by hand if he wants.`));
       return;
     }
     try {
       rmSync(to, { force: true });
     } catch (e) {
-      log(`${as}: a copy of its recording in Original files could not be taken away (${code(e)}). Ask Jason.`);
+      log(asHere(`${as}: a copy of its recording in Original files could not be taken away (${code(e)}). Ask Jason.`));
     }
   };
   if (p.owed === true) {
@@ -224,7 +228,7 @@ export function checkOriginal(p, deps) {
     return move();
   }
   if (held) {
-    if (putAway()) log(ORIGINALS_SESSION(heldName(read.record)));
+    if (putAway()) log(asHere(ORIGINALS_SESSION(heldName(read.record))));
     return;
   }
   return check();
@@ -291,7 +295,7 @@ export function checkOriginal(p, deps) {
           try {
             rmSync(to, { force: true });
           } catch (err) {
-            log(`${shown}: a copy of its recording in Original files could not be taken away (${code(err)}). Ask Jason.`);
+            log(asHere(`${shown}: a copy of its recording in Original files could not be taken away (${code(err)}). Ask Jason.`));
           }
         }
         return wait(`${shown}: its copy in Original files could not be listed in its record (${code(e)}), so it is taken away again. It is looked at again later.`);
@@ -370,7 +374,7 @@ export function checkOriginal(p, deps) {
       const latest = readEpisode(p.folder);
       if (unreadable(latest)) return wait(recordLater);
       if (asSession(linksOf(p.root), { folder: p.folder, record: latest.record })) {
-        if (putAway()) log(ORIGINALS_SESSION(heldName(latest.record)));
+        if (putAway()) log(asHere(ORIGINALS_SESSION(heldName(latest.record))));
         return;
       }
       // The record in force still lists the copy at the move's bytes: if Dropbox lost the move's record meanwhile, nothing is taken off; the copy is owed again.

@@ -34,7 +34,7 @@ import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { homeRefusal, studioHome } from "./home.js";
-import { NEWER_SAY, buildOf, forThisMac, isInstalled, repairLine } from "./build.js";
+import { NEWER_SAY, buildOf, forThisMac, isInstalled, repairLine, saidHere } from "./build.js";
 import { bracket, lookerOf, noteState, postNewNodeIfDue, readAccess } from "./access.js";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { isMain } from "./is-main.js";
@@ -549,7 +549,7 @@ async function workOn(file, deps) {
     }
     // A marked folder of an import that stopped, which has records or work that cannot be read now, holds the video: it is decided here, before the work.
     if (heldFolderOf(file, arrived, { episode, today: deps.today })) {
-      log(`${shown}: an episode made of it already has records or work that cannot be read now, so it stays in the drop folder. Ask Jason.`);
+      log(saidHere(`${shown}: an episode made of it already has records or work that cannot be read now, so it stays in the drop folder. Ask Jason.`, deps.build ?? buildOf(thisCheckout())));
       return { ok: false, name, arriving: true, message: "an episode of it has records or work that cannot be read now" };
     }
   }
@@ -1398,14 +1398,14 @@ export function askBlocked({ folder, record, root, statusFolders, home, machine,
   const at = (rel) => fileAt({ home }, { folder, record }, rel);
   if (!existsSync(at(plan))) return { why: `${name} has no cut plan here, so Claude cannot be asked.` };
   const lost = listGone({ folder, record, home });
-  if (lost && !existsSync(at(REELS_FILE))) return { why: lost };
+  if (lost && !existsSync(at(REELS_FILE))) return { why: saidHere(lost, build) };
   const listed = existsSync(at(REELS_FILE));
   const bring = (coming) => ({ why: `Dropbox is still bringing ${coming.join(", ")} over to this Mac. Say "ask Claude again for Reels" again when it is done.`, bring: coming });
   // What the cut plan and the list decide is decided before the video is brought, so it is never brought only to be refused.
   const small = [plan, ...(listed ? [REELS_FILE] : [])].filter((rel) => !whole(at(rel)));
   // A file kept on this Mac is not brought by Dropbox: if it is not whole, that is for Jason.
   const kept = small.filter((rel) => filePlace(record, rel) === "local");
-  if (kept.length) return { why: `${kept.map((rel) => notWholeHere(shownName(record), rel).replace(/ Ask Jason\.$/, "")).join(" ")} Claude cannot be asked. Ask Jason.` };
+  if (kept.length) return { why: saidHere(`${kept.map((rel) => notWholeHere(shownName(record), rel).replace(/ Ask Jason\.$/, "")).join(" ")} Claude cannot be asked. Ask Jason.`, build) };
   if (small.length) return bring(small);
   let facts = null;
   try {
@@ -1466,7 +1466,7 @@ export async function askAgain({ folder, record }, deps) {
     if (read && read.why) return { ok: false, made: [], failed: [...said, `The list of Reel candidates cannot be read: ${read.why.replace(/\.$/, "")}.`], next: as };
     // The record is read again for it: the other Mac's ask may have landed meanwhile, which the rev check then says.
     const lost = listGone({ folder, record: readEpisode(folder).record || record, home: deps.home || studioHome() });
-    if (lost) return { ok: false, made: [], failed: [...said, lost], next: "" };
+    if (lost) return { ok: false, made: [], failed: [...said, saidHere(lost, build)], next: "" };
     const merged = mergeCandidates({ old: read ? read.reels : null, fresh, record });
     if (!merged.added.length) return { ok: true, made: [], failed: [...said, ...merged.ignored], next: `Every clip Claude picked has words of a Reel or a candidate already there. ${as}` };
     const files = filesOf(work, { name, hold: true, log });
@@ -1492,8 +1492,9 @@ export async function askAgain({ folder, record }, deps) {
     // When the put was undone, no Reel was made; and when reels.json could not be put back, the list is not as it was.
     const kept = into.kept.find((k) => basename(k) === REELS_FILE && basename(dirname(k)) === "put back");
     const oursStays = existsSync(reelsAt) && sameBytes(reelsAt, files.at(reelsAt));
-    const lostList = listed !== null && !existsSync(reelsAt) ? `${REELS_FILE} is not in the episode now.${kept ? ` A copy of it is kept at ${kept}: ask Jason to put it back.` : ""}`
-      : !into.put && oursStays ? `${REELS_FILE} in the episode is this run's new list, which its record does not list.${kept ? ` The one it lists is kept at ${kept}: ask Jason to put it back.` : ""}` : "";
+    // On an installed Mac, where no Jason is at hand, the support contact is asked to put it back (build.js saidHere).
+    const lostList = saidHere(listed !== null && !existsSync(reelsAt) ? `${REELS_FILE} is not in the episode now.${kept ? ` A copy of it is kept at ${kept}: ask Jason to put it back.` : ""}`
+      : !into.put && oursStays ? `${REELS_FILE} in the episode is this run's new list, which its record does not list.${kept ? ` The one it lists is kept at ${kept}: ask Jason to put it back.` : ""}` : "", build);
     if (!into.put) return { ok: false, made: [], failed, next: lostList || as };
     const next = into.problems.length ? lostList || `Not everything is as this Mac put it: what is not done says which${into.kept.length ? ", and where this Mac's copies are kept" : ""}.` : "Say \"show me the Reels\" to see them.";
     return { ok: !into.problems.length, made: merged.added.map((c) => `Reel ${c.n}`), failed, next };
@@ -1767,6 +1768,10 @@ export async function checkClaude({ run, tools, say, tmpDir = tmpdir(), until, j
   }
 }
 
+/** What the log says to do on a Mac that lacks a program the import needs: to run the installer, on a checkout; on an installed Mac, whose
+    programs are the app's own and which has no installer to run, to choose Repair. */
+export const setUpWords = (build) => (isInstalled(build) ? repairLine(build) : "Run tool/install.sh to set this Mac up.");
+
 export async function main(argv) {
   const args = parseArgs(argv);
   if (args.help) {
@@ -1788,7 +1793,7 @@ export async function main(argv) {
   const found = findPrograms();
   if (found.missing.length) {
     for (const m of found.missing) log(m);
-    log("Run tool/install.sh to set this Mac up.");
+    log(setUpWords(buildOf(thisCheckout())));
     return 2;
   }
   const deps = depsFor(found, log, process.env, args);
