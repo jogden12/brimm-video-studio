@@ -35,6 +35,48 @@ export const forThisMac = (e, build) => (e && e.code === "NEWER" && isInstalled(
     else a person or a file gave: every "Jason" in it is changed. */
 export const askWords = (build, dev, bare = "") => (!isInstalled(build) ? dev : build.support ? dev.replaceAll("Jason", build.support) : bare);
 
+/** How a line that sends a person to Jason ends, and how an installed Mac ends it: [the checkout's last words, what stands for them where
+    build.json names no support contact, what stands for them where it names one (left out where the contact simply takes Jason's place)].
+    The longest come first, so that a line is taken by the most of it that fits. */
+const ASK_ENDS = [
+  [" than the one Jason checked: ask Jason.", " than the one that was checked.", (support) => ` than the one that was checked: ask ${support}.`],
+  [" A conflict needs Jason: tell him the episode's name.", "", (support) => ` A conflict needs ${support}: tell them the episode's name.`],
+  [" Tell Jason: the episode needs him.", "", (support) => ` Tell ${support}: the episode needs help.`],
+  [" Jason removes it by hand if he wants.", " It can be removed there by hand.", () => " It can be removed there by hand."],
+  ["; if it still says a file is not whole, tell Jason the episode's name.", "."],
+  [": ask Jason to check the training setting again.", "."],
+  [", or ask Jason. Nothing was written.", ". Nothing was written."],
+  [": ask Jason. Nothing was written.", ". Nothing was written."],
+  [" Ask Jason. Nothing was written.", " Nothing was written."],
+  [" If that is not what you want, tell Jason.", ""],
+  [" If it says this again, tell Jason.", ""],
+  ["; if it says this again, ask Jason.", "."],
+  [", and ask Jason what to do with it.", "."],
+  [" If it does not come, tell Jason.", ""],
+  [" If it still won't, tell Jason.", ""],
+  [" Ask Jason for anything else.", ""],
+  [": ask Jason to put it back.", "."],
+  [" and tell Jason.", "."],
+  [", or ask Jason.", "."],
+  [": tell Jason.", "."],
+  [": ask Jason.", "."],
+  [" Tell Jason.", ""],
+  [" Ask Jason.", ""]
+];
+
+/** A line this Mac's own code made, `line`, as this Mac says it. A checkout says it as it is. An installed Mac, where no Jason is at hand,
+    says a line that ends by sending the person to Jason (ASK_ENDS) with the support contact its build.json names in his place, and with
+    those last words left out where it names none. Only the line's last words are looked at, and they are the code's own: a name, a path or
+    a sentence a person said, earlier in the line, is never changed. So this is for the lines the code makes, not for a transcript's or any
+    other words it shows. Whoever says such a line passes it through here first, as a failed write's error goes through forThisMac. */
+export function askHere(line, build) {
+  if (typeof line !== "string" || !isInstalled(build)) return line;
+  const end = ASK_ENDS.find(([dev]) => line.endsWith(dev));
+  if (!end) return line;
+  const [dev, bare, named] = end;
+  return line.slice(0, -dev.length) + (build.support ? (named ? named(build.support) : askWords(build, dev)) : bare);
+}
+
 /** What an installed Mac is when its build.json says nothing that can be used. */
 const BROKEN = { mode: "installed", version: "", build: 0, commit: "", short: "unknown", feed: "", channel: "stable", support: "", broken: true };
 

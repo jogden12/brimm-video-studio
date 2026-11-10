@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BUILD_FILE, NEWER_SAY, REPAIR, VERSION, UPDATE_SAY, askWords, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "../build.js";
+import { BUILD_FILE, NEWER_SAY, REPAIR, VERSION, UPDATE_SAY, askHere, askWords, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "../build.js";
 import { commitOf, thisCheckout } from "../filing.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
 
@@ -145,5 +145,50 @@ describe("whether a Mac has BRIMM Video Studio installed", () => {
       assert.equal(bare === undefined ? askWords(unnamed, dev) : askWords(unnamed, dev, bare), none);
       assert.doesNotMatch(named + none, /Jason|install\.sh|Terminal|node/);
     }
+  });
+
+  it("gives a line that ends by sending a person to Jason as an installed Mac says it, by its last words alone, and every line as it is on a checkout (the sweep)", () => {
+    const installed = buildOf(checkout(WHOLE));
+    const unnamed = buildOf(checkout({ ...WHOLE, support: "" }));
+    const S = "help@example.invalid";
+    const table = [
+      // [how a checkout's line ends, with a support contact, with none]
+      ["It could not be made again. Ask Jason.", `It could not be made again. Ask ${S}.`, "It could not be made again."],
+      ["A number is never given twice. Ask Jason. Nothing was written.", `A number is never given twice. Ask ${S}. Nothing was written.`, "A number is never given twice. Nothing was written."],
+      ["Readings are off on this Mac: ask Jason.", `Readings are off on this Mac: ask ${S}.`, "Readings are off on this Mac."],
+      ["Its versions lead to e-20261104-a11111: ask Jason. Nothing was written.", `Its versions lead to e-20261104-a11111: ask ${S}. Nothing was written.`, "Its versions lead to e-20261104-a11111. Nothing was written."],
+      ["Answer it as a session too, or ask Jason.", `Answer it as a session too, or ask ${S}.`, "Answer it as a session too."],
+      ["Answer it as a session, or ask Jason. Nothing was written.", `Answer it as a session, or ask ${S}. Nothing was written.`, "Answer it as a session. Nothing was written."],
+      ["Say it again in a few minutes. If it says this again, tell Jason.", `Say it again in a few minutes. If it says this again, tell ${S}.`, "Say it again in a few minutes."],
+      ['Say "open Talk in HyperFrames" to try again; if it says this again, ask Jason.', `Say "open Talk in HyperFrames" to try again; if it says this again, ask ${S}.`, 'Say "open Talk in HyperFrames" to try again.'],
+      ["Dropbox is bringing it back. If it does not come, tell Jason.", `Dropbox is bringing it back. If it does not come, tell ${S}.`, "Dropbox is bringing it back."],
+      ["Say B. If that is not what you want, tell Jason.", `Say B. If that is not what you want, tell ${S}.`, "Say B."],
+      ["Try once more. If it still won't, tell Jason.", `Try once more. If it still won't, tell ${S}.`, "Try once more."],
+      ["Its versions name each other: tell Jason.", `Its versions name each other: tell ${S}.`, "Its versions name each other."],
+      ["They could not be taken out. Tell Jason.", `They could not be taken out. Tell ${S}.`, "They could not be taken out."],
+      ["It could not be put back as it was. Tell Jason: the episode needs him.", `It could not be put back as it was. Tell ${S}: the episode needs help.`, "It could not be put back as it was."],
+      ["It is kept at /a/b: ask Jason to put it back.", `It is kept at /a/b: ask ${S} to put it back.`, "It is kept at /a/b."],
+      ["It was turned on more than 90 days ago on this Mac: ask Jason to check the training setting again.", `It was turned on more than 90 days ago on this Mac: ask ${S} to check the training setting again.`, "It was turned on more than 90 days ago on this Mac."],
+      ["Claude runs only BRIMM Video Studio's own commands. Ask Jason for anything else.", `Claude runs only BRIMM Video Studio's own commands. Ask ${S} for anything else.`, "Claude runs only BRIMM Video Studio's own commands."],
+      ["Close it in HyperFrames, and ask Jason what to do with it.", `Close it in HyperFrames, and ask ${S} what to do with it.`, "Close it in HyperFrames."],
+      ["Drop the new revision on the BRIMM Ops page and tell Jason.", `Drop the new revision on the BRIMM Ops page and tell ${S}.`, "Drop the new revision on the BRIMM Ops page."],
+      ['Say "sort out the conflict" again to put them right; if it still says a file is not whole, tell Jason the episode\'s name.', `Say "sort out the conflict" again to put them right; if it still says a file is not whole, tell ${S} the episode's name.`, 'Say "sort out the conflict" again to put them right.'],
+      ["It could not be sorted out: EIO. A conflict needs Jason: tell him the episode's name.", `It could not be sorted out: EIO. A conflict needs ${S}: tell them the episode's name.`, "It could not be sorted out: EIO."],
+      ["It is signed in to another account than the one Jason checked: ask Jason.", `It is signed in to another account than the one that was checked: ask ${S}.`, "It is signed in to another account than the one that was checked."],
+      ["Dropbox keeps it there and in its history. Jason removes it by hand if he wants.", "Dropbox keeps it there and in its history. It can be removed there by hand.", "Dropbox keeps it there and in its history. It can be removed there by hand."]
+    ];
+    for (const [dev, named, bare] of table) {
+      for (const b of [buildOf(checkout()), { mode: "dev" }, undefined, null]) assert.equal(askHere(dev, b), dev);
+      assert.equal(askHere(dev, installed), named);
+      assert.equal(askHere(dev, unnamed), bare);
+      assert.doesNotMatch(named + bare, /Jason|install\.sh|Terminal|\bnode\b|\bhim\b/);
+    }
+    // Only a line's last words are looked at: a name or a sentence a person said, earlier in the line, is never changed.
+    for (const line of ['"Ask Jason." is a video of 3 minutes.', "Ask Jason. Then say it again.", "The words of Ask Jason are not on this Mac yet.", "Nothing here names him.", ""]) {
+      assert.equal(askHere(line, installed), line);
+      assert.equal(askHere(line, unnamed), line);
+    }
+    // What is no line is given back as it is.
+    for (const other of [undefined, null, 3]) assert.equal(askHere(other, installed), other);
   });
 });
