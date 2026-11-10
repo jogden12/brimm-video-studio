@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
 import { PARTS } from "../setup/protocol.js";
-import { LABELS, MODEL_BYTES, modelPath, modelPin, npmArgs, quiet, sha256Of, stageChrome, stageCli, stageModel } from "../setup/install.js";
+import { LABELS, MODEL_BYTES, modelPath, modelPin, npmArgs, quiet, runProgram, sha256Of, stageChrome, stageCli, stageModel } from "../setup/install.js";
 import { mac } from "./setup-harness.js";
 
 const INSTALL = readFileSync(fileURLToPath(new URL("../install.sh", import.meta.url)), "utf8");
@@ -271,5 +271,40 @@ describe("quiet", () => {
   it("drops docker's line, and keeps every other line as it was", () => {
     const text = ["one  ", "/bin/sh: docker: command not found", "/bin/sh: line 1: docker: command not found", "/bin/sh: line 2: docker: command not found!", "", "last"].join("\n");
     assert.equal(quiet(text), ["one  ", "/bin/sh: line 2: docker: command not found!", "", "last"].join("\n"));
+  });
+});
+
+describe("runProgram", () => {
+  /** A stand-in program in the test's own folder: prints docker's line and another, to stdout and stderr, then waits `wait` seconds. */
+  const standIn = (m, wait) => {
+    const file = join(m.dir, "prints");
+    writeFileSync(file, `#!/bin/sh\necho hello\necho "/bin/sh: docker: command not found" >&2\nsleep ${wait}\n`);
+    chmodSync(file, 0o755);
+    return file;
+  };
+  const capture = () => {
+    const chunks = [];
+    return { chunks, errors: { write: (text) => chunks.push(String(text)) } };
+  };
+
+  it("writes what a program printed to the errors once, without docker's line, and resolves with its code", async () => {
+    await withMac(async (m) => {
+      const { chunks, errors } = capture();
+      assert.deepEqual(await runProgram(standIn(m, 0), [], { env: { PATH: "/usr/bin:/bin" }, errors }), { code: 0 });
+      assert.equal(chunks.join(""), "hello\n");
+    });
+  });
+
+  it("writes it once when a stop ends the program, and resolves with no code", async () => {
+    await withMac(async (m) => {
+      const { chunks, errors } = capture();
+      const stop = new AbortController();
+      const ran = runProgram(standIn(m, 5), [], { env: { PATH: "/usr/bin:/bin" }, signal: stop.signal, errors });
+      await new Promise((r) => setTimeout(r, 300));
+      stop.abort();
+      assert.deepEqual(await ran, { code: null });
+      await new Promise((r) => setTimeout(r, 100));
+      assert.equal(chunks.join(""), "hello\n");
+    });
   });
 });

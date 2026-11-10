@@ -56,16 +56,19 @@ export function quiet(text) {
     .join("\n");
 }
 
-/** Runs a program to its end: `{ code }`, with what it printed given to the engine's stderr through quiet. A stop ends it (code null). */
-export function runProgram(program, args, { env, signal } = {}) {
+/** Runs a program to its end: `{ code }`, with what it printed given to `errors` (the engine's stderr unless a test gives another) through quiet, once. A stop ends it (code null). */
+export function runProgram(program, args, { env, signal, errors = process.stderr } = {}) {
   return new Promise((resolve) => {
     const child = spawn(program, args, { env, stdio: ["ignore", "pipe", "pipe"], signal });
     let printed = "";
     child.stdout.on("data", (chunk) => (printed += chunk));
     child.stderr.on("data", (chunk) => (printed += chunk));
+    let settled = false;
     const end = (code) => {
+      if (settled) return;
+      settled = true;
       const shown = quiet(printed);
-      if (shown.trim() !== "") process.stderr.write(shown.endsWith("\n") ? shown : `${shown}\n`);
+      if (shown.trim() !== "") errors.write(shown.endsWith("\n") ? shown : `${shown}\n`);
       resolve({ code });
     };
     child.on("error", () => end(null));
