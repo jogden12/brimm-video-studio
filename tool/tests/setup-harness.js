@@ -35,7 +35,7 @@ const CLAUDE = {
       dir/says/claude-status hold, and `auth login` prints dir/says/claude-login, reads a line and writes it into dir/claude-got.
     - `programs` are stand-ins in dir/bin. Each writes "<name> <arguments>" into `ran()`, prints dir/says/<name> when it is there and ends
       with the number in dir/exits/<name> when it is there. curl writes dir/says/curl's bytes to the file after --output, and script
-      runs what follows /dev/null. The installer (a list: the program and its first arguments) waits while dir/hold is there and appends
+      runs what follows /dev/null as a job of its own, in a group of its own (as real script puts claude in a session of its own, which a kill of script's group does not reach). The installer (a list: the program and its first arguments) waits while dir/hold is there and appends
       dir/says/check-log, when there is one, to the log the installer's own check of Claude writes. */
 export function mac({ settings = "none", apps = [], dropbox = true, claude = "signed-in" } = {}) {
   const copy = appCopy({ under: "Copy" });
@@ -87,7 +87,10 @@ export function mac({ settings = "none", apps = [], dropbox = true, claude = "si
     `echo "script $*" >> "${ranFile}"`,
     `while [ $# -gt 0 ] && [ "$1" != "/dev/null" ]; do shift; done`,
     `shift`,
-    `"$@"; code=$?`,
+    `set -m`,
+    `"$@" <&0 &`,
+    `child=$!`,
+    `wait $child; code=$?`,
     exitsOf("script"),
     `exit $code`,
     ""

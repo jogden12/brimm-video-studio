@@ -262,6 +262,8 @@ export function signInLinkOf(text) {
 /** How long a sign-in waits for claude's link before it asks without one, and how long claude is given to end by itself after an answer. */
 export const LINK_WAIT_MS = 5000;
 export const SETTLE_MS = 10000;
+/** How long claude's output must be quiet before a link in it is taken as whole: a terminal can deliver a long link in several reads. */
+export const LINK_QUIET_MS = 150;
 
 const TOO_LONG = "Signing in took too long. Try again.";
 const NOT_SIGNED_IN = "Claude Code is not signed in yet. Try again.";
@@ -272,8 +274,15 @@ const NOT_SIGNED_IN = "Claude Code is not signed in yet. Try again.";
     asks claude's state (the shell then runs the terminal itself). Nothing claude prints is shown or kept: only a link of it is read. */
 export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 300000, linkWaitMs = LINK_WAIT_MS, settleMs = SETTLE_MS, pty = true }) {
   let timedOut = false;
+  let leave = false;
   if (pty) {
-    const child = spawn(programs.script, ["-q", "/dev/null", claude, "auth", "login"], { env: claudeEnv({ home, tools }), stdio: ["pipe", "pipe", "pipe"], detached: true });
+    // Claude is started by a small shell that writes its own process id into a file (never the code) and then becomes claude, so that
+    // the engine can end claude itself: a real script puts it in a session of its own, which ending script does not reach.
+    const folder = join(home, "Library", "Caches", "BRIMM Video Studio");
+    mkdirSync(folder, { recursive: true });
+    const pidFile = join(folder, "claude-login.pid");
+    rmSync(pidFile, { force: true });
+    const child = spawn(programs.script, ["-q", "/dev/null", "/bin/sh", "-c", 'echo $$ > "$1"; exec "$2" auth login', "sh", pidFile, claude], { env: claudeEnv({ home, tools }), stdio: ["pipe", "pipe", "pipe"] });
     let ended = false;
     const endedP = new Promise((resolve) => {
       child.on("exit", () => ((ended = true), resolve("ended")));
@@ -281,10 +290,13 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
     });
     child.stdin.on("error", () => {});
     const stop = () => {
-      if (ended) return;
-      try {
-        process.kill(-child.pid, "SIGTERM");
-      } catch {
+      if (!ended) {
+        try {
+          const pid = Number(readFileSync(pidFile, "utf8").trim());
+          if (Number.isInteger(pid) && pid > 1) process.kill(pid, "SIGTERM");
+        } catch {
+          // No pid yet, or claude is already gone.
+        }
         try {
           child.kill("SIGTERM");
         } catch {
@@ -303,13 +315,19 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
     let answered = false;
     let askedWith = null;
     let onLink = () => {};
+    let quiet;
     const read = (chunk) => {
       seen = (seen + chunk).slice(-8000);
-      const now = signInLinkOf(seen);
-      if (now && !link) {
-        link = now;
-        onLink();
-      }
+      if (link) return;
+      clearTimeout(quiet);
+      quiet = setTimeout(() => {
+        const now = signInLinkOf(seen);
+        if (now && !link) {
+          link = now;
+          onLink();
+        }
+      }, LINK_QUIET_MS);
+      timers.add(quiet);
     };
     child.stdout.on("data", read);
     child.stderr.on("data", read);
@@ -343,8 +361,10 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
           }
           const value = next.value;
           const code = value && typeof value === "object" && typeof value.code === "string" ? value.code.replace(/[\u0000-\u001f\u007f]/g, "") : "";
-          if (value === "back" || value === "cancel") stop();
-          else {
+          if (value === "back" || value === "cancel") {
+            stop();
+            leave = true;
+          } else {
             if (code !== "") child.stdin.write(`${code}\n`);
             const settled = await Promise.race([endedP, limit, wait(settleMs, "settled")]);
             if (settled === "timeout") timedOut = true;
@@ -355,11 +375,14 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
       await Promise.race([endedP, wait(5000, "gone")]);
     } finally {
       stop();
+      rmSync(pidFile, { force: true });
       for (const timer of timers) clearTimeout(timer);
       child.stdout.destroy();
       child.stderr.destroy();
     }
   }
+  // After a back or a cancel claude is not asked: its answer could take a minute, and the person has left this step.
+  if (leave) return { signedIn: false, plan: "" };
   const state = claudeState({ home, tools });
   return state.signedIn ? { signedIn: true, plan: state.plan } : { signedIn: false, plan: null, fault: timedOut ? TOO_LONG : NOT_SIGNED_IN };
 }

@@ -477,7 +477,21 @@ describe("signIn", () => {
   it("starts claude under script, with a terminal of its own", async () => {
     await withLogin(async (m) => {
       await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => ({ code: "x" }) });
-      assert.match(m.ran(), new RegExp(`script -q /dev/null ${join(m.home, ".local", "bin", "claude").replaceAll(".", "\\.")} auth login`));
+      const claude = join(m.home, ".local", "bin", "claude");
+      const line = m.ran().split("\n").find((one) => one.startsWith("script "));
+      assert.ok(line.startsWith("script -q /dev/null /bin/sh -c "), line);
+      assert.ok(line.includes(claude), line);
+      assert.equal(line.includes("x\n"), false);
+    });
+  });
+
+  it("takes a link only once it is whole: one that comes in two writes is asked with whole", async () => {
+    await withLogin(async (m, { asked }) => {
+      const mine = join(m.home, ".local", "bin", "claude");
+      writeFileSync(mine, `#!/bin/sh\ncase "$*" in\n  "auth login") printf 'Open https://claude.ai/oauth/auth'; sleep 0.05; echo 'orize?code=true&state=abc'; read -r line ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
+      chmodSync(mine, 0o755);
+      await signIn({ ...base(m), linkWaitMs: 3000, settleMs: 20, ask: async (q) => (asked.push(q), {}) });
+      assert.deepEqual(asked.map((q) => q.link), ["https://claude.ai/oauth/authorize?code=true&state=abc"]);
     });
   });
 
@@ -502,27 +516,47 @@ describe("signIn", () => {
     });
   });
 
+  /** A claude stand-in that writes its own pid into claude-pid and then waits for a line. */
+  const pidClaude = (m) => {
+    const mine = join(m.home, ".local", "bin", "claude");
+    writeFileSync(mine, `#!/bin/sh\ncase "$*" in\n  "auth login") echo "${LINK}"; echo $$ > "${join(m.dir, "claude-pid")}"; read -r line; printf '%s\\n' "$line" > "${join(m.dir, "claude-got")}" ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
+    chmodSync(mine, 0o755);
+  };
+  const gone = async (m) => {
+    const pid = Number(readFileSync(join(m.dir, "claude-pid"), "utf8"));
+    for (let i = 0; i < 40; i++) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return false;
+  };
+  const leftBehind = (m) => (existsSync(cachesOf(m.home)) ? readdirSync(cachesOf(m.home)) : []);
+
   it("an empty answer writes nothing to claude, and claude is ended after the settling time", async () => {
     await withLogin(async (m) => {
-      const mine = join(m.home, ".local", "bin", "claude");
-      writeFileSync(mine, `#!/bin/sh\ncase "$*" in\n  "auth login") echo "${LINK}"; echo $$ > "${join(m.dir, "claude-pid")}"; read -r line; printf '%s\\n' "$line" > "${join(m.dir, "claude-got")}" ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
-      chmodSync(mine, 0o755);
+      pidClaude(m);
       const result = await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 20, ask: async () => ({}) });
       assert.equal(existsSync(join(m.dir, "claude-got")), false);
-      await new Promise((r) => setTimeout(r, 200));
+      assert.equal(await gone(m), true);
       assert.equal(existsSync(join(m.dir, "claude-got")), false);
-      const pid = Number(readFileSync(join(m.dir, "claude-pid"), "utf8"));
-      assert.throws(() => process.kill(pid, 0));
       assert.equal(result.signedIn, true);
+      assert.deepEqual(leftBehind(m), []);
     });
   });
 
-  it("a back or a cancel ends claude without writing to it", async () => {
+  it("a back or a cancel ends claude itself, writes nothing to it, and asks nothing of claude after", async () => {
     for (const answer of ["back", "cancel"]) {
       await withLogin(async (m) => {
-        await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => answer });
-        await new Promise((r) => setTimeout(r, 200));
+        pidClaude(m);
+        const result = await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => answer });
+        assert.deepEqual(result, { signedIn: false, plan: "" });
+        assert.equal(await gone(m), true);
         assert.equal(existsSync(join(m.dir, "claude-got")), false);
+        assert.deepEqual(leftBehind(m), []);
       });
     }
   });
@@ -539,8 +573,10 @@ describe("signIn", () => {
 
   it("a sign-in that never ends is stopped after its time, and says so", async () => {
     await withLogin(async (m) => {
+      pidClaude(m);
       const result = await signIn({ ...base(m), timeoutMs: 50, linkWaitMs: 2000, settleMs: 2000, ask: () => new Promise(() => {}) });
       assert.deepEqual(result, { signedIn: false, plan: null, fault: "Signing in took too long. Try again." });
+      assert.equal(await gone(m), true);
     }, { claude: "signed-out" });
   });
 
