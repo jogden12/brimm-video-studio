@@ -659,7 +659,7 @@ describe("the installer's own text", () => {
     const toolchainStep = text.indexOf('if [[ -n "$machine" ]] && ! toolchain_here "$TOOLCHAIN" "$node"; then\n');
     assert.ok(toolchainStep > 0 && start > text.indexOf("\nfi\n", toolchainStep) + 4, "after the step that installs the command line");
     assert.ok(start > text.indexOf('if node_old "$node" say; then\n  exit 1\nfi'), "after node is in place");
-    for (const later of ['if [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then', 'if ! settings_plan "$node"; then', 'mkdir -p "${folders[@]}"', '"$node" "$HERE/settings.js" marker "$drop" "$machine"', '"$node" "$HERE/settings.js" write ', 'agent "$node" > "$AGENT_FILE"']) {
+    for (const later of ['if [[ ! -f "$MODEL" || "$model_has" != "$MODEL_SHA256" ]]; then', 'if ! settings_plan "$node"; then', 'mkdir -p "${folders[@]}"', '"$node" "$HERE/settings.js" marker "$drop" "$machine"', '"$node" "$HERE/settings.js" write ', 'agent "$node" > "$AGENT_FILE"']) {
       assert.ok(start < text.indexOf(later), later);
     }
     // The Chrome first, then the check, and the check is the step's last.
@@ -2601,7 +2601,8 @@ describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac
     }
   });
   it("keeps a download only when its SHA-256 is the pin's: a page that is not the model, or a cut-short file, is taken away and said (its own lines, run alone in zsh)", { skip: noZsh }, () => {
-    const from = '\nif [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then\n';
+    // From the line that reads the model's SHA-256 when the summary read none, which is so here (model_has is empty), to the closing fi.
+    const from = '\n[[ ! -f "$MODEL" || -n "$model_has" ]] || model_has="$(model_sha256 "$MODEL" || true)"\nif [[ ! -f "$MODEL" || "$model_has" != "$MODEL_SHA256" ]]; then\n';
     const at = text.indexOf(from);
     assert.ok(at >= 0, "the download's block, in install.sh");
     const block = text.slice(at + 1, text.indexOf("\nfi\n", at) + 4);
@@ -2619,7 +2620,7 @@ describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac
           mkdirSync(modelDir);
           writeFileSync(model, here);
         }
-        const script = `set -euo pipefail\nMODEL_DIR="${modelDir}"\nMODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"\nMODEL_URL="${PINNED.url}"\nMODEL_SHA256="${sha256}"\nnode="${process.execPath}"\n${functionOf("say")}${functionOf("model_sha256")}${block}\nprint -r -- "went on"\n`;
+        const script = `set -euo pipefail\nMODEL_DIR="${modelDir}"\nMODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"\nMODEL_URL="${PINNED.url}"\nMODEL_SHA256="${sha256}"\nnode="${process.execPath}"\nmodel_has=""\n${functionOf("say")}${functionOf("model_sha256")}${block}\nprint -r -- "went on"\n`;
         const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { PATH: `${join(dir, "bin")}:/usr/bin:/bin`, GIVES: gives, ASKED: join(dir, "curl-asked"), ...(curlExit ? { CURL_EXIT: String(curlExit) } : {}) } });
         const read = (file) => (existsSync(file) ? readFileSync(file, "utf8") : null);
         return { status: r.status, out: r.stdout, err: r.stderr, model: read(model), part: existsSync(`${model}.part`), asked: read(join(dir, "curl-asked")), modelPath: model };
@@ -2659,6 +2660,69 @@ describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac
     assert.equal(r.status, 0, r.err);
     assert.equal(r.out, "went on\n");
     assert.deepEqual([r.model, r.part, r.asked], [MODEL_WORDS, false, null]);
+  });
+  it("reads the model's SHA-256 once: what the summary read is kept for the download's decision, and it is read there only when there is no answer yet (their own lines, run alone in zsh)", { skip: noZsh }, () => {
+    // The summary's lines about the model, and the download's, each from its first line to its closing fi.
+    const summaryAt = text.indexOf("\n# A model that is here is checked against the pin");
+    assert.ok(summaryAt >= 0, "the summary's lines about the model, in install.sh");
+    const summary = text.slice(summaryAt + 1, text.indexOf("\nfi\n", summaryAt) + 4);
+    assert.ok(summary.includes('say "  Model:  here already, and its SHA-256 is the pin\'s"'), summary);
+    const made = text.indexOf('\n  mkdir -p "$MODEL_DIR"\n');
+    assert.ok(made >= 0, "the download's block, in install.sh");
+    const download = text.slice(text.lastIndexOf("\n\n", made) + 2, text.indexOf("\nfi\n", made) + 4);
+    const MODEL_WORDS = "the model, made for the test";
+    const HERE_ALREADY = "  Model:  here already, and its SHA-256 is the pin's\n";
+    const NOT_THE_PINS = (model) => `  Model:  here, but its SHA-256 is not the pin's, so the pinned one is downloaded, about 1.6 GB, from ${PINNED.url}, and replaces it only when its SHA-256 is the pin's, ${sha(MODEL_WORDS)} (tool/whisper-model.pin.json)\n`;
+    const ONCE_NODE = "  Model:  here; its SHA-256 is checked against the pin's once node is installed\n";
+    const DOWNLOADING = "Downloading the model. This is done once.\n";
+    // `first` is the node the summary has and `later` the one found again after Homebrew: "counting" is this node, which writes down
+    // each file it is asked to read; "none" is no node; "broken" writes the file down and reads nothing.
+    const run = ({ here, first = "counting", later = "counting" }) => {
+      const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-once-")));
+      try {
+        mkdirSync(join(dir, "bin"));
+        const read = join(dir, "read");
+        const stand = (name, last) => {
+          writeFileSync(join(dir, "bin", name), `#!/bin/sh\nfor a; do file="$a"; done\necho "$file" >> "${read}"\n${last}\n`);
+          chmodSync(join(dir, "bin", name), 0o755);
+          return join(dir, "bin", name);
+        };
+        const nodes = { counting: stand("counting", `exec "${process.execPath}" "$@"`), broken: stand("broken", "exit 1"), none: "" };
+        writeFileSync(join(dir, "bin", "curl"), '#!/bin/sh\necho "$*" > "$ASKED"\nwhile [ "$1" != "-o" ]; do shift; done\nprintf %s "$GIVES" > "$2"\n');
+        chmodSync(join(dir, "bin", "curl"), 0o755);
+        const modelDir = join(dir, "models");
+        const model = join(modelDir, "ggml-large-v3-turbo.bin");
+        if (here !== undefined) {
+          mkdirSync(modelDir);
+          writeFileSync(model, here);
+        }
+        const script = `set -euo pipefail\nMODEL_DIR="${modelDir}"\nMODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"\nMODEL_URL="${PINNED.url}"\nMODEL_SHA256="${sha(MODEL_WORDS)}"\n${functionOf("say")}${functionOf("model_sha256")}node="${nodes[first]}"\n${summary}node="${nodes[later]}"\n${download}print -r -- "went on"\n`;
+        const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { PATH: `${join(dir, "bin")}:/usr/bin:/bin`, GIVES: MODEL_WORDS, ASKED: join(dir, "curl-asked") } });
+        const names = existsSync(read) ? readFileSync(read, "utf8").split("\n").filter(Boolean).map((file) => (file === model ? "the model" : file === `${model}.part` ? "the download" : file)) : [];
+        return { status: r.status, out: r.stdout.replaceAll(model, "<model>"), err: r.stderr, read: names, model: existsSync(model) ? readFileSync(model, "utf8") : null, fetched: existsSync(join(dir, "curl-asked")) };
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+    // Here and the pin's: read once, for the summary, and never again.
+    let r = run({ here: MODEL_WORDS });
+    assert.deepEqual([r.status, r.out, r.read, r.fetched], [0, `${HERE_ALREADY}went on\n`, ["the model"], false], r.err);
+    // Here, but not the pin's: read once, and the answer the summary gave is the one the download goes by. The download is read too.
+    r = run({ here: "another model" });
+    assert.deepEqual([r.status, r.out, r.read, r.model], [0, `${NOT_THE_PINS()}${DOWNLOADING}went on\n`, ["the model", "the download"], MODEL_WORDS], r.err);
+    // Here, with no node until Homebrew installs one: the summary reads nothing, so it is read once node is found again.
+    r = run({ here: MODEL_WORDS, first: "none" });
+    assert.deepEqual([r.status, r.out, r.read, r.fetched], [0, `${ONCE_NODE}went on\n`, ["the model"], false], r.err);
+    r = run({ here: "another model", first: "none" });
+    assert.deepEqual([r.status, r.out, r.read, r.model], [0, `${ONCE_NODE}${DOWNLOADING}went on\n`, ["the model", "the download"], MODEL_WORDS], r.err);
+    // Here, and the first reading said nothing: there is no answer to keep, so it is read again by the node found again.
+    r = run({ here: MODEL_WORDS, first: "broken" });
+    assert.deepEqual([r.status, r.out, r.read, r.fetched], [0, `${NOT_THE_PINS()}went on\n`, ["the model", "the model"], false], r.err);
+    // Not here: nothing to read until it is downloaded.
+    r = run({});
+    assert.equal(r.status, 0, r.err);
+    assert.ok(r.out.startsWith("  Model:  to download, about 1.6 GB, to <model>, from ") && r.out.endsWith(`\n${DOWNLOADING}went on\n`), r.out);
+    assert.deepEqual([r.read, r.model], [["the download"], MODEL_WORDS]);
   });
   it("says in its help that the model is downloaded at the pinned revision, and kept only when its SHA-256 is the pin's", () => {
     const r = ask("--print", "--help");
