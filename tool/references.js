@@ -316,7 +316,7 @@ export async function withReferences(ctx, names, make) {
     const references = [];
     for (const ref of names) {
       const file = listed?.pictures.find((picture) => sameName(picture, ref));
-      if (!listed) ctx.say(projectHasNone.noFolder(ref));
+      if (!listed) ctx.say(saidHere(projectHasNone.noFolder(ref), ctx.build));
       else if (!file) ctx.say(projectHasNone.notThere(ref));
       else if (!(await brought(ctx, join(folder, file)))) ctx.say(projectHasNone.coming(file));
       else {

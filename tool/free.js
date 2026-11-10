@@ -43,6 +43,7 @@ import { sizeText } from "./kinds.js";
 import { episodeWork, workFolder } from "./settings.js";
 import { workCopyDir, workCopyLockOf } from "./workcopy.js";
 import { fileAt, recordingAt } from "./where.js";
+import { saidHere } from "./build.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
@@ -281,8 +282,9 @@ export async function freeEpisode(ctx, { found, record }, deps = {}) {
   const { running = () => hyperFramesRunning(), rm = rmSync, list = (path) => readdirSync(path, { withFileTypes: true }) } = deps;
   const { home, say } = ctx;
   const name = shownName(record);
+  // What stops it is the code's own line, said as this Mac says it: an installed Mac's sends her to no Jason (build.js saidHere).
   const stop = (why) => {
-    say(why);
+    say(saidHere(why, ctx.build));
     return 1;
   };
 

@@ -4,9 +4,12 @@
 // program is real.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BUILD_FILE } from "../build.js";
 import { editMain } from "../edit.js";
+import { guardAnswer } from "../open-lock.js";
 import { NEWEST_VERSION, recordFile } from "../episode.js";
 import { setup, episodeFor, FOLDER, ID } from "./episodes.js";
 
@@ -70,6 +73,37 @@ describe("what is said of an episode, on an installed Mac", () => {
       assert.equal(dev[at].trim(), "An episode of 2026-10-14 from the Mac Studio whose record cannot be read: ask Jason.");
       assert.equal(installed[at].trim(), "An episode of 2026-10-14 from the Mac Studio whose record cannot be read: ask help@example.invalid.");
       assert.equal(unnamed[at].trim(), "An episode of 2026-10-14 from the Mac Studio whose record cannot be read.");
+    }
+  });
+});
+
+describe("the guard on her folder, on an installed Mac", () => {
+  /** A call the strict guard refuses, on a Mac with no settings: `checkout` is where the guard's own copy is, whose build.json says which Mac it is. */
+  const refusal = async (checkout, deps = {}) => {
+    const home = mkdtempSync(join(tmpdir(), "brimm-guard-"));
+    try {
+      const folder = join(home, "BRIMM Video Studio");
+      mkdirSync(folder, { recursive: true });
+      return await guardAnswer({ tool_name: "Bash", tool_input: { command: "ls" } }, { checkout, node: "/opt/homebrew/bin/node", folder, deps });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  };
+
+  it("names the support contact in what it refuses, by the build of the copy it runs from, and Jason on a checkout", async () => {
+    const dev = "In this folder Claude runs only BRIMM Video Studio's own commands. Ask Jason for anything else.";
+    assert.deepEqual(await refusal("/checkout"), { decision: "deny", reason: dev });
+    assert.deepEqual(await refusal("/checkout", { build: DEV }), { decision: "deny", reason: dev });
+    assert.deepEqual(await refusal("/checkout", { build: INSTALLED }), { decision: "deny", reason: "In this folder Claude runs only BRIMM Video Studio's own commands. Ask help@example.invalid for anything else." });
+    assert.deepEqual(await refusal("/checkout", { build: UNNAMED }), { decision: "deny", reason: "In this folder Claude runs only BRIMM Video Studio's own commands." });
+    // With no build given it reads the build.json of its own copy, as the hook does.
+    const app = mkdtempSync(join(tmpdir(), "brimm-guard-app-"));
+    try {
+      const { mode, broken, ...written } = INSTALLED;
+      writeFileSync(join(app, BUILD_FILE), JSON.stringify(written));
+      assert.deepEqual(await refusal(app), { decision: "deny", reason: "In this folder Claude runs only BRIMM Video Studio's own commands. Ask help@example.invalid for anything else." });
+    } finally {
+      rmSync(app, { recursive: true, force: true });
     }
   });
 });

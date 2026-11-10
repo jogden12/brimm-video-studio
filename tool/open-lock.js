@@ -59,6 +59,7 @@ import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, WORD, editStart, guardDecision, openSe
 import { TOOLS_WITH_RULES, effectiveLock, factsOf, readSettings, settingsFile, studioAllowOf, studioNodeOf } from "./settings.js";
 import { UNSCOPED, SESSION_TAUGHT } from "./gate.js";
 import { argsOf, chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
+import { buildOf, saidHere } from "./build.js";
 
 export const NEVER_REFUSED = "That is never done from this folder: nothing here posts, sends, publishes or shares, or works the screen, the browser or another session. Ask Jason.";
 export const NOT_NAMED = "That is not among the tools and skills this folder allows. Ask Jason.";
@@ -459,6 +460,14 @@ function lookUp(host) {
     after a sandboxed `cd`, when that `cwd` is her folder or inside it. A chat is held by the held check (held.js), its claude the one
     above the guard. */
 export async function guardAnswer(input, { checkout, node, folder, deps = {} }) {
+  const answered = await answerOf(input, { checkout, node, folder, deps });
+  // What it refuses with is the code's own line, said as this Mac says it: an installed Mac's sends her to no Jason (build.js saidHere).
+  // Which Mac this is comes from the build.json of the copy the guard runs from (`deps.build` in a test).
+  return answered.decision === "deny" ? { ...answered, reason: saidHere(answered.reason, deps.build ?? buildOf(checkout)) } : answered;
+}
+
+/** guardAnswer's answer, with each refusal in a checkout's words. */
+async function answerOf(input, { checkout, node, folder, deps = {} }) {
   const today = () => guardDecision(input, { checkout, node, folder, ...(deps.tmp !== undefined ? { tmp: deps.tmp } : {}), ...(deps.uid !== undefined ? { uid: deps.uid } : {}) });
   if (typeof folder !== "string" || !isAbsolute(folder)) return today();
   const home = dirname(folder);

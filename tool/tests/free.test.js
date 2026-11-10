@@ -537,6 +537,23 @@ describe("free: a session clip's folder, however the record spells it", () => {
   });
 });
 
+describe("free, on an installed Mac (the sweep)", () => {
+  it("sends her to the support contact, not to Jason, when the folder is not as it was made", async (c) => {
+    const SWEPT = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+    for (const [build, line] of [
+      [SWEPT, "The folder for Pricing talk on this Mac is not as it was made, so nothing was taken away. Ask help@example.invalid."],
+      [{ ...SWEPT, support: "" }, "The folder for Pricing talk on this Mac is not as it was made, so nothing was taken away."],
+      [{ mode: "dev" }, "The folder for Pricing talk on this Mac is not as it was made, so nothing was taken away. Ask Jason."]
+    ]) {
+      const w = world(c, { names: [MAIN, CLIP], listed: [MAIN, CLIP] });
+      w.ctx.build = build;
+      const record = { ...w.record, app: { ...w.record.app, projects: [...w.record.app.projects, entry("main", "x".repeat(300), w.made)] } };
+      assert.equal(await w.run({}, record), 1);
+      assert.deepEqual(w.said, [line]);
+    }
+  });
+});
+
 describe("free: it looks again at each path just before it goes", () => {
   const STUCK = "Part of it could not be taken away. Ask Jason.";
   /** A folder outside the work folder with a project's shape in it: what a link swapped in after the first look would lead to. */

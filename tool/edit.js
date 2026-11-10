@@ -1047,7 +1047,7 @@ function episodeLines(ctx, e, left, all, links) {
   const handEdited = scriptHandEdited(e.folder, record);
   const looked = { machine: ctx.machine, localFolder: folderAt(ctx, { folder: e.folder, record }, "local") };
   for (const problem of fileProblems(e.folder, record, looked)) if (!(handEdited && problem.file === "teleprompter.txt")) lines.push(`    ${clean(filePlace(record, problem.file) === "local" && keptOnAMac(record) ? asSaid(ctx, notWholeHere(isGated(e) ? listedAs(ctx, e) : shownName(record), problem.file)) : fileProblemSaid(ctx, problem))}`);
-  if (handEdited) lines.push(`    ${HAND_EDITED(record)}`);
+  if (handEdited) lines.push(`    ${asSaid(ctx, HAND_EDITED(record))}`);
   return lines;
 }
 
@@ -3751,7 +3751,7 @@ async function reels(ctx, rest) {
     // `app … reel <n>` has made, which has a project in the record (on this Mac or the other's) and is picked.
     const dropped = new Set((record.reels || []).filter((r) => r.status === "dropped").map((r) => r.n));
     const open = read.reels.candidates.filter((c) => uncropped(c) && !dropped.has(c.n) && !madeInApp(record, c.n)).map((c) => c.n);
-    if (!gated(record) && open.length) ctx.say(appOf(ctx.settings) ? makeOneWords(open, shownName(record)) : notMadeWords());
+    if (!gated(record) && open.length) ctx.say(appOf(ctx.settings) ? makeOneWords(open, shownName(record)) : asSaid(ctx, notMadeWords()));
     return 0;
   }
   // Whether Claude can be asked again is said as this Mac finds it now, in the words ask would refuse with (PR 19's review).
