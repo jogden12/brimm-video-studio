@@ -94,6 +94,7 @@ export function mac({ settings = "none", apps = [], dropbox = true, claude = "si
   ].join("\n"));
   standIn(join(bin, "installer"), [
     `echo "installer $*" >> "${ranFile}"`,
+    `{ printf 'installer-args'; for a in "$@"; do printf '\\t%s' "$a"; done; printf '\\n'; } >> "${ranFile}"`,
     `while [ -f "${join(dir, "hold")}" ]; do sleep 0.1; done`,
     `if [ -f "${join(dir, "says", "check-log")}" ]; then mkdir -p "${join(home, "Library", "Logs")}"; cat "${join(dir, "says", "check-log")}" >> "${join(home, "Library", "Logs", "brimm-video-claude-check.log")}"; fi`,
     `[ -f "${join(dir, "says", "installer")}" ] && cat "${join(dir, "says", "installer")}"`,
@@ -122,9 +123,10 @@ export function mac({ settings = "none", apps = [], dropbox = true, claude = "si
   return { dir, home, root, app, tools, checkout, programs, ran: copy.ran, done: copy.done };
 }
 
-/** The installer's calls in what `ran()` holds, each as its arguments. An argument with a space in it is split, as the stand-in
-    writes its arguments with `$*`. */
-export const installCalls = (ran) => ran.split("\n").filter((line) => line.startsWith("installer ")).map((line) => line.slice("installer ".length).split(" "));
+/** The installer's calls in what `ran()` holds, each as its arguments exactly as they were given, spaces and all. The stand-in writes
+    each call twice: as a readable line, "installer <arguments>", and as an "installer-args" line with a tab before each argument,
+    which is the one read here. */
+export const installCalls = (ran) => ran.split("\n").filter((line) => line.startsWith("installer-args")).map((line) => line.split("\t").slice(1));
 
 /** The text of this Mac's settings file, or null when there is none. */
 export const settingsOf = (home) => (existsSync(settingsFile(home)) ? readFileSync(settingsFile(home), "utf8") : null);

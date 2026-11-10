@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { HELPERS } from "../helpers.js";
 import { readSettings, writeSettings } from "../settings.js";
 import { DAMAGED as INSTALL_DAMAGED, HDR_LISTS, appCopy } from "./app-copy.js";
-import { mac, notAMac, printOnly } from "./setup-harness.js";
+import { installCalls, mac, notAMac, printOnly } from "./setup-harness.js";
 import { DAMAGED, PROGRAMS, copyFault, kindOf } from "../setup/checks.js";
 
 const INSTALL = readFileSync(fileURLToPath(new URL("../install.sh", import.meta.url)), "utf8");
@@ -213,5 +213,18 @@ describe("what the engine says of the copy is the installer's", () => {
   it("the engine's DAMAGED words are install.sh's", () => {
     assert.ok(INSTALL.includes(`DAMAGED="${DAMAGED}"`));
     assert.equal(DAMAGED, INSTALL_DAMAGED);
+  });
+});
+
+describe("the made-up Mac's installer", () => {
+  it("the installer's calls keep each argument whole, spaces and all", () => {
+    withMac({}, (m) => {
+      const first = ["--print", "--machine", "Studio Test", "--app", join(m.dir, "My Apps", "BRIMM Video Studio.app"), "--root", join(m.home, "The BRIMM DB", "BRIMM Video")];
+      const second = ["--yes", "--tools", m.tools];
+      const none = [];
+      for (const args of [first, none, second]) assert.equal(spawnSync(m.programs.installer[0], args, { encoding: "utf8" }).status, 0);
+      assert.deepEqual(installCalls(m.ran()), [first, none, second]);
+      assert.match(m.ran(), /^installer --print --machine Studio Test --app /m, "ran() still reads as text");
+    });
   });
 });
