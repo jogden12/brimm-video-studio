@@ -13,6 +13,7 @@ import { runsFolder, workFolder } from "../settings.js";
 
 const TOOL = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BUSY = join(TOOL, "busy.js");
+const EDIT = join(TOOL, "edit.js");
 const alive = (pid) => pid === 4321;
 /** A temp folder that is not there, for a test with no home of its own. */
 const NO_TEMP = join(TOOL, "tests", "no such temp folder");
@@ -80,6 +81,12 @@ describe("idleWhy", () => {
     assert.equal(launchdPid({ run, uid: 501 }), 77);
     assert.deepEqual(calls, [["/bin/launchctl", "print", "gui/501/com.thebrimm.unedited"]]);
     assert.equal(launchdPid({ run: () => ({ status: 113, stdout: "" }), uid: 501 }), null);
+  });
+
+  it("a launch agent whose print says pid = 0 is not running", () => {
+    const printing = (text) => ({ run: () => ({ status: 0, stdout: text }), uid: 501 });
+    assert.equal(launchdPid(printing("\tstate = waiting\n\tpid = 0\n")), null);
+    assert.equal(launchdPid(printing("\tstate = running\n\tpid = 412\n")), 412);
   });
 
   it("says an import holds its lock while its process lives, for half a day at most", () => {
@@ -215,6 +222,22 @@ describe("idleWhy", () => {
   it("keeps run.js's half day", () => {
     assert.equal(RUNS_LOCK_STALE_MS, 43200000);
     assert.ok(readFileSync(join(TOOL, "run.js"), "utf8").includes("const STALE_LOCK_MS = 12 * 3600 * 1000;"));
+  });
+});
+
+describe("the one parser of launchctl print", () => {
+  it("edit.js reads the launch agent's pid with busy.js's parser, and has none of its own", () => {
+    const text = readFileSync(EDIT, "utf8");
+    const imports = text.split("\n").filter((line) => line.startsWith("import ") && line.includes('from "./busy.js"'));
+    assert.equal(imports.length, 1, "one import from ./busy.js");
+    assert.ok(imports[0].includes("launchdPid"), "it imports launchdPid");
+    assert.ok(imports[0].includes("AGENT_LABEL"), "it imports AGENT_LABEL");
+    // Its old two expressions, `/^\s*pid = \d+/m` and `/^\s*pid = (\d+)/m`, are gone: the parser is busy.js's pidFromPrint alone.
+    for (const own of ["pid = \\d", "pid = (\\d"]) assert.ok(!text.includes(own), `edit.js holds no ${own} of its own`);
+    // The label is named once, in busy.js: edit.js takes AGENT_LABEL and holds no string of its own.
+    for (const quoted of ['"com.thebrimm.unedited"', "'com.thebrimm.unedited'", "`com.thebrimm.unedited`"]) assert.ok(!text.includes(quoted), `edit.js holds no ${quoted}`);
+    // And launchctl print is asked by busy.js alone.
+    assert.ok(!text.includes('["print"'), "edit.js does not run launchctl print itself");
   });
 });
 

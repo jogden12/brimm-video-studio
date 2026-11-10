@@ -98,6 +98,7 @@ import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, 
 import { isMedia } from "./lib.js";
 import { quotable, shellWord, studioFiles, studioFolder } from "./studio.js";
 import { UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "./build.js";
+import { AGENT_LABEL, launchdPid } from "./busy.js";
 import { checkForUpdate, updateLine } from "./update-check.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
@@ -1700,20 +1701,19 @@ export function openApp(app, file, run = spawnSync) {
   if (ran.status !== 0) throw new Error(`${app} could not be opened (${lastLine(ran.stderr)})`);
 }
 
-/** The launch agent that imports this Mac's drop folder. */
-const AGENT = "com.thebrimm.unedited";
+/** The launch agent that imports this Mac's drop folder: busy.js names it. */
+const AGENT = AGENT_LABEL;
 
-/** Whether the launch agent's run is at work now: launchctl names its process while it runs. */
+/** Whether the launch agent's run is at work now: launchd names its process while it runs. busy.js's one parser reads
+    `launchctl print`, so a job shown with `pid = 0` is not running. */
 function agentRunning() {
-  const ran = spawnSync("/bin/launchctl", ["print", `gui/${process.getuid()}/${AGENT}`], { encoding: "utf8" });
-  return ran.status === 0 && /^\s*pid = \d+/m.test(ran.stdout);
+  return launchdPid() !== null;
 }
 
-/** The process number launchctl names for the launch agent while it runs (`pid = N`), or null when it is not running or cannot be asked. */
+/** The process number launchd names for the launch agent while it runs, or null when it is not running or cannot be asked
+    (busy.js launchdPid). */
 function agentPid() {
-  const ran = spawnSync("/bin/launchctl", ["print", `gui/${process.getuid()}/${AGENT}`], { encoding: "utf8" });
-  const found = ran.status === 0 ? /^\s*pid = (\d+)/m.exec(ran.stdout) : null;
-  return found ? Number(found[1]) : null;
+  return launchdPid();
 }
 
 /** The real path of the node the launch agent's plist names (ProgramArguments.0, in `home`'s LaunchAgents folder, as install.sh writes it),
