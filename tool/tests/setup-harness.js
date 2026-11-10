@@ -7,6 +7,7 @@ import { PassThrough, Writable } from "node:stream";
 import { dirname, join } from "node:path";
 import { appCopy } from "./app-copy.js";
 import { settingsFile, writeSettings } from "../settings.js";
+import { LABELS } from "../setup/install.js";
 
 export const notAMac = process.platform !== "darwin" ? "the installer is for a Mac, and so is plutil, which reads what it would write" : false;
 
@@ -153,12 +154,19 @@ export function printOnly(m) {
   return [guard];
 }
 
+/** A stage that stands in for one of the engine's three: it says it is running and then done, and downloads, runs and writes nothing. */
+const standInStage = (part) => async ({ progress }) => {
+  for (const state of ["running", "done"]) progress({ part, label: LABELS[part], done: 0, total: null, state });
+  return "done";
+};
+
 /** Runs the engine once, in this process, as the app's shell would start it, and gives { code, events, errors }: its exit code, each
-    event it sent (the JSON lines of its output) and each line it wrote for a developer. `answers(event)` is called with every event;
-    a line it gives back, as text or as an object, is sent to the engine. engine.js is imported when this is first called, so that
-    this file loads before the engine exists. The engine is given no real launchd to wait on, no sleeping, and an Applications
-    folder of the made-up Mac that holds nothing. */
-export async function drive(m, { run, answers = () => undefined, why = () => "", argv, look } = {}) {
+    event it sent (the JSON lines of its output) and each line it wrote for a developer. `answers(event, input)` is called with every
+    event; a line it gives back, as text or as an object, is sent to the engine, and `input` is the engine's stdin, which a test may
+    end or break. engine.js is imported when this is first called, so that this file loads before the engine exists. The engine is
+    given no real launchd to wait on, no sleeping, an Applications folder of the made-up Mac that holds nothing, and stand-ins for
+    its three stages (Decided 37), of which `stages` replaces any it names. */
+export async function drive(m, { run, answers = () => undefined, why = () => "", argv, look, stages = {} } = {}) {
   const { runSetup } = await import("../setup/engine.js");
   const input = new PassThrough();
   const events = [];
@@ -179,11 +187,12 @@ export async function drive(m, { run, answers = () => undefined, why = () => "",
     if (line === "") return;
     const event = JSON.parse(line);
     events.push(event);
-    const reply = answers(event);
-    if (reply !== undefined && reply !== null) input.write(`${typeof reply === "string" ? reply : JSON.stringify(reply)}\n`);
+    const reply = answers(event, input);
+    if (reply !== undefined && reply !== null && input.writable) input.write(`${typeof reply === "string" ? reply : JSON.stringify(reply)}\n`);
   });
   const stderr = lines((line) => errors.push(line));
-  const given = { programs: m.programs, applications: join(m.dir, "Applications"), ...(look ? { look } : {}) };
+  const own = { model: standInStage("model"), cli: standInStage("hyperframes"), chrome: standInStage("chrome"), ...stages };
+  const given = { programs: m.programs, applications: join(m.dir, "Applications"), stages: own, ...(look ? { look } : {}) };
   const code = await runSetup({
     argv: argv ?? ["--run", run, "--app", m.app, "--tools", m.tools, "--protocol", "1"],
     input, output, errors: stderr, home: m.home, checkout: m.checkout,
