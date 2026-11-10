@@ -14,6 +14,8 @@ import { runsFolder, workFolder } from "../settings.js";
 const TOOL = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BUSY = join(TOOL, "busy.js");
 const alive = (pid) => pid === 4321;
+/** A temp folder that is not there, for a test with no home of its own. */
+const NO_TEMP = join(TOOL, "tests", "no such temp folder");
 const JOB = "The import is at work: its background job, com.thebrimm.unedited, is running (process 4321).";
 const LOCK = "An import is at work: it holds its lock (process 4321).";
 
@@ -27,6 +29,12 @@ function withHome(body) {
   }
 }
 
+/** A temp folder of the made-up Mac's own, inside its home: no test reads this computer's real temp folder, where an import that
+    is not for episodes keeps its lock (run.js lockFile). */
+const tempOf = (home) => join(home, "its temp folder");
+/** idleWhy on the made-up Mac whose home is `home`, with its own temp folder. */
+const whyOn = (home, options) => idleWhy({ home, temp: tempOf(home), ...options });
+
 const holding = (file, held) => {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(held));
@@ -37,20 +45,27 @@ const importLock = (home, text = "4321") => {
   writeFileSync(file, text);
   return file;
 };
+/** The lock of an import of a folder that is not for episodes: run.js keeps it in the temp folder. */
+const oldImportLock = (home, text = "4321") => {
+  const file = lockFile("/Volumes/Work/An old folder", tempOf(home));
+  mkdirSync(tempOf(home), { recursive: true });
+  writeFileSync(file, text);
+  return file;
+};
 
 describe("idleWhy", () => {
   it("is idle when nothing is at work, and when BRIMM Video Work is not there or is a file", () => {
     withHome((home) => {
-      assert.equal(idleWhy({ home, agentPid: null, alive }), "");
+      assert.equal(whyOn(home, { agentPid: null, alive }), "");
       writeFileSync(workFolder(home), "x");
-      assert.equal(idleWhy({ home, agentPid: null, alive }), "");
+      assert.equal(whyOn(home, { agentPid: null, alive }), "");
     });
   });
 
   it("says the background job is at work while launchd names its process", () => {
     withHome((home) => {
-      assert.equal(idleWhy({ home, agentPid: 4321, alive }), JOB);
-      assert.equal(idleWhy({ home, agentPid: null, alive }), "");
+      assert.equal(whyOn(home, { agentPid: 4321, alive }), JOB);
+      assert.equal(whyOn(home, { agentPid: null, alive }), "");
     });
   });
 
@@ -71,15 +86,57 @@ describe("idleWhy", () => {
     withHome((home) => {
       const file = importLock(home);
       const now = Date.now();
-      assert.equal(idleWhy({ home, agentPid: null, alive, now }), LOCK);
-      assert.equal(idleWhy({ home, agentPid: null, alive: () => false, now }), "");
+      assert.equal(whyOn(home, { agentPid: null, alive, now }), LOCK);
+      assert.equal(whyOn(home, { agentPid: null, alive: () => false, now }), "");
       const old = new Date(now - RUNS_LOCK_STALE_MS - 1000);
       utimesSync(file, old, old);
-      assert.equal(idleWhy({ home, agentPid: null, alive, now }), "");
+      assert.equal(whyOn(home, { agentPid: null, alive, now }), "");
       writeFileSync(file, "x");
       const fresh = new Date(now);
       utimesSync(file, fresh, fresh);
-      assert.equal(idleWhy({ home, agentPid: null, alive, now }), "");
+      assert.equal(whyOn(home, { agentPid: null, alive, now }), "");
+    });
+  });
+
+  it("says an import of a folder that is not for episodes holds its lock, which run.js keeps in the temp folder", () => {
+    withHome((home) => {
+      const file = oldImportLock(home);
+      const now = Date.now();
+      // This Mac has no runs folder at all: the temp folder is looked in all the same.
+      assert.equal(whyOn(home, { agentPid: null, alive, now }), LOCK);
+      assert.equal(whyOn(home, { agentPid: null, alive: () => false, now }), "");
+      // Another temp folder holds no lock.
+      assert.equal(idleWhy({ home, temp: join(home, "another temp folder"), agentPid: null, alive, now }), "");
+      const old = new Date(now - RUNS_LOCK_STALE_MS - 1000);
+      utimesSync(file, old, old);
+      assert.equal(whyOn(home, { agentPid: null, alive, now }), "");
+      writeFileSync(file, "x");
+      const fresh = new Date(now);
+      utimesSync(file, fresh, fresh);
+      assert.equal(whyOn(home, { agentPid: null, alive, now }), "");
+    });
+  });
+
+  it("looks in both folders: a lock left by a dead run in one does not hide a held lock in the other", () => {
+    withHome((home) => {
+      const now = Date.now();
+      importLock(home, "99");
+      oldImportLock(home, "4321");
+      assert.equal(whyOn(home, { agentPid: null, alive, now }), LOCK);
+    });
+    withHome((home) => {
+      const now = Date.now();
+      importLock(home, "4321");
+      oldImportLock(home, "99");
+      assert.equal(whyOn(home, { agentPid: null, alive, now }), LOCK);
+    });
+  });
+
+  it("takes only an import's lock in the temp folder: another file there holds nothing", () => {
+    withHome((home) => {
+      mkdirSync(tempOf(home), { recursive: true });
+      for (const name of ["brimm-transcribe-0123456789abcdef.txt", "another.lock", "brimm-transcribe.lock.old"]) writeFileSync(join(tempOf(home), name), "4321");
+      assert.equal(whyOn(home, { agentPid: null, alive }), "");
     });
   });
 
@@ -87,19 +144,19 @@ describe("idleWhy", () => {
     withHome((home) => {
       const lock = lockOf(home, "2026-11-09 Jane Client session Mac Studio");
       holding(lock, { pid: 4321, command: "finish", nonce: "n" });
-      const line = idleWhy({ home, agentPid: null, alive });
+      const line = whyOn(home, { agentPid: null, alive });
       assert.equal(line, "A command is at work on an episode: finish (process 4321).");
       assert.doesNotMatch(line, /Jane|Client/);
       holding(lock, { pid: 4321, command: "rm -rf ~", nonce: "n" });
-      assert.equal(idleWhy({ home, agentPid: null, alive }), "A command is at work on an episode (process 4321).");
-      assert.equal(idleWhy({ home, agentPid: null, alive: () => false }), "");
+      assert.equal(whyOn(home, { agentPid: null, alive }), "A command is at work on an episode (process 4321).");
+      assert.equal(whyOn(home, { agentPid: null, alive: () => false }), "");
     });
   });
 
   it("says a video is being made ready for HyperFrames while its when-ready lock is held", () => {
     withHome((home) => {
       holding(whenReadyLockOf(home, "2026-11-09 a video Mac Studio"), { pid: 4321, command: "app" });
-      assert.equal(idleWhy({ home, agentPid: null, alive }), "A video is being made ready for HyperFrames (process 4321).");
+      assert.equal(whyOn(home, { agentPid: null, alive }), "A video is being made ready for HyperFrames (process 4321).");
     });
   });
 
@@ -109,12 +166,12 @@ describe("idleWhy", () => {
       const folder = "2026-11-09 a video Mac Studio";
       holding(lockOf(home, folder), { pid: 4321, command: "finish", nonce: "n" });
       holding(whenReadyLockOf(home, folder), { pid: 4321, command: "app" });
-      assert.equal(idleWhy({ home, agentPid: 4321, alive }), JOB);
-      assert.equal(idleWhy({ home, agentPid: null, alive }), LOCK);
+      assert.equal(whyOn(home, { agentPid: 4321, alive }), JOB);
+      assert.equal(whyOn(home, { agentPid: null, alive }), LOCK);
       rmSync(lock);
-      assert.equal(idleWhy({ home, agentPid: null, alive }), "A command is at work on an episode: finish (process 4321).");
+      assert.equal(whyOn(home, { agentPid: null, alive }), "A command is at work on an episode: finish (process 4321).");
       rmSync(lockOf(home, folder));
-      assert.equal(idleWhy({ home, agentPid: null, alive }), "A video is being made ready for HyperFrames (process 4321).");
+      assert.equal(whyOn(home, { agentPid: null, alive }), "A video is being made ready for HyperFrames (process 4321).");
     });
   });
 
@@ -122,8 +179,8 @@ describe("idleWhy", () => {
     const was = process.env.BRIMM_VIDEO_HOME;
     process.env.BRIMM_VIDEO_HOME = "relative";
     try {
-      assert.equal(idleWhy({ agentPid: null }), CANNOT_TELL);
-      assert.equal(idleWhy({ agentPid: 4321 }), JOB);
+      assert.equal(idleWhy({ agentPid: null, temp: NO_TEMP }), CANNOT_TELL);
+      assert.equal(idleWhy({ agentPid: 4321, temp: NO_TEMP }), JOB);
     } finally {
       if (was === undefined) delete process.env.BRIMM_VIDEO_HOME;
       else process.env.BRIMM_VIDEO_HOME = was;
@@ -142,8 +199,9 @@ describe("idleWhy", () => {
 });
 
 describe("node busy.js idle-why", () => {
+  // The command's temp folder is node's own (os.tmpdir), which TMPDIR names: each run here is given the made-up Mac's.
   const ask = (home, words, input = "") =>
-    spawnSync(process.execPath, [BUSY, ...words], { input, env: { PATH: "/usr/bin:/bin", HOME: home, BRIMM_VIDEO_HOME: home }, encoding: "utf8" });
+    spawnSync(process.execPath, [BUSY, ...words], { input, env: { PATH: "/usr/bin:/bin", HOME: home, BRIMM_VIDEO_HOME: home, TMPDIR: tempOf(home) }, encoding: "utf8" });
 
   it("as a command, reads what launchctl printed from its standard input, says why and ends 1 when something is at work, and says nothing and ends 0 when nothing is", () => {
     withHome((home) => {
@@ -163,8 +221,20 @@ describe("node busy.js idle-why", () => {
     });
   });
 
+  it("as a command, looks for the lock of an import that is not for episodes in node's own temp folder", () => {
+    withHome((home) => {
+      const words = ["idle-why", "--launchd", "-"];
+      mkdirSync(tempOf(home), { recursive: true });
+      const idle = ask(home, words, "");
+      assert.deepEqual([idle.status, idle.stdout], [0, ""]);
+      oldImportLock(home, String(process.pid));
+      const held = ask(home, words, "");
+      assert.deepEqual([held.status, held.stdout], [1, `An import is at work: it holds its lock (process ${process.pid}).\n`]);
+    });
+  });
+
   it("ends 2 and says why on standard error when BRIMM_VIDEO_HOME is refused", () => {
-    const r = spawnSync(process.execPath, [BUSY, "idle-why"], { env: { PATH: "/usr/bin:/bin", BRIMM_VIDEO_HOME: "relative" }, encoding: "utf8" });
+    const r = spawnSync(process.execPath, [BUSY, "idle-why"], { env: { PATH: "/usr/bin:/bin", BRIMM_VIDEO_HOME: "relative", TMPDIR: NO_TEMP }, encoding: "utf8" });
     assert.equal(r.status, 2);
     assert.equal(r.stdout, "");
     assert.ok(r.stderr.trim().length > 0, "a refusal is said");
@@ -173,8 +243,20 @@ describe("node busy.js idle-why", () => {
   it("ends 2 and says so on standard error when standard input cannot be read", () => {
     withHome((home) => {
       // A folder given as standard input cannot be read.
-      const closed = spawnSync("/bin/sh", ["-c", `exec 0<"${home}"; "${process.execPath}" "${BUSY}" idle-why --launchd -`], { env: { PATH: "/usr/bin:/bin", HOME: home, BRIMM_VIDEO_HOME: home }, encoding: "utf8" });
+      const closed = spawnSync("/bin/sh", ["-c", `exec 0<"${home}"; "${process.execPath}" "${BUSY}" idle-why --launchd -`], { env: { PATH: "/usr/bin:/bin", HOME: home, BRIMM_VIDEO_HOME: home, TMPDIR: tempOf(home) }, encoding: "utf8" });
       assert.deepEqual([closed.status, closed.stdout, closed.stderr], [2, "", "Standard input could not be read.\n"]);
     });
+  });
+});
+
+describe("busy.test.js itself", () => {
+  it("gives every idleWhy a temp folder of the test's own, and every run of the command a TMPDIR, so none reads this computer's real one", () => {
+    const text = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    const calls = text.split("idleWhy(").slice(1).map((rest) => rest.split("\n")[0]);
+    // The import's own line, the helper's, and this test's two are not calls with options.
+    const without = calls.filter((rest) => rest.startsWith("{") && !rest.includes("temp:"));
+    assert.deepEqual(without, []);
+    const spawns = text.split("\n").filter((line) => line.includes("spawnSync(") && line.includes("BUSY") && !line.includes("TMPDIR:"));
+    assert.deepEqual(spawns, []);
   });
 });

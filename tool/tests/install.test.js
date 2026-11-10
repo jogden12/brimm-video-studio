@@ -73,19 +73,25 @@ const ask = (...args) => askOn({}, ...args);
     is given are kept, as what `asked` says of them, one to a line. `onPath` names more stand-ins to put first on
     its PATH, each with the shell text it runs, such as "xcode-select" or "sw_vers". With
     `bare`, the Mac has no Homebrew: there is no stand-in brew, and the installer looks for programs on PATH alone, which
-    holds the stand-ins and /usr/bin and /bin. `install` is the installer to ask, this checkout's unless a test gives a copy's. */
+    holds the stand-ins and /usr/bin and /bin. `install` is the installer to ask, this checkout's unless a test gives a copy's.
+    Every run is given a temp folder of its own (TMPDIR), empty unless `temp` names files to put there, each as [name, text]: an
+    import of a folder that is not for episodes keeps its lock in the temp folder, where busy.js looks, and no test reads this
+    computer's real one. */
 function askOn(installed, ...args) {
   return askWith({ installed }, ...args);
 }
-function askWith({ installed = {}, programs = [], files = [], launchd, agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, ffmpegSays, settings, bare = false, install = INSTALL }, ...args) {
+function askWith({ installed = {}, programs = [], files = [], temp = [], launchd, agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, ffmpegSays, settings, bare = false, install = INSTALL }, ...args) {
   // The one rule of this file: nothing is run without --print.
   assert.ok(args.includes("--print"), "the installer is only ever asked what it would do");
   const dir = mkdtempSync(join(tmpdir(), "brimm-install-"));
   try {
     const home = join(dir, "home");
     const bin = join(dir, "bin");
+    const tmp = join(dir, "tmp");
     mkdirSync(home);
     mkdirSync(bin);
+    mkdirSync(tmp);
+    for (const [name, text] of temp) writeFileSync(join(tmp, name), text);
     // An argument may be a function of the home folder made for the test, which has no name until now: a folder in it.
     args = args.map((arg) => (typeof arg === "function" ? arg(home) : arg));
     const fileOf = (label) => join(home, "Library", "LaunchAgents", `${label}.plist`);
@@ -134,7 +140,7 @@ function askWith({ installed = {}, programs = [], files = [], launchd, agentPath
     const env = {
       // The node that runs these tests is on the PATH of the installer, whatever PATH the tests were started with: with --machine it
       // reads this Mac's settings with node, before anything is changed. `bare` is a Mac with no Homebrew and no node.
-      HOME: home, PATH: bare ? `${bin}:/usr/bin:/bin` : `${bin}:${process.env.PATH}:${dirname(process.execPath)}`, ...(agentPath ? { BRIMM_AGENT_PATH: agentPath } : {}),
+      HOME: home, TMPDIR: tmp, PATH: bare ? `${bin}:/usr/bin:/bin` : `${bin}:${process.env.PATH}:${dirname(process.execPath)}`, ...(agentPath ? { BRIMM_AGENT_PATH: agentPath } : {}),
       ...(stands["claude-stand-in"] ? { BRIMM_CLAUDE: join(bin, "claude-stand-in") } : {}), ...(bare ? { BRIMM_HOMEBREW_DIRS: "" } : {})
     };
     const r = spawnSync("/bin/zsh", [install, ...args], { encoding: "utf8", input: "", env });
@@ -3037,6 +3043,18 @@ describe("waiting for nothing at work (Studio app phase 4)", { skip: notAMac }, 
       d.done();
     }
   });
+  it("names an import of a folder that is not for episodes too, by its lock in the temp folder, which here is the test's own", () => {
+    const d = dropbox();
+    try {
+      const lock = askApp({ temp: [["brimm-transcribe-fedcba9876543210.lock", String(process.pid)]] }, d.root);
+      assert.equal(lock.status, 0, lock.err + lock.out);
+      assert.ok(lock.out.includes(`\n  At work now:  An import is at work: it holds its lock (process ${process.pid}). ${UNTIL}\n`), lock.out);
+      assert.equal(lock.ran, "");
+      assert.deepEqual(lock.left, []);
+    } finally {
+      d.done();
+    }
+  });
   it("in dev mode asks launchd nothing and says no such line", () => {
     const d = dropbox();
     try {
@@ -3074,7 +3092,8 @@ describe("waiting for nothing at work (Studio app phase 4)", { skip: notAMac }, 
         writeFileSync(join(dir, "bin", "launchctl"), `#!/bin/sh\n${launchctl}\n`);
         chmodSync(join(dir, "bin", "launchctl"), 0o755);
         const script = `set -euo pipefail\nLABEL="${label}"\nHERE="${HERE}"\nnode="${node}"\ntools=/x\nBUSY=75\n${functionOf("say")}${functionOf("idle_why")}${block}print -r -- "went on"\n`;
-        return spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { HOME: dir, BRIMM_VIDEO_HOME: dir, PATH: `${join(dir, "bin")}:/usr/bin:/bin` } });
+        // busy.js looks in node's temp folder too: the test's own, never this computer's.
+        return spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { HOME: dir, BRIMM_VIDEO_HOME: dir, TMPDIR: join(dir, "tmp"), PATH: `${join(dir, "bin")}:/usr/bin:/bin` } });
       };
       const stopped = run("printf '\\tpid = 4321\\n'", process.execPath);
       assert.deepEqual([stopped.status, stopped.stdout], [75, "\nThe import is at work: its background job, com.thebrimm.unedited, is running (process 4321). Stopped before this Mac's drop folder, its settings and its launch agent were touched: they are as they were. What this run installed or downloaded first stays. Run this again once that is done.\n"], stopped.stderr);
