@@ -518,6 +518,28 @@ describe("signIn", () => {
     });
   });
 
+  it("gives script a pipe for its input, never node's own socket, which macOS script refuses", async () => {
+    await withLogin(async (m) => {
+      const result = await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => ({ code: "x" }) });
+      assert.ok(m.ran().split("\n").includes("script-stdin pipe"), m.ran());
+      assert.equal(m.ran().includes("Operation not supported on socket"), false);
+      assert.deepEqual(result, { signedIn: true, plan: "max" });
+    });
+  });
+
+  it("is back at once when claude ends by itself: the copier of the input ends with script", async () => {
+    await withLogin(async (m, { asked }) => {
+      const quick = join(m.home, ".local", "bin", "claude");
+      writeFileSync(quick, `#!/bin/sh\ncase "$*" in\n  "auth login") echo "Signed in already." ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
+      chmodSync(quick, 0o755);
+      const started = Date.now();
+      const result = await signIn({ ...base(m), linkWaitMs: 4000, settleMs: 4000, ask: async (q) => (asked.push(q), {}) });
+      assert.ok(Date.now() - started < 2500, `took ${Date.now() - started} ms`);
+      assert.deepEqual(asked, []);
+      assert.equal(result.signedIn, true);
+    });
+  });
+
   it("takes a link only once it is whole: one that comes in two writes is asked with whole", async () => {
     await withLogin(async (m, { asked }) => {
       const mine = join(m.home, ".local", "bin", "claude");

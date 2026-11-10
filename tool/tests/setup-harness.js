@@ -38,7 +38,8 @@ const CLAUDE = {
       dir/claude-got.
     - `programs` are stand-ins in dir/bin. Each writes "<name> <arguments>" into `ran()`, prints dir/says/<name> when it is there
       and ends with the number in dir/exits/<name> when it is there. curl writes dir/says/curl's bytes to the file after --output.
-      script runs what follows /dev/null as a job of its own, in a group of its own, as real script puts claude in a session of
+      script refuses a socket for its stdin, as macOS script does (node's own pipes are sockets), and notes in `ran()` when
+      its stdin is a pipe. It runs what follows /dev/null as a job of its own, in a group of its own, as real script puts claude in a session of
       its own, which a kill of script's group does not reach. The job reads script's own stdin through fd 3: a shell with no job
       control (dash, GitHub's Linux /bin/sh, which has no terminal there) gives a background job /dev/null for stdin, and
       shares script's group with it.
@@ -93,6 +94,8 @@ export function mac({ settings = "none", apps = [], dropbox = true, claude = "si
   ].join("\n"));
   standIn(join(bin, "script"), [
     `echo "script $*" >> "${ranFile}"`,
+    `if [ -S /dev/stdin ]; then echo "script: tcgetattr/ioctl: Operation not supported on socket" >&2; exit 1; fi`,
+    `if [ -p /dev/stdin ]; then echo "script-stdin pipe" >> "${ranFile}"; fi`,
     `while [ $# -gt 0 ] && [ "$1" != "/dev/null" ]; do shift; done`,
     `shift`,
     `exec 3<&0`,
