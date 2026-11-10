@@ -277,7 +277,16 @@ export const LINK_QUIET_MS = 150;
 const TOO_LONG = "Signing in took too long. Try again.";
 const NOT_SIGNED_IN = "Claude Code is not signed in yet. Try again.";
 
-/** Signs Claude Code in: runs `claude auth login` under `programs.script`, so that it has a terminal of its own, asks `ask` for the
+/** The shell that starts a sign-in. Its arguments are, after "sh": $1 claude's pid file, $2 claude, $3 the pid file of the copier of the
+    input, $4 script. Script's input has to be a real pipe: node's own pipes are sockets, and macOS script asks its input about its terminal
+    and gives up at once on a socket (a named pipe is a socket on macOS too). So the shell copies node's socket into a pipe with cat, and runs
+    script on the far end of that pipe. Once script ends, cat is ended too: otherwise the shell would wait for it until node closes its end,
+    and a claude that ends by itself would not be seen to end. The wait is bounded and normally runs no time: it only covers script ending
+    before the copier has written its pid. */
+const SIGN_IN_SHELL = `/bin/sh -c 'echo $$ > "$0"; exec /bin/cat' "$3" | { "$4" -q /dev/null /bin/sh -c 'echo $$ > "$1"; exec "$2" auth login' sh "$1" "$2"; s=$?; i=0; while [ ! -s "$3" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; read c < "$3" 2>/dev/null && kill "$c" 2>/dev/null; rm -f "$3"; exit "$s"; }`;
+
+/** Signs Claude Code in: runs `claude auth login` under `programs.script`, so that it has a terminal of its own (script's input goes
+    through cat and a shell pipe, see SIGN_IN_SHELL), asks `ask` for the
     sign-in (with the link, once claude printed an allowed one), writes a pasted code to claude's input and nowhere else, ends claude, and
     gives back only whether Claude Code is then signed in, its plan, and a `fault` when it is not. With `pty` false it starts nothing and only
     asks claude's state (the shell then runs the terminal itself). Nothing claude prints is shown or kept: only a link of it is read. */
@@ -290,8 +299,11 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
     const folder = join(home, "Library", "Caches", "BRIMM Video Studio");
     mkdirSync(folder, { recursive: true });
     const pidFile = join(folder, "claude-login.pid");
+    const catPidFile = join(folder, "claude-login-cat.pid");
     rmSync(pidFile, { force: true });
-    const child = spawn(programs.script, ["-q", "/dev/null", "/bin/sh", "-c", 'echo $$ > "$1"; exec "$2" auth login', "sh", pidFile, claude], { env: claudeEnv({ home, tools }), stdio: ["pipe", "pipe", "pipe"] });
+    rmSync(catPidFile, { force: true });
+    // Node starts the shell above, not script: see SIGN_IN_SHELL for why script's input goes through cat and a pipe.
+    const child = spawn("/bin/sh", ["-c", SIGN_IN_SHELL, "sh", pidFile, claude, catPidFile, programs.script], { env: claudeEnv({ home, tools }), stdio: ["pipe", "pipe", "pipe"] });
     let ended = false;
     const endedP = new Promise((resolve) => {
       child.on("exit", () => ((ended = true), resolve("ended")));
@@ -385,6 +397,7 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
     } finally {
       stop();
       rmSync(pidFile, { force: true });
+      rmSync(catPidFile, { force: true });
       for (const timer of timers) clearTimeout(timer);
       child.stdout.destroy();
       child.stderr.destroy();
