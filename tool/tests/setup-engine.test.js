@@ -274,6 +274,12 @@ const SIGNED_IN = JSON.stringify({ loggedIn: true, authMethod: "claude.ai", emai
 const LINK = "https://claude.ai/oauth/authorize?code=true";
 const withLink = (m) => writeFileSync(join(m.dir, "says", "claude-login"), `Open ${LINK} to sign in.\nPaste the code here if the browser does not open.\n`);
 const valueOf = (summary, label) => summary.lines.find((l) => l.label === label)?.value;
+/** What the Dropbox step says of Dropbox itself, whatever it found: the spec's step 4. */
+const DROPBOX_SAYS = [
+  "Make the BRIMM Video folder available offline in Finder, so it opens without a connection.",
+  "When you drag a video from Dropbox into your drop folder, hold Option, so Dropbox keeps its copy.",
+  "Never export a video into the drop folder: BRIMM Video Studio would take it in as a new video."
+];
 
 describe("a setup, step by step", () => {
   it("a fresh Mac: nine steps in order, and the installer gets the answers", async () => {
@@ -293,7 +299,7 @@ describe("a setup, step by step", () => {
       ]);
       assert.deepEqual(body.name, ["Each Mac that runs BRIMM Video Studio has its own name, so its videos can be told apart."]);
       assert.deepEqual(body.apps, ["BRIMM Video Studio works with these apps. Install the ones that are missing, then continue."]);
-      assert.deepEqual(body.dropbox, [`BRIMM Video is at ${folderWords(m.root, m.home)}.`]);
+      assert.deepEqual(body.dropbox, [`BRIMM Video is at ${folderWords(m.root, m.home)}.`, ...DROPBOX_SAYS]);
       assert.deepEqual(body.folders, ["The drop folder is where you put a video for BRIMM Video Studio to take in.", "The exports folder is where HyperFrames saves a finished video, and where BRIMM Video Studio looks for it."]);
       assert.deepEqual(body.permissions, ["BRIMM Video Studio looks in three folders: the drop folder, the Episodes folder in BRIMM Video, and the exports folder.", 'If macOS asks whether "BRIMM Video Studio" may look in a folder, choose Allow.']);
       assert.deepEqual(body.review, ["This is what Install will do. Nothing has been changed yet."]);
@@ -380,7 +386,7 @@ describe("a setup, step by step", () => {
       assert.deepEqual(stepsOf(events), ["welcome", "name", "apps", "dropbox", "name", "folders"]);
       const steps = events.filter((e) => e.event === "step");
       assert.deepEqual(steps.map((s) => s.n), [1, 2, 3, 4, 2, 5]);
-      assert.deepEqual(steps[3].body, ["More than one BRIMM Video folder is on this Mac. Choose the one to use."]);
+      assert.deepEqual(steps[3].body, ["More than one BRIMM Video folder is on this Mac. Choose the one to use.", ...DROPBOX_SAYS]);
       const dropbox = questionsOf(events).find((q) => q.id === "dropbox");
       assert.deepEqual(dropbox.options.map((o) => o.value), [m.root, other, "look-again"]);
       const names = questionsOf(events).filter((q) => q.id === "name");
@@ -397,7 +403,7 @@ describe("a setup, step by step", () => {
       const root = join(m.home, "Library", "CloudStorage", "Dropbox", "The BRIMM DB", "BRIMM Video");
       const { events } = await go(m, { run: "setup", answers: reply({ ...FRESH, dropbox: () => (mkdirSync(root, { recursive: true }), "look-again") }, cancelAt("drop-folder")) });
       const dropboxes = events.filter((e) => e.event === "step" && e.id === "dropbox");
-      assert.deepEqual(dropboxes.map((s) => s.body), [NO_BRIMM_VIDEO, [`BRIMM Video is at ${folderWords(root, m.home)}.`]]);
+      assert.deepEqual(dropboxes.map((s) => s.body), [[...NO_BRIMM_VIDEO, ...DROPBOX_SAYS], [`BRIMM Video is at ${folderWords(root, m.home)}.`, ...DROPBOX_SAYS]]);
       assert.deepEqual(questionsOf(events).find((q) => q.id === "dropbox").options.map((o) => o.value), ["look-again"]);
       assert.equal(lastOf(events).outcome, "cancelled");
     });

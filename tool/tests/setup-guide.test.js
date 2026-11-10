@@ -69,6 +69,15 @@ describe("the Getting Started guide", () => {
     ]) assert.ok(html.includes(say), say);
   });
 
+  it("the guide explains Dropbox: available offline, Option held while dragging, and never an export into the drop folder", () => {
+    const html = page();
+    for (const say of [
+      "Choose Make available offline.",
+      "When you drag a video from Dropbox into your drop folder, hold Option, so Dropbox keeps its copy.",
+      "Never export a video into the drop folder: BRIMM Video Studio would take it in as a new video.",
+    ]) assert.ok(html.includes(say), say);
+  });
+
   it("the guide says where to start, how an update arrives, Repair, and who to ask", () => {
     const html = page({ missing: ["Dropbox"] });
     for (const say of ["BRIMM Video Studio", UPDATE_SAY.replace(/"/g, "&quot;"), REPAIR, "help@example.test", "<li>Dropbox</li>", "Code tab"]) assert.ok(html.includes(say), say);

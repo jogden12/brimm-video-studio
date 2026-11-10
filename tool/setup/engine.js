@@ -50,6 +50,13 @@ const BODIES = {
   install: ["Setting up this Mac. The download is the longest part: leave this window open."]
 };
 const SEVERAL_BRIMM_VIDEO = ["More than one BRIMM Video folder is on this Mac. Choose the one to use."];
+/** What the Dropbox step says of Dropbox itself, after what it found, whatever that was. A video dragged from Dropbox into a drop
+    folder on the same disk is moved out of Dropbox, for every Mac: held Option, it is copied. */
+const DROPBOX_SAYS = [
+  "Make the BRIMM Video folder available offline in Finder, so it opens without a connection.",
+  "When you drag a video from Dropbox into your drop folder, hold Option, so Dropbox keeps its copy.",
+  "Never export a video into the drop folder: BRIMM Video Studio would take it in as a new video."
+];
 /** The steps a setup shows on a Mac that is already set up, or was by an older copy: its name and folders are its settings' own. */
 const HELD_STEPS = ["welcome", "apps", "permissions", "review", "install", "done"];
 const DONE_BODY = { installed: "BRIMM Video Studio is set up on this Mac.", repaired: "BRIMM Video Studio was repaired on this Mac.", updated: "BRIMM Video Studio was updated on this Mac." };
@@ -367,11 +374,11 @@ const STEP = {
     for (;;) {
       const found = brimmVideoFolders(home);
       if (found.length === 1) {
-        step(ctx, "dropbox", [`BRIMM Video is at ${folderWords(found[0], home)}.`]);
+        step(ctx, "dropbox", [`BRIMM Video is at ${folderWords(found[0], home)}.`, ...DROPBOX_SAYS]);
         state.root = found[0];
         break;
       }
-      step(ctx, "dropbox", found.length === 0 ? NO_BRIMM_VIDEO : SEVERAL_BRIMM_VIDEO);
+      step(ctx, "dropbox", [...(found.length === 0 ? NO_BRIMM_VIDEO : SEVERAL_BRIMM_VIDEO), ...DROPBOX_SAYS]);
       const question = rootQuestion(found, home);
       const got = await ask(ctx, question);
       if (got.back) return "back";
