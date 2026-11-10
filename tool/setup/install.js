@@ -304,7 +304,10 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
     const catPidFile = join(folder, "claude-login-cat.pid");
     rmSync(pidFile, { force: true });
     rmSync(catPidFile, { force: true });
-    // Node starts the shell above, not script: see SIGN_IN_SHELL for why script's input goes through cat and a pipe.
+    // Node starts the shell above, not script: see SIGN_IN_SHELL for why script's input goes through cat and a pipe. Detached gives it a
+    // session and process group of its own, which stop() ends whole; the engine's own group (a Ctrl-C) no longer reaches it. If the
+    // engine is itself killed, its end of the input closes and cat ends, and script and claude are left as they were when node started
+    // script itself.
     const child = spawn("/bin/sh", ["-c", SIGN_IN_SHELL, "sh", pidFile, claude, catPidFile, programs.script], { env: claudeEnv({ home, tools }), stdio: ["pipe", "pipe", "pipe"], detached: true });
     let ended = false;
     const endedP = new Promise((resolve) => {

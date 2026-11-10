@@ -4,7 +4,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
@@ -617,17 +616,22 @@ describe("signIn", () => {
     }
   });
 
-  it("a sign-in ended at once, before claude has started, leaves nothing running", async () => {
+  it("a sign-in ended at once leaves no claude running, and starts none afterwards", async () => {
     await withLogin(async (m) => {
-      // A claude that does not end when its input does, so that only being ended keeps it from running.
+      // A claude that writes its pid and then becomes a sleep that does not end when its input does: only being ended stops it.
       const slow = join(m.home, ".local", "bin", "claude");
-      writeFileSync(slow, `#!/bin/sh\ncase "$*" in\n  "auth login") sleep 8 ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
+      writeFileSync(slow, `#!/bin/sh\ncase "$*" in\n  "auth login") echo $$ > "${join(m.dir, "claude-pid")}"; exec sleep 8 ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
       chmodSync(slow, 0o755);
       const result = await signIn({ ...base(m), linkWaitMs: 0, settleMs: 2000, ask: async () => "cancel" });
       assert.deepEqual(result, { signedIn: false, plan: "" });
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      const found = spawnSync("pgrep", ["-f", m.dir], { encoding: "utf8" });
-      assert.equal(found.stdout.trim(), "", `still running: ${found.stdout}`);
+      // Long enough for a shell left running to have started script and claude after the end.
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // No claude-pid: claude never started. One: it must be gone (and is ended here if not, so that no sleep is left behind).
+      if (existsSync(join(m.dir, "claude-pid"))) {
+        const ended = await gone(m);
+        if (!ended) process.kill(Number(readFileSync(join(m.dir, "claude-pid"), "utf8")), "SIGKILL");
+        assert.equal(ended, true, "claude was left running");
+      }
     });
   });
 
