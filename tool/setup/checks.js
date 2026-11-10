@@ -3,6 +3,7 @@
 // codesign's check; it writes nothing.
 import { accessSync, constants, existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 import { buildOf, isInstalled } from "../build.js";
 import { devMarked, machineFault, readSettings, sameFolder, settingsFile } from "../settings.js";
@@ -204,8 +205,14 @@ export function claudeAt({ home, tools, system = ["/usr/bin", "/bin"] }) {
   return null;
 }
 
-/** The environment Claude Code is run with, built from scratch: its home, the app's tools folder and the system's, and a locale. */
-export const claudeEnv = ({ home, tools }) => ({ HOME: home, PATH: `${tools}:/usr/bin:/bin`, LANG: "en_US.UTF-8" });
+/** The environment Claude Code is run with, built from scratch: its home, the app's tools folder and the system's, a locale, and USER
+    and LOGNAME. Claude Code keeps its sign-in in the macOS keychain keyed on USER, so without it the setup would sign in and read a
+    sign-in apart from the one Terminal, the import's launch agent and HyperFrames' agent use. Both come from `base` when set, else from
+    the account's own login name. Nothing else of `base` is copied. */
+export const claudeEnv = ({ home, tools }, base = process.env) => {
+  const login = userInfo().username;
+  return { HOME: home, PATH: `${tools}:/usr/bin:/bin`, LANG: "en_US.UTF-8", USER: base.USER || login, LOGNAME: base.LOGNAME || login };
+};
 
 /** What is known of Claude Code: where it is, its version, whether it is signed in, and its plan. Claude is run with an environment
     built from scratch. Of what `auth status --json` prints only whether it is signed in and the plan are read: never the email, never

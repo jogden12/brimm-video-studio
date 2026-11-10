@@ -507,6 +507,32 @@ describe("signIn", () => {
     });
   });
 
+  it("the claude it starts has USER and LOGNAME, as Terminal's has", async () => {
+    await withLogin(async (m) => {
+      const where = join(m.home, ".local", "bin", "claude");
+      writeFileSync(where, [
+        "#!/bin/sh",
+        `case "$*" in`,
+        `  "auth login") echo "Open ${LINK}"; read -r line; printf '%s %s\\n' "$USER" "$LOGNAME" > "${join(m.dir, "claude-user")}" ;;`,
+        `esac`,
+        ""
+      ].join("\n"));
+      chmodSync(where, 0o755);
+      const was = { USER: process.env.USER, LOGNAME: process.env.LOGNAME };
+      process.env.USER = "jane-test";
+      process.env.LOGNAME = "jane-test";
+      try {
+        await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => ({ code: "x" }) });
+      } finally {
+        for (const [k, v] of Object.entries(was)) {
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+        }
+      }
+      assert.equal(readFileSync(join(m.dir, "claude-user"), "utf8"), "jane-test jane-test\n");
+    });
+  });
+
   it("starts claude under script, with a terminal of its own", async () => {
     await withLogin(async (m) => {
       await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => ({ code: "x" }) });
