@@ -56,7 +56,7 @@ for (const [name, path, ways] of readers) {
   const text = code(readFileSync(path, "utf8"));
   const local = (spec) => {
     if (!spec.endsWith(".js")) return null;
-    for (const [prefix, under] of ways) if (spec.startsWith(prefix) && !spec.slice(prefix.length).includes("/")) return under + spec.slice(prefix.length);
+    for (const [prefix, under] of ways) if (spec.startsWith(prefix)) return under + spec.slice(prefix.length);
     return null;
   };
   const nameOf = (spec) => local(spec);
