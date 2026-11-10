@@ -16,6 +16,7 @@ import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
 import { HELPERS } from "../helpers.js";
 import { writeAccess } from "../access.js";
 import { hasFilters, hasHwaccel } from "../workcopy.js";
+import { DEV_REFUSAL } from "../settings.js";
 
 const INSTALL = fileURLToPath(new URL("../install.sh", import.meta.url));
 const HERE = dirname(INSTALL);
@@ -3057,6 +3058,19 @@ describe("BRIMM Video Studio's background job through the app (--app; Studio app
       }
       same(askWith({ bare: true, install: copy.install }, "--print", "--machine", "Mac Studio", "--tools", other.tools, "--app", copy.app, d.root), NOT_WHOLE(copy.app, `the programs after --tools, ${other.tools}, are not inside it.`));
       same(askWith({ bare: true, install: other.install }, "--print", "--machine", "Mac Studio", "--tools", copy.tools, "--app", copy.app, d.root), NOT_WHOLE(copy.app, `this installer, ${other.tool}/install.sh, is not inside it.`));
+      assert.equal(copy.ran(), "");
+    } finally {
+      d.done();
+    }
+  });
+  it('the app\'s copy refuses a Mac marked "mode": "dev": exit 2, and nothing changes', () => {
+    const d = dropbox();
+    try {
+      // The Mac's settings name a git checkout, not the copy, and carry the mark: the copy's plan refuses, before the installer
+      // changes anything, and the settings file given is all that is left in the home.
+      const r = askWith({ bare: true, install: copy.install, settings: { machine: "Mac Studio", root: d.root, checkout: "/Users/jason/Claude Code/brimm-video-studio", mode: "dev" } }, "--print", "--machine", "Mac Studio", "--tools", copy.tools, "--app", copy.app, d.root);
+      assert.deepEqual([r.status, r.out], [2, `${DEV_REFUSAL}\n\nNothing was changed.\n`], r.err + r.out);
+      assert.deepEqual([r.left, r.ran, r.agents], [["Library", "Library/Application Support", "Library/Application Support/BRIMM Video", "Library/Application Support/BRIMM Video/settings.json"], "", []]);
       assert.equal(copy.ran(), "");
     } finally {
       d.done();

@@ -18,10 +18,10 @@
 // and whether it is in a cloud folder are found here too.
 //
 //   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-//                          [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off]
+//                          [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off] [--mode dev|off]
 //   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-//                         [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off]
-//   node settings.js set [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--exports-folder "<whole path>"] [--app hyperframes|off] [--app-handover on|off]
+//                         [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off] [--mode dev|off]
+//   node settings.js set [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--exports-folder "<whole path>"] [--app hyperframes|off] [--app-handover on|off] [--mode dev|off]
 //   node settings.js sessions --teachings on --cli-account <email> --app-account <email>
 //   node settings.js sessions --teachings off
 //   node settings.js show
@@ -180,6 +180,7 @@ export function settingsFault(s) {
   if (isSet(s.userDeny) && typeof s.userDeny !== "boolean") return "the note of her user settings' deny rules must be true or false";
   if (s.app !== undefined && s.app !== "hyperframes" && s.app !== "off") return 'the editing app must be "hyperframes" or "off"';
   if (s.appHandover !== undefined && typeof s.appHandover !== "boolean") return "whether her chat is handed to the app must be true or false";
+  if (s.mode !== undefined && s.mode !== "dev" && s.mode !== "off") return 'the mode must be "dev" or "off"';
   return "";
 }
 
@@ -320,7 +321,7 @@ export function writeSettings(home, fields, remove = []) {
 const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Support/BRIMM Video/settings.json.
 
   node settings.js write --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-                               [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off]
+                               [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off] [--mode dev|off]
                                write them, as install.sh --machine does, and say where. The settings of the switch that it
                                is told are written with them, read as set reads them, and any setting it is not told is
                                kept. It refuses a value that will not do. Unlike set it changes the drop folder watched
@@ -345,7 +346,7 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                a Mac has marked, nor a folder inside one. On a Mac with a drop folder of its own, --drop goes
                                back to one in Dropbox only with --switch-back
   node settings.js plan --machine "<this Mac>" --root "<path to BRIMM Video>" --checkout "<path to BRIMM Video Studio>"
-                               [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off]
+                               [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--drop-folder "<path>"] [--exports-folder "<whole path>"] [--switch-back] [--app hyperframes|off] [--app-handover on|off] [--mode dev|off]
                                say what write would write, whole, as JSON, but for the emails of the accounts of the
                                teachings from sessions, shown as (not shown), and then the import it will be (always light),
                                the drop folder as it is now and as it will be, and the exports folder it will be, a line
@@ -353,12 +354,13 @@ const HELP = `This Mac's settings for episodes, kept in ~/Library/Application Su
                                which) and whether macOS may ask about reading it; and, when the folder watched changes, the
                                old one's whole path; or why it would refuse it. Nothing is written. install.sh asks this
                                before it changes anything
-  node settings.js set [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--exports-folder "<whole path>"] [--app hyperframes|off] [--app-handover on|off]
+  node settings.js set [--import light] [--readings on|off] [--handoff 1|2] [--drop Drop|"Unedited Video"] [--exports-folder "<whole path>"] [--app hyperframes|off] [--app-handover on|off] [--mode dev|off]
                                change the settings of the switch to the light import, and say what changed. Any other
                                setting is kept. It does not change the drop folder: it is switched by the installer, which
                                makes the new folder, marks it and points the import at it, after it has checked the old one.
                                A change of it is refused, and nothing is changed: it says the installer's line that shows
-                               what the switch would do
+                               what the switch would do. --mode dev marks this Mac as Jason's development Mac, which the app
+                               never takes over; --mode off takes the mark away.
   node settings.js sessions --teachings on --cli-account <email> --app-account <email>
                                record that Jason has checked that the setting letting Anthropic train on chats is off on
                                both accounts that touch a session, the one the claude command is signed in to and the one
@@ -715,6 +717,10 @@ function planned(home, rest, now, plutil = spawnSync, build) {
   } catch (e) {
     return { code: 1, said: [`This Mac's settings could not be written (${e.code || e.message}).`] };
   }
+  // A Mac marked as Jason's development Mac is never planned or written for an app's copy, whichever copy of this file runs the
+  // plan: the build asked about is the checkout told, not `build`, the running copy's own. A broken app's copy is an installed one
+  // still. A plan for a git checkout goes on as before, and keeps the mark, a setting it is not told.
+  if (devMarked(held) && isInstalled(buildOf(told.fields.checkout))) return { code: 1, said: [DEV_REFUSAL] };
   const { dropFolder: picked, switchBack } = told;
   const wasLocal = isLocal(held);
   // A drop folder is named by --drop-folder or by --drop, and a Mac with a drop folder of its own goes back to one in Dropbox only
@@ -897,6 +903,10 @@ export const SETTABLE = {
   "--app-handover": {
     field: "appHandover", takes: "on or off", read: (v) => (v === "on" ? true : v === "off" ? false : undefined), said: (v) => (v ? "on" : "off"),
     otherwise: false, subject: "Handing her chat to the app", be: "is", was: "it was"
+  },
+  "--mode": {
+    field: "mode", takes: "dev or off", read: (v) => (v === "dev" || v === "off" ? v : undefined), said: String,
+    otherwise: "off", subject: "This Mac's mode", be: "is", was: "it was"
   }
 };
 
@@ -907,6 +917,15 @@ export const appOf = (s) => (s && s.app === "hyperframes" ? "hyperframes" : "");
 /** Whether her chat may be handed to the app when it opens a project: only when this Mac's settings turn it on (`--app-handover
     on`), and off otherwise (5.6). Whether it is handed over even then is hyperframes.js handoverAllowed's to say. */
 export const appHandoverOn = (s) => Boolean(s && s.appHandover === true);
+
+/** Whether this Mac is marked as Jason's development Mac: only when its settings say `mode: "dev"`, which only a person writes
+    (`node settings.js set --mode dev`; `--mode off` takes the mark away). It is this Mac's mode, not a build's: buildOf gives
+    "dev" for a git checkout and "installed" for an app's copy, and no program puts this mark on. A marked Mac is never planned or
+    written for an app's copy (Studio app phase 5). */
+export const devMarked = (s) => s?.mode === "dev";
+
+/** The one line `plan` and `write` say when the checkout they are told is an app's copy and this Mac carries the mark. */
+export const DEV_REFUSAL = 'Not written: this Mac is marked as Jason\'s development Mac ("mode": "dev" in its settings), and the app does not take it over. Its settings are as they were.';
 
 /** A moment as a local time with its offset, "2026-10-22T20:00:00-04:00", as localStamp in episode.js writes it. That file
     cannot be read here: it reads this one. */

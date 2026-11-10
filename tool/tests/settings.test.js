@@ -12,7 +12,7 @@ import { studioFolder, studioFiles, openSettingsOf, workshopFolder, ALLOW_DEFAUL
 import { claudeDirName, realOf } from "../places.js";
 import { chatHeld } from "../held.js";
 import { heldFolder } from "../scan.js";
-import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, runsFolder, episodeWork, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, appOf, appHandoverOn, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf, effectiveLock, factsOf, isLocal, defaultDropFolder, dropFolderOf, episodeFilesFolder, importingFolderOf, statusFoldersOf, exportsFolderOf, exportsWords, cloudFolder, folderWords, dropFolderFault, exportsFolderFault, needsFilesAccess, transcriptFolders } from "../settings.js";
+import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, runsFolder, episodeWork, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, appOf, appHandoverOn, devMarked, DEV_REFUSAL, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf, effectiveLock, factsOf, isLocal, defaultDropFolder, dropFolderOf, episodeFilesFolder, importingFolderOf, statusFoldersOf, exportsFolderOf, exportsWords, cloudFolder, folderWords, dropFolderFault, exportsFolderFault, needsFilesAccess, transcriptFolders } from "../settings.js";
 import { isMedia } from "../lib.js";
 import { watched } from "./watched-fs.js";
 import { UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, NODE_FAULT, CHECKOUT_FAULT } from "./guard-cases.js";
@@ -3641,6 +3641,96 @@ describe("the full import is gone (Phase 2, F4)", () => {
       assert.deepEqual(t.said, [GONE], command);
       assert.equal(JSON.stringify(readSettings(t.home)), before, command);
     }
+    t.done();
+  });
+});
+
+describe("a Mac marked as Jason's development Mac (Studio app phase 5)", () => {
+  const AT = new Date("2026-11-10T10:00:00-05:00");
+  /** What a build of BRIMM Video Studio writes into build.json: INSTALLED's seven fields, as install.test.js's WHOLE has them. */
+  const { mode: _mode, broken: _broken, ...WHOLE } = INSTALLED;
+  /** A Mac with settings, marked with `mode` when given, and the command line told what time it is. `app(text)` is an app's copy of
+      Studio in the test's folder, Contents/Resources/Studio in BRIMM Video Studio.app, with a build.json that holds `text`. */
+  function mac(mode) {
+    const t = setup();
+    writeSettings(t.home, mode === undefined ? t.given : { ...t.given, mode });
+    const app = (text = JSON.stringify(WHOLE)) => {
+      const checkout = join(t.home, "Applications", "BRIMM Video Studio.app", "Contents", "Resources", "Studio");
+      mkdirSync(checkout, { recursive: true });
+      writeFileSync(join(checkout, "build.json"), text);
+      return checkout;
+    };
+    const run = (...argv) => settingsMain(argv, { home: t.home, say: (line) => t.said.push(line), now: AT });
+    const told = (checkout) => ["--machine", "Mac Studio", "--root", ROOT, "--checkout", checkout];
+    return { ...t, app, run, told, file: settingsFile(t.home), held: () => readFileSync(settingsFile(t.home), "utf8") };
+  }
+
+  it("a Mac's mode is dev or off, and anything else is a fault", () => {
+    const t = setup();
+    const given = { version: 1, ...t.given };
+    assert.equal(settingsFault({ ...given, mode: "dev" }), "");
+    assert.equal(settingsFault({ ...given, mode: "off" }), "");
+    for (const mode of ["on", true, ""]) assert.equal(settingsFault({ ...given, mode }), 'the mode must be "dev" or "off"', JSON.stringify(mode));
+    t.done();
+  });
+  it("set --mode dev marks this Mac, and set --mode off takes the mark away", () => {
+    const t = mac();
+    assert.equal(t.run("set", "--mode", "dev"), 0);
+    assert.equal(readSettings(t.home).settings.mode, "dev");
+    t.said.length = 0;
+    assert.equal(t.run("set", "--mode", "off"), 0);
+    assert.equal(readSettings(t.home).settings.mode, "off");
+    t.said.length = 0;
+    assert.equal(t.run("set", "--mode", "maybe"), 1);
+    assert.deepEqual(t.said, ["Not changed: --mode takes dev or off."]);
+    assert.equal(readSettings(t.home).settings.mode, "off");
+    t.done();
+  });
+  it("devMarked is true only for the mark", () => {
+    assert.equal(devMarked({ mode: "dev" }), true);
+    for (const s of [{ mode: "off" }, {}, null, undefined]) assert.equal(devMarked(s), false, JSON.stringify(s));
+  });
+  it("a plan from an app's copy refuses a Mac marked dev, and nothing changes", async () => {
+    const t = mac("dev");
+    const before = t.held();
+    assert.equal(await t.run("plan", ...t.told(t.app())), 1);
+    assert.deepEqual(t.said, [DEV_REFUSAL]);
+    assert.equal(t.held(), before);
+    t.done();
+  });
+  it("a write from an app's copy refuses a Mac marked dev, and nothing changes", async () => {
+    const t = mac("dev");
+    const before = t.held();
+    assert.equal(await t.run("write", ...t.told(t.app())), 1);
+    assert.deepEqual(t.said, [DEV_REFUSAL]);
+    assert.equal(t.held(), before);
+    t.done();
+  });
+  it("a plan and a write from a git checkout keep the mark", async () => {
+    const t = mac("dev");
+    assert.equal(await t.run("plan", ...t.told(CHECKOUT)), 0);
+    assert.equal(JSON.parse(t.said[0]).mode, "dev");
+    t.said.length = 0;
+    assert.equal(await t.run("write", ...t.told(CHECKOUT)), 0);
+    assert.deepEqual(t.said, [`Written: ${t.file}`]);
+    assert.equal(readSettings(t.home).settings.mode, "dev");
+    t.done();
+  });
+  it("a Mac that is not marked is planned from an app's copy as before", async () => {
+    for (const mode of [undefined, "off"]) {
+      const t = mac(mode);
+      const copy = t.app();
+      assert.equal(await t.run("plan", ...t.told(copy)), 0, JSON.stringify(mode));
+      assert.equal(JSON.parse(t.said[0]).checkout, copy, JSON.stringify(mode));
+      t.done();
+    }
+  });
+  it("a broken app's copy refuses a marked Mac too", async () => {
+    const t = mac("dev");
+    const before = t.held();
+    assert.equal(await t.run("plan", ...t.told(t.app("{"))), 1);
+    assert.deepEqual(t.said, [DEV_REFUSAL]);
+    assert.equal(t.held(), before);
     t.done();
   });
 });
