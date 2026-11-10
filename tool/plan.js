@@ -24,7 +24,7 @@ import { referencesFolder, runsFolder } from "./settings.js";
 import { episodeFolderName } from "./names.js";
 import { textWriter } from "./dropbox.js";
 import { commitOf, thisCheckout } from "./filing.js";
-import { isInstalled } from "./build.js";
+import { saidHere, isInstalled } from "./build.js";
 import { agreedFor, labelOf, partLine, partsOf as footageParts } from "./footage.js";
 import { joinFor } from "./join.js";
 import { voiceFor } from "./explainer.js";
@@ -312,8 +312,9 @@ export function planAsked(words, flags) {
   return cues.length + shots.length + lines.length ? { form: "set", episode: first, cues, shots, lines } : null;
 }
 
+/** A refusal is the code's own line, so it is said as this Mac says it: an installed Mac's sends her to no Jason (build.js saidHere). */
 const refuse = (ctx, why) => {
-  ctx.say(why);
+  ctx.say(saidHere(why, ctx.build));
   return 1;
 };
 

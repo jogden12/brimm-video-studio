@@ -30,13 +30,15 @@ import { waitFacts } from "./late-wait.js";
 import { progressFolder, readRates } from "./progress.js";
 import { requestWorkCopy, workCopyLimits } from "./workcopy.js";
 import { ON_OTHER_MAC, fileAt, keptOnAMac, notWholeHere, onOtherMac } from "./where.js";
+import { saidHere } from "./build.js";
 
 export { isFromPlan };
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const list = (v) => (Array.isArray(v) ? v : []);
+/** A refusal is the code's own line, so it is said as this Mac says it: an installed Mac's sends her to no Jason (build.js saidHere). */
 const refuse = (ctx, why) => {
-  ctx.say(why);
+  ctx.say(saidHere(why, ctx.build));
   return 1;
 };
 

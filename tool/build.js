@@ -69,7 +69,7 @@ const ASK_ENDS = [
     those last words left out where it names none. Only the line's last words are looked at, and they are the code's own: a name, a path or
     a sentence a person said, earlier in the line, is never changed. So this is for the lines the code makes, not for a transcript's or any
     other words it shows. Whoever says such a line passes it through here first, as a failed write's error goes through forThisMac. */
-export function askHere(line, build) {
+export function saidHere(line, build) {
   if (typeof line !== "string" || !isInstalled(build)) return line;
   const end = ASK_ENDS.find(([dev]) => line.endsWith(dev));
   if (!end) return line;

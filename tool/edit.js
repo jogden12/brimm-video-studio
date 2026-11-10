@@ -97,7 +97,7 @@ import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
 import { quotable, shellWord, studioFiles, studioFolder } from "./studio.js";
-import { UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "./build.js";
+import { UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine, saidHere } from "./build.js";
 import { checkForUpdate, updateLine } from "./update-check.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
@@ -2220,8 +2220,9 @@ async function save(ctx, found, record, done) {
   if (done) ctx.say(done);
   return 0;
 }
+/** A refusal is the code's own line, so it is said as this Mac says it: an installed Mac's sends her to no Jason (build.js saidHere). */
 const refuse = (ctx, why) => {
-  ctx.say(why);
+  ctx.say(saidHere(why, ctx.build));
   return 1;
 };
 /** What a command says when the run at work on the episode stops it: `generic`, the words it has always said, unless that run is a finish

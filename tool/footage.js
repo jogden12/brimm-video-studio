@@ -34,6 +34,7 @@ import { lockFor } from "./loosened.js";
 import { NO_RECEIPT, expectedFootage, expectedVoiceover, footageOption, notSessionCardOf, partCardOf, plannedCardOf, receiptWhy, voiceoverOption } from "./receipts.js";
 import { localDay } from "./shared/text.js";
 import { SHOT_SAID, counted, dayText, joined, plainly, sentence, textArg } from "./sentences.js";
+import { saidHere } from "./build.js";
 
 export { PART_KINDS };
 
@@ -41,8 +42,9 @@ export { PART_KINDS };
 const MOST_OFFERS = 3;
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+/** A refusal is the code's own line, so it is said as this Mac says it: an installed Mac's sends her to no Jason (build.js saidHere). */
 const refuse = (ctx, why) => {
-  ctx.say(why);
+  ctx.say(saidHere(why, ctx.build));
   return 1;
 };
 

@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BUILD_FILE, NEWER_SAY, REPAIR, VERSION, UPDATE_SAY, askHere, askWords, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "../build.js";
+import { BUILD_FILE, NEWER_SAY, REPAIR, VERSION, UPDATE_SAY, saidHere, askWords, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "../build.js";
 import { commitOf, thisCheckout } from "../filing.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
 
@@ -178,17 +178,17 @@ describe("whether a Mac has BRIMM Video Studio installed", () => {
       ["Dropbox keeps it there and in its history. Jason removes it by hand if he wants.", "Dropbox keeps it there and in its history. It can be removed there by hand.", "Dropbox keeps it there and in its history. It can be removed there by hand."]
     ];
     for (const [dev, named, bare] of table) {
-      for (const b of [buildOf(checkout()), { mode: "dev" }, undefined, null]) assert.equal(askHere(dev, b), dev);
-      assert.equal(askHere(dev, installed), named);
-      assert.equal(askHere(dev, unnamed), bare);
+      for (const b of [buildOf(checkout()), { mode: "dev" }, undefined, null]) assert.equal(saidHere(dev, b), dev);
+      assert.equal(saidHere(dev, installed), named);
+      assert.equal(saidHere(dev, unnamed), bare);
       assert.doesNotMatch(named + bare, /Jason|install\.sh|Terminal|\bnode\b|\bhim\b/);
     }
     // Only a line's last words are looked at: a name or a sentence a person said, earlier in the line, is never changed.
     for (const line of ['"Ask Jason." is a video of 3 minutes.', "Ask Jason. Then say it again.", "The words of Ask Jason are not on this Mac yet.", "Nothing here names him.", ""]) {
-      assert.equal(askHere(line, installed), line);
-      assert.equal(askHere(line, unnamed), line);
+      assert.equal(saidHere(line, installed), line);
+      assert.equal(saidHere(line, unnamed), line);
     }
     // What is no line is given back as it is.
-    for (const other of [undefined, null, 3]) assert.equal(askHere(other, installed), other);
+    for (const other of [undefined, null, 3]) assert.equal(saidHere(other, installed), other);
   });
 });

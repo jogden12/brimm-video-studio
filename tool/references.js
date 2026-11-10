@@ -24,6 +24,7 @@ import { readThrough } from "./dropbox.js";
 import { runProgram } from "./run.js";
 import { referencesFolder, workFolder } from "./settings.js";
 import { studioFolder } from "./studio.js";
+import { saidHere } from "./build.js";
 
 /** The kinds of file that are pictures in the reference folder. Anything else in it is left alone, and listed as a file Studio does not
     use (a video, a note, a PDF). */
@@ -148,8 +149,9 @@ const joined = (things, word = "and") => (things.length < 2 ? things.join("") : 
 /** A count with its noun: "1 picture", "3 pictures". */
 const counted = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+/** A refusal is the code's own line, so it is said as this Mac says it: an installed Mac's sends her to no Jason (build.js saidHere). */
 const refuse = (ctx, why) => {
-  ctx.say(why);
+  ctx.say(saidHere(why, ctx.build));
   return 1;
 };
 
