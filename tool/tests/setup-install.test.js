@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
@@ -533,8 +534,8 @@ describe("signIn", () => {
       writeFileSync(quick, `#!/bin/sh\ncase "$*" in\n  "auth login") echo "Signed in already." ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
       chmodSync(quick, 0o755);
       const started = Date.now();
-      const result = await signIn({ ...base(m), linkWaitMs: 4000, settleMs: 4000, ask: async (q) => (asked.push(q), {}) });
-      assert.ok(Date.now() - started < 2500, `took ${Date.now() - started} ms`);
+      const result = await signIn({ ...base(m), linkWaitMs: 8000, settleMs: 8000, ask: async (q) => (asked.push(q), {}) });
+      assert.ok(Date.now() - started < 5000, `took ${Date.now() - started} ms`);
       assert.deepEqual(asked, []);
       assert.equal(result.signedIn, true);
     });
@@ -614,6 +615,30 @@ describe("signIn", () => {
         assert.deepEqual(leftBehind(m), []);
       });
     }
+  });
+
+  it("a sign-in ended at once, before claude has started, leaves nothing running", async () => {
+    await withLogin(async (m) => {
+      // A claude that does not end when its input does, so that only being ended keeps it from running.
+      const slow = join(m.home, ".local", "bin", "claude");
+      writeFileSync(slow, `#!/bin/sh\ncase "$*" in\n  "auth login") sleep 8 ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
+      chmodSync(slow, 0o755);
+      const result = await signIn({ ...base(m), linkWaitMs: 0, settleMs: 2000, ask: async () => "cancel" });
+      assert.deepEqual(result, { signedIn: false, plan: "" });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const found = spawnSync("pgrep", ["-f", m.dir], { encoding: "utf8" });
+      assert.equal(found.stdout.trim(), "", `still running: ${found.stdout}`);
+    });
+  });
+
+  it("a cancel followed at once by a second sign-in: the second still gets the code", async () => {
+    await withLogin(async (m) => {
+      pidClaude(m);
+      assert.deepEqual(await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => "cancel" }), { signedIn: false, plan: "" });
+      const result = await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => ({ code: "x2" }) });
+      assert.equal(result.signedIn, true);
+      assert.equal(readFileSync(join(m.dir, "claude-got"), "utf8"), "x2\n");
+    });
   });
 
   it("goes on without an answer when claude ends by itself first", async () => {

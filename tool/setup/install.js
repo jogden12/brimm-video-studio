@@ -281,9 +281,11 @@ const NOT_SIGNED_IN = "Claude Code is not signed in yet. Try again.";
     input, $4 script. Script's input has to be a real pipe: node's own pipes are sockets, and macOS script asks its input about its terminal
     and gives up at once on a socket (a named pipe is a socket on macOS too). So the shell copies node's socket into a pipe with cat, and runs
     script on the far end of that pipe. Once script ends, cat is ended too: otherwise the shell would wait for it until node closes its end,
-    and a claude that ends by itself would not be seen to end. The wait is bounded and normally runs no time: it only covers script ending
-    before the copier has written its pid. */
-const SIGN_IN_SHELL = `/bin/sh -c 'echo $$ > "$0"; exec /bin/cat' "$3" | { "$4" -q /dev/null /bin/sh -c 'echo $$ > "$1"; exec "$2" auth login' sh "$1" "$2"; s=$?; i=0; while [ ! -s "$3" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; read c < "$3" 2>/dev/null && kill "$c" 2>/dev/null; rm -f "$3"; exit "$s"; }`;
+    and a claude that ends by itself would not be seen to end. Cat's pid is read before script is started, and its file is removed at once,
+    so that nothing reads it later: a later read could end the copier of a sign-in begun after this one. The wait for it is bounded (5 s) and
+    normally runs no time. Node starts this shell in a process group of its own, so that ending the group reaches the copier, this subshell
+    and script together. */
+const SIGN_IN_SHELL = `/bin/sh -c 'echo $$ > "$0"; exec /bin/cat' "$3" | { i=0; while [ ! -s "$3" ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i+1)); done; c=; read c < "$3" 2>/dev/null; rm -f "$3"; "$4" -q /dev/null /bin/sh -c 'echo $$ > "$1"; exec "$2" auth login' sh "$1" "$2"; s=$?; [ -n "$c" ] && kill "$c" 2>/dev/null; exit "$s"; }`;
 
 /** Signs Claude Code in: runs `claude auth login` under `programs.script`, so that it has a terminal of its own (script's input goes
     through cat and a shell pipe, see SIGN_IN_SHELL), asks `ask` for the
@@ -303,7 +305,7 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
     rmSync(pidFile, { force: true });
     rmSync(catPidFile, { force: true });
     // Node starts the shell above, not script: see SIGN_IN_SHELL for why script's input goes through cat and a pipe.
-    const child = spawn("/bin/sh", ["-c", SIGN_IN_SHELL, "sh", pidFile, claude, catPidFile, programs.script], { env: claudeEnv({ home, tools }), stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn("/bin/sh", ["-c", SIGN_IN_SHELL, "sh", pidFile, claude, catPidFile, programs.script], { env: claudeEnv({ home, tools }), stdio: ["pipe", "pipe", "pipe"], detached: true });
     let ended = false;
     const endedP = new Promise((resolve) => {
       child.on("exit", () => ((ended = true), resolve("ended")));
@@ -319,7 +321,10 @@ export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 3
           // No pid yet, or claude is already gone.
         }
         try {
-          child.kill("SIGTERM");
+          // The shell is no longer script: ending it alone would leave the copier, the subshell and script running (and the subshell
+          // would start script and claude after an early stop). It leads a process group of its own, which is ended whole, as ending
+          // script once ended the terminal and so claude. Claude is in a session of its own under a real script, hence its pid first.
+          process.kill(-child.pid, "SIGTERM");
         } catch {
           // Already gone.
         }
