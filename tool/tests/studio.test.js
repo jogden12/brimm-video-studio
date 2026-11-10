@@ -16,7 +16,7 @@ import { NO_RECEIPT, cardOf } from "../receipts.js";
 import { EDITS } from "../sessions.js";
 import { episodeAs, FOLDER as FOLDER_NAME } from "./episodes.js";
 import { episode } from "./phase4.js";
-import { CHECKOUT, NODE, EDIT, ALLOWED } from "./guard-cases.js";
+import { CHECKOUT, NODE, EDIT, ALLOWED, NODE_CASES, UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, spellingsOf, APP_NODE, OWN, REFUSED as NOT_OWN, NODE_FAULT, CHECKOUT_FAULT, strictStartsOf, tailRefusals } from "./guard-cases.js";
 import { openWorld } from "./open-world.js";
 import { rowWithRules, rulesOf, rulesOfRow, withRules } from "./skill-rows.js";
 
@@ -149,6 +149,13 @@ describe("her folder's settings", () => {
     assert.deepEqual(s.hooks, {
       PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: ["/Users/o'hara/Claude Code/BRIMM video/tool/studio/guard.sh", NODE, "/Users/o'hara/BRIMM Video Studio"], onFailure: "block" }] }]
     });
+  });
+  it("names node in double quotes in the skill and the allow rule for a node whose path has spaces, and gives the hook that path as it is", () => {
+    const files = studioFiles({ checkout: CHECKOUT, node: APP_NODE, folder: FOLDER });
+    assert.ok(files[".claude/skills/brimm-edit/SKILL.md"].includes(`exactly so: "${APP_NODE}" "${CHECKOUT}/tool/edit.js" <command> …\n`));
+    const s = JSON.parse(files[".claude/settings.json"]);
+    assert.deepEqual(s.permissions.allow, [`Bash("${APP_NODE}" "${CHECKOUT}/tool/edit.js" *)`]);
+    assert.deepEqual(s.hooks.PreToolUse[0].hooks[0].args, [`${CHECKOUT}/tool/studio/guard.sh`, APP_NODE, FOLDER]);
   });
   it("name the checkout in the skill, with its spaces, and leave no {{ }} behind", () => {
     const files = studioFiles({ checkout: CHECKOUT, node: NODE });
@@ -926,14 +933,103 @@ describe("the guard", () => {
 
 describe("the guard and paths that hold a regular expression's own characters", () => {
   it("matches the checkout and node letter for letter", () => {
-    const checkout = "/Users/o.hara/Claude Code/BRIMM video (1)+";
+    const checkout = "/Users/o.hara/Claude Code/BRIMM video {1}+";
     const node = "/Users/o.hara/.nvm/versions/node/v22.11.0/bin/node";
     const decide = (command) => guardDecision({ tool_name: "Bash", tool_input: { command } }, { checkout, node }).decision;
     assert.equal(decide(`${node} "${checkout}/tool/edit.js" episodes`), "allow");
     assert.equal(decide(`node "${checkout}/tool/edit.js" episodes`), "allow");
-    for (const c of [`node "/Users/oXhara/Claude Code/BRIMM video (1)+/tool/edit.js" episodes`, `node "/Users/o.hara/Claude Code/BRIMM video 1/tool/edit.js" episodes`,
+    for (const c of [`node "/Users/oXhara/Claude Code/BRIMM video {1}+/tool/edit.js" episodes`, `node "/Users/o.hara/Claude Code/BRIMM video 1/tool/edit.js" episodes`,
       `node "${checkout}/tool/editXjs" episodes`, `/Users/oXhara/.nvm/versions/node/v22X11X0/bin/node "${checkout}/tool/edit.js" episodes`])
       assert.equal(decide(c), "deny", c);
+  });
+});
+
+describe("the guard and node's path in double quotes (design 2026-11-09, part 6)", () => {
+  const answer = (command, node, checkout = CHECKOUT) => guardDecision({ tool_name: "Bash", tool_input: { command } }, { checkout, node });
+  it("lets through node in double quotes, the word node, and a plain node bare, and refuses every other spelling", () => {
+    for (const { node, both, strictOnly, refused } of NODE_CASES) {
+      for (const command of [...both, ...strictOnly]) assert.deepEqual(answer(command, node), OWN, command);
+      for (const command of refused) assert.deepEqual(answer(command, node), NOT_OWN, command);
+    }
+  });
+  it("refuses what could run more after edit.js, or in front of it, whichever start is let through", () => {
+    for (const node of [NODE, APP_NODE]) {
+      for (const start of strictStartsOf(node)) {
+        const edit = `${start} "${CHECKOUT}/tool/edit.js"`;
+        assert.deepEqual(answer(`${edit} episodes`, node), OWN, start);
+        for (const command of tailRefusals(edit)) assert.deepEqual(answer(command, node), NOT_OWN, JSON.stringify(command));
+      }
+    }
+  });
+  it("refuses every spelling when node or the checkout cannot be put in double quotes", () => {
+    for (const node of UNQUOTABLE_NODES) for (const command of spellingsOf(node)) assert.deepEqual(answer(command, node), NOT_OWN, JSON.stringify(command));
+    for (const checkout of UNQUOTABLE_CHECKOUTS) for (const command of spellingsOf(NODE, checkout)) assert.deepEqual(answer(command, NODE, checkout), NOT_OWN, JSON.stringify(command));
+  });
+  it("is given a node in double quotes that zsh and bash run as that one program, with edit.js and its words; bare, the shells run no such program", async (t) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-quoted-node-")));
+    try {
+      const node = join(dir, "Sallie's BRIMM 1 & Co; ok! é", "node");
+      mkdirSync(dirname(node), { recursive: true });
+      writeFileSync(node, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o755 });
+      const quoted = `"${node}" "${CHECKOUT}/tool/edit.js" open "Pricing talk"`;
+      const bare = quoted.slice(1).replace('" "', ' "');
+      assert.deepEqual(answer(quoted, node), OWN);
+      assert.deepEqual(answer(bare, node), NOT_OWN);
+      await inEachShell(t, ([shell, flags]) => {
+        const r = spawnSync(shell, [...flags, quoted], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+        assert.equal(r.status, 0, `${shell}: ${r.stderr}`);
+        assert.equal(r.stderr, "", shell);
+        assert.deepEqual(r.stdout.split("\n").slice(0, -1), [`${CHECKOUT}/tool/edit.js`, "open", "Pricing talk"]);
+        const b = spawnSync(shell, [...flags, bare], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+        assert.notEqual(b.status, 0, shell);
+        assert.equal(b.stdout, "", shell);
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("is given a node whose path has only spaces: in double quotes the shells run it, bare they run the program the first space cuts off and never the node", async (t) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-spaced-node-")));
+    try {
+      const node = join(dir, "BRIMM Video Studio.app", "Contents", "Resources", "bin", "node");
+      mkdirSync(dirname(node), { recursive: true });
+      writeFileSync(node, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o755 });
+      // The recorder stands where the shells look for the program before the first space, and writes its words to a marker file.
+      const marker = join(dir, "marker");
+      writeFileSync(join(dir, "BRIMM"), `#!/bin/sh\nprintf '%s\\n' "$@" > "${marker}"\n`, { mode: 0o755 });
+      const quoted = `"${node}" "${CHECKOUT}/tool/edit.js" open "Pricing talk"`;
+      const bare = `${node} "${CHECKOUT}/tool/edit.js" open "Pricing talk"`;
+      assert.deepEqual(answer(quoted, node), OWN);
+      assert.deepEqual(answer(bare, node), NOT_OWN);
+      await inEachShell(t, ([shell, flags]) => {
+        const env = { PATH: "/usr/bin:/bin" };
+        rmSync(marker, { force: true });
+        const r = spawnSync(shell, [...flags, quoted], { encoding: "utf8", env });
+        assert.equal(r.status, 0, `${shell}: ${r.stderr}`);
+        assert.equal(r.stderr, "", shell);
+        assert.deepEqual(r.stdout.split("\n").slice(0, -1), [`${CHECKOUT}/tool/edit.js`, "open", "Pricing talk"]);
+        assert.equal(existsSync(marker), false, `${shell}: the recorder ran for the quoted command`);
+        const b = spawnSync(shell, [...flags, bare], { encoding: "utf8", env });
+        assert.equal(b.stdout, "", `${shell}: the node ran`);
+        assert.equal(existsSync(marker), true, `${shell}: the recorder did not run for the bare command`);
+        assert.deepEqual(readFileSync(marker, "utf8").split("\n").slice(0, 2), ["Video", "Studio.app/Contents/Resources/bin/node"], shell);
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("is never written into her folder for a node or checkout that cannot be put in double quotes", () => {
+    const attempt = (options, message) => {
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "brimm-unquotable-")));
+      try {
+        assert.throws(() => writeStudio(home, options), { message });
+        assert.equal(existsSync(studioFolder(home)), false);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    };
+    for (const node of UNQUOTABLE_NODES) attempt({ checkout: CHECKOUT, node }, NODE_FAULT);
+    for (const checkout of UNQUOTABLE_CHECKOUTS) attempt({ checkout, node: NODE }, CHECKOUT_FAULT);
   });
 });
 
@@ -1016,6 +1112,23 @@ describe("the guard, run as Claude Code runs the hook", () => {
     const refused = hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "date" } });
     assert.equal(refused.status, 0, refused.stderr);
     assert.deepEqual(decision(refused), { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "In this folder Claude runs only BRIMM Video Studio's own commands. Ask Jason for anything else." });
+  });
+  it("answers so with a node whose path has spaces: in double quotes allowed, bare refused", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-app-node-")));
+    try {
+      const node = join(dir, "BRIMM Video Studio.app", "Contents", "Resources", "bin", "node");
+      mkdirSync(dirname(node), { recursive: true });
+      symlinkSync(process.execPath, node);
+      const ask = (command) => {
+        const r = hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } }, node);
+        assert.equal(r.status, 0, r.stderr);
+        return decision(r).permissionDecision;
+      };
+      assert.equal(ask(`"${node}" "${THIS_CHECKOUT}/tool/edit.js" episodes`), "allow");
+      assert.equal(ask(`${node} "${THIS_CHECKOUT}/tool/edit.js" episodes`), "deny");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
   it("says nothing of a read inside her folder, so Claude Code's own rules decide, and refuses one outside it", () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "brimm-guard-hook-")));

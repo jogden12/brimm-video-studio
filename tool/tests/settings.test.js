@@ -15,6 +15,7 @@ import { heldFolder } from "../scan.js";
 import { settingsFile, dropFolder, episodesFolder, importingFolder, workFolder, runsFolder, episodeWork, writtenFile, pendingFolder, machineFault, settingsFault, readSettings, writeSettings, settingsMain, lightImport, teachingsOn, teachingsLapsed, SETTABLE, WRITTEN, lockOf, webOf, appOf, appHandoverOn, zoomFolderOf, studioAllowOf, proxyPortOf, studioNodeOf, effectiveLock, factsOf, isLocal, defaultDropFolder, dropFolderOf, episodeFilesFolder, importingFolderOf, statusFoldersOf, exportsFolderOf, exportsWords, cloudFolder, folderWords, dropFolderFault, exportsFolderFault, needsFilesAccess, transcriptFolders } from "../settings.js";
 import { isMedia } from "../lib.js";
 import { watched } from "./watched-fs.js";
+import { UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, NODE_FAULT, CHECKOUT_FAULT } from "./guard-cases.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
 import { writePending } from "../filing.js";
 
@@ -526,6 +527,35 @@ describe("node settings.js studio, for both locks (the open lock, K1)", () => {
     assert.deepEqual([s.settings().web, s.settings().zoomFolder, s.settings().lock], ["open", join(s.home, "Zoom recordings"), undefined]);
     assert.equal(s.written(), studioFiles({ checkout: CHECKOUT, node: NODE, folder: s.folder() })[".claude/settings.json"]);
     s.done();
+    t.done();
+  });
+  it("refuses a node or a checkout that cannot be put in double quotes, and writes nothing", () => {
+    const t = studioWorld();
+    let before = readFileSync(settingsFile(t.home), "utf8");
+    // A relative --node is refused before any quoting check, as a wrong asking: the help, exit 2, nothing written, no port.
+    assert.equal(t.run(MINIMUM, "studio", "--node", "bin/node"), 2);
+    assert.ok(t.said[0].includes("node settings.js studio --node"));
+    assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+    assert.equal(existsSync(studioFolder(t.home)), false);
+    assert.equal(t.ports(), 0);
+    for (const node of UNQUOTABLE_NODES.filter((n) => n.startsWith("/"))) {
+      for (const extra of [[], ["--print"]]) {
+        assert.equal(t.run(MINIMUM, "studio", "--node", node, ...extra), 1, JSON.stringify(node));
+        assert.deepEqual(t.said, [`Not written: ${NODE_FAULT}.`], JSON.stringify(node));
+        assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+        assert.equal(existsSync(studioFolder(t.home)), false);
+      }
+    }
+    // A relative checkout never gets into the settings file: settings.js refuses it as not a whole path, which is its own test.
+    for (const checkout of UNQUOTABLE_CHECKOUTS.filter((c) => c.startsWith("/"))) {
+      writeSettings(t.home, { checkout });
+      before = readFileSync(settingsFile(t.home), "utf8");
+      assert.equal(t.run(MINIMUM, "studio", "--node", NODE), 1, JSON.stringify(checkout));
+      assert.deepEqual(t.said, [`Not written: ${CHECKOUT_FAULT}.`], JSON.stringify(checkout));
+      assert.equal(readFileSync(settingsFile(t.home), "utf8"), before);
+      assert.equal(existsSync(studioFolder(t.home)), false);
+    }
+    assert.equal(t.ports(), 0);
     t.done();
   });
   it("prints the folder's settings for a lock without writing anything", () => {

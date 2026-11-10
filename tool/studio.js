@@ -27,7 +27,7 @@
 // records is data here (studio/allow.json, environment.json, app-flags.json), and starts so that the open lock fails closed.
 import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { neverDenyRules } from "./never.js";
 import { bothSpellings, gatedPlaces, readAllowed, realOf } from "./places.js";
@@ -68,7 +68,7 @@ function settingsOf({ checkout, node, folder }) {
   return {
     permissions: {
       defaultMode: "default",
-      allow: [`Bash(${node} "${checkout}/tool/edit.js" *)`],
+      allow: [`Bash("${node}" "${checkout}/tool/edit.js" *)`],
       deny: ["Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "mcp__*", "Monitor", "RemoteTrigger", "SendMessage"],
       disableBypassPermissionsMode: "disable",
       disableAutoMode: "disable"
@@ -123,7 +123,7 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
   return {
     permissions: {
       defaultMode: "default",
-      allow: [`Bash(${node} "${checkout}/tool/edit.js" *)`, ...(facts.web === "open" ? ["WebFetch", "WebSearch"] : [])],
+      allow: [`Bash("${node}" "${checkout}/tool/edit.js" *)`, ...(facts.web === "open" ? ["WebFetch", "WebSearch"] : [])],
       deny: [
         ...neverDenyRules(facts.allow),
         ...gatedReadRules(facts),
@@ -137,7 +137,7 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
       enabled: true,
       failIfUnavailable: true,
       allowUnsandboxedCommands: false,
-      excludedCommands: [`${node} "${checkout}/tool/edit.js" *`],
+      excludedCommands: [`"${node}" "${checkout}/tool/edit.js" *`],
       network: { deniedDomains: ["*"], httpProxyPort: facts.port, socksProxyPort: facts.port },
       filesystem: {
         allowWrite: [W],
@@ -239,8 +239,11 @@ export function studioFiles({ checkout, node, folder, lock = "strict", facts }) 
 /** Write her folder in `home`: its files, written over the ones there, and Pictures/ and Scripts/. Nothing else in it is touched.
     It is on this Mac's own disk, so the files are written in place. The hook is given the folder as the disk spells it,
     which is the folder Claude Code runs in, even when it was made by hand in another case. With the open lock it also makes
-    the workshop, readable by her alone. Gives back the folder. */
+    the workshop, readable by her alone. A node or a checkout that cannot go inside double quotes (quotable) makes it throw before
+    it makes anything. Gives back the folder. */
 export function writeStudio(home, { checkout, node, lock = "strict", facts }) {
+  const fault = quotingFault({ checkout, node });
+  if (fault) throw new Error(fault);
   if (lock === "open") {
     mkdirSync(workshopFolder(home), { recursive: true, mode: 0o700 });
     chmodSync(workshopFolder(home), 0o700);
@@ -304,6 +307,33 @@ function readable(input, folder, tmp, uid) {
   return within(path, folder) || Boolean(results && within(path, results)) || Boolean(tasks && within(path, tasks));
 }
 
+/** Whether `path` can stand inside double quotes in her folder's files, as the guard's spelling of node does, and in the
+    `Bash(...)` allow rule and the sandbox's excluded command that carry it: a string, absolute, and none of these letters.
+    Refused for what the shells read inside double quotes: ", $, a backtick and a backslash. Refused for what Claude Code reads
+    first: > (it rewrites ">nul" to ">/dev/null" before the shell runs a command, even inside quotes) and <. Refused as wildcards
+    and parse hazards in the allow rule and in excludedCommands: *, ?, [, ], ( and ). Refused as control characters: every one,
+    U+0000 to U+001F and U+007F (WORD's double-quoted word refuses only a carriage return and a line feed, so this set is wider
+    than WORD's). A space, !, &, ;, braces and letters outside ASCII are let through: Claude Code runs commands in a shell that does
+    not expand history, and inside double quotes the rest are only themselves. */
+export const quotable = (path) => typeof path === "string" && isAbsolute(path) && !/["$`\\<>*?[\]()\u0000-\u001f\u007f]/.test(path);
+
+/** Whether `path` is a plain word, one the shells read letter for letter with no quotes: `/` and then only a plain word's letters
+    (WORD's, with = allowed after the first). Such a path holds nothing the shells split or expand, and starting with / it cannot be
+    an assignment, a =cmd, a ~ or a % job. editStart lets node through bare only so, and `behind` names a node bare only so. */
+export const plainPath = (path) => /^\/[A-Za-z0-9_.,:+=@%/-]*$/.test(path);
+
+/** `path` as one shell word for a command pasted into a terminal: bare when it is a plain path (plainPath), else in single quotes,
+    each ' written as '\'' (end the quotes, a quoted ', start them again). Single quotes hold every other letter as it is. */
+export const shellWord = (path) => (plainPath(path) ? path : `'${path.replace(/'/g, "'\\''")}'`);
+
+/** Why her folder is not written for this node and checkout, or null when both can go inside double quotes. The node is looked at
+    first. The text is one the settings command prints after "Not written: ". */
+export function quotingFault({ checkout, node }) {
+  if (!quotable(node)) return "the path to node holds a letter that cannot go inside double quotes (\", $, `, \\, >, <, *, ?, [, ], (, ) or a control character)";
+  if (!quotable(checkout)) return "the path to the checkout of BRIMM Video Studio holds a letter that cannot go inside double quotes (\", $, `, \\, >, <, *, ?, [, ], (, ) or a control character)";
+  return null;
+}
+
 /** Her skill, the one the guard lets her session use. */
 const SKILL = "brimm-edit";
 
@@ -325,11 +355,25 @@ export const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     runs. The guard is given the command as written, before the rewrite. */
 export const WORD = String.raw`(?:[A-Za-z0-9_.,:+@%/-][A-Za-z0-9_.,:+=@%/-]*|"[^"$` + "`" + String.raw`\\\r\n]*"|'[^'\r\n]*')`;
 
+/** The start of an edit.js command, as a regular expression's source with no anchors: the node, then the checkout's edit.js in
+    double quotes. Three spellings of the node: this Mac's node in double quotes (her skill's, and the only one when `quotedOnly`,
+    which is the open lock's one spelling), the word node, and the path bare. The bare path is kept for a Mac whose folder still
+    has today's skill (between a git pull and the folder's rewrite), and only for a plain path, one of a plain word's letters
+    starting with /: such a word holds nothing the shells split or expand, while a path with a space bare would run only its first
+    part. Null when the checkout or the node cannot go inside double quotes (quotable): then no command is let through, node the
+    word included. */
+export function editStart({ checkout, node }, { quotedOnly = false } = {}) {
+  if (!quotable(checkout) || !quotable(node)) return null;
+  const quoted = `"${literally(node)}"`;
+  const starts = quotedOnly ? [quoted] : ["node", quoted, ...(plainPath(node) ? [literally(node)] : [])];
+  return `(?:${starts.join("|")}) "${literally(checkout)}/tool/edit\\.js"`;
+}
+
 /** What the guard answers to a tool call Claude Code is about to make, `input` as the PreToolUse hook is given it:
-    { decision, reason }. "allow" for brimm-video's edit.js run with node (the word node, or the node the installer found)
-    from the checkout, followed only by words one space apart (WORD), and for her skill; "pass" for a tool left to Claude
-    Code's own rules, which gives no answer, and for a read inside her folder, `folder`; and "deny" for everything else, any
-    other read, any other skill and any tool added later among them. */
+    { decision, reason }. "allow" for brimm-video's edit.js run from the checkout, followed only by words one space apart (WORD),
+    and for her skill. The node may be spelled three ways (editStart): this Mac's node in double quotes, the word node, or a plain
+    path to node bare. "pass" for a tool left to Claude Code's own rules, which gives no answer, and for a read inside her
+    folder, `folder`; and "deny" for everything else, any other read, any other skill and any tool added later among them. */
 export function guardDecision(input, { checkout, node, folder = "", tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp", uid = process.getuid() }) {
   const name = input && input.tool_name;
   if (LEFT_TO_CLAUDE_CODE.has(name)) return { decision: "pass", reason: "" };
@@ -337,8 +381,8 @@ export function guardDecision(input, { checkout, node, folder = "", tmp = proces
   if (name === "Skill" && input.tool_input && input.tool_input.skill === SKILL) return { decision: "allow", reason: "her skill" };
   if (name === "Bash") {
     const command = input.tool_input && input.tool_input.command;
-    const edit = new RegExp(`^(?:node|${literally(node)}) "${literally(checkout)}/tool/edit\\.js"(?: ${WORD})*$`);
-    if (typeof command === "string" && edit.test(command)) return { decision: "allow", reason: "BRIMM Video Studio's own command" };
+    const start = editStart({ checkout, node });
+    if (start && typeof command === "string" && new RegExp(`^${start}(?: ${WORD})*$`).test(command)) return { decision: "allow", reason: "BRIMM Video Studio's own command" };
   }
   return { decision: "deny", reason: REFUSED };
 }

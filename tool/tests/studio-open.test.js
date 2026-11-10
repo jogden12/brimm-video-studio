@@ -37,7 +37,7 @@ describe("her folder's settings under the open lock", () => {
     assert.deepEqual(Object.keys(s), ["permissions", "env", "disableAllHooks", "hooks"]);
     assert.deepEqual(s.permissions, {
       defaultMode: "default",
-      allow: [`Bash(${w.node} "${w.checkout}/tool/edit.js" *)`],
+      allow: [`Bash("${w.node}" "${w.checkout}/tool/edit.js" *)`],
       deny: ["Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "mcp__*", "Monitor", "RemoteTrigger", "SendMessage"],
       disableBypassPermissionsMode: "disable",
       disableAutoMode: "disable"
@@ -54,9 +54,10 @@ describe("her folder's settings under the open lock", () => {
   it("writes the sandbox on, failing when it cannot start, with edit.js its one door, no network and no proxy login", () => {
     const s = open();
     assert.deepEqual([s.sandbox.enabled, s.sandbox.failIfUnavailable, s.sandbox.allowUnsandboxedCommands], [true, true, false]);
-    assert.deepEqual(s.sandbox.excludedCommands, [`${w.node} "${w.checkout}/tool/edit.js" *`]);
+    assert.deepEqual(s.sandbox.excludedCommands, [`"${w.node}" "${w.checkout}/tool/edit.js" *`]);
     assert.deepEqual(s.sandbox.network, { deniedDomains: ["*"], httpProxyPort: 47123, socksProxyPort: 47123 });
-    assert.deepEqual(s.permissions.allow[0], `Bash(${w.node} "${w.checkout}/tool/edit.js" *)`);
+    assert.deepEqual(s.permissions.allow[0], `Bash("${w.node}" "${w.checkout}/tool/edit.js" *)`);
+    assert.deepEqual(s.hooks.PostToolUse[0].hooks[0].args, [`${w.checkout}/tool/studio/receipt.sh`, w.node, w.folder]);
     assert.deepEqual([s.permissions.defaultMode, s.permissions.disableBypassPermissionsMode, s.permissions.disableAutoMode], ["default", "disable", "disable"]);
   });
   it("denies every gated place to Read and to sandboxed commands, by its real path and its /System/Volumes/Data spelling", () => {
@@ -139,8 +140,8 @@ describe("her folder's settings under the open lock", () => {
     assert.deepEqual([s.autoMemoryEnabled, s.autoDreamEnabled, s.disableSkillShellExecution, s.disableAllHooks], [false, false, true, false]);
   });
   it("allows edit.js alone while the web tools are held, and the web tools too once they are opened", () => {
-    assert.deepEqual(open().permissions.allow, [`Bash(${w.node} "${w.checkout}/tool/edit.js" *)`]);
-    assert.deepEqual(openWith({ web: "open" }).permissions.allow, [`Bash(${w.node} "${w.checkout}/tool/edit.js" *)`, "WebFetch", "WebSearch"]);
+    assert.deepEqual(open().permissions.allow, [`Bash("${w.node}" "${w.checkout}/tool/edit.js" *)`]);
+    assert.deepEqual(openWith({ web: "open" }).permissions.allow, [`Bash("${w.node}" "${w.checkout}/tool/edit.js" *)`, "WebFetch", "WebSearch"]);
   });
   it("never denies the drawing tools, and denies Monitor and NotebookEdit", () => {
     const { deny } = open().permissions;
@@ -173,7 +174,7 @@ describe("her folder's settings under the open lock", () => {
     const template = (name) => readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8").split("{{CHECKOUT}}").join(w.checkout).split("{{NODE}}").join(w.node);
     assert.equal(files[".claude/skills/brimm-edit/SKILL.md"], template("SKILL-open.md"));
     assert.notEqual(files[".claude/skills/brimm-edit/SKILL.md"], studioFiles({ checkout: w.checkout, node: w.node, folder: w.folder })[".claude/skills/brimm-edit/SKILL.md"]);
-    assert.ok(files[".claude/skills/brimm-edit/SKILL.md"].includes(`${w.node} "${w.checkout}/tool/edit.js"`));
+    assert.ok(files[".claude/skills/brimm-edit/SKILL.md"].includes(`"${w.node}" "${w.checkout}/tool/edit.js"`));
     assert.equal(files["CLAUDE.md"], template("CLAUDE-open.md"));
     // The skill's script.md (PR H4) is the same file under either lock, beside SKILL.md, and Scripts/ is made beside Pictures/.
     assert.equal(files[".claude/skills/brimm-edit/script.md"], template("script.md"));

@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { SHOWN_MARKER, editMain } from "../edit.js";
 import { episodeWork, workFolder } from "../settings.js";
 import { setup, episodeFor, reread, FOLDER } from "./episodes.js";
+import { APP_NODE } from "./guard-cases.js";
 
 const notAMac = process.platform !== "darwin" ? "managed preferences are a Mac's, and plutil, which reads them, is a Mac's" : false;
 
@@ -280,6 +281,62 @@ describe("behind", () => {
     const offline = await on({ ...t.ctx.deps, run: git({ code: 128, stderr: "fatal: Could not read from remote repository." }).run }, "behind");
     assert.deepEqual([offline.code, offline.text], [0, `Could not check for a newer BRIMM Video Studio. Is this Mac offline?\n${stale}`]);
     t.done();
+  });
+  it("finds her folder up to date when this checkout wrote it with a node whose path has spaces, and out of date, not changed, when it was written before node was quoted", async () => {
+    const t = setup();
+    const newest = () => git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" }).run;
+    writeStudio(t.home, { checkout: "/checkout", node: APP_NODE });
+    assert.equal((await on({ ...t.ctx.deps, run: newest() }, "behind")).text, "This Mac has the newest BRIMM Video Studio.");
+    const folder = writeStudio(t.home, { checkout: "/checkout", node: "/opt/homebrew/bin/node" });
+    const skill = join(folder, ".claude", "skills", "brimm-edit", "SKILL.md");
+    const before = readFileSync(skill, "utf8");
+    assert.ok(before.includes('"/opt/homebrew/bin/node" "/checkout/tool/edit.js"'));
+    writeFileSync(skill, before.replace('"/opt/homebrew/bin/node" "/checkout/tool/edit.js"', '/opt/homebrew/bin/node "/checkout/tool/edit.js"'));
+    const r = await on({ ...t.ctx.deps, run: newest() }, "behind");
+    assert.deepEqual([r.code, r.text], [0, `This Mac has the newest BRIMM Video Studio.\n${stale}`]);
+    // A pulled Mac's settings.json allow rule has the bare spelling too: still out of date, never "lock changed".
+    const settings = join(folder, ".claude", "settings.json");
+    const allowed = readFileSync(settings, "utf8");
+    assert.ok(allowed.includes('Bash(\\"/opt/homebrew/bin/node\\" \\"/checkout/tool/edit.js\\"'));
+    writeFileSync(settings, allowed.replace('Bash(\\"/opt/homebrew/bin/node\\" \\"/checkout/tool/edit.js\\"', 'Bash(/opt/homebrew/bin/node \\"/checkout/tool/edit.js\\"'));
+    const bare = await on({ ...t.ctx.deps, run: newest() }, "behind");
+    assert.deepEqual([bare.code, bare.text], [0, `This Mac has the newest BRIMM Video Studio.\n${stale}`]);
+    assert.ok(!bare.text.includes("lock"), bare.text);
+    t.done();
+  });
+  it("names a node whose path is not a plain word in single quotes in the line for Jason, so each shell gives it to settings.js as one word", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-named-node-")));
+    try {
+      const standIn = join(dir, "args.sh");
+      writeFileSync(standIn, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o755 });
+      const nodes = {
+        spaces: [join(dir, "BRIMM Video Studio.app", "bin", "node"), (p) => `'${p}'`],
+        apostrophe: [join(dir, "o'hara", "bin", "node"), (p) => `'${p.replace(/'/g, "'\\''")}'`],
+        shell: [join(dir, "Sallie's BRIMM 1 & Co; ok! é", "node"), (p) => `'${p.replace(/'/g, "'\\''")}'`]
+      };
+      for (const [name, [node, spelled]] of Object.entries(nodes)) {
+        mkdirSync(dirname(node), { recursive: true });
+        writeFileSync(node, "#!/bin/sh\n", { mode: 0o755 });
+        const t = setup();
+        const folder = writeStudio(t.home, { checkout: "/checkout", node });
+        const skill = join(folder, ".claude", "skills", "brimm-edit", "SKILL.md");
+        writeFileSync(skill, readFileSync(skill, "utf8").replace(/\| "Show me the Reels".*\n/, ""));
+        const r = await on({ ...t.ctx.deps, run: git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "0\n" }).run }, "behind");
+        const given = r.text.match(/--node (.*), then start a new session/)[1];
+        assert.equal(given, spelled(node), name);
+        // Each shell this computer has: the Linux that runs the tests on GitHub has no zsh, and bash alone is asked there.
+        const shells = [["/bin/zsh", ["-f", "-c"]], ["/bin/bash", ["-c"]]].filter(([path]) => existsSync(path));
+        assert.ok(shells.length > 0, "neither zsh nor bash is on this computer");
+        for (const shell of shells) {
+          const run = spawnSync(shell[0], [...shell[1], `${standIn} --node ${given}`], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+          assert.equal(run.status, 0, `${name} ${shell[0]}: ${run.stderr}`);
+          assert.deepEqual(run.stdout.split("\n").slice(0, -1), ["--node", node], `${name} ${shell[0]}`);
+        }
+        t.done();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
   it("asks git nothing where this Mac's checkout has no .git of its own, and still says what needs no network", async () => {
     const t = setup();
@@ -889,19 +946,24 @@ describe("behind", () => {
       }
     });
   });
-  it("names the node that rewrites her folder only when her folder's settings give a real one: an absolute path ending in /node that is there; otherwise Homebrew's", async () => {
+  it("names the node that rewrites her folder only when her folder's settings give a real one: an absolute path ending in /node that is there and that can go inside double quotes; otherwise Homebrew's", async () => {
     // The folder's settings are a file she can change, and Jason is told to run what this line prints.
     const HOMEBREW = "/opt/homebrew/bin/node";
     const said = (node) => `Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason to update it when it suits. (Jason: in the checkout, run node tool/settings.js studio --node ${node}, then start a new session in her Claude folder)`;
     const t = setup();
     const bin = join(t.home, "bin");
+    const unquotable = ['quo"te', "back\\slash", "dollar$x"];
     mkdirSync(join(bin, "newline\n--evil"), { recursive: true });
-    for (const file of [join(bin, "node"), join(bin, "sh"), join(bin, "newline\n--evil", "node")]) writeFileSync(file, "");
+    for (const name of unquotable) mkdirSync(join(bin, name), { recursive: true });
+    for (const file of [join(bin, "node"), join(bin, "sh"), join(bin, "newline\n--evil", "node"), ...unquotable.map((name) => join(bin, name, "node"))]) writeFileSync(file, "");
     const cases = [
       [join(bin, "node"), join(bin, "node")],
       [join(t.home, "nowhere", "node"), HOMEBREW],
       [join(bin, "sh"), HOMEBREW],
       [join(bin, "newline\n--evil", "node"), HOMEBREW],
+      [join(bin, 'quo"te', "node"), HOMEBREW],
+      [join(bin, "back\\slash", "node"), HOMEBREW],
+      [join(bin, "dollar$x", "node"), HOMEBREW],
       ["node", HOMEBREW],
       ["../bin/node", HOMEBREW],
       [`${join(bin, "node")}; echo hi`, HOMEBREW],
