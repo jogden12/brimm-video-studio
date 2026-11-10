@@ -21,6 +21,7 @@ Mistakes made or nearly made on Studio, and how not to repeat them. Seeded on 20
 - **Going back**: asked to go back, the agent may remove a change with a new forward change, so `history --json` marks nothing undone. The project's rules point it to `hyperframes history undo --who claude`.
 - **Its transcript says "Brim"**: the house spellings belong in `brimm/spellings.json` too.
 - **Its exports land in `~/Downloads`**, which on the Mac Studio is a link into Dropbox.
+- **`hyperframes open` saying `"opened": true` means only that macOS's `open -b` handed the folder over.** In a new account (spike S6, 2026-11-10) the app sat on its welcome questions and only listed the project under "On this Mac, not imported yet". On the Mac Studio, past its welcome, it imported every project Studio handed it from 5 to 8 November at once (its `recents.json`). Check 5 on the Mac App By-Hand Checks page re-tests it in Studio Test.
 - **The HeyGen command line never reads the app's sign-in**: only `HEYGEN_API_KEY`, `HYPERFRAMES_API_KEY`, `HEYGEN_ACCESS_TOKEN` or `~/.heygen/credentials`. The app needs a HeyGen sign-in on first run (spike S6).
 
 ## Pictures, sound and fonts
@@ -41,6 +42,8 @@ Mistakes made or nearly made on Studio, and how not to repeat them. Seeded on 20
 
 - **Signing on the Mac Studio (Command Line Tools, no Xcode) needed Apple's Developer ID G2 intermediate imported by hand.** Open Keychain Access from Apps; importing with iCloud selected hangs it (-25294).
 - **The Move to Studio app clones Studio at the commit it was built from**: a code fix means rebuilding the app.
+- **Claude Code keeps its sign-in in the keychain under the account's name, which it reads from `USER`.** An environment built from scratch must pass `USER` (and `LOGNAME`): the setup's `claudeEnv` had only `HOME`, `PATH` and `LANG`, so the setup signed in and read one keychain entry and Terminal another, and `claude auth logout` in Terminal left the setup signed in (check 3, Studio Test, 2026-11-10).
+- **macOS's `script` exits at once when its input is a socket** ("tcgetattr/ioctl: Operation not supported on socket"). Node's stdio pipes are socketpairs, and on macOS a named FIFO is one too; a shell `|` pipe works. The setup's sign-in feeds `script` through `cat` and a shell pipe (#62, 2026-11-10).
 - **The Code tab's `/status` shows no version** (Claude takes it as a question). The installer's print shows Claude Code's version.
 
 ## Git, CI and pull requests

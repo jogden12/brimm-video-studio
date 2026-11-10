@@ -1,6 +1,6 @@
 # Progress
 
-Where Studio stands. Last brought up to date on 2026-11-10 (main at 6636327). Dated lines say what was true then; check `git log` and the By-Hand Checks page before relying on them.
+Where Studio stands. Last brought up to date on 2026-11-10 (main at c979291). Dated lines say what was true then; check `git log` and the By-Hand Checks page before relying on them.
 
 ## Done
 
@@ -14,16 +14,18 @@ Where Studio stands. Last brought up to date on 2026-11-10 (main at 6636327). Da
 - **The Move to Studio app**, notarized; Jason's MacBook (check 80) and Sallie's laptop (checks 74, 41 to 45) moved to Studio on 2026-11-08. The Mac Studio moved on 2026-11-03 (check 40).
 - **The Mac app, Phases 0 to 4** merged on 2026-11-09 (#53 to #57); spikes S1 to S4 and S7 passed. **Review fixes** #58 merged on 2026-11-10.
 - **This memory system** (`docs/memory/`, `docs/wiki/`), 2026-11-10.
+- **The Mac app, Phase 5 (the setup engine)** merged on 2026-11-10 (#61), and **its sign-in fix** (#62, c979291: macOS's `script` refuses node's pipes). In Studio Test on 2026-11-10: spike S5 passed (check 108; Claude Code signs in with no Terminal), S6 passed (check 109; the HyperFrames app runs, plays and exports on This Mac with no Homebrew), and Phase 5's check 3 passed (the setup's own sign-in takes a pasted code with a newline, the link comes through whole, and nothing is left running after a cancel). Check 3 found that the setup's sign-in was kept apart from Terminal's (no `USER`; see `gotchas.md`).
 
 ## In progress (2026-11-10)
 
-- **Mac app Phase 5, the setup engine**, on branch `app-development-phase-5` (its ledger is in that worktree's `.superpowers/sdd/`). Not pushed.
+- **The setup passes `USER` and `LOGNAME` to Claude Code**, on branch `app-development-claude-env-user`, so that its sign-in is Terminal's. Its pull request waits on Jason's yes; then check 4 on the Mac App By-Hand Checks page re-tests it in Studio Test.
+- **Check 5 on the Mac App By-Hand Checks page**: whether `hyperframes open` opens a project in the app once the app is past its welcome questions (S6 found it only listed).
 - **A sweep of the lines that still name Jason, `install.sh` or node on an installed Mac**, in its own session.
 
 ## Next, and waiting on Jason
 
 - **Sallie's laptop**: check 46 (a first video, Jason's own recording), 47 (the BRIMM Ops page on her laptop), 48 (delete brimm-video's old GitHub deploy key, on his yes), the open boxes of checks 41 and 43; check 88 was never confirmed.
-- **The Mac app**: spikes S5 and S6 paused at sign-in; the bundle ID (suggested `com.thebrimm.video-studio`); a GPL source zip on R2; the Phase 5 plan's six open questions; whether to add a macOS CI job (a cost call); pulling the Mac Studio's live checkout to the newest main.
+- **The Mac app**: checks 4 and 5 on the Mac App By-Hand Checks page; Phase 6 (the window); the bundle ID (suggested `com.thebrimm.video-studio`); a GPL source zip on R2; the Phase 5 plan's six open questions; whether to add a macOS CI job (a cost call); pulling the Mac Studio's live checkout to the newest main.
 - **Calls from the build plan**: `finish`'s NEVER_OPENED line on a Mac with the app off; whether `free` takes a Reel's video; a toolchain lock file; whether the "One Video, Start to Finish" page is retired.
 - **The import notice**: item 3 ("I allowed it" → look); B1 at the next `brew upgrade node`; a signed helper later.
 - **Her folder**: whether the open lock writes the feedback `env` (when an open lock is named).
@@ -44,7 +46,7 @@ Most serious first. Sources are in `gotchas.md`, "From past reviews".
   - Nothing reads the HyperFrames app's own version: warn in `behind` when it changes, and keep an "after an app update" check.
   - Files copied by hand between the repos (`tool/shared/`, `lib.js`, `run.js`) and the Ops page's button words have no drift test; only the five v2 fixtures are hash-pinned (v1's are not).
   - The installed Mac's privacy list naming each program is proven only for the launch agent (S4); `access.js` depends on it.
-  - A stopped setup stage can still rename a file mid-hash (Phase 5, Task 8 carried to 13); `claude auth login` outliving a cancel is unproven until S5.
+  - A stopped setup stage can still rename a file mid-hash (Phase 5, Task 8 carried to 13). (`claude auth login` outliving a cancel was ruled out by check 3 on 2026-11-10.)
   - A session clip re-answered after its reading wrongly says to drop it on BRIMM Ops.
   - Retake detection has never been tested on real speech (only a synthetic voice).
   - Pin everything fetched at run time (the toolchain lock file call).
