@@ -1,11 +1,11 @@
 // Compiles Studio's five helpers with swiftc into a folder, as brimm-<name>: node tool/build-helpers.js <folder>.
 // The app's build runs this, then puts the folder's files beside node. It signs nothing, because the build signs inside-out
 // itself, and it writes nothing but the helpers.
-import { mkdirSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { HELPERS, helperSource } from "./helpers.js";
+import { isMain } from "./is-main.js";
 import { lastLine } from "./run.js";
 
 /** Compiles each helper into `folder`. Returns the exit code; says what it did to `out` and `err`. */
@@ -33,11 +33,4 @@ export function buildHelpers(args, { out = (s) => process.stdout.write(s), err =
   return 0;
 }
 
-const isMain = (() => {
-  try {
-    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return false;
-  }
-})();
-if (isMain) process.exitCode = buildHelpers(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = buildHelpers(process.argv.slice(2));

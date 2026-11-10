@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -61,5 +61,37 @@ test("runs each entry point's main from a folder with spaces reached through a l
     rmSync(base, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
     assert.ok(existsSync(join(tool, "edit.js")), "removing the temp folders left tool/ alone");
+  }
+});
+
+test("every entry point asks is-main.js: no other file in tool/ compares process.argv[1] itself", () => {
+  const tool = fileURLToPath(new URL("..", import.meta.url));
+  const own = readdirSync(tool)
+    .filter((name) => name.endsWith(".js") && name !== "is-main.js")
+    .filter((name) => readFileSync(join(tool, name), "utf8").includes("process.argv[1]"));
+  assert.deepEqual(own, []);
+  const text = readFileSync(join(tool, "build-helpers.js"), "utf8");
+  assert.ok(text.includes('import { isMain } from "./is-main.js";'), "build-helpers.js imports isMain");
+  assert.ok(text.includes("if (isMain(import.meta.url)) process.exitCode = buildHelpers(process.argv.slice(2));"), "build-helpers.js has the entry point's line");
+});
+
+test("build-helpers.js runs its main from a folder with spaces reached through a link, and by its Data-volume spelling", () => {
+  const tool = fileURLToPath(new URL("..", import.meta.url));
+  const base = mkdtempSync(join(tmpdir(), "brimm main "));
+  mkdirSync(join(base, "with space"));
+  const linked = join(base, "with space", "linked tool");
+  symlinkSync(tool, linked);
+  try {
+    const folders = [linked];
+    const data = "/System/Volumes/Data" + realpathSync(tool);
+    if (existsSync(data)) folders.push(data);
+    for (const folder of folders) {
+      // No folder is given, so nothing is compiled and swiftc is never asked for.
+      const r = spawnSync(process.execPath, [join(folder, "build-helpers.js")], { env: { PATH: join(base, "with space"), HOME: base }, encoding: "utf8", timeout: 30000 });
+      assert.deepEqual([r.status, r.stderr], [2, "Give it the folder to put the helpers in: node tool/build-helpers.js <folder>\n"], `via ${folder}`);
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+    assert.ok(existsSync(join(tool, "build-helpers.js")), "removing the temp folder left tool/ alone");
   }
 });
