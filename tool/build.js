@@ -29,6 +29,12 @@ export const NEWER_SAY = `the episode was written by a newer BRIMM Video Studio.
     and every error on a checkout, comes back as it is. Whoever prints a failed write's own message passes it through here first. */
 export const forThisMac = (e, build) => (e && e.code === "NEWER" && isInstalled(build) ? Object.assign(new Error(NEWER_SAY), { code: "NEWER" }) : e);
 
+/** The words that send a person to Jason, `dev`, as this Mac says them. On a checkout they are as they are. On an installed Mac, where no
+    Jason is at hand, the support contact its build.json names stands in his place; where it names none, `bare` stands in place of the
+    words (nothing, unless given), so that the line ends as a sentence. `dev` is a line's own fixed words, never a name, a path or anything
+    else a person or a file gave: every "Jason" in it is changed. */
+export const askWords = (build, dev, bare = "") => (!isInstalled(build) ? dev : build.support ? dev.replaceAll("Jason", build.support) : bare);
+
 /** What an installed Mac is when its build.json says nothing that can be used. */
 const BROKEN = { mode: "installed", version: "", build: 0, commit: "", short: "unknown", feed: "", channel: "stable", support: "", broken: true };
 

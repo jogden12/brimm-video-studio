@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BUILD_FILE, NEWER_SAY, REPAIR, VERSION, UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "../build.js";
+import { BUILD_FILE, NEWER_SAY, REPAIR, VERSION, UPDATE_SAY, askWords, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "../build.js";
 import { commitOf, thisCheckout } from "../filing.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
 
@@ -126,5 +126,24 @@ describe("whether a Mac has BRIMM Video Studio installed", () => {
     // Nothing else is touched, installed or not.
     const changed = Object.assign(new Error("The episode changed on the other Mac."), { code: "CHANGED" });
     for (const e of [changed, new Error("EACCES"), "a plain string", undefined, null]) assert.equal(forThisMac(e, installed), e);
+  });
+
+  it("gives the words that send a person to Jason as they are on a checkout, with the support contact in his place on an installed Mac, and takes them out where it names none (the sweep)", () => {
+    const installed = buildOf(checkout(WHOLE));
+    const unnamed = buildOf(checkout({ ...WHOLE, support: "" }));
+    const table = [
+      // [the checkout's words, what stands where no one is named, with a support contact, with none]
+      [" Ask Jason.", undefined, " Ask help@example.invalid.", ""],
+      [": ask Jason.", ".", ": ask help@example.invalid.", "."],
+      [" If it says this again, tell Jason.", undefined, " If it says this again, tell help@example.invalid.", ""],
+      [", or ask Jason.", ".", ", or ask help@example.invalid.", "."],
+      [": ask Jason to put it back.", ".", ": ask help@example.invalid to put it back.", "."]
+    ];
+    for (const [dev, bare, named, none] of table) {
+      for (const b of [buildOf(checkout()), { mode: "dev" }, undefined, null]) assert.equal(bare === undefined ? askWords(b, dev) : askWords(b, dev, bare), dev);
+      assert.equal(bare === undefined ? askWords(installed, dev) : askWords(installed, dev, bare), named);
+      assert.equal(bare === undefined ? askWords(unnamed, dev) : askWords(unnamed, dev, bare), none);
+      assert.doesNotMatch(named + none, /Jason|install\.sh|Terminal|node/);
+    }
   });
 });
