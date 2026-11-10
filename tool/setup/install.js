@@ -3,7 +3,7 @@
 // how far it has come, as `progress` events, and none of them shows what a program printed: that goes to the engine's stderr.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { chmodSync, closeSync, createReadStream, existsSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { GUARD_CLAUDE, claudeAt, claudeEnv, claudeState, versionAtLeast } from "./checks.js";
 import { signInQuestion } from "./questions.js";
@@ -454,18 +454,34 @@ export async function installWhenIdle({ args, home, programs, why = () => idleWh
 
 const checkLogFile = (home) => join(home, "Library", "Logs", "brimm-video-claude-check.log");
 
-/** The size of the installer's check log, 0 when it is not there. Taken before the installer runs, which takes the old log away first. */
-export function checkLogSize(home) {
-  return sizeOf(checkLogFile(home));
+/** The installer's check log as it is before the installer runs: which file it is (its inode and birth time) and its size, or null
+    when there is none. Its length alone cannot tell an old log from a new one: install.sh takes the old log away before its check,
+    and the check's new log can be just as long. */
+export function checkLogMark(home) {
+  try {
+    const { ino, birthtimeMs, size } = statSync(checkLogFile(home));
+    return { ino, birthtimeMs, size };
+  } catch {
+    return null;
+  }
 }
 
-/** Whether Claude answered from the background job, read from the check log from byte `from` (from 0 when the log is now shorter):
-    the first line that says so or says it could not be asked, else a line saying there was no answer. */
-export function checkLogSays(home, { from = 0 } = {}) {
+/** Whether Claude answered from the background job, read from the check log: all of it when it is another file than `before` (its
+    mark from before the installer ran) or there was none before, else only what was added to it since (all of it again when it is
+    now shorter, since it was written again in place). The first line that says Claude answered or says it could not be asked, else
+    a line saying there was no answer. */
+export function checkLogSays(home, { before = null } = {}) {
   let text = "";
   try {
-    const bytes = readFileSync(checkLogFile(home));
-    text = bytes.subarray(bytes.length < from ? 0 : from).toString("utf8");
+    const fd = openSync(checkLogFile(home), "r");
+    try {
+      const now = fstatSync(fd);
+      const bytes = readFileSync(fd);
+      const same = before !== null && now.ino === before.ino && now.birthtimeMs === before.birthtimeMs;
+      text = bytes.subarray(same && bytes.length >= before.size ? before.size : 0).toString("utf8");
+    } finally {
+      closeSync(fd);
+    }
   } catch {
     // No log: no answer.
   }

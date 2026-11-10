@@ -2,13 +2,13 @@
 // No test downloads anything or runs the real npm or curl: each stage is given a stand-in program or a recorder.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
 import { PARTS } from "../setup/protocol.js";
-import { BUSY_TRIES, BUSY_WAIT_MS, CLAUDE_INSTALL_ARGS, LABELS, MODEL_BYTES, claudePin, installClaudeCode, modelPath, modelPin, npmArgs, checkLogSays, checkLogSize, installWhenIdle, installerArgs, installerEnv, installerOutcome, quiet, runInstaller, runProgram, sha256Of, signIn, signInLinkOf, stageChrome, stageCli, stageModel } from "../setup/install.js";
+import { BUSY_TRIES, BUSY_WAIT_MS, CLAUDE_INSTALL_ARGS, LABELS, MODEL_BYTES, claudePin, installClaudeCode, modelPath, modelPin, npmArgs, checkLogMark, checkLogSays, installWhenIdle, installerArgs, installerEnv, installerOutcome, quiet, runInstaller, runProgram, sha256Of, signIn, signInLinkOf, stageChrome, stageCli, stageModel } from "../setup/install.js";
 import { claudeAt } from "../setup/checks.js";
 import { signInQuestion } from "../setup/questions.js";
 import { installCalls, mac, notAMac, printOnly, settingsOf } from "./setup-harness.js";
@@ -754,12 +754,15 @@ describe("the check log", () => {
     writeFileSync(LOG(m.home), text);
   };
 
-  it("the size is 0 when there is no log", () => {
+  it("the mark is null when there is no log, and else names the file and its size", () => {
     const m = mac();
     try {
-      assert.equal(checkLogSize(m.home), 0);
+      assert.equal(checkLogMark(m.home), null);
       put(m, "abc\n");
-      assert.equal(checkLogSize(m.home), 4);
+      const mark = checkLogMark(m.home);
+      assert.deepEqual(Object.keys(mark).sort(), ["birthtimeMs", "ino", "size"]);
+      assert.equal(mark.size, 4);
+      assert.equal(mark.ino, statSync(LOG(m.home)).ino);
     } finally {
       m.done();
     }
@@ -780,16 +783,62 @@ describe("the check log", () => {
     }
   });
 
-  it("an old line in the check log, from before this run, is not read", () => {
+  it("no log before the installer: the log is read whole", () => {
+    const m = mac();
+    try {
+      const before = checkLogMark(m.home);
+      put(m, "Claude answered from here.\n");
+      assert.deepEqual(checkLogSays(m.home, { before }), { answered: true, line: "Claude answered from here." });
+    } finally {
+      m.done();
+    }
+  });
+
+  it("a log taken away and written anew, as install.sh does, is read whole, though it is as long as the old one", () => {
     const m = mac();
     try {
       put(m, "Claude answered from here.\n");
-      const from = checkLogSize(m.home);
-      assert.equal(checkLogSays(m.home, { from }).answered, false);
-      writeFileSync(LOG(m.home), "Claude answered from here.\nClaude could not be asked from here: late.\n");
-      assert.deepEqual(checkLogSays(m.home, { from }), { answered: false, line: "Claude could not be asked from here: late." });
+      const before = checkLogMark(m.home);
+      rmSync(LOG(m.home));
+      writeFileSync(LOG(m.home), "Claude answered from here.\n");
+      assert.equal(statSync(LOG(m.home)).size, before.size);
+      assert.deepEqual(checkLogSays(m.home, { before }), { answered: true, line: "Claude answered from here." });
+    } finally {
+      m.done();
+    }
+  });
+
+  it("the same log, added to: only what was added is read", () => {
+    const m = mac();
+    try {
       put(m, "Claude answered from here.\n");
-      assert.equal(checkLogSays(m.home, { from: 9999 }).answered, true);
+      const before = checkLogMark(m.home);
+      appendFileSync(LOG(m.home), "Claude could not be asked from here: late.\n");
+      assert.deepEqual(checkLogSays(m.home, { before }), { answered: false, line: "Claude could not be asked from here: late." });
+    } finally {
+      m.done();
+    }
+  });
+
+  it("the same log, untouched: its old line is not read, and there was no answer", () => {
+    const m = mac();
+    try {
+      put(m, "Claude answered from here.\n");
+      const before = checkLogMark(m.home);
+      assert.deepEqual(checkLogSays(m.home, { before }), { answered: false, line: "Claude did not answer from the background job within 90 seconds." });
+    } finally {
+      m.done();
+    }
+  });
+
+  it("the same log, now shorter than it was: it was written again in place, and is read whole", () => {
+    const m = mac();
+    try {
+      put(m, "starting\nClaude could not be asked from here: old.\n");
+      const before = checkLogMark(m.home);
+      writeFileSync(LOG(m.home), "Claude answered from here.\n");
+      assert.equal(statSync(LOG(m.home)).ino, before.ino);
+      assert.deepEqual(checkLogSays(m.home, { before }), { answered: true, line: "Claude answered from here." });
     } finally {
       m.done();
     }

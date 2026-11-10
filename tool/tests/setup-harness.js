@@ -18,8 +18,9 @@ function standIn(file, script) {
   chmodSync(file, 0o755);
 }
 
-/** The words each stand-in for Claude Code says, as `claude` gives them: its version, and what it prints for `auth status --json`.
-    Both signed-in and signed-out say an email address and an organisation, so that a test sees any leak of them. */
+/** The words each stand-in for Claude Code says, as `claude` gives them: its version, and what it prints for
+    `auth status --json`. Both signed-in and signed-out say an email address and an organisation, so that a test sees any leak of
+    them. */
 const CLAUDE = {
   "signed-in": { version: "2.1.296 (Claude Code)", status: JSON.stringify({ loggedIn: true, authMethod: "claude.ai", email: "jane@example.invalid", orgName: "Example Org", subscriptionType: "max" }), exit: 0 },
   "signed-out": { version: "2.1.296 (Claude Code)", status: JSON.stringify({ loggedIn: false, email: "jane@example.invalid", orgName: "Example Org" }), exit: 1 },
@@ -27,17 +28,21 @@ const CLAUDE = {
 };
 
 /** A whole made-up Mac in one temp folder.
-    - `settings`: "none"; "takeover" (usable settings whose checkout is a git clone in the folder); "installed" (the checkout is this
-      app's copy); "moved" (the checkout is another app's copy); "dev" (takeover's, marked as Jason's development Mac); "unusable"
-      (a settings file that holds `{`).
+    - `settings`: "none"; "takeover" (usable settings whose checkout is a git clone in the folder); "installed" (the checkout is
+      this app's copy); "moved" (the checkout is another app's copy); "dev" (takeover's, marked as Jason's development Mac);
+      "unusable" (a settings file that holds `{`).
     - `apps`: any of "claude-app", "dropbox" and "hyperframes", each made as that app's folder in the home's Applications folder.
     - `dropbox`: whether there is a BRIMM Video folder (`root`) in Dropbox, with Drop, Unedited Video and one episode.
-    - `claude`: "none", "signed-out", "old" or "signed-in": the Claude Code in ~/.local/bin. It says what dir/says/claude-version and
-      dir/says/claude-status hold, and `auth login` prints dir/says/claude-login, reads a line and writes it into dir/claude-got.
-    - `programs` are stand-ins in dir/bin. Each writes "<name> <arguments>" into `ran()`, prints dir/says/<name> when it is there and ends
-      with the number in dir/exits/<name> when it is there. curl writes dir/says/curl's bytes to the file after --output, and script
-      runs what follows /dev/null as a job of its own, in a group of its own (as real script puts claude in a session of its own, which a kill of script's group does not reach). The installer (a list: the program and its first arguments) waits while dir/hold is there and appends
-      dir/says/check-log, when there is one, to the log the installer's own check of Claude writes. */
+    - `claude`: "none", "signed-out", "old" or "signed-in": the Claude Code in ~/.local/bin. It says what dir/says/claude-version
+      and dir/says/claude-status hold, and `auth login` prints dir/says/claude-login, reads a line and writes it into
+      dir/claude-got.
+    - `programs` are stand-ins in dir/bin. Each writes "<name> <arguments>" into `ran()`, prints dir/says/<name> when it is there
+      and ends with the number in dir/exits/<name> when it is there. curl writes dir/says/curl's bytes to the file after --output.
+      script runs what follows /dev/null as a job of its own, in a group of its own, as real script puts claude in a session of
+      its own, which a kill of script's group does not reach.
+    - The installer (a list: the program and its first arguments) waits while dir/hold is there, and then writes the log that its
+      own check of Claude writes, in one of two ways. With dir/says/check-log-new it does as install.sh does: it takes the log
+      away and writes that file's text as a new log. With dir/says/check-log it appends that file's text to the log. */
 export function mac({ settings = "none", apps = [], dropbox = true, claude = "signed-in" } = {}) {
   const copy = appCopy({ under: "Copy" });
   const { dir, app, tools, checkout } = copy;
@@ -100,7 +105,9 @@ export function mac({ settings = "none", apps = [], dropbox = true, claude = "si
     `echo "installer $*" >> "${ranFile}"`,
     `{ printf 'installer-args'; for a in "$@"; do printf '\\t%s' "$a"; done; printf '\\n'; } >> "${ranFile}"`,
     `while [ -f "${join(dir, "hold")}" ]; do sleep 0.1; done`,
-    `if [ -f "${join(dir, "says", "check-log")}" ]; then mkdir -p "${join(home, "Library", "Logs")}"; cat "${join(dir, "says", "check-log")}" >> "${join(home, "Library", "Logs", "brimm-video-claude-check.log")}"; fi`,
+    `log="${join(home, "Library", "Logs", "brimm-video-claude-check.log")}"`,
+    `if [ -f "${join(dir, "says", "check-log-new")}" ]; then mkdir -p "\${log%/*}"; rm -f "$log"; cat "${join(dir, "says", "check-log-new")}" > "$log"; fi`,
+    `if [ -f "${join(dir, "says", "check-log")}" ]; then mkdir -p "\${log%/*}"; cat "${join(dir, "says", "check-log")}" >> "$log"; fi`,
     `[ -f "${join(dir, "says", "installer")}" ] && cat "${join(dir, "says", "installer")}"`,
     exitsOf("installer"),
     "exit 0",
@@ -127,18 +134,18 @@ export function mac({ settings = "none", apps = [], dropbox = true, claude = "si
   return { dir, home, root, app, tools, checkout, programs, ran: copy.ran, done: copy.done };
 }
 
-/** The installer's calls in what `ran()` holds, each as its arguments exactly as they were given, spaces and all. The stand-in writes
-    each call twice: as a readable line, "installer <arguments>", and as an "installer-args" line with a tab before each argument,
-    which is the one read here. */
+/** The installer's calls in what `ran()` holds, each as its arguments exactly as they were given, spaces and all. The stand-in
+    writes each call twice: as a readable line, "installer <arguments>", and as an "installer-args" line with a tab before each
+    argument, which is the one read here. */
 export const installCalls = (ran) => ran.split("\n").filter((line) => line.startsWith("installer-args")).map((line) => line.split("\t").slice(1));
 
 /** The text of this Mac's settings file, or null when there is none. */
 export const settingsOf = (home) => (existsSync(settingsFile(home)) ? readFileSync(settingsFile(home), "utf8") : null);
 
-/** An installer for `programs.installer` that reaches the real install.sh of the app's copy, and only to ask what it would do: a guard
-    that passes its arguments on when --print is among them and --yes is not, and otherwise writes "refused <arguments>" into `ran()`
-    and ends with 99. The stand-ins come first on its PATH, HOME is the made-up Mac's home whatever the caller has, and BRIMM_CLAUDE is the stand-in for Claude Code, as install.test.js's
-    askWith has them. */
+/** An installer for `programs.installer` that reaches the real install.sh of the app's copy, and only to ask what it would do: a
+    guard that passes its arguments on when --print is among them and --yes is not, and otherwise writes "refused <arguments>"
+    into `ran()` and ends with 99. The stand-ins come first on its PATH, HOME is the made-up Mac's home whatever the caller has,
+    and BRIMM_CLAUDE is the stand-in for Claude Code, as install.test.js's askWith has them. */
 export function printOnly(m) {
   const guard = join(m.dir, "bin", "install-guard");
   standIn(guard, [
@@ -154,18 +161,19 @@ export function printOnly(m) {
   return [guard];
 }
 
-/** A stage that stands in for one of the engine's three: it says it is running and then done, and downloads, runs and writes nothing. */
+/** A stage that stands in for one of the engine's three: it says it is running and then done, and downloads, runs and writes
+    nothing. */
 const standInStage = (part) => async ({ progress }) => {
   for (const state of ["running", "done"]) progress({ part, label: LABELS[part], done: 0, total: null, state });
   return "done";
 };
 
-/** Runs the engine once, in this process, as the app's shell would start it, and gives { code, events, errors }: its exit code, each
-    event it sent (the JSON lines of its output) and each line it wrote for a developer. `answers(event, input)` is called with every
-    event; a line it gives back, as text or as an object, is sent to the engine, and `input` is the engine's stdin, which a test may
-    end or break. engine.js is imported when this is first called, so that this file loads before the engine exists. The engine is
-    given no real launchd to wait on, no sleeping, an Applications folder of the made-up Mac that holds nothing, and stand-ins for
-    its three stages (Decided 37), of which `stages` replaces any it names. */
+/** Runs the engine once, in this process, as the app's shell would start it, and gives { code, events, errors }: its exit code,
+    each event it sent (the JSON lines of its output) and each line it wrote for a developer. `answers(event, input)` is called
+    with every event; a line it gives back, as text or as an object, is sent to the engine, and `input` is the engine's stdin,
+    which a test may end or break. engine.js is imported when this is first called, so that this file loads before the engine
+    exists. The engine is given no real launchd to wait on, no sleeping, an Applications folder of the made-up Mac that holds
+    nothing, and stand-ins for its three stages (Decided 37), of which `stages` replaces any it names. */
 export async function drive(m, { run, answers = () => undefined, why = () => "", argv, look, stages = {} } = {}) {
   const { runSetup } = await import("../setup/engine.js");
   const input = new PassThrough();

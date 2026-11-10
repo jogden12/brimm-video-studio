@@ -16,7 +16,7 @@ import { DEV_REFUSAL, defaultDropFolder, downloadsFolder, dropFolderOf, episodes
 import { studioFolder } from "../studio.js";
 import { APPS, DAMAGED, NO_BRIMM_VIDEO, appsHere, brimmVideoFolders, claudeState, copyFault, kindOf, nameClash, nameSuggestion, peekAt } from "./checks.js";
 import { guideData, writeGuide } from "./guide.js";
-import { LABELS, checkLogSays, checkLogSize, claudePin, installClaudeCode, installWhenIdle, installerArgs, installerOutcome, modelPath, modelPin, runInstaller, runProgram, signIn, stageChrome, stageCli, stageModel } from "./install.js";
+import { LABELS, checkLogMark, checkLogSays, claudePin, installClaudeCode, installWhenIdle, installerArgs, installerOutcome, modelPath, modelPin, runInstaller, runProgram, signIn, stageChrome, stageCli, stageModel } from "./install.js";
 import { STEPS, answerFault, argsOf, emitter, lineFault, readerOf } from "./protocol.js";
 import { appsQuestion, folderQuestion, nameQuestion, permissionQuestion, read, reviewQuestion, rootQuestion, welcomeQuestion } from "./questions.js";
 import { planOf, reviewSummary, setupSummary, statusSummary, summaryText } from "./summary.js";
@@ -231,7 +231,7 @@ async function install(ctx, answers) {
     }
     talk.checkpoint();
   }
-  const from = checkLogSize(home);
+  const before = checkLogMark(home);
   talk.installerMayRun();
   bar(ctx, "installer", "running");
   // installWhenIdle asks `why` before each try: when nothing is at work after a wait, the bar is running again.
@@ -257,7 +257,7 @@ async function install(ctx, answers) {
   // A line the engine could not take while the installer ran ends the run now that the installer has ended.
   talk.checkpoint();
   bar(ctx, "claude", "running");
-  const check = checkLogSays(home, { from });
+  const check = checkLogSays(home, { before });
   bar(ctx, "claude", check.answered ? "done" : "failed");
   return check;
 }

@@ -845,6 +845,29 @@ describe("the Install's parts, and how each can end", () => {
     });
   });
 
+  it("a repair after a good check: install.sh's new check log is read whole, though the old one was as long", async () => {
+    const said = [
+      ["Claude answered from here.", "done", true, []],
+      ["Claude could not be asked from here: nope", "failed", false, ["Claude did not answer from the background job. Open BRIMM Video Studio and choose Repair."]]
+    ];
+    for (const [line, state, ok, notes] of said) {
+      await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
+        const log = join(m.home, "Library", "Logs", "brimm-video-claude-check.log");
+        mkdirSync(dirname(log), { recursive: true });
+        writeFileSync(log, "Claude answered from here.\n");
+        writeFileSync(join(m.dir, "says", "check-log-new"), `${line}\n`);
+        const { code, events } = await go(m, { run: "repair" });
+        assert.equal(code, 0, JSON.stringify(lastOf(events)));
+        assert.equal(readFileSync(log, "utf8"), `${line}\n`);
+        assert.deepEqual(statesOf(events, "claude"), ["running", state], line);
+        const summary = events[events.length - 2];
+        assert.deepEqual([summary.id, summary.ok], ["setup", ok], line);
+        if (!ok) assert.equal(summary.details, line);
+        assert.deepEqual(lastOf(events).notes, notes, line);
+      });
+    }
+  });
+
   it("a signature that does not verify at Install ends with error damaged, and nothing is staged", async () => {
     await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
       writeFileSync(join(m.dir, "exits", "codesign"), "1");
