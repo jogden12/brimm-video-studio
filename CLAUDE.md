@@ -1,21 +1,31 @@
 # BRIMM Video Studio
 
-Video for The BRIMM, run through Claude Code or Claude chat, apart from BRIMM Ops. Jason Ogden owns the repo. The HyperFrames Mac app does the editing. Studio does everything around it: it takes a video in, reads it, makes the app's project, takes the exports back, and writes BRIMM Ops its hand-off file, all for a person to check.
+Video for The BRIMM, run through Claude Code or Claude chat, apart from BRIMM Ops. Jason Ogden owns the repo. The HyperFrames Mac app does the editing. Studio does everything around it: it takes a video in, reads it, makes the app's project, takes the exports back, and writes BRIMM Ops its hand-off file, all for a person to check. It began as brimm-video, and its code is still brimm-video's, changed step by step. What it must do: `docs/requirements.md`; Jason's preferences there win over Sallie's comments.
 
-Studio began as brimm-video: its history up to c666508, which is the tag `brimm-video-v1` (42a39a3, what ran on the Mac Studio on 2026-10-27) and the late-check groundwork merged after it. brimm-video itself keeps running for Sallie until Jason switches each Mac. The code here is still brimm-video's, and is changed step by step.
+## Stack
 
-- What it must do: `docs/requirements.md`. Jason's preferences there win over Sallie's comments.
-- The design, accepted on 2026-10-27: `docs/superpowers/specs/2026-10-27-brimm-video-with-the-hyperframes-app.md`. The architecture and the workflows: `docs/superpowers/specs/2026-10-27-brimm-video-studio-architecture.md`. The build plan: `docs/superpowers/plans/2026-10-27-brimm-video-studio-build-plan.md`. The handoffs: `docs/handoffs/`.
+Plain JavaScript in `tool/` (Node 22 or later, no npm packages), a few Swift helpers and zsh scripts. It runs ffmpeg, whisper-cli, the `claude` program and the pinned HyperFrames command line, and is started on each Mac by the launch agent `com.thebrimm.unedited`. A Mac app, BRIMM Video Studio.app, is being built to install it.
+
+## Run and test
+
+```
+cd tool && node --test                       # every test. Needs Node 22 or later, no packages
+cd tool && ./install.sh --print "<folder>"   # what the installer would do. It changes nothing
+```
+
+- The installer is only ever run with `--print`, by a test or by hand, unless Jason has said yes in chat.
+- No test calls the real `claude` program, the HyperFrames app or HeyGen: a stand-in says what each would print.
 - How the tool works today and how it is set up: `README.md`, "Unedited video".
 
 ## Rules that are never broken
 
-- The tools draft, and post only what Sallie has approved. Studio itself never posts, sends or publishes anything. BRIMM Ops may hand an episode's approved set to her scheduler, through a connector in her own Claude, each piece at its planned time. Nothing goes out that she hasn't approved, and a post drawn from a session carries only approved principles, with no client names. HyperFrames still never publishes or renders in the cloud. (Jason, 5 November 2026; see the requirements' "Decisions".)
-- Never read a `.env` file. The project's one secret is a read-only deploy key on Sallie's laptop, kept only in her `~/.ssh` (never in the repo or Dropbox); Jason revokes it in the repo's GitHub settings when it is no longer needed. Until her laptop is switched to Studio, the key there is brimm-video's; Studio gets its own then.
+- The tools draft, and post only what Sallie has approved. Studio itself never posts, sends or publishes anything. BRIMM Ops may hand an episode's approved set to her scheduler, through a connector in her own Claude, each piece at its planned time. Nothing goes out that she hasn't approved, and a post drawn from a session carries only approved principles, with no client names. HyperFrames still never publishes or renders in the cloud.
+- Never read a `.env` file. The project's one secret is a read-only deploy key on Sallie's laptop, kept only in her `~/.ssh` (never in the repo or Dropbox); Jason revokes it in the repo's GitHub settings when it is no longer needed.
 - Nothing is installed on a Mac, and no launch agent is added or changed, without Jason's yes in chat first.
 - Write a failing test first, then the code.
-- Since 2026-11-03 the Mac Studio's launch agent, `com.thebrimm.unedited`, runs from Studio's main checkout, `~/Claude Code/brimm-video-studio`. Studio's installer kept that label and replaced brimm-video's agent in place, on Jason's yes. That checkout stays on `main`: work in git worktrees. Sallie's laptop runs brimm-video's agent until it is moved to Studio.
+- The Mac Studio's launch agent runs from Studio's main checkout, `~/Claude Code/brimm-video-studio`. That checkout stays on `main`: work in git worktrees.
 - Experiments never write into a Mac's drop folder: a new file there starts the tool (and `~/Movies` on the Mac Studio is a link into Dropbox).
+- Every by-hand step for Jason goes into an artifact: what to do on a Mac, the commands to run, and a place for his results, which the session reads back. A pull request or a chat message links to it and never holds the steps alone.
 
 ## The contract with BRIMM Ops (never broken)
 
@@ -36,47 +46,25 @@ BRIMM Ops takes Studio's hand-off file. These carry over exactly. Change any of 
 - No session clip uses HeyGen's features (the Script panel, Share, the cloud) until HeyGen confirms the training opt-out, which Jason is asking for.
 - Higgsfield never gets a session.
 
-## HeyGen and the app
+## HeyGen and the HyperFrames app
 
-- HeyGen is on its lowest paid tier.
-- The Script panel may transcribe videos meant for posting.
-- Share is for invited people only.
-- Never render in the cloud.
-- HeyGen's tools are open, and nothing blocks them on either Mac (Jason, 2026-11-04). Each project's notes warn before an AI avatar, lip-sync, or an AI-generated Sallie, her face or her voice, which The BRIMM doesn't use for now. A session clip's notes keep the old line: no session clip uses HeyGen's features. A stock HeyGen voice is fine, with YouTube's altered or synthetic label.
+- HeyGen is on its lowest paid tier. The Script panel may transcribe videos meant for posting. Share is for invited people only. Never render in the cloud.
+- HeyGen's tools are open, and nothing blocks them on either Mac. Each project's notes warn before an AI avatar, lip-sync, or an AI-generated Sallie, her face or her voice, which The BRIMM doesn't use for now. A session clip's notes keep the old line: no session clip uses HeyGen's features. A stock HeyGen voice is fine, with YouTube's altered or synthetic label.
 - The app's agent is Claude Code with Auto access, never Full.
+- Projects Studio makes live in `~/BRIMM Video Work`, never in Dropbox or a watched folder. The app's own projects folder is in Dropbox and is not watched.
+- HyperFrames telemetry is off. Never `publish`, `cloud`, `lambda` or `cloudrun`.
+- Each project carries BRIMM's rules for the agent (`docs/phase-a0/brief.md`, `settings.json`). The app starts its agent with only the user's own settings, so a project's `.claude/settings.json` has no effect in the app: the notes are what guide the agent there.
 
-## HyperFrames
+## The brand and media
 
-- Projects Studio makes live in `~/BRIMM Video Work`, never in Dropbox or a watched folder.
-- On the Mac Studio the app's own projects folder is `HyperFrames`, in `BRIMM Video`, in The BRIMM DB in Dropbox (Jason, 2026-11-05; set in `~/Library/Application Support/HyperFrames/projects-folder.json`, which has the full path). It is not a watched folder. Projects started in the app live there. When Studio opens one of its projects in the app, the app puts a link to it in that folder, and the project's files stay in `~/BRIMM Video Work`. The app's old folder, `~/.hyperframes-studio`, keeps the links it held before the change.
-- Telemetry is off.
-- Never `publish`, `cloud`, `lambda` or `cloudrun`.
-- Each project carries BRIMM's rules for the agent (`docs/phase-a0/brief.md`, `settings.json`).
-- The app starts its agent with only the user's own settings (--setting-sources user), so a project's .claude/settings.json has no effect in the app: the notes are what guide the agent there (A1, 2026-11-04).
+- The brand is The BRIMM's brand guide: its colours (navy, sand, mist and the rest). The typeface is Josefin Sans (Google Fonts) in place of Sweet Sans Pro. Fonts come only from Adobe Fonts or Google Fonts. The script is Allison (Google Fonts) in place of Sinthya (`tool/brand/brand.md`). The name on screen is Sallie Ogden.
+- Versions are the app's history (`npx hyperframes history`). Music comes from a library, with Sallie picking. Generated media is labelled for YouTube's disclosure. OpenRouter is for pictures only. Higgsfield waits until A0.
 
-## The brand
+## Wiki and memory
 
-The brand is The BRIMM's brand guide: its colours (navy, sand, mist and the rest). The typeface is Josefin Sans (Google Fonts) in place of Sweet Sans Pro, which never became active on the Mac Studio. Fonts come only from Adobe Fonts or Google Fonts. The script is Allison (Google Fonts) in place of Sinthya (Jason, 2026-10-28; `tool/brand/brand.md`). The name on screen is Sallie Ogden.
-
-## Elsewhere
-
-- Versions are the app's history (`npx hyperframes history`).
-- Music comes from a library, with Sallie picking.
-- Generated media is labelled for YouTube's disclosure.
-- OpenRouter is for pictures only. Higgsfield waits until A0.
-
-## Working on the tool
-
-```
-cd tool && node --test                       # every test. Needs Node 22 or later, no packages
-cd tool && ./install.sh --print "<folder>"   # what the installer would do. It changes nothing
-```
-
-- The installer is only ever run with `--print`, by a test or by hand, unless Jason has said yes in chat.
-- No test calls the real `claude` program, the HyperFrames app or HeyGen: a stand-in says what each would print.
-- `tool/shared/`, `tool/lib.js` and `tool/run.js` are copies from brimm-operations, each named in its first line, and are kept in step by hand.
-- Every by-hand step for Jason goes into an artifact: what to do on a Mac, the commands to run, and a place for his results, which the session reads back. A pull request or a chat message links to it and never holds the steps alone (Jason, 2026-10-28).
-
-## Both Macs
-
-Both Macs edit in the HyperFrames app (A0 installs it on the Mac Studio first; Sallie's laptop follows, on Jason's yes). Each Mac picks its own drop folder and exports folder (Phase 3, 6 November 2026; the default drop folder is `~/BRIMM Video Work/Drop`). A video's own files stay on the Mac that took it in until its hand-off, and its recordings then move into `Original files` in the episode's folder in Dropbox. Edits are not handed between Macs. Episodes from before the switch keep the old way. Studio retired Final Cut on 6 November 2026 (Jason: "Retire it now"); Final Cut can still open HyperFrames' MOV export by hand. Sallie's laptop is set up by `docs/setup/sallies-laptop.md`, which still describes brimm-video until a later step updates it. Moving it to Studio is checks 40 to 48 on the Studio By-Hand Checks page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT); the Mac Studio's own move, check 40, was done on 2026-11-03. Her guide is the BRIMM Ops guide (https://claude.ai/artifact/Vu5JmADhftiEsPz4KYN4e4). The BRIMM Video Guide it replaced was retired on 2026-11-03: its link points to the BRIMM Ops guide. Her laptop has been on brimm-video's light import since 2026-10-26, with its drop folder at `Drop/Sallie's laptop`.
+- `docs/wiki/architecture.md`: how Studio is put together: entry points, the pipeline, the module map, tests, the Mac app.
+- `docs/wiki/data-model.md`: every file and record Studio reads and writes, the hand-off's shape among them.
+- `docs/wiki/macs.md`: both Macs, the live checkout, drop and exports folders, Sallie's laptop, the By-Hand Checks page and her guide.
+- `docs/wiki/hyperframes-and-heygen.md`: the decisions and findings behind the rules for the app and HeyGen.
+- `docs/wiki/documents.md`: where the requirements, specs, plans and handoffs are, and where Studio came from.
+- `docs/memory/`: decisions (choices and why), gotchas (mistakes not to repeat), progress (done, in progress, next). Read `progress.md` and `gotchas.md` at the start of a session; update them before ending one.
