@@ -31,3 +31,21 @@ Where Studio stands. Last brought up to date on 2026-11-10 (main at 6636327). Da
 - **Deferred minors** (final touches): a stray `.new` after a kill; `exports.js`'s own `plainName` copy; an empty `set aside/` after a failed move; an export only in an older `renders/`.
 - **Carried forward for the Mac app**: cap retries after `install.sh`'s exit 75 and show the line; the npm update notifier off; hide the HyperFrames CLI's "docker: command not found"; DAMAGED advice for a broken app copy; refuse `:` in a `--tools` path; one `launchctl print` parser; Phase 6 ships the transcriber as `whisper-cli`; Phase 8 drops the bare `node` from `editStart`.
 - **Later**: remove the old Dropbox-wait code once Sallie's laptop has no episode from before the switch; `docs/setup/sallies-laptop.md` still describes brimm-video.
+
+## Open from past reviews (harvested 2026-11-10)
+
+Most serious first. Sources are in `gotchas.md`, "From past reviews".
+
+- **High:** K0's by-hand list for the lock is still unchecked (folder trust, `--add-dir`, `/sandbox` "No sandbox", `failIfUnavailable`, two chats at once, forks, a Keychain item, `launchctl kickstart`, `osascript`). Only matters once an open lock is named, but nothing proves the lock there yet.
+- **Medium:**
+  - `lib.js`'s silence finder needs 5 s, so a shorter closing quiet is missed; it is a copy shared with brimm-operations, so the fix is its own PR in step.
+  - Lock liveness is judged by pid alone (a reused pid can keep a check put off).
+  - No "nothing has run for N hours" signal when the launch agent never woke (a restart before a drop leaves a video untouched, silently).
+  - Nothing reads the HyperFrames app's own version: warn in `behind` when it changes, and keep an "after an app update" check.
+  - Files copied by hand between the repos (`tool/shared/`, `lib.js`, `run.js`) and the Ops page's button words have no drift test; only the five v2 fixtures are hash-pinned (v1's are not).
+  - The installed Mac's privacy list naming each program is proven only for the launch agent (S4); `access.js` depends on it.
+  - A stopped setup stage can still rename a file mid-hash (Phase 5, Task 8 carried to 13); `claude auth login` outliving a cancel is unproven until S5.
+  - A session clip re-answered after its reading wrongly says to drop it on BRIMM Ops.
+  - Retake detection has never been tested on real speech (only a synthetic voice).
+  - Pin everything fetched at run time (the toolchain lock file call).
+- **Low:** the remaining copied helpers; the `footage.js`↔`plan.js` cycle; the skill's line cap repeated in three tests; `edit.js` (about 7,600 lines) and `workOn`'s about 20 branches; the hand-off re-transcribing each export; "after HH:MM" past times and estimate nits; same-stem HEIC and JPEG sharing a project file; b-roll and screen parts can't be taken back after a join; an explainer's voice can't change after `plan new`; a failed join gives no next step; the guide keeps saying "drag the hand-off" after the page took it; a real-`launchctl` read in a Phase 5 test; README line 28 ("nothing on the PATH is used") is wrong; about 25 named test gaps in Phases 4 and 5 and about 70 in H7's Appendix A.

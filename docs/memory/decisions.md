@@ -56,3 +56,18 @@ Choices made for Studio, newest first within each heading, with who decided and 
 - **Agents and sessions run on the cheapest model that fits** (Jason, 2026-11-10: "I will select the model for the main chat; delegate to cheaper models for appropriate sub tasks and sessions"). Haiku for mechanical one-file work, Sonnet for builders, fixers, writing and task reviews, Opus for integration-heavy builds and whole-branch reviews; Fable only when Jason asks. Never fork for work a cheaper fresh agent can do.
 - **One coordinating session; Jason's yes gates every merge, push, change on a Mac and BRIMM Ops guide line**, each time. Merge one PR at a time, with a merge commit, CI green. A blanket yes covers only the batch it was given for.
 - **Jason uses Studio once the by-hand checks pass; final touches follow from what they find** (2026-10-29).
+
+## Decisions the reviews led to (harvested 2026-11-10)
+
+- **Editing became its own app, run through Claude** (14 Oct, after the reel-editor review): Studio did not adopt that tool's cutter or its upload-the-video review page; each video gets its own record, kept and never deleted. Source: `docs/research/2026-10-13-claude-reel-editor/review.md`.
+- **The lock's design was revised after K0** (2026-10-26): check the parent process with `ps` and key held chats on message uuids, not session ids or environment marks; add three narrow `allowRead` entries; Bash `find`/`grep` are what search, so Glob/Grep deny rules don't count. Source: `docs/superpowers/notes/2026-10-26-lock-k0-findings.md`.
+- **Studio makes Reels; the app's agent never does**, and Studio writes Reels upright from the face track (Jason, 2026-11-02, reversing "the app's job"). Source: build-plan ledger.
+- **Don't make her wait on a safety check** (Jason, 2026-11-02: "Don't make me wait"): the hand-off is written first and the late check runs behind it, with a ready-by time and a notification. Source: build-plan ledger; team review.
+- **The 5 Nov team review's answers** (questionnaire): one screen name, "BRIMM Video Studio" (Q10; `madeBy` unchanged); trust the notes, warn never block, for the app (Q12); one yes at the hand-off and one press on the page (Q8, Q9); a one-page first-week card (Q19); a backup of BRIMM Ops before every publish, in a second place (Q2); withdrawn words cleared by hand from Dropbox's history too (Q30); build R1d too (Q29). Built as #40 (Studio) and the Ops round. Source: team review `CHANGE-LIST.md`, review-changes plan and ledger.
+- **Her script is read from a copy; changes come only through `plan … set`** (Jason, 2026-11-05). Source: H7 findings.
+- **Full cutaway is fine for b-roll** when no rule says otherwise (Jason, 2026-11-05). Source: HyperFrames-led path ledger.
+- **#35 merged before Sallie's laptop moved** (Jason waived ruling 35: "get it up and running on this Mac Studio first"). Source: HyperFrames-led path ledger.
+- **Deferred minors are parked in the ledger and cleared in a named round** (ruling 10), not fixed in passing. Source: H7 findings, review-changes plan.
+- **Mac app review findings went in their own small PR from main** (Jason: "Own small PR"; #58); the macOS CI job (finding 5) is left out as his cost call. Source: Mac app review ledgers.
+- **`install.sh` keeps exit 75 when busy, as the fail-safe**; the setup engine caps retries. Source: Phase 4 ledger, Phase 5 plan review.
+- **Parallel builders in separate worktrees, merged one at a time with the whole suite after each**, with a fresh read-only reviewer per task and a fix pass test-first. Source: every ledger.
