@@ -820,7 +820,7 @@ Nothing is left for this task. Its number is kept so that the other tasks keep t
 Jason, 2026-11-09:
 1. The Mac app's build plan stands: one pull request for each phase, a task plan for each phase, built by subagent-driven development, and a push, a pull request or a merge only on his yes. For this plan: "Yes, write it" (9 November), then "Yes, amend and build" (10 November), which accepts the recommendations under Open for Jason; the by-hand steps in 1 and 4 still wait for his yes.
 2. The support contact is `admin@growwiththebrimm.com` and the update address is `updates.thebrimminsights.com`. The engine reads the contact from `build.json` and never spells it itself.
-3. Every agent in this build runs on Fable 5.2.
+3. Every agent in this build ran on Fable 5.2 until 10 November 2026. Since then Jason picks the main chat's model, and each agent goes to the cheapest model that fits its task: "change models in order to save tokens. I will select the model for the main chat; delegate to cheaper models for appropriate sub tasks and sessions".
 
 Claude's rulings, 2026-11-09:
 4. The shell says which run it wants, and the engine works out which kind of Mac this is. The shell never reads the settings.
