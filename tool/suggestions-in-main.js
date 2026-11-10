@@ -68,7 +68,7 @@ export function suggestionsInMain({ candidates, words, spellings = [], main }) {
 export function suggestionsFor({ folder, record, ctx = null, main }) {
   let read;
   try {
-    read = readReels(readFileSync(ctx ? fileAt(ctx, { folder, record }, REELS_FILE) : join(folder, REELS_FILE), "utf8"));
+    read = readReels(readFileSync(ctx ? fileAt(ctx, { folder, record }, REELS_FILE) : join(folder, REELS_FILE), "utf8"), { build: ctx ? ctx.build : undefined });
   } catch (e) {
     return { list: [], left: e && e.code === "ENOENT" ? [] : ["No Reel suggestions are in the hand-off: their list cannot be read."] };
   }

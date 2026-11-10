@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BUILD_FILE, REPAIR, VERSION, UPDATE_SAY, brokenLine, buildOf, isInstalled, repairLine } from "../build.js";
+import { BUILD_FILE, NEWER_SAY, REPAIR, VERSION, UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "../build.js";
 import { commitOf, thisCheckout } from "../filing.js";
 import { handoffFaultV2 } from "../handoff-v2.js";
 
@@ -110,5 +110,21 @@ describe("whether a Mac has BRIMM Video Studio installed", () => {
     assert.equal(UPDATE_SAY, 'Say "update Studio" to update this Mac.');
     assert.equal(isInstalled(buildOf(checkout(WHOLE))), true);
     for (const b of [{ mode: "dev" }, undefined, null]) assert.equal(isInstalled(b), false);
+  });
+  it("gives a record's NEWER error again in the update's words on an installed Mac, and every other error as it is (review finding 2)", () => {
+    // episode.js knows no build, so its own words name Jason: "Jason has a newer BRIMM Video Studio. Ask him to update this Mac."
+    const newer = Object.assign(new Error("Jason has a newer BRIMM Video Studio. Ask him to update this Mac."), { code: "NEWER" });
+    const installed = buildOf(checkout(WHOLE));
+    const told = forThisMac(newer, installed);
+    assert.equal(NEWER_SAY, 'the episode was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac.');
+    assert.equal(told.message, NEWER_SAY);
+    assert.equal(told.code, "NEWER");
+    assert.equal(told instanceof Error, true);
+    assert.doesNotMatch(told.message, /Jason|install\.sh|Terminal|node/);
+    // A checkout keeps episode.js's own words: Jason is at hand there.
+    for (const b of [buildOf(checkout()), { mode: "dev" }, undefined, null]) assert.equal(forThisMac(newer, b), newer);
+    // Nothing else is touched, installed or not.
+    const changed = Object.assign(new Error("The episode changed on the other Mac."), { code: "CHANGED" });
+    for (const e of [changed, new Error("EACCES"), "a plain string", undefined, null]) assert.equal(forThisMac(e, installed), e);
   });
 });

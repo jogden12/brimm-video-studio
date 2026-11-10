@@ -16,6 +16,8 @@ async function on(deps, ...argv) {
   const code = await editMain(argv, { ...deps, say: (line) => said.push(line) });
   return { code, text: said.join("\n") };
 }
+// An installed Mac's build, as build.json gives it: no Jason is at hand there.
+const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
 const RECORD_COPY = "record/0002 (Sallie's laptop's conflicted copy 2026-10-20).json";
 const TIMELINE = "edit/main.v2.mac-studio.fcpxml";
 const TIMELINE_COPY = "edit/main.v2.mac-studio (Sallie's laptop's conflicted copy 2026-10-20).fcpxml";
@@ -146,6 +148,24 @@ describe("resolve", () => {
     assert.equal(readFileSync(join(found.folder, TIMELINE), "utf8"), "<fcpxml>A</fcpxml>\n");
     assert.deepEqual(conflictedCopies(found.folder), [TIMELINE_COPY]);
     t.done();
+  });
+  it("says how to update, not to ask Jason, on an installed Mac, when the record it would write is a newer BRIMM Video Studio's (review finding 2)", async () => {
+    const ASK = "Jason has a newer BRIMM Video Studio. Ask him to update this Mac.";
+    const SAY = 'the episode was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac.';
+    for (const [build, why] of [[undefined, ASK], [INSTALLED, SAY]]) {
+      const t = setup();
+      if (build) t.ctx.deps.build = build;
+      const found = timelineConflict(t);
+      // The record in force is one a newer BRIMM Video Studio wrote: this Mac may not write the next.
+      writeFileSync(recordFile(found.folder, 2), recordText({ ...readEpisode(found.folder, { pastCopies: true }).record, version: 99 }));
+      const before = filesOf(found);
+      const r = await keep(t.ctx.deps, "B");
+      assert.deepEqual([r.code, r.text], [1, `Nothing was written, and nothing deleted: ${why} Say "sort out the conflict" again to see it as it is now.`], `build ${build ? build.mode : "none"}`);
+      if (build) assert.doesNotMatch(r.text, /Jason|install\.sh/);
+      assert.deepEqual(Object.fromEntries(Object.entries(filesOf(found)).filter(([rel]) => !rel.startsWith("history/"))), before);
+      assert.deepEqual(conflictedCopies(found.folder), [TIMELINE_COPY]);
+      t.done();
+    }
   });
   it("puts A back, and the record as it was, when B cannot be put in its place", async () => {
     const t = setup();

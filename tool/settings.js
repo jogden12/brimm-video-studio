@@ -34,6 +34,8 @@ import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { buildOf, isInstalled, repairLine } from "./build.js";
 import { isMain } from "./is-main.js";
 import { waitingToCut } from "./cuts.js";
 import { textWriter } from "./dropbox.js";
@@ -237,25 +239,29 @@ export function teachingsLapsed(s, now = Date.now()) {
     BRIMM Video and the checkout every time, and the settings of the switch only when it is told them. */
 const MEND_SETTING = "Jason puts that setting right by hand, or runs install.sh --machine on it, which writes this Mac's name, BRIMM Video and the checkout every time, the import, the hand-off version and the drop folder when told --import, --handoff or --drop, and readings off with --rules-only.";
 
+/** What mends this Mac's settings, as a sentence: `dev`, what Jason does, on a checkout; and on a Mac with BRIMM Video Studio
+    installed (`build`, as buildOf gives it), where no Jason is at hand and there is no installer to run, to choose Repair. */
+const mendFor = (build, dev) => (isInstalled(build) ? repairLine(build) : dev);
+
 /** This Mac's settings, as {settings}, or {why} there are none that can be used, in plain words, and {mend}, what Jason does
     about it, as a sentence. Any field a later version of brimm-video adds is kept as it is. install.sh --machine makes
     settings that are not there and mends a file that is not JSON; it writes the Mac, BRIMM Video and the checkout every time,
     and mends another setting that is wrong only when it is told it (--import, --handoff, --drop, or --rules-only for readings
-    off); and nothing else in the file. */
-function usable(home) {
+    off); and nothing else in the file. On an installed Mac (`build`) every {mend} is to choose Repair. */
+function usable(home, build) {
   const file = settingsFile(home);
-  const installer = "Jason runs install.sh --machine on it.";
+  const installer = mendFor(build, "Jason runs install.sh --machine on it.");
   let s;
   try {
     s = JSON.parse(readFileSync(file, "utf8"));
   } catch (e) {
     if (e.code === "ENOENT") return { why: `This Mac has no settings for episodes (${file}).`, mend: installer };
     if (e instanceof SyntaxError) return { why: `This Mac's settings could not be read (${file}: it is not JSON).`, mend: installer };
-    return { why: `This Mac's settings could not be read (${file}: ${e.code || e.message}).`, mend: "Jason puts that file right by hand." };
+    return { why: `This Mac's settings could not be read (${file}: ${e.code || e.message}).`, mend: mendFor(build, "Jason puts that file right by hand.") };
   }
   const fault = settingsFault(s);
   return fault
-    ? { why: `This Mac's settings could not be read (${file}: ${fault}).`, mend: MEND_SETTING }
+    ? { why: `This Mac's settings could not be read (${file}: ${fault}).`, mend: mendFor(build, MEND_SETTING) }
     : { settings: s };
 }
 
@@ -700,7 +706,7 @@ export function exportsFolderFault(path, { home, root, drop, zoom = join(home, "
     folder, of its Mac, in its BRIMM Video) is not the one the settings would name: a new --drop, and a new --root or --machine
     too; and the old folder looked at, with the statuses and late checks of its Mac in its BRIMM Video, is the file's. `now` is a
     time, for the status files. */
-function planned(home, rest, now, plutil = spawnSync) {
+function planned(home, rest, now, plutil = spawnSync, build) {
   const told = fieldsToldBy(rest);
   if (!told.fields) return { code: told.code, said: [told.said] };
   let held;
@@ -734,7 +740,7 @@ function planned(home, rest, now, plutil = spawnSync) {
     if (why) return { code: 1, said: [`Not written: ${why}.`] };
   }
   const { settings, fault } = afterWrite(held, fields, remove);
-  if (fault) return { code: 1, said: [`This Mac's settings could not be written (${fault}). ${MEND_SETTING}`] };
+  if (fault) return { code: 1, said: [`This Mac's settings could not be written (${fault}). ${mendFor(build, MEND_SETTING)}`] };
   // And whatever the drop folder is, in Dropbox or this Mac's own, and whichever option moved it or the exports folder (--exports-folder,
   // --drop, --switch-back, or none), the exports folder the settings would name (told, kept, or Downloads when none is) may not be what
   // exportsFolderFault refuses, as `set` refuses it. When this run named no exports folder, a second line names the one refused, kept
@@ -807,8 +813,8 @@ const afterwards = (result, next) => (typeof result.then === "function" ? result
 
 /** `write`: the settings it is told, checked (planned) and then written. Gives the number it ends with, or a promise of it when
     the drop folder changes. */
-function write(home, rest, say, now, plutil) {
-  return afterwards(planned(home, rest, now, plutil), (result) => {
+function write(home, rest, say, now, plutil, build) {
+  return afterwards(planned(home, rest, now, plutil, build), (result) => {
     if (!result.fields) {
       for (const line of result.said) say(line);
       return result.code;
@@ -829,8 +835,8 @@ function write(home, rest, say, now, plutil) {
     the drop folder is in a cloud folder and that macOS may ask about reading it, and, when the folder watched changes, the old
     one's whole path, the one checked, on a line after them; and nothing written; or the lines `write` would refuse by. Gives the
     number it ends with, or a promise of it when the drop folder changes. */
-function plan(home, rest, say, now, plutil) {
-  return afterwards(planned(home, rest, now, plutil), (result) => {
+function plan(home, rest, say, now, plutil, build) {
+  return afterwards(planned(home, rest, now, plutil, build), (result) => {
     if (!result.fields) {
       for (const line of result.said) say(line);
       return result.code;
@@ -913,7 +919,7 @@ function localTime(d) {
 
 /** `set`: the settings of the switch it is told, changed and checked, each change said. A setting that is as it is told is
     left, and said to be. A change of the drop folder is refused, since the installer makes it: nothing is changed. */
-function set(home, rest, say, plutil = spawnSync) {
+function set(home, rest, say, plutil = spawnSync, build) {
   const told = pairsOf(rest, { ...OF_SET(), "--drop-folder": "--drop-folder" });
   if (!told || !Object.keys(told).length) {
     say(HELP);
@@ -932,7 +938,7 @@ function set(home, rest, say, plutil = spawnSync) {
       return 1;
     }
   }
-  const got = usable(home);
+  const got = usable(home, build);
   if (got.why) {
     say(`${got.why} ${got.mend}`);
     return 2;
@@ -989,7 +995,7 @@ function set(home, rest, say, plutil = spawnSync) {
 
 /** `sessions`: record that Jason has checked the training setting on the two accounts that touch a session, and when, or take
     that away. The account setting cannot be read from code: this records that a person checked, and no more. */
-function sessions(home, rest, say, now) {
+function sessions(home, rest, say, now, build) {
   const told = pairsOf(rest, { "--teachings": "teachings", "--cli-account": "cli", "--app-account": "app" });
   const accounts = told ? [told.cli, told.app].filter((a) => a !== undefined).length : 0;
   const on = told?.teachings === "on" && accounts === 2;
@@ -1002,7 +1008,7 @@ function sessions(home, rest, say, now) {
     say("Not changed: teachings need both accounts, the one the claude command is signed in to and the one the Code tab shows.");
     return 1;
   }
-  const got = usable(home);
+  const got = usable(home, build);
   if (got.why) {
     say(`${got.why} ${got.mend}`);
     return 2;
@@ -1034,8 +1040,8 @@ function sessions(home, rest, say, now) {
     folder's lock but the node it was written with, are said when the file has them, but not the two accounts the teachings from sessions were turned on for, each said as "(not shown)":
     what this prints may reach a chat, and an account's email is not to. `sessions --teachings on` says them once, to Jason,
     who typed them. */
-function show(home, say, now) {
-  const got = usable(home);
+function show(home, say, now, build) {
+  const got = usable(home, build);
   if (got.why) {
     say(`${got.why} ${got.mend}`);
     return 2;
@@ -1154,7 +1160,7 @@ function clearChatOutput(tmp, uid, folder) {
     effect, or for the lock --lock names, whatever `openMinimum` is, so that the open shape can be tried by hand before it is
     named; with the port this Mac's settings store, or NO_PORT, never one picked for it. Gives the number it ends with, or a
     promise of it while a port is picked. */
-function studio(home, rest, say, { openMinimum, freePort, tmp, uid, now }) {
+function studio(home, rest, say, { openMinimum, freePort, tmp, uid, now, build }) {
   const told = studioToldBy(rest);
   if (!told) {
     say(HELP);
@@ -1164,7 +1170,7 @@ function studio(home, rest, say, { openMinimum, freePort, tmp, uid, now }) {
     say(NOT_YET);
     return 1;
   }
-  const got = usable(home);
+  const got = usable(home, build);
   if (got.why) {
     say(`${got.why} ${got.mend}`);
     return 2;
@@ -1239,12 +1245,12 @@ const USER_UNREAD = "Her user settings could not be read as JSON, so nothing was
     mode it had, and one that is made is 0600. First this Mac's settings note `userDeny: true`, so that the lock check looks for the rules
     from then on (loosened.js), then the file is written under another name beside it, then renamed: through a link to it, the file
     it leads to, the link left as it is. Gives the number it ends with. */
-function userDeny(home, rest, say, { tmp, uid, openMinimum, env }) {
+function userDeny(home, rest, say, { tmp, uid, openMinimum, env, build }) {
   if (rest.length) {
     say(HELP);
     return 2;
   }
-  const got = usable(home);
+  const got = usable(home, build);
   if (got.why) {
     say(`${got.why} ${got.mend}`);
     return 2;
@@ -1373,7 +1379,7 @@ function mark(rest, say, clone, home) {
     `tmp` and `uid` Claude Code's temp folder and this Mac user's id, which a test gives as its own. The home folder is the one HOME names, as for the
     launch agent and in a shell, and the Mac's own word for it when HOME names none; or the one BRIMM_VIDEO_HOME names (home.js), and a
     BRIMM_VIDEO_HOME that is not a whole path ends it with 2. */
-export function settingsMain(argv, { home, say = (line) => process.stdout.write(`${line}\n`), clone, now = new Date(), openMinimum = OPEN_LOCK_CLAUDE, freePort = freeLocalPort, tmp, uid, env = process.env, plutil = spawnSync } = {}) {
+export function settingsMain(argv, { home, say = (line) => process.stdout.write(`${line}\n`), clone, now = new Date(), openMinimum = OPEN_LOCK_CLAUDE, freePort = freeLocalPort, tmp, uid, env = process.env, plutil = spawnSync, build = buildOf(dirname(dirname(fileURLToPath(import.meta.url)))) } = {}) {
   const [command, ...rest] = argv;
   if (command === "--help" || command === "-h") {
     say(HELP);
@@ -1387,14 +1393,14 @@ export function settingsMain(argv, { home, say = (line) => process.stdout.write(
     }
     home = studioHome();
   }
-  if (command === "write") return write(home, rest, say, now, plutil);
-  if (command === "plan") return plan(home, rest, say, now, plutil);
-  if (command === "set") return set(home, rest, say, plutil);
-  if (command === "sessions") return sessions(home, rest, say, now);
-  if (command === "show" && !rest.length) return show(home, say, now);
+  if (command === "write") return write(home, rest, say, now, plutil, build);
+  if (command === "plan") return plan(home, rest, say, now, plutil, build);
+  if (command === "set") return set(home, rest, say, plutil, build);
+  if (command === "sessions") return sessions(home, rest, say, now, build);
+  if (command === "show" && !rest.length) return show(home, say, now, build);
   if (command === "marker") return mark(rest, say, clone, home);
-  if (command === "studio") return studio(home, rest, say, { openMinimum, freePort, tmp, uid, now });
-  if (command === "user-deny") return userDeny(home, rest, say, { tmp, uid, openMinimum, env });
+  if (command === "studio") return studio(home, rest, say, { openMinimum, freePort, tmp, uid, now, build });
+  if (command === "user-deny") return userDeny(home, rest, say, { tmp, uid, openMinimum, env, build });
   say(HELP);
   return 2;
 }

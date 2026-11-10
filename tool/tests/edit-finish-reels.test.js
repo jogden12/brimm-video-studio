@@ -22,6 +22,8 @@ import { REEL1, REEL2, changeAt, entry, exportOf, named } from "./exports-world.
 import { HANDOFF_REL, REEL2_OPENING, finishedWorld } from "./reels-world.js";
 
 const AT = "2026-10-20T15:00:00-05:00";
+// An installed Mac's build, as build.json gives it: no Jason is at hand there.
+const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
 const worlds = [];
 /** The finished video of reels-world.js, kept until the tests are done. */
 async function W(opts) {
@@ -413,5 +415,21 @@ describe("6. numbers: a Reel number is never given twice within a video", () => 
     const r = await ask(w, { yes: true });
     assert.equal(r.code, 0, r.lines.join("\n"));
     assert.deepEqual(started(w), [["finish", "--now", FOLDER]]);
+  });
+});
+
+describe("7. a list of suggestions a newer BRIMM Video Studio wrote (review finding 2)", () => {
+  it("says how to update, not to ask Jason, on an installed Mac, in a finished video's own hand-off, and writes nothing", async () => {
+    for (const [build, update] of [[undefined, "Ask Jason to update this Mac"], [INSTALLED, 'Say "update Studio" to update this Mac']]) {
+      const w = await W({ handoff: false });
+      if (build) w.t.ctx.build = build;
+      const text = JSON.stringify({ format: "brimm-video reels", version: 99, video: "Pricing talk.mp4", candidates: [] });
+      writeFileSync(join(w.found.folder, "reels.json"), text);
+      const record = { ...w.found.record, files: { ...w.found.record.files, "reels.json": Buffer.byteLength(text) } };
+      const before = tree(w);
+      const r = await finishFinished(w.t.ctx, w.found, { record });
+      assert.deepEqual(r, { why: `${NAME}'s list of Reel suggestions cannot be used: it was written by a newer BRIMM Video Studio. ${update}. Nothing was written.` }, `build ${build ? build.mode : "none"}`);
+      assert.deepEqual(tree(w), before);
+    }
   });
 });

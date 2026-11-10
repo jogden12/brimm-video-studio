@@ -24,6 +24,8 @@ const SETTINGS = fileURLToPath(new URL("../settings.js", import.meta.url));
 const MEND_SETTING = "Jason puts that setting right by hand, or runs install.sh --machine on it, which writes this Mac's name, BRIMM Video and the checkout every time, the import, the hand-off version and the drop folder when told --import, --handoff or --drop, and readings off with --rules-only.";
 const ROOT = "/Users/sallie/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
 const CHECKOUT = "/Users/sallie/BRIMM Video Studio";
+/** What build.js makes of an installed Mac's build.json, with someone to ask. */
+const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
 
 /** Whether the test's folders are on a disk whose names are not case-sensitive, as a Mac's own disk is unless it was made otherwise. */
 const caseBlind = (() => {
@@ -2333,9 +2335,9 @@ describe("node settings.js write and plan, with the settings of the switch", () 
 describe("what set, sessions, show and studio say when this Mac's settings cannot be used", () => {
   const PLAIN = (t) => `This Mac has no settings for episodes (${settingsFile(t.home)}). Jason runs install.sh --machine on it.`;
   /** What each of the four says, with the settings file as it is, and how it ended. */
-  const said = (t) => ["set --readings off", "sessions --teachings off", "show", "studio --node /opt/homebrew/bin/node"].map((line) => {
+  const said = (t, build) => ["set --readings off", "sessions --teachings off", "show", "studio --node /opt/homebrew/bin/node", ...(build ? ["user-deny"] : [])].map((line) => {
     t.said.length = 0;
-    const code = settingsMain(line.split(" "), { home: t.home, say: (l) => t.said.push(l), now: new Date("2026-10-23T10:00:00-04:00") });
+    const code = settingsMain(line.split(" "), { home: t.home, say: (l) => t.said.push(l), now: new Date("2026-10-23T10:00:00-04:00"), ...(build ? { build } : {}) });
     return [code, t.said.join("\n")];
   });
   it("is what install.sh --machine does, when there are none, or the file is not JSON: it makes them, or mends the file", () => {
@@ -2363,6 +2365,45 @@ describe("what set, sessions, show and studio say when this Mac's settings canno
       assert.equal(code, 2);
       assert.equal(text, `This Mac's settings could not be read (${settingsFile(t.home)}: EISDIR). Jason puts that file right by hand.`);
     }
+    t.done();
+  });
+  it("is, on an installed Mac, to choose Repair, whatever is wrong: no Jason is at hand there, and no installer to run (review finding 2)", () => {
+    const t = setup();
+    const file = settingsFile(t.home);
+    const repair = "Open BRIMM Video Studio and choose Repair. If that does not help, ask help@example.invalid.";
+    const each = (why, build = INSTALLED, mend = repair) => {
+      for (const [code, text] of said(t, build)) assert.deepEqual([code, text], [2, `${why} ${mend}`]);
+    };
+    each(`This Mac has no settings for episodes (${file}).`);
+    // With no one named to ask, it is Repair alone.
+    each(`This Mac has no settings for episodes (${file}).`, { ...INSTALLED, support: "" }, "Open BRIMM Video Studio and choose Repair.");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "{ not json");
+    each(`This Mac's settings could not be read (${file}: it is not JSON).`);
+    rmSync(file);
+    writeSettings(t.home, t.given);
+    writeFileSync(file, readFileSync(file, "utf8").replace('"version": 1', '"version": 1, "import": "ligth"'));
+    each(`This Mac's settings could not be read (${file}: the import must be "full" or "light").`);
+    rmSync(file);
+    mkdirSync(file);
+    each(`This Mac's settings could not be read (${file}: EISDIR).`);
+    t.done();
+  });
+  it("write, on an installed Mac, says to choose Repair when the settings there will not do (review finding 2)", () => {
+    const t = setup();
+    writeSettings(t.home, t.given);
+    const file = settingsFile(t.home);
+    const text = readFileSync(file, "utf8").replace('"version": 1', '"version": 1, "import": "ligth"');
+    writeFileSync(file, text);
+    const run = (build) => {
+      t.said.length = 0;
+      return settingsMain(["write", "--machine", "Mac Studio", "--root", ROOT, "--checkout", CHECKOUT], { home: t.home, say: (l) => t.said.push(l), ...(build ? { build } : {}) });
+    };
+    assert.equal(run(INSTALLED), 1);
+    assert.deepEqual(t.said, ['This Mac\'s settings could not be written (the import must be "full" or "light"). Open BRIMM Video Studio and choose Repair. If that does not help, ask help@example.invalid.']);
+    assert.equal(run({ mode: "dev" }), 1);
+    assert.deepEqual(t.said, [`This Mac's settings could not be written (the import must be "full" or "light"). ${MEND_SETTING}`]);
+    assert.equal(readFileSync(file, "utf8"), text);
     t.done();
   });
 });

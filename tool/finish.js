@@ -16,6 +16,7 @@ import { probeArgs, factsOf, colourOf, pauseArgs, pausesOf } from "./cuts.js";
 import { clipArgs, storyCuts, STORY_MAX } from "./reframe.js";
 import { captionsOf, settled, stampedText } from "./lib.js";
 import { finalTranscript, spelled, spelledPairs, spelledCaptions } from "./final-transcript.js";
+import { buildOf, forThisMac } from "./build.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredths, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, readThrough, LATE_CHECK_MS } from "./dropbox.js";
@@ -44,6 +45,8 @@ import { oweOriginals } from "./originals.js";
 
 /** The path of a file of the episode `found` (where.js fileAt): in its folder in Dropbox, or in its video/ folder on this Mac when its record keeps its own files there. */
 const fileOf = (ctx, found, rel) => fileAt(ctx, { folder: found.folder, record: found.record ?? found.read?.record }, rel);
+/** This Mac's build, as the words that turn on it take it: the context's own, or this checkout's where a context was made without one. */
+const buildFor = (ctx) => ctx.build ?? buildOf(thisCheckout());
 
 /** How often a finished video's size is looked at while HyperFrames may still be writing it, and how many looks before the
     finish stops: ten minutes. */
@@ -659,7 +662,7 @@ export function letGoClaim(ctx, found) {
     // A record written since (one not whole yet, say: the other Mac's claim on its way) is not this Mac's claim to keep
     // (round 3, t1-5).
     if (e.code === "CHANGED") return "The episode changed on the other Mac while finish ran, so nothing was let go here: say open to see who has it now.";
-    return `This Mac still has the episode open: it could not be let go (${String(e.message).replace(/\.$/, "")}). Ask Jason.`;
+    return `This Mac still has the episode open: it could not be let go (${String(forThisMac(e, buildFor(ctx)).message).replace(/\.$/, "")}). Ask Jason.`;
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -1039,7 +1042,7 @@ export async function finishNow(ctx, found, deps = {}) {
           if (asked.claimed) letGoneAlready = true;
           failed.push(`The record lists what final/ holds now. Say ${finishAgain} again.`);
         } catch (w) {
-          failed.push(`The record could not be written to list what final/ holds now: ${String(w.message).replace(/\.$/, "")}.`);
+          failed.push(`The record could not be written to list what final/ holds now: ${String(forThisMac(w, buildFor(ctx)).message).replace(/\.$/, "")}.`);
         }
       }
       return result();
@@ -1098,7 +1101,7 @@ export async function finishNow(ctx, found, deps = {}) {
         writeEpisode(found.folder, { ...newest.record, files: { ...newest.record.files, ...files }, finished: base ? newest.record.finished : null }, { expectRev: newest.record.rev, writeText: textWriter({ work: join(work, "record-listed"), ...opts }), writer, home: ctx.home });
         return base ? " The record lists what final/ holds now, and keeps the hand-off it had: the Reels are taken again from their exports." : " The record lists what final/ holds now, and no finish: the next finish makes every part again, from the Shares on the Mac that makes it.";
       } catch (w) {
-        return ` The record could not be written to list what final/ holds now: ${String(w.message).replace(/\.$/, "")}.${NEEDS_JASON}`;
+        return ` The record could not be written to list what final/ holds now: ${String(forThisMac(w, buildFor(ctx)).message).replace(/\.$/, "")}.${NEEDS_JASON}`;
       }
     };
     const before_ = readEpisode(found.folder);
@@ -1155,7 +1158,7 @@ export async function finishNow(ctx, found, deps = {}) {
         }
         pendingWritten = false;
       }
-      failed.push(`The files are in final/, but the record was not written: ${String(e.message).replace(/\.$/, "")}.${listWhatFinalHolds()} ${sayAgain}`);
+      failed.push(`The files are in final/, but the record was not written: ${String(forThisMac(e, buildFor(ctx)).message).replace(/\.$/, "")}.${listWhatFinalHolds()} ${sayAgain}`);
     }
     // The writer's hold on the episode's check is let go once its record is written or refused.
     if (step && step.end) step.end({ put: recordWritten });
@@ -1255,7 +1258,7 @@ export async function finishNow(ctx, found, deps = {}) {
     ended = failed.length === 0;
     return result();
   } catch (e) {
-    failed.push(`The finish stopped: ${e.message}`);
+    failed.push(`The finish stopped: ${forThisMac(e, buildFor(ctx)).message}`);
     return result();
   } finally {
     // The run is over: it leaves no marker for the guide to believe, whatever ended it. And if it ended badly after she was told she
@@ -1510,7 +1513,7 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
   let onFile = null;
   try {
     imported = readFileSync(fileAt(ctx, { folder, record }, captionsRel), "utf8");
-    if (kind === "finished" && standing(REELS_FILE) === "here") reels = readReels(readFileSync(fileAt(ctx, { folder, record }, REELS_FILE), "utf8"));
+    if (kind === "finished" && standing(REELS_FILE) === "here") reels = readReels(readFileSync(fileAt(ctx, { folder, record }, REELS_FILE), "utf8"), { build: buildFor(ctx) });
   } catch (e) {
     return { why: `${who}'s files could not be read (${e.code || "they are not what they should be"}). Nothing was written.` };
   }
@@ -1628,7 +1631,7 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
   } catch (e) {
     const lost = putBack();
     if (step && step.end) step.end({ put: false });
-    const why = e.code === "CHANGED" ? "this episode changed on the other Mac: open it again" : String(e.message || e.code || "a file could not be put in").replace(/\.$/, "");
+    const why = e.code === "CHANGED" ? "this episode changed on the other Mac: open it again" : String(forThisMac(e, buildFor(ctx)).message || e.code || "a file could not be put in").replace(/\.$/, "");
     // Files that could not be put back are what matters then, as the finish says it: not that nothing was written.
     if (lost.length) return { why: `${capital(why)}. ${capital(saidList([...new Set(lost)]))} could not be put back as it was. Tell Jason: the episode needs him.` };
     return { why: `Nothing was written: ${why}.` };
@@ -1817,7 +1820,7 @@ export async function finishSession(ctx, found, { host } = {}) {
         // It is not empty, or not there.
       }
     }
-    const why = e.code === "CHANGED" ? "this episode changed on the other Mac: open it again" : String(e.message || e.code || "the hand-off could not be put in").replace(/\.$/, "");
+    const why = e.code === "CHANGED" ? "this episode changed on the other Mac: open it again" : String(forThisMac(e, buildFor(ctx)).message || e.code || "the hand-off could not be put in").replace(/\.$/, "");
     if (step && step.end) step.end({ put: false });
     if (lost) return { why: `${capital(why)}. The hand-off could not be put back as it was. Tell Jason: the episode needs him.` };
     return { why: `Nothing was written: ${why}.` };

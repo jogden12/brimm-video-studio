@@ -97,7 +97,7 @@ import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
 import { quotable, shellWord, studioFiles, studioFolder } from "./studio.js";
-import { UPDATE_SAY, brokenLine, buildOf, isInstalled, repairLine } from "./build.js";
+import { UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "./build.js";
 import { checkForUpdate, updateLine } from "./update-check.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
@@ -2212,7 +2212,7 @@ async function save(ctx, found, record, done) {
   try {
     writeEpisode(found.folder, record, { expectRev: found.record.rev, writeText: textWriter({ work, ...ruleOpts(ctx) }), writer: writerOf(ctx), home: ctx.home });
   } catch (e) {
-    ctx.say(e.code === "CHANGED" ? "Nothing was written: this episode changed on the other Mac: open it again." : `Nothing was written: ${String(e.message).replace(/\.$/, "")}.`);
+    ctx.say(e.code === "CHANGED" ? "Nothing was written: this episode changed on the other Mac: open it again." : `Nothing was written: ${String(forThisMac(e, ctx.build).message).replace(/\.$/, "")}.`);
     return 1;
   } finally {
     rmSync(work, { recursive: true, force: true });
@@ -3165,7 +3165,7 @@ async function resolveConflict(ctx, rest) {
   try {
     return await resolveIn(ctx, found, keep);
   } catch (e) {
-    return refuse(ctx, `It could not be sorted out: ${plainWhy(e)}. ${NEEDS_JASON}`);
+    return refuse(ctx, `It could not be sorted out: ${plainWhy(e, ctx.build)}. ${NEEDS_JASON}`);
   }
 }
 
@@ -3184,8 +3184,9 @@ function keptOverWhy(kept, other) {
   return "";
 }
 
-/** An error's words for a person: the copy rule's own "Nothing was copied." and the closing full stop taken off. */
-const plainWhy = (e) => String(e && e.message ? e.message : e).replace(/ Nothing was copied\.$/, "").replace(/\.$/, "");
+/** An error's words for a person: the copy rule's own "Nothing was copied." and the closing full stop taken off. `build` is this Mac's build, given
+    where the error may be a record write's: an installed Mac hears a newer BRIMM Video Studio's record in the update's words (build.js forThisMac). */
+const plainWhy = (e, build) => String(e && e.message ? forThisMac(e, build).message : e).replace(/ Nothing was copied\.$/, "").replace(/\.$/, "");
 
 async function resolveIn(ctx, found, keep) {
   const read = readEpisode(found.folder, { pastCopies: true });
@@ -3428,8 +3429,8 @@ async function resolveIn(ctx, found, keep) {
         // What is still not as it was is found below.
       }
       const stuck = planOff();
-      if (stuck.length) return refuse(ctx, unsure(stuck, plainWhy(e)));
-      return refuse(ctx, `Nothing was written, and nothing deleted: ${plainWhy(e)}. Say "sort out the conflict" again to see it as it is now.`);
+      if (stuck.length) return refuse(ctx, unsure(stuck, plainWhy(e, ctx.build)));
+      return refuse(ctx, `Nothing was written, and nothing deleted: ${plainWhy(e, ctx.build)}. Say "sort out the conflict" again to see it as it is now.`);
     }
   }
   // 3. Only then is anything replaced or deleted. When B cannot be put in A's place, A comes back from history/, and the
@@ -3453,7 +3454,7 @@ async function resolveIn(ctx, found, keep) {
       try {
         write(sizedLike(written || record, record), (written || record).rev);
       } catch (w) {
-        recordNote = ` The record could not be set back (${plainWhy(w)}): it lists B's size for ${of}.`;
+        recordNote = ` The record could not be set back (${plainWhy(w, ctx.build)}): it lists B's size for ${of}.`;
       }
       if (back) return refuse(ctx, `B could not be put in place of ${of}: ${why}. ${aHere ? "A is back as it was" : "A was not there"}, and nothing was deleted.${recordNote}`);
       return refuse(ctx, `B could not be put in place of ${of}: ${why}, and A could not be put back either. A is whole in history/${basename(asideOf(of))}, and B is still the copy, ${copy}.${recordNote} Say "sort out the conflict" again in a minute. If it says this again, tell Jason.`);
@@ -3700,7 +3701,7 @@ async function reels(ctx, rest) {
     const ns = (record.reels || []).map((r) => `Reel ${r.n}`);
     return refuse(ctx, `This episode has no list of Reel candidates (reels.json).${ns.length ? ` Its Reels are the clips the import cut: ${listed(ns)}.` : ""}`);
   }
-  const read = readReels(readFileSync(at, "utf8"));
+  const read = readReels(readFileSync(at, "utf8"), { build: ctx.build });
   if (read.why) return refuse(ctx, `Its list of Reel candidates cannot be read: ${read.why.replace(/\.$/, "")}.`);
   // A list at another size than the record lists is not the one it lists: not shown as the candidates.
   const listedSize = record.files ? record.files[REELS_FILE] : undefined;
@@ -3754,7 +3755,7 @@ function askRefusal(ctx, found, record) {
   if (running === "ask") return { why: 'Claude is being asked already. Say "how far is it?" to see how far it has got.' };
   if (running) return { why: stoppedWords(ctx, found, record, { generic: `${running} is running for ${calledAs(ctx, found)} already. Say it again when it has finished.`, again: "Say it again then.", of: ` of ${calledAs(ctx, found)}` }) };
   if (!(ctx.deps.tools || findPrograms()).claude) return { why: NO_CLAUDE_CODE };
-  return askBlocked({ folder: found.folder, record, root: ctx.root, statusFolders: statusReadFolders(ctx), home: ctx.home, machine: ctx.machine, now: ctx.now(), whole: ctx.isWhole });
+  return askBlocked({ folder: found.folder, record, root: ctx.root, statusFolders: statusReadFolders(ctx), home: ctx.home, machine: ctx.machine, now: ctx.now(), whole: ctx.isWhole, build: ctx.build });
 }
 
 /** What to do about a reels.json the record lists that is gone: put back the copy this Mac kept of it (keptList), or wait for
@@ -3790,7 +3791,7 @@ async function ask(ctx, rest) {
       return 1;
     }
     const deps = {
-      run: ctx.deps.run || runProgram, tools: ctx.deps.tools || findPrograms(), home: ctx.home, settings: ctx.settings, now: ctx.now,
+      run: ctx.deps.run || runProgram, tools: ctx.deps.tools || findPrograms(), home: ctx.home, settings: ctx.settings, build: ctx.build, now: ctx.now,
       log: (line) => ctx.say(line), wait: ctx.deps.wait || ((ms) => new Promise((done) => setTimeout(done, ms))), isWhole: ctx.isWhole,
       ...ruleOpts(ctx), ...(ctx.deps.commit ? { commit: ctx.deps.commit } : {})
     };
@@ -5796,7 +5797,7 @@ async function setAsideWritten(ctx, found, base, next, aside, handoff = null, { 
     if (!lost) for (const copy of copies) rmSync(copy, { force: true });
     if (hold) hold.end({ put: false });
     const changed = e.code === "CHANGED";
-    const why = changed ? "this episode changed on the other Mac: open it again" : plainWhy(e);
+    const why = changed ? "this episode changed on the other Mac: open it again" : plainWhy(e, ctx.build);
     if (lost) ctx.say(quiet ? "Its earlier files could not all be put back as they were; a copy of each is in history/. Tell Jason: the episode needs him." : `${capital(why)}. A file could not be put back as it was; a copy of it is in history/. Tell Jason: the episode needs him.`);
     else ctx.say(quiet && !changed ? asideFailed(e.code || "an error") : `Nothing was changed: ${why}.`);
     return { code: 1 };

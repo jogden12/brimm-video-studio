@@ -34,7 +34,7 @@ import { checkOriginal, oweForgotten } from "./originals.js";
 import { linksOf } from "./finish.js";
 import { clearChecking, clearProblem, flagProblem, problemNotice } from "./finish-check.js";
 import { randomUUID } from "node:crypto";
-import { buildOf, isInstalled } from "./build.js";
+import { buildOf, forThisMac, isInstalled } from "./build.js";
 
 /** How long a recording must be to be an episode, in seconds. One that is shorter is a short video. */
 const SHORT_UNDER = 90;
@@ -307,7 +307,7 @@ function fileIntoPlanHere({ file, made, at, facts, printed, kind, work, fingerpr
   const next = into.change(first);
   // A video with no sound takes no kind (PR H5b, ruling 5), and no caller of `into` may give it one.
   if (next.kind !== null && next.video && next.video.sound === false) throw new Error("a video with no sound takes no kind, so it is not filed as one");
-  const put = putHereNow({ folder: into.folder, record: into.record }, list, { ...opts, home: episode.home, work: join(work, "record"), writer, change: (record) => ({ ...next, files: { ...record.files, ...next.files } }), expectRev: into.record.rev, now: deps.now ? deps.now().getTime() : Date.now() });
+  const put = putHereNow({ folder: into.folder, record: into.record }, list, { ...opts, home: episode.home, work: join(work, "record"), writer, change: (record) => ({ ...next, files: { ...record.files, ...next.files } }), expectRev: into.record.rev, now: deps.now ? deps.now().getTime() : Date.now(), build: deps.build ?? buildOf(thisCheckout()) });
   if (!put.put) throw new Error(put.why);
   log(`${shownName(put.record)}: filed into its own folder on this Mac.`);
   return { name: basename(into.folder), path: into.folder, record: put.record, entries: [] };
@@ -1547,7 +1547,8 @@ export function finishLate(pending, deps) {
     try {
       noteProblem(pending, said, { ...deps, log });
     } catch (e) {
-      log(`${who}: the problem could not be written into its cut plan (${String(e.message).replace(/\.$/, "")}).`);
+      // An installed Mac hears a newer BRIMM Video Studio's record in the update's words: no Jason is at hand there to ask (build.js forThisMac).
+      log(`${who}: the problem could not be written into its cut plan (${String(forThisMac(e, deps.build ?? buildOf(thisCheckout())).message).replace(/\.$/, "")}).`);
     }
   }
   pending.problem = said;

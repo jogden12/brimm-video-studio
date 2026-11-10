@@ -2,6 +2,8 @@
 // files a joined video into a plan with it, and both are sync underneath: nothing here waits.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { NEWER_SAY, buildOf, forThisMac, isInstalled } from "./build.js";
 import { cloneFile, onSameDisk, textWriter } from "./dropbox.js";
 import { localStamp, readEpisode, recordNumbers, undone, writeEpisode } from "./episode.js";
 import { studioHome } from "./home.js";
@@ -11,7 +13,8 @@ import { episodeFilesFolder, runsFolder } from "./settings.js";
     Dropbox but the record, and nothing waits for a check. `found` is { folder, record } (`folder`: its folder in Episodes), `files` are
     [{ rel, from }]: `from` is a file the run made whole, and `rel` its name in video/. Options: `change` (the record's other change, called with the
     record and the sizes of the files put in), `expectRev` (the rev the work was made from), `home`, `writer`, `work` (the run's own folder, for the
-    record's work copy), `clone` and `sameDisk` (the rule's), `now` (ms), `log`, `onRecordCopy` (told of the record's work copy, as filing.js is) and
+    record's work copy), `clone` and `sameDisk` (the rule's), `now` (ms), `log`, `onRecordCopy` (told of the record's work copy, as filing.js is),
+    `build` (this Mac's build, read from this checkout where it is not given: it turns only the words about a newer BRIMM Video Studio) and
     `killed(at)`, a test's way to stop the run at "written", "renamed" or "recorded".
     In this order: the journal, video/.put.json, is written, naming each rename it will make; each file is written whole in video/ under a name of its
     own; each file it replaces is renamed into video/history/<moment> <name>; each new file is renamed into place; the record is written with `expectRev`,
@@ -25,6 +28,9 @@ export function putHereNow(found, files, opts = {}) {
   const own = episodeFilesFolder(home, basename(folder));
   const journal = join(own, ".put.json");
   const ropts = { ...(clone ? { clone } : {}), ...(sameDisk ? { sameDisk } : {}), log };
+  // This Mac's build, read only where a line's words turn on it: an installed Mac has no Jason at hand to ask.
+  const build = () => opts.build ?? buildOf(dirname(dirname(fileURLToPath(import.meta.url))));
+  const newer = () => (isInstalled(build()) ? NEWER_SAY.replace(/\.$/, "") : "the episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac");
   mkdirSync(own, { recursive: true });
   // A journal a stopped run left is settled first, by the record: written, the files stay; not written, each rename is undone.
   if (existsSync(journal)) {
@@ -37,7 +43,7 @@ export function putHereNow(found, files, opts = {}) {
     if (left && Array.isArray(left.entries)) {
       const at = readEpisode(folder);
       // A record that cannot be read now (a conflicted copy, a placeholder, a newer writer) cannot say whether the stopped put's record was written: the journal stays, nothing is undone, and the put waits for a later look.
-      if (at.newer) return { put: false, why: "the episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac" };
+      if (at.newer) return { put: false, why: newer() };
       // A record above the one read that does not read whole yet (as while Dropbox brings it over) may be the stopped put's own.
       if (!at.record || (recordNumbers(folder)[0] || 0) > at.record.rev) return { put: false, why: `the episode's record cannot be read now: ${String(at.why || "it is not there").replace(/\.$/, "")}` };
       // The record was written when it lists every file the stopped put meant to list at the size it put in, not merely when its rev is above the journal's:
@@ -51,7 +57,7 @@ export function putHereNow(found, files, opts = {}) {
   const before = readEpisode(folder);
   const expectRev = opts.expectRev !== undefined ? opts.expectRev : found.record ? found.record.rev : undefined;
   if (!before.record) return { put: false, why: `the episode's record cannot be read: ${String(before.why || "it is not there").replace(/\.$/, "")}` };
-  if (before.newer) return { put: false, why: "the episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac" };
+  if (before.newer) return { put: false, why: newer() };
   const gone = undone(before.record, home);
   if (gone) return { put: false, why: gone.replace(/\.$/, "") };
   if (expectRev !== undefined && before.record.rev > expectRev) return { put: false, why: "this episode changed meanwhile. Say it again" };
@@ -123,7 +129,7 @@ export function putHereNow(found, files, opts = {}) {
     record = writeEpisode(folder, next, { expectRev: before.record.rev, writeText: (to, text) => write(to, text), writer, home });
   } catch (e) {
     undo();
-    return { put: false, why: `the episode's record could not be written again: ${String(e.message).replace(/\.$/, "")}` };
+    return { put: false, why: `the episode's record could not be written again: ${String(forThisMac(e, build()).message).replace(/\.$/, "")}` };
   }
   killed("recorded");
   rmSync(journal, { force: true });

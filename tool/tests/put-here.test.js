@@ -14,6 +14,8 @@ import { putHere } from "../unedited.js";
 
 const NAME = "2026-10-20 IMG_0042 (Mac Studio)";
 const WRITER = { commit: "c709b57", on: "Mac Studio" };
+// An installed Mac's build, as build.json gives it: no Jason is at hand there.
+const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
 const OLD = { "IMG_0042.mov": "the recording", "IMG_0042.cut-plan.json": "the old plan", "IMG_0042.srt": "the words" };
 
 /** A world: a root, a home, an episode kept on the Mac Studio with `OLD` in its video/, and a folder of the run's own to make files in. */
@@ -208,6 +210,42 @@ describe("putHere", () => {
       assert.equal(existsSync(join(w.own, ".put.json")), true, `newer ${newer}`);
       assert.equal(w.inVideo()["IMG_0042.notes.txt"], "notes", `newer ${newer}`);
       w.done();
+    }
+  });
+  it("says how to update, not to ask Jason, on an installed Mac, when a newer BRIMM Video Studio wrote the record (review finding 2)", async () => {
+    class Killed extends Error {}
+    const ASK = "the episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac";
+    const SAY = 'the episode was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac';
+    for (const [build, why] of [[undefined, ASK], [{ mode: "dev" }, ASK], [INSTALLED, SAY]]) {
+      const more = build ? { build } : {};
+      // The record is a newer Studio's when the put begins.
+      const w = world();
+      writeFileSync(recordFile(w.folder, 2), recordText({ ...readEpisode(w.folder).record, rev: 2, version: 99 }));
+      const before = w.inVideo();
+      const r = await putHere(w.found(), [w.made("IMG_0042.srt", "other words")], w.opts({ expectRev: 2, ...more }));
+      assert.deepEqual(r, { put: false, why }, `build ${JSON.stringify(build)}`);
+      assert.deepEqual(w.inVideo(), before);
+      w.done();
+      // A stopped put's journal lies under a record a newer Studio wrote.
+      const j = world();
+      await assert.rejects(putHere(j.found(), [j.made("IMG_0042.notes.txt", "notes")], j.opts({ killed: (at) => {
+        if (at === "recorded") throw new Killed("killed");
+      } })), Killed);
+      const top = readEpisode(j.folder).record;
+      writeFileSync(recordFile(j.folder, top.rev + 1), recordText({ ...top, rev: top.rev + 1, version: 99 }));
+      const left = await putHere(j.found(), [j.made("IMG_0042.srt", "other words")], j.opts({ expectRev: top.rev, ...more }));
+      assert.deepEqual(left, { put: false, why }, `build ${JSON.stringify(build)}`);
+      assert.equal(existsSync(join(j.own, ".put.json")), true);
+      j.done();
+      // The record the put itself hands on is a newer layout's: the write refuses it, and the files are put back.
+      const c = world();
+      const was = c.inVideo();
+      const refused = await putHere(c.found(), [c.made("IMG_0042.notes.txt", "notes")], c.opts({ change: (record) => ({ ...record, version: 99 }), ...more }));
+      const said = build === INSTALLED ? SAY : "Jason has a newer BRIMM Video Studio. Ask him to update this Mac";
+      assert.deepEqual(refused, { put: false, why: `the episode's record could not be written again: ${said}` }, `build ${JSON.stringify(build)}`);
+      assert.deepEqual(c.inVideo(), was);
+      c.done();
+      if (build === INSTALLED) for (const said of [r.why, left.why, refused.why]) assert.doesNotMatch(said, /Jason|install\.sh/);
     }
   });
   it("waits for nothing and calls no check", async () => {
