@@ -8,8 +8,9 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { accessFile } from "../access.js";
 import { DEV_REFUSAL, defaultDropFolder, downloadsFolder, episodesFolder, folderWords } from "../settings.js";
 import { studioFolder } from "../studio.js";
 import { DAMAGED, NO_BRIMM_VIDEO, nameClash } from "../setup/checks.js";
@@ -480,6 +481,24 @@ describe("a setup, step by step", () => {
         `BRIMM Video Studio is not yet allowed to look in ${folderWords(episodes, m.home)}. Allow it in System Settings, under Privacy & Security, then Files and Folders.`,
         `BRIMM Video Studio could not look in ${folderWords(exports, m.home)}.`
       ]);
+    });
+  });
+
+  it("the Permissions step writes no note of its looks: a takeover's note is as it was after a cancel, and a fresh Mac has none", async () => {
+    await withMac({ settings: "takeover", apps: EVERY_APP }, async (m) => {
+      const note = `${JSON.stringify({ version: 1, places: { drop: { state: "ok", node: "/opt/homebrew/bin/node", okNode: "/opt/homebrew/bin/node" } }, looking: null, told: {} }, null, 2)}\n`;
+      mkdirSync(dirname(accessFile(m.home)), { recursive: true });
+      writeFileSync(accessFile(m.home), note);
+      const { events } = await go(m, { run: "setup", answers: reply(HELD, cancelAt("review")) });
+      assert.deepEqual(stepsOf(events), ["welcome", "apps", "permissions", "review"]);
+      assert.equal(lastOf(events).outcome, "cancelled");
+      assert.equal(readFileSync(accessFile(m.home), "utf8"), note);
+    });
+    await withMac({ settings: "none", apps: EVERY_APP }, async (m) => {
+      const { events } = await go(m, { run: "setup", answers: reply(FRESH, cancelAt("review")) });
+      assert.deepEqual(stepsOf(events), ["welcome", "name", "apps", "dropbox", "folders", "permissions", "review"]);
+      assert.deepEqual(questionsOf(events).filter((q) => q.id.startsWith("permission-")), []);
+      assert.equal(existsSync(accessFile(m.home)), false);
     });
   });
 

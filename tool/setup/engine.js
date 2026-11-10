@@ -1,20 +1,20 @@
 // The setup engine: the program the Mac app's shell runs to set up, repair, update or ask about this Mac. It takes the shell's answers
 // as JSON lines on stdin, and tells the shell what to show as JSON lines on stdout (protocol.js, version 1), from the first step to
-// `done` or `error`. stderr is for a developer only. Before the Review's Install it changes only the note of what its looks in the
-// three folders found (access.js), and Claude Code, which the Apps step may install and sign in. The Install changes the rest,
-// through install.sh and the three stages. A repair or an update asks nothing, and goes straight to the Install.
+// `done` or `error`. stderr is for a developer only. Before the Review's Install it changes only Claude Code, which the Apps step
+// may install and sign in: its looks in the three folders write nothing, not even the import's note of them (access.json). The
+// Install changes the rest, through install.sh and the three stages. A repair or an update asks nothing, and goes straight to the
+// Install.
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { lookAt } from "../access.js";
 import { REPAIR, buildOf } from "../build.js";
 import { idleWhy } from "../busy.js";
 import { toolchainDiffers, toolchainHolds } from "../hyperframes.js";
 import { isMain } from "../is-main.js";
 import { DEV_REFUSAL, defaultDropFolder, downloadsFolder, dropFolderOf, episodesFolder, exportsFolderOf, folderWords } from "../settings.js";
 import { studioFolder } from "../studio.js";
-import { APPS, DAMAGED, NO_BRIMM_VIDEO, appsHere, brimmVideoFolders, claudeState, copyFault, kindOf, nameClash, nameSuggestion } from "./checks.js";
+import { APPS, DAMAGED, NO_BRIMM_VIDEO, appsHere, brimmVideoFolders, claudeState, copyFault, kindOf, nameClash, nameSuggestion, peekAt } from "./checks.js";
 import { guideData, writeGuide } from "./guide.js";
 import { LABELS, checkLogSays, checkLogSize, claudePin, installClaudeCode, installWhenIdle, installerArgs, installerOutcome, modelPath, modelPin, runInstaller, runProgram, signIn, stageChrome, stageCli, stageModel } from "./install.js";
 import { STEPS, answerFault, argsOf, emitter, lineFault, readerOf } from "./protocol.js";
@@ -547,8 +547,8 @@ async function renew(ctx) {
 /** The whole run, from the shell's arguments to its last event: it gives the engine's exit code (0 after `done`, 1 after `error`, 2
     for a start the engine does not know). `programs` are the system programs it runs, each an absolute path, and the installer as a
     list (its program and first arguments). `why` says what is at work on this Mac, `wait` waits, `now` gives the time, `look` looks in
-    a folder as the import does, and `stages` stage the model, the HyperFrames tools and Chrome. */
-export async function runSetup({ argv, input, output, errors, home, checkout, programs, why, wait, now, look = lookAt, applications = "/Applications", pty = true, stages = { model: stageModel, cli: stageCli, chrome: stageChrome } }) {
+    a folder as the import does but writes no note of it, and `stages` stage the model, the HyperFrames tools and Chrome. */
+export async function runSetup({ argv, input, output, errors, home, checkout, programs, why, wait, now, look = peekAt, applications = "/Applications", pty = true, stages = { model: stageModel, cli: stageCli, chrome: stageChrome } }) {
   const send = emitter(output);
   const build = buildOf(checkout);
   const contact = build.support ? { contact: build.support } : {};

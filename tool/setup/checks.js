@@ -70,6 +70,20 @@ export function kindOf({ home, checkout }) {
   return { kind: "takeover", settings };
 }
 
+/** The state of each error code a look can meet: access.js's own STATES, which it does not export, kept in step by a test. */
+const LOOK_STATES = { EPERM: "refused", EACCES: "locked", ENOENT: "missing" };
+
+/** What a look in `folder` finds, as access.js's lookAt tells it, { names } or { state, code } (refused, locked, missing or error),
+    but written down nowhere: setup's Permissions step looks before Install, and the import's note (access.json) is the import's own,
+    which a cancelled setup must leave as it was. `place` is lookAt's, and is not used. */
+export function peekAt(place, folder) {
+  try {
+    return { names: readdirSync(folder) };
+  } catch (e) {
+    return { state: LOOK_STATES[e?.code] || "error", code: String(e?.code || "") };
+  }
+}
+
 /** The floor for Claude Code's version: install.sh's GUARD_CLAUDE, what her folder's guard needs. */
 export const GUARD_CLAUDE = "2.1.295";
 

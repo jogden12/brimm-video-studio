@@ -2,14 +2,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { accessFile, lookAt } from "../access.js";
 import { HELPERS } from "../helpers.js";
 import { readSettings, writeSettings } from "../settings.js";
 import { DAMAGED as INSTALL_DAMAGED, HDR_LISTS, appCopy } from "./app-copy.js";
 import { installCalls, mac, notAMac, printOnly } from "./setup-harness.js";
-import { APPS, DAMAGED, GUARD_CLAUDE, NO_BRIMM_VIDEO, PROGRAMS, appsHere, brimmVideoFolders, claudeAt, claudeState, copyFault, kindOf, nameClash, nameSuggestion, namesInUse, versionAtLeast } from "../setup/checks.js";
+import { APPS, DAMAGED, GUARD_CLAUDE, NO_BRIMM_VIDEO, PROGRAMS, appsHere, brimmVideoFolders, claudeAt, claudeState, copyFault, kindOf, nameClash, nameSuggestion, namesInUse, peekAt, versionAtLeast } from "../setup/checks.js";
 
 const INSTALL = readFileSync(fileURLToPath(new URL("../install.sh", import.meta.url)), "utf8");
 
@@ -450,5 +451,42 @@ describe("Claude Code on this Mac", () => {
   it("the engine's floor for Claude Code is install.sh's", () => {
     assert.equal(GUARD_CLAUDE, "2.1.295");
     assert.equal(INSTALL.match(/^GUARD_CLAUDE="([^"]*)"$/m)[1], GUARD_CLAUDE);
+  });
+});
+
+describe("a look at a folder that writes nothing", () => {
+  const ACCESS = readFileSync(fileURLToPath(new URL("../access.js", import.meta.url)), "utf8");
+  const CHECKS = readFileSync(fileURLToPath(new URL("../setup/checks.js", import.meta.url)), "utf8");
+  const mapOf = (text, name) => new RegExp(`const ${name} = (\\{[^}]*\\});`).exec(text)?.[1];
+
+  it("gives what access.js's lookAt gives, and writes no note", () => {
+    withMac({}, (m) => {
+      const folder = join(m.dir, "looked");
+      mkdirSync(join(folder, "one"), { recursive: true });
+      const locked = join(m.dir, "locked");
+      mkdirSync(locked);
+      chmodSync(locked, 0o000);
+      const file = join(m.dir, "a file");
+      writeFileSync(file, "");
+      const noted = join(m.dir, "noted home");
+      try {
+        for (const path of [folder, join(m.dir, "not there"), file, ...(process.getuid() === 0 ? [] : [locked])]) {
+          assert.deepEqual(peekAt("drop", path), lookAt("drop", path, { home: noted }), path);
+        }
+        assert.deepEqual(peekAt("drop", folder), { names: ["one"] });
+        assert.deepEqual(peekAt("drop", join(m.dir, "not there")), { state: "missing", code: "ENOENT" });
+        assert.deepEqual(peekAt("drop", file), { state: "error", code: "ENOTDIR" });
+        if (process.getuid() !== 0) assert.deepEqual(peekAt("drop", locked), { state: "locked", code: "EACCES" });
+        assert.equal(existsSync(accessFile(m.home)), false);
+      } finally {
+        chmodSync(locked, 0o755);
+      }
+    });
+  });
+
+  it("maps each error code to its state as access.js does", () => {
+    const theirs = mapOf(ACCESS, "STATES");
+    assert.ok(theirs, "access.js's STATES was not found");
+    assert.equal(mapOf(CHECKS, "LOOK_STATES"), theirs);
   });
 });
