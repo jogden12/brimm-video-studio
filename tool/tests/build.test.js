@@ -180,6 +180,7 @@ describe("whether a Mac has BRIMM Video Studio installed", () => {
       ['Then delete the old backups from "About", and tell Jason.', `Then delete the old backups from "About", and tell ${S}.`, 'Then delete the old backups from "About".'],
       ["Wait a few minutes and ask again. If it is still missing, tell Jason.", `Wait a few minutes and ask again. If it is still missing, tell ${S}.`, "Wait a few minutes and ask again."],
       ["If you changed it, tell me what you changed. If not, tell Jason.", `If you changed it, tell me what you changed. If not, tell ${S}.`, "If you changed it, tell me what you changed."],
+      ["This folder's lock is changed on this Mac: ask Jason before going on.", `This folder's lock is changed on this Mac: ask ${S} before going on.`, "This folder's lock is changed on this Mac."],
       ["It is signed in to another account than the one Jason checked: ask Jason.", `It is signed in to another account than the one that was checked: ask ${S}.`, "It is signed in to another account than the one that was checked."],
       ["Dropbox keeps it there and in its history. Jason removes it by hand if he wants.", "Dropbox keeps it there and in its history. It can be removed there by hand.", "Dropbox keeps it there and in its history. It can be removed there by hand."]
     ];

@@ -97,7 +97,7 @@ import { approve, EDITS } from "./sessions.js";
 import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, teachingsWhy, sessionReading, readTeachings, itemsOf, seenFrom, sessionSeen, herWordsName, isFilesName, isTeachingsName, isTeachingsFile, principleLines, recurringLine, ideaLines, takenLines } from "./teachings.js";
 import { isMedia } from "./lib.js";
 import { quotable, shellWord, studioFiles, studioFolder } from "./studio.js";
-import { UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine, saidHere } from "./build.js";
+import { REPAIR, UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine, saidHere } from "./build.js";
 import { checkForUpdate, updateLine } from "./update-check.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
@@ -2904,12 +2904,20 @@ const BEHIND_MS = 20000;
 /** What `behind` says first when the lock on her folder for Claude has been loosened on this Mac (loosened.js, which makes the check). */
 export { LOCK_CHANGED } from "./loosened.js";
 
-/** Say that her folder's lock is changed, and why, if it is (lockLoosened): 1 when it said so, else null. */
-function refuseIfLoosened(lock, say) {
+/** One of lockLoosened's notes, each written for Jason, as this Mac says it. A checkout says it as it is. An installed Mac, where no Jason is
+    at hand, says it with his name left off, and says to choose Repair where the note gives his command, which Repair runs there. The
+    notes are the code's own, and each begins "(Jason: ". */
+const loosenedNote = (line, build) => (isInstalled(build)
+  ? line.replace(/^\(Jason: (.)/, (_, first) => `(${first.toUpperCase()}`).replace(/ Run node tool\/settings\.js studio again\.\)$/, ` ${REPAIR})`)
+  : line);
+
+/** Say that her folder's lock is changed, and why, if it is (lockLoosened): 1 when it said so, else null. `build` is this Mac's build:
+    an installed Mac's lines name no Jason (her skill listens for the first words, which are as they were). */
+function refuseIfLoosened(lock, say, build) {
   const why = lockLoosened(lock);
   if (!why.length) return null;
-  say(LOCK_CHANGED);
-  for (const line of why) say(line);
+  say(saidHere(LOCK_CHANGED, build));
+  for (const line of why) say(loosenedNote(line, build));
   return 1;
 }
 
@@ -2926,7 +2934,7 @@ function refuseIfLoosened(lock, say) {
 async function behind(ctx) {
   // The skill runs it at every session's start: the copies show opened in the last one go (spec 2, "cleared at the next session start").
   clearShown(ctx);
-  const refused = refuseIfLoosened({ home: ctx.home, checkout: ctx.settings.checkout, deps: ctx.deps }, ctx.say);
+  const refused = refuseIfLoosened({ home: ctx.home, checkout: ctx.settings.checkout, deps: ctx.deps }, ctx.say, ctx.build);
   if (refused !== null) return refused;
   const open = lockFor(ctx.settings, ctx.deps) === "open";
   if (open) {
@@ -7209,7 +7217,7 @@ export async function editMain(argv, deps = {}) {
   if (made.why) {
     // A Mac with no settings for episodes can still have her folder, and the lock on it is looked at all the same, for the checkout
     // this edit.js runs from.
-    const refused = command === "behind" ? refuseIfLoosened({ home: homeOf(deps), checkout: dirname(dirname(fileURLToPath(import.meta.url))), deps }, say) : null;
+    const refused = command === "behind" ? refuseIfLoosened({ home: homeOf(deps), checkout: dirname(dirname(fileURLToPath(import.meta.url))), deps }, say, deps.build ?? buildOf(thisCheckout())) : null;
     if (refused !== null) return refused;
     say(made.why);
     return 2;

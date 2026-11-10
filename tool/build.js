@@ -47,6 +47,7 @@ const ASK_ENDS = [
   [" Jason removes it by hand if he wants.", " It can be removed there by hand.", () => " It can be removed there by hand."],
   ["; if it still says a file is not whole, tell Jason the episode's name.", "."],
   [": ask Jason to check the training setting again.", "."],
+  [": ask Jason before going on.", "."],
   [": ask Jason, or choose the transcript only.", ": choose the transcript only."],
   [", or ask Jason. Nothing was written.", ". Nothing was written."],
   [": ask Jason. Nothing was written.", ". Nothing was written."],

@@ -107,7 +107,9 @@ describe("behind: on an installed Mac", () => {
     writeFileSync(join(folder, ".claude", "settings.local.json"), "{}");
     const f = NEWER_FEED();
     const r = await on(t, f.fetch);
-    assert.equal(r.said[0], LOCK_CHANGED);
+    // The sweep: an installed Mac's lines name no Jason. The skill listens for the first words, which are as they were.
+    assert.deepEqual(r.said, ["This folder's lock is changed on this Mac: ask help@example.invalid before going on.", "(Her folder has a .claude/settings.local.json of its own, which can loosen the lock. Its contents are not shown here.)"]);
+    assert.ok(r.said[0].startsWith(LOCK_CHANGED.split(":")[0]));
     assert.deepEqual([r.code, f.calls.length, r.runs], [1, 0, []]);
     t.done();
   });

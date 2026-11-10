@@ -342,6 +342,18 @@ describe("behind, with the open lock: the chat's environment, the proxy port and
       w.done();
     }
   });
+  it("says a loosened lock's lines with no Jason on an installed Mac, and Repair where a note gives his command (the sweep)", async () => {
+    const installed = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "", broken: false };
+    const w = openWorld();
+    noteStrictSeen(w.home, Date.parse("2026-10-26T10:30:00.000Z"));
+    const r = await behindOn(w, { build: installed });
+    assert.deepEqual([r.code, r.text.split("\n")], [1, [
+      "This folder's lock is changed on this Mac.",
+      "(Her folder kept the open lock's settings for a time while this Mac's lock was strict, when a session's words could go into command output that chats with the open lock can read. Open BRIMM Video Studio and choose Repair.)"
+    ]]);
+    assert.doesNotMatch(r.text, /Jason|install\.sh|Terminal|\bnode\b/);
+    w.done();
+  });
   it("refuses after a time her folder kept the open lock's settings under the strict lock, until settings.js studio writes it again", async () => {
     const line = "(Jason: her folder kept the open lock's settings for a time while this Mac's lock was strict, when a session's words could go into command output that chats with the open lock can read. Run node tool/settings.js studio again.)";
     const w = openWorld();
