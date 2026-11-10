@@ -7,11 +7,13 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
+import { HELPERS } from "../helpers.js";
 import { hasFilters, hasHwaccel } from "../workcopy.js";
 
 const INSTALL = fileURLToPath(new URL("../install.sh", import.meta.url));
@@ -21,6 +23,22 @@ const notAMac = process.platform !== "darwin" ? "the installer is for a Mac, and
 const noZsh = existsSync("/bin/zsh") ? false : "the installer is a zsh script, and there is no /bin/zsh here to run its lines with";
 const PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
 const MODEL = "Library/Application Support/BRIMM Transcribe/ggml-large-v3-turbo.bin";
+/** The pin of the transcriber's model, which the installer and the engine both read. */
+const PINNED = JSON.parse(readFileSync(join(HERE, "whisper-model.pin.json"), "utf8"));
+/** The installer's text, for the tests that read it or run some of its lines alone. */
+const text = readFileSync(INSTALL, "utf8");
+/** Each of these, as install.sh has it: a line that gives a name its value, or a function, whole. */
+const valueOf = (name) => {
+  const found = new RegExp(`\\n(${name}="[^"\\n]*")\\n`).exec(text);
+  assert.ok(found, `${name}=, in install.sh`);
+  return found[1];
+};
+const functionOf = (name) => {
+  const at = text.indexOf(`\n${name}() {`);
+  assert.ok(at >= 0, `${name}(), in install.sh`);
+  const end = text.indexOf("\n", at + 1);
+  return text.slice(at + 1, text.slice(at + 1, end).endsWith("}") ? end + 1 : text.indexOf("\n}\n", at) + 3);
+};
 /** What Claude Code prints for `claude auth status --json` when it is signed in: its email is never to be shown. */
 const SIGNED_IN = '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max","email":"sallie@example.com","orgName":"The BRIMM"}';
 /** Stand-ins for the programs that say what the Mac has: Xcode's command line tools there or not, and the Mac's macOS. */
@@ -59,7 +77,7 @@ const ask = (...args) => askOn({}, ...args);
 function askOn(installed, ...args) {
   return askWith({ installed }, ...args);
 }
-function askWith({ installed = {}, programs = [], files = [], agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, ffmpegSays, settings, bare = false, install = INSTALL }, ...args) {
+function askWith({ installed = {}, programs = [], files = [], launchd, agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, ffmpegSays, settings, bare = false, install = INSTALL }, ...args) {
   // The one rule of this file: nothing is run without --print.
   assert.ok(args.includes("--print"), "the installer is only ever asked what it would do");
   const dir = mkdtempSync(join(tmpdir(), "brimm-install-"));
@@ -90,6 +108,10 @@ function askWith({ installed = {}, programs = [], files = [], agentPath = "", cl
       writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${join(dir, "ran")}"\n`);
       chmodSync(join(bin, name), 0o755);
     }
+    // launchctl answers `print` as launchd does, from the text a test gives (or with 113, as for a job that is not loaded), and writes
+    // down what it was asked in `launchd-asked`, not in `ran`: asking is not a change. Any other call is written into `ran`.
+    if (launchd !== undefined) writeFileSync(join(dir, "launchd-says"), launchd);
+    writeFileSync(join(bin, "launchctl"), `#!/bin/sh\ncase "$1" in\n  print)\n    echo "$*" >> "${join(dir, "launchd-asked")}"\n    [ -f "${join(dir, "launchd-says")}" ] || exit 113\n    cat "${join(dir, "launchd-says")}"\n    exit 0 ;;\nesac\necho "launchctl $*" >> "${join(dir, "ran")}"\n`);
     // The stand-in for Claude Code answers what --print asks, signed out as the real one is, with exit 1, and writes any
     // other call into `ran`, so that a --print that updated it or signed it in would show. So does xcode-select's, for any
     // call but -p.
@@ -124,7 +146,7 @@ function askWith({ installed = {}, programs = [], files = [], agentPath = "", cl
       return { text, ...JSON.parse(spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", file], { encoding: "utf8" }).stdout) };
     });
     const kept = Object.fromEntries(Object.keys(installed).map((label) => [label, readFileSync(fileOf(label), "utf8")]));
-    return { status: r.status, out: r.stdout, err: r.stderr, agents, home, left: readdirSync(home, { recursive: true }).sort(), kept, ran: existsSync(join(dir, "ran")) ? readFileSync(join(dir, "ran"), "utf8") : "", asked: existsSync(join(dir, "ffmpeg-asked")) ? readFileSync(join(dir, "ffmpeg-asked"), "utf8") : "" };
+    return { status: r.status, out: r.stdout, err: r.stderr, agents, home, left: readdirSync(home, { recursive: true }).sort(), kept, ran: existsSync(join(dir, "ran")) ? readFileSync(join(dir, "ran"), "utf8") : "", asked: existsSync(join(dir, "ffmpeg-asked")) ? readFileSync(join(dir, "ffmpeg-asked"), "utf8") : "", launchdAsked: existsSync(join(dir, "launchd-asked")) ? readFileSync(join(dir, "launchd-asked"), "utf8") : "" };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -264,15 +286,20 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
     assert.deepEqual(r.agents[0].WatchPaths, ["/Volumes/Work/R&D <raw> \"takes\""]);
     assert.deepEqual(r.agents[0].ProgramArguments.slice(2), ["--watch", "/Volumes/Work/R&D <raw> \"takes\""]);
   });
-  it("says whether the transcriber's model is here, where the transcript tool keeps it, and offers the download only when it is not", () => {
+  it("says whether the transcriber's model is here, where the transcript tool keeps it, and offers the download when it is not here or is not the pin's", () => {
     const missing = ask("--print", "/Volumes/Work/Unedited video");
-    assert.ok(missing.out.includes(`\n  Model:  to download, about 1.6 GB, to ${missing.home}/${MODEL}\n`), missing.out);
+    assert.ok(missing.out.includes(`\n  Model:  to download, about 1.6 GB, to ${missing.home}/${MODEL}, from ${PINNED.url}, and kept only when its SHA-256 is the pin's, ${PINNED.sha256} (tool/whisper-model.pin.json)\n`), missing.out);
     changedNothing(missing);
+    // The harness's stand-in is not the pinned model.
     const here = askWith({ files: [MODEL] }, "--print", "/Volumes/Work/Unedited video");
     assert.equal(here.status, 0, here.err);
-    assert.ok(here.out.includes("\n  Model:  here already\n"), here.out);
+    assert.ok(here.out.includes(`\n  Model:  here, but its SHA-256 is not the pin's, so the pinned one is downloaded, about 1.6 GB, from ${PINNED.url}, and replaces it only when its SHA-256 is the pin's, ${PINNED.sha256} (tool/whisper-model.pin.json)\n`), here.out);
     assert.doesNotMatch(here.out, /to download/);
     assert.equal(here.ran, "");
+    // With no node on this Mac yet, a model that is here cannot be checked, and that is said.
+    const blind = askWith({ files: [MODEL], bare: true }, "--print", "/Volumes/Work/Unedited video");
+    assert.equal(blind.status, 0, blind.err);
+    assert.ok(blind.out.includes("\n  Model:  here; its SHA-256 is checked against the pin's once node is installed\n"), blind.out);
   });
   // The transcript tool's launch agent goes on watching its folders, and whichever tool looked first in a folder would file the
   // video away. So a folder it watches is refused here, and its file is only ever read.
@@ -411,7 +438,7 @@ describe("the installer's own text", () => {
     const xml = text.slice(text.indexOf("xml() {"), text.indexOf("\n", text.indexOf("xml() {")) + 1);
     const dir = mkdtempSync(join(tmpdir(), "brimm-check-agent-"));
     const file = join(dir, "check.plist");
-    const r = spawnSync("/bin/zsh", ["-c", `${xml}${writer}\nLABEL=x; CHECK_LABEL=com.thebrimm.claude-check; HERE="/the tool"; AGENT_PATH=/opt/homebrew/bin:/usr/bin; CHECK_LOG="/home/Library/Logs/brimm-video-claude-check.log"\ncheck_agent /opt/homebrew/bin/node 1800000180 > "${file}"`], { encoding: "utf8" });
+    const r = spawnSync("/bin/zsh", ["-c", `${xml}${writer}${functionOf("agent_program")}${functionOf("agent_bundle")}\napp_exe=""; app_id=""\nLABEL=x; CHECK_LABEL=com.thebrimm.claude-check; HERE="/the tool"; AGENT_PATH=/opt/homebrew/bin:/usr/bin; CHECK_LOG="/home/Library/Logs/brimm-video-claude-check.log"\ncheck_agent /opt/homebrew/bin/node 1800000180 > "${file}"`], { encoding: "utf8" });
     assert.equal(r.status, 0, r.stderr);
     assert.equal(spawnSync("/usr/bin/plutil", ["-lint", file], { encoding: "utf8" }).status, 0);
     assert.deepEqual(JSON.parse(spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", file], { encoding: "utf8" }).stdout), {
@@ -435,18 +462,6 @@ describe("the installer's own text", () => {
     // Once the wait is over, the check takes the agent away itself, and only then lifts the traps.
     assert.match(text, /\n {2}done\n {2}drop_check\n {2}trap - EXIT INT TERM\n {2}say "From the background job: /);
   });
-  /** Each of these, as install.sh has it: a line that gives a name its value, or a function, whole. */
-  const valueOf = (name) => {
-    const found = new RegExp(`\\n(${name}="[^"\\n]*")\\n`).exec(text);
-    assert.ok(found, `${name}=, in install.sh`);
-    return found[1];
-  };
-  const functionOf = (name) => {
-    const at = text.indexOf(`\n${name}() {`);
-    assert.ok(at >= 0, `${name}(), in install.sh`);
-    const end = text.indexOf("\n", at + 1);
-    return text.slice(at + 1, text.slice(at + 1, end).endsWith("}") ? end + 1 : text.indexOf("\n}\n", at) + 3);
-  };
   /** A folder made for one test, with a stand-in for launchctl that only writes down how it was called. */
   const standIn = () => {
     const dir = mkdtempSync(join(tmpdir(), "brimm-launchctl-"));
@@ -638,7 +653,7 @@ describe("the installer's own text", () => {
     const toolchainStep = text.indexOf('if [[ -n "$machine" ]] && ! toolchain_here "$TOOLCHAIN" "$node"; then\n');
     assert.ok(toolchainStep > 0 && start > text.indexOf("\nfi\n", toolchainStep) + 4, "after the step that installs the command line");
     assert.ok(start > text.indexOf('if node_old "$node" say; then\n  exit 1\nfi'), "after node is in place");
-    for (const later of ['if [[ ! -f "$MODEL" ]]; then', 'if ! settings_plan "$node"; then', 'mkdir -p "${folders[@]}"', '"$node" "$HERE/settings.js" marker "$drop" "$machine"', '"$node" "$HERE/settings.js" write ', 'agent "$node" > "$AGENT_FILE"']) {
+    for (const later of ['if [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then', 'if ! settings_plan "$node"; then', 'mkdir -p "${folders[@]}"', '"$node" "$HERE/settings.js" marker "$drop" "$machine"', '"$node" "$HERE/settings.js" write ', 'agent "$node" > "$AGENT_FILE"']) {
       assert.ok(start < text.indexOf(later), later);
     }
     // The Chrome first, then the check, and the check is the step's last.
@@ -834,7 +849,7 @@ describe("the installer's own text", () => {
   it("gives the launch agent the one PATH, and looks for Claude Code along that same PATH", () => {
     // It is this PATH unless another is named in BRIMM_AGENT_PATH, as a test names one.
     assert.match(text, /\nAGENT_PATH="\$\{BRIMM_AGENT_PATH:-\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin\}"\n/);
-    assert.ok(text.includes('<dict><key>PATH</key><string>$AGENT_PATH</string></dict>'));
+    assert.equal(text.split('<dict><key>PATH</key><string>$(xml "$AGENT_PATH")</string></dict>').length - 1, 2);
     assert.match(text, /\n {2}for dir in \$\{\(s\.:\.\)AGENT_PATH\} "\$HOME\/\.local\/bin"; do\n/);
   });
   it("stops its own launch agents when it is asked to stop the watching, and never writes, loads or stops the transcript tool's", () => {
@@ -845,10 +860,10 @@ describe("the installer's own text", () => {
     const naming = text.split("\n").filter((line) => /TRANSCRIBE_LABEL|com\.thebrimm\.transcribe/.test(line) && !line.startsWith("#"));
     assert.ok(naming.length >= 2, naming.join("\n"));
     for (const line of naming) assert.doesNotMatch(line, /launchctl|rm |> ?"/, line);
-    // plutil reads a launch agent's file in two places, both in watched(); its other reads are of what Claude Code says
-    // of its sign-in. None reads what settings.js says: that is read as lines.
+    // plutil reads a launch agent's file in two places, both in watched(); two reads are of the app's Info.plist (--app), and its
+    // other reads are of what Claude Code says of its sign-in. None reads what settings.js says: that is read as lines.
     const reads = text.split("\n").filter((line) => line.includes("plutil -extract"));
-    assert.deepEqual(reads.map((line) => (line.includes('"$file"') ? "agent" : / -o - - /.test(line) ? "Claude" : line)), ["agent", "agent", "Claude", "Claude"]);
+    assert.deepEqual(reads.map((line) => (line.includes('"$file"') ? "agent" : line.includes('"$app/Contents/Info.plist"') ? "app" : / -o - - /.test(line) ? "Claude" : line)), ["agent", "agent", "app", "app", "Claude", "Claude"]);
   });
 });
 
@@ -1895,6 +1910,45 @@ function checkoutWithOpenLock(version) {
   return { install: join(tool, "install.sh"), done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
+/** What a build of BRIMM Video Studio writes into build.json (Phase 3), as tests/build.test.js has it. */
+const WHOLE = { version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid" };
+/** The programs in the folder after --tools besides Studio's compiled helpers (HELPERS, each named brimm-<name>). */
+const TOOLS_PROGRAMS = ["node", "npm", "ffmpeg", "ffprobe", "whisper-cli"];
+/** What the installer says of a copy of BRIMM Video Studio that is not whole. */
+const DAMAGED = "This copy of BRIMM Video Studio may be damaged: download it again, then open it and choose Repair.";
+/** What the app's ffmpeg prints for the three calls --print asks of it: it can make an HDR video standard. */
+const HDR_LISTS = { hwaccels: "Hardware acceleration methods:\nvideotoolbox\n", filters: "Filters:\n .. scale_vt          V->V       Scale Videotoolbox frames\n", version: "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers" };
+
+/** A copy of BRIMM Video Studio.app as its build lays it out, in a folder made for the test, with stand-ins for every program: `app`,
+    its `checkout` (Contents/Resources/Studio, which holds this checkout's tool without its tests, and beside it a build.json unless
+    `build` is false), `tool`, `install` (the installer in that copy) and `tools` (Contents/Resources/node/bin). Each stand-in writes
+    what it is given into `ran()` but node, which runs the real one (an old one with `oldNode`), and ffmpeg, which prints `lists` for
+    -hwaccels, -filters and -version. */
+function appCopy({ under = "Applications", id = "com.thebrimm.video-studio", exe = "BRIMM Video Studio", build = true, lists = HDR_LISTS, oldNode = false, deadNode = false } = {}) {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-app-")));
+  const app = join(dir, under, "BRIMM Video Studio.app");
+  const ranFile = join(dir, "ran");
+  const stand = (file, script) => {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `#!/bin/sh\n${script}`);
+    chmodSync(file, 0o755);
+  };
+  mkdirSync(join(app, "Contents"), { recursive: true });
+  writeFileSync(join(app, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleIdentifier</key><string>${xml(id)}</string>\n  <key>CFBundleExecutable</key><string>${xml(exe)}</string>\n  <key>CFBundleName</key><string>BRIMM Video Studio</string>\n</dict>\n</plist>\n`);
+  stand(join(app, "Contents", "MacOS", exe), `echo "app $*" >> "${ranFile}"\n`);
+  const checkout = join(app, "Contents", "Resources", "Studio");
+  const tool = join(checkout, "tool");
+  cpSync(HERE, tool, { recursive: true, filter: (src) => src !== join(HERE, "tests") });
+  if (build) writeFileSync(join(checkout, "build.json"), JSON.stringify(WHOLE));
+  const tools = join(app, "Contents", "Resources", "node", "bin");
+  const old = oldNode ? `case "$1" in\n  --version) echo v20.11.0; exit 0 ;;\n  -e) case "$2" in *process.versions.node*) exit 1 ;; esac ;;\nesac\n` : "";
+  stand(join(tools, "node"), deadNode ? "exit 1\n" : `${old}exec "${process.execPath}" "$@"\n`);
+  for (const [name, text] of Object.entries(lists)) writeFileSync(join(dir, `ffmpeg-${name}`), text);
+  stand(join(tools, "ffmpeg"), `case "$*" in\n  *-hwaccels*) cat "${join(dir, "ffmpeg-hwaccels")}" ;;\n  *-filters*) cat "${join(dir, "ffmpeg-filters")}" ;;\n  *-version*) cat "${join(dir, "ffmpeg-version")}" ;;\n  *) echo "$0 $*" >> "${ranFile}" ;;\nesac\n`);
+  for (const name of ["npm", "ffprobe", "whisper-cli", ...HELPERS.map((h) => `brimm-${h}`)]) stand(join(tools, name), `echo "$0 $*" >> "${ranFile}"\n`);
+  return { dir, app, tools, tool, checkout, install: join(tool, "install.sh"), ran: () => (existsSync(ranFile) ? readFileSync(ranFile, "utf8") : ""), done: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
 describe("the installer and her folder's lock (the open lock, K1), asked what it would do", { skip: notAMac }, () => {
   let copy;
   before(() => {
@@ -2445,5 +2499,601 @@ describe("the full import is gone (Phase 2, F4)", { skip: notAMac }, () => {
     // --import light is as it was.
     assert.equal(ask("--print", "--machine", "Mac Studio", "--import", "light", root).status, 0);
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac }, () => {
+  const sha = (words) => createHash("sha256").update(words).digest("hex");
+  const WHY = "The pin of the transcriber's model, tool/whisper-model.pin.json, does not hold its address on Hugging Face at one revision and its SHA-256, so the installer changed nothing.";
+  /** A copy of the tool, without its tests, in a folder made for the test, as the pin test for the command line makes it. */
+  const copyOfTheTool = () => {
+    const copy = realpathSync(mkdtempSync(join(tmpdir(), "brimm-checkout-")));
+    const tool = join(copy, "BRIMM video", "tool");
+    cpSync(HERE, tool, { recursive: true, filter: (src) => src !== join(HERE, "tests") });
+    return { copy, tool, install: join(tool, "install.sh"), pin: join(tool, "whisper-model.pin.json") };
+  };
+  const dropboxRoot = () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    return { root, done: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+  it("pins the model at one revision of Hugging Face's whisper.cpp, by its SHA-256, under the name run.js and the installer give it", () => {
+    assert.deepEqual(Object.keys(PINNED).sort(), ["sha256", "url"]);
+    assert.match(PINNED.url, /^https:\/\/huggingface\.co\/ggerganov\/whisper\.cpp\/resolve\/[0-9a-f]{40}\/ggml-large-v3-turbo\.bin$/);
+    assert.match(PINNED.sha256, /^[0-9a-f]{64}$/);
+    const name = /const MODEL_NAME = "([^"]+)";/.exec(readFileSync(join(HERE, "run.js"), "utf8"))?.[1];
+    assert.equal(basename(PINNED.url), name);
+    assert.equal(basename(PINNED.url), basename(MODEL));
+    assert.doesNotMatch(text, /resolve\/main/);
+  });
+  /** Nothing was changed: the home folder holds only the model the test put there, and nothing was run. */
+  const unchanged = (r) => {
+    assert.deepEqual([r.left, r.ran], [["Library", "Library/Application Support", "Library/Application Support/BRIMM Transcribe", `${MODEL}`], ""]);
+    assert.match(r.out, /\nNothing was changed\.\n$/);
+  };
+  it("checks a model already here against the pin: here already when its SHA-256 is the pin's, downloaded again when it is not", () => {
+    const { copy, install, pin } = copyOfTheTool();
+    try {
+      writeFileSync(pin, JSON.stringify({ url: PINNED.url, sha256: sha("the model, made for the test") }, null, 2) + "\n");
+      const right = askWith({ install, files: [[MODEL, "the model, made for the test"]] }, "--print", "/Volumes/Work/Unedited video");
+      assert.equal(right.status, 0, right.err);
+      assert.ok(right.out.includes("\n  Model:  here already, and its SHA-256 is the pin's\n"), right.out);
+      unchanged(right);
+      const wrong = askWith({ install, files: [[MODEL, "another model"]] }, "--print", "/Volumes/Work/Unedited video");
+      assert.equal(wrong.status, 0, wrong.err);
+      assert.ok(wrong.out.includes(`\n  Model:  here, but its SHA-256 is not the pin's, so the pinned one is downloaded, about 1.6 GB, from ${PINNED.url}, and replaces it only when its SHA-256 is the pin's, ${sha("the model, made for the test")} (tool/whisper-model.pin.json)\n`), wrong.out);
+      unchanged(wrong);
+    } finally {
+      rmSync(copy, { recursive: true, force: true });
+    }
+  });
+  it("refuses, before it changes anything, a pin it cannot read an address at one revision and a SHA-256 from, whether or not the model is here", () => {
+    const { copy, install, pin } = copyOfTheTool();
+    const d = dropboxRoot();
+    const pinned = (more) => JSON.stringify({ url: PINNED.url, sha256: PINNED.sha256, ...more }, null, 2) + "\n";
+    try {
+      for (const [what, text] of [
+        ["no pin file", null],
+        ["an empty one", ""],
+        ["one that is not JSON", "url and sha"],
+        ["an address at main", pinned({ url: PINNED.url.replace(/resolve\/[0-9a-f]{40}\//, "resolve/main/") })],
+        ["an address on another host", pinned({ url: PINNED.url.replace("huggingface.co", "huggingface.co.example.invalid") })],
+        ["an address with http", pinned({ url: PINNED.url.replace("https:", "http:") })],
+        ["a SHA-256 cut short", pinned({ sha256: PINNED.sha256.slice(0, 63) })],
+        ["a SHA-256 in capitals", pinned({ sha256: PINNED.sha256.toUpperCase() })],
+        ["a SHA-256 alone", JSON.stringify({ sha256: PINNED.sha256 }, null, 2) + "\n"]
+      ]) {
+        if (text === null) rmSync(pin, { force: true });
+        else writeFileSync(pin, text);
+        for (const args of [["--print", "/Volumes/Work/Unedited video"], ["--print", "--machine", "Mac Studio", d.root]]) {
+          for (const files of [[], [MODEL]]) {
+            const r = askWith({ install, files }, ...args);
+            assert.deepEqual([r.status, r.out], [2, WHY + "\n\nNothing was changed.\n"], what + " " + args.join(" "));
+            assert.deepEqual([r.left, r.ran], [files.length ? ["Library", "Library/Application Support", "Library/Application Support/BRIMM Transcribe", MODEL] : [], ""], what);
+          }
+        }
+      }
+    } finally {
+      rmSync(copy, { recursive: true, force: true });
+      d.done();
+    }
+  });
+  it("tells the model's SHA-256 as node reads it (the function alone, in zsh)", { skip: noZsh }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-sha-"));
+    try {
+      const file = join(dir, "model.bin");
+      writeFileSync(file, "made for the test\n");
+      const script = (path) => `node="${process.execPath}"\n${functionOf("model_sha256")}model_sha256 "${path}"`;
+      const r = spawnSync("/bin/zsh", ["-c", script(file)], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+      assert.deepEqual([r.status, r.stdout], [0, sha("made for the test\n") + "\n"], r.stderr);
+      const gone = spawnSync("/bin/zsh", ["-c", script(join(dir, "missing.bin"))], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+      assert.equal(gone.stdout, "");
+      assert.notEqual(gone.status, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("keeps a download only when its SHA-256 is the pin's: a page that is not the model, or a cut-short file, is taken away and said (its own lines, run alone in zsh)", { skip: noZsh }, () => {
+    const from = '\nif [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then\n';
+    const at = text.indexOf(from);
+    assert.ok(at >= 0, "the download's block, in install.sh");
+    const block = text.slice(at + 1, text.indexOf("\nfi\n", at) + 4);
+    const WIFI = "<html><body>Sign in to the Wi-Fi</body></html>";
+    const MODEL_WORDS = "the model, made for the test";
+    const run = ({ gives, sha256, here, curlExit }) => {
+      const dir = mkdtempSync(join(tmpdir(), "brimm-download-"));
+      try {
+        mkdirSync(join(dir, "bin"));
+        writeFileSync(join(dir, "bin", "curl"), '#!/bin/sh\necho "$*" > "$ASKED"\nwhile [ "$1" != "-o" ]; do shift; done\nprintf %s "$GIVES" > "$2"\n[ -z "${CURL_EXIT:-}" ] || exit "$CURL_EXIT"\n');
+        chmodSync(join(dir, "bin", "curl"), 0o755);
+        const modelDir = join(dir, "models");
+        const model = join(modelDir, "ggml-large-v3-turbo.bin");
+        if (here !== undefined) {
+          mkdirSync(modelDir);
+          writeFileSync(model, here);
+        }
+        const script = `set -euo pipefail\nMODEL_DIR="${modelDir}"\nMODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"\nMODEL_URL="${PINNED.url}"\nMODEL_SHA256="${sha256}"\nnode="${process.execPath}"\n${functionOf("say")}${functionOf("model_sha256")}${block}\nprint -r -- "went on"\n`;
+        const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { PATH: `${join(dir, "bin")}:/usr/bin:/bin`, GIVES: gives, ASKED: join(dir, "curl-asked"), ...(curlExit ? { CURL_EXIT: String(curlExit) } : {}) } });
+        const read = (file) => (existsSync(file) ? readFileSync(file, "utf8") : null);
+        return { status: r.status, out: r.stdout, err: r.stderr, model: read(model), part: existsSync(`${model}.part`), asked: read(join(dir, "curl-asked")), modelPath: model };
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+    // Not here: a page that is not the model is not kept.
+    let r = run({ gives: WIFI, sha256: PINNED.sha256 });
+    assert.equal(r.status, 1, r.err);
+    assert.ok(r.out.includes("It was not kept. Run this again."), r.out);
+    assert.ok(r.out.includes(`its SHA-256 is ${sha(WIFI)}, and the pin's is ${PINNED.sha256}`), r.out);
+    assert.deepEqual([r.model, r.part], [null, false]);
+    assert.equal(r.asked.trim(), `-L --fail --progress-bar -o ${r.modelPath}.part ${PINNED.url}`);
+    // Not here: the model, whole, is kept and the run goes on.
+    r = run({ gives: MODEL_WORDS, sha256: sha(MODEL_WORDS) });
+    assert.equal(r.status, 0, r.err);
+    assert.ok(r.out.endsWith("went on\n"), r.out);
+    assert.deepEqual([r.model, r.part], [MODEL_WORDS, false]);
+    // Here, but not the pin's: a bad download leaves it as it was, and a good one replaces it.
+    r = run({ gives: WIFI, sha256: PINNED.sha256, here: "another model" });
+    assert.equal(r.status, 1, r.err);
+    assert.deepEqual([r.model, r.part], ["another model", false]);
+    r = run({ gives: MODEL_WORDS, sha256: sha(MODEL_WORDS), here: "another model" });
+    assert.equal(r.status, 0, r.err);
+    assert.deepEqual([r.model, r.part], [MODEL_WORDS, false]);
+    // Curl itself fails part-way (its exit 18): the part is taken away, the installer says so and ends 1, and a model that was here is left as it was.
+    for (const here of [undefined, "another model"]) {
+      r = run({ gives: MODEL_WORDS.slice(0, 7), sha256: sha(MODEL_WORDS), here, curlExit: 18 });
+      assert.equal(r.status, 1, r.err);
+      assert.ok(r.out.includes("The model could not be downloaded whole"), r.out);
+      assert.ok(!r.out.includes("went on"), r.out);
+      assert.deepEqual([r.model, r.part], [here ?? null, false]);
+    }
+    // Here and the pin's: nothing is asked of curl.
+    r = run({ gives: MODEL_WORDS, sha256: sha(MODEL_WORDS), here: MODEL_WORDS });
+    assert.equal(r.status, 0, r.err);
+    assert.equal(r.out, "went on\n");
+    assert.deepEqual([r.model, r.part, r.asked], [MODEL_WORDS, false, null]);
+  });
+  it("says in its help that the model is downloaded at the pinned revision, and kept only when its SHA-256 is the pin's", () => {
+    const r = ask("--print", "--help");
+    assert.ok(r.out.replace(/\s+/g, " ").includes("downloads the transcriber's model once (about 1.6 GB) when it is not here, at the revision tool/whisper-model.pin.json pins, and keeps it only when its SHA-256 is the pin's,"), r.out);
+  });
+});
+
+describe("BRIMM Video Studio's own copy of Studio (--tools; Studio app phase 4), asked what it would do", { skip: notAMac }, () => {
+  let copy;
+  before(() => {
+    copy = appCopy();
+  });
+  after(() => copy.done());
+  /** A folder made for one test that stands for The BRIMM DB in Dropbox, with BRIMM Video in it, as the --machine tests make it. */
+  function dropbox() {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    return { dir, root, done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  const ALSO = "\n\nNothing was changed.\n";
+  const APPS_COPY_LINE = "This is BRIMM Video Studio's own copy of Studio (it has a build.json beside tool/), so it is set up only with the app's own programs, never Homebrew's. Open BRIMM Video Studio and choose Repair.";
+  const GIT_CHECKOUT_LINE = "--tools and --app are for BRIMM Video Studio's own copy of Studio, which has a build.json beside tool/. This is a git checkout, which is set up with Homebrew's programs: run this again without them.";
+  const HELPERS_LINE = (tools) => `  Studio's helpers, compiled:  in ${tools}: ${HELPERS.map((h) => `brimm-${h}`).join(", ")}`;
+  it("takes every program from the folder after --tools on a Mac with no Homebrew, and runs the background job with node from there", () => {
+    const d = dropbox();
+    try {
+      const drop = `${d.root}/Unedited Video/Mac Studio`;
+      const r = askWith({ bare: true, install: copy.install }, "--print", "--machine", "Mac Studio", "--tools", copy.tools, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.deepEqual(r.agents[0].ProgramArguments, [`${copy.tools}/node`, `${copy.tool}/unedited.js`, "--watch", drop]);
+      assert.equal(r.agents[0].EnvironmentVariables.PATH, `${copy.tools}:/usr/bin:/bin`);
+      assert.ok(!("AssociatedBundleIdentifiers" in r.agents[0]));
+      for (const line of [
+        HELPERS_LINE(copy.tools),
+        `  Programs, BRIMM Video Studio's own:  in ${copy.tools}: node ${process.version}, npm, ffmpeg, ffprobe, whisper-cli`,
+        "  By hand afterwards:  the Getting Started guide, which BRIMM Video Studio opens when the setup is done"
+      ]) assert.ok(r.out.includes(`\n${line}\n`), `${line}\n---\n${r.out}`);
+      assert.ok(r.out.includes(`"checkout": "${copy.checkout}"`), r.out);
+      assert.doesNotMatch(r.out, /Homebrew|brew |Xcode|xcode-select|Swift/);
+      changedNothing(r);
+      assert.equal(copy.ran(), "");
+    } finally {
+      d.done();
+    }
+  });
+  it("takes the app's programs over Homebrew's and the PATH's", () => {
+    const d = dropbox();
+    try {
+      const r = askWith({ install: copy.install, ffmpegSays: { hwaccels: "Hardware acceleration methods:\n", filters: "Filters:\n", version: "ffmpeg version 1.0 from the PATH" } }, "--print", "--machine", "Mac Studio", "--tools", copy.tools, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.equal(r.asked, "");
+      assert.equal(r.agents[0].ProgramArguments[0], `${copy.tools}/node`);
+      assert.ok(r.out.includes("this Mac's ffmpeg (ffmpeg version 9.0.2) can make an HDR video standard"), r.out);
+      assert.ok(!r.out.includes("from the PATH"), r.out);
+    } finally {
+      d.done();
+    }
+  });
+  it("says the app's ffmpeg may be damaged, and never names brew, when it lacks what an HDR video needs", () => {
+    const bad = appCopy({ lists: { ...HDR_LISTS, hwaccels: "Hardware acceleration methods:\n" } });
+    const d = dropbox();
+    try {
+      const r = askWith({ bare: true, install: bad.install }, "--print", "--machine", "Mac Studio", "--tools", bad.tools, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.ok(r.out.includes(`\n  HDR video:  this Mac's ffmpeg (ffmpeg version 9.0.2) cannot make an HDR video standard, which an iPhone's clip is by default, so the working copy refuses every one: it has no videotoolbox hwaccel. ${DAMAGED}\n`), r.out);
+      assert.doesNotMatch(r.out, /brew/);
+    } finally {
+      d.done();
+      bad.done();
+    }
+  });
+  it("refuses a program or a helper missing from the folder, naming each, before anything is changed", () => {
+    const d = dropbox();
+    const ask1 = () => askWith({ bare: true, install: copy.install }, "--print", "--machine", "Mac Studio", "--tools", copy.tools, d.root);
+    const away = (names, then) => {
+      for (const name of names) renameSync(join(copy.tools, name), join(copy.tools, `${name}.away`));
+      try {
+        return then();
+      } finally {
+        for (const name of names) renameSync(join(copy.tools, `${name}.away`), join(copy.tools, name));
+      }
+    };
+    try {
+      for (const name of [...TOOLS_PROGRAMS, ...HELPERS.map((h) => `brimm-${h}`)]) {
+        const r = away([name], ask1);
+        assert.deepEqual([r.status, r.out], [2, `BRIMM Video Studio's own programs are not all in ${copy.tools}. Missing: ${name}. ${DAMAGED}${ALSO}`], name);
+        assert.deepEqual([r.left, r.ran], [[], ""], name);
+      }
+      const two = away(["ffprobe", "brimm-faces"], ask1);
+      assert.deepEqual([two.status, two.out], [2, `BRIMM Video Studio's own programs are not all in ${copy.tools}. Missing: ffprobe, brimm-faces. ${DAMAGED}${ALSO}`]);
+      assert.deepEqual([two.left, two.ran], [[], ""]);
+      // A file that cannot be run counts as missing.
+      chmodSync(join(copy.tools, "whisper-cli"), 0o644);
+      try {
+        const r = ask1();
+        assert.deepEqual([r.status, r.out], [2, `BRIMM Video Studio's own programs are not all in ${copy.tools}. Missing: whisper-cli. ${DAMAGED}${ALSO}`]);
+      } finally {
+        chmodSync(join(copy.tools, "whisper-cli"), 0o755);
+      }
+      assert.equal(copy.ran(), "");
+    } finally {
+      d.done();
+    }
+  });
+  it("refuses a folder after --tools that is not a folder", () => {
+    const d = dropbox();
+    try {
+      const gone = join(copy.dir, "no such folder");
+      const r = askWith({ bare: true, install: copy.install }, "--print", "--machine", "Mac Studio", "--tools", gone, d.root);
+      assert.deepEqual([r.status, r.out], [2, `The folder after --tools is not a folder: ${gone}. ${DAMAGED}${ALSO}`]);
+      assert.deepEqual([r.left, r.ran], [[], ""]);
+    } finally {
+      d.done();
+    }
+  });
+  it("refuses a node older than 22 in the folder", () => {
+    const old = appCopy({ oldNode: true });
+    const d = dropbox();
+    try {
+      const r = askWith({ bare: true, install: old.install }, "--print", "--machine", "Mac Studio", "--tools", old.tools, d.root);
+      assert.deepEqual([r.status, r.out], [2, `BRIMM Video Studio's own node, in ${old.tools}, is v20.11.0, and Studio needs 22 or later. ${DAMAGED}${ALSO}`]);
+      assert.deepEqual([r.left, r.ran], [[], ""]);
+    } finally {
+      d.done();
+      old.done();
+    }
+  });
+  it("refuses a node that cannot be run at all, in words that do not name a version", () => {
+    const dead = appCopy({ deadNode: true });
+    const d = dropbox();
+    try {
+      const r = askWith({ bare: true, install: dead.install }, "--print", "--machine", "Mac Studio", "--tools", dead.tools, d.root);
+      assert.deepEqual([r.status, r.out], [2, `BRIMM Video Studio's own node, in ${dead.tools}, cannot be run. ${DAMAGED}${ALSO}`]);
+      assert.deepEqual([r.left, r.ran], [[], ""]);
+    } finally {
+      d.done();
+      dead.done();
+    }
+  });
+  it("refuses --tools from a git checkout, and the app's own copy without --tools, before anything is changed", () => {
+    const d = dropbox();
+    try {
+      const git = ask("--print", "--machine", "Mac Studio", "--tools", copy.tools, d.root);
+      assert.deepEqual([git.status, git.out], [2, GIT_CHECKOUT_LINE + ALSO]);
+      assert.deepEqual([git.left, git.ran], [[], ""]);
+      const same = (r) => {
+        assert.deepEqual([r.status, r.out], [2, APPS_COPY_LINE + ALSO]);
+        assert.deepEqual([r.left, r.ran], [[], ""]);
+      };
+      same(askWith({ install: copy.install }, "--print", "--machine", "Mac Studio", d.root));
+      same(askWith({ install: copy.install }, "--print", "/Volumes/Work/Unedited video"));
+      // A build file that is a folder, or a link to nowhere, is there all the same.
+      const file = join(copy.checkout, "build.json");
+      const kept = readFileSync(file, "utf8");
+      rmSync(file);
+      try {
+        mkdirSync(file);
+        same(askWith({ install: copy.install }, "--print", "--machine", "Mac Studio", d.root));
+        rmSync(file, { recursive: true });
+        symlinkSync(join(copy.dir, "nowhere.json"), file);
+        same(askWith({ install: copy.install }, "--print", "--machine", "Mac Studio", d.root));
+      } finally {
+        rmSync(file, { recursive: true, force: true });
+        writeFileSync(file, kept);
+      }
+    } finally {
+      d.done();
+    }
+  });
+  it("refuses --tools and --app where they do not belong, plainly and before anything else", () => {
+    const d = dropbox();
+    const SET = '--machine "<this Mac>" --tools "<bin>" --app "<BRIMM Video Studio.app>" "<path to BRIMM Video>"';
+    try {
+      for (const [args, line] of [
+        [["--machine", "Mac Studio", d.root, "--tools"], 'Say which folder after --tools, as --tools "<path>".'],
+        [["--tools", "--machine", "Mac Studio", d.root], 'Say which folder after --tools, as --tools "<path>".'],
+        [["--machine", "Mac Studio", d.root, "--app"], 'Say which app after --app, as --app "<path>".'],
+        [["--remove", "--tools", "/x"], "--remove stops the watching and changes no settings, so it does not take --tools or --app."],
+        [["--remove", "--app", "/x"], "--remove stops the watching and changes no settings, so it does not take --tools or --app."],
+        [["--machine", "Mac Studio", "--app", "/x", d.root], `--app goes with --tools, the folder of the app's own programs: ./install.sh ${SET}`],
+        [["--tools", "/x", "/Volumes/Work/Unedited video"], `--tools and --app are for a Mac set up with --machine, as BRIMM Video Studio sets one up: ./install.sh ${SET}`]
+      ]) {
+        const r = ask("--print", ...args);
+        assert.deepEqual([r.status, r.out], [2, line + "\n"], args.join(" "));
+        assert.deepEqual([r.left, r.ran], [[], ""], args.join(" "));
+      }
+    } finally {
+      d.done();
+    }
+  });
+  it("never looks for brew with --tools: its lines, read", () => {
+    assert.equal(text.split('"$brew" install').length - 1, 1);
+    assert.equal(text.split('brew=""').length - 1, 1);
+    assert.equal(text.split('brew="$(find_program brew || true)"').length - 1, 1);
+    assert.ok(text.includes('\nbrew=""\n[[ -n "$tools" ]] || brew="$(find_program brew || true)"\n'));
+  });
+  it("says in its help how BRIMM Video Studio sets a Mac up with --tools", () => {
+    const r = ask("--print", "--help");
+    assert.ok(r.out.replace(/\s+/g, " ").includes("set this Mac up as BRIMM Video Studio does, from the app's own copy of Studio, which has a build.json beside tool/ and is never set up without --tools (and a git checkout never with it). Every program is the app's own, in <bin>: node, npm, ffmpeg, ffprobe, whisper-cli and Studio's compiled helpers. Homebrew is never looked for or run, and Xcode's tools are not needed."), r.out);
+  });
+});
+
+describe("BRIMM Video Studio's background job through the app (--app; Studio app phase 4), asked what it would do", { skip: notAMac }, () => {
+  let copy;
+  let other;
+  before(() => {
+    copy = appCopy();
+    other = appCopy();
+  });
+  after(() => {
+    copy.done();
+    other.done();
+  });
+  function dropbox() {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    return { dir, root, done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  const ALSO = "\n\nNothing was changed.\n";
+  const askApp = (c, ...more) => askWith({ bare: true, install: c.install }, "--print", "--machine", "Mac Studio", "--tools", c.tools, "--app", c.app, ...more);
+  const NOT_WHOLE = (app, reason) => `The app after --app is not a whole BRIMM Video Studio (${app}): ${reason} ${DAMAGED}${ALSO}`;
+  it("runs the background job as the app's own program with --agent, and names the app to macOS", () => {
+    const d = dropbox();
+    try {
+      const drop = `${d.root}/Unedited Video/Mac Studio`;
+      const r = askApp(copy, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      const log = join(r.home, "Library/Logs/brimm-video.log");
+      assert.deepEqual(held(r.agents[0]), {
+        Label: "com.thebrimm.unedited",
+        ProgramArguments: [`${copy.app}/Contents/MacOS/BRIMM Video Studio`, "--agent", "--watch", drop],
+        AssociatedBundleIdentifiers: ["com.thebrimm.video-studio"],
+        WatchPaths: [drop],
+        RunAtLoad: true,
+        EnvironmentVariables: { PATH: `${copy.tools}:/usr/bin:/bin` },
+        StandardOutPath: log,
+        StandardErrorPath: log
+      });
+      changedNothing(r);
+      assert.equal(copy.ran(), "");
+    } finally {
+      d.done();
+    }
+  });
+  it("passes --rules-only on after --agent", () => {
+    const d = dropbox();
+    try {
+      const r = askApp(copy, "--rules-only", d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.deepEqual(r.agents[0].ProgramArguments, [`${copy.app}/Contents/MacOS/BRIMM Video Studio`, "--agent", "--rules-only", "--watch", `${d.root}/Unedited Video/Mac Studio`]);
+    } finally {
+      d.done();
+    }
+  });
+  it("runs the check of Claude through the app too (its writer, run alone)", { skip: noZsh }, () => {
+    const writer = text.slice(text.indexOf("check_agent() {"), text.indexOf("\n}\n", text.indexOf("check_agent() {")) + 3);
+    const xmlFn = text.slice(text.indexOf("xml() {"), text.indexOf("\n", text.indexOf("xml() {")) + 1);
+    const dir = mkdtempSync(join(tmpdir(), "brimm-check-agent-"));
+    const file = join(dir, "check.plist");
+    const exe = "/Applications/BRIMM Video Studio.app/Contents/MacOS/BRIMM Video Studio";
+    try {
+      const r = spawnSync("/bin/zsh", ["-c", `${xmlFn}${writer}${functionOf("agent_program")}${functionOf("agent_bundle")}\napp_exe="${exe}"; app_id=com.thebrimm.video-studio\nLABEL=x; CHECK_LABEL=com.thebrimm.claude-check; HERE="/the tool"; AGENT_PATH=/opt/homebrew/bin:/usr/bin; CHECK_LOG="/home/Library/Logs/brimm-video-claude-check.log"\ncheck_agent /opt/homebrew/bin/node 1800000180 > "${file}"`], { encoding: "utf8" });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(spawnSync("/usr/bin/plutil", ["-lint", file], { encoding: "utf8" }).status, 0);
+      assert.deepEqual(JSON.parse(spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", file], { encoding: "utf8" }).stdout), {
+        Label: "com.thebrimm.claude-check",
+        ProgramArguments: [exe, "--agent", "--check-claude", "--until", "1800000180"],
+        AssociatedBundleIdentifiers: ["com.thebrimm.video-studio"],
+        RunAtLoad: true,
+        EnvironmentVariables: { PATH: "/opt/homebrew/bin:/usr/bin" },
+        StandardOutPath: "/home/Library/Logs/brimm-video-claude-check.log",
+        StandardErrorPath: "/home/Library/Logs/brimm-video-claude-check.log"
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("an app in a folder whose name has spaces, & and < > is named exactly", () => {
+    const odd = appCopy({ under: "R&D <apps>" });
+    const d = dropbox();
+    try {
+      const r = askApp(odd, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.equal(r.agents[0].ProgramArguments[0], `${odd.app}/Contents/MacOS/BRIMM Video Studio`);
+      assert.equal(r.agents[0].EnvironmentVariables.PATH, `${odd.tools}:/usr/bin:/bin`);
+      assert.deepEqual(r.agents[0].WatchPaths, [`${d.root}/Unedited Video/Mac Studio`]);
+    } finally {
+      d.done();
+      odd.done();
+    }
+  });
+  it("refuses an app that is not whole, or that does not hold the programs and this installer, before anything is changed", () => {
+    const d = dropbox();
+    const same = (r, line) => {
+      assert.deepEqual([r.status, r.out], [2, line], line);
+      assert.deepEqual([r.left, r.ran], [[], ""], line);
+    };
+    const plist = join(copy.app, "Contents", "Info.plist");
+    const exe = join(copy.app, "Contents", "MacOS", "BRIMM Video Studio");
+    const kept = readFileSync(plist, "utf8");
+    try {
+      same(askApp({ install: copy.install, tools: copy.tools, app: copy.tools }, d.root), NOT_WHOLE(copy.tools, "it is not a folder whose name ends in .app."));
+      try {
+        writeFileSync(plist, kept.replace(/\s*<key>CFBundleIdentifier<\/key><string>[^<]*<\/string>/, ""));
+        same(askApp(copy, d.root), NOT_WHOLE(copy.app, "its Contents/Info.plist does not name its identifier and its program."));
+        writeFileSync(plist, kept.replace("<string>BRIMM Video Studio</string>\n  <key>CFBundleName", "<string>../x</string>\n  <key>CFBundleName"));
+        same(askApp(copy, d.root), NOT_WHOLE(copy.app, "its Contents/Info.plist does not name its identifier and its program."));
+      } finally {
+        writeFileSync(plist, kept);
+      }
+      chmodSync(exe, 0o644);
+      try {
+        same(askApp(copy, d.root), NOT_WHOLE(copy.app, "its program, Contents/MacOS/BRIMM Video Studio, is not there or cannot be run."));
+      } finally {
+        chmodSync(exe, 0o755);
+      }
+      same(askWith({ bare: true, install: copy.install }, "--print", "--machine", "Mac Studio", "--tools", other.tools, "--app", copy.app, d.root), NOT_WHOLE(copy.app, `the programs after --tools, ${other.tools}, are not inside it.`));
+      same(askWith({ bare: true, install: other.install }, "--print", "--machine", "Mac Studio", "--tools", copy.tools, "--app", copy.app, d.root), NOT_WHOLE(copy.app, `this installer, ${other.tool}/install.sh, is not inside it.`));
+      assert.equal(copy.ran(), "");
+    } finally {
+      d.done();
+    }
+  });
+  it("keeps dev mode's launch agent as it was: node and unedited.js, no AssociatedBundleIdentifiers, no blank line", () => {
+    const r = ask("--print", "/Volumes/Work/Unedited video");
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.ok(!r.agents[0].text.includes("AssociatedBundleIdentifiers"));
+    assert.ok(!r.agents[0].text.includes("\n\n"));
+    assert.deepEqual(r.agents[0].ProgramArguments.slice(1, 2), [join(HERE, "unedited.js")]);
+  });
+  it("says in its help that with --app the background job is the app's own program", () => {
+    const r = ask("--print", "--help");
+    assert.ok(r.out.replace(/\s+/g, " ").includes("With --app the background job is the app's own program, started with --agent, so that macOS names the app when it asks for access and in Login Items; without it, node from <bin>. It takes the other options of --machine"), r.out);
+  });
+});
+
+describe("waiting for nothing at work (Studio app phase 4)", { skip: notAMac }, () => {
+  let copy;
+  before(() => {
+    copy = appCopy();
+  });
+  after(() => copy.done());
+  function dropbox() {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-db-")));
+    const root = join(dir, "The BRIMM DB", "BRIMM Video");
+    mkdirSync(root, { recursive: true });
+    return { dir, root, done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  const askApp = (extra, root) => askWith({ bare: true, install: copy.install, ...extra }, "--print", "--machine", "Mac Studio", "--tools", copy.tools, "--app", copy.app, root);
+  const NOTHING = "  At work now:  nothing, so the background job can be stopped and started again";
+  const UNTIL = "The real run stops before it touches this Mac's drop folder, its settings and its background job, until that is done";
+  const label = "com.thebrimm.unedited";
+  it("says nothing is at work when nothing is, and asks launchd once", () => {
+    const d = dropbox();
+    try {
+      const r = askApp({}, d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.ok(r.out.includes(`\n${NOTHING}\n`), r.out);
+      assert.equal(r.launchdAsked, `print gui/${process.getuid()}/${label}\n`);
+      changedNothing(r);
+    } finally {
+      d.done();
+    }
+  });
+  it("names what is at work: the background job launchd names, or an import's lock", () => {
+    const d = dropbox();
+    try {
+      const job = askApp({ launchd: "\tpid = 4321\n" }, d.root);
+      assert.equal(job.status, 0, job.err + job.out);
+      assert.ok(job.out.includes(`\n  At work now:  The import is at work: its background job, ${label}, is running (process 4321). ${UNTIL}\n`), job.out);
+      assert.equal(job.ran, "");
+      assert.deepEqual(job.left, []);
+      const lock = askApp({ files: [["BRIMM Video Work/.runs/brimm-transcribe-0123456789abcdef.lock", String(process.pid)]] }, d.root);
+      assert.equal(lock.status, 0, lock.err + lock.out);
+      const line = lock.out.split("\n").find((l) => l.startsWith("  At work now:  "));
+      assert.ok(line && line.includes(String(process.pid)) && line.endsWith(` ${UNTIL}`), lock.out);
+      assert.equal(lock.ran, "");
+      assert.deepEqual(lock.left, ["BRIMM Video Work", "BRIMM Video Work/.runs", "BRIMM Video Work/.runs/brimm-transcribe-0123456789abcdef.lock"]);
+    } finally {
+      d.done();
+    }
+  });
+  it("in dev mode asks launchd nothing and says no such line", () => {
+    const d = dropbox();
+    try {
+      const r = ask("--print", "--machine", "Mac Studio", d.root);
+      assert.equal(r.status, 0, r.err + r.out);
+      assert.equal(r.launchdAsked, "");
+      assert.doesNotMatch(r.out, /At work now/);
+    } finally {
+      d.done();
+    }
+  });
+  it("stops the real run with 75 right before it touches the Mac, after the downloads (its lines, read, not run)", () => {
+    assert.ok(text.includes("\nBUSY=75\n"));
+    const model = text.indexOf('mv "$MODEL.part" "$MODEL"');
+    const start = text.indexOf('\nif [[ -n "$tools" ]]; then\n', model);
+    const block = text.slice(start, text.indexOf("\nfi\n", start));
+    assert.ok(model > 0 && start > model);
+    assert.ok(block.trimEnd().endsWith("exit $BUSY"), block);
+    const at = (needle) => {
+      const i = text.indexOf(needle);
+      assert.ok(i >= 0, needle);
+      return i;
+    };
+    assert.ok(start > at('curl -L --fail --progress-bar -o "$MODEL.part" "$MODEL_URL"') && start > at("run_hyperframes doctor"));
+    for (const later of ['if ! settings_plan "$node"; then', 'mkdir -p "${folders[@]}"', 'agent "$node" > "$AGENT_FILE"']) assert.ok(start < text.indexOf(later, start), later);
+  });
+  it("its own lines, run alone in zsh, stop while the background job runs, and go on when nothing is at work", { skip: noZsh }, () => {
+    const model = text.indexOf('mv "$MODEL.part" "$MODEL"');
+    const start = text.indexOf('\nif [[ -n "$tools" ]]; then\n', model);
+    const block = text.slice(start + 1, text.indexOf("\nfi\n", start) + 4);
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-busy-")));
+    try {
+      mkdirSync(join(dir, "bin"));
+      const run = (launchctl, node) => {
+        writeFileSync(join(dir, "bin", "launchctl"), `#!/bin/sh\n${launchctl}\n`);
+        chmodSync(join(dir, "bin", "launchctl"), 0o755);
+        const script = `set -euo pipefail\nLABEL="${label}"\nHERE="${HERE}"\nnode="${node}"\ntools=/x\nBUSY=75\n${functionOf("say")}${functionOf("idle_why")}${block}print -r -- "went on"\n`;
+        return spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { HOME: dir, BRIMM_VIDEO_HOME: dir, PATH: `${join(dir, "bin")}:/usr/bin:/bin` } });
+      };
+      const stopped = run("printf '\\tpid = 4321\\n'", process.execPath);
+      assert.deepEqual([stopped.status, stopped.stdout], [75, "\nThe import is at work: its background job, com.thebrimm.unedited, is running (process 4321). Stopped before this Mac's drop folder, its settings and its launch agent were touched: they are as they were. What this run installed or downloaded first stays. Run this again once that is done.\n"], stopped.stderr);
+      const idle = run("exit 113", process.execPath);
+      assert.deepEqual([idle.status, idle.stdout], [0, "went on\n"], idle.stderr);
+      const blind = run("exit 113", "/nowhere/node");
+      assert.equal(blind.status, 75, blind.stderr);
+      assert.ok(blind.stdout.startsWith("\nWhether anything is at work on this Mac could not be told. Stopped before"), blind.stdout);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("says in its help, and in the README, how BRIMM Video Studio sets a Mac up", () => {
+    const help = ask("--print", "--help").out.replace(/\s+/g, " ");
+    assert.ok(help.includes("A real run stops, with 75, before it touches this Mac's drop folder, its settings or its background job, while an import, an episode's command or a video being made ready for HyperFrames is at work"), help);
+    const readme = readFileSync(join(HERE, "..", "README.md"), "utf8");
+    const at = readme.indexOf("**Installed from the app.**");
+    assert.ok(at >= 0);
+    const paragraph = readme.slice(at, readme.indexOf("\n", at));
+    for (const word of ["none of these programs is taken from the PATH or Homebrew", "with --app, that folder must be inside the app", "`--tools`", "`--app`", "`--agent`", "75", "`tool/busy.js`", "`tool/whisper-model.pin.json`"]) assert.ok(paragraph.includes(word), word);
   });
 });

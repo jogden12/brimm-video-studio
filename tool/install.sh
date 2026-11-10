@@ -59,13 +59,22 @@
 #                                    write the import (light; full is gone and refused) and the version of the hand-off (1 or 2) in this Mac's
 #                                    settings, with --drop's own rules: a setting that is not named is left as it is. With
 #                                    --machine, --rules-only also writes readings off. These three options are for --machine only
+#   ./install.sh --machine "<this Mac>" --tools "<bin>" [--app "<BRIMM Video Studio.app>"] "/path/to/The BRIMM DB/BRIMM Video"
+#                                    set this Mac up as BRIMM Video Studio does, from the app's own copy of Studio, which has a
+#                                    build.json beside tool/ and is never set up without --tools (and a git checkout never with
+#                                    it). Every program is the app's own, in <bin>: node, npm, ffmpeg, ffprobe, whisper-cli and
+#                                    Studio's compiled helpers. Homebrew is never looked for or run, and Xcode's tools are not
+#                                    needed. With --app the background job is the app's own program, started with --agent, so
+#                                    that macOS names the app when it asks for access and in Login Items; without it, node from
+#                                    <bin>. It takes the other options of --machine. A real run stops, with 75, before it touches this
+#                                    Mac's drop folder, its settings or its background job, while an import, an episode's command or a video being made ready for HyperFrames is at work
 #   ./install.sh --machine "Sallie's laptop" --user-deny "/path/to/The BRIMM DB/BRIMM Video"
 #                                    also add to her user settings, ~/.claude/settings.json, the Read deny rules for the places
 #                                    her folder's open lock keeps from Claude, so that every Claude Code session on this Mac
 #                                    takes them. Only where her folder gets the open lock, which --print says
 #
-# It installs ffmpeg, whisper-cpp and Node with Homebrew when they are missing, downloads the transcriber's model once (about
-# 1.6 GB) when it is not here, and has the Mac run unedited.js whenever something lands in a watched folder. It asks before it
+# It installs ffmpeg, whisper-cpp and Node with Homebrew when they are missing, downloads the transcriber's model once (about 1.6 GB)
+# when it is not here, at the revision tool/whisper-model.pin.json pins, and keeps it only when its SHA-256 is the pin's, and has the Mac run unedited.js whenever something lands in a watched folder. It asks before it
 # installs or downloads. The model is the transcript tool's own, in the same place, so a Mac that has that tool has it
 # already. With --machine it also installs the HyperFrames command line that tool/hyperframes.pin.json pins, with npm and none of
 # the package's own scripts, into ~/BRIMM Video Work/.toolchain/hyperframes-<version>, unless that folder holds it already. It
@@ -86,6 +95,8 @@ set -euo pipefail
 
 LABEL="com.thebrimm.unedited"
 AGENT_FILE="$HOME/Library/LaunchAgents/$LABEL.plist"
+# The real run's exit in installed mode when something is at work (sysexits' EX_TEMPFAIL, "try again later").
+BUSY=75
 # The transcript tool's launch agent. Its file is only ever read, for the folders it lists: here (watched), for the drop folder's
 # refusal, and by settings.js transcriptFolders, which also reads that file turned off (.plist.off, by-hand check 88) for the exports folder.
 TRANSCRIBE_LABEL="com.thebrimm.transcribe"
@@ -106,7 +117,12 @@ CHECK_FILE="$HOME/Library/LaunchAgents/$CHECK_LABEL.plist"
 CHECK_LOG="$HOME/Library/Logs/brimm-video-claude-check.log"
 MODEL_DIR="$HOME/Library/Application Support/BRIMM Transcribe"
 MODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"
-MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+# The model's address, at one revision of Hugging Face's whisper.cpp, and its SHA-256, from tool/whisper-model.pin.json, which the
+# engine reads too. Read with sed, as the pin above is: only the pin's own two lines, indented two spaces. A pin that will not do is
+# refused before anything is changed (below, right after --remove).
+MODEL_PIN="$HERE/whisper-model.pin.json"
+MODEL_URL="$(sed -n 's/^  "url": "\([^"]*\)",\{0,1\}$/\1/p' "$MODEL_PIN" 2>/dev/null || true)"
+MODEL_SHA256="$(sed -n 's/^  "sha256": "\([^"]*\)",\{0,1\}$/\1/p' "$MODEL_PIN" 2>/dev/null || true)"
 # This Mac's settings for episodes, which settings.js writes and checks (and reads here, to see what a run would change), the
 # work folder, and the checkout this runs from.
 SETTINGS_FILE="$HOME/Library/Application Support/BRIMM Video/settings.json"
@@ -135,6 +151,15 @@ CHROME_DIR="$HOME/.cache/hyperframes/chrome"
 
 say() { print -r -- "$@"; }
 
+# What is at work on this Mac, in a line, by busy.js: what launchd says of the import's background job, the import's lock, an episode's
+# command, a video being made ready. Its status is busy.js's: 0 and no line when nothing is at work, 1 and a line when something is.
+# When launchctl fails, busy.js is told nothing, which is a job that is not loaded.
+idle_why() {
+  local printed
+  printed="$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null || true)"
+  "$node" "$HERE/busy.js" idle-why --launchd - <<< "$printed"
+}
+
 # --print is kept apart from what is asked for, so that with it nothing is ever changed, wherever in the line it comes.
 mode="install"
 print="no"
@@ -155,6 +180,10 @@ switch_missing=""
 switch_local=""
 # --user-deny: her user settings are given the Read deny rules of the places her folder's open lock keeps from Claude.
 user_deny=""
+# --tools: the folder of BRIMM Video Studio's own programs, as given; --app: the app, as given (the app checks below check it, and the background job's program is made from it).
+# Neither goes to settings.js, so neither is in switch_options.
+tools_given=""
+app_given=""
 # Set, with --machine, when her folder gets the open lock: the settings say open and a Claude Code is named for it.
 open_lock=""
 while (( $# )); do
@@ -171,6 +200,11 @@ while (( $# )); do
     # --switch-back goes with --drop, and --switch-local picks the default drop folder: both say what to do with no value.
     --switch-back) switch_options+=("$arg") ;;
     --switch-local) switch_local="yes" ;;
+    --tools|--app)
+      if (( $# )) && [[ -n "$1" && "$1" != -* ]]; then
+        if [[ "$arg" == --tools ]]; then tools_given="$1"; else app_given="$1"; fi
+        shift
+      else switch_missing="${switch_missing:-$arg}"; fi ;;
     --machine)
       machined="yes"
       if [[ "${1-}" == -* ]]; then machine_option="$1"; else machine="${1-}"; (( $# )) && shift; fi ;;
@@ -188,6 +222,8 @@ if [[ -n "$switch_missing" ]]; then
     --handoff) say "Say which version after --handoff, as --handoff 1 or --handoff 2." ;;
     --drop-folder) say 'Say which folder after --drop-folder, as --drop-folder "<path>".' ;;
     --exports-folder) say 'Say which folder after --exports-folder, as --exports-folder "<path>".' ;;
+    --tools) say 'Say which folder after --tools, as --tools "<path>".' ;;
+    --app) say 'Say which app after --app, as --app "<path>".' ;;
   esac
   exit 2
 fi
@@ -233,12 +269,44 @@ if [[ ${#folders[@]} -eq 0 && "$mode" != "remove" && "$machined" != "yes" ]]; th
   say 'Name the folder to watch for unedited video: ./install.sh "<folder>"'
   exit 2
 fi
+# --tools and --app are for BRIMM Video Studio, which sets a Mac up with --machine from the app's own programs. In installed mode
+# (--tools) every program is looked for in that folder alone, and the background job runs the node there or, with --app, the app's own program (agent_program).
+if [[ ( -n "$tools_given" || -n "$app_given" ) && "$mode" == "remove" ]]; then
+  say "--remove stops the watching and changes no settings, so it does not take --tools or --app."
+  exit 2
+fi
+if [[ -n "$app_given" && -z "$tools_given" ]]; then
+  say "--app goes with --tools, the folder of the app's own programs: ./install.sh --machine \"<this Mac>\" --tools \"<bin>\" --app \"<BRIMM Video Studio.app>\" \"<path to BRIMM Video>\""
+  exit 2
+fi
+if [[ ( -n "$tools_given" || -n "$app_given" ) && "$machined" != "yes" ]]; then
+  say "--tools and --app are for a Mac set up with --machine, as BRIMM Video Studio sets one up: ./install.sh --machine \"<this Mac>\" --tools \"<bin>\" --app \"<BRIMM Video Studio.app>\" \"<path to BRIMM Video>\""
+  exit 2
+fi
+tools=""
+# --app: the app, by its real path, its CFBundleIdentifier and its program. All "" until the checks below have read them.
+app=""
+app_id=""
+app_exe=""
+if [[ -n "$tools_given" ]]; then
+  tools="${tools_given:A}"
+  AGENT_PATH="${BRIMM_AGENT_PATH:-$tools:/usr/bin:/bin}"
+fi
+# The programs in the folder after --tools besides Studio's compiled helpers, which are the ones helpers.js names (each is brimm-<name>).
+TOOLS_PROGRAMS=(node npm ffmpeg ffprobe whisper-cli)
+helper_line="$(sed -n 's/^export const HELPERS = \[\(.*\)\];$/\1/p' "$HERE/helpers.js" 2>/dev/null || true)"
+helper_line="${helper_line//\"/}"
+TOOLS_HELPERS=("${(@)${(@s:, :)helper_line}/#/brimm-}")
+DAMAGED="This copy of BRIMM Video Studio may be damaged: download it again, then open it and choose Repair."
 
 xml() { print -rn -- "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 find_program() {
   local name dir
+  local -a dirs
+  # With --tools every program is the app's own, and the PATH and Homebrew's folders are not looked in.
+  if [[ -n "$tools" ]]; then dirs=("$tools"); else dirs=(${(s.:.)PATH} ${(s.:.)HOMEBREW_DIRS}); fi
   for name in "$@"; do
-    for dir in ${(s.:.)PATH} ${(s.:.)HOMEBREW_DIRS}; do
+    for dir in "${dirs[@]}"; do
       if [[ -x "$dir/$name" ]]; then print -r -- "$dir/$name"; return 0; fi
     done
   done
@@ -298,6 +366,19 @@ const locked = read("package-lock.json")?.packages?.["node_modules/hyperframes"]
 console.log(fit(installed?.version, /^\d+\.\d+\.\d+$/) + "\n" + fit(locked?.integrity, /^sha512-[A-Za-z0-9+\/]{86}==$/));
 ' "$1" 2>/dev/null; } || true
 }
+# The SHA-256 of the file $1, as lowercase hex, as the node at $node reads it. The file is read as a stream, since the model is 1.6 GB.
+# A file that cannot be read, or a node that is not here, says nothing and ends non-zero.
+model_sha256() {
+  [[ -x "$node" ]] && "$node" -e '
+const { createHash } = require("node:crypto");
+const { createReadStream } = require("node:fs");
+const hash = createHash("sha256");
+const input = createReadStream(process.argv[1]);
+input.on("error", () => process.exit(1));
+input.on("data", (chunk) => hash.update(chunk));
+input.on("end", () => console.log(hash.digest("hex")));
+' "$1" 2>/dev/null
+}
 # Whether the folder $1 holds the pinned command line: installed, at the pinned version, with its program, and with the pin's
 # integrity string in npm's lock file, as the node at $2 reads them. Gives 0 when it does. The one place that is looked at: the
 # summary says it, the real run leaves a folder that passes as it is, and checks what npm fetched with it before going on.
@@ -338,8 +419,31 @@ watch_paths() {
   for f in "${folders[@]}"; do print -r -- "    <string>$(xml "$f")</string>"; done
 }
 
-# The launch agent: under its label the Mac runs unedited.js with node, on the folders named, whenever one of those folders
-# changes and once when the agent is loaded. $1 is the node it is run with. --print shows this and the Mac is given this, so
+# The first ProgramArguments of a launch agent, the program and what it is told first. This is S4's one assumption, kept in one place.
+# With --app the program is the app's own, started with --agent, which has it run its own node on its own unedited.js; so the plist
+# names no node and no script. Otherwise it is $1, the node, and unedited.js. Each goes through xml.
+agent_program() {
+  if [[ -n "$app_exe" ]]; then
+    print -r -- "    <string>$(xml "$app_exe")</string>"
+    print -r -- "    <string>--agent</string>"
+  else
+    print -r -- "    <string>$(xml "$1")</string>"
+    print -r -- "    <string>$(xml "$HERE/unedited.js")</string>"
+  fi
+}
+# The key that has macOS name the app for the background job. With --app it starts with a newline, so that it follows the line
+# before it; otherwise it prints nothing, and no line is left behind.
+agent_bundle() {
+  [[ -n "$app_id" ]] || return 0
+  print -r -- ""
+  print -r -- "  <key>AssociatedBundleIdentifiers</key>"
+  print -r -- "  <array>"
+  print -r -- "    <string>$(xml "$app_id")</string>"
+  print -rn -- "  </array>"
+}
+
+# The launch agent: under its label the Mac runs unedited.js with node (or, with --app, the app's own program, agent_program), on the folders named, whenever one of those folders
+# changes and once when the agent is loaded. $1 is the node it is run with (not used with --app: agent_program). --print shows this and the Mac is given this, so
 # the two cannot differ.
 agent() {
   cat <<EOF
@@ -350,17 +454,16 @@ agent() {
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$(xml "$1")</string>
-    <string>$(xml "$HERE/unedited.js")</string>
+$(agent_program "$1")
 $(tool_arguments)
-  </array>
+  </array>$(agent_bundle)
   <key>WatchPaths</key>
   <array>
 $(watch_paths)
   </array>
   <key>RunAtLoad</key><true/>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>$AGENT_PATH</string></dict>
+  <dict><key>PATH</key><string>$(xml "$AGENT_PATH")</string></dict>
   <key>StandardOutPath</key><string>$(xml "$LOG")</string>
   <key>StandardErrorPath</key><string>$(xml "$LOG")</string>
 </dict>
@@ -369,7 +472,7 @@ EOF
 }
 
 # The one-shot launch agent of the check of Claude: unedited.js --check-claude, run once when it is loaded, with the main
-# agent's PATH, into a log of its own. $1 is the node it is run with. It watches nothing, and is taken away once it has run.
+# agent's PATH, into a log of its own. $1 is the node it is run with (or, with --app, the app's own program, agent_program). It watches nothing, and is taken away once it has run.
 # $2 is the time, in seconds since 1970, after which it asks Claude nothing (--until). launchd runs one that a kill -9 or a
 # power cut left behind at every login, and past that time it only says in its log that Claude was not asked.
 check_agent() {
@@ -381,15 +484,14 @@ check_agent() {
   <key>Label</key><string>$CHECK_LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$(xml "$1")</string>
-    <string>$(xml "$HERE/unedited.js")</string>
+$(agent_program "$1")
     <string>--check-claude</string>
     <string>--until</string>
     <string>$(xml "$2")</string>
-  </array>
+  </array>$(agent_bundle)
   <key>RunAtLoad</key><true/>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>$AGENT_PATH</string></dict>
+  <dict><key>PATH</key><string>$(xml "$AGENT_PATH")</string></dict>
   <key>StandardOutPath</key><string>$(xml "$CHECK_LOG")</string>
   <key>StandardErrorPath</key><string>$(xml "$CHECK_LOG")</string>
 </dict>
@@ -442,6 +544,60 @@ if [[ "$mode" == "remove" ]]; then
   drop_check
   say "Stopped watching for unedited video. The folders, the model, the programs and the transcript tool's own launch agent are still here."
   exit 0
+fi
+
+# Which kind of Studio this is. BRIMM Video Studio's own copy has a build.json beside tool/ (a link to nowhere counts, as build.js
+# buildOf counts it) and is set up only with the app's own programs, never Homebrew's; a git checkout has none and is set up with
+# Homebrew's, and never with --tools. The two are never mixed, and each refusal comes before anything is changed.
+refuse() {
+  say "$1"
+  say ""
+  say "Nothing was changed."
+  exit 2
+}
+if [[ -e "$CHECKOUT/build.json" || -L "$CHECKOUT/build.json" ]]; then
+  [[ -n "$tools" ]] || refuse "This is BRIMM Video Studio's own copy of Studio (it has a build.json beside tool/), so it is set up only with the app's own programs, never Homebrew's. Open BRIMM Video Studio and choose Repair."
+elif [[ -n "$tools" ]]; then
+  refuse "--tools and --app are for BRIMM Video Studio's own copy of Studio, which has a build.json beside tool/. This is a git checkout, which is set up with Homebrew's programs: run this again without them."
+fi
+# The app's own programs (installed mode): the folder is there, every program and helper in it can be run, and its node is 22 or later.
+if [[ -n "$tools" ]]; then
+  [[ -d "$tools" ]] || refuse "The folder after --tools is not a folder: ${tools}. ${DAMAGED}"
+  tools_missing=()
+  for name in "${TOOLS_PROGRAMS[@]}" "${TOOLS_HELPERS[@]}"; do
+    [[ -f "$tools/$name" && -x "$tools/$name" ]] || tools_missing+=("$name")
+  done
+  (( ${#tools_missing[@]} == 0 )) || refuse "BRIMM Video Studio's own programs are not all in ${tools}. Missing: ${(j:, :)tools_missing}. ${DAMAGED}"
+  tools_node_version="$("$tools/node" --version 2>/dev/null || true)"
+  [[ -n "$tools_node_version" ]] || refuse "BRIMM Video Studio's own node, in ${tools}, cannot be run. ${DAMAGED}"
+  if node_old "$tools/node"; then
+    refuse "BRIMM Video Studio's own node, in ${tools}, is ${tools_node_version}, and Studio needs 22 or later. ${DAMAGED}"
+  fi
+fi
+# The app (--app): a whole bundle that names its identifier and its program, whose program can be run, and that holds the programs
+# after --tools and this installer. A bundle that is not is refused, since the background job would be named for it in macOS.
+if [[ -n "$app_given" ]]; then
+  app="${app_given:A}"
+  app_refuse() { refuse "The app after --app is not a whole BRIMM Video Studio (${app}): $1 ${DAMAGED}"; }
+  [[ -d "$app" && "$app" == *.app ]] || app_refuse "it is not a folder whose name ends in .app."
+  app_id="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist" 2>/dev/null || true)"
+  exe="$(/usr/bin/plutil -extract CFBundleExecutable raw -o - "$app/Contents/Info.plist" 2>/dev/null || true)"
+  if [[ ! "$app_id" =~ '^[A-Za-z0-9.-]+$' || -z "$exe" || "$exe" == */* || "$exe" == . || "$exe" == .. ]]; then
+    app_refuse "its Contents/Info.plist does not name its identifier and its program."
+  fi
+  app_exe="$app/Contents/MacOS/$exe"
+  [[ -f "$app_exe" && -x "$app_exe" ]] || app_refuse "its program, Contents/MacOS/${exe}, is not there or cannot be run."
+  [[ "$tools" == "$app"/* ]] || app_refuse "the programs after --tools, ${tools}, are not inside it."
+  [[ "${HERE:A}" == "$app"/* ]] || app_refuse "this installer, ${HERE}/install.sh, is not inside it."
+fi
+
+# The pin of the transcriber's model is looked at before anything is, whether or not the model is here, since a model already here is
+# checked against it too: a pin read as nothing would download whatever the address gave, and keep it.
+if [[ ! "$MODEL_URL" =~ '^https://huggingface\.co/ggerganov/whisper\.cpp/resolve/[0-9a-f]{40}/ggml-large-v3-turbo\.bin$' || ! "$MODEL_SHA256" =~ '^[0-9a-f]{64}$' ]]; then
+  say "The pin of the transcriber's model, tool/whisper-model.pin.json, does not hold its address on Hugging Face at one revision and its SHA-256, so the installer changed nothing."
+  say ""
+  say "Nothing was changed."
+  exit 2
 fi
 
 # For one of the two Macs (--machine): the one folder named is BRIMM Video, in The BRIMM DB in Dropbox, and the folder watched
@@ -642,7 +798,9 @@ for f in "${folders[@]}"; do
   done
 done
 
-brew="$(find_program brew || true)"
+# With --tools Homebrew is never looked for (brew stays empty), and nothing is installed with it.
+brew=""
+[[ -n "$tools" ]] || brew="$(find_program brew || true)"
 ffmpeg="$(find_program ffmpeg || true)"
 whisper="$(find_program whisper-cli whisper-cpp || true)"
 node="$(find_program node || true)"
@@ -709,7 +867,11 @@ fi
 # swift finds the speaker's face for a Reel's crop. It comes with Xcode's command line tools, and nothing here installs it.
 swift_more=""
 [[ -n "$local_drop" ]] && swift_more=" Without it Studio cannot tell when Dropbox has uploaded a recording's copy in Original files, so the recordings stay on this Mac."
-say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here, so a Reel is cropped at the centre of the picture.$swift_more To get it: xcode-select --install")"
+if [[ -n "$tools" ]]; then
+  say "  Studio's helpers, compiled:  in ${tools}: ${(j:, :)TOOLS_HELPERS}"
+else
+  say "  Swift, to find the speaker's face:  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here, so a Reel is cropped at the centre of the picture.$swift_more To get it: xcode-select --install")"
+fi
 # For one of the two Macs, what it has of what the tool needs, and what Jason does by hand when something is not here. Nothing
 # here installs Xcode's command line tools, Homebrew or Claude Code, or signs in to Claude.
 autoload -Uz is-at-least
@@ -721,11 +883,15 @@ user_deny_why=""
 # --rules-only, which asks Claude nothing.
 check_line=""
 if [[ -n "$machine" ]]; then
-  say "  Xcode's command line tools (git, swift):  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here. Jason runs: xcode-select --install")"
-  if [[ -n "$brew" ]]; then
-    say "  Homebrew:  here already"
+  if [[ -n "$tools" ]]; then
+    say "  Programs, BRIMM Video Studio's own:  in ${tools}: node $("$tools/node" --version), npm, ffmpeg, ffprobe, whisper-cli"
   else
-    say '  Homebrew:  not here. In Terminal, Sallie runs this (it asks for her password, which she types herself): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+    say "  Xcode's command line tools (git, swift):  $(xcode-select -p >/dev/null 2>&1 && echo "here already" || echo "not here. Jason runs: xcode-select --install")"
+    if [[ -n "$brew" ]]; then
+      say "  Homebrew:  here already"
+    else
+      say '  Homebrew:  not here. In Terminal, Sallie runs this (it asks for her password, which she types herself): /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+    fi
   fi
   macos="$(sw_vers -productVersion 2>/dev/null || true)"
   if [[ -z "$macos" ]]; then
@@ -759,7 +925,9 @@ if [[ -n "$machine" ]]; then
     if (( ${#hdr_missing[@]} == 0 )); then
       say "  HDR video:  $hdr_whose can make an HDR video standard, which an iPhone's clip is by default: it has the videotoolbox hwaccel and the scale_vt filter that the working copy needs for it"
     else
-      say "  HDR video:  $hdr_whose cannot make an HDR video standard, which an iPhone's clip is by default, so the working copy refuses every one: it has ${(j: and :)hdr_missing}. Jason: brew upgrade ffmpeg, which builds VideoToolbox in, or the clip is recorded in standard colour"
+      hdr_fix="Jason: brew upgrade ffmpeg, which builds VideoToolbox in, or the clip is recorded in standard colour"
+      [[ -z "$tools" ]] || hdr_fix="$DAMAGED"
+      say "  HDR video:  $hdr_whose cannot make an HDR video standard, which an iPhone's clip is by default, so the working copy refuses every one: it has ${(j: and :)hdr_missing}. $hdr_fix"
     fi
   fi
   # The pinned HyperFrames command line, in a folder of its own for its version: what would be installed there, and how the download
@@ -855,7 +1023,11 @@ if [[ -n "$machine" ]]; then
     say "  The Claude app's own Claude Code:  $app_newest, the newest copy the app keeps here (her folder's guard needs $GUARD_CLAUDE or later; /status in the Code tab says which copy runs)"
   fi
   [[ -z "$check_line" ]] || say "  At the end:  one real call to Claude from the background job (a launch agent of its own, $CHECK_LABEL, taken away when it answers or after 90 seconds), to prove that the sign-in her readings use is seen there (the import itself never asks Claude)"
-  say "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
+  if [[ -n "$tools" ]]; then
+    say "  By hand afterwards:  the Getting Started guide, which BRIMM Video Studio opens when the setup is done"
+  else
+    say "  By hand afterwards:  the setup guide (docs/setup/sallies-laptop.md)"
+  fi
 fi
 # Claude reads a video through Claude Code once its person has said what it is. Nothing here installs that or signs in to it. When
 # Claude is going to be asked, this says what is sent to it, before anything is changed. The import itself sends nothing.
@@ -868,12 +1040,32 @@ elif claude="$(find_claude)"; then
 else
   say "  Claude Code, to read a video once its person has said what it is:  not here, so nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac"
 fi
-say "  Programs to install with Homebrew:  ${need[*]:-none, they are all here}"
-say "  Model:  $([[ -f "$MODEL" ]] && echo "here already" || echo "to download, about 1.6 GB, to $MODEL")"
+[[ -n "$tools" ]] || say "  Programs to install with Homebrew:  ${need[*]:-none, they are all here}"
+# A model that is here is checked against the pin, by the node found above (about 3 seconds). Before Homebrew's node is installed there
+# is none to check with, and that is said.
+if [[ ! -f "$MODEL" ]]; then
+  say "  Model:  to download, about 1.6 GB, to ${MODEL}, from ${MODEL_URL}, and kept only when its SHA-256 is the pin's, ${MODEL_SHA256} (tool/whisper-model.pin.json)"
+elif [[ ! -x "$node" ]]; then
+  say "  Model:  here; its SHA-256 is checked against the pin's once node is installed"
+elif [[ "$(model_sha256 "$MODEL" || true)" == "$MODEL_SHA256" ]]; then
+  say "  Model:  here already, and its SHA-256 is the pin's"
+else
+  say "  Model:  here, but its SHA-256 is not the pin's, so the pinned one is downloaded, about 1.6 GB, from ${MODEL_URL}, and replaces it only when its SHA-256 is the pin's, ${MODEL_SHA256} (tool/whisper-model.pin.json)"
+fi
 say "  Log:  $LOG"
 # A check of Claude that an earlier setup left behind, cut short before it could take it away: by an installer from before
 # the traps below, or by a kill -9. launchd runs it at every login. Every setup that goes ahead takes it away first.
 [[ ! -e "$CHECK_FILE" ]] || say "  Left behind by an earlier setup:  its check of Claude, $CHECK_LABEL, at $CHECK_FILE. launchd runs it at every login, so this setup takes it away first"
+
+# Installed mode only: what is at work now, which a real run waits for. Dev mode asks launchd nothing here.
+if [[ -n "$tools" ]]; then
+  if why="$(idle_why)"; then
+    say "  At work now:  nothing, so the background job can be stopped and started again"
+  else
+    why="${why:-Whether anything is at work on this Mac could not be told.}"
+    say "  At work now:  ${why} The real run stops before it touches this Mac's drop folder, its settings and its background job, until that is done"
+  fi
+fi
 
 if [[ "$print" == "yes" ]]; then
   say ""
@@ -965,16 +1157,32 @@ if [[ -n "$machine" ]]; then
   say "That is all doctor says. The setup reads none of it and installs nothing it suggests. Jason looks for a tick against Node.js, FFmpeg, FFprobe and Chrome; a cross against whisper-cpp, TTS, BGM or Docker is expected, and so is one against Version when a newer command line is out, since the pin moves only by a pull request."
 fi
 
-if [[ ! -f "$MODEL" ]]; then
+if [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then
   mkdir -p "$MODEL_DIR"
   say "Downloading the model. This is done once."
-  curl -L --fail --progress-bar -o "$MODEL.part" "$MODEL_URL"
-  if [[ "$(stat -f %z "$MODEL.part")" -lt 1000000000 ]]; then
+  if ! curl -L --fail --progress-bar -o "$MODEL.part" "$MODEL_URL"; then
     rm -f "$MODEL.part"
-    say "The model did not download whole. Run this again."
+    say "The model could not be downloaded whole (what curl said is above). It was not kept. Check that this Mac is online, then run this again."
+    exit 1
+  fi
+  got="$(model_sha256 "$MODEL.part" || true)"
+  if [[ "$got" != "$MODEL_SHA256" ]]; then
+    rm -f "$MODEL.part"
+    say "The model downloaded is not the one tool/whisper-model.pin.json pins: its SHA-256 is ${got:-one that could not be read}, and the pin's is ${MODEL_SHA256}. It may not have downloaded whole. It was not kept. Run this again."
     exit 1
   fi
   mv "$MODEL.part" "$MODEL"
+fi
+
+# A video may have been dropped, or an import begun, while the programs and the model were fetched. So what is at work is asked again,
+# right before the Mac's drop folder, settings and launch agent are touched, and nothing is touched while anything is.
+if [[ -n "$tools" ]]; then
+  idle=yes
+  why="$(idle_why)" || idle=no
+  why="${why:-Whether anything is at work on this Mac could not be told.}"
+  [[ "$idle" == yes ]] || say ""
+  [[ "$idle" == yes ]] || say "${why} Stopped before this Mac's drop folder, its settings and its launch agent were touched: they are as they were. What this run installed or downloaded first stays. Run this again once that is done."
+  [[ "$idle" == yes ]] || exit $BUSY
 fi
 
 # Things can change while the programs, the command line and the model are fetched, and the first check was made before the
