@@ -4,10 +4,10 @@
 // program is real.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BUILD_FILE } from "../build.js";
+import { BUILD_FILE, saidHere } from "../build.js";
 import { editMain } from "../edit.js";
 import { guardAnswer } from "../open-lock.js";
 import { NEWEST_VERSION, recordFile } from "../episode.js";
@@ -105,5 +105,73 @@ describe("the guard on her folder, on an installed Mac", () => {
     } finally {
       rmSync(app, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the tool's own lines that name Jason, install.sh or Terminal", () => {
+  // The lines of tool/*.js that an installed Mac may say as they are written, each with why. Every other line that names Jason must end in
+  // words saidHere knows (so that whoever says it can pass it through), or be made with askWords or behind isInstalled. A new line that
+  // sends her to Jason fails here until it ends as saidHere knows, or is listed with its reason.
+  const STAYS = [
+    // The command lines' own help: Claude and Jason read it, and it is a list of commands for a Terminal.
+    ["edit.js", /^ {30,}\S/, "edit.js --help"],
+    ["settings.js", /^ {30,}\S/, "settings.js --help"],
+    // A checkout's own lines: each is said only where the Mac is not installed (its installed line is beside it, or it is git's).
+    ["edit.js", "so it is not updated from here. Ask Jason to update it when it suits.", "update, on a checkout"],
+    ["edit.js", "Her folder for Claude is out of date: an older BRIMM Video Studio wrote it. Ask Jason", "behind, on a checkout"],
+    ["edit.js", "is not the one Studio needs. Ask Jason to update it when it suits.", "behind, on a checkout"],
+    ["edit.js", "Jason has a newer BRIMM Video Studio (${n} change", "behind, on a checkout: git's count"],
+    ["plan.js", "Jason has a newer BRIMM Video Studio. Ask him to update this Mac", "notWritten, on a checkout"],
+    ["settings.js", "const MEND_SETTING = ", "a checkout's mend: mendFor says Repair on an installed Mac"],
+    ["settings.js", "const USER_UNREAD = ", "a checkout's line: userUnread says an installed Mac's"],
+    ["settings.js", "The drop folder is switched by the installer", "settings.js set, Jason's own command: an installed Mac has no Terminal to run it in"],
+    // Said through code that knows the build, where it is said.
+    ["edit.js", "line.replace(/^\\(Jason: (.)/", "loosenedNote, which takes Jason out of a lock note"],
+    ["edit.js", 'const NEEDS_JASON = "A conflict needs Jason', "always said after a sentence, and saidHere knows that end"],
+    ["episode.js", 'new Error("Jason has a newer BRIMM Video Studio', "episode.js knows no build: forThisMac gives the error again where it is said"],
+    ["episode.js", "tell Jason.${as}", "episode.js knows no build: edit.js fileProblemSaid says it"],
+    ["loosened.js", "(Jason: ", "a lock note: edit.js loosenedNote says it"],
+    // Not said to the person at the Mac.
+    ["hyperframes.js", '"denied", "', "the table of why a HyperFrames command is never run: said to nobody"],
+    ["project.js", "No generated people.", "The BRIMM's rule in a project's notes, for the app's agent"],
+    // No installed wording yet: the way out is a command, and what an installed Mac does about it waits for the app's own setup.
+    ["unedited.js", "com.thebrimm.claude-check", "a launch agent an old or cut-short setup left behind"]
+  ];
+  const stays = (file, line) => STAYS.some(([f, words]) => f === file && (words instanceof RegExp ? words.test(line) : line.includes(words)));
+
+  it("each end as saidHere knows, are made for this Mac where they are written, or are listed above with why they stay", () => {
+    const tool = new URL("..", import.meta.url);
+    const loose = [];
+    for (const file of readdirSync(tool).filter((name) => name.endsWith(".js") && name !== "build.js").sort()) {
+      let comment = false;
+      readFileSync(new URL(file, tool), "utf8").split("\n").forEach((line, i) => {
+        const text = line.trim();
+        if (comment) {
+          comment = !text.includes("*/");
+          return;
+        }
+        if (text.startsWith("/*")) {
+          comment = !text.includes("*/");
+          return;
+        }
+        if (text.startsWith("//") || text.startsWith("*")) return;
+        // Made for this Mac where it is written.
+        if (/askWords\(|isInstalled\(|saidHere\(|asSaid\(|asHere\(|mendFor\(|forJason\(|installed \? /.test(line) || stays(file, line)) return;
+        for (const found of line.matchAll(/Jason|install\.sh|Terminal/g)) {
+          if (found[0] !== "Jason") {
+            loose.push(`${file}:${i + 1}: ${text.slice(0, 160)}`);
+            continue;
+          }
+          // The line's own words up to the end of the string this Jason is in: a quote, or a full stop before a closing single quote.
+          const rest = line.slice(found.index);
+          const end = rest.search(/(?<!\\)["`]|(?<=\.)'(?=[;),\s]|$)/);
+          const written = line.slice(0, found.index + (end === -1 ? rest.length : end));
+          // A reason that ends a sentence someone else closes (workcopy.js) is tried with its full stop.
+          const ok = [written, `${written}.`].some((words) => !saidHere(words, INSTALLED).slice(found.index).includes("Jason"));
+          if (!ok) loose.push(`${file}:${i + 1}: ${text.slice(0, 160)}`);
+        }
+      });
+    }
+    assert.deepEqual(loose, []);
   });
 });
