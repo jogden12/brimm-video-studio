@@ -36,9 +36,9 @@ Today a Mac is set up with "Move to Studio.app", which opens Terminal on a 1,900
   - a static whisper-cli built with Metal;
   - Studio's Swift helpers, compiled ahead of time;
   - Sparkle 2.
-- **Downloaded during setup instead,** with a pinned SHA-256 for each:
+- **Downloaded during setup instead,** each checked against a pin, but for Chrome:
   - the whisper model;
-  - the pinned HyperFrames CLI and its Chrome, as today;
+  - the HyperFrames CLI, pinned by npm's own integrity check (`hyperframes.pin.json`), and its Chrome, which the pinned CLI fetches with its own `browser ensure`, as today. Studio has no pin of Chrome's (Phase 5 plan, Open for Jason 2);
   - Claude Code, via its user-level native installer into `~/.local/bin`, where `install.sh:281` and `unedited.js:117` already look.
 - **First open.**
   - If macOS is running it from a quarantine location (App Translocation), it refuses to set up and offers to move itself to /Applications, or to ~/Applications for a user who isn't an admin.
@@ -72,7 +72,7 @@ A SwiftUI window shows its steps down the side, each with a live status. Every q
 - It is saved in `~/BRIMM Video Work/` and can be reopened from the app.
 - It covers:
   - adding the drop folder to Finder's sidebar;
-  - making the folder available offline in Dropbox;
+  - Dropbox: making the folder available offline, holding Option while dragging from it so Dropbox keeps its copy, and never exporting into the drop folder;
   - recommended HyperFrames settings: agent Claude Code on **Auto, never Full**; telemetry off; sign in to HeyGen; never render in the cloud; the notes on AI avatars;
   - how to start a session in the Claude app's Code tab on `~/BRIMM Video Studio`;
   - how updates arrive;
