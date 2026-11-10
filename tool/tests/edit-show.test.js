@@ -338,18 +338,20 @@ describe("behind", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
-  it("asks git nothing where this Mac's checkout has no .git of its own, and still says what needs no network", async () => {
+  it("asks git nothing where this Mac's checkout has no .git of its own, says in one line that it could not check and why, and still says what needs no network", async () => {
     const t = setup();
     const g = git({ code: 0, stderr: "" }, { code: 0, stderr: "", stdout: "3\n" });
     const looked = [];
     const none = (checkout) => (looked.push(checkout), false);
-    const quiet = await on({ ...t.ctx.deps, run: g.run, isGitCheckout: none }, "behind");
-    assert.deepEqual([quiet.code, quiet.text], [0, ""]);
+    const noGit = "Could not check for a newer BRIMM Video Studio: this Mac's copy of it is not a git checkout.";
+    const alone = await on({ ...t.ctx.deps, run: g.run, isGitCheckout: none }, "behind");
+    assert.deepEqual([alone.code, alone.text], [0, noGit]);
+    assert.ok(!alone.text.includes("offline"), "it is not the line for a Mac that could not reach GitHub");
     const folder = writeStudio(t.home, { checkout: "/checkout", node: "/opt/homebrew/bin/node" });
     const skill = join(folder, ".claude", "skills", "brimm-edit", "SKILL.md");
     writeFileSync(skill, readFileSync(skill, "utf8").replace(/\| "Show me the Reels".*\n/, ""));
     const r = await on({ ...t.ctx.deps, run: g.run, isGitCheckout: none }, "behind");
-    assert.deepEqual([r.code, r.text], [0, stale]);
+    assert.deepEqual([r.code, r.text], [0, `${noGit}\n${stale}`]);
     assert.deepEqual([g.calls, looked], [[], ["/checkout", "/checkout"]]);
     t.done();
   });

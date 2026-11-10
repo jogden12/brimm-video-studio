@@ -2902,7 +2902,7 @@ function refuseIfLoosened(lock, say) {
     main, and counts the changes there that this checkout has not. First it clears the copies `show` opened (clearShown), the one thing it
     writes. Then it looks at the lock on her folder for Claude (lockLoosened): when that is loosened it says so, to ask Jason, and
     ends with 1 without asking git, since she is not to go on (editMain asks it too when this Mac has no settings for episodes). On her laptop git reaches GitHub with the deploy key. It changes nothing in the
-    checkout, and otherwise always ends with 0: a check that could not be made is said. A checkout with no .git of its own is not asked of git (phase 1); phase 3 says the update check's line there. With the open lock in effect on this Mac it
+    checkout, and otherwise always ends with 0: a check that could not be made is said. A checkout with no .git of its own is not asked of git (phase 1): it says in one line that it could not check, and that this is why. An installed Mac's line is the update check's (phase 3). With the open lock in effect on this Mac it
     also says, and goes on, when Claude Code has not trusted her folder yet (UNTRUSTED, first), and, after its other lines, the entries
     this Mac's settings add to what her folder allows, so that a change shows (design section 2). On a Mac whose settings turn the app
     on it also says, whatever git answered and before those entries, one line when the pinned HyperFrames command line is not the one
@@ -2962,7 +2962,11 @@ async function behind(ctx) {
     }
     return folderLine();
   }
-  if (!(ctx.deps.isGitCheckout || isGitCheckout)(ctx.settings.checkout)) return folderLine();
+  if (!(ctx.deps.isGitCheckout || isGitCheckout)(ctx.settings.checkout)) {
+    // Not the offline line: git was not asked at all, and the network is not why.
+    ctx.say("Could not check for a newer BRIMM Video Studio: this Mac's copy of it is not a git checkout.");
+    return folderLine();
+  }
   const run = ctx.deps.run || runProgram;
   const git = (...args) => run("/usr/bin/git", ["-C", ctx.settings.checkout, ...args], { limit: BEHIND_MS, out: 100 });
   const fetched = await git("fetch", "-q", "origin", "main");
