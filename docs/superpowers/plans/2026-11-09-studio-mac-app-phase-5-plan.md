@@ -27,7 +27,7 @@
 - Never read a `.env` file. Never run a script fetched from the network: a download is data until its SHA-256 is the pin's.
 - Comments and messages are plain, full-sentence English, as in the rest of `tool/`. Words a person reads say "BRIMM Video Studio", never "node" and never "Terminal".
 - Tests that need a Mac skip themselves elsewhere and say why (`{ skip: notAMac }`, or `{ skip: noZsh }` for zsh alone), as `tests/install.test.js` does.
-- The line numbers are as of a1346fc. Find each one by the grep given.
+- The line numbers are as of 6636327, main after PR #58 (the review fixes). Find each one by the grep given.
 
 ## The protocol between the shell and the engine (version 1)
 
@@ -79,7 +79,7 @@ S1 to S4 and S7 have passed. S5 (Claude Code's sign-in without Terminal) and S6 
   - The one place: the engine takes the folder from `--tools` and never works it out.
 - **S4 (the launch agent through the app).**
   - Assumed: macOS's Files and Folders prompt names "BRIMM Video Studio" for a folder the app's node lists, whether the app started that node for setup or launchd started it for the agent.
-  - The one place: `LOOKER_APP` in `access.js` (Task 3). If a prompt names something else, only that word changes.
+  - The one place: `lookerOf` in `access.js`, merged with PR #58. If a prompt names something else, only that word changes.
 - **S5 (sign-in, paused).**
   - Assumed: `claude auth login`, given a terminal, opens the browser, prints a link, and takes a pasted code when the browser cannot hand the sign-in back. S5 proved that from Swift's `forkpty`. It did not prove it from `/usr/bin/script` under the app's node, and it did not prove that the stored sign-in then works from the background job.
   - The one place: `signIn`'s `pty` option in `tool/setup/install.js` (Task 9).
@@ -98,12 +98,12 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 1. **Claude Code "with a pinned SHA-256".** `install.sh` says "It does not install Claude Code", nothing in `tool/` installs it or signs in to it, and Anthropic's own installer fetches "native build latest" (2.1.321 in S5), unpinned. `install.sh` only requires `GUARD_CLAUDE="2.1.295"` or later. This plan builds the pinned install and leaves the pin file to Jason's answer.
 2. **Stale line numbers.** `find_claude` is at `install.sh:346` (the spec says 281). The BRIMM Video search is `search_brimm_video` at `move.zsh:422`.
 3. **The HyperFrames CLI "and its Chrome", each pinned by SHA-256.** The CLI has npm's own integrity pin (`hyperframes.pin.json`). Chrome is fetched by the pinned CLI's `browser ensure`, with no pin of Studio's. This plan keeps that (Open for Jason, 2).
-4. **"The HyperFrames CLI and Chrome" as a staged bar.** `install.sh` runs `browser ensure` (1146) and `doctor` (1154) itself in every real run. Only the npm install (1108) and the model (1160) are skipped when already there. The engine runs `browser ensure` first for the bar, and the installer's own then returns at once.
+4. **"The HyperFrames CLI and Chrome" as a staged bar.** `install.sh` runs `browser ensure` (1149) and `doctor` (1157) itself in every real run. Only the npm install (1111) and the model (1167) are skipped when already there. The engine runs `browser ensure` first for the bar, and the installer's own then returns at once.
 5. **"Copying the programs".** Nothing is copied: the programs are in the bundle. The first bar is the check that this copy is whole.
 6. **The check that Claude answers** has its own bar, but `install.sh`'s exit code does not carry it. The engine reads the check's log.
 7. **Review: "Its exit code decides".** `install.sh --print` ends with 0 when Claude Code is missing, signed out or too old (it only says so). The engine therefore holds the Apps step until Claude Code is there, new enough and signed in.
-8. **Terminal words.** `install.sh`'s summary says "In Terminal, run: claude auth login" and "In Terminal: claude update" (957, 966), and `access.js` says "node". Review's own lines are the engine's, without Terminal. install.sh's lines stay under Details. `access.js` gets installed wording in Task 3.
-9. **The dev mark.** `settingsFault` (settings.js:153) knows no `mode`, and `SETTABLE` (866) has no `--mode`. Task 1 adds both.
+8. **Terminal words.** `install.sh`'s summary says "In Terminal, run: claude auth login" and "In Terminal: claude update" (957, 966). Review's own lines are the engine's, without Terminal. install.sh's lines stay under Details. `access.js` has named "BRIMM Video Studio" on an installed Mac since PR #58 (`lookerOf`).
+9. **The dev mark.** `settingsFault` (settings.js:155) knows no `mode`, and `SETTABLE` (872) has no `--mode`. Task 1 adds both.
 10. **Two launchctl parsers.** `edit.js` has its own two (1708, 1714) beside `busy.js`'s, and they differ. Task 2 leaves one.
 11. **The name's clash and its suggestion** are spoken of as if they existed. `move.zsh` has neither. Both are new code in Task 6.
 12. **Where Claude Code is looked for.** In installed mode `find_claude` looks only in `<tools>`, `/usr/bin`, `/bin` and `~/.local/bin`. A takeover Mac whose Claude Code is only in Homebrew's folder is told Claude Code is not here.
@@ -122,7 +122,7 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 8. **Exit 75 is waited for a bounded time.** Covered in Task 10: "something at work: the line is shown, and after five tries the run ends with error busy".
 9. **Review never reads install.sh's English.** Covered in Task 11: "the review's lines are the same whatever the installer's text says".
 10. **The installer is never interrupted.** Covered in Task 13: "a cancel while the installer runs is answered after it ends".
-11. **A Mac on a git checkout reads every line as before.** Covered in Task 3: "with installed false or left out, every line is as it was".
+11. **A Mac on a git checkout reads every line as before.** The access lines' dev wording is pinned by PR #58's own tests. Covered in Task 1: "a plan and a write from a git checkout keep the mark" and "a Mac that is not marked is planned from an app's copy as before".
 12. **A faulty event is never written.** Covered in Task 4: "the emitter throws on a faulty event before it writes".
 
 ## Files
@@ -130,9 +130,7 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 | File | What changes |
 | --- | --- |
 | `tool/settings.js` | An optional `mode` (`"dev"` or `"off"`), `set --mode`, `devMarked`, `DEV_REFUSAL`, and the refusal of a plan or a write from an app's copy on a marked Mac. |
-| `tool/edit.js` | `agentRunning` and `agentPid` use `busy.js`'s `launchdPid`. Passes `installed` to `access.js`'s lines. |
-| `tool/access.js` | Its lines name "BRIMM Video Studio" on an installed Mac (`LOOKER_APP`, an `installed` flag). |
-| `tool/filing.js` | Passes `installed` to `postIfDue` and `lookLog`. |
+| `tool/edit.js` | `agentRunning` and `agentPid` use `busy.js`'s `launchdPid`. |
 | `tool/setup/protocol.js` (new) | The events, steps, parts and codes, the emitter, the reader, the reading of an answer and of the arguments. |
 | `tool/setup/checks.js` (new) | Is this copy whole, which kind of Mac, the name and its clash, the BRIMM Video search, the apps, Claude Code's state. |
 | `tool/setup/questions.js` (new) | Each question, and `read`, which turns an answer into a value or a fault. Pure. |
@@ -142,19 +140,19 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 | `tool/setup/engine.js` (new) | `runSetup(options)` and `main()`. |
 | `tool/tests/setup-harness.js`, `tool/tests/app-copy.js` (new, not tests) | The engine's stand-ins, and `appCopy` moved out of `install.test.js` unchanged. |
 | `tool/tests/load-each.test.js`, `tool/tests/unused-exports.mjs` | Both also read `tool/setup/*.js`. |
-| Tests | New: `setup-protocol.test.js`, `setup-checks.test.js`, `setup-questions.test.js`, `setup-install.test.js`, `setup-summary.test.js`, `setup-guide.test.js`, `setup-engine.test.js`. Changed: `settings.test.js`, `install.test.js`, `busy.test.js`, `access.test.js`, `installed-words.test.js`. |
+| Tests | New: `setup-protocol.test.js`, `setup-checks.test.js`, `setup-questions.test.js`, `setup-install.test.js`, `setup-summary.test.js`, `setup-guide.test.js`, `setup-engine.test.js`. Changed: `settings.test.js`, `install.test.js`, `busy.test.js`. |
 
 ---
 
 ### Task 1: The dev mark in `settings.js`
 
 **Files:**
-- Modify: `tool/settings.js` (`grep -n '^const HELP\|^export function settingsFault\|^function planned\|^export const SETTABLE' tool/settings.js`: 314, 153, 703, 866)
-- Test: `tool/tests/settings.test.js` (a new `describe("a Mac marked as Jason's development Mac", …)`), `tool/tests/install.test.js` (beside the `--app` tests, from 2666)
+- Modify: `tool/settings.js` (`grep -n '^const HELP\|^export function settingsFault\|^function planned\|^export const SETTABLE' tool/settings.js`: 320, 155, 709, 872)
+- Test: `tool/tests/settings.test.js` (a new `describe("a Mac marked as Jason's development Mac", …)`), `tool/tests/install.test.js` (beside the `--app` tests, from 2737)
 
 **Interfaces:**
 - Consumes:
-  - `buildOf`, `isInstalled` (build.js), which imports only `node:fs` and `node:path`, so there is no cycle;
+  - `buildOf`, `isInstalled` (build.js), which `settings.js` has imported since PR #58;
   - `heldIn`, `fieldsToldBy`, `writeSettings` (settings.js itself).
 - Produces:
   - the settings' optional `mode`: `"dev"` or `"off"`, and nothing else. It is not a build's mode (`buildOf` gives `dev` for a git checkout and `installed` for an app's copy): this one is about the Mac, and only a person sets it.
@@ -170,6 +168,7 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 
 **The rules:**
 - In `planned`, right after `held` is read and before `const { dropFolder: picked, switchBack } = told;`: `if (devMarked(held) && isInstalled(buildOf(told.fields.checkout))) return { code: 1, said: [DEV_REFUSAL] };`. `plan` and `write` both go through `planned`, so both refuse, and neither writes.
+- Since PR #58, `planned(home, rest, now, plutil = spawnSync, build)` takes a fifth parameter: `build` is the running copy's own build, for the words of its mends. The refusal does not use it. It asks the build of the checkout it is told (`buildOf(told.fields.checkout)`), so a plan for an app's copy is refused on a marked Mac whichever copy of `settings.js` runs it.
 - A broken app's copy is still an installed one (`buildOf` gives `broken: true` with `mode: "installed"`), so it refuses a marked Mac too.
 - A plan or a write from a git checkout is as it was, and keeps the mark: `mode` is a setting it is not told, so it is kept.
 - `set` is not gated. Only a person runs it, by hand, and it is how the mark is put on and taken off.
@@ -221,46 +220,11 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 
 ---
 
-### Task 3: `access.js`'s words on an installed Mac
+### Task 3: Dropped, since PR #58 did it
 
-**Files:**
-- Modify: `tool/access.js` (`grep -n '^export function\|^function main' tool/access.js`: `accessLine` 162, `stepLine` 189, `accessBanner` 206, `accessLog` 214, `lookLog` 222, `setupLine` 233, `postIfDue` 272, `main` 327)
-- Modify: `tool/edit.js` (`grep -n 'accessLine(finding, opts)' tool/edit.js`: 1803), `tool/filing.js` (`grep -n 'postIfDue(\|lookLog(' tool/filing.js`: 1441, 1790, 1794)
-- Test: `tool/tests/access.test.js`, `tool/tests/installed-words.test.js`
+PR #58 (the review fixes, merged into main on 10 November 2026 as 6636327) made every access line name the program as macOS lists it. `lookerOf(build)` in `access.js` gives `"node"` on a git checkout and `"BRIMM Video Studio"` on an installed Mac. `edit.js`, `filing.js`, `unedited.js` and `access.js`'s own `main` pass it to each line as `name`, and its tests pin a git checkout's lines as they were. It also took the unused `installed` option off `findingOf` and `postNewNodeIfDue`.
 
-**Interfaces:**
-- Consumes:
-  - `buildOf`, `isInstalled` (build.js); `filing.js` imports both already (37), and `edit.js` too (100).
-- Produces:
-  - `LOOKER_APP = "BRIMM Video Studio"`: the name macOS shows for what looks in a folder on an installed Mac (S4).
-  - an `installed` flag, false when left out, on: `accessLine(finding, { placeWords, switchName, code, installed })`, `stepLine(finding, opts)` (it passes `opts` on whole), `accessBanner(kind, placeWords, installed)`, `accessLog(state, code, node, placeWords, installed)`, `lookLog(place, folder, look, home, node, installed)`, `setupLine(note, { home, now, alive, places, installed })` and `postIfDue(place, note, { notify, clock, node, placeWords, home, installed })`, which gives it to `accessBanner` and `accessLog`.
-  - `findingOf` (113) and `postNewNodeIfDue` (299) took `installed` in Phase 3 and are not changed: an installed Mac is never given the new-node notice.
-
-**The lines, when `installed` is true** (`${LOOKER_APP}` is written out here):
-- asking: `The import has waited more than a minute to look in ${placeWords}. If a box on this Mac's screen asks whether "BRIMM Video Studio" may look in it, choose Allow, and the import goes on.`
-- refused: `This Mac does not let the import look in ${placeWords}${gone}. In System Settings, under Privacy & Security, Files and Folders, turn on ${switchName} under "BRIMM Video Studio". Then say "look again".`
-- the banner for refused: `This Mac does not let BRIMM Video Studio look in ${placeWords}. Allow it in System Settings › Privacy & Security › Files and Folders.`
-- the log for refused: `macOS does not let BRIMM Video Studio look in ${placeWords} (${code}). Allow BRIMM Video Studio in System Settings, Privacy & Security, Files and Folders; then say "look again" in her chat, or drop the video again.`
-- the log for locked: `The folder's own permissions do not let BRIMM Video Studio look in ${placeWords} (${code}). Jason checks them in Finder, Get Info, Sharing & Permissions.`
-- `lookLog`'s error line: `BRIMM Video Studio could not look in ${words} (${look.code || "an error"}).`
-- `setupLine`, still looking: `${lead}the import is still looking; if a box asks whether "BRIMM Video Studio" may look in a folder, choose Allow.` And both allowed: `${lead}BRIMM Video Studio may look in the drop folder and in Dropbox.`
-
-**The rules:**
-- With `installed` false or left out, every line is byte for byte what it is at a1346fc. The first new test pins that before anything is changed.
-- The `locked` line in her chat keeps its bracket for Jason (`(Jason: node gets EACCES there; …)`): it is for Jason, and it is the one line that still says "node".
-- `postIfDue`'s key stays `${state}|${node}`: the path of the program still tells one build from the next.
-- Who passes `installed`: `edit.js` at 1802 to 1803 adds `installed: isInstalled(ctx.build)` to `opts`; `filing.js` at 1441, 1790 and 1794 gives `isInstalled(buildOf(<the checkout it runs from>))`, worked out once; `access.js`'s `main` works it out from the folder above `tool/`.
-
-- [ ] **Step 1: Write the failing tests** in `tool/tests/access.test.js`, in a new `describe("an installed Mac's lines name BRIMM Video Studio", …)`.
-  - "with installed false or left out, every line is as it was": for each finding (`asking`, `refused`, `locked`, `error`), each banner kind, each `accessLog` state, `lookLog`'s error line and `setupLine`'s two lines, the line with `installed: false`, and with no `installed` at all, equals the string copied here from a1346fc's `access.js`.
-  - one test for each line above, by its words: "asking names BRIMM Video Studio in the box", "refused names the one switch under BRIMM Video Studio", "the banner and the log name BRIMM Video Studio", "lookLog's error names BRIMM Video Studio", "the setup line names BRIMM Video Studio".
-  - "no installed line holds the word node": every line above, and every finding but `locked`, has no `node` in it.
-  - "postIfDue gives installed to the banner": with `installed: true` and a refused note, `notify` is called with the installed banner.
-  - In `tool/tests/installed-words.test.js`, in "an installed Mac's words" (39), with `contextFor({ home, build: INSTALLED })`: "a refused drop folder is said with BRIMM Video Studio, not node".
-- [ ] **Step 2: Run `cd tool && node --test tests/access.test.js tests/installed-words.test.js`.** Expected: FAIL in the new tests but the first, since no line takes `installed` yet.
-- [ ] **Step 3: Write the code** to the lines and rules above.
-- [ ] **Step 4: Run `cd tool && node --test tests/access.test.js tests/installed-words.test.js tests/edit.test.js tests/filing.test.js`.** Expected: PASS.
-- [ ] **Step 5: Commit.** `git add tool/access.js tool/edit.js tool/filing.js tool/tests/access.test.js tool/tests/installed-words.test.js`, then `git commit -m "Studio app phase 5: access.js names BRIMM Video Studio, not node, on an installed Mac"`.
+Nothing is left for this task. Its number is kept so that the other tasks keep theirs. The lines that still name Jason, `install.sh` or node on an installed Mac (`access.js`'s `locked` line among them) are the sweep's, in its own session and pull request, not this phase's.
 
 ---
 
@@ -311,14 +275,14 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 
 **Files:**
 - Create: `tool/tests/app-copy.js`, `tool/tests/setup-harness.js` (neither is a test: `node --test` runs only `*.test.js`), `tool/setup/checks.js`
-- Modify: `tool/tests/install.test.js` (`grep -n '^const WHOLE\|^const TOOLS_PROGRAMS\|^const DAMAGED\|^const HDR_LISTS\|^function appCopy\|^const xml\|^function xml' tool/tests/install.test.js`: from 1927, and `xml` at 179)
+- Modify: `tool/tests/install.test.js` (`grep -n '^const WHOLE\|^const TOOLS_PROGRAMS\|^const DAMAGED\|^const HDR_LISTS\|^function appCopy\|^const xml\|^function xml' tool/tests/install.test.js`: from 1934, and `xml` at 186)
 - Test: `tool/tests/setup-checks.test.js`
 
 **Interfaces:**
 - Consumes:
   - `buildOf`, `isInstalled` (build.js); `settingsFile`, `readSettings`, `sameFolder`, `devMarked`, `writeSettings` (settings.js); `HELPERS` (helpers.js); `hasHwaccel`, `hasFilters` (workcopy.js).
 - Produces, in `tool/tests/app-copy.js`:
-  - `appCopy`, `WHOLE`, `HDR_LISTS`, `TOOLS_PROGRAMS`, `DAMAGED` and `xml`, moved out of `install.test.js` with not a character changed, and whatever `appCopy` reads (`HERE`, `HELPERS`). `install.test.js` imports them back. The other `appCopy`, the `const appCopy = (version) => …` inside the describe at 1971, is another thing and stays.
+  - `appCopy`, `WHOLE`, `HDR_LISTS`, `TOOLS_PROGRAMS`, `DAMAGED` and `xml`, moved out of `install.test.js` with not a character changed, and whatever `appCopy` reads (`HERE`, `HELPERS`). `install.test.js` imports them back. The other `appCopy`, the `const appCopy = (version) => …` inside the describe at 1978, is another thing and stays.
 - Produces, in `tool/tests/setup-harness.js`:
   - `notAMac`, as `install.test.js` has it.
   - `mac({ settings = "none", apps = [], dropbox = true, claude = "signed-in" } = {}) -> { dir, home, root, app, tools, checkout, programs, ran(), done() }`. A whole made-up Mac in one temp folder: an app's copy from `appCopy()`, a home, and a BRIMM Video folder at `<home>/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video` when `dropbox` is true, holding `Drop`, `Unedited Video` and `Episodes/2026-11-01 Client Jane (Old Mac)`. `apps` is a list of `claude-app`, `dropbox` and `hyperframes`: each is made as that app's folder (`Claude.app`, `Dropbox.app`, `HyperFrames.app`) in `<home>/Applications`.
@@ -414,7 +378,7 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 
 **Interfaces:**
 - Consumes:
-  - `machineFault`, `dropFolderFault`, `exportsFolderFault`, `cloudFolder`, `folderWords`, `defaultDropFolder`, `downloadsFolder` (settings.js); `nameClash`, `APPS`, `GUARD_CLAUDE`, `NO_BRIMM_VIDEO` (checks.js); `switchFor`, `LOOKER_APP` (access.js); `eventFault`, `answerFault` (protocol.js), in the tests only.
+  - `machineFault`, `dropFolderFault`, `exportsFolderFault`, `cloudFolder`, `folderWords`, `defaultDropFolder`, `downloadsFolder` (settings.js); `nameClash`, `APPS`, `GUARD_CLAUDE`, `NO_BRIMM_VIDEO` (checks.js); `switchFor`, `lookerOf` (access.js); `eventFault`, `answerFault` (protocol.js), in the tests only.
 - Produces:
   - Each question function gives a whole `question` event, `{ event: "question", id, kind, prompt, … }`, with `warning` and `fault` only when given and not empty.
   - `welcomeQuestion()`: id `welcome`, kind `confirm`, `ok: "Continue"`.
@@ -485,7 +449,7 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 
 **Interfaces:**
 - Consumes:
-  - `PIN`, `toolchainDir`, `cliPath`, `toolchainHolds`, `toolchainDiffers`, `childEnv` (hyperframes.js); `tool/whisper-model.pin.json`; `install.sh`'s `MODEL` (118 to 119), its npm line (1118), `toolchain_here` (385), `drop_toolchain` (393), `run_hyperframes` (403) and `browser ensure` (1146), each read as text by a test or followed by hand.
+  - `PIN`, `toolchainDir`, `cliPath`, `toolchainHolds`, `toolchainDiffers`, `childEnv` (hyperframes.js); `tool/whisper-model.pin.json`; `install.sh`'s `MODEL` (118 to 119), its npm line (1121), `toolchain_here` (385), `drop_toolchain` (393), `run_hyperframes` (403) and `browser ensure` (1149), each read as text by a test or followed by hand.
 - Produces:
   - `LABELS`: the label of each part of `PARTS`.
   - `MODEL_BYTES = 1624555275`, the bar's guess of the model's size. Nothing is checked against it.
@@ -591,7 +555,7 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 
 **Interfaces:**
 - Consumes:
-  - `idleWhy` (busy.js); `quiet` (Task 8); `install.sh`'s options (193 to 208), `BUSY=75` (99) and `CHECK_LOG` (117), and `tool/unedited.js`'s two lines (1738, 1755), each read as text by a test; `printOnly` (the harness).
+  - `idleWhy` (busy.js); `quiet` (Task 8); `install.sh`'s options (193 to 208), `BUSY=75` (99) and `CHECK_LOG` (117), and `tool/unedited.js`'s two lines (1746, 1763), each read as text by a test; `printOnly` (the harness).
 - Produces:
   - `installerArgs(answers, { app, tools, print = false }) -> string[]`, where `answers` is `{ kind: "fresh", machine, root, drop, exports }` or `{ kind: "held", machine, root }`.
   - `installerEnv(home, base = process.env) -> object`.
@@ -729,7 +693,7 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 - The page's background is Mist (`#E8E3DA`), its words are Navy (`#1F2D42`) and its lines are Sand (`#C1AD97`). Its typeface is Josefin Sans, with Allison for the script, held in the page itself (Decided 17): `josefin-sans-latin-300-normal.woff2`, `josefin-sans-latin-400-normal.woff2`, `josefin-sans-latin-500-normal.woff2` and `Allison-Regular.ttf`. Its `@page` is Letter.
 - The page loads nothing from the network: no `<script`, no `<link`, no `src="http`, and every `url(` is a `data:` URI.
 - `writeGuide` writes `<workFolder(home)>/BRIMM Video Studio Getting Started.html`, making the folder when it is not there, and gives that path as `html` and the same name with `.pdf` as `pdf`. It does not make the PDF: Phase 6's shell prints the page to that path.
-- The guide is written into `~/BRIMM Video Work` itself, which no Mac's drop folder and no exports folder can be (`dropFolderFault`, settings.js:549, and `exportsFolderFault`, 653, each refuse it), so a new file there starts nothing.
+- The guide is written into `~/BRIMM Video Work` itself, which no Mac's drop folder and no exports folder can be (`dropFolderFault`, settings.js:555, and `exportsFolderFault`, 659, each refuse it), so a new file there starts nothing.
 - The guide never says "node" and never says "Terminal". It names no episode's folder, and nothing of Claude Code's account.
 - `tool/setup/guide.js` imports nothing from `tool/guide.js`, which is the contract's.
 
@@ -845,8 +809,8 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 ### Final check
 
 - [ ] Run `cd tool && node --test`. Every test passes, with `contract.test.js`'s hashes unchanged.
-- [ ] Run `git diff a1346fc --stat -- tool/shared tool/lib.js tool/run.js tool/guide.js tool/guide-note.js tool/handoff.js tool/handoff-v2.js tool/tests/fixtures`. Expected: nothing.
-- [ ] Run `git diff a1346fc --stat -- tool/install.sh`. Expected: nothing.
+- [ ] Run `git diff 6636327 --stat -- tool/shared tool/lib.js tool/run.js tool/guide.js tool/guide-note.js tool/handoff.js tool/handoff-v2.js tool/tests/fixtures`. Expected: nothing.
+- [ ] Run `git diff 6636327 --stat -- tool/install.sh`. Expected: nothing.
 - [ ] Run `node tool/tests/unused-exports.mjs`. Every export of `tool/setup/` it lists is one this plan names under "Produces": a test's seam, or the shell's contract in `protocol.js`. Its last line is `Imports of files that are not there: 0`.
 - [ ] Run `grep -rnwi -e node -e terminal tool/setup`. Every line it shows is code or a comment, never words a person reads.
 - [ ] Run `git status --short`. Nothing is left over, and no file outside `tool/` and `docs/` was touched.
@@ -854,7 +818,7 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 ## Decided
 
 Jason, 2026-11-09:
-1. The Mac app's build plan stands: one pull request for each phase, a task plan for each phase, built by subagent-driven development, and a push, a pull request or a merge only on his yes. For this plan: "Yes, write it".
+1. The Mac app's build plan stands: one pull request for each phase, a task plan for each phase, built by subagent-driven development, and a push, a pull request or a merge only on his yes. For this plan: "Yes, write it" (9 November), then "Yes, amend and build" (10 November), which accepts the recommendations under Open for Jason; the by-hand steps in 1 and 4 still wait for his yes.
 2. The support contact is `admin@growwiththebrimm.com` and the update address is `updates.thebrimminsights.com`. The engine reads the contact from `build.json` and never spells it itself.
 3. Every agent in this build runs on Fable 5.2.
 
@@ -876,7 +840,7 @@ Claude's rulings, 2026-11-09:
 18. An answer to a question the engine has since replaced is dropped, since the shell's timer can be a moment late. An answer to an id never asked is a fault.
 19. `install.sh`'s Terminal words stay under Details, where its whole text goes, and so do the plan's refusal words and the check log's own line. This answers Phase 4's Decided 9 until S5 passes.
 20. A `:` in `--tools` is refused by `argsOf`, since the folder goes into a PATH.
-21. The new-node notice is never given or posted on an installed Mac, since Phase 3. Task 3 leaves `findingOf` and `postNewNodeIfDue` alone.
+21. The new-node notice is never given or posted on an installed Mac, since Phase 3. PR #58 took their unused `installed` option away, and this phase does not touch them.
 22. Which of two copies of the app wins is Phase 6's. The engine sets up the copy it was started from.
 23. `back` goes to the step before that asked something. From an open sign-in it ends the sign-in and returns to the Apps question.
 24. The permission question words its place itself, with `folderWords`, not with `accessLine`, whose words are for a Mac that is already set up.
@@ -888,13 +852,14 @@ Claude's rulings, 2026-11-09:
 30. A failed Claude Code install at the Apps step is the question's fault, not the run's end: the person can try again or install it another way.
 31. The review's facts come from `settings.js plan`'s JSON and from node functions, never from `install.sh`'s text. The text decides only `ok`, by its exit code, and is shown under Details.
 32. After the installer the engine shows the plan's settings, or the Mac's own on a repair, and does not read the settings file back.
-33. A folder that is missing at the Permissions step is passed over, since the installer makes it (`install.sh`, 1202).
+33. A folder that is missing at the Permissions step is passed over, since the installer makes it (`install.sh`, 1209).
 34. `appsQuestion`'s `working` line shows Claude Code's install: the engine sends the apps question again for each line.
 35. The engine looks for apps in an `applications` folder it is given, so no test looks in this Mac's own Applications folder.
 36. The review's plan is Studio's own `settings.js`, run by the engine's own node, in tests too. It is not a system program, it asks plutil only of a launch agent's file that is there, and it runs on CI's Linux as the settings tests do.
 37. The engine is given its three stages, so its tests never download and never call npm. The real stages are Task 8's to test.
 38. A cancel that comes while the engine waits for a busy Mac is answered when the installer's part ends, at most two and a half minutes later: `installWhenIdle` takes no signal, so the wait and the installer are one part.
 39. "Choose Repair" is the app's one way back in after a fault. On a Mac with no settings a repair ends with `error`, `no-settings`, so Phase 6's shell asks `--run status` first and starts a setup when `needs` is `setup`, whatever the person chose.
+40. Task 3 is dropped: PR #58 did its work, with `lookerOf` and a `name` option in place of this plan's `LOOKER_APP` and `installed` flag. The plan was moved onto main after #58 (10 November), and its line numbers with it.
 
 ## Open for Jason
 
