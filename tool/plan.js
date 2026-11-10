@@ -24,6 +24,7 @@ import { referencesFolder, runsFolder } from "./settings.js";
 import { episodeFolderName } from "./names.js";
 import { textWriter } from "./dropbox.js";
 import { commitOf, thisCheckout } from "./filing.js";
+import { isInstalled } from "./build.js";
 import { agreedFor, labelOf, partLine, partsOf as footageParts } from "./footage.js";
 import { joinFor } from "./join.js";
 import { voiceFor } from "./explainer.js";
@@ -326,9 +327,10 @@ const writerOf = (ctx) => ({ commit: ctx.deps.commit || commitOf(thisCheckout())
 const workOf = (ctx) => join(runsFolder(ctx.home), `plan-${process.pid}-${ctx.now()}`);
 
 /** Why a record could not be written, in plain words with no path. */
-export const notWritten = (e) => {
+export const notWritten = (e, build) => {
   if (e.code === "CHANGED") return "this plan changed on the other Mac: say it again";
   if (e.code === "CONFLICTED") return "Dropbox has kept a conflicted copy of it: say \"sort out the conflict\"";
+  if (e.code === "NEWER" && isInstalled(build)) return 'a newer BRIMM Video Studio wrote it: say "update Studio" to update this Mac';
   if (e.code === "NEWER") return "Jason has a newer BRIMM Video Studio. Ask him to update this Mac";
   return `it could not be written (${e.code || "an error"})`;
 };
@@ -375,7 +377,7 @@ export function newPlan(ctx, { title: given, explainer, voice }) {
     mkdirSync(ctx.episodes, { recursive: true });
     mkdirSync(folder);
   } catch (e) {
-    return refuse(ctx, `Nothing was saved: ${notWritten(e)}.`);
+    return refuse(ctx, `Nothing was saved: ${notWritten(e, ctx.build)}.`);
   }
   const work = workOf(ctx);
   try {
@@ -383,7 +385,7 @@ export function newPlan(ctx, { title: given, explainer, voice }) {
   } catch (e) {
     // The folder this command made, with no record in it, is no plan: it is taken away, so that nothing is left that looks like an import that stopped.
     rmSync(folder, { recursive: true, force: true });
-    return refuse(ctx, `Nothing was saved: ${notWritten(e)}.`);
+    return refuse(ctx, `Nothing was saved: ${notWritten(e, ctx.build)}.`);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -406,7 +408,7 @@ function writeNext(ctx, found, record, next, before = () => {}) {
     before(work);
     writeEpisode(found.folder, next, { expectRev: record.rev, writeText: textWriter({ work: join(work, "record"), ...ruleOpts(ctx) }), writer: writerOf(ctx), home: ctx.home });
   } catch (e) {
-    return refuse(ctx, `Nothing was saved: ${notWritten(e)}.`);
+    return refuse(ctx, `Nothing was saved: ${notWritten(e, ctx.build)}.`);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

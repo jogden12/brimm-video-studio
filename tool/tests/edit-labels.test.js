@@ -106,6 +106,8 @@ const TODAY_ASKED = {
   finish: [[FOLDER], ["--now", FOLDER], []],
   show: [[FOLDER, "transcript"], [FOLDER, "plan"], []],
   behind: [[]],
+  // `update` says only its own fixed lines, which tests/edit-update.test.js pins.
+  update: [],
   look: [[]],
   resolve: [[FOLDER], []],
   free: [[]],
@@ -1260,6 +1262,7 @@ describe("the walk: every command, for a video imported lightly from a file name
     finish: [[label], [label, "reels"], ["--now", LIGHT_FOLDER], []],
     show: [[label, "transcript"], [label, "notes"], [label, "plan"], []],
     behind: [[]],
+    update: [[]],
     look: [[]],
     resolve: [[label], [label, "--keep", "B"], []],
     free: [[label], []],
@@ -1450,7 +1453,7 @@ describe("a Mac whose own import is not light, beside one that imports lightly (
     const label = record.label;
     for (const name of COMMAND_NAMES) {
       // `kind` and `leave` would answer the video the commands after them are walked for, so they are given words that do not.
-      const words = { episodes: [[]], status: [[], [label]], behind: [[]], look: [[]], retry: [[SECOND_LABEL], [label]], kind: [[label], [label, "finished"], ["nothing fits this", "raw", "--private", "no"]], leave: [["nothing fits this"], []] }[name] || [[label], ["--now", LIGHT_FOLDER], []];
+      const words = { episodes: [[]], status: [[], [label]], behind: [[]], update: [[]], look: [[]], retry: [[SECOND_LABEL], [label]], kind: [[label], [label, "finished"], ["nothing fits this", "raw", "--private", "no"]], leave: [["nothing fits this"], []] }[name] || [[label], ["--now", LIGHT_FOLDER], []];
       for (const given of words) {
         const before = resultsIn(t.home);
         const r = await on(depsOf(t), name, ...given);
@@ -1614,7 +1617,7 @@ describe("an error that leaves a command for a gated video (fix 2)", () => {
     writeFileSync(join(drop, VIDEO), "video");
     const logs = [];
     const deps = {
-      run: async () => ({ code: 1, stderr: "" }), tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", swift: "", claude: "" }, model: "/m", home: t.home, lockDir: join(t.dir, "locks"),
+      build: { mode: "dev" }, run: async () => ({ code: 1, stderr: "" }), tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", swift: "", claude: "" }, model: "/m", home: t.home, lockDir: join(t.dir, "locks"),
       settings: { version: 1, machine: "Mac Studio", root: t.root, checkout: "/checkout", import: "light" }, light: true, log: (line) => logs.push(line), wait: async () => {}, alive: () => false,
       // Something nobody foresaw, which names the video's file, stops the folder's work.
       keepAwake: () => {

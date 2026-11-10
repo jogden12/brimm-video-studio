@@ -12,13 +12,15 @@ import { studioFiles, writeStudio, guardDecision, studioFolder } from "../studio
 import { COMMAND_NAMES, HELP, LOCK_CHANGED, editMain, wordsLine } from "../edit.js";
 import { HELD_NARROWED, HELD_REFUSED } from "../held.js";
 import { UNTRUSTED } from "../loosened.js";
+import { REPAIR } from "../build.js";
+import { updateLine } from "../update-check.js";
 import { NO_RECEIPT, cardOf } from "../receipts.js";
 import { EDITS } from "../sessions.js";
 import { episodeAs, FOLDER as FOLDER_NAME } from "./episodes.js";
 import { episode } from "./phase4.js";
 import { CHECKOUT, NODE, EDIT, ALLOWED, NODE_CASES, UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, spellingsOf, APP_NODE, OWN, REFUSED as NOT_OWN, NODE_FAULT, CHECKOUT_FAULT, strictStartsOf, tailRefusals } from "./guard-cases.js";
 import { openWorld } from "./open-world.js";
-import { rowWithRules, rulesOf, rulesOfRow, withRules } from "./skill-rows.js";
+import { lineOf, rowWithRules, rulesOf, rulesOfRow, withRules } from "./skill-rows.js";
 
 const FOLDER = "/Users/sallie/BRIMM Video Studio";
 const bash = (command) => guardDecision({ tool_name: "Bash", tool_input: { command } }, { checkout: CHECKOUT, node: NODE }).decision;
@@ -530,6 +532,22 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     assert.ok(start.indexOf("`behind`") >= 0 && start.indexOf("`behind`") < start.indexOf("`episodes`"), start);
     assert.match(start.slice(start.indexOf("`episodes`")), /card/);
     assert.match(skill, /^\| "What's waiting\?" \| `episodes`, then the card/m);
+  });
+  it("passes the update line on in one line, offers \"update Studio\", and keeps a git checkout's line (Studio app, phase 3)", () => {
+    for (const name of ["SKILL.md", "SKILL-open.md"]) {
+      const text = readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8");
+      const start = sectionOf(text, "## At the start of each session");
+      for (const words of [
+        'If it says "Jason has a newer BRIMM Video Studio", tell her: "Jason has a newer BRIMM Video Studio; ask him to update this Mac when it suits."',
+        'If it says "A newer BRIMM Video Studio is ready", tell her that line as it is said, in one line, and that she can say "update Studio" whenever it suits.',
+        'If it says "Her folder for Claude is out of date", tell her: "Your Claude folder needs an update from Jason; ask him when it suits."',
+        "If a line says to open BRIMM Video Studio and choose Repair, tell her that line as it is said."
+      ]) assert.ok(start.includes(words), `${name}: ${words}`);
+      // The skill listens for the first words of what edit.js prints, which are said word for word.
+      assert.ok(updateLine({ state: "newer", version: "1.5.0", have: "1.4.2" }).startsWith("A newer BRIMM Video Studio is ready"), name);
+      assert.ok(REPAIR.includes("Open BRIMM Video Studio and choose Repair"), name);
+      assert.equal(lineOf(text, '| "Update Studio" |'), '| "Update Studio" | `update`: tell her what it says, in plain words. |', name);
+    }
   });
   it("stops when behind says the folder's lock is changed: tells her to ask Jason, and runs nothing else (spec 2026-10-22, section 7)", () => {
     const start = sectionOf(skill, "## At the start of each session");
@@ -1684,7 +1702,7 @@ describe("her skill passes on the import's line, and runs look for \"look again\
   for (const [name, text] of Object.entries(SKILLS)) {
     it(`${name}: the start of a session, the two bullets after L1c's, and the row`, () => {
       const start = sectionOf(text, "## At the start of each session");
-      assert.ok(start.includes("ask him when it suits.\"\nIf it ends with a line about the import (node, her drop folder or Dropbox), tell her that line as it is said. Then run `episodes`"), name);
+      assert.ok(start.includes("choose Repair, tell her that line as it is said.\nIf it ends with a line about the import (node, her drop folder or Dropbox), tell her that line as it is said. Then run `episodes`"), name);
       const lines = text.split("\n");
       const l1c = lines.findIndex((line) => line.startsWith("- If `episodes` or the guide says this Mac does not let"));
       const pass = lines[l1c + 1];

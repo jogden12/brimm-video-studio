@@ -552,7 +552,7 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
   it("lets a chat that holds a session's words run only the commands a session runs", async () => {
     const w = chat();
     untiedMark({ home: w.home, now: Date.parse("2026-10-26T10:30:00.000Z") });
-    for (const words of ["episodes", 'guide "Talk" tell', 'principles "Pricing talk" keep 1', 'finish "Pricing talk"', 'teachings "Pricing talk"', "behind", 'kind "Pricing talk" session', 'reel "Pricing talk" 1']) {
+    for (const words of ["episodes", 'guide "Talk" tell', 'principles "Pricing talk" keep 1', 'finish "Pricing talk"', 'teachings "Pricing talk"', "behind", "update", 'kind "Pricing talk" session', 'reel "Pricing talk" 1']) {
       assert.equal((await guard(w, "Bash", { command: `${w.edit} ${words}` })).decision, "allow", words);
     }
     assert.equal((await guard(w, "Bash", { command: `${w.edit} guide "Talk" tell`, run_in_background: true })).decision, "allow");

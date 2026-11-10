@@ -842,7 +842,7 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     const at = Date.parse("2026-10-20T15:00:00");
     let clock = at;
     await uneditedFolder(drop, {
-      run, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", swift: "", claude: "" }, model: "/models/model.bin", tmpDir: join(t.dir, "tmp"), lockDir: join(t.dir, "locks"), home: t.home,
+      build: { mode: "dev" }, run, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", swift: "", claude: "" }, model: "/models/model.bin", tmpDir: join(t.dir, "tmp"), lockDir: join(t.dir, "locks"), home: t.home,
       today: () => dayOf(t), rand: () => 0.5, rulesOnly: true, settings: { version: 1, machine: "Mac Studio", root: t.root, checkout: "/checkout", import: "light" }, light: true,
       now: () => new Date(at), clock: () => clock, wait: async (ms) => { clock += ms; }, notify: () => {}, log: (line) => logs.push(line),
       clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, commit: "abc1234", keepAwake: () => {}, progress: noProgress, isWhole: () => true, alive: () => false

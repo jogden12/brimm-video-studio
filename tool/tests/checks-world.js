@@ -55,6 +55,8 @@ export function runs(w, at, over = {}) {
     log: (line) => logs.push(line),
     notify: (text) => notices.push(text),
     alive: mine,
+    // No test reads this checkout's own build.json: a made-up Mac is a git checkout unless a test says it is installed.
+    build: { mode: "dev" },
     ...over,
     checks: { original: null, ...(over.checks || {}) }
   };

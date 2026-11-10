@@ -226,7 +226,7 @@ function setup(script = {}) {
   const home = join(dir, "home");
   const deps = {
     run, runGuarded, tools: { ffmpeg: "FFMPEG", ffprobe: "FFPROBE", whisper: "WHISPER", swift: "SWIFT", claude: script.claude ? "CLAUDE" : "" }, model: "/models/model.bin", tmpDir: work, lockDir: locks, home, today: () => "2026-10-13",
-    rulesOnly: !script.claude, wait: async (ms) => { waits.push(ms); }, notify: (text) => notes.push(text), log: (line) => logs.push(line),
+    build: { mode: "dev" }, rulesOnly: !script.claude, wait: async (ms) => { waits.push(ms); }, notify: (text) => notes.push(text), log: (line) => logs.push(line),
     ...(script.sizes ? { sizeOf: () => script.sizes.shift() } : {})
   };
   const video = (name, bytes = "video") => {

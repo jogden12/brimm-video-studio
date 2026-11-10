@@ -11,7 +11,8 @@ Words with a `$`, a backtick, a backslash or a straight double quote go in singl
 
 ## At the start of each session
 
-Run `behind`. If it says "This folder's lock is changed on this Mac", tell her: "Something in this Claude folder's setup has changed; ask Jason before going on." Then stop: run nothing else, not even `episodes`, and show her nothing of what it says after that line. If this Mac is behind, tell her: "Jason has a newer BRIMM Video Studio; ask him to update this Mac when it suits." If it says her folder for Claude is out of date, tell her: "Your Claude folder needs an update from Jason; ask him when it suits."
+Run `behind`. If it says "This folder's lock is changed on this Mac", tell her: "Something in this Claude folder's setup has changed; ask Jason before going on." Then stop: run nothing else, not even `episodes`, and show her nothing of what it says after that line. If it says "Jason has a newer BRIMM Video Studio", tell her: "Jason has a newer BRIMM Video Studio; ask him to update this Mac when it suits." If it says "A newer BRIMM Video Studio is ready", tell her that line as it is said, in one line, and that she can say "update Studio" whenever it suits.
+If it says "Her folder for Claude is out of date", tell her: "Your Claude folder needs an update from Jason; ask him when it suits." If a line says to open BRIMM Video Studio and choose Repair, tell her that line as it is said.
 If it ends with a line about the import (node, her drop folder or Dropbox), tell her that line as it is said. Then run `episodes`, and show the card below for each video waiting for her answer.
 
 ## The card: what a video is
@@ -131,6 +132,7 @@ When she says she has a video, or asks what to do, what's next, where she was, o
 | "How far is it?" | `status` |
 | "Try it again" (an import that stopped) | `retry "<video>"` |
 | "Look again" / "I allowed it" (the import could not look) | `look` |
+| "Update Studio" | `update`: tell her what it says, in plain words. |
 | "Sort out the conflict" | `resolve "<episode>"`; show her the two sides in plain words; then `resolve "<episode>" --keep A` or `resolve "<episode>" --keep B` as she picks. |
 
 ## More on these rows

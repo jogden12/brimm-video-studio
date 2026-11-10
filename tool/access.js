@@ -8,7 +8,7 @@
 // No note, line or banner names a video by its file. A write that fails costs only the notice.
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { isMain } from "./is-main.js";
 import { studioHome } from "./home.js";
 import { realOf } from "./places.js";
 import { isRunning } from "./run.js";
@@ -108,8 +108,9 @@ export function lookAt(place, folder, opts = {}) {
     is whether this Mac's drop folder is not there as her chat sees it; `unseen` is the videos the import has not taken; `agentNode`
     is the node the plist names, "" when it is not known; `needsAccess` lists the places (drop, episodes) that macOS guards. The first that
     holds: asking, refused/locked/error for the drop folder or Episodes (the first noted place that is still where it was),
-    missing, unseen, refused/locked/error for Downloads, newNode. */
-export function findingOf({ note, now, places, agentPid, missing = false, unseen = [], agentNode = "", needsAccess = [] }) {
+    missing, unseen, refused/locked/error for Downloads, newNode. On an installed Mac (`installed`) there is never a newNode: macOS's grants belong
+    to the app, whose own executable runs the job, and they survive a change of node. */
+export function findingOf({ note, now, places, agentPid, missing = false, unseen = [], agentNode = "", needsAccess = [], installed = false }) {
   const looking = note.looking;
   if (looking && looking.pid === agentPid && now - looking.at > ASKING_MS) return { kind: "asking", place: looking.place };
   const refusedAt = (place) => {
@@ -127,7 +128,7 @@ export function findingOf({ note, now, places, agentPid, missing = false, unseen
   const found = refusedAt("downloads");
   if (found) return found;
   const guarded = needsAccess.filter((place) => place === "drop" || place === "episodes").map((place) => (note.places[place] || {}).okNode);
-  if (agentNode && guarded.some((okNode) => okNode && okNode !== agentNode)) return { kind: "newNode" };
+  if (!installed && agentNode && guarded.some((okNode) => okNode && okNode !== agentNode)) return { kind: "newNode" };
   return null;
 }
 
@@ -293,8 +294,10 @@ export function postIfDue(place, note, { notify, clock = Date.now, node = proces
 }
 
 /** Post the new-node banner once per `node`, when `needs` (the places whose folder needs Files and Folders access) has a place whose last
-    ok look was by another node. Gives whether a banner was posted. */
-export function postNewNodeIfDue(note, { notify, clock = Date.now, node = process.execPath, needs = [], home } = {}) {
+    ok look was by another node. Gives whether a banner was posted. On an installed Mac (`installed`) it posts nothing and writes nothing:
+    the grants are the app's. */
+export function postNewNodeIfDue(note, { notify, clock = Date.now, node = process.execPath, needs = [], home, installed = false } = {}) {
+  if (installed) return false;
   const told = (note.told = note.told || {});
   if (told.newNode && told.newNode.node === node) return false;
   if (!needs.some((place) => (note.places[place] || {}).okNode && note.places[place].okNode !== node)) return false;
@@ -332,4 +335,4 @@ export function main(argv, { out = process.stdout, home } = {}) {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = main(process.argv.slice(2));
