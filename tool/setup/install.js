@@ -3,8 +3,10 @@
 // how far it has come, as `progress` events, and none of them shows what a program printed: that goes to the engine's stderr.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { chmodSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { GUARD_CLAUDE, claudeAt, claudeEnv, claudeState, versionAtLeast } from "./checks.js";
+import { signInQuestion } from "./questions.js";
 import { PIN, childEnv, cliPath, toolchainDiffers, toolchainDir, toolchainHolds } from "../hyperframes.js";
 
 /** The label of each part of the setup, as the shell shows it. */
@@ -181,4 +183,183 @@ export async function stageChrome({ home, tools, progress, signal, run = runProg
   }
   send("done");
   return "done";
+}
+
+/** Claude Code's version, address and SHA-256, from tool/claude-code.pin.json in the folder `checkout`: null when there is no such file,
+    it is no JSON, or it is not whole (a version of three numbers not below the floor, an https address, 64 hex digits). This phase adds no such file. */
+export function claudePin(checkout) {
+  let pin;
+  try {
+    pin = JSON.parse(readFileSync(join(checkout, "claude-code.pin.json"), "utf8"));
+  } catch {
+    return null;
+  }
+  if (!pin || typeof pin !== "object") return null;
+  const { version, url, sha256 } = pin;
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version) || !versionAtLeast(version, GUARD_CLAUDE)) return null;
+  if (typeof url !== "string" || !/^https:\/\/[^\s/]/.test(url)) return null;
+  if (typeof sha256 !== "string" || !/^[0-9a-f]{64}$/.test(sha256)) return null;
+  return { version, url, sha256 };
+}
+
+/** What the downloaded copy of Claude Code is run with: its own install step. The one place to change if the by-hand check finds otherwise. */
+export const CLAUDE_INSTALL_ARGS = ["install"];
+
+const CLAUDE_WRONG = "The copy of Claude Code that was downloaded is not the one BRIMM Video Studio expects. Nothing of it was kept.";
+const CLAUDE_FAILED = "Claude Code could not be installed. Check this Mac's internet connection, then try again.";
+
+/** Installs Claude Code from `pin`: downloads it, runs it with CLAUDE_INSTALL_ARGS only when its SHA-256 is the pin's, takes the
+    download away whatever happens, and resolves with the path where claudeAt then finds Claude Code. Rejects with words fit to show
+    (code "install"). A download is data until its SHA-256 is the pin's: one that is not is never made runnable and never run. */
+export async function installClaudeCode({ home, tools, pin, programs, say = () => {}, signal, run = runProgram }) {
+  const refuse = (message) => Object.assign(new Error(message), { code: "install" });
+  if (!pin) throw refuse(CLAUDE_FAILED);
+  const folder = join(home, "Library", "Caches", "BRIMM Video Studio");
+  const part = join(folder, `claude-${pin.version}.part`);
+  const env = claudeEnv({ home, tools });
+  if (signal?.aborted) throw stopped();
+  say("Downloading Claude Code.");
+  mkdirSync(folder, { recursive: true });
+  rmSync(part, { force: true });
+  try {
+    const got = await run(programs.curl, ["--fail", "--location", "--silent", "--show-error", "--output", part, pin.url], { env: { HOME: home, PATH: "/usr/bin:/bin", LANG: "en_US.UTF-8" }, signal });
+    if (signal?.aborted) throw stopped();
+    if (got.code !== 0) throw refuse(CLAUDE_FAILED);
+    if (!existsSync(part) || (await sha256Of(part)) !== pin.sha256) throw refuse(CLAUDE_WRONG);
+    chmodSync(part, 0o755);
+    say("Installing Claude Code.");
+    const ran = await run(part, CLAUDE_INSTALL_ARGS, { env, signal });
+    if (signal?.aborted) throw stopped();
+    if (ran.code !== 0) throw refuse(CLAUDE_FAILED);
+  } finally {
+    rmSync(part, { force: true });
+  }
+  const where = claudeAt({ home, tools });
+  if (!where) throw refuse(CLAUDE_FAILED);
+  return where;
+}
+
+const SIGN_IN_HOSTS = ["claude.ai", "claude.com", "anthropic.com"];
+
+/** The first link in `text` that may be passed on: https, with no user name and no password, and a host that is claude.ai, claude.com or
+    anthropic.com or ends with a dot and one of them. Colour codes are taken off first. Any other link is never passed on; null when none is. */
+export function signInLinkOf(text) {
+  const plain = String(text).replace(/\u001b\[[0-9;?]*[ -\/]*[@-~]/g, "").replace(/\u001b\][^\u0007\u001b]*(\u0007|\u001b\\)/g, "");
+  for (const found of plain.match(/https?:\/\/[^\s"'<>\u0000-\u001f]+/g) ?? []) {
+    let url;
+    try {
+      url = new URL(found.replace(/[.,;:)\]]+$/, ""));
+    } catch {
+      continue;
+    }
+    if (url.protocol !== "https:" || url.username !== "" || url.password !== "") continue;
+    const host = url.hostname.replace(/\.$/, "");
+    if (SIGN_IN_HOSTS.some((one) => host === one || host.endsWith(`.${one}`))) return url.href;
+  }
+  return null;
+}
+
+/** How long a sign-in waits for claude's link before it asks without one, and how long claude is given to end by itself after an answer. */
+export const LINK_WAIT_MS = 5000;
+export const SETTLE_MS = 10000;
+
+const TOO_LONG = "Signing in took too long. Try again.";
+const NOT_SIGNED_IN = "Claude Code is not signed in yet. Try again.";
+
+/** Signs Claude Code in: runs `claude auth login` under `programs.script`, so that it has a terminal of its own, asks `ask` for the
+    sign-in (with the link, once claude printed an allowed one), writes a pasted code to claude's input and nowhere else, ends claude, and
+    gives back only whether Claude Code is then signed in, its plan, and a `fault` when it is not. With `pty` false it starts nothing and only
+    asks claude's state (the shell then runs the terminal itself). Nothing claude prints is shown or kept: only a link of it is read. */
+export async function signIn({ home, tools, claude, programs, ask, timeoutMs = 300000, linkWaitMs = LINK_WAIT_MS, settleMs = SETTLE_MS, pty = true }) {
+  let timedOut = false;
+  if (pty) {
+    const child = spawn(programs.script, ["-q", "/dev/null", claude, "auth", "login"], { env: claudeEnv({ home, tools }), stdio: ["pipe", "pipe", "pipe"], detached: true });
+    let ended = false;
+    const endedP = new Promise((resolve) => {
+      child.on("exit", () => ((ended = true), resolve("ended")));
+      child.on("error", () => ((ended = true), resolve("ended")));
+    });
+    child.stdin.on("error", () => {});
+    const stop = () => {
+      if (ended) return;
+      try {
+        process.kill(-child.pid, "SIGTERM");
+      } catch {
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          // Already gone.
+        }
+      }
+      child.stdin.destroy();
+    };
+    const timers = new Set();
+    const wait = (ms, value) => new Promise((resolve) => {
+      const timer = setTimeout(() => (timers.delete(timer), resolve(value)), ms);
+      timers.add(timer);
+    });
+    let seen = "";
+    let link = null;
+    let answered = false;
+    let askedWith = null;
+    let onLink = () => {};
+    const read = (chunk) => {
+      seen = (seen + chunk).slice(-8000);
+      const now = signInLinkOf(seen);
+      if (now && !link) {
+        link = now;
+        onLink();
+      }
+    };
+    child.stdout.on("data", read);
+    child.stderr.on("data", read);
+    let hearAnswer;
+    const heard = new Promise((resolve) => (hearAnswer = resolve));
+    const pose = (question, kind) => {
+      askedWith = kind;
+      Promise.resolve(ask(question)).then(
+        (value) => !answered && ((answered = true), hearAnswer({ value })),
+        (error) => !answered && ((answered = true), hearAnswer({ error }))
+      );
+    };
+    const linkP = new Promise((resolve) => (onLink = () => resolve("link")));
+    try {
+      const limit = wait(timeoutMs, "timeout");
+      const first = await Promise.race([endedP, linkP, wait(linkWaitMs, "waited")]);
+      if (first !== "ended") {
+        if (link) pose(signInQuestion({ link }), "link");
+        else {
+          pose(signInQuestion(), "none");
+          onLink = () => !answered && askedWith === "none" && pose(signInQuestion({ link }), "link");
+        }
+        const next = await Promise.race([endedP, heard, limit]);
+        if (next === "timeout") {
+          timedOut = true;
+          stop();
+        } else if (next !== "ended") {
+          if (next.error) {
+            stop();
+            throw next.error;
+          }
+          const value = next.value;
+          const code = value && typeof value === "object" && typeof value.code === "string" ? value.code.replace(/[\u0000-\u001f\u007f]/g, "") : "";
+          if (value === "back" || value === "cancel") stop();
+          else {
+            if (code !== "") child.stdin.write(`${code}\n`);
+            const settled = await Promise.race([endedP, limit, wait(settleMs, "settled")]);
+            if (settled === "timeout") timedOut = true;
+            stop();
+          }
+        }
+      }
+      await Promise.race([endedP, wait(5000, "gone")]);
+    } finally {
+      stop();
+      for (const timer of timers) clearTimeout(timer);
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }
+  }
+  const state = claudeState({ home, tools });
+  return state.signedIn ? { signedIn: true, plan: state.plan } : { signedIn: false, plan: null, fault: timedOut ? TOO_LONG : NOT_SIGNED_IN };
 }

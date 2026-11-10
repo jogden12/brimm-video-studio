@@ -8,7 +8,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
 import { PARTS } from "../setup/protocol.js";
-import { LABELS, MODEL_BYTES, modelPath, modelPin, npmArgs, quiet, runProgram, sha256Of, stageChrome, stageCli, stageModel } from "../setup/install.js";
+import { CLAUDE_INSTALL_ARGS, LABELS, MODEL_BYTES, claudePin, installClaudeCode, modelPath, modelPin, npmArgs, quiet, runProgram, sha256Of, signIn, signInLinkOf, stageChrome, stageCli, stageModel } from "../setup/install.js";
+import { claudeAt } from "../setup/checks.js";
+import { signInQuestion } from "../setup/questions.js";
 import { mac } from "./setup-harness.js";
 
 const INSTALL = readFileSync(fileURLToPath(new URL("../install.sh", import.meta.url)), "utf8");
@@ -317,6 +319,253 @@ describe("runProgram", () => {
       assert.ok(!alive());
       await new Promise((r) => setTimeout(r, 300));
       assert.equal(chunks.join(""), "hello\n");
+    });
+  });
+});
+
+const FLOOR = "2.1.295";
+const wholePin = { version: "2.1.300", url: "https://example.invalid/claude", sha256: "a".repeat(64) };
+const INSTALLER = `#!/bin/sh
+if [ "$1" = install ]; then
+  mkdir -p "$HOME/.local/bin"
+  printf '#!/bin/sh\\necho "2.1.300 (Claude Code)"\\n' > "$HOME/.local/bin/claude"
+  chmod 755 "$HOME/.local/bin/claude"
+fi
+`;
+const cachesOf = (home) => join(home, "Library", "Caches", "BRIMM Video Studio");
+
+describe("claudePin", () => {
+  it("is whole only with a version, an https address and a 64-digit SHA-256, and never below the floor", () => {
+    const m = mac();
+    try {
+      const at = (pin) => {
+        writeFileSync(join(m.checkout, "tool", "claude-code.pin.json"), JSON.stringify(pin));
+        return claudePin(join(m.checkout, "tool"));
+      };
+      assert.deepEqual(at(wholePin), wholePin);
+      assert.equal(at({ ...wholePin, url: "http://example.invalid/claude" }), null);
+      assert.equal(at({ ...wholePin, sha256: "a".repeat(63) }), null);
+      assert.equal(at({ ...wholePin, version: "2.0.0" }), null);
+      assert.equal(at({ ...wholePin, version: "2.1" }), null);
+      assert.equal(at({ ...wholePin, version: FLOOR }) !== null, true);
+    } finally {
+      m.done();
+    }
+  });
+
+  it("no pin file, or one that is not whole, gives no pin", () => {
+    const m = mac();
+    try {
+      assert.equal(claudePin(join(m.checkout, "tool")), null);
+      writeFileSync(join(m.checkout, "tool", "claude-code.pin.json"), "{");
+      assert.equal(claudePin(join(m.checkout, "tool")), null);
+    } finally {
+      m.done();
+    }
+  });
+});
+
+describe("installClaudeCode", () => {
+  const withInstaller = async (check, { script = INSTALLER, exit } = {}) => {
+    const m = mac({ claude: "none" });
+    try {
+      writeFileSync(join(m.dir, "says", "curl"), script);
+      if (exit !== undefined) writeFileSync(join(m.dir, "exits", "curl"), String(exit));
+      const said = [];
+      const pin = { ...wholePin, sha256: createHash("sha256").update(script).digest("hex") };
+      return await check(m, { pin, said, say: (line) => said.push(line) });
+    } finally {
+      m.done();
+    }
+  };
+  const caches = (m) => (existsSync(cachesOf(m.home)) ? readdirSync(cachesOf(m.home)).filter((n) => n.startsWith("claude-")) : []);
+
+  it("is run with `install`", () => assert.deepEqual(CLAUDE_INSTALL_ARGS, ["install"]));
+
+  it("is downloaded, checked against the pin, installed by its own install step, and the download is taken away", async () => {
+    await withInstaller(async (m, { pin, said, say }) => {
+      const found = await installClaudeCode({ home: m.home, tools: m.tools, pin, programs: m.programs, say });
+      assert.equal(found, join(m.home, ".local", "bin", "claude"));
+      assert.equal(claudeAt({ home: m.home, tools: m.tools }), found);
+      assert.deepEqual(said, ["Downloading Claude Code.", "Installing Claude Code."]);
+      assert.deepEqual(caches(m), []);
+      assert.match(m.ran(), new RegExp(`--output ${cachesOf(m.home).replaceAll(".", "\\.")}/claude-2\\.1\\.300\\.part https://example\\.invalid/claude`));
+    });
+  });
+
+  it("a Claude Code download whose SHA-256 is not the pin's is never run", async () => {
+    await withInstaller(async (m, { pin, say }) => {
+      writeFileSync(join(m.dir, "says", "curl"), `#!/bin/sh\necho ran > "${join(m.dir, "was-run")}"\n`);
+      await assert.rejects(installClaudeCode({ home: m.home, tools: m.tools, pin, programs: m.programs, say }), { message: "The copy of Claude Code that was downloaded is not the one BRIMM Video Studio expects. Nothing of it was kept." });
+      assert.equal(existsSync(join(m.dir, "was-run")), false);
+      assert.deepEqual(caches(m), []);
+    });
+  });
+
+  it("a download that fails says so, and keeps nothing", async () => {
+    await withInstaller(async (m, { pin, say }) => {
+      await assert.rejects(installClaudeCode({ home: m.home, tools: m.tools, pin, programs: m.programs, say }), { message: "Claude Code could not be installed. Check this Mac's internet connection, then try again." });
+      assert.deepEqual(caches(m), []);
+    }, { exit: 22 });
+  });
+
+  it("an install that leaves no Claude Code behind fails, and keeps nothing", async () => {
+    await withInstaller(async (m, { pin, say }) => {
+      await assert.rejects(installClaudeCode({ home: m.home, tools: m.tools, pin, programs: m.programs, say }), { message: "Claude Code could not be installed. Check this Mac's internet connection, then try again." });
+      assert.deepEqual(caches(m), []);
+    }, { script: "#!/bin/sh\nexit 0\n" });
+  });
+});
+
+describe("signInLinkOf", () => {
+  it("passes a link on only when it is https and its host is claude.ai, claude.com or anthropic.com", () => {
+    assert.equal(signInLinkOf("Open https://claude.ai/oauth/authorize?code=true to sign in"), "https://claude.ai/oauth/authorize?code=true");
+    assert.equal(signInLinkOf("visit https://console.anthropic.com/x now"), "https://console.anthropic.com/x");
+    assert.equal(signInLinkOf("https://claude.com/x"), "https://claude.com/x");
+    for (const bad of ["http://claude.ai/x", "https://claude.ai.example.invalid/x", "https://example.invalid/?next=https://claude.ai/x", "https://user:pw@claude.ai/x", "https://notclaude.ai/x", "https://example.invalid/x"]) {
+      assert.equal(signInLinkOf(bad), null, bad);
+    }
+  });
+
+  it("gives the first link that passes, not the first link", () => {
+    assert.equal(signInLinkOf("https://example.invalid/a then https://claude.ai/b"), "https://claude.ai/b");
+  });
+
+  it("colour codes around a link are taken off", () => {
+    assert.equal(signInLinkOf("go to \u001b[4m\u001b[36mhttps://claude.ai/oauth/authorize?x=1\u001b[0m\u001b[39m please"), "https://claude.ai/oauth/authorize?x=1");
+  });
+});
+
+describe("signIn", () => {
+  const LINK = "https://claude.ai/oauth/authorize?code=true";
+  const withLogin = async (check, { claude = "signed-in", login = `Open ${LINK}\nPaste the code here.\n` } = {}) => {
+    const m = mac({ claude });
+    try {
+      writeFileSync(join(m.dir, "says", "claude-login"), login);
+      const asked = [];
+      return await check(m, { asked });
+    } finally {
+      m.done();
+    }
+  };
+  const base = (m) => ({ home: m.home, tools: m.tools, claude: join(m.home, ".local", "bin", "claude"), programs: m.programs });
+  const filesUnder = (dir) => readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => join(e.parentPath, e.name));
+
+  it("the pasted code reaches claude and nothing else", async () => {
+    await withLogin(async (m, { asked }) => {
+      const written = [];
+      const real = process.stderr.write;
+      process.stderr.write = (chunk, ...rest) => (written.push(String(chunk)), true);
+      let result;
+      try {
+        result = await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async (q) => (asked.push(q), { code: "9f3a-code" }) });
+      } finally {
+        process.stderr.write = real;
+      }
+      assert.equal(readFileSync(join(m.dir, "claude-got"), "utf8"), "9f3a-code\n");
+      assert.equal(asked[0].link, LINK);
+      assert.equal(JSON.stringify([asked, result, written]).includes("9f3a-code"), false);
+      assert.equal(m.ran().includes("9f3a-code"), false);
+      for (const file of filesUnder(m.dir)) {
+        if (file === join(m.dir, "claude-got")) continue;
+        assert.equal(readFileSync(file).includes("9f3a-code"), false, file);
+      }
+      assert.deepEqual(result, { signedIn: true, plan: "max" });
+    });
+  });
+
+  it("starts claude under script, with a terminal of its own", async () => {
+    await withLogin(async (m) => {
+      await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => ({ code: "x" }) });
+      assert.match(m.ran(), new RegExp(`script -q /dev/null ${join(m.home, ".local", "bin", "claude").replaceAll(".", "\\.")} auth login`));
+    });
+  });
+
+  it("asks without a link when none comes, then asks again with it when it does", async () => {
+    await withLogin(async (m, { asked }) => {
+      // Claude prints its link two seconds after it starts; the question is asked after 100 ms without one.
+      const slow = join(m.home, ".local", "bin", "claude");
+      writeFileSync(slow, `#!/bin/sh\ncase "$*" in\n  "auth login") sleep 0.6; echo "${LINK}"; read -r line; printf '%s\\n' "$line" > "${join(m.dir, "claude-got")}" ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
+      chmodSync(slow, 0o755);
+      let answer;
+      const answered = new Promise((r) => (answer = r));
+      const ask = (q) => {
+        asked.push(q);
+        if (q.link) answer();
+        return answered.then(() => ({}));
+      };
+      await signIn({ ...base(m), linkWaitMs: 100, settleMs: 20, ask });
+      assert.equal(asked.length, 2);
+      assert.equal(asked[0].link, undefined);
+      assert.equal(asked[1].link, LINK);
+      assert.equal(asked[1].kind, signInQuestion({ link: LINK }).kind);
+    });
+  });
+
+  it("an empty answer writes nothing to claude, and claude is ended after the settling time", async () => {
+    await withLogin(async (m) => {
+      const mine = join(m.home, ".local", "bin", "claude");
+      writeFileSync(mine, `#!/bin/sh\ncase "$*" in\n  "auth login") echo "${LINK}"; echo $$ > "${join(m.dir, "claude-pid")}"; read -r line; printf '%s\\n' "$line" > "${join(m.dir, "claude-got")}" ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
+      chmodSync(mine, 0o755);
+      const result = await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 20, ask: async () => ({}) });
+      assert.equal(existsSync(join(m.dir, "claude-got")), false);
+      await new Promise((r) => setTimeout(r, 200));
+      assert.equal(existsSync(join(m.dir, "claude-got")), false);
+      const pid = Number(readFileSync(join(m.dir, "claude-pid"), "utf8"));
+      assert.throws(() => process.kill(pid, 0));
+      assert.equal(result.signedIn, true);
+    });
+  });
+
+  it("a back or a cancel ends claude without writing to it", async () => {
+    for (const answer of ["back", "cancel"]) {
+      await withLogin(async (m) => {
+        await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 2000, ask: async () => answer });
+        await new Promise((r) => setTimeout(r, 200));
+        assert.equal(existsSync(join(m.dir, "claude-got")), false);
+      });
+    }
+  });
+
+  it("goes on without an answer when claude ends by itself first", async () => {
+    await withLogin(async (m) => {
+      const mine = join(m.home, ".local", "bin", "claude");
+      writeFileSync(mine, `#!/bin/sh\ncase "$*" in\n  "auth login") echo "${LINK}"; exit 0 ;;\n  "auth status --json") cat "${join(m.dir, "says", "claude-status")}" ;;\n  --version) cat "${join(m.dir, "says", "claude-version")}" ;;\nesac\n`);
+      chmodSync(mine, 0o755);
+      const result = await signIn({ ...base(m), linkWaitMs: 5000, settleMs: 2000, ask: () => new Promise(() => {}) });
+      assert.deepEqual(result, { signedIn: true, plan: "max" });
+    });
+  });
+
+  it("a sign-in that never ends is stopped after its time, and says so", async () => {
+    await withLogin(async (m) => {
+      const result = await signIn({ ...base(m), timeoutMs: 50, linkWaitMs: 2000, settleMs: 2000, ask: () => new Promise(() => {}) });
+      assert.deepEqual(result, { signedIn: false, plan: null, fault: "Signing in took too long. Try again." });
+    }, { claude: "signed-out" });
+  });
+
+  it("one that ends signed out says so", async () => {
+    await withLogin(async (m) => {
+      const result = await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 20, ask: async () => ({}) });
+      assert.deepEqual(result, { signedIn: false, plan: null, fault: "Claude Code is not signed in yet. Try again." });
+    }, { claude: "signed-out" });
+  });
+
+  it("after signing in, only signed in and the plan are given back", async () => {
+    await withLogin(async (m) => {
+      const result = await signIn({ ...base(m), linkWaitMs: 2000, settleMs: 20, ask: async () => ({}) });
+      const text = JSON.stringify(result);
+      assert.equal(text.includes("jane@example.invalid"), false);
+      assert.equal(text.includes("Example Org"), false);
+      assert.deepEqual(result, { signedIn: true, plan: "max" });
+    });
+  });
+
+  it("with pty false it starts nothing and only asks claude's state", async () => {
+    await withLogin(async (m) => {
+      const result = await signIn({ ...base(m), pty: false, ask: async () => assert.fail("nothing is asked") });
+      assert.equal(m.ran().includes("script"), false);
+      assert.deepEqual(result, { signedIn: true, plan: "max" });
     });
   });
 });

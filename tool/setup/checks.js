@@ -184,6 +184,9 @@ export function claudeAt({ home, tools, system = ["/usr/bin", "/bin"] }) {
   return null;
 }
 
+/** The environment Claude Code is run with, built from scratch: its home, the app's tools folder and the system's, and a locale. */
+export const claudeEnv = ({ home, tools }) => ({ HOME: home, PATH: `${tools}:/usr/bin:/bin`, LANG: "en_US.UTF-8" });
+
 /** What is known of Claude Code: where it is, its version, whether it is signed in, and its plan. Claude is run with an environment
     built from scratch. Of what `auth status --json` prints only whether it is signed in and the plan are read: never the email, never
     the organisation. */
@@ -191,7 +194,7 @@ export function claudeState({ home, tools, run = spawnSync }) {
   const where = claudeAt({ home, tools });
   const state = { here: where !== null, where, version: null, enough: false, signedIn: false, plan: null };
   if (!where) return state;
-  const env = { HOME: home, PATH: `${tools}:/usr/bin:/bin`, LANG: "en_US.UTF-8" };
+  const env = claudeEnv({ home, tools });
   const ask = (args) => run(where, args, { encoding: "utf8", timeout: 30000, env });
   const said = ask(["--version"]);
   const version = /\d+\.\d+\.\d+/.exec(said.status === 0 ? String(said.stdout) : "");
