@@ -36,8 +36,8 @@ PIN_SIZE[whisper]="10 MB"
 PIN_SHA[whisper]=ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720
 PIN_FROM[whisper]="Homebrew's whisper.cpp 1.9.5 formula on the Mac Studio (/opt/homebrew/Cellar/whisper.cpp/1.9.5/.brew/whisper.cpp.rb)"
 
-# S2: CMake, which whisper.cpp builds with, Kitware's own build for macOS. It is used for the build alone. Not pinned yet: Kitware
-# publishes the SHA-256 of each file in the list PIN_SUMS names, which the fetch prints beside the one it found.
+# S2: CMake, which whisper.cpp builds with, Kitware's own build for macOS. It is used for the build alone. Pinned on 2026-11-09 by
+# the SHA-256 Kitware publishes for it in the list PIN_SUMS names, which the fetch printed beside the one it found.
 PIN_FILE[cmake]=cmake-4.0.3-macos-universal.tar.gz
 PIN_URL[cmake]=https://github.com/Kitware/CMake/releases/download/v4.0.3/cmake-4.0.3-macos-universal.tar.gz
 PIN_SIZE[cmake]="80 MB"
@@ -45,8 +45,8 @@ PIN_SHA[cmake]=4e85de4daf1c3e82d7dc6b8ba5683972944b466343aeb9c327a742437bb3ce9a
 PIN_FROM[cmake]="Kitware's own list of the SHA-256s of its 4.0.3 files (cmake-4.0.3-SHA-256.txt), which the file fetched on 2026-11-09 matched; pinned on Jason's yes"
 PIN_SUMS[cmake]=https://github.com/Kitware/CMake/releases/download/v4.0.3/cmake-4.0.3-SHA-256.txt
 
-# S3: node, the version `node --version` printed on the Mac Studio on 9 November 2026, as nodejs.org builds it. Not pinned yet:
-# nodejs.org publishes the SHA-256 of each file in the list PIN_SUMS names, which the fetch prints beside the one it found.
+# S3: node, the version `node --version` printed on the Mac Studio on 9 November 2026, as nodejs.org builds it. Pinned on
+# 2026-11-09 by the SHA-256 nodejs.org publishes for it in the list PIN_SUMS names, which the fetch printed beside the one it found.
 NODE_VERSION=26.11.1
 PIN_FILE[node]=node-v$NODE_VERSION-darwin-arm64.tar.gz
 PIN_URL[node]=https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-darwin-arm64.tar.gz
