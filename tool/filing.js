@@ -23,7 +23,7 @@ import { releaseEpisodeLock, runningCommand, takeEpisodeLock } from "./detached.
 import { askedAt, endedSinceYes } from "./finish-ended.js";
 import { holdsVideo, importState, leftByCrash, readStatusesIn, removeStatusIn, writeStatusIn } from "./importing.js";
 import { isRunning } from "./run.js";
-import { lookAt, lookLog, noteState, placeWordsOf, postIfDue, readAccess } from "./access.js";
+import { lookAt, lookLog, lookerOf, noteState, placeWordsOf, postIfDue, readAccess } from "./access.js";
 // kinds.js takes episodeKind from here: each is used only when called, so neither needs the other to have been read first.
 import { isZoomName, namesOf, withoutNames, zoomTimeOf } from "./kinds.js";
 import { gated, gatedAsOf, withShortId } from "./gate.js";
@@ -1438,7 +1438,9 @@ export function checkFinal(p, deps) {
       const folder = downloadsFolder(home);
       const node = deps.node || process.execPath;
       noteState("downloads", folder, err, { home, clock, node });
-      postIfDue("downloads", readAccess(home), { notify: deps.notify || (() => {}), clock, node, placeWords: err ? placeWordsOf("downloads", folder, home) : "", home });
+      // The banner names the program as macOS does: the app on an installed Mac, node on a dev Mac.
+      const name = lookerOf(deps.build ?? buildOf(thisCheckout()));
+      postIfDue("downloads", readAccess(home), { notify: deps.notify || (() => {}), clock, node, placeWords: err ? placeWordsOf("downloads", folder, home) : "", home, name });
     } catch {
       // a note or banner that fails costs only itself
     }
@@ -1782,16 +1784,18 @@ export async function importEpisodes(dir, deps, importOne) {
   // What the log says of a look that macOS or the folder's permissions refused: once while the look goes on meeting it.
   const lookSaid = new Map();
   const node = deps.node || process.execPath;
+  // The program as macOS names it, for the banner and the log: the app on an installed Mac, node on a dev Mac.
+  const looker = lookerOf(deps.build ?? buildOf(thisCheckout()));
   const sayLook = (place, folder, look) => {
     // The banner for whoever is at the Mac: access.js says whether it is due, from the note's `told`. It never stops the run. The place's
     // words are worked out only for a look that was refused or locked.
     try {
       const stopped = look && (look.state === "refused" || look.state === "locked");
-      postIfDue(place, readAccess(episode.home), { notify: deps.notify || (() => {}), clock, node, placeWords: stopped ? placeWordsOf(place, folder, episode.home) : "", home: episode.home });
+      postIfDue(place, readAccess(episode.home), { notify: deps.notify || (() => {}), clock, node, placeWords: stopped ? placeWordsOf(place, folder, episode.home) : "", home: episode.home, name: looker });
     } catch {
       // a banner that fails costs only the banner
     }
-    const line = lookLog(place, folder, look, episode.home, node);
+    const line = lookLog(place, folder, look, episode.home, node, { name: looker });
     if (!line) lookSaid.delete(place);
     else if (lookSaid.get(place) !== line) {
       lookSaid.set(place, line);

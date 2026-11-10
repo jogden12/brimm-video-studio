@@ -1174,6 +1174,15 @@ describe("the check of a local finish's copies in final/ (L5)", () => {
     assert.equal(existsSync(h.exportPath), false);
   }));
 
+  it("C6d names BRIMM Video Studio in a refused Downloads' banner on an installed Mac, as macOS does (review finding 1)", () => withWorld(async (w) => {
+    const h = holdFinal(w, L);
+    const refuse = { names: ["statSync"], deny: (name, path) => (path === h.exportPath ? Object.assign(new Error(`EPERM: operation not permitted, stat '${path}'`), { code: "EPERM" }) : null) };
+    const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+    const { result: r } = await watched(() => run(w, AT, { build: INSTALLED }), refuse);
+    assert.equal(readAccess(w.home).places.downloads.state, "refused");
+    assert.deepEqual(r.notices, ["This Mac does not let BRIMM Video Studio look in the Downloads folder. Allow it in System Settings › Privacy & Security › Files and Folders."]);
+  }));
+
   it("C7 flags a problem as today", () => withWorld(async (w) => {
     const h = holdFinal(w, L, { workCopies: false });
     rmSync(h.files.mp4);

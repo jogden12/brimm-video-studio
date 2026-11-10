@@ -6,7 +6,8 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, LOCK_CHANGED } from "../edit.js";
 import { PIN } from "../hyperframes.js";
-import { writeAccess } from "../access.js";
+import { ASKING_MS, accessLine, writeAccess } from "../access.js";
+import { dropWords } from "../guide.js";
 import { dropFolderOf, readSettings, writeSettings } from "../settings.js";
 import { writeStudio } from "../studio.js";
 import { UPDATE_EVERY_MS, updateCheckFile } from "../update-check.js";
@@ -138,6 +139,30 @@ describe("behind: on an installed Mac, a new node", () => {
     assert.deepEqual(r.said, [NEWEST]);
     assert.equal(asked, 0);
     assert.deepEqual(kicks, []);
+    t.done();
+  });
+});
+
+// On an installed Mac macOS's question and System Settings' list name the app, never "node" (review finding 1).
+describe("behind: on an installed Mac, what macOS answered the import", () => {
+  const APP = "BRIMM Video Studio";
+  const wordsOf = (t) => `your drop folder, ${dropWords(readSettings(t.home).settings, "Mac Studio", t.home)}`;
+  const dropOf = (t) => dropFolderOf(readSettings(t.home).settings, t.home);
+
+  it("says the box asks about BRIMM Video Studio when a look has waited", async () => {
+    const t = setup();
+    writeAccess(t.home, { version: 1, places: {}, looking: { place: "drop", pid: 4242, at: NOW - ASKING_MS - 1000 }, told: {} });
+    const r = await on(t, NEWEST_FEED().fetch, { agentPid: () => 4242 });
+    assert.deepEqual(r.said, [NEWEST, `The import has waited more than a minute to look in ${wordsOf(t)}. If a box on this Mac's screen asks whether "BRIMM Video Studio" may look in it, choose Allow, and the import goes on.`]);
+    t.done();
+  });
+
+  it("says the switch is under BRIMM Video Studio when the drop folder is refused", async () => {
+    const t = setup();
+    writeAccess(t.home, { version: 1, places: { drop: { state: "refused", code: "EPERM", at: NOW, since: NOW, folder: dropOf(t), node: NODE } }, looking: null, told: {} });
+    const r = await on(t, NEWEST_FEED().fetch);
+    assert.deepEqual(r.said, [NEWEST, `This Mac does not let the import look in ${wordsOf(t)}, so the videos you drop wait. In System Settings, under Privacy & Security, Files and Folders, turn on its switches under "BRIMM Video Studio". Then say "look again".`]);
+    assert.equal(r.said.at(-1), accessLine({ kind: "refused", place: "drop", code: "EPERM" }, { placeWords: wordsOf(t), switchName: "its switches", name: APP }));
     t.done();
   });
 });

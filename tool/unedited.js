@@ -35,7 +35,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { homedir, tmpdir } from "node:os";
 import { homeRefusal, studioHome } from "./home.js";
 import { buildOf, isInstalled } from "./build.js";
-import { bracket, noteState, postNewNodeIfDue, readAccess } from "./access.js";
+import { bracket, lookerOf, noteState, postNewNodeIfDue, readAccess } from "./access.js";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { isMain } from "./is-main.js";
 import { localDay, stamp } from "./shared/text.js";
@@ -1544,7 +1544,8 @@ export async function uneditedFolder(dir, deps) {
     try {
       names = waitingToCut(readdirSync(dir));
     } catch (e) {
-      log(`The folder could not be read (${e.code || e.message}). If it is in Dropbox or another cloud drive, allow node to read it in System Settings, Privacy & Security, Files and Folders.`);
+      // The program is named as macOS names it: the app on an installed Mac, node on a dev Mac.
+      log(`The folder could not be read (${e.code || e.message}). If it is in Dropbox or another cloud drive, allow ${lookerOf(deps.build ?? buildOf(thisCheckout()))} to read it in System Settings, Privacy & Security, Files and Folders.`);
       return [];
     }
     log(names.length ? `Looked in the folder: ${names.length} waiting (${names.join(", ")}).` : "Looked in the folder: nothing is waiting.");

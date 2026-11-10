@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
 import { HELPERS } from "../helpers.js";
+import { writeAccess } from "../access.js";
 import { hasFilters, hasHwaccel } from "../workcopy.js";
 
 const INSTALL = fileURLToPath(new URL("../install.sh", import.meta.url));
@@ -2747,6 +2748,19 @@ describe("BRIMM Video Studio's own copy of Studio (--tools; Studio app phase 4),
   const APPS_COPY_LINE = "This is BRIMM Video Studio's own copy of Studio (it has a build.json beside tool/), so it is set up only with the app's own programs, never Homebrew's. Open BRIMM Video Studio and choose Repair.";
   const GIT_CHECKOUT_LINE = "--tools and --app are for BRIMM Video Studio's own copy of Studio, which has a build.json beside tool/. This is a git checkout, which is set up with Homebrew's programs: run this again without them.";
   const HELPERS_LINE = (tools) => `  Studio's helpers, compiled:  in ${tools}: ${HELPERS.map((h) => `brimm-${h}`).join(", ")}`;
+  it("names BRIMM Video Studio, as macOS does, in the line a setup ends on: access.js --setup-line, run from the app's own copy (review finding 1)", () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "brimm-home-")));
+    try {
+      const node = `${copy.tools}/node`;
+      const ok = (folder) => ({ state: "ok", code: "", at: 1, since: 1, folder, node, okNode: node });
+      writeAccess(home, { version: 1, looking: null, told: {}, places: { drop: ok(join(home, "Drop")), episodes: ok(join(home, "Episodes")) } });
+      const r = spawnSync(node, [join(copy.tool, "access.js"), "--setup-line"], { env: { ...process.env, BRIMM_VIDEO_HOME: home }, encoding: "utf8" });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(r.stdout, "  Files and Folders, at the end:  BRIMM Video Studio may look in the drop folder and in Dropbox.\n");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
   it("takes every program from the folder after --tools on a Mac with no Homebrew, and runs the background job with node from there", () => {
     const d = dropbox();
     try {

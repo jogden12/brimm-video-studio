@@ -873,6 +873,13 @@ describe("a folder of unedited videos", () => {
     assert.deepEqual(readdirSync(t.locks), []);
     t.done();
   });
+  it("names BRIMM Video Studio, as macOS does, when an installed Mac's folder cannot be read (review finding 1)", async () => {
+    const t = setup();
+    const installed = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+    assert.deepEqual(await uneditedFolder(join(t.dir, "not there"), { ...t.deps, build: installed }), []);
+    assert.deepEqual(t.logs, ["The folder could not be read (ENOENT). If it is in Dropbox or another cloud drive, allow BRIMM Video Studio to read it in System Settings, Privacy & Security, Files and Folders."]);
+    t.done();
+  });
 });
 
 describe("what the progress panel is told", () => {

@@ -107,7 +107,7 @@ import { processTable, readProcesses } from "./chain.js";
 import { SHOWN_MARKER, addShown, cantOpen, clearShownIn, freeShownName, madeShownByIdFolder, revealed, shownByIdFolder } from "./reveal.js";
 import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sessionByFollowUp } from "./receipts.js";
 import { isRunning, lastLine, lockFile, runProgram } from "./run.js";
-import { DOWNLOADS_SAY_MS, LOOK_ASKED, LOOK_AT_WORK, UNSEEN_MS, accessLine, blocksDrop, saysInEpisodes, saysInOverview, stepLine, findingOf, placeWordsOf, readAccess, switchFor } from "./access.js";
+import { DOWNLOADS_SAY_MS, LOOK_ASKED, LOOK_AT_WORK, UNSEEN_MS, accessLine, blocksDrop, saysInEpisodes, saysInOverview, stepLine, findingOf, lookerOf, placeWordsOf, readAccess, switchFor } from "./access.js";
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
@@ -1799,7 +1799,8 @@ function accessFindingOf(ctx) {
   if (!finding) return null;
   const folder = places[finding.place];
   const words = finding.place === "drop" ? `your drop folder, ${dropWords(ctx.settings, ctx.machine, home)}` : folder ? placeWordsOf(finding.place, folder, home) : "";
-  const opts = { placeWords: words, switchName: folder ? switchFor(folder, home) : "its switches" };
+  // The lines name the program as macOS does: the app on an installed Mac, node on a dev Mac.
+  const opts = { placeWords: words, switchName: folder ? switchFor(folder, home) : "its switches", name: lookerOf(ctx.build) };
   return { finding, line: accessLine(finding, opts), step: stepLine(finding, opts) };
 }
 
