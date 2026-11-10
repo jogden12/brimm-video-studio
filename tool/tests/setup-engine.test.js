@@ -817,6 +817,20 @@ describe("the Install's parts, and how each can end", () => {
     });
   });
 
+  it("a download that could not be saved ends with error download, and its own advice of making room", async () => {
+    await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
+      const said = "The transcription model could not be saved on this Mac (curl 23): its disk may be full. Make room on it, then choose Repair.";
+      const advice = "Make room on this Mac's disk, then open BRIMM Video Studio and choose Repair.";
+      const model = async ({ progress }) => {
+        progress({ part: "model", label: LABELS.model, done: 0, total: 100, state: "running" });
+        throw Object.assign(new Error(said), { code: "download", advice });
+      };
+      const { code, events } = await go(m, { run: "repair", stages: { model } });
+      assert.equal(code, 1);
+      assert.deepEqual(lastOf(events), { event: "error", code: "download", message: said, advice, contact: SUPPORT });
+    });
+  });
+
   it("the installer's exit 1 ends with error install and its text in details", async () => {
     for (const [exit, message] of [["1", "BRIMM Video Studio could not be set up on this Mac."], ["2", "Setup was refused, and nothing was changed."]]) {
       await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {

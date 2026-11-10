@@ -120,6 +120,21 @@ describe("stageModel", () => {
     });
   });
 
+  it("a curl that could not save the download (exit 23) says the disk may be full, not the internet", async () => {
+    await withMac(async (m, { progress, events }) => {
+      writeFileSync(join(m.dir, "exits", "curl"), "23");
+      const said = "The transcription model could not be saved on this Mac (curl 23): its disk may be full. Make room on it, then choose Repair.";
+      await assert.rejects(stageModel({ home: m.home, pin: pinOf(BYTES), programs: m.programs, progress }), (e) => {
+        assert.equal(e.code, "download");
+        assert.equal(e.message, said);
+        assert.equal(e.advice, "Make room on this Mac's disk, then open BRIMM Video Studio and choose Repair.");
+        return true;
+      });
+      assert.equal(events.at(-1).detail, said);
+      assert.ok(!existsSync(`${modelPath(m.home)}.part`));
+    });
+  });
+
   it("takes away a .part file left from before", async () => {
     await withMac(async (m, { progress }) => {
       mkdirSync(dirname(modelPath(m.home)), { recursive: true });
@@ -297,6 +312,17 @@ describe("runProgram", () => {
     });
   });
 
+  it("a character split between two of the program's writes is kept whole", async () => {
+    await withMac(async (m) => {
+      const { chunks, errors } = capture();
+      const file = join(m.dir, "halves");
+      writeFileSync(file, "#!/bin/sh\nprintf 'a \\342\\200'\nsleep 0.2\nprintf '\\272 b\\n'\n");
+      chmodSync(file, 0o755);
+      assert.deepEqual(await runProgram(file, [], { env: { PATH: "/usr/bin:/bin" }, errors }), { code: 0 });
+      assert.equal(chunks.join(""), "a \u203a b\n");
+    });
+  });
+
   it("writes it once when a stop ends the program, and resolves with no code", async () => {
     await withMac(async (m) => {
       const { chunks, errors } = capture();
@@ -407,6 +433,13 @@ describe("installClaudeCode", () => {
       await assert.rejects(installClaudeCode({ home: m.home, tools: m.tools, pin, programs: m.programs, say }), { message: "Claude Code could not be installed. Check this Mac's internet connection, then try again." });
       assert.deepEqual(caches(m), []);
     }, { exit: 22 });
+  });
+
+  it("a download that could not be saved (curl 23) says the disk may be full, and keeps nothing", async () => {
+    await withInstaller(async (m, { pin, say }) => {
+      await assert.rejects(installClaudeCode({ home: m.home, tools: m.tools, pin, programs: m.programs, say }), { message: "Claude Code could not be saved on this Mac (curl 23): its disk may be full. Make room on it, then try again." });
+      assert.deepEqual(caches(m), []);
+    }, { exit: 23 });
   });
 
   it("an install that leaves no Claude Code behind fails, and keeps nothing", async () => {
@@ -670,6 +703,19 @@ describe("runInstaller and installerOutcome", () => {
     }
   });
 
+  it("a character split between two of the installer's writes is kept whole in its text", async () => {
+    const m = mac();
+    try {
+      const halves = join(m.dir, "bin", "halves");
+      writeFileSync(halves, "#!/bin/sh\nprintf 'Moving \\342\\200'\nsleep 0.2\nprintf '\\272 done\\n'\n");
+      chmodSync(halves, 0o755);
+      const result = await runInstaller({ args: ["--yes"], home: m.home, programs: { installer: [halves] } });
+      assert.equal(result.text, "Moving \u203a done\n");
+    } finally {
+      m.done();
+    }
+  });
+
   it("exit 0 is done, exit 1 failed, exit 2 refused, each with the installer's text", async () => {
     const m = mac();
     try {
@@ -725,7 +771,7 @@ describe("installWhenIdle", () => {
       assert.equal(e.waits.length, 3);
       assert.equal(JSON.stringify(e.sent).includes("Jane"), false);
       assert.equal(e.sent.length, 3);
-      assert.equal(e.sent.every((event) => event.state === "waiting" && typeof event.detail === "string"), true);
+      for (const event of e.sent) assert.deepEqual([event.state, event.detail], ["waiting", "Something is at work on this Mac."]);
     } finally {
       m.done();
     }

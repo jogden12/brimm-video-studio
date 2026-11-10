@@ -245,7 +245,7 @@ async function install(ctx, answers) {
     } catch (e) {
       close(ctx, part, talk.stopping ? SAY.stopped : undefined);
       talk.checkpoint();
-      if (e?.code === "download") throw new Ending("download", e.message, { advice: SAY.download });
+      if (e?.code === "download") throw new Ending("download", e.message, { advice: e.advice ?? SAY.download });
       throw e;
     }
     talk.checkpoint();

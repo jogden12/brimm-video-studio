@@ -48,6 +48,10 @@ const fail = (message) => Object.assign(new Error(message), { code: "download" }
 const stopped = () => Object.assign(new Error("This part was stopped."), { code: "stopped" });
 const MODEL_WRONG = "The transcription model that was downloaded is not the one BRIMM Video Studio expects. Nothing of it was kept.";
 const MODEL_FAILED = (code) => `The transcription model could not be downloaded (curl ${code}). Check this Mac's internet connection, then choose Repair.`;
+/** curl's exit code when it could not write what it downloaded: on a Mac, most likely a disk that is full. */
+const CURL_UNSAVED = 23;
+const MODEL_UNSAVED = "The transcription model could not be saved on this Mac (curl 23): its disk may be full. Make room on it, then choose Repair.";
+const FULL_DISK = "Make room on this Mac's disk, then open BRIMM Video Studio and choose Repair.";
 const CLI_FAILED = "The HyperFrames tools could not be fetched as BRIMM Video Studio expects them. Check this Mac's internet connection, then choose Repair.";
 const CHROME_FAILED = "HyperFrames could not fetch its copy of Chrome. Check this Mac's internet connection, then choose Repair.";
 
@@ -64,8 +68,8 @@ export function runProgram(program, args, { env, signal, errors = process.stderr
   return new Promise((resolve) => {
     const child = spawn(program, args, { env, stdio: ["ignore", "pipe", "pipe"], signal });
     let printed = "";
-    child.stdout.on("data", (chunk) => (printed += chunk));
-    child.stderr.on("data", (chunk) => (printed += chunk));
+    child.stdout.setEncoding("utf8").on("data", (chunk) => (printed += chunk));
+    child.stderr.setEncoding("utf8").on("data", (chunk) => (printed += chunk));
     let settled = false;
     const end = (code) => {
       if (settled) return;
@@ -90,16 +94,17 @@ const sizeOf = (file) => {
 /** Stages the model in `modelPath(home)`: a model that is there with the pin's SHA-256 is left (skipped, and curl is never run);
     otherwise it is downloaded to a .part file, which is given its name only when its SHA-256 is the pin's. The bar's `done` is the
     .part file's size, read every `pollMs`; its `total` is `bytes`, and null once the file is larger than that. Resolves "done" or
-    "skipped"; rejects with code "download" and words fit to show, or "stopped". */
+    "skipped"; rejects with code "download" and words fit to show (with the `advice` to give, when it is not the internet's fault),
+    or "stopped". */
 export async function stageModel({ home, pin, programs, progress, signal, bytes = MODEL_BYTES, pollMs = 500 }) {
   const send = (state, done, total, detail) => progress({ part: "model", label: LABELS.model, done, total, state, ...(detail ? { detail } : {}) });
   const target = modelPath(home);
   const part = `${target}.part`;
   const bar = (size) => (size > bytes ? { done: size, total: null } : { done: size, total: bytes });
-  const give = (message, code = "download") => {
+  const give = (message, advice) => {
     rmSync(part, { force: true });
     send("failed", 0, null, message);
-    return Object.assign(new Error(message), { code });
+    return Object.assign(new Error(message), { code: "download", ...(advice ? { advice } : {}) });
   };
   if (signal?.aborted) throw stopped();
   send("running", 0, bytes);
@@ -126,6 +131,7 @@ export async function stageModel({ home, pin, programs, progress, signal, bytes 
     rmSync(part, { force: true });
     throw stopped();
   }
+  if (ran.code === CURL_UNSAVED) throw give(MODEL_UNSAVED, FULL_DISK);
   if (ran.code !== 0) throw give(MODEL_FAILED(ran.code));
   if ((await sha256Of(part)) !== pin.sha256) throw give(MODEL_WRONG);
   renameSync(part, target);
@@ -208,6 +214,7 @@ export const CLAUDE_INSTALL_ARGS = ["install"];
 
 const CLAUDE_WRONG = "The copy of Claude Code that was downloaded is not the one BRIMM Video Studio expects. Nothing of it was kept.";
 const CLAUDE_FAILED = "Claude Code could not be installed. Check this Mac's internet connection, then try again.";
+const CLAUDE_UNSAVED = "Claude Code could not be saved on this Mac (curl 23): its disk may be full. Make room on it, then try again.";
 
 /** Installs Claude Code from `pin`: downloads it, runs it with CLAUDE_INSTALL_ARGS only when its SHA-256 is the pin's, takes the
     download away whatever happens, and resolves with the path where claudeAt then finds Claude Code. Rejects with words fit to show
@@ -225,6 +232,7 @@ export async function installClaudeCode({ home, tools, pin, programs, say = () =
   try {
     const got = await run(programs.curl, ["--fail", "--location", "--silent", "--show-error", "--output", part, pin.url], { env: { HOME: home, PATH: "/usr/bin:/bin", LANG: "en_US.UTF-8" }, signal });
     if (signal?.aborted) throw stopped();
+    if (got.code === CURL_UNSAVED) throw refuse(CLAUDE_UNSAVED);
     if (got.code !== 0) throw refuse(CLAUDE_FAILED);
     if (!existsSync(part) || (await sha256Of(part)) !== pin.sha256) throw refuse(CLAUDE_WRONG);
     chmodSync(part, 0o755);
@@ -409,8 +417,8 @@ export function runInstaller({ args, home, programs }) {
     const [program, ...first] = programs.installer;
     const child = spawn(program, [...first, ...args], { env: installerEnv(home), stdio: ["ignore", "pipe", "pipe"] });
     let printed = "";
-    child.stdout.on("data", (chunk) => (printed += chunk));
-    child.stderr.on("data", (chunk) => (printed += chunk));
+    child.stdout.setEncoding("utf8").on("data", (chunk) => (printed += chunk));
+    child.stderr.setEncoding("utf8").on("data", (chunk) => (printed += chunk));
     let settled = false;
     const end = (code) => {
       if (settled) return;
