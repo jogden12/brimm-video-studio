@@ -1439,8 +1439,8 @@ export function checkFinal(p, deps) {
       const node = deps.node || process.execPath;
       noteState("downloads", folder, err, { home, clock, node });
       // The banner names the program as macOS does: the app on an installed Mac, node on a dev Mac.
-      const name = lookerOf(deps.build ?? buildOf(thisCheckout()));
-      postIfDue("downloads", readAccess(home), { notify: deps.notify || (() => {}), clock, node, placeWords: err ? placeWordsOf("downloads", folder, home) : "", home, name });
+      const build = deps.build ?? buildOf(thisCheckout());
+      postIfDue("downloads", readAccess(home), { notify: deps.notify || (() => {}), clock, node, placeWords: err ? placeWordsOf("downloads", folder, home) : "", home, name: lookerOf(build), build });
     } catch {
       // a note or banner that fails costs only itself
     }
@@ -1785,18 +1785,20 @@ export async function importEpisodes(dir, deps, importOne) {
   // What the log says of a look that macOS or the folder's permissions refused: once while the look goes on meeting it.
   const lookSaid = new Map();
   const node = deps.node || process.execPath;
-  // The program as macOS names it, for the banner and the log: the app on an installed Mac, node on a dev Mac.
-  const looker = lookerOf(deps.build ?? buildOf(thisCheckout()));
+  // The program as macOS names it, for the banner and the log: the app on an installed Mac, node on a dev Mac. And which BRIMM Video Studio this
+  // is, for whom a locked folder's banner sends her to.
+  const lookBuild = deps.build ?? buildOf(thisCheckout());
+  const looker = lookerOf(lookBuild);
   const sayLook = (place, folder, look) => {
     // The banner for whoever is at the Mac: access.js says whether it is due, from the note's `told`. It never stops the run. The place's
     // words are worked out only for a look that was refused or locked.
     try {
       const stopped = look && (look.state === "refused" || look.state === "locked");
-      postIfDue(place, readAccess(episode.home), { notify: deps.notify || (() => {}), clock, node, placeWords: stopped ? placeWordsOf(place, folder, episode.home) : "", home: episode.home, name: looker });
+      postIfDue(place, readAccess(episode.home), { notify: deps.notify || (() => {}), clock, node, placeWords: stopped ? placeWordsOf(place, folder, episode.home) : "", home: episode.home, name: looker, build: lookBuild });
     } catch {
       // a banner that fails costs only the banner
     }
-    const line = lookLog(place, folder, look, episode.home, node, { name: looker });
+    const line = lookLog(place, folder, look, episode.home, node, { name: looker, build: lookBuild });
     if (!line) lookSaid.delete(place);
     else if (lookSaid.get(place) !== line) {
       lookSaid.set(place, line);

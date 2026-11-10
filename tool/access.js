@@ -9,7 +9,7 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildOf, isInstalled } from "./build.js";
+import { askWords, buildOf, isInstalled } from "./build.js";
 import { isMain } from "./is-main.js";
 import { studioHome } from "./home.js";
 import { realOf } from "./places.js";
@@ -165,8 +165,11 @@ const LOG_FILE = "~/Library/Logs/brimm-video.log";
 
 /** The line for her chat (and the installer) for a finding. `placeWords` is the place in her words, `switchName` the switch to turn on,
     `code` the error's code when the finding has none, `name` the program as macOS names it (`lookerOf`). System Settings can list
-    several "node" (one for each node that ever asked), and the app once. */
-export function accessLine(finding, { placeWords = "", switchName = "", code = "", name = "node" } = {}) {
+    several "node" (one for each node that ever asked), and the app once. `build` is which BRIMM Video Studio this is (build.js): on an
+    installed Mac, where no Jason is at hand, a line that sends her to Jason sends her to the support contact, if the build names one, and
+    leaves out its note for Jason, which names node, the log and a command for Terminal. */
+export function accessLine(finding, { placeWords = "", switchName = "", code = "", name = "node", build } = {}) {
+  const forJason = (note) => (isInstalled(build) ? "" : ` (Jason: ${note})`);
   const gone = finding.place === "downloads" ? ", so the exports HyperFrames put there stay there" : ", so the videos you drop wait";
   switch (finding.kind) {
     case "asking":
@@ -174,15 +177,15 @@ export function accessLine(finding, { placeWords = "", switchName = "", code = "
     case "refused":
       return `This Mac does not let the import look in ${placeWords}${gone}. In System Settings, under Privacy & Security, Files and Folders, turn on ${switchName} under ${name === "node" ? 'each "node" listed' : `"${name}"`}. Then say "look again".`;
     case "locked":
-      return `The import cannot open ${placeWords}: the folder's own permissions shut it. Ask Jason. (Jason: node gets EACCES there; see Get Info, Sharing & Permissions.)`;
+      return `The import cannot open ${placeWords}: the folder's own permissions shut it.${askWords(build, " Ask Jason.")}${forJason("node gets EACCES there; see Get Info, Sharing & Permissions.")}`;
     case "error":
-      return `The import could not look in ${placeWords}${finding.code || code ? ` (${finding.code || code})` : ""}. Ask Jason. (Jason: see ${LOG_FILE}.)`;
+      return `The import could not look in ${placeWords}${finding.code || code ? ` (${finding.code || code})` : ""}.${askWords(build, " Ask Jason.")}${forJason(`see ${LOG_FILE}.`)}`;
     case "missing":
       return `${capital(placeWords)}, is not there now. If it is on another disk, connect the disk, then say "look again".`;
     case "unseen": {
       const n = finding.videos.length;
       const [what, it, waits] = n === 1 ? ["1 video", "it", "waits"] : [`${n} videos`, "they", "wait"];
-      return `The import has not taken ${what} in your drop folder, and no import is running. Say "look again". If ${it} still ${waits}, ask Jason. (Jason: see ${LOG_FILE}, and launchctl print gui/$(id -u)/com.thebrimm.unedited.)`;
+      return `The import has not taken ${what} in your drop folder, and no import is running. Say "look again".${askWords(build, ` If ${it} still ${waits}, ask Jason.`)}${forJason(`see ${LOG_FILE}, and launchctl print gui/$(id -u)/com.thebrimm.unedited.`)}`;
     }
     case "newNode":
       return "node was updated on this Mac, so macOS may ask whether node may look in your drop folder or in Dropbox. If a box asks, choose Allow.";
@@ -194,7 +197,7 @@ export function accessLine(finding, { placeWords = "", switchName = "", code = "
 /** The line on one waiting video's step: its own for a video the import has not taken, else the finding's line as it is. Nothing for
     a finding that does not block a video, or one about Downloads. */
 export function stepLine(finding, opts = {}) {
-  if (finding.kind === "unseen") return 'The import has not taken it, and no import is running. Say "look again". If it still waits, ask Jason.';
+  if (finding.kind === "unseen") return `The import has not taken it, and no import is running. Say "look again".${askWords(opts.build, " If it still waits, ask Jason.")}`;
   if (finding.place === "downloads") return "";
   return ["asking", "refused", "locked", "error"].includes(finding.kind) ? accessLine(finding, opts) : "";
 }
@@ -209,36 +212,38 @@ export const saysInOverview = (finding) => finding.kind !== "newNode" && finding
 /** Whether `episodes` says a finding: all but a new node. */
 export const saysInEpisodes = (finding) => finding.kind !== "newNode";
 
-/** The banner for whoever is at the Mac. `name` is the program as macOS names it (`lookerOf`). */
-export function accessBanner(kind, placeWords, { name = "node" } = {}) {
+/** The banner for whoever is at the Mac. `name` is the program as macOS names it (`lookerOf`), and `build` which BRIMM Video Studio this
+    is: an installed Mac's banner sends nobody to Jason. */
+export function accessBanner(kind, placeWords, { name = "node", build } = {}) {
   if (kind === "refused") return `This Mac does not let ${name} look in ${placeWords}. Allow it in System Settings › Privacy & Security › Files and Folders.`;
-  if (kind === "locked") return `The import cannot open ${placeWords}. Ask Jason.`;
+  if (kind === "locked") return `The import cannot open ${placeWords}.${askWords(build, " Ask Jason.")}`;
   if (kind === "newNode") return "node was updated. If macOS asks whether node may look in a folder, choose Allow.";
   return "";
 }
 
-/** The log line for a look that macOS or the folder's permissions refused. `node` is the program's path, `name` what macOS calls it. */
-export function accessLog(state, code, node, placeWords, { name = "node" } = {}) {
+/** The log line for a look that macOS or the folder's permissions refused. `node` is the program's path, `name` what macOS calls it, and
+    `build` which BRIMM Video Studio this is: an installed Mac's log names no Jason. */
+export function accessLog(state, code, node, placeWords, { name = "node", build } = {}) {
   if (state === "refused") return `macOS does not let ${name} (${node}) look in ${placeWords} (${code}). Allow ${name} in System Settings, Privacy & Security, Files and Folders; then say "look again" in her chat, or drop the video again.`;
-  if (state === "locked") return `The folder's own permissions do not let ${name} look in ${placeWords} (${code}). Jason checks them in Finder, Get Info, Sharing & Permissions.`;
+  if (state === "locked") return `The folder's own permissions do not let ${name} look in ${placeWords} (${code}). ${isInstalled(build) ? "They are checked" : "Jason checks them"} in Finder, Get Info, Sharing & Permissions.`;
   return "";
 }
 
 /** The log line for a `lookAt` result that was not ok: `accessLog`'s line for refused and locked, a line with the code for any other error, and
     "" for a look that found the folder, or did not find it there (the caller says that). `home` is for the place's words. */
-export function lookLog(place, folder, look, home, node = process.execPath, { name = "node" } = {}) {
+export function lookLog(place, folder, look, home, node = process.execPath, { name = "node", build } = {}) {
   if (!look || look.names) return "";
   const words = placeWordsOf(place, folder, home);
   if (look.state === "error") return `${name} (${node}) could not look in ${words} (${look.code || "an error"}).`;
-  return accessLog(look.state, look.code, node, words, { name });
+  return accessLog(look.state, look.code, node, words, { name, build });
 }
 
 /** The installer's line, from the note, for what macOS answered at the end of the setup. `home` is for the place words, `now` the time, `alive`
     whether a process is running (kill 0, as run.js isRunning), and `places` where each place is now, to name a place the note has no
     folder for yet (a first look). Only these: both places ok; none looked yet; a live look under a minute old (still looking), or older
     (the asking line); a look whose process is gone is passed over; refused, locked and error in any place; missing for the drop folder only.
-    `name` is the program as macOS names it (`lookerOf`). */
-export function setupLine(note, { home = studioHome(), now = Date.now(), alive = isRunning, places = {}, name = "node" } = {}) {
+    `name` is the program as macOS names it (`lookerOf`), and `build` which BRIMM Video Studio this is, for accessLine's words. */
+export function setupLine(note, { home = studioHome(), now = Date.now(), alive = isRunning, places = {}, name = "node", build } = {}) {
   const lead = "  Files and Folders, at the end:  ";
   const folderOf = (place) => {
     const noted = (note.places[place] || {}).folder;
@@ -255,7 +260,7 @@ export function setupLine(note, { home = studioHome(), now = Date.now(), alive =
   const looking = note.looking;
   if (looking && alive(looking.pid)) {
     if (now - looking.at < ASKING_MS) return `${lead}the import is still looking; if a box asks whether "${name}" may look in a folder, choose Allow.`;
-    return lead + accessLine({ kind: "asking", place: looking.place }, { placeWords: words(looking.place), name });
+    return lead + accessLine({ kind: "asking", place: looking.place }, { placeWords: words(looking.place), name, build });
   }
   for (const place of PLACES) {
     const noted = noteOf(place);
@@ -265,7 +270,7 @@ export function setupLine(note, { home = studioHome(), now = Date.now(), alive =
     const said = noted.state === "missing" ? place === "drop" : ["refused", "locked", "error"].includes(noted.state);
     if (!said) continue;
     const finding = { kind: noted.state, place, code: noted.code };
-    return lead + accessLine(finding, { placeWords: words(place), switchName: folderOf(place) ? switchFor(folderOf(place), home) : "its switches", name });
+    return lead + accessLine(finding, { placeWords: words(place), switchName: folderOf(place) ? switchFor(folderOf(place), home) : "its switches", name, build });
   }
   const both = ["drop", "episodes"].every((place) => (noteOf(place) || {}).state === "ok");
   return lead + (both ? `${name} may look in the drop folder and in Dropbox.` : "the import has not looked yet.");
@@ -277,8 +282,8 @@ export function setupLine(note, { home = studioHome(), now = Date.now(), alive =
     it to `home` each time, never from the run's memory (a run starts again on every dropped video). `notify` failing costs only the banner.
     `home` is required for `told` to persist: without it the rule works on `note` in memory only. Pass a `note` read after noteState (the
     look's own write), or the banner is judged from a note the look has since changed. `name` is the program as macOS names it
-    (`lookerOf`), for the banner's words. Gives whether a banner was posted. */
-export function postIfDue(place, note, { notify, clock = Date.now, node = process.execPath, placeWords = "", home, name = "node" } = {}) {
+    (`lookerOf`) and `build` which BRIMM Video Studio this is, for the banner's words. Gives whether a banner was posted. */
+export function postIfDue(place, note, { notify, clock = Date.now, node = process.execPath, placeWords = "", home, name = "node", build } = {}) {
   const state = (note.places[place] || {}).state;
   const told = (note.told = note.told || {});
   if (state !== "refused" && state !== "locked") {
@@ -293,7 +298,7 @@ export function postIfDue(place, note, { notify, clock = Date.now, node = proces
   const last = told[place];
   if (last && last.key === key && now - last.at <= BANNER_AGAIN_MS) return false;
   try {
-    notify(accessBanner(state, placeWords, { name }));
+    notify(accessBanner(state, placeWords, { name, build }));
   } catch {
     return false;
   }
@@ -330,14 +335,14 @@ function placesFromSettings(home) {
 }
 
 /** `node access.js --setup-line`: the installer's one line at the end of a setup, from the note. Prints nothing for any other argument,
-    and never fails the installer: whatever goes wrong prints nothing. The line names the program as macOS does, from `build` or, with
+    and never fails the installer: whatever goes wrong prints nothing. The line names the program as macOS does, and whom to ask, from `build` or, with
     none given, from the build of the checkout this file is in (an installed Mac's setup runs it from the app's own programs). */
 export function main(argv, { out = process.stdout, home, build } = {}) {
   if (argv[0] !== "--setup-line") return 0;
   try {
     const h = home || studioHome();
-    const name = lookerOf(build ?? buildOf(dirname(dirname(fileURLToPath(import.meta.url)))));
-    out.write(`${setupLine(readAccess(h), { home: h, places: placesFromSettings(h), name })}\n`);
+    const mine = build ?? buildOf(dirname(dirname(fileURLToPath(import.meta.url))));
+    out.write(`${setupLine(readAccess(h), { home: h, places: placesFromSettings(h), name: lookerOf(mine), build: mine })}\n`);
   } catch {
     // Nothing: the setup goes on without the line.
   }

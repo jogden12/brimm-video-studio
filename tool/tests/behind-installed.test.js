@@ -165,4 +165,27 @@ describe("behind: on an installed Mac, what macOS answered the import", () => {
     assert.equal(r.said.at(-1), accessLine({ kind: "refused", place: "drop", code: "EPERM" }, { placeWords: wordsOf(t), switchName: "its switches", name: APP }));
     t.done();
   });
+
+  it("sends her to the support contact, not to Jason, when the drop folder's own permissions shut it or a look failed (the sweep)", async () => {
+    for (const [state, code, line] of [
+      ["locked", "EACCES", (words) => `The import cannot open ${words}: the folder's own permissions shut it. Ask help@example.invalid.`],
+      ["error", "EIO", (words) => `The import could not look in ${words} (EIO). Ask help@example.invalid.`]
+    ]) {
+      const t = setup();
+      writeAccess(t.home, { version: 1, places: { drop: { state, code, at: NOW, since: NOW, folder: dropOf(t), node: NODE } }, looking: null, told: {} });
+      const r = await on(t, NEWEST_FEED().fetch);
+      assert.deepEqual(r.said, [NEWEST, line(wordsOf(t))]);
+      t.done();
+    }
+  });
+
+  it("sends her to the support contact when a video still waits that the import never took (the sweep)", async () => {
+    const t = setup();
+    const drop = dropOf(t);
+    mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, "Talk.mov"), "video");
+    const r = await on(t, NEWEST_FEED().fetch, { now: () => Date.now() + 60 * 60 * 1000, agentPid: () => null });
+    assert.deepEqual(r.said, [NEWEST, 'The import has not taken 1 video in your drop folder, and no import is running. Say "look again". If it still waits, ask help@example.invalid.']);
+    t.done();
+  });
 });

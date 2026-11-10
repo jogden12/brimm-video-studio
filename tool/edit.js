@@ -1799,8 +1799,8 @@ function accessFindingOf(ctx) {
   if (!finding) return null;
   const folder = places[finding.place];
   const words = finding.place === "drop" ? `your drop folder, ${dropWords(ctx.settings, ctx.machine, home)}` : folder ? placeWordsOf(finding.place, folder, home) : "";
-  // The lines name the program as macOS does: the app on an installed Mac, node on a dev Mac.
-  const opts = { placeWords: words, switchName: folder ? switchFor(folder, home) : "its switches", name: lookerOf(ctx.build) };
+  // The lines name the program as macOS does: the app on an installed Mac, node on a dev Mac. And an installed Mac's send her to no Jason.
+  const opts = { placeWords: words, switchName: folder ? switchFor(folder, home) : "its switches", name: lookerOf(ctx.build), build: ctx.build };
   return { finding, line: accessLine(finding, opts), step: stepLine(finding, opts) };
 }
 

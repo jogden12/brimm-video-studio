@@ -298,9 +298,11 @@ describe("the banners (A3)", () => {
       const a = await watched(() => run(w, L, { node: "/n/a", build: INSTALLED }), { names: READS, deny: denyList(w.drop) });
       assert.deepEqual(a.result.notices, [`This Mac does not let BRIMM Video Studio look in ${drop}. Allow it in System Settings › Privacy & Security › Files and Folders.`]);
       assert.ok(a.result.logs.includes(`macOS does not let BRIMM Video Studio (/n/a) look in ${drop} (EPERM). Allow BRIMM Video Studio in System Settings, Privacy & Security, Files and Folders; then say "look again" in her chat, or drop the video again.`), a.result.logs.join("|"));
-      const b = await watched(() => run(w, L + MIN, { node: "/n/a", build: INSTALLED }), { names: READS, deny: denyList(w.drop, "EACCES") });
-      assert.ok(b.result.logs.includes(`The folder's own permissions do not let BRIMM Video Studio look in ${drop} (EACCES). Jason checks them in Finder, Get Info, Sharing & Permissions.`), b.result.logs.join("|"));
-      for (const line of [...a.result.notices, ...a.result.logs, ...b.result.logs]) assert.doesNotMatch(line, /\bnode\b/, line);
+      const b = await watched(() => run(w, L + MIN, { node: "/n/a", build: { ...INSTALLED, support: "help@example.invalid" } }), { names: READS, deny: denyList(w.drop, "EACCES") });
+      // The sweep: an installed Mac's locked lines name no Jason. The log says where the permissions are checked, and the banner whom to ask.
+      assert.ok(b.result.logs.includes(`The folder's own permissions do not let BRIMM Video Studio look in ${drop} (EACCES). They are checked in Finder, Get Info, Sharing & Permissions.`), b.result.logs.join("|"));
+      assert.deepEqual(b.result.notices, [`The import cannot open ${drop}. Ask help@example.invalid.`]);
+      for (const line of [...a.result.notices, ...a.result.logs, ...b.result.logs, ...b.result.notices]) assert.doesNotMatch(line, /\bnode\b|Jason/, line);
     }));
 
   it("an installed Mac's log names BRIMM Video Studio for Episodes refused", () =>

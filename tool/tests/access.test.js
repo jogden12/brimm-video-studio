@@ -790,3 +790,83 @@ describe("node access.js --setup-line", () => {
     assert.equal(r.stdout, "");
   });
 });
+
+describe("an installed Mac's lines send nobody to Jason (the sweep)", () => {
+  const drop = "your drop folder, Dropbox › BRIMM Video › Drop";
+  const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+  const UNNAMED = { ...INSTALLED, support: "" };
+  const APP_NODE = "/Applications/BRIMM Video Studio.app/Contents/Resources/bin/node";
+  const on = (build) => ({ placeWords: drop, name: lookerOf(build), build });
+  const NEVER = /Jason|install\.sh|Terminal|\bnode\b/;
+
+  it("accessLine, locked: the support contact is asked, and the note for Jason is left out", () => {
+    const finding = { kind: "locked", place: "drop", code: "EACCES" };
+    assert.equal(accessLine(finding, on(INSTALLED)), `The import cannot open ${drop}: the folder's own permissions shut it. Ask help@example.invalid.`);
+    assert.equal(accessLine(finding, on(UNNAMED)), `The import cannot open ${drop}: the folder's own permissions shut it.`);
+    for (const build of [{ mode: "dev" }, undefined]) assert.equal(accessLine(finding, on(build)), `The import cannot open ${drop}: the folder's own permissions shut it. Ask Jason. (Jason: node gets EACCES there; see Get Info, Sharing & Permissions.)`);
+  });
+
+  it("accessLine, error: the support contact is asked, and the log's place is left out", () => {
+    const finding = { kind: "error", place: "drop", code: "EIO" };
+    assert.equal(accessLine(finding, on(INSTALLED)), `The import could not look in ${drop} (EIO). Ask help@example.invalid.`);
+    assert.equal(accessLine(finding, on(UNNAMED)), `The import could not look in ${drop} (EIO).`);
+    for (const build of [{ mode: "dev" }, undefined]) assert.equal(accessLine(finding, on(build)), `The import could not look in ${drop} (EIO). Ask Jason. (Jason: see ~/Library/Logs/brimm-video.log.)`);
+  });
+
+  it("accessLine and stepLine, unseen: the support contact is asked if the videos still wait, and no command is given", () => {
+    const one = { kind: "unseen", videos: ["a.mov"] };
+    const two = { kind: "unseen", videos: ["a.mov", "b.mov"] };
+    assert.equal(accessLine(one, on(INSTALLED)), 'The import has not taken 1 video in your drop folder, and no import is running. Say "look again". If it still waits, ask help@example.invalid.');
+    assert.equal(accessLine(two, on(INSTALLED)), 'The import has not taken 2 videos in your drop folder, and no import is running. Say "look again". If they still wait, ask help@example.invalid.');
+    assert.equal(accessLine(two, on(UNNAMED)), 'The import has not taken 2 videos in your drop folder, and no import is running. Say "look again".');
+    assert.equal(stepLine(one, on(INSTALLED)), 'The import has not taken it, and no import is running. Say "look again". If it still waits, ask help@example.invalid.');
+    assert.equal(stepLine(one, on(UNNAMED)), 'The import has not taken it, and no import is running. Say "look again".');
+    for (const build of [{ mode: "dev" }, undefined]) {
+      assert.equal(accessLine(two, on(build)), 'The import has not taken 2 videos in your drop folder, and no import is running. Say "look again". If they still wait, ask Jason. (Jason: see ~/Library/Logs/brimm-video.log, and launchctl print gui/$(id -u)/com.thebrimm.unedited.)');
+      assert.equal(stepLine(one, on(build)), 'The import has not taken it, and no import is running. Say "look again". If it still waits, ask Jason.');
+    }
+  });
+
+  it("stepLine gives a locked or failed look's line as accessLine does, on an installed Mac too", () => {
+    for (const finding of [{ kind: "locked", place: "drop", code: "EACCES" }, { kind: "error", place: "episodes", code: "EIO" }]) {
+      assert.equal(stepLine(finding, on(INSTALLED)), accessLine(finding, on(INSTALLED)));
+      assert.doesNotMatch(stepLine(finding, on(INSTALLED)), NEVER);
+    }
+  });
+
+  it("accessBanner, locked", () => {
+    assert.equal(accessBanner("locked", drop, { name: lookerOf(INSTALLED), build: INSTALLED }), `The import cannot open ${drop}. Ask help@example.invalid.`);
+    assert.equal(accessBanner("locked", drop, { name: lookerOf(UNNAMED), build: UNNAMED }), `The import cannot open ${drop}.`);
+    for (const build of [{ mode: "dev" }, undefined]) assert.equal(accessBanner("locked", drop, { name: "node", build }), `The import cannot open ${drop}. Ask Jason.`);
+  });
+
+  it("accessLog and lookLog, locked: the log says where the permissions are checked, and names nobody", () => {
+    const installed = `The folder's own permissions do not let BRIMM Video Studio look in ${drop} (EACCES). They are checked in Finder, Get Info, Sharing & Permissions.`;
+    assert.equal(accessLog("locked", "EACCES", APP_NODE, drop, { name: lookerOf(INSTALLED), build: INSTALLED }), installed);
+    assert.equal(accessLog("locked", "EACCES", APP_NODE, drop, { name: lookerOf(UNNAMED), build: UNNAMED }), installed);
+    for (const build of [{ mode: "dev" }, undefined]) assert.equal(accessLog("locked", "EACCES", NODE, drop, { name: "node", build }), `The folder's own permissions do not let node look in ${drop} (EACCES). Jason checks them in Finder, Get Info, Sharing & Permissions.`);
+    const folder = join(home, "Dropbox", "BRIMM Video", "Drop");
+    const said = lookLog("drop", folder, { state: "locked", code: "EACCES" }, home, APP_NODE, { name: lookerOf(INSTALLED), build: INSTALLED });
+    assert.match(said, /They are checked in Finder, Get Info, Sharing & Permissions\.$/);
+    assert.doesNotMatch(said.replace(APP_NODE, ""), NEVER);
+  });
+
+  it("postIfDue posts a locked folder's banner in an installed Mac's words", () => {
+    const posted = [];
+    writeAccess(home, { places: { drop: { state: "locked", code: "EACCES", at: 1000, since: 1000, folder: join(home, "Drop"), node: APP_NODE } } });
+    postIfDue("drop", readAccess(home), { notify: (text) => posted.push(text), clock: () => 2000, node: APP_NODE, placeWords: drop, home, name: lookerOf(INSTALLED), build: INSTALLED });
+    assert.deepEqual(posted, [`The import cannot open ${drop}. Ask help@example.invalid.`]);
+  });
+
+  it("setupLine and access.js --setup-line say a locked folder in an installed Mac's words at the end of a setup", () => {
+    const folder = join(home, "Drop");
+    writeAccess(home, { places: { drop: { state: "locked", code: "EACCES", at: 1000, since: 1000, folder, node: APP_NODE } } });
+    const words = placeWordsOf("drop", folder, home);
+    const installed = `  Files and Folders, at the end:  The import cannot open ${words}: the folder's own permissions shut it. Ask help@example.invalid.`;
+    assert.equal(setupLine(readAccess(home), { home, now: 2000, name: lookerOf(INSTALLED), build: INSTALLED }), installed);
+    assert.equal(setupLine(readAccess(home), { home, now: 2000, name: "node" }), `  Files and Folders, at the end:  The import cannot open ${words}: the folder's own permissions shut it. Ask Jason. (Jason: node gets EACCES there; see Get Info, Sharing & Permissions.)`);
+    const out = [];
+    accessMain(["--setup-line"], { out: { write: (text) => out.push(text) }, home, build: INSTALLED });
+    assert.deepEqual(out, [`${installed}\n`]);
+  });
+});
