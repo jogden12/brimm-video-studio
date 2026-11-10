@@ -61,7 +61,8 @@ function importLockPid(home, temp, alive, now) {
   for (const dir of [runsFolder(home), temp]) {
     let names = [];
     try {
-      names = readdirSync(dir).filter((n) => /^brimm-transcribe-.*\.lock$/.test(n)).sort();
+      // Only run.js's name. brimm-video's and brimm-operations' imports write it too, and so count (the careful side). Only this user's own temp folder is read.
+      names = readdirSync(dir).filter((n) => /^brimm-transcribe-[0-9a-f]{16}\.lock$/.test(n)).sort();
     } catch (e) {
       continue;
     }

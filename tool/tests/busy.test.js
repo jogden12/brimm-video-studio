@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CANNOT_TELL, RUNS_LOCK_STALE_MS, idleWhy, launchdPid, pidFromPrint } from "../busy.js";
 import { lockOf, whenReadyLockOf } from "../detached.js";
@@ -137,6 +137,26 @@ describe("idleWhy", () => {
       mkdirSync(tempOf(home), { recursive: true });
       for (const name of ["brimm-transcribe-0123456789abcdef.txt", "another.lock", "brimm-transcribe.lock.old"]) writeFileSync(join(tempOf(home), name), "4321");
       assert.equal(whyOn(home, { agentPid: null, alive }), "");
+    });
+  });
+
+  it("takes only the name run.js gives an import's lock, 16 hex characters: a brimm-transcribe-notes.lock a live process wrote is not an import, in either folder (review finding 3, fix round 1)", () => {
+    // Each of these holds a live process's number and is written now: only the name says it is not an import's lock.
+    const others = ["brimm-transcribe-notes.lock", "brimm-transcribe-.lock", "brimm-transcribe-0123456789abcde.lock", "brimm-transcribe-0123456789abcdef0.lock", "brimm-transcribe-0123456789ABCDEF.lock", "brimm-transcribe-0123456789abcdeg.lock"];
+    for (const folderOf of [tempOf, runsFolder]) {
+      withHome((home) => {
+        mkdirSync(folderOf(home), { recursive: true });
+        for (const name of others) writeFileSync(join(folderOf(home), name), "4321");
+        assert.equal(whyOn(home, { agentPid: null, alive }), "", others.join(", "));
+        // The name run.js gives still counts, beside them. (Other characters than theirs: this disk may not tell A from a.)
+        writeFileSync(join(folderOf(home), "brimm-transcribe-fedcba9876543210.lock"), "4321");
+        assert.equal(whyOn(home, { agentPid: null, alive }), LOCK);
+      });
+    }
+    // And run.js's own name is of that form, whatever the folder it is for.
+    withHome((home) => {
+      assert.match(basename(oldImportLock(home)), /^brimm-transcribe-[0-9a-f]{16}\.lock$/);
+      assert.match(basename(importLock(home)), /^brimm-transcribe-[0-9a-f]{16}\.lock$/);
     });
   });
 
