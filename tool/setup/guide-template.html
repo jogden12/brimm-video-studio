@@ -33,18 +33,18 @@ section { break-inside: avoid; }
 
 <section>
 <h2>Your drop folder</h2>
-<p>Videos go into your drop folder, which is in Finder under: {{drop}}.</p>
+<p>Videos go into your drop folder. In Finder, it is {{drop}}.</p>
 <p>To keep it close at hand, add it to Finder's sidebar:</p>
 <ol>
 <li>In Finder, open the drop folder.</li>
 <li>Drag its folder icon from the title bar of the window into the sidebar, on the left.</li>
 </ol>
-<p>Finished videos you export from HyperFrames go to: {{exports}}.</p>
+<p>Finished videos you export from HyperFrames go to your exports folder. In Finder, it is {{exports}}.</p>
 </section>
 
 <section>
 <h2>Dropbox</h2>
-<p>BRIMM Video lives in Dropbox, in Finder under: {{root}}. Keep it on this Mac so it opens without a connection:</p>
+<p>BRIMM Video lives in Dropbox. In Finder, it is {{root}}. Keep it on this Mac so it opens without a connection:</p>
 <ol>
 <li>In Finder, find the BRIMM Video folder in Dropbox.</li>
 <li>Hold Control and click the folder, or right-click it.</li>
@@ -69,7 +69,7 @@ section { break-inside: avoid; }
 <h2>Starting in the Claude app</h2>
 <ol>
 <li>Open the Claude app and choose its Code tab.</li>
-<li>Choose the folder BRIMM Video Studio, which is in your home folder ({{studio}}).</li>
+<li>Choose the folder {{studio}}.</li>
 <li>Tell Claude what you would like to do with a video.</li>
 </ol>
 </section>
@@ -88,7 +88,7 @@ section { break-inside: avoid; }
 </ul>
 </section>
 
-<section>
+<section data-when="notes">
 <h2>Notes</h2>
 <ul>
 {{list:notes}}

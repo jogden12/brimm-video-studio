@@ -78,6 +78,28 @@ describe("the Getting Started guide", () => {
     ]) assert.ok(html.includes(say), say);
   });
 
+  it("the guide names each folder once, in plain words", () => {
+    const html = page();
+    const d = data();
+    for (const say of [
+      `Videos go into your drop folder. In Finder, it is ${d.drop}.`,
+      `Finished videos you export from HyperFrames go to your exports folder. In Finder, it is ${d.exports}.`,
+      `BRIMM Video lives in Dropbox. In Finder, it is ${d.root}.`,
+      `Choose the folder ${d.studio}.`,
+    ]) assert.ok(html.includes(say), say);
+    assert.equal(d.studio, "BRIMM Video Studio, in your home folder");
+    assert.ok(!/Finder under:|go to: |in your home folder \(/.test(html));
+  });
+
+  it("the Notes part is left out when there are no notes, and shown when there are", () => {
+    assert.ok(!page({ notes: [] }).includes("<h2>Notes</h2>"));
+    assert.ok(!page({ notes: [] }).includes("data-when"));
+    const html = page({ notes: ["A note."] });
+    assert.ok(html.includes("<h2>Notes</h2>\n<ul>\n<li>A note.</li>\n</ul>"));
+    assert.ok(!html.includes("data-when"));
+    assert.ok(page({ notes: [], missing: [] }).includes("<h2>Still to install</h2>"));
+  });
+
   it("the guide says where to start, how an update arrives, Repair, and who to ask", () => {
     const html = page({ missing: ["Dropbox"] });
     for (const say of ["BRIMM Video Studio", UPDATE_SAY.replace(/"/g, "&quot;"), REPAIR, "help@example.test", "<li>Dropbox</li>", "Code tab"]) assert.ok(html.includes(say), say);

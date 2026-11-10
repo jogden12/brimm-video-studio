@@ -42,9 +42,11 @@ export function guideData({ home, settings, build, missing = [], notes = [], now
 
 const escaped = (text) => String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-/** The page, whole: `{{key}}` is a value, `{{list:key}}` a list's lines as <li>, `{{font:<file>}}` a data: URI of a file in `fonts`. */
+/** The page, whole: `{{key}}` is a value, `{{list:key}}` a list's lines as <li>, `{{font:<file>}}` a data: URI of a file in `fonts`.
+    A `<section data-when="key">` is left out when the list `key` is empty, and is kept, without the mark, when it is not. */
 export function fillGuide(template, data, { fonts = FONTS } = {}) {
-  return template.replace(/\{\{(list:|font:)?([^{}]+?)\}\}/g, (mark, kind, key) => {
+  const shown = template.replace(/<section data-when="([^"]+)">([\s\S]*?<\/section>\n?)/g, (whole, key, rest) => (Array.isArray(data[key]) && data[key].length === 0 ? "" : `<section>${rest}`));
+  return shown.replace(/\{\{(list:|font:)?([^{}]+?)\}\}/g, (mark, kind, key) => {
     if (kind === "font:") {
       const type = MIME[key.split(".").pop().toLowerCase()];
       if (!type || /[\\/]/.test(key)) throw new Error(`The guide cannot hold the font "${key}".`);

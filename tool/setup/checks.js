@@ -147,8 +147,9 @@ export function nameClash(name, root) {
 }
 
 /** The BRIMM Video folders in Dropbox under `home`, looked for in the four places move.zsh's search_brimm_video looks, in its order.
-    Folders only; one folder reached by two spellings counts once, by its real path, and the first spelling is kept. */
-export function brimmVideoFolders(home) {
+    Folders only; one folder reached by two spellings counts once, by its real path (`real` gives it), and the first spelling is
+    kept. A folder that goes before its real path is read is passed over. */
+export function brimmVideoFolders(home, { real: realOf = realpathSync } = {}) {
   const dropboxes = (parent) => foldersIn(parent).filter((name) => name.startsWith("Dropbox")).sort().map((name) => join(parent, name));
   const below = (folders) => folders.flatMap((folder) => foldersIn(folder).filter((name) => !name.startsWith(".")).sort().map((name) => join(folder, name)));
   const cloud = dropboxes(join(home, "Library", "CloudStorage"));
@@ -159,7 +160,12 @@ export function brimmVideoFolders(home) {
     for (const folder of top) {
       const candidate = join(folder, "The BRIMM DB", "BRIMM Video");
       if (!isFolder(candidate)) continue;
-      const real = realpathSync(candidate);
+      let real;
+      try {
+        real = realOf(candidate);
+      } catch {
+        continue;
+      }
       if (seen.has(real)) continue;
       seen.add(real);
       found.push(candidate);

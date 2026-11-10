@@ -5,7 +5,7 @@ import { switchFor } from "../access.js";
 import { cloudFolder, dropFolderFault, exportsFolderFault, defaultDropFolder, folderWords, machineFault } from "../settings.js";
 import { APPS, GUARD_CLAUDE, NO_BRIMM_VIDEO, nameClash } from "./checks.js";
 
-/** A faults that settings.js words as a phrase, as a sentence: a capital first letter and a full stop. */
+/** A fault that settings.js words as a phrase, as a sentence: a capital first letter and a full stop. */
 export function sentence(words) {
   const text = String(words).trim();
   if (text === "") return "";

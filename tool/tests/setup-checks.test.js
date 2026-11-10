@@ -2,7 +2,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { accessFile, lookAt } from "../access.js";
@@ -312,6 +312,20 @@ describe("the search for BRIMM Video in Dropbox", () => {
       mkdirSync(join(m.home, "Dropbox", "The BRIMM DB"), { recursive: true });
       writeFileSync(join(m.home, "Dropbox", "The BRIMM DB", "BRIMM Video"), "not a folder");
       assert.deepEqual(brimmVideoFolders(m.home), []);
+    });
+  });
+
+  it("a folder that goes between the look and its real path is passed over, not thrown", () => {
+    withMac({ dropbox: false }, (m) => {
+      const gone = join(m.home, "Library", "CloudStorage", "Dropbox", "The BRIMM DB", "BRIMM Video");
+      const kept = join(m.home, "Dropbox", "The BRIMM DB", "BRIMM Video");
+      mkdirSync(gone, { recursive: true });
+      mkdirSync(kept, { recursive: true });
+      const real = (path) => {
+        if (path === gone) rmSync(gone, { recursive: true });
+        return realpathSync(path);
+      };
+      assert.deepEqual(brimmVideoFolders(m.home, { real }), [kept]);
     });
   });
 
