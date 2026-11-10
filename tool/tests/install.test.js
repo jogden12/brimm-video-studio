@@ -65,12 +65,14 @@ const ask = (...args) => askOn({}, ...args);
     what those files hold afterwards. `programs` names stand-ins to put in the home folder first, each by its path from
     there, such as ".local/bin/claude": a file that can be run and does nothing. `files` names plain files to put there, such
     as the transcriber's model, each by its path from there, or as [path, text] when it must hold something. `agentPath` is
-    the PATH the installer is told to give a launch agent, in place of its own: folders with no programs in them, for a test
-    that must not find the Claude Code of the Mac it runs on.
-    For one of the two Macs (--machine) the installer asks Claude Code whether it is signed in, and its version, so such a run
-    is given a stand-in for it, and no test runs the real one: `claude` is what the stand-in prints for `auth status --json`,
-    by default signed in, with an email the installer must never print, and `claudeVersion` what it prints for --version.
-    With `claude: null` there is no stand-in: give `agentPath` too, so that this Mac's own Claude Code is not found. `ffmpegSays` puts a
+    the PATH the installer is told to give a launch agent, in place of its own, or a function of the home folder made for the
+    test that gives it: folders on no Mac, or in that home folder, for a test that looks for Claude Code itself.
+    Every run is given a stand-in for Claude Code, named in BRIMM_CLAUDE, which the installer takes before any folder it looks
+    in, so that no test finds or runs the Claude Code of the Mac it runs on. For one of the two Macs (--machine) the installer
+    asks it whether it is signed in, and its version: `claude` is what the stand-in prints for `auth status --json`, by
+    default signed in, with an email the installer must never print, and `claudeVersion` what it prints for --version.
+    With `claude: null` there is no stand-in, and `agentPath` must be given too, so that the installer looks only in folders
+    on no Mac and in the home folder made for the test. `ffmpegSays` puts a
     stand-in for ffmpeg first on its PATH too, so that no test runs this Mac's own: { hwaccels, filters, version } are what it prints for
     -hwaccels, -filters and -version, and any other call it is given is written into `ran`, which a --print never makes; the calls it
     is given are kept, as what `asked` says of them, one to a line. `onPath` names more stand-ins to put first on
@@ -86,6 +88,8 @@ function askOn(installed, ...args) {
 function askWith({ installed = {}, programs = [], files = [], temp = [], launchd, agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, ffmpegSays, settings, bare = false, install = INSTALL }, ...args) {
   // The one rule of this file: nothing is run without --print.
   assert.ok(args.includes("--print"), "the installer is only ever asked what it would do");
+  // And no test reaches this Mac's own Claude Code: a run with no stand-in for it looks only where no Mac has one.
+  assert.ok(claude !== null || agentPath, "with claude: null, give agentPath too");
   const dir = mkdtempSync(join(tmpdir(), "brimm-install-"));
   try {
     const home = join(dir, "home");
@@ -129,7 +133,7 @@ function askWith({ installed = {}, programs = [], files = [], temp = [], launchd
     // The stand-in for ffmpeg keeps each call it is given, prints the lists --print asks it for, which change nothing, and writes any
     // other call into `ran`.
     const ffmpegStand = ffmpegSays ? { ffmpeg: `echo "$*" >> "${join(dir, "ffmpeg-asked")}"\ncase "$*" in\n  *-hwaccels*) printf '%s' '${ffmpegSays.hwaccels}' ;;\n  *-filters*) printf '%s' '${ffmpegSays.filters}' ;;\n  *-version*) echo '${ffmpegSays.version ?? "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers"}' ;;\n  *) echo "ffmpeg $*" >> "${ran}" ;;\nesac\n` } : {};
-    const stands = { ...onPath, ...ffmpegStand, ...(args.includes("--machine") && claude !== null ? { "claude-stand-in": `case "$*" in\n  "auth status --json") printf '%s' '${claude}'; exit ${signedOut ? 1 : 0} ;;\n  --version) echo '${claudeVersion}'; exit ${versionExit} ;;\n  *) echo "claude $*" >> "${ran}" ;;\nesac\n` } : {}) };
+    const stands = { ...onPath, ...ffmpegStand, ...(claude !== null ? { "claude-stand-in": `case "$*" in\n  "auth status --json") printf '%s' '${claude}'; exit ${signedOut ? 1 : 0} ;;\n  --version) echo '${claudeVersion}'; exit ${versionExit} ;;\n  *) echo "claude $*" >> "${ran}" ;;\nesac\n` } : {}) };
     for (const [name, script] of Object.entries(stands)) {
       const logged = name === "xcode-select" ? `[ "$1" = "-p" ] || echo "xcode-select $*" >> "${ran}"\n` : "";
       writeFileSync(join(bin, name), `#!/bin/sh\n${logged}${script}`);
@@ -143,7 +147,7 @@ function askWith({ installed = {}, programs = [], files = [], temp = [], launchd
     const env = {
       // The node that runs these tests is on the PATH of the installer, whatever PATH the tests were started with: with --machine it
       // reads this Mac's settings with node, before anything is changed. `bare` is a Mac with no Homebrew and no node.
-      HOME: home, TMPDIR: tmp, PATH: bare ? `${bin}:/usr/bin:/bin` : `${bin}:${process.env.PATH}:${dirname(process.execPath)}`, ...(agentPath ? { BRIMM_AGENT_PATH: agentPath } : {}),
+      HOME: home, TMPDIR: tmp, PATH: bare ? `${bin}:/usr/bin:/bin` : `${bin}:${process.env.PATH}:${dirname(process.execPath)}`, ...(agentPath ? { BRIMM_AGENT_PATH: typeof agentPath === "function" ? agentPath(home) : agentPath } : {}),
       ...(stands["claude-stand-in"] ? { BRIMM_CLAUDE: join(bin, "claude-stand-in") } : {}), ...(bare ? { BRIMM_HOMEBREW_DIRS: "" } : {})
     };
     const r = spawnSync("/bin/zsh", [install, ...args], { encoding: "utf8", input: "", env });
@@ -240,24 +244,31 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
     assert.deepEqual([r.status, r.out, r.agents], [2, "Not an option this script knows: --unedited\n", []]);
     assert.deepEqual([r.left, r.ran], [[], ""]);
   });
-  it("says whether Claude Code is on this Mac, where the launch agent will look for it, and what is then sent to Claude. It installs nothing for it", () => {
+  it("says whether Claude Code is on this Mac, and what is then sent to Claude. It installs nothing for it", () => {
     const r = ask("--print", "/Volumes/Work/Unedited video");
     assert.equal(r.status, 0, r.err);
-    const found = /\n {2}Claude Code, to read a video once its person has said what it is: {2}here already, at (\/\S+\/claude)\n {2}Sent to Claude: {2}nothing when a video is dropped, since this Mac's import is the light one\. Claude reads a video only once its person has said what it is, on the Claude account signed in on this Mac, and never a session's file name\. The video and its sound never leave it\. To send nothing: --rules-only\n/.exec(r.out);
-    const missing = r.out.includes("\n  Claude Code, to read a video once its person has said what it is:  not here, so nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac\n");
-    assert.ok(found || missing, r.out);
-    // It is looked for where the launch agent's own PATH leads, and not where this shell's does.
-    if (found) assert.ok(["/opt/homebrew/bin/claude", "/usr/local/bin/claude", "/usr/bin/claude", "/bin/claude"].includes(found[1]), found[1]);
+    const found = /\n {2}Claude Code, to read a video once its person has said what it is: {2}here already, at (\/\S+)\n {2}Sent to Claude: {2}nothing when a video is dropped, since this Mac's import is the light one\. Claude reads a video only once its person has said what it is, on the Claude account signed in on this Mac, and never a session's file name\. The video and its sound never leave it\. To send nothing: --rules-only\n/.exec(r.out);
+    assert.ok(found, r.out);
+    // The one found is the stand-in that BRIMM_CLAUDE names, never this Mac's own.
+    assert.match(found[1], /\/brimm-install-[^/]+\/bin\/claude-stand-in$/);
     changedNothing(r);
     // The agent is told nothing about Claude: unedited.js asks whenever Claude Code is there.
     assert.deepEqual(r.agents.map(held), [agent(r, ["/Volumes/Work/Unedited video"])]);
   });
   // The Mac a test runs on may have Claude Code where Homebrew puts programs, and that one would be found first. So these
-  // two give the launch agent a PATH of folders that are on no Mac, and the home folder made for the test is the one place
-  // left to look.
+  // tests, which have no stand-in for it, give the launch agent a PATH of folders that are on no Mac or in the home folder
+  // made for the test, which is then the one place left to look.
   const NOWHERE = "/nowhere/bin:/nowhere/else/bin";
+  it("looks for Claude Code where the launch agent's own PATH leads, and not where this shell's does", () => {
+    const r = askWith({ claude: null, programs: ["agent-bin/claude"], agentPath: (home) => join(home, "agent-bin"), onPath: { claude: "exit 0\n" } }, "--print", "/Volumes/Work/Unedited video");
+    assert.equal(r.status, 0, r.err);
+    const found = /\n {2}Claude Code, to read a video once its person has said what it is: {2}here already, at (\/\S+\/claude)\n/.exec(r.out);
+    assert.ok(found, r.out);
+    assert.equal(found[1], `${r.home}/agent-bin/claude`);
+    assert.equal(r.agents[0].EnvironmentVariables.PATH, `${r.home}/agent-bin`);
+  });
   it("finds Claude Code in the home folder's own .local/bin, where the launch agent's PATH does not lead and unedited.js looks all the same", () => {
-    const r = askWith({ programs: [".local/bin/claude"], agentPath: NOWHERE }, "--print", "/Volumes/Work/Unedited video");
+    const r = askWith({ claude: null, programs: [".local/bin/claude"], agentPath: NOWHERE }, "--print", "/Volumes/Work/Unedited video");
     assert.equal(r.status, 0, r.err);
     const found = /\n {2}Claude Code, to read a video once its person has said what it is: {2}here already, at (\/\S+\/claude)\n/.exec(r.out);
     assert.ok(found, r.out);
@@ -265,7 +276,7 @@ describe("the installer, asked what it would do", { skip: notAMac }, () => {
     assert.deepEqual([r.left, r.ran], [[".local", ".local/bin", ".local/bin/claude"], ""]);
   });
   it("says Claude Code is not here when it is nowhere the launch agent will look, and that each plan is then the rules' alone", () => {
-    const r = askWith({ agentPath: NOWHERE }, "--print", "/Volumes/Work/Unedited video");
+    const r = askWith({ claude: null, agentPath: NOWHERE, onPath: { claude: "exit 0\n" } }, "--print", "/Volumes/Work/Unedited video");
     assert.equal(r.status, 0, r.err);
     assert.ok(r.out.includes("\n  Claude Code, to read a video once its person has said what it is:  not here, so nothing leaves this Mac. To have Claude read it: install Claude Code and sign in to it on this Mac\n"), r.out);
     assert.doesNotMatch(r.out, /here already, at|Sent to Claude/);
