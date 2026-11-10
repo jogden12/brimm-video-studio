@@ -1,14 +1,17 @@
 // Phase 2 ("Final Cut retired"): which exports of tool/*.js does no other module import? One line `<module>: <export>` for each,
 // then `Imports of files that are not there: <n>` and one line for each such import. Tests are not counted as importers: an
 // export only a test uses is unused here. The two scripts in tool/studio/ (.mjs) are counted as importers, since the guard and
-// the receipt run from there. Run by hand: node tool/tests/unused-exports.mjs. It is not a test (`node --test` does not pick it up),
-// reads only tool/*.js and tool/studio/*.mjs, and changes nothing.
+// the receipt run from there. The modules of tool/setup/ are counted both ways: as modules (listed as `setup/<module>: <export>`) and
+// as importers, of tool/*.js through "../" and of each other through "./". Run by hand: node tool/tests/unused-exports.mjs. It is not a test (`node --test` does not pick it up),
+// reads only tool/*.js, tool/setup/*.js and tool/studio/*.mjs, and changes nothing.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const TOOL = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const modules = readdirSync(TOOL).filter((f) => f.endsWith(".js")).sort();
+const setup = existsSync(join(TOOL, "setup")) ? readdirSync(join(TOOL, "setup")).filter((f) => f.endsWith(".js")).sort().map((f) => `setup/${f}`) : [];
+const everyModule = [...modules, ...setup];
 const studio = existsSync(join(TOOL, "studio")) ? readdirSync(join(TOOL, "studio")).filter((f) => f.endsWith(".mjs")).sort() : [];
 
 /** The source without its comments and string-free of nothing else: a comment that names an import must not count as one. */
@@ -30,7 +33,7 @@ function inside(list) {
   return list.split(",").map((x) => x.trim()).filter(Boolean).map((x) => x.split(/\s+as\s+/).pop().trim());
 }
 
-const used = new Map(modules.map((m) => [m, new Set()]));
+const used = new Map(everyModule.map((m) => [m, new Set()]));
 const missing = [];
 const take = (from, spec, names) => {
   const file = spec.replace(/^\.\//, "");
@@ -43,10 +46,19 @@ const take = (from, spec, names) => {
   for (const n of names) set.add(n);
 };
 
-const readers = [...modules.map((m) => [m, join(TOOL, m), "./"]), ...studio.map((m) => [`studio/${m}`, join(TOOL, "studio", m), "../"])];
-for (const [name, path, here] of readers) {
+// Each reader says which folders its imports may name, as a prefix of the specifier and the folder under tool/ it stands for.
+const readers = [
+  ...modules.map((m) => [m, join(TOOL, m), [["./", ""]]]),
+  ...setup.map((m) => [m, join(TOOL, m), [["../", ""], ["./", "setup/"]]]),
+  ...studio.map((m) => [`studio/${m}`, join(TOOL, "studio", m), [["../", ""]]]),
+];
+for (const [name, path, ways] of readers) {
   const text = code(readFileSync(path, "utf8"));
-  const local = (spec) => (spec.startsWith(here) && spec.endsWith(".js") ? spec.slice(here.length).replace(/^\.\//, "") : null);
+  const local = (spec) => {
+    if (!spec.endsWith(".js")) return null;
+    for (const [prefix, under] of ways) if (spec.startsWith(prefix) && !spec.slice(prefix.length).includes("/")) return under + spec.slice(prefix.length);
+    return null;
+  };
   const nameOf = (spec) => local(spec);
   // import { a, b as c } from "./x.js"; import x from; import * as x from; import "./x.js"; export { a } from "./x.js"
   for (const m of text.matchAll(/\b(?:import|export)\s+([^;"']*?)\s*from\s*["'](\.{1,2}\/[^"']+)["']/g)) {
@@ -75,7 +87,7 @@ for (const [name, path, here] of readers) {
 }
 
 const lines = [];
-for (const m of modules) {
+for (const m of everyModule) {
   for (const n of [...exportsOf(code(readFileSync(join(TOOL, m), "utf8")))].sort()) if (!used.get(m).has(n)) lines.push(`${m}: ${n}`);
 }
 console.log(lines.join("\n"));
