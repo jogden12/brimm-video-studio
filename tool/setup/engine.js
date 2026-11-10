@@ -55,7 +55,7 @@ const BODIES = {
 };
 const SEVERAL_BRIMM_VIDEO = ["More than one BRIMM Video folder is on this Mac. Choose the one to use."];
 /** What the Dropbox step says of Dropbox itself, after what it found, whatever that was. A video dragged from Dropbox into a drop
-    folder on the same disk is moved out of Dropbox, for every Mac: held Option, it is copied. */
+    folder on the same disk is moved out of Dropbox, for every Mac; with Option held, it is copied. */
 const DROPBOX_SAYS = [
   "Make the BRIMM Video folder available offline in Finder, so it opens without a connection.",
   "When you drag a video from Dropbox into your drop folder, hold Option, so Dropbox keeps its copy.",
