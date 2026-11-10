@@ -754,6 +754,18 @@ describe("the Install's parts, and how each can end", () => {
     });
   });
 
+  it("a cancel sent while the copy's signature is checked is seen before anything is staged", async () => {
+    await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
+      const first = (e) => (e.event === "progress" && e.part === "programs" && e.state === "running" ? { cancel: true } : undefined);
+      const { code, events } = await go(m, { run: "repair", answers: first });
+      assert.equal(code, 0);
+      assert.deepEqual([...partsOf(events).keys()], ["programs"]);
+      assert.deepEqual(statesOf(events, "programs"), ["running", "done"]);
+      assert.deepEqual(lastOf(events), CANCELLED(m));
+      assert.deepEqual(installCalls(m.ran()), []);
+    });
+  });
+
   it("a cancel while the installer runs is answered after it ends", async () => {
     await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
       answering(m);
@@ -768,18 +780,25 @@ describe("the Install's parts, and how each can end", () => {
     });
   });
 
-  it("a line that cannot be taken while the installer runs ends the run with error protocol once the installer has ended", async () => {
-    await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
-      answering(m);
-      const hold = join(m.dir, "hold");
-      const review = () => (writeFileSync(hold, ""), true);
-      const first = (e) => (e.event === "progress" && e.part === "installer" && e.state === "running" ? (setTimeout(() => rmSync(hold, { force: true }), 300), "not json") : undefined);
-      const { code, events } = await go(m, { run: "setup", answers: reply({ ...HELD, review }, first) });
-      assert.equal(code, 1);
-      assert.deepEqual([lastOf(events).code, lastOf(events).details], ["protocol", "A line was not a JSON object."]);
-      assert.deepEqual(statesOf(events, "installer"), ["running", "done"]);
-      assert.deepEqual(installCalls(m.ran()).map((call) => call[0]), ["--print", "--yes"]);
-    });
+  it("a line that cannot be taken while the installer runs is dropped, with a line on stderr, and a good install ends done", async () => {
+    for (const bad of ["not json", { answer: "never-asked", value: true }, { back: true, cancel: true }]) {
+      await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
+        answering(m);
+        const hold = join(m.dir, "hold");
+        const review = () => (writeFileSync(hold, ""), true);
+        const first = (e) => (e.event === "progress" && e.part === "installer" && e.state === "running" ? (setTimeout(() => rmSync(hold, { force: true }), 300), bad) : undefined);
+        const { code, events, errors } = await go(m, { run: "setup", answers: reply({ ...HELD, review }, first) });
+        assert.equal(code, 0, JSON.stringify(lastOf(events)));
+        assert.deepEqual([lastOf(events).event, lastOf(events).outcome], ["done", "installed"]);
+        assert.equal(events[events.length - 2].ok, true);
+        assert.deepEqual(statesOf(events, "installer"), ["running", "done"]);
+        assert.deepEqual(statesOf(events, "claude"), ["running", "done"]);
+        assert.deepEqual(installCalls(m.ran()).map((call) => call[0]), ["--print", "--yes"]);
+        assert.equal(errors.length, 1, JSON.stringify(bad));
+        assert.match(errors[0], /^A line from the shell could not be taken while the installer ran, so it was dropped: /);
+        assert.equal(errors[0].includes("never-asked"), false);
+      });
+    }
   });
 
   it("a failed download ends with error download, and the installer never ran", async () => {
@@ -882,6 +901,20 @@ describe("the Install's parts, and how each can end", () => {
       assert.deepEqual(lastOf(events), { event: "error", code: "damaged", message: DAMAGED, contact: SUPPORT, details: "the signature does not verify" });
       assert.deepEqual([...partsOf(events).keys()], ["programs"]);
       assert.deepEqual(statesOf(events, "programs"), ["running", "failed"]);
+    });
+  });
+
+  it("an error event that cannot be made still ends the run with one last line, a fixed error engine", async () => {
+    await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
+      const model = async ({ progress }) => {
+        progress({ part: "model", label: LABELS.model, done: 0, total: null, state: "running" });
+        throw Object.assign(new Error(""), { code: "download" });
+      };
+      const { code, events, errors } = await go(m, { run: "repair", stages: { model } });
+      assert.equal(code, 1);
+      assert.deepEqual(lastOf(events), { event: "error", code: "engine", message: "BRIMM Video Studio's setup stopped on a fault of its own.", advice: "Open BRIMM Video Studio and choose Repair." });
+      assert.equal(events.filter((e) => e.event === "error" || e.event === "done").length, 1);
+      assert.ok(errors.some((line) => line.includes("The engine made a faulty event.")), errors.join("\n"));
     });
   });
 

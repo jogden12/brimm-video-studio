@@ -34,6 +34,10 @@ const SAY = {
   stopped: "Stopped, since setup was cancelled."
 };
 
+/** The run's last line when its own cannot be made: fixed words, which the protocol takes, written as they are, so that the shell
+    always reads one last line. */
+const LAST_LINE = `${JSON.stringify({ event: "error", code: "engine", message: SAY.engine, advice: REPAIR })}\n`;
+
 const TITLES = { welcome: "Welcome", name: "This Mac's name", apps: "Apps", dropbox: "BRIMM Video in Dropbox", folders: "Folders", permissions: "Permissions", review: "Review", install: "Install", done: "Done" };
 const BODIES = {
   welcome: [
@@ -99,7 +103,9 @@ class Stop extends Error {
 /** The engine's side of the conversation with the shell: one reader of stdin for the whole run. It knows the question that is open
     and every id asked in this run. An answer to the open question settles it; one to an id asked before, or while no question is
     open, is dropped (Decided 18); one to an id never asked, or a line that cannot be taken, stops the run. A cancel or the end of
-    stdin stops it too, until the installer may run: from then on a cancel is answered with the run's own outcome (Decided 13, 38). */
+    stdin stops it too, until the installer may run: from then on a cancel is answered with the run's own outcome (Decided 13, 38),
+    and a line that cannot be taken is written to stderr and dropped, since ending a good install as a failure would send her to
+    Repair a Mac that works. */
 function conversation({ input, send, errors }) {
   const asked = new Set();
   let open = null;
@@ -123,7 +129,10 @@ function conversation({ input, send, errors }) {
   const cancel = () => {
     if (!installing) stopWith({ kind: "cancel" });
   };
-  const fault = (details) => stopWith({ kind: "fault", details });
+  const fault = (details) => {
+    if (installing) errors.write(`A line from the shell could not be taken while the installer ran, so it was dropped: ${details}\n`);
+    else stopWith({ kind: "fault", details });
+  };
   const hear = (line) => {
     if (finished) return;
     if (line === null) return cancel();
@@ -185,7 +194,8 @@ function conversation({ input, send, errors }) {
         halts.delete(halt);
       }
     },
-    /** From now on the installer may run: a cancel is answered with the run's own outcome, and a back is dropped. */
+    /** From now on the installer may run: a cancel is answered with the run's own outcome, and a back and a line that cannot be
+        taken are dropped. */
     installerMayRun() {
       installing = true;
     },
@@ -220,6 +230,8 @@ async function install(ctx, answers) {
     throw new Ending("damaged", DAMAGED, { details: damaged });
   }
   bar(ctx, "programs", "done");
+  // codesign's check held the engine while it ran: a cancel sent meanwhile is read only once the engine lets stdin's lines in.
+  await new Promise((resolve) => setImmediate(resolve));
   talk.checkpoint();
   const own = {
     model: () => ({ home, pin: modelPin(join(checkout, "tool")), programs }),
@@ -261,8 +273,6 @@ async function install(ctx, answers) {
     throw new Ending("install", outcome === "refused" ? SAY.refused : SAY.notSetUp, { advice: REPAIR, details: result.text });
   }
   bar(ctx, "installer", "done");
-  // A line the engine could not take while the installer ran ends the run now that the installer has ended.
-  talk.checkpoint();
   bar(ctx, "claude", "running");
   const check = checkLogSays(home, { before });
   bar(ctx, "claude", check.answered ? "done" : "failed");
@@ -561,6 +571,24 @@ export async function runSetup({ argv, input, output, errors, home, checkout, pr
   const contact = build.support ? { contact: build.support } : {};
   const error = (code, message, { advice, details } = {}) => send({ event: "error", code, message: one(message), ...(advice ? { advice: one(advice) } : {}), ...contact, ...(details !== undefined ? { details: String(details) } : {}) });
   const had = { claudeCode: false, staged: false };
+  /** Sends the last line of a run that `e` ended, and gives the exit code. */
+  const end = (e) => {
+    if (e instanceof Stop && e.reason.kind === "cancel") {
+      send({ event: "done", outcome: "cancelled", summary: "", studio: studioFolder(home), guide: null, notes: [...(had.claudeCode ? [NOTE.claudeStays] : []), ...(had.staged ? [NOTE.staged] : [])] });
+      return 0;
+    }
+    if (e instanceof Stop) {
+      error("protocol", SAY.protocol, { advice: SAY.reopen, details: e.reason.details });
+      return 1;
+    }
+    if (e instanceof Ending) {
+      error(e.code, e.message, { advice: e.advice, details: e.details });
+      return 1;
+    }
+    errors.write(`${e?.stack ?? String(e)}\n`);
+    error("engine", SAY.engine, { advice: REPAIR, details: [e?.name ?? "Error", e?.code].filter(Boolean).join(", code ") });
+    return 1;
+  };
   let talk = null;
   try {
     const args = argsOf(argv);
@@ -594,21 +622,13 @@ export async function runSetup({ argv, input, output, errors, home, checkout, pr
     else await renew(ctx);
     return 0;
   } catch (e) {
-    if (e instanceof Stop && e.reason.kind === "cancel") {
-      send({ event: "done", outcome: "cancelled", summary: "", studio: studioFolder(home), guide: null, notes: [...(had.claudeCode ? [NOTE.claudeStays] : []), ...(had.staged ? [NOTE.staged] : [])] });
-      return 0;
-    }
-    if (e instanceof Stop) {
-      error("protocol", SAY.protocol, { advice: SAY.reopen, details: e.reason.details });
+    try {
+      return end(e);
+    } catch (again) {
+      errors.write(`${again?.stack ?? String(again)}\n`);
+      output.write(LAST_LINE);
       return 1;
     }
-    if (e instanceof Ending) {
-      error(e.code, e.message, { advice: e.advice, details: e.details });
-      return 1;
-    }
-    errors.write(`${e?.stack ?? String(e)}\n`);
-    error("engine", SAY.engine, { advice: REPAIR, details: [e?.name ?? "Error", e?.code].filter(Boolean).join(", code ") });
-    return 1;
   } finally {
     talk?.finish();
   }
@@ -637,4 +657,12 @@ export async function main() {
   process.stdin.destroy();
 }
 
-if (isMain(import.meta.url)) main();
+// Should the run fail before it can end itself, its last line is the fixed one, and it exits 1.
+if (isMain(import.meta.url)) {
+  main().catch((e) => {
+    process.stderr.write(`${e?.stack ?? String(e)}\n`);
+    process.stdout.write(LAST_LINE);
+    process.exitCode = 1;
+    process.stdin.destroy();
+  });
+}
