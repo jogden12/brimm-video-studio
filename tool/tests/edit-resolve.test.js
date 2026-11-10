@@ -150,7 +150,8 @@ describe("resolve", () => {
     t.done();
   });
   it("says how to update, not to ask Jason, on an installed Mac, when the record it would write is a newer BRIMM Video Studio's (review finding 2)", async () => {
-    const ASK = "Jason has a newer BRIMM Video Studio. Ask him to update this Mac.";
+    // A checkout's line is as it was. An installed Mac's ends at the update: sorting the conflict out again fails the same way until then.
+    const ASK = 'Jason has a newer BRIMM Video Studio. Ask him to update this Mac. Say "sort out the conflict" again to see it as it is now.';
     const SAY = 'the episode was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac.';
     for (const [build, why] of [[undefined, ASK], [INSTALLED, SAY]]) {
       const t = setup();
@@ -160,7 +161,7 @@ describe("resolve", () => {
       writeFileSync(recordFile(found.folder, 2), recordText({ ...readEpisode(found.folder, { pastCopies: true }).record, version: 99 }));
       const before = filesOf(found);
       const r = await keep(t.ctx.deps, "B");
-      assert.deepEqual([r.code, r.text], [1, `Nothing was written, and nothing deleted: ${why} Say "sort out the conflict" again to see it as it is now.`], `build ${build ? build.mode : "none"}`);
+      assert.deepEqual([r.code, r.text], [1, `Nothing was written, and nothing deleted: ${why}`], `build ${build ? build.mode : "none"}`);
       if (build) assert.doesNotMatch(r.text, /Jason|install\.sh/);
       assert.deepEqual(Object.fromEntries(Object.entries(filesOf(found)).filter(([rel]) => !rel.startsWith("history/"))), before);
       assert.deepEqual(conflictedCopies(found.folder), [TIMELINE_COPY]);

@@ -3430,7 +3430,10 @@ async function resolveIn(ctx, found, keep) {
       }
       const stuck = planOff();
       if (stuck.length) return refuse(ctx, unsure(stuck, plainWhy(e, ctx.build)));
-      return refuse(ctx, `Nothing was written, and nothing deleted: ${plainWhy(e, ctx.build)}. Say "sort out the conflict" again to see it as it is now.`);
+      // A record a newer BRIMM Video Studio wrote, on an installed Mac: the line ends at the update, as sorting the conflict out again fails
+      // the same way until then. Every other error, and every error on a checkout, keeps its line.
+      const untilUpdated = e && e.code === "NEWER" && isInstalled(ctx.build);
+      return refuse(ctx, `Nothing was written, and nothing deleted: ${plainWhy(e, ctx.build)}.${untilUpdated ? "" : ' Say "sort out the conflict" again to see it as it is now.'}`);
     }
   }
   // 3. Only then is anything replaced or deleted. When B cannot be put in A's place, A comes back from history/, and the
