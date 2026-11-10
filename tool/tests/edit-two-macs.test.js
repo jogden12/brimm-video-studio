@@ -34,6 +34,29 @@ const finalOf = (found) => (existsSync(join(found.folder, "final")) ? readdirSyn
 /** A Mac with BRIMM Video Studio installed, as build.js buildOf gives it: no Jason is at hand there. */
 const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
 
+/** What a finish says failed when a record a newer BRIMM Video Studio wrote lands while it copies into final/: Sallie's laptop taking the
+    episode over, or (`takeOver` false) the record as it was. `build` is this Mac's build, a checkout's when it is left out. */
+async function failedUnderNewer(build, takeOver) {
+  const { t, found } = exported();
+  if (build) t.ctx.deps.build = build;
+  assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
+  const clone = t.ctx.deps.clone;
+  let landed = false;
+  t.ctx.deps.clone = (from, to) => {
+    clone(from, to);
+    if (!landed && to.endsWith(".brimm-ops.json")) {
+      landed = true;
+      const now = reread(found);
+      const next = takeOver ? claimed(now, "Sallie's laptop", "2026-10-20T15:10:00-05:00") : now;
+      writeFileSync(recordFile(found.folder, now.rev + 1), recordText({ ...next, version: 99, rev: now.rev + 1, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
+    }
+  };
+  assert.equal(await editMain(["finish", "--now", FOLDER], t.ctx.deps), 1);
+  const failed = readResult(t.home, FOLDER, "finish").failed.join(" ");
+  t.done();
+  return failed;
+}
+
 describe("finish, with the other Mac", () => {
   it("claims an episode nobody has open when it starts, so the other Mac cannot open it while it runs", async () => {
     const { t, found } = exported();
@@ -173,31 +196,18 @@ describe("the two Macs, as the P1 check found them", () => {
   });
   it("says how to update, and names no Jason, on an installed Mac, when that claim was written by a newer BRIMM Video Studio, so final/ cannot be listed (review finding 2, fix round 1)", async () => {
     const TOOK = "Sallie's laptop took Pricing: what to charge? over while finish was copying into final/, so the finish is not in the record. The record could not be written to list what final/ holds now: ";
-    const rounds = [
-      // A checkout's line is as it was: Jason is at hand there.
-      [undefined, `${TOOK}Jason has a newer BRIMM Video Studio. Ask him to update this Mac. If the episode then says it is not whole in Dropbox, that needs Jason. Finish it there.`],
-      [INSTALLED, `${TOOK}the episode was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac. Finish it there.`]
-    ];
-    for (const [build, line] of rounds) {
-      const { t, found } = exported();
-      if (build) t.ctx.deps.build = build;
-      assert.equal((await on(t.ctx.deps, "finish", FOLDER, "--yes")).code, 0);
-      const clone = t.ctx.deps.clone;
-      let taken = false;
-      t.ctx.deps.clone = (from, to) => {
-        clone(from, to);
-        if (!taken && to.endsWith(".brimm-ops.json")) {
-          taken = true;
-          const now = reread(found);
-          writeFileSync(recordFile(found.folder, now.rev + 1), recordText({ ...claimed(now, "Sallie's laptop", "2026-10-20T15:10:00-05:00"), version: 99, rev: now.rev + 1, writer: { commit: "c709b57", on: "Sallie's laptop" } }));
-        }
-      };
-      assert.equal(await editMain(["finish", "--now", FOLDER], t.ctx.deps), 1);
-      const failed = readResult(t.home, FOLDER, "finish").failed.join(" ");
-      assert.equal(failed, line);
-      if (build) assert.doesNotMatch(failed, /Jason|install\.sh/);
-      t.done();
-    }
+    // A checkout's line is as it was: Jason is at hand there.
+    assert.equal(await failedUnderNewer(undefined, true), `${TOOK}Jason has a newer BRIMM Video Studio. Ask him to update this Mac. If the episode then says it is not whole in Dropbox, that needs Jason. Finish it there.`);
+    const installed = await failedUnderNewer(INSTALLED, true);
+    assert.equal(installed, `${TOOK}the episode was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac. Finish it there.`);
+    assert.doesNotMatch(installed, /Jason|install\.sh/);
+  });
+  it("says the same where the newer BRIMM Video Studio's record is no take-over: finish's own record is refused, then the list of what final/ holds (review finding 2, fix round 1)", async () => {
+    const REFUSED = "The files are in final/, but the record was not written: this episode changed on the other Mac: open it again. The record could not be written to list what final/ holds now: ";
+    assert.equal(await failedUnderNewer(undefined, false), `${REFUSED}Jason has a newer BRIMM Video Studio. Ask him to update this Mac. If the episode then says it is not whole in Dropbox, that needs Jason. Say "hand it off" again.`);
+    const installed = await failedUnderNewer(INSTALLED, false);
+    assert.equal(installed, `${REFUSED}the episode was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac. Say "hand it off" again.`);
+    assert.doesNotMatch(installed, /Jason|install\.sh/);
   });
   it("writes no claim when this Mac already has the episode it finishes (T19)", async () => {
     const { t, found } = exported({ over: { editing: MINE2 } });
