@@ -33,6 +33,7 @@ import { stretchesOf, fitReel } from "./reframe.js";
 import { reelsFile, reelEntries, REELS_FILE } from "./reel-candidates.js";
 import { readEpisode, writeEpisode, localStamp, kindOf, shownName, heldElsewhere, undone, recordNumbers } from "./episode.js";
 import { commitOf, thisCheckout, statusReadFolders } from "./filing.js";
+import { UPDATE_SAY, buildOf, forThisMac, isInstalled } from "./build.js";
 import { keepCheckInStep, ownCheckOnly } from "./late-wait.js";
 import { gated } from "./gate.js";
 import { highestNumberOf } from "./finish.js";
@@ -275,6 +276,9 @@ export function asFiled(folder, record, ctx = null) {
       file it reads is not on this Mac and cannot be brought over.
     When Claude cannot be asked, nothing is written either. Otherwise what it read goes in by the rule, with the record; then the
     rough cut opens, the notice is posted and the result is written early, before the late check is waited for. */
+/** This Mac's build: as the run was given it, or as its own checkout says. A line's words turn on it: an installed Mac has no Jason at hand to ask. */
+const buildFor = (ctx, deps) => deps.build ?? ctx.build ?? buildOf(thisCheckout());
+
 export async function readEpisodeNow(ctx, found, deps) {
   const { kind, rev } = deps;
   const home = ctx.home;
@@ -298,7 +302,7 @@ export async function readEpisodeNow(ctx, found, deps) {
   const again = () => {
     const read = readEpisode(found.folder);
     if (!read.record) return { why: `The record of ${name} cannot be read now (${String(read.why).replace(/\.$/, "")}), so Claude did not read it.` };
-    if (read.newer) return { why: `${name} was written by a newer BRIMM Video Studio meanwhile, so Claude did not read it. Ask Jason to update this Mac.` };
+    if (read.newer) return { why: `${name} was written by a newer BRIMM Video Studio meanwhile, so Claude did not read it. ${isInstalled(buildFor(ctx, deps)) ? UPDATE_SAY : "Ask Jason to update this Mac."}` };
     // A record file above the one read, which Dropbox is still bringing over, may be another Mac's answer, or its session mark.
     if ((recordNumbers(found.folder)[0] || 0) > read.record.rev) return { why: `Dropbox is still bringing a newer record of ${name} over, so Claude did not read it.` };
     const why = notAsAnswered(read.record, asWas);
@@ -598,7 +602,7 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
       const opts = { ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}) };
       writeEpisode(folder, change(record), { expectRev: record.rev, writeText: textWriter({ work: join(work, "record"), ...opts }), writer, home });
     } catch (e) {
-      const why = e.code === "CHANGED" ? "this episode changed while Claude read it" : String(e.message).replace(/\.$/, "");
+      const why = e.code === "CHANGED" ? "this episode changed while Claude read it" : String(forThisMac(e, buildFor(ctx, deps)).message).replace(/\.$/, "");
       return { ok: false, made: [], failed: [...failed, `Nothing was written: ${why}.`], next: AGAIN };
     }
     try {
@@ -631,7 +635,7 @@ async function written(ctx, found, deps, { kind, record, plan, facts, read, at, 
   let into;
   try {
     // The files are in once `onPut` is called: their entries leave the check then, and the lock goes.
-    into = await intoEpisode(join(folder, file), madeAt, work, { ...deps, home, settings: ctx.settings, files, log: intoLog }, { change, expectRev: record.rev, onPut: () => {
+    into = await intoEpisode(join(folder, file), madeAt, work, { ...deps, home, settings: ctx.settings, build: buildFor(ctx, deps), files, log: intoLog }, { change, expectRev: record.rev, onPut: () => {
       if (step.end) step.end({ put: true });
       return onPut();
     } });
@@ -653,7 +657,7 @@ async function putLocal(ctx, found, deps, { record, madeAt, files, work, change,
   const writer = { commit: deps.commit || commitOf(thisCheckout()), on: ctx.machine };
   const opts = { ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}) };
   const put = await putHere({ folder, record }, madeAt.map((to) => ({ rel: relative(folder, to).split(sep).join("/"), from: files.at(to) })), {
-    ...opts, home: ctx.home, work: join(work, "record"), writer, change, expectRev: record.rev, log, now: ctx.now(),
+    ...opts, home: ctx.home, work: join(work, "record"), writer, change, expectRev: record.rev, log, now: ctx.now(), build: buildFor(ctx, deps),
     ...(deps.onRecordCopy ? { onRecordCopy: deps.onRecordCopy } : {})
   });
   if (!put.put) return { put: false, problems: [sentence(put.why), "Nothing was changed in the episode."] };
@@ -737,7 +741,7 @@ async function writtenSession(ctx, found, deps, { record, read, at, account, wor
     log(`${named}: read.`);
     return { ok: true, made, failed: [...failed], next: FOUND };
   }
-  const into = await intoEpisode(join(folder, file), madeAt, work, { ...deps, home: ctx.home, settings: ctx.settings, files, log: intoLog }, { change, expectRev: record.rev, onPut });
+  const into = await intoEpisode(join(folder, file), madeAt, work, { ...deps, home: ctx.home, settings: ctx.settings, build: buildFor(ctx, deps), files, log: intoLog }, { change, expectRev: record.rev, onPut });
   const problems = [...into.problems, ...into.notes].map(sentence);
   if (!into.put) {
     // Her answer of the transcript only, given while Claude read it, is why: nothing it read is kept, as she asked.

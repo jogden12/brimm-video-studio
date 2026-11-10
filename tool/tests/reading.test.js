@@ -47,6 +47,8 @@ async function on(deps, ...argv) {
 // --- The made-up recording, imported lightly and answered ---
 
 const AT = "2026-10-20T15:00:00-05:00";
+/** What build.js makes of an installed Mac's build.json. */
+const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
 const LABEL = "Video of 14 Oct, 09:12 (Mac Studio)";
 const VIDEO = "Pricing talk.mp4";
 const NAME = "Pricing talk";
@@ -982,6 +984,30 @@ describe("read reads the record again right before every call to Claude (fix 2, 
     assert.deepEqual(notices, []);
     assert.ok(readResult(t.home, FOLDER, "read").failed.some((f) => /changed on the other Mac meanwhile/.test(f)), readResult(t.home, FOLDER, "read").failed.join(" | "));
     t.done();
+  });
+  it("says how to update, not to ask Jason, on an installed Mac, when a newer BRIMM Video Studio wrote the record meanwhile (review finding 2)", async () => {
+    const newerAt = (found) => () => writeFileSync(recordFile(found.folder, 2), recordText({ ...reread(found), rev: 2, version: 99 }));
+    for (const [build, update] of [[undefined, "Ask Jason to update this Mac."], [{ mode: "dev" }, "Ask Jason to update this Mac."], [INSTALLED, 'Say "update Studio" to update this Mac.']]) {
+      // Before Claude is asked: the record is read again once the account is known (reading.js).
+      const before = reading("finished");
+      const asks = [];
+      if (build) before.t.ctx.deps.build = build;
+      claudeDoing(before.t, FINISHED_REPLY, asks, { onAuth: newerAt(before.found) });
+      assert.equal((await on(before.t.ctx.deps, ...readArgs("finished"))).code, 1);
+      assert.equal(asks.length, 0);
+      assert.deepEqual(readResult(before.t.home, FOLDER, "read").failed, [`${NAME} was written by a newer BRIMM Video Studio meanwhile, so Claude did not read it. ${update}`]);
+      before.t.done();
+      // While Claude was asked: what it read is not put in (unedited.js intoEpisode).
+      const during = reading("finished");
+      if (build) during.t.ctx.deps.build = build;
+      claudeDoing(during.t, FINISHED_REPLY, [], { then: newerAt(during.found) });
+      assert.equal((await on(during.t.ctx.deps, ...readArgs("finished"))).code, 1);
+      assert.ok(!existsSync(join(during.found.folder, "reels.json")));
+      const failed = readResult(during.t.home, FOLDER, "read").failed;
+      assert.ok(failed.includes(`the episode was written by a newer BRIMM Video Studio. ${update}`), failed.join(" | "));
+      if (build === INSTALLED) assert.doesNotMatch(failed.join(" "), /Jason|install\.sh/);
+      during.t.done();
+    }
   });
 });
 

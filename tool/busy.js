@@ -4,6 +4,7 @@
 // A line names a command at most, and never an episode's folder: its name can carry a client's name.
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runningRun, lockOf, whenReadyLockOf } from "./detached.js";
 import { homeRefusal, studioHome } from "./home.js";
@@ -53,36 +54,41 @@ function foldersIn(dir) {
   }
 }
 
-/** The process of an import's lock that is held now, or 0: a lock of a live process, written within half a day (run.js's rule). */
-function importLockPid(home, alive, now) {
-  const runs = runsFolder(home);
-  let names = [];
-  try {
-    names = readdirSync(runs).filter((n) => /^brimm-transcribe-.*\.lock$/.test(n)).sort();
-  } catch (e) {
-    return 0;
-  }
-  for (const name of names) {
+/** The process of an import's lock that is held now, or 0: a lock of a live process, written within half a day (run.js's rule).
+    An import for episodes keeps its lock in the runs folder, and an import of any other folder keeps it in the temp folder
+    (run.js lockFile, unedited.js): both are looked in, and a folder that cannot be listed holds nothing. */
+function importLockPid(home, temp, alive, now) {
+  for (const dir of [runsFolder(home), temp]) {
+    let names = [];
     try {
-      const file = join(runs, name);
-      const text = readFileSync(file, "utf8").trim();
-      if (!/^\d+$/.test(text)) continue;
-      const pid = Number(text);
-      if (pid > 0 && alive(pid) && now - statSync(file).mtimeMs < RUNS_LOCK_STALE_MS) return pid;
+      // Only run.js's name. brimm-video's and brimm-operations' imports write it too, and so count (the careful side). Only this user's own temp folder is read.
+      names = readdirSync(dir).filter((n) => /^brimm-transcribe-[0-9a-f]{16}\.lock$/.test(n)).sort();
     } catch (e) {
-      // a lock that cannot be read holds nothing
+      continue;
+    }
+    for (const name of names) {
+      try {
+        const file = join(dir, name);
+        const text = readFileSync(file, "utf8").trim();
+        if (!/^\d+$/.test(text)) continue;
+        const pid = Number(text);
+        if (pid > 0 && alive(pid) && now - statSync(file).mtimeMs < RUNS_LOCK_STALE_MS) return pid;
+      } catch (e) {
+        // a lock that cannot be read holds nothing
+      }
     }
   }
   return 0;
 }
 
-/** Why the Mac is not idle, in one line, or "" when nothing is at work; CANNOT_TELL when it fails. Never throws. */
+/** Why the Mac is not idle, in one line, or "" when nothing is at work; CANNOT_TELL when it fails. Never throws. `temp` is the
+    temp folder an import of a folder that is not for episodes keeps its lock in: node's own, unless a test gives another. */
 export function idleWhy(options = {}) {
   try {
     const { agentPid = launchdPid(), alive = isRunning, now = Date.now() } = options;
     if (Number.isInteger(agentPid) && agentPid > 0) return `The import is at work: its background job, ${AGENT_LABEL}, is running (process ${agentPid}).`;
-    const { home = studioHome() } = options;
-    const lockPid = importLockPid(home, alive, now);
+    const { home = studioHome(), temp = tmpdir() } = options;
+    const lockPid = importLockPid(home, temp, alive, now);
     if (lockPid) return `An import is at work: it holds its lock (process ${lockPid}).`;
     const folders = foldersIn(workFolder(home));
     for (const name of folders) {

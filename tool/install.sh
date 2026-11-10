@@ -1042,12 +1042,15 @@ else
 fi
 [[ -n "$tools" ]] || say "  Programs to install with Homebrew:  ${need[*]:-none, they are all here}"
 # A model that is here is checked against the pin, by the node found above (about 3 seconds). Before Homebrew's node is installed there
-# is none to check with, and that is said.
+# is none to check with, and that is said. What node reads is kept in model_has, so that the download's decision below does not read
+# 1.6 GB a second time: it is empty while nothing has been read.
+model_has=""
+[[ ! -f "$MODEL" || ! -x "$node" ]] || model_has="$(model_sha256 "$MODEL" || true)"
 if [[ ! -f "$MODEL" ]]; then
   say "  Model:  to download, about 1.6 GB, to ${MODEL}, from ${MODEL_URL}, and kept only when its SHA-256 is the pin's, ${MODEL_SHA256} (tool/whisper-model.pin.json)"
 elif [[ ! -x "$node" ]]; then
   say "  Model:  here; its SHA-256 is checked against the pin's once node is installed"
-elif [[ "$(model_sha256 "$MODEL" || true)" == "$MODEL_SHA256" ]]; then
+elif [[ "$model_has" == "$MODEL_SHA256" ]]; then
   say "  Model:  here already, and its SHA-256 is the pin's"
 else
   say "  Model:  here, but its SHA-256 is not the pin's, so the pinned one is downloaded, about 1.6 GB, from ${MODEL_URL}, and replaces it only when its SHA-256 is the pin's, ${MODEL_SHA256} (tool/whisper-model.pin.json)"
@@ -1157,7 +1160,11 @@ if [[ -n "$machine" ]]; then
   say "That is all doctor says. The setup reads none of it and installs nothing it suggests. Jason looks for a tick against Node.js, FFmpeg, FFprobe and Chrome; a cross against whisper-cpp, TTS, BGM or Docker is expected, and so is one against Version when a newer command line is out, since the pin moves only by a pull request."
 fi
 
-if [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then
+# The model's SHA-256 was read for the summary when the model and a node were both here, and that answer is the one gone by. It is read
+# here only when there is none yet: the model was here with no node to read it by until Homebrew installed one (the node found again
+# above), or the first reading said nothing.
+[[ ! -f "$MODEL" || -n "$model_has" ]] || model_has="$(model_sha256 "$MODEL" || true)"
+if [[ ! -f "$MODEL" || "$model_has" != "$MODEL_SHA256" ]]; then
   mkdir -p "$MODEL_DIR"
   say "Downloading the model. This is done once."
   if ! curl -L --fail --progress-bar -o "$MODEL.part" "$MODEL_URL"; then

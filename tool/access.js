@@ -8,6 +8,8 @@
 // No note, line or banner names a video by its file. A write that fails costs only the notice.
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { buildOf, isInstalled } from "./build.js";
 import { isMain } from "./is-main.js";
 import { studioHome } from "./home.js";
 import { realOf } from "./places.js";
@@ -108,9 +110,9 @@ export function lookAt(place, folder, opts = {}) {
     is whether this Mac's drop folder is not there as her chat sees it; `unseen` is the videos the import has not taken; `agentNode`
     is the node the plist names, "" when it is not known; `needsAccess` lists the places (drop, episodes) that macOS guards. The first that
     holds: asking, refused/locked/error for the drop folder or Episodes (the first noted place that is still where it was),
-    missing, unseen, refused/locked/error for Downloads, newNode. On an installed Mac (`installed`) there is never a newNode: macOS's grants belong
-    to the app, whose own executable runs the job, and they survive a change of node. */
-export function findingOf({ note, now, places, agentPid, missing = false, unseen = [], agentNode = "", needsAccess = [], installed = false }) {
+    missing, unseen, refused/locked/error for Downloads, newNode. On an installed Mac its caller gives no `agentNode`, so there is never a
+    newNode: macOS's grants belong to the app, whose own executable runs the job, and they survive a change of node. */
+export function findingOf({ note, now, places, agentPid, missing = false, unseen = [], agentNode = "", needsAccess = [] }) {
   const looking = note.looking;
   if (looking && looking.pid === agentPid && now - looking.at > ASKING_MS) return { kind: "asking", place: looking.place };
   const refusedAt = (place) => {
@@ -128,7 +130,7 @@ export function findingOf({ note, now, places, agentPid, missing = false, unseen
   const found = refusedAt("downloads");
   if (found) return found;
   const guarded = needsAccess.filter((place) => place === "drop" || place === "episodes").map((place) => (note.places[place] || {}).okNode);
-  if (!installed && agentNode && guarded.some((okNode) => okNode && okNode !== agentNode)) return { kind: "newNode" };
+  if (agentNode && guarded.some((okNode) => okNode && okNode !== agentNode)) return { kind: "newNode" };
   return null;
 }
 
@@ -154,18 +156,23 @@ export function switchFor(folder, home) {
   return "its switches";
 }
 
+/** The name macOS gives the program the import looks with, in its question and in System Settings' lists: "node" on a dev Mac, where the
+    launch agent runs Homebrew's node, and the app's own name on an installed Mac, where the app's own program runs the job. Every line
+    below takes it as `name`, and says "node" where none is given. */
+export const lookerOf = (build) => (isInstalled(build) ? "BRIMM Video Studio" : "node");
 const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 const LOG_FILE = "~/Library/Logs/brimm-video.log";
 
 /** The line for her chat (and the installer) for a finding. `placeWords` is the place in her words, `switchName` the switch to turn on,
-    `code` the error's code when the finding has none. */
-export function accessLine(finding, { placeWords = "", switchName = "", code = "" } = {}) {
+    `code` the error's code when the finding has none, `name` the program as macOS names it (`lookerOf`). System Settings can list
+    several "node" (one for each node that ever asked), and the app once. */
+export function accessLine(finding, { placeWords = "", switchName = "", code = "", name = "node" } = {}) {
   const gone = finding.place === "downloads" ? ", so the exports HyperFrames put there stay there" : ", so the videos you drop wait";
   switch (finding.kind) {
     case "asking":
-      return `The import has waited more than a minute to look in ${placeWords}. If a box on this Mac's screen asks whether "node" may look in it, choose Allow, and the import goes on.`;
+      return `The import has waited more than a minute to look in ${placeWords}. If a box on this Mac's screen asks whether "${name}" may look in it, choose Allow, and the import goes on.`;
     case "refused":
-      return `This Mac does not let the import look in ${placeWords}${gone}. In System Settings, under Privacy & Security, Files and Folders, turn on ${switchName} under each "node" listed. Then say "look again".`;
+      return `This Mac does not let the import look in ${placeWords}${gone}. In System Settings, under Privacy & Security, Files and Folders, turn on ${switchName} under ${name === "node" ? 'each "node" listed' : `"${name}"`}. Then say "look again".`;
     case "locked":
       return `The import cannot open ${placeWords}: the folder's own permissions shut it. Ask Jason. (Jason: node gets EACCES there; see Get Info, Sharing & Permissions.)`;
     case "error":
@@ -202,35 +209,36 @@ export const saysInOverview = (finding) => finding.kind !== "newNode" && finding
 /** Whether `episodes` says a finding: all but a new node. */
 export const saysInEpisodes = (finding) => finding.kind !== "newNode";
 
-/** The banner for whoever is at the Mac. */
-export function accessBanner(kind, placeWords) {
-  if (kind === "refused") return `This Mac does not let node look in ${placeWords}. Allow it in System Settings › Privacy & Security › Files and Folders.`;
+/** The banner for whoever is at the Mac. `name` is the program as macOS names it (`lookerOf`). */
+export function accessBanner(kind, placeWords, { name = "node" } = {}) {
+  if (kind === "refused") return `This Mac does not let ${name} look in ${placeWords}. Allow it in System Settings › Privacy & Security › Files and Folders.`;
   if (kind === "locked") return `The import cannot open ${placeWords}. Ask Jason.`;
   if (kind === "newNode") return "node was updated. If macOS asks whether node may look in a folder, choose Allow.";
   return "";
 }
 
-/** The log line for a look that macOS or the folder's permissions refused. */
-export function accessLog(state, code, node, placeWords) {
-  if (state === "refused") return `macOS does not let node (${node}) look in ${placeWords} (${code}). Allow node in System Settings, Privacy & Security, Files and Folders; then say "look again" in her chat, or drop the video again.`;
-  if (state === "locked") return `The folder's own permissions do not let node look in ${placeWords} (${code}). Jason checks them in Finder, Get Info, Sharing & Permissions.`;
+/** The log line for a look that macOS or the folder's permissions refused. `node` is the program's path, `name` what macOS calls it. */
+export function accessLog(state, code, node, placeWords, { name = "node" } = {}) {
+  if (state === "refused") return `macOS does not let ${name} (${node}) look in ${placeWords} (${code}). Allow ${name} in System Settings, Privacy & Security, Files and Folders; then say "look again" in her chat, or drop the video again.`;
+  if (state === "locked") return `The folder's own permissions do not let ${name} look in ${placeWords} (${code}). Jason checks them in Finder, Get Info, Sharing & Permissions.`;
   return "";
 }
 
 /** The log line for a `lookAt` result that was not ok: `accessLog`'s line for refused and locked, a line with the code for any other error, and
     "" for a look that found the folder, or did not find it there (the caller says that). `home` is for the place's words. */
-export function lookLog(place, folder, look, home, node = process.execPath) {
+export function lookLog(place, folder, look, home, node = process.execPath, { name = "node" } = {}) {
   if (!look || look.names) return "";
   const words = placeWordsOf(place, folder, home);
-  if (look.state === "error") return `node (${node}) could not look in ${words} (${look.code || "an error"}).`;
-  return accessLog(look.state, look.code, node, words);
+  if (look.state === "error") return `${name} (${node}) could not look in ${words} (${look.code || "an error"}).`;
+  return accessLog(look.state, look.code, node, words, { name });
 }
 
 /** The installer's line, from the note, for what macOS answered at the end of the setup. `home` is for the place words, `now` the time, `alive`
     whether a process is running (kill 0, as run.js isRunning), and `places` where each place is now, to name a place the note has no
     folder for yet (a first look). Only these: both places ok; none looked yet; a live look under a minute old (still looking), or older
-    (the asking line); a look whose process is gone is passed over; refused, locked and error in any place; missing for the drop folder only. */
-export function setupLine(note, { home = studioHome(), now = Date.now(), alive = isRunning, places = {} } = {}) {
+    (the asking line); a look whose process is gone is passed over; refused, locked and error in any place; missing for the drop folder only.
+    `name` is the program as macOS names it (`lookerOf`). */
+export function setupLine(note, { home = studioHome(), now = Date.now(), alive = isRunning, places = {}, name = "node" } = {}) {
   const lead = "  Files and Folders, at the end:  ";
   const folderOf = (place) => {
     const noted = (note.places[place] || {}).folder;
@@ -246,8 +254,8 @@ export function setupLine(note, { home = studioHome(), now = Date.now(), alive =
   };
   const looking = note.looking;
   if (looking && alive(looking.pid)) {
-    if (now - looking.at < ASKING_MS) return `${lead}the import is still looking; if a box asks whether "node" may look in a folder, choose Allow.`;
-    return lead + accessLine({ kind: "asking", place: looking.place }, { placeWords: words(looking.place) });
+    if (now - looking.at < ASKING_MS) return `${lead}the import is still looking; if a box asks whether "${name}" may look in a folder, choose Allow.`;
+    return lead + accessLine({ kind: "asking", place: looking.place }, { placeWords: words(looking.place), name });
   }
   for (const place of PLACES) {
     const noted = noteOf(place);
@@ -257,10 +265,10 @@ export function setupLine(note, { home = studioHome(), now = Date.now(), alive =
     const said = noted.state === "missing" ? place === "drop" : ["refused", "locked", "error"].includes(noted.state);
     if (!said) continue;
     const finding = { kind: noted.state, place, code: noted.code };
-    return lead + accessLine(finding, { placeWords: words(place), switchName: folderOf(place) ? switchFor(folderOf(place), home) : "its switches" });
+    return lead + accessLine(finding, { placeWords: words(place), switchName: folderOf(place) ? switchFor(folderOf(place), home) : "its switches", name });
   }
   const both = ["drop", "episodes"].every((place) => (noteOf(place) || {}).state === "ok");
-  return lead + (both ? "node may look in the drop folder and in Dropbox." : "the import has not looked yet.");
+  return lead + (both ? `${name} may look in the drop folder and in Dropbox.` : "the import has not looked yet.");
 }
 
 /** Post the banner for `place` when its look found the folder refused or locked (`note.places[place].state`) and the rule says it is due:
@@ -268,8 +276,9 @@ export function setupLine(note, { home = studioHome(), now = Date.now(), alive =
     other state) posts nothing and takes `told[place]` away, so the next refusal posts at once. The rule reads `told` from `note` and writes
     it to `home` each time, never from the run's memory (a run starts again on every dropped video). `notify` failing costs only the banner.
     `home` is required for `told` to persist: without it the rule works on `note` in memory only. Pass a `note` read after noteState (the
-    look's own write), or the banner is judged from a note the look has since changed. Gives whether a banner was posted. */
-export function postIfDue(place, note, { notify, clock = Date.now, node = process.execPath, placeWords = "", home } = {}) {
+    look's own write), or the banner is judged from a note the look has since changed. `name` is the program as macOS names it
+    (`lookerOf`), for the banner's words. Gives whether a banner was posted. */
+export function postIfDue(place, note, { notify, clock = Date.now, node = process.execPath, placeWords = "", home, name = "node" } = {}) {
   const state = (note.places[place] || {}).state;
   const told = (note.told = note.told || {});
   if (state !== "refused" && state !== "locked") {
@@ -284,7 +293,7 @@ export function postIfDue(place, note, { notify, clock = Date.now, node = proces
   const last = told[place];
   if (last && last.key === key && now - last.at <= BANNER_AGAIN_MS) return false;
   try {
-    notify(accessBanner(state, placeWords));
+    notify(accessBanner(state, placeWords, { name }));
   } catch {
     return false;
   }
@@ -294,10 +303,8 @@ export function postIfDue(place, note, { notify, clock = Date.now, node = proces
 }
 
 /** Post the new-node banner once per `node`, when `needs` (the places whose folder needs Files and Folders access) has a place whose last
-    ok look was by another node. Gives whether a banner was posted. On an installed Mac (`installed`) it posts nothing and writes nothing:
-    the grants are the app's. */
-export function postNewNodeIfDue(note, { notify, clock = Date.now, node = process.execPath, needs = [], home, installed = false } = {}) {
-  if (installed) return false;
+    ok look was by another node. Gives whether a banner was posted. An installed Mac's run never calls it: the grants are the app's. */
+export function postNewNodeIfDue(note, { notify, clock = Date.now, node = process.execPath, needs = [], home } = {}) {
   const told = (note.told = note.told || {});
   if (told.newNode && told.newNode.node === node) return false;
   if (!needs.some((place) => (note.places[place] || {}).okNode && note.places[place].okNode !== node)) return false;
@@ -323,12 +330,14 @@ function placesFromSettings(home) {
 }
 
 /** `node access.js --setup-line`: the installer's one line at the end of a setup, from the note. Prints nothing for any other argument,
-    and never fails the installer: whatever goes wrong prints nothing. */
-export function main(argv, { out = process.stdout, home } = {}) {
+    and never fails the installer: whatever goes wrong prints nothing. The line names the program as macOS does, from `build` or, with
+    none given, from the build of the checkout this file is in (an installed Mac's setup runs it from the app's own programs). */
+export function main(argv, { out = process.stdout, home, build } = {}) {
   if (argv[0] !== "--setup-line") return 0;
   try {
     const h = home || studioHome();
-    out.write(`${setupLine(readAccess(h), { home: h, places: placesFromSettings(h) })}\n`);
+    const name = lookerOf(build ?? buildOf(dirname(dirname(fileURLToPath(import.meta.url)))));
+    out.write(`${setupLine(readAccess(h), { home: h, places: placesFromSettings(h), name })}\n`);
   } catch {
     // Nothing: the setup goes on without the line.
   }

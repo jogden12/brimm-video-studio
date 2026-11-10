@@ -12,6 +12,8 @@ import { setup, episodeFor, reread, EDITED, FOLDER } from "./episodes.js";
 const tags = (xml, name) => [...xml.matchAll(new RegExp(`<${name}((?: [\\w-]+="[^"]*")*)/?>`, "g"))].map((m) => Object.fromEntries([...m[1].matchAll(/ ([\w-]+)="([^"]*)"/g)].map((a) => [a[1], a[2]])));
 /** The made-up episode's Reels, as picked: Reel 1 picked, never pushed. */
 const PICKED = { ...EDITED, reels: EDITED.reels.map((r) => ({ ...r, pushed: [] })) };
+/** A Mac with BRIMM Video Studio installed, as buildOf gives its build.json: no Jason is at hand there. */
+const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
 /** ffprobe's answer for an upright clip of 7.7 seconds at 30000/1001. */
 const facts = { duration: 7.7, frameRate: "30000/1001", width: 1080, height: 1920, hasAudio: true, audioRate: 48000, audioChannels: 2 };
 
@@ -97,6 +99,14 @@ describe("reels, the list of an episode's Reel candidates (phase 3)", () => {
     writeFile(join(found.folder, "reels.json"), JSON.stringify({ ...JSON.parse(PHASE_3.files["reels.json"]), version: 3 }));
     assert.equal(await editMain(["reels", "Pricing"], t.ctx.deps), 1);
     assert.equal(t.said(), "Its list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac.");
+    t.done();
+  });
+  it("says how to update, not to ask Jason, on an installed Mac, when a newer BRIMM Video Studio wrote the list (review finding 2)", async () => {
+    const { t, found } = phase3();
+    t.ctx.deps.build = INSTALLED;
+    writeFile(join(found.folder, "reels.json"), JSON.stringify({ ...JSON.parse(PHASE_3.files["reels.json"]), version: 3 }));
+    assert.equal(await editMain(["reels", "Pricing"], t.ctx.deps), 1);
+    assert.equal(t.said(), 'Its list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac.');
     t.done();
   });
   it("offers to ask again on a Mac that can, though the importing Mac had no Claude Code (PR 19's review)", async () => {
@@ -380,6 +390,25 @@ describe("ask, when the list or Claude's reply is not as it was read (PR 19's re
     assert.equal(readFileSync(at, "utf8"), newer);
     assert.equal(reread(p.found).rev, 1);
     assert.deepEqual(readResult(p.t.home, FOLDER, "ask").failed, ["The list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac."]);
+    p.t.done();
+  });
+  it("says how to update, not to ask Jason, on an installed Mac, when a newer BRIMM Video Studio wrote the list while Claude was asked (review finding 2)", async () => {
+    const p = askable();
+    p.t.ctx.deps.build = INSTALLED;
+    const at = join(p.found.folder, "reels.json");
+    const newer = JSON.stringify({ ...JSON.parse(readFileSync(at, "utf8")), version: 3 });
+    const asked = claudeSays([{ from: "p5", to: "p5", hook: "What this is about", why: "It says it." }]);
+    p.t.ctx.deps.run = ((run) => async (cmd, args, more) => {
+      if (cmd === "CLAUDE") {
+        rmSync(at);
+        writeFile(at, newer);
+        return asked();
+      }
+      return run(cmd, args, more);
+    })(p.t.ctx.deps.run);
+    assert.equal(await editMain(["ask", "--now", FOLDER], p.t.ctx.deps), 1);
+    assert.equal(readFileSync(at, "utf8"), newer);
+    assert.deepEqual(readResult(p.t.home, FOLDER, "ask").failed, ['The list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac.']);
     p.t.done();
   });
   it("says which of Claude's clips were left out, and what was wrong with its reply, when another clip is taken", async () => {
@@ -1351,6 +1380,19 @@ describe("ask, what it refuses (from the review)", () => {
     writeFile(join(p.found.folder, "reels.json"), JSON.stringify({ ...reels, version: 3 }));
     const r = await askedBoth(p);
     const why = "The list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac.";
+    assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
+    assert.ok(p.t.said().includes(why), p.t.said());
+    assert.deepEqual(r.failed, [why]);
+    p.t.done();
+  });
+  it("says how to update, not to ask Jason, on an installed Mac, when it refuses a list a newer BRIMM Video Studio wrote (review finding 2)", async () => {
+    const p = askable();
+    p.t.ctx.deps.build = INSTALLED;
+    const reels = JSON.parse(readFileSync(join(p.found.folder, "reels.json"), "utf8"));
+    rmSync(join(p.found.folder, "reels.json"));
+    writeFile(join(p.found.folder, "reels.json"), JSON.stringify({ ...reels, version: 3 }));
+    const r = await askedBoth(p);
+    const why = 'The list of Reel candidates cannot be read: it was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac.';
     assert.deepEqual([r.quick, r.started, r.now, r.claude, r.kept, r.rev], [1, 0, 1, 0, true, 1]);
     assert.ok(p.t.said().includes(why), p.t.said());
     assert.deepEqual(r.failed, [why]);

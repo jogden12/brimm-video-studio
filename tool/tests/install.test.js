@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
 import { HELPERS } from "../helpers.js";
+import { writeAccess } from "../access.js";
 import { hasFilters, hasHwaccel } from "../workcopy.js";
 
 const INSTALL = fileURLToPath(new URL("../install.sh", import.meta.url));
@@ -73,19 +74,25 @@ const ask = (...args) => askOn({}, ...args);
     is given are kept, as what `asked` says of them, one to a line. `onPath` names more stand-ins to put first on
     its PATH, each with the shell text it runs, such as "xcode-select" or "sw_vers". With
     `bare`, the Mac has no Homebrew: there is no stand-in brew, and the installer looks for programs on PATH alone, which
-    holds the stand-ins and /usr/bin and /bin. `install` is the installer to ask, this checkout's unless a test gives a copy's. */
+    holds the stand-ins and /usr/bin and /bin. `install` is the installer to ask, this checkout's unless a test gives a copy's.
+    Every run is given a temp folder of its own (TMPDIR), empty unless `temp` names files to put there, each as [name, text]: an
+    import of a folder that is not for episodes keeps its lock in the temp folder, where busy.js looks, and no test reads this
+    computer's real one. */
 function askOn(installed, ...args) {
   return askWith({ installed }, ...args);
 }
-function askWith({ installed = {}, programs = [], files = [], launchd, agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, ffmpegSays, settings, bare = false, install = INSTALL }, ...args) {
+function askWith({ installed = {}, programs = [], files = [], temp = [], launchd, agentPath = "", claude = SIGNED_IN, claudeVersion = "2.1.296 (Claude Code)", versionExit = 0, onPath = {}, ffmpegSays, settings, bare = false, install = INSTALL }, ...args) {
   // The one rule of this file: nothing is run without --print.
   assert.ok(args.includes("--print"), "the installer is only ever asked what it would do");
   const dir = mkdtempSync(join(tmpdir(), "brimm-install-"));
   try {
     const home = join(dir, "home");
     const bin = join(dir, "bin");
+    const tmp = join(dir, "tmp");
     mkdirSync(home);
     mkdirSync(bin);
+    mkdirSync(tmp);
+    for (const [name, text] of temp) writeFileSync(join(tmp, name), text);
     // An argument may be a function of the home folder made for the test, which has no name until now: a folder in it.
     args = args.map((arg) => (typeof arg === "function" ? arg(home) : arg));
     const fileOf = (label) => join(home, "Library", "LaunchAgents", `${label}.plist`);
@@ -134,7 +141,7 @@ function askWith({ installed = {}, programs = [], files = [], launchd, agentPath
     const env = {
       // The node that runs these tests is on the PATH of the installer, whatever PATH the tests were started with: with --machine it
       // reads this Mac's settings with node, before anything is changed. `bare` is a Mac with no Homebrew and no node.
-      HOME: home, PATH: bare ? `${bin}:/usr/bin:/bin` : `${bin}:${process.env.PATH}:${dirname(process.execPath)}`, ...(agentPath ? { BRIMM_AGENT_PATH: agentPath } : {}),
+      HOME: home, TMPDIR: tmp, PATH: bare ? `${bin}:/usr/bin:/bin` : `${bin}:${process.env.PATH}:${dirname(process.execPath)}`, ...(agentPath ? { BRIMM_AGENT_PATH: agentPath } : {}),
       ...(stands["claude-stand-in"] ? { BRIMM_CLAUDE: join(bin, "claude-stand-in") } : {}), ...(bare ? { BRIMM_HOMEBREW_DIRS: "" } : {})
     };
     const r = spawnSync("/bin/zsh", [install, ...args], { encoding: "utf8", input: "", env });
@@ -653,7 +660,7 @@ describe("the installer's own text", () => {
     const toolchainStep = text.indexOf('if [[ -n "$machine" ]] && ! toolchain_here "$TOOLCHAIN" "$node"; then\n');
     assert.ok(toolchainStep > 0 && start > text.indexOf("\nfi\n", toolchainStep) + 4, "after the step that installs the command line");
     assert.ok(start > text.indexOf('if node_old "$node" say; then\n  exit 1\nfi'), "after node is in place");
-    for (const later of ['if [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then', 'if ! settings_plan "$node"; then', 'mkdir -p "${folders[@]}"', '"$node" "$HERE/settings.js" marker "$drop" "$machine"', '"$node" "$HERE/settings.js" write ', 'agent "$node" > "$AGENT_FILE"']) {
+    for (const later of ['if [[ ! -f "$MODEL" || "$model_has" != "$MODEL_SHA256" ]]; then', 'if ! settings_plan "$node"; then', 'mkdir -p "${folders[@]}"', '"$node" "$HERE/settings.js" marker "$drop" "$machine"', '"$node" "$HERE/settings.js" write ', 'agent "$node" > "$AGENT_FILE"']) {
       assert.ok(start < text.indexOf(later), later);
     }
     // The Chrome first, then the check, and the check is the step's last.
@@ -2595,7 +2602,8 @@ describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac
     }
   });
   it("keeps a download only when its SHA-256 is the pin's: a page that is not the model, or a cut-short file, is taken away and said (its own lines, run alone in zsh)", { skip: noZsh }, () => {
-    const from = '\nif [[ ! -f "$MODEL" || "$(model_sha256 "$MODEL" || true)" != "$MODEL_SHA256" ]]; then\n';
+    // From the line that reads the model's SHA-256 when the summary read none, which is so here (model_has is empty), to the closing fi.
+    const from = '\n[[ ! -f "$MODEL" || -n "$model_has" ]] || model_has="$(model_sha256 "$MODEL" || true)"\nif [[ ! -f "$MODEL" || "$model_has" != "$MODEL_SHA256" ]]; then\n';
     const at = text.indexOf(from);
     assert.ok(at >= 0, "the download's block, in install.sh");
     const block = text.slice(at + 1, text.indexOf("\nfi\n", at) + 4);
@@ -2613,7 +2621,7 @@ describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac
           mkdirSync(modelDir);
           writeFileSync(model, here);
         }
-        const script = `set -euo pipefail\nMODEL_DIR="${modelDir}"\nMODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"\nMODEL_URL="${PINNED.url}"\nMODEL_SHA256="${sha256}"\nnode="${process.execPath}"\n${functionOf("say")}${functionOf("model_sha256")}${block}\nprint -r -- "went on"\n`;
+        const script = `set -euo pipefail\nMODEL_DIR="${modelDir}"\nMODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"\nMODEL_URL="${PINNED.url}"\nMODEL_SHA256="${sha256}"\nnode="${process.execPath}"\nmodel_has=""\n${functionOf("say")}${functionOf("model_sha256")}${block}\nprint -r -- "went on"\n`;
         const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { PATH: `${join(dir, "bin")}:/usr/bin:/bin`, GIVES: gives, ASKED: join(dir, "curl-asked"), ...(curlExit ? { CURL_EXIT: String(curlExit) } : {}) } });
         const read = (file) => (existsSync(file) ? readFileSync(file, "utf8") : null);
         return { status: r.status, out: r.stdout, err: r.stderr, model: read(model), part: existsSync(`${model}.part`), asked: read(join(dir, "curl-asked")), modelPath: model };
@@ -2654,6 +2662,69 @@ describe("the transcriber's model, pinned (Studio app phase 4)", { skip: notAMac
     assert.equal(r.out, "went on\n");
     assert.deepEqual([r.model, r.part, r.asked], [MODEL_WORDS, false, null]);
   });
+  it("reads the model's SHA-256 once: what the summary read is kept for the download's decision, and it is read there only when there is no answer yet (their own lines, run alone in zsh)", { skip: noZsh }, () => {
+    // The summary's lines about the model, and the download's, each from its first line to its closing fi.
+    const summaryAt = text.indexOf("\n# A model that is here is checked against the pin");
+    assert.ok(summaryAt >= 0, "the summary's lines about the model, in install.sh");
+    const summary = text.slice(summaryAt + 1, text.indexOf("\nfi\n", summaryAt) + 4);
+    assert.ok(summary.includes('say "  Model:  here already, and its SHA-256 is the pin\'s"'), summary);
+    const made = text.indexOf('\n  mkdir -p "$MODEL_DIR"\n');
+    assert.ok(made >= 0, "the download's block, in install.sh");
+    const download = text.slice(text.lastIndexOf("\n\n", made) + 2, text.indexOf("\nfi\n", made) + 4);
+    const MODEL_WORDS = "the model, made for the test";
+    const HERE_ALREADY = "  Model:  here already, and its SHA-256 is the pin's\n";
+    const NOT_THE_PINS = (model) => `  Model:  here, but its SHA-256 is not the pin's, so the pinned one is downloaded, about 1.6 GB, from ${PINNED.url}, and replaces it only when its SHA-256 is the pin's, ${sha(MODEL_WORDS)} (tool/whisper-model.pin.json)\n`;
+    const ONCE_NODE = "  Model:  here; its SHA-256 is checked against the pin's once node is installed\n";
+    const DOWNLOADING = "Downloading the model. This is done once.\n";
+    // `first` is the node the summary has and `later` the one found again after Homebrew: "counting" is this node, which writes down
+    // each file it is asked to read; "none" is no node; "broken" writes the file down and reads nothing.
+    const run = ({ here, first = "counting", later = "counting" }) => {
+      const dir = realpathSync(mkdtempSync(join(tmpdir(), "brimm-once-")));
+      try {
+        mkdirSync(join(dir, "bin"));
+        const read = join(dir, "read");
+        const stand = (name, last) => {
+          writeFileSync(join(dir, "bin", name), `#!/bin/sh\nfor a; do file="$a"; done\necho "$file" >> "${read}"\n${last}\n`);
+          chmodSync(join(dir, "bin", name), 0o755);
+          return join(dir, "bin", name);
+        };
+        const nodes = { counting: stand("counting", `exec "${process.execPath}" "$@"`), broken: stand("broken", "exit 1"), none: "" };
+        writeFileSync(join(dir, "bin", "curl"), '#!/bin/sh\necho "$*" > "$ASKED"\nwhile [ "$1" != "-o" ]; do shift; done\nprintf %s "$GIVES" > "$2"\n');
+        chmodSync(join(dir, "bin", "curl"), 0o755);
+        const modelDir = join(dir, "models");
+        const model = join(modelDir, "ggml-large-v3-turbo.bin");
+        if (here !== undefined) {
+          mkdirSync(modelDir);
+          writeFileSync(model, here);
+        }
+        const script = `set -euo pipefail\nMODEL_DIR="${modelDir}"\nMODEL="$MODEL_DIR/ggml-large-v3-turbo.bin"\nMODEL_URL="${PINNED.url}"\nMODEL_SHA256="${sha(MODEL_WORDS)}"\n${functionOf("say")}${functionOf("model_sha256")}node="${nodes[first]}"\n${summary}node="${nodes[later]}"\n${download}print -r -- "went on"\n`;
+        const r = spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { PATH: `${join(dir, "bin")}:/usr/bin:/bin`, GIVES: MODEL_WORDS, ASKED: join(dir, "curl-asked") } });
+        const names = existsSync(read) ? readFileSync(read, "utf8").split("\n").filter(Boolean).map((file) => (file === model ? "the model" : file === `${model}.part` ? "the download" : file)) : [];
+        return { status: r.status, out: r.stdout.replaceAll(model, "<model>"), err: r.stderr, read: names, model: existsSync(model) ? readFileSync(model, "utf8") : null, fetched: existsSync(join(dir, "curl-asked")) };
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+    // Here and the pin's: read once, for the summary, and never again.
+    let r = run({ here: MODEL_WORDS });
+    assert.deepEqual([r.status, r.out, r.read, r.fetched], [0, `${HERE_ALREADY}went on\n`, ["the model"], false], r.err);
+    // Here, but not the pin's: read once, and the answer the summary gave is the one the download goes by. The download is read too.
+    r = run({ here: "another model" });
+    assert.deepEqual([r.status, r.out, r.read, r.model], [0, `${NOT_THE_PINS()}${DOWNLOADING}went on\n`, ["the model", "the download"], MODEL_WORDS], r.err);
+    // Here, with no node until Homebrew installs one: the summary reads nothing, so it is read once node is found again.
+    r = run({ here: MODEL_WORDS, first: "none" });
+    assert.deepEqual([r.status, r.out, r.read, r.fetched], [0, `${ONCE_NODE}went on\n`, ["the model"], false], r.err);
+    r = run({ here: "another model", first: "none" });
+    assert.deepEqual([r.status, r.out, r.read, r.model], [0, `${ONCE_NODE}${DOWNLOADING}went on\n`, ["the model", "the download"], MODEL_WORDS], r.err);
+    // Here, and the first reading said nothing: there is no answer to keep, so it is read again by the node found again.
+    r = run({ here: MODEL_WORDS, first: "broken" });
+    assert.deepEqual([r.status, r.out, r.read, r.fetched], [0, `${NOT_THE_PINS()}went on\n`, ["the model", "the model"], false], r.err);
+    // Not here: nothing to read until it is downloaded.
+    r = run({});
+    assert.equal(r.status, 0, r.err);
+    assert.ok(r.out.startsWith("  Model:  to download, about 1.6 GB, to <model>, from ") && r.out.endsWith(`\n${DOWNLOADING}went on\n`), r.out);
+    assert.deepEqual([r.read, r.model], [["the download"], MODEL_WORDS]);
+  });
   it("says in its help that the model is downloaded at the pinned revision, and kept only when its SHA-256 is the pin's", () => {
     const r = ask("--print", "--help");
     assert.ok(r.out.replace(/\s+/g, " ").includes("downloads the transcriber's model once (about 1.6 GB) when it is not here, at the revision tool/whisper-model.pin.json pins, and keeps it only when its SHA-256 is the pin's,"), r.out);
@@ -2677,6 +2748,19 @@ describe("BRIMM Video Studio's own copy of Studio (--tools; Studio app phase 4),
   const APPS_COPY_LINE = "This is BRIMM Video Studio's own copy of Studio (it has a build.json beside tool/), so it is set up only with the app's own programs, never Homebrew's. Open BRIMM Video Studio and choose Repair.";
   const GIT_CHECKOUT_LINE = "--tools and --app are for BRIMM Video Studio's own copy of Studio, which has a build.json beside tool/. This is a git checkout, which is set up with Homebrew's programs: run this again without them.";
   const HELPERS_LINE = (tools) => `  Studio's helpers, compiled:  in ${tools}: ${HELPERS.map((h) => `brimm-${h}`).join(", ")}`;
+  it("names BRIMM Video Studio, as macOS does, in the line a setup ends on: access.js --setup-line, run from the app's own copy (review finding 1)", () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "brimm-home-")));
+    try {
+      const node = `${copy.tools}/node`;
+      const ok = (folder) => ({ state: "ok", code: "", at: 1, since: 1, folder, node, okNode: node });
+      writeAccess(home, { version: 1, looking: null, told: {}, places: { drop: ok(join(home, "Drop")), episodes: ok(join(home, "Episodes")) } });
+      const r = spawnSync(node, [join(copy.tool, "access.js"), "--setup-line"], { env: { ...process.env, BRIMM_VIDEO_HOME: home }, encoding: "utf8" });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(r.stdout, "  Files and Folders, at the end:  BRIMM Video Studio may look in the drop folder and in Dropbox.\n");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
   it("takes every program from the folder after --tools on a Mac with no Homebrew, and runs the background job with node from there", () => {
     const d = dropbox();
     try {
@@ -3037,6 +3121,18 @@ describe("waiting for nothing at work (Studio app phase 4)", { skip: notAMac }, 
       d.done();
     }
   });
+  it("names an import of a folder that is not for episodes too, by its lock in the temp folder, which here is the test's own", () => {
+    const d = dropbox();
+    try {
+      const lock = askApp({ temp: [["brimm-transcribe-fedcba9876543210.lock", String(process.pid)]] }, d.root);
+      assert.equal(lock.status, 0, lock.err + lock.out);
+      assert.ok(lock.out.includes(`\n  At work now:  An import is at work: it holds its lock (process ${process.pid}). ${UNTIL}\n`), lock.out);
+      assert.equal(lock.ran, "");
+      assert.deepEqual(lock.left, []);
+    } finally {
+      d.done();
+    }
+  });
   it("in dev mode asks launchd nothing and says no such line", () => {
     const d = dropbox();
     try {
@@ -3074,7 +3170,8 @@ describe("waiting for nothing at work (Studio app phase 4)", { skip: notAMac }, 
         writeFileSync(join(dir, "bin", "launchctl"), `#!/bin/sh\n${launchctl}\n`);
         chmodSync(join(dir, "bin", "launchctl"), 0o755);
         const script = `set -euo pipefail\nLABEL="${label}"\nHERE="${HERE}"\nnode="${node}"\ntools=/x\nBUSY=75\n${functionOf("say")}${functionOf("idle_why")}${block}print -r -- "went on"\n`;
-        return spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { HOME: dir, BRIMM_VIDEO_HOME: dir, PATH: `${join(dir, "bin")}:/usr/bin:/bin` } });
+        // busy.js looks in node's temp folder too: the test's own, never this computer's.
+        return spawnSync("/bin/zsh", ["-c", script], { encoding: "utf8", env: { HOME: dir, BRIMM_VIDEO_HOME: dir, TMPDIR: join(dir, "tmp"), PATH: `${join(dir, "bin")}:/usr/bin:/bin` } });
       };
       const stopped = run("printf '\\tpid = 4321\\n'", process.execPath);
       assert.deepEqual([stopped.status, stopped.stdout], [75, "\nThe import is at work: its background job, com.thebrimm.unedited, is running (process 4321). Stopped before this Mac's drop folder, its settings and its launch agent were touched: they are as they were. What this run installed or downloaded first stays. Run this again once that is done.\n"], stopped.stderr);

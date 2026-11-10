@@ -17,7 +17,7 @@ import { readNotes, applyDecisions, clipRanges, pausesOfPlan } from "../notes.js
 import { probed, told, TOLD, SRT, PAUSES } from "./fixtures.js";
 import { progressFolder, noProgress } from "../progress.js";
 import { seenFile, writeSettings, pendingFolder, importingFolderOf, statusFoldersOf, episodeFilesFolder } from "../settings.js";
-import { lastWritten, readEpisode, writeEpisode } from "../episode.js";
+import { lastWritten, readEpisode, recordFile, recordText, writeEpisode } from "../episode.js";
 import { dropIdOf, fileId, importIdOf, noteSeen, writePending } from "../filing.js";
 import { readStatusesIn, removeStatusIn, writeStatusIn } from "../importing.js";
 import { importingFolder } from "../settings.js";
@@ -873,6 +873,13 @@ describe("a folder of unedited videos", () => {
     assert.deepEqual(readdirSync(t.locks), []);
     t.done();
   });
+  it("names BRIMM Video Studio, as macOS does, when an installed Mac's folder cannot be read (review finding 1)", async () => {
+    const t = setup();
+    const installed = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+    assert.deepEqual(await uneditedFolder(join(t.dir, "not there"), { ...t.deps, build: installed }), []);
+    assert.deepEqual(t.logs, ["The folder could not be read (ENOENT). If it is in Dropbox or another cloud drive, allow BRIMM Video Studio to read it in System Settings, Privacy & Security, Files and Folders."]);
+    t.done();
+  });
 });
 
 describe("what the progress panel is told", () => {
@@ -1586,6 +1593,37 @@ describe("the late check of an episode's import", () => {
     assert.ok(t.logs.some((line) => line.startsWith("the video.rough-cut.srt is not whole in ") && line.endsWith("at the late check (it is not there), so it is copied in again from its work copy.")), t.logs.join("\n"));
     t.done();
   });
+  it("says how to update, not to ask Jason, in an installed Mac's log, when the problem cannot be listed in a record a newer BRIMM Video Studio wrote (review finding 2)", async () => {
+    const ASK = "Jason has a newer BRIMM Video Studio. Ask him to update this Mac";
+    const SAY = 'the episode was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac';
+    const installed = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+    for (const [build, why] of [[undefined, ASK], [installed, SAY]]) {
+      const t = timed();
+      if (build) t.deps.build = build;
+      t.put("Talk.mov");
+      const rough = join(t.episodes, FOLDER, "Talk.rough-cut.srt");
+      let filed = false;
+      const clone = t.deps.clone;
+      t.deps.clone = (from, to) => {
+        if (filed && to === rough) return writeFileSync(to, "the rou");
+        return clone(from, to);
+      };
+      t.hooks.push((ms) => {
+        if (ms === 60000 && !filed) {
+          filed = true;
+          writeFileSync(rough, "the rou");
+          // The other Mac wrote the next record meanwhile, with a newer BRIMM Video Studio.
+          const { record } = readEpisode(join(t.episodes, FOLDER));
+          writeFileSync(recordFile(join(t.episodes, FOLDER), record.rev + 1), recordText({ ...record, rev: record.rev + 1, version: 99 }));
+        }
+      });
+      await uneditedFolder(t.drop, t.deps);
+      const line = t.logs.find((said) => said.includes("the problem could not be written into its cut plan"));
+      assert.equal(line, `Video of 13 Oct, 10:00 (Mac Studio): the problem could not be written into its cut plan (${why}).`, t.logs.join("\n"));
+      if (build) assert.doesNotMatch(line, /Jason|install\.sh/);
+      t.done();
+    }
+  });
   it("keeps the raw video, says so in the status file, the cut plan's first lines and a banner, and never imports it twice, when a file is still wrong", async () => {
     const t = timed();
     t.put("Talk.mov");
@@ -1750,6 +1788,20 @@ describe("what the final review found in the episode import", () => {
     assert.deepEqual([readdirSync(t.drop).sort(), t.calls], [[".brimm-watched-by", "Talk.mov"], []]);
     assert.deepEqual(t.logs, [`This is a drop folder for episodes (${join(t.drop, ".brimm-watched-by")} names Mac Studio), and this Mac has no settings for episodes that name it, so nothing is done here. Jason runs install.sh --machine on this Mac.`]);
     t.done();
+  });
+  it("says, on an installed Mac, to choose Repair when this Mac's settings cannot be used: no Jason is at hand there, and no installer to run (review finding 2)", async () => {
+    const installed = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+    for (const [build, mend] of [[installed, "Open BRIMM Video Studio and choose Repair. If that does not help, ask help@example.invalid."], [{ ...installed, support: "" }, "Open BRIMM Video Studio and choose Repair."]]) {
+      const t = episodic();
+      t.put("Talk.mov");
+      writeFileSync(join(t.drop, ".brimm-watched-by"), "Mac Studio\n");
+      t.deps.settings = null;
+      t.deps.build = build;
+      assert.deepEqual(await uneditedFolder(t.drop, t.deps), []);
+      assert.deepEqual([readdirSync(t.drop).sort(), t.calls], [[".brimm-watched-by", "Talk.mov"], []]);
+      assert.deepEqual(t.logs, [`This is a drop folder for episodes (${join(t.drop, ".brimm-watched-by")} names Mac Studio), and this Mac has no settings for episodes that name it, so nothing is done here. ${mend}`]);
+      t.done();
+    }
   });
   // The switch names Drop: a folder directly in BRIMM Video/Drop/ is a drop folder as one in BRIMM Video/Unedited Video/ is, and
   // the log names the folder it is in.

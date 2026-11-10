@@ -38,6 +38,8 @@ async function finished(w, answers = {}) {
   return { found, result };
 }
 const numbers = (handoff) => (handoff.suggestions || []).map((s) => s.n);
+/** A Mac with BRIMM Video Studio installed, as buildOf gives its build.json: no Jason is at hand there. */
+const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
 
 describe("F1. the suggestions in the hand-off", () => {
   it("holds the unmade suggestions that fall in the main video, on its clock, and the Reel by its fromSuggestion, and passes the contract's check", async () => {
@@ -143,6 +145,19 @@ describe("F3. what is said in the result", () => {
     assert.deepEqual(numbers(handoffOf(found)), [1]);
     assert.ok(result.next.includes("Suggestion 3 is left out of the hand-off: it has no point."), result.next);
     w.t.done();
+  });
+  it("says how to update, not to ask Jason, on an installed Mac, when a newer BRIMM Video Studio wrote the list (review finding 2)", async () => {
+    for (const [build, update] of [[undefined, "Ask Jason to update this Mac."], [INSTALLED, 'Say "update Studio" to update this Mac.']]) {
+      const w = ready();
+      if (build) w.t.ctx.build = build;
+      const found = await asked(w);
+      writeFileSync(join(found.folder, "reels.json"), JSON.stringify({ format: "brimm-video reels", version: 3, video: "Pricing talk.mp4", candidates: [] }));
+      const r = await finishNow(w.t.ctx, found);
+      assert.equal(r.ok, true, r.failed.join(" "));
+      assert.ok(r.next.includes(`No Reel suggestions are in the hand-off: their list cannot be used: it was written by a newer BRIMM Video Studio. ${update}`), r.next);
+      assert.equal("suggestions" in handoffOf(found), false);
+      w.t.done();
+    }
   });
   it("says a list that cannot be used, and the recording's words not being on this Mac, and writes the hand-off without suggestions", async () => {
     const list = ready();

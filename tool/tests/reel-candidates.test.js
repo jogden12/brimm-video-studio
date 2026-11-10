@@ -101,6 +101,14 @@ describe("reels.json", () => {
     assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 1, video: "a.mov", candidates: [{ n: 1, ranges: [{ start: 1 }] }] })), { why: "candidate 1 in it cannot be read" });
     assert.deepEqual(readReels(JSON.stringify({ format: "brimm-video reels", version: 1, video: "a.mov", highest: "three", candidates: [] })), { why: "it is not a list of Reel candidates this tool wrote" });
   });
+  it("says how to update, not to ask Jason, when a newer BRIMM Video Studio wrote it and this Mac has BRIMM Video Studio installed (review finding 2)", () => {
+    const newer = JSON.stringify({ format: "brimm-video reels", version: 3, video: "a.mov", candidates: [] });
+    assert.deepEqual(readReels(newer, { build: { mode: "installed" } }), { why: 'it was written by a newer BRIMM Video Studio. Say "update Studio" to update this Mac.' });
+    // A checkout, and a caller that knows no build, hear today's words.
+    for (const build of [undefined, null, { mode: "dev" }]) assert.deepEqual(readReels(newer, { build }), { why: "it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac." });
+    // The build changes no other answer.
+    assert.deepEqual(readReels("not json", { build: { mode: "installed" } }), { why: "it is not JSON" });
+  });
   it("is refused when a candidate's preview is anywhere but its own place in previews/, since it is opened and brought", () => {
     const one = (preview) => readReels(JSON.stringify({ format: "brimm-video reels", version: 1, video: "a.mov", candidates: [{ n: 1, ranges: [{ start: 1, end: 2, crop: { x: 0, y: 0, w: 10, h: 10 } }], preview }] }));
     for (const preview of ["../../Library/x.mp4", "/Users/x/a.mp4", "previews/reel-2.mp4", "previews/reel-1.mov", 3]) assert.deepEqual(one(preview), { why: "candidate 1 in it cannot be read" }, String(preview));

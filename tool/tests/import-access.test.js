@@ -292,6 +292,30 @@ describe("the banners (A3)", () => {
       assert.equal(readAccess(w.home).told.newNode, undefined);
     }));
 
+  it("an installed Mac's banner and log name BRIMM Video Studio, as macOS does, for a refused drop folder and a locked one (review finding 1)", () =>
+    withWorld(async (w) => {
+      const drop = wordsOf(w, "drop", w.drop);
+      const a = await watched(() => run(w, L, { node: "/n/a", build: INSTALLED }), { names: READS, deny: denyList(w.drop) });
+      assert.deepEqual(a.result.notices, [`This Mac does not let BRIMM Video Studio look in ${drop}. Allow it in System Settings › Privacy & Security › Files and Folders.`]);
+      assert.ok(a.result.logs.includes(`macOS does not let BRIMM Video Studio (/n/a) look in ${drop} (EPERM). Allow BRIMM Video Studio in System Settings, Privacy & Security, Files and Folders; then say "look again" in her chat, or drop the video again.`), a.result.logs.join("|"));
+      const b = await watched(() => run(w, L + MIN, { node: "/n/a", build: INSTALLED }), { names: READS, deny: denyList(w.drop, "EACCES") });
+      assert.ok(b.result.logs.includes(`The folder's own permissions do not let BRIMM Video Studio look in ${drop} (EACCES). Jason checks them in Finder, Get Info, Sharing & Permissions.`), b.result.logs.join("|"));
+      for (const line of [...a.result.notices, ...a.result.logs, ...b.result.logs]) assert.doesNotMatch(line, /\bnode\b/, line);
+    }));
+
+  it("an installed Mac's log names BRIMM Video Studio for Episodes refused", () =>
+    withWorld(async (w) => {
+      const drop = join(w.home, "BRIMM Video Work", "Drop");
+      mkdirSync(drop, { recursive: true });
+      writeFileSync(join(drop, "Talk.mov"), "video");
+      const r = runs(w, L, { settings: settingsOf(w, drop), home: w.home, node: "/n/a", build: INSTALLED });
+      const episodes = episodesFolder(w.root);
+      await watched(() => uneditedFolders([drop], r.deps), { names: READS, deny: denyList(episodes) });
+      const words = wordsOf(w, "episodes", episodes);
+      assert.ok(r.logs.includes(accessLog("refused", "EPERM", "/n/a", words, { name: "BRIMM Video Studio" })), r.logs.join("|"));
+      assert.deepEqual(r.notices, [`This Mac does not let BRIMM Video Studio look in ${words}. Allow it in System Settings › Privacy & Security › Files and Folders.`]);
+    }));
+
   it("a new node posts nothing with no okNode, or when every noted place is in the home folder", () =>
     withWorld(async (w) => {
       const none = await newNodeRun(w, { episodes: { ...okPlace(cloud(w), "/n/a"), okNode: undefined } }, "/n/b");

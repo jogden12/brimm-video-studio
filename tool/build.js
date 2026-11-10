@@ -21,6 +21,14 @@ export const repairLine = (build) => (build.support ? `${REPAIR} If that does no
 /** The line for a Mac whose build.json cannot be read. */
 export const brokenLine = (build) => `This Mac's BRIMM Video Studio cannot read its own build file. ${repairLine(build)}`;
 
+/** What an installed Mac is told when an episode's record was written by a newer BRIMM Video Studio than its own. */
+export const NEWER_SAY = `the episode was written by a newer BRIMM Video Studio. ${UPDATE_SAY}`;
+
+/** A failed record write's error `e`, as this Mac is to hear it. episode.js knows no build, so its NEWER error asks for Jason; on an
+    installed Mac, where no Jason is at hand, that error is given again in the update's words, with its code kept. Every other error,
+    and every error on a checkout, comes back as it is. Whoever prints a failed write's own message passes it through here first. */
+export const forThisMac = (e, build) => (e && e.code === "NEWER" && isInstalled(build) ? Object.assign(new Error(NEWER_SAY), { code: "NEWER" }) : e);
+
 /** What an installed Mac is when its build.json says nothing that can be used. */
 const BROKEN = { mode: "installed", version: "", build: 0, commit: "", short: "unknown", feed: "", channel: "stable", support: "", broken: true };
 

@@ -10,6 +10,7 @@ import { gated } from "./gate.js";
 import { suggestionsOnClock, KEPT_IN_100 } from "./handoff-v2.js";
 import { spelled } from "./final-transcript.js";
 import { timelineAt } from "./clock.js";
+import { UPDATE_SAY, isInstalled } from "./build.js";
 
 /** A sum to the thousandth of a second: a computer's sums leave 3.136 + 2.068 a hair off 5.204. */
 const ms = (t) => Math.round(t * 1000) / 1000;
@@ -89,8 +90,10 @@ export const reelsFile = ({ video, by, made, candidates, none = "", cannotAsk = 
 /** reels.json as it was read: {reels}, or {why} it cannot be used. Only what the previews, the listing and a Reel's project
     are made from is looked at: each candidate's number, its stretches and their crops, and its preview's place. A stretch at
     version 2 may have no crop (a candidate a reading suggested, not made yet); at version 1 each has its own. `known` is the
-    newest version this brimm-video reads: a test gives an older one, to stand in for a Mac on older code. */
-export function readReels(text, { known = REELS_VERSION } = {}) {
+    newest version this brimm-video reads: a test gives an older one, to stand in for a Mac on older code. `build` is this Mac's
+    build, as buildOf gives it, from whoever says the reason to a person: a list a newer BRIMM Video Studio wrote says how to update
+    on a Mac with BRIMM Video Studio installed, where no Jason is at hand, and to ask Jason on a checkout, or where no build is given. */
+export function readReels(text, { known = REELS_VERSION, build } = {}) {
   let reels;
   try {
     reels = JSON.parse(text);
@@ -99,7 +102,7 @@ export function readReels(text, { known = REELS_VERSION } = {}) {
   }
   const not = { why: "it is not a list of Reel candidates this tool wrote" };
   if (!reels || reels.format !== "brimm-video reels" || !Number.isInteger(reels.version)) return not;
-  if (reels.version > known) return { why: "it was written by a newer BRIMM Video Studio. Ask Jason to update this Mac." };
+  if (reels.version > known) return { why: `it was written by a newer BRIMM Video Studio. ${isInstalled(build) ? UPDATE_SAY : "Ask Jason to update this Mac."}` };
   if (typeof reels.video !== "string" || !Array.isArray(reels.candidates)) return not;
   if (reels.highest !== undefined && !(Number.isInteger(reels.highest) && reels.highest >= 0)) return not;
   const isCrop = (c) => Boolean(c) && [c.x, c.y, c.w, c.h].every(Number.isFinite);

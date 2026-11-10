@@ -34,8 +34,8 @@ import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { homeRefusal, studioHome } from "./home.js";
-import { buildOf, isInstalled } from "./build.js";
-import { bracket, noteState, postNewNodeIfDue, readAccess } from "./access.js";
+import { NEWER_SAY, buildOf, forThisMac, isInstalled, repairLine } from "./build.js";
+import { bracket, lookerOf, noteState, postNewNodeIfDue, readAccess } from "./access.js";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { isMain } from "./is-main.js";
 import { localDay, stamp } from "./shared/text.js";
@@ -936,10 +936,12 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
   const wait = deps.wait || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const unchanged = "Nothing was changed in the episode";
   const rel = (to) => relative(folder, to).split(sep).join("/");
+  // This Mac's build, read only where a line's words turn on it: an installed Mac has no Jason at hand to ask.
+  const build = () => deps.build ?? buildOf(thisCheckout());
   // Why the episode cannot be gone on with as it is now, or "".
   const notAsWas = (found, rev) => {
     if (!found.record) return `the episode's record cannot be read: ${String(found.why || "it is not there").replace(/\.$/, "")}`;
-    if (found.newer) return "the episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac";
+    if (found.newer) return isInstalled(build()) ? NEWER_SAY.replace(/\.$/, "") : "the episode was written by a newer BRIMM Video Studio. Ask Jason to update this Mac";
     const gone = undone(found.record, home);
     if (gone) return gone.replace(/\.$/, "");
     if (rev !== undefined && found.record.rev > rev) return "this episode changed on the other Mac meanwhile. Say it again";
@@ -1252,7 +1254,7 @@ export async function intoEpisode(file, madeAt, work, deps, { change = (record) 
     const write = textWriter({ work: join(work, "record"), keep: true, ...opts });
     writeEpisode(folder, change({ ...found.record, files: { ...found.record.files, ...sizes } }), { expectRev: before.record.rev, writeText: (to, text) => entries.push(write(to, text)), writer, home });
   } catch (e) {
-    problems.push(`the episode's record could not be written again: ${String(e.message).replace(/\.$/, "")}`);
+    problems.push(`the episode's record could not be written again: ${String(forThisMac(e, build()).message).replace(/\.$/, "")}`);
     await undo();
     return { put: false, problems, notes, kept: keptNow };
   }
@@ -1373,9 +1375,11 @@ export function listGone({ folder, record, home }) {
     - no cut plan, a reels.json the record lists that is gone (listGone), and the video, its cut plan or reels.json not
       whole on this Mac (`whole`);
     - a recording with no picture, as its cut plan says, which gets no Reels;
-    - a list of candidates that cannot be read, as one a newer brimm-video wrote, which a new one would be written over;
+    - a list of candidates that cannot be read, as one a newer brimm-video wrote, which a new one would be written over
+      (`build` is this Mac's build, which turns only that line's last words: an installed Mac is told how to update,
+      and not to ask Jason);
     - an import told to go by the rules alone, as the list says (`rulesOnly`). */
-export function askBlocked({ folder, record, root, statusFolders, home, machine, now = Date.now(), whole = isWhole }) {
+export function askBlocked({ folder, record, root, statusFolders, home, machine, now = Date.now(), whole = isWhole, build }) {
   if (kindOf(record) === null) return { why: leftAlone(record) ? LEFT : "This video is waiting for its answer: say what it is first." };
   // A session is known by its kind or by its mark, and only a mark cleared by her click lets Claude read it, by the gate's own rule
   // (gate.js sessionNotCleared): a record of kind "session" with no mark at all is refused too.
@@ -1411,7 +1415,7 @@ export function askBlocked({ folder, record, root, statusFolders, home, machine,
   }
   if (!facts || !facts.height) return { why: "A recording with no picture gets no Reels." };
   if (listed) {
-    const read = readReels(readFileSync(at(REELS_FILE), "utf8"));
+    const read = readReels(readFileSync(at(REELS_FILE), "utf8"), { build });
     if (read.why) return { why: `The list of Reel candidates cannot be read: ${read.why.replace(/\.$/, "")}.` };
     if (read.reels.rulesOnly === true) return { why: `Claude cannot be asked for Reels: ${read.reels.cannotAsk || "its import went by the rules alone"}.` };
     if (lost) return { why: lost };
@@ -1424,7 +1428,9 @@ export function askBlocked({ folder, record, root, statusFolders, home, machine,
 export async function askAgain({ folder, record }, deps) {
   const { log = () => {} } = deps;
   const as = "The Reel candidates are as they were.";
-  const blocked = askBlocked({ folder, record, root: deps.settings.root, statusFolders: statusFoldersOf(deps.settings, deps.home || studioHome()), home: deps.home || studioHome(), machine: deps.settings.machine, now: deps.now ? deps.now() : Date.now(), whole: deps.isWhole || isWhole });
+  // This Mac's build, for the words of what cannot be done: an installed Mac has no Jason at hand to ask.
+  const build = deps.build ?? buildOf(thisCheckout());
+  const blocked = askBlocked({ folder, record, build, root: deps.settings.root, statusFolders: statusFoldersOf(deps.settings, deps.home || studioHome()), home: deps.home || studioHome(), machine: deps.settings.machine, now: deps.now ? deps.now() : Date.now(), whole: deps.isWhole || isWhole });
   if (blocked.why) return { ok: false, made: [], failed: [blocked.why], next: as };
   const name = record.video.file;
   const video = join(folder, name);
@@ -1456,7 +1462,7 @@ export async function askAgain({ folder, record }, deps) {
     // start: one a newer brimm-video wrote meanwhile is never written over.
     const reelsAt = join(folder, REELS_FILE);
     const listed = existsSync(join(own, REELS_FILE)) ? readFileSync(join(own, REELS_FILE), "utf8") : null;
-    const read = listed === null ? null : readReels(listed);
+    const read = listed === null ? null : readReels(listed, { build });
     if (read && read.why) return { ok: false, made: [], failed: [...said, `The list of Reel candidates cannot be read: ${read.why.replace(/\.$/, "")}.`], next: as };
     // The record is read again for it: the other Mac's ask may have landed meanwhile, which the rev check then says.
     const lost = listGone({ folder, record: readEpisode(folder).record || record, home: deps.home || studioHome() });
@@ -1476,12 +1482,12 @@ export async function askAgain({ folder, record }, deps) {
       const put = await putHere({ folder, record }, [{ rel: REELS_FILE, from: files.at(reelsAt) }], {
         ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), home: deps.home || studioHome(), work: join(work, "record"), log,
         writer: { commit: deps.commit || (deps.settings ? commitOf(thisCheckout()) : "unknown"), on: deps.settings ? deps.settings.machine : "unknown" },
-        change: (r) => ({ ...r, reels: entries }), expectRev: record.rev, now: deps.now ? deps.now() : Date.now()
+        change: (r) => ({ ...r, reels: entries }), expectRev: record.rev, now: deps.now ? deps.now() : Date.now(), build
       });
       if (!put.put) return { ok: false, made: [], failed: [...said, ...merged.ignored, `${put.why}.`, "Nothing was changed in the episode."], next: as };
       return { ok: true, made: merged.added.map((c) => `Reel ${c.n}`), failed: [...said, ...merged.ignored], next: "Say \"show me the Reels\" to see them." };
     }
-    const into = await intoEpisode(video, [reelsAt], work, { ...deps, files }, { change: (r) => ({ ...r, reels: entries }), expectRev: record.rev });
+    const into = await intoEpisode(video, [reelsAt], work, { ...deps, build, files }, { change: (r) => ({ ...r, reels: entries }), expectRev: record.rev });
     const failed = [...said, ...merged.ignored, ...into.problems.map((p) => `${p}.`), ...into.notes.map((n) => `${n}.`)];
     // When the put was undone, no Reel was made; and when reels.json could not be put back, the list is not as it was.
     const kept = into.kept.find((k) => basename(k) === REELS_FILE && basename(dirname(k)) === "put back");
@@ -1516,7 +1522,8 @@ export async function uneditedFolder(dir, deps) {
   const inBrimmVideo = ["Unedited Video", "Drop"].includes(parent) && basename(dirname(dirname(resolve(dir)))) === "BRIMM Video";
   if (!episodic && (existsSync(marker) || inBrimmVideo)) {
     const owner = existsSync(marker) ? readFileSync(marker, "utf8").split("\n")[0] : "";
-    log(`This is a drop folder for episodes (${owner ? `${marker} names ${owner}` : `it is in BRIMM Video/${parent}`}), and this Mac has no settings for episodes that name it, so nothing is done here. Jason runs install.sh --machine on this Mac.`);
+    const build = deps.build ?? buildOf(thisCheckout());
+    log(`This is a drop folder for episodes (${owner ? `${marker} names ${owner}` : `it is in BRIMM Video/${parent}`}), and this Mac has no settings for episodes that name it, so nothing is done here. ${isInstalled(build) ? repairLine(build) : "Jason runs install.sh --machine on this Mac."}`);
     return [];
   }
   // The lock of this Mac's drop folder is kept in BRIMM Video Work, so that a run started by hand and the launch agent's,
@@ -1544,7 +1551,8 @@ export async function uneditedFolder(dir, deps) {
     try {
       names = waitingToCut(readdirSync(dir));
     } catch (e) {
-      log(`The folder could not be read (${e.code || e.message}). If it is in Dropbox or another cloud drive, allow node to read it in System Settings, Privacy & Security, Files and Folders.`);
+      // The program is named as macOS names it: the app on an installed Mac, node on a dev Mac.
+      log(`The folder could not be read (${e.code || e.message}). If it is in Dropbox or another cloud drive, allow ${lookerOf(deps.build ?? buildOf(thisCheckout()))} to read it in System Settings, Privacy & Security, Files and Folders.`);
       return [];
     }
     log(names.length ? `Looked in the folder: ${names.length} waiting (${names.join(", ")}).` : "Looked in the folder: nothing is waiting.");
@@ -1592,7 +1600,7 @@ export async function uneditedFolders(folders, deps) {
             () => {
               const note = readAccess(home);
               const needs = Object.keys(note.places).filter((place) => place === "downloads" || (typeof note.places[place].folder === "string" && needsFilesAccess(note.places[place].folder, home)));
-              postNewNodeIfDue(note, { notify: deps.notify || (() => {}), clock: noteOpts.clock, node, needs, home, installed });
+              postNewNodeIfDue(note, { notify: deps.notify || (() => {}), clock: noteOpts.clock, node, needs, home });
             },
             noteOpts
           );

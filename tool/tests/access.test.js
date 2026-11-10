@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { seenFile, settingsFile } from "../settings.js";
 import {
   ASKING_MS, UNSEEN_MS, BANNER_AGAIN_MS, DOWNLOADS_SAY_MS, accessFile, accessBanner, accessLine, accessLog, blocksDrop, bracket, findingOf, lookAt, lookLog, noteState,
-  placeWordsOf, postIfDue, postNewNodeIfDue, readAccess, saysInEpisodes, saysInOverview, setupLine, stepLine, switchFor, writeAccess,
+  lookerOf, main as accessMain, placeWordsOf, postIfDue, postNewNodeIfDue, readAccess, saysInEpisodes, saysInOverview, setupLine, stepLine, switchFor, writeAccess,
 } from "../access.js";
 import { watched } from "./watched-fs.js";
 
@@ -251,11 +251,11 @@ describe("findingOf", () => {
     assert.equal(findingOf({ ...base, note: noted, needsAccess: ["drop"], agentNode: "" }), null);
   });
 
-  it("never gives newNode on an installed Mac, whose grants are the app's", () => {
+  it("takes no word on whether the Mac is installed: its callers know that, and ask for no newNode there (behind-installed.test.js)", () => {
     const noted = note({ drop: place("ok", { okNode: "/a/node" }) });
     const args = { ...base, note: noted, needsAccess: ["drop"], agentNode: "/b/node" };
     assert.deepEqual(findingOf(args), { kind: "newNode" });
-    assert.equal(findingOf({ ...args, installed: true }), null);
+    assert.deepEqual(findingOf({ ...args, installed: true }), { kind: "newNode" });
   });
 
   it("judges newNode by the places that need access, not by any place", () => {
@@ -501,6 +501,136 @@ describe("the words are the design's", () => {
   });
 });
 
+// On an installed Mac the import runs through the app's own program, so macOS's question and System Settings' lists say "BRIMM Video
+// Studio" and never "node". Every line that names the program takes that name, and a git checkout's words stay as they were.
+describe("the words name the program as macOS does (review finding 1)", () => {
+  const drop = "your drop folder, Dropbox › BRIMM Video › Drop";
+  const dl = "the Downloads folder";
+  const sw = "the switch for Dropbox";
+  const APP = "BRIMM Video Studio";
+  const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+  const APP_NODE = "/Applications/BRIMM Video Studio.app/Contents/Resources/bin/node";
+  const name = APP;
+
+  it("lookerOf is node in a git checkout and the app on an installed Mac", () => {
+    assert.equal(lookerOf({ mode: "dev" }), "node");
+    assert.equal(lookerOf(undefined), "node");
+    assert.equal(lookerOf(INSTALLED), APP);
+  });
+
+  it("accessLine: the question and the list are the app's, and the list has one entry", () => {
+    assert.equal(
+      accessLine({ kind: "asking", place: "drop" }, { placeWords: drop, name }),
+      `The import has waited more than a minute to look in ${drop}. If a box on this Mac's screen asks whether "BRIMM Video Studio" may look in it, choose Allow, and the import goes on.`,
+    );
+    assert.equal(
+      accessLine({ kind: "refused", place: "drop", code: "EPERM" }, { placeWords: drop, switchName: sw, name }),
+      `This Mac does not let the import look in ${drop}, so the videos you drop wait. In System Settings, under Privacy & Security, Files and Folders, turn on ${sw} under "BRIMM Video Studio". Then say "look again".`,
+    );
+    assert.equal(
+      accessLine({ kind: "refused", place: "downloads", code: "EPERM" }, { placeWords: dl, switchName: "Downloads Folder", name }),
+      `This Mac does not let the import look in ${dl}, so the exports HyperFrames put there stay there. In System Settings, under Privacy & Security, Files and Folders, turn on Downloads Folder under "BRIMM Video Studio". Then say "look again".`,
+    );
+  });
+
+  it("accessLine and stepLine say node, as they always did, when the name is node or is not given", () => {
+    for (const finding of [{ kind: "asking", place: "drop" }, { kind: "refused", place: "drop", code: "EPERM" }]) {
+      const opts = { placeWords: drop, switchName: sw };
+      assert.equal(accessLine(finding, { ...opts, name: "node" }), accessLine(finding, opts));
+      assert.equal(stepLine(finding, { ...opts, name: "node" }), stepLine(finding, opts));
+    }
+  });
+
+  it("stepLine takes the name with the rest", () => {
+    for (const finding of [{ kind: "asking", place: "drop" }, { kind: "refused", place: "drop", code: "EPERM" }]) {
+      const opts = { placeWords: drop, switchName: sw, name };
+      assert.equal(stepLine(finding, opts), accessLine(finding, opts));
+      assert.match(stepLine(finding, opts), /"BRIMM Video Studio"/);
+      assert.doesNotMatch(stepLine(finding, opts), /node/);
+    }
+  });
+
+  it("accessBanner", () => {
+    assert.equal(accessBanner("refused", drop, { name }), `This Mac does not let BRIMM Video Studio look in ${drop}. Allow it in System Settings › Privacy & Security › Files and Folders.`);
+    assert.equal(accessBanner("refused", drop, { name: "node" }), accessBanner("refused", drop));
+    assert.equal(accessBanner("locked", drop, { name }), accessBanner("locked", drop));
+  });
+
+  it("accessLog", () => {
+    assert.equal(
+      accessLog("refused", "EPERM", APP_NODE, drop, { name }),
+      `macOS does not let BRIMM Video Studio (${APP_NODE}) look in ${drop} (EPERM). Allow BRIMM Video Studio in System Settings, Privacy & Security, Files and Folders; then say "look again" in her chat, or drop the video again.`,
+    );
+    assert.equal(
+      accessLog("locked", "EACCES", APP_NODE, drop, { name }),
+      `The folder's own permissions do not let BRIMM Video Studio look in ${drop} (EACCES). Jason checks them in Finder, Get Info, Sharing & Permissions.`,
+    );
+    assert.equal(accessLog("refused", "EPERM", NODE, drop, { name: "node" }), accessLog("refused", "EPERM", NODE, drop));
+  });
+
+  it("lookLog", () => {
+    const folder = join(home, "Drop");
+    const words = placeWordsOf("drop", folder, home);
+    assert.equal(lookLog("drop", folder, { state: "refused", code: "EPERM" }, home, APP_NODE, { name }), accessLog("refused", "EPERM", APP_NODE, words, { name }));
+    assert.equal(lookLog("drop", folder, { state: "locked", code: "EACCES" }, home, APP_NODE, { name }), accessLog("locked", "EACCES", APP_NODE, words, { name }));
+    assert.equal(lookLog("drop", folder, { state: "error", code: "EIO" }, home, APP_NODE, { name }), `BRIMM Video Studio (${APP_NODE}) could not look in ${words} (EIO).`);
+    assert.equal(lookLog("drop", folder, { state: "refused", code: "EPERM" }, home, NODE, { name: "node" }), lookLog("drop", folder, { state: "refused", code: "EPERM" }, home, NODE));
+  });
+
+  describe("setupLine", () => {
+    const LEAD = "  Files and Folders, at the end:  ";
+    const at = { state: "ok", code: "", at: 1, since: 1, node: APP_NODE, okNode: APP_NODE };
+    const ok = () => ({ version: 1, looking: null, told: {}, places: { drop: { ...at, folder: join(home, "Drop") }, episodes: { ...at, folder: join(home, "Episodes") } } });
+    const opts = (extra = {}) => ({ home, now: 100_000, alive: () => false, name, ...extra });
+    const words = "your drop folder, Drop, in your home folder";
+
+    it("says the app may look, when both places are ok", () => {
+      assert.equal(setupLine(ok(), opts()), `${LEAD}BRIMM Video Studio may look in the drop folder and in Dropbox.`);
+    });
+
+    it("says the app's question for a live look, under a minute old and older", () => {
+      const fresh = { ...ok(), looking: { place: "episodes", pid: 5, at: 100_000 - ASKING_MS + 1 } };
+      assert.equal(setupLine(fresh, opts({ alive: () => true })), `${LEAD}the import is still looking; if a box asks whether "BRIMM Video Studio" may look in a folder, choose Allow.`);
+      const old = { ...ok(), looking: { place: "episodes", pid: 5, at: 100_000 - ASKING_MS } };
+      assert.equal(setupLine(old, opts({ alive: () => true })), LEAD + accessLine({ kind: "asking", place: "episodes" }, { placeWords: "BRIMM Video in Dropbox", name }));
+    });
+
+    it("says the app's own entry for a refused place", () => {
+      const note = ok();
+      note.places.drop = { ...note.places.drop, state: "refused", code: "EPERM" };
+      assert.equal(
+        setupLine(note, opts()),
+        `${LEAD}This Mac does not let the import look in ${words}, so the videos you drop wait. In System Settings, under Privacy & Security, Files and Folders, turn on its switches under "BRIMM Video Studio". Then say "look again".`,
+      );
+    });
+
+    it("says node for the name node", () => {
+      assert.equal(setupLine(ok(), opts({ name: "node" })), `${LEAD}node may look in the drop folder and in Dropbox.`);
+    });
+  });
+
+  it("postIfDue posts the banner with the name it is given, and keeps its key by the program's path", () => {
+    const said = [];
+    const note = { version: 1, places: { drop: { state: "refused", code: "EPERM" } }, looking: null, told: {} };
+    writeAccess(home, note);
+    assert.equal(postIfDue("drop", note, { notify: (t) => said.push(t), clock: () => 1_000_000, node: APP_NODE, placeWords: drop, home, name }), true);
+    assert.deepEqual(said, [`This Mac does not let BRIMM Video Studio look in ${drop}. Allow it in System Settings › Privacy & Security › Files and Folders.`]);
+    assert.deepEqual(readAccess(home).told.drop, { key: `refused|${APP_NODE}`, at: 1_000_000 });
+  });
+
+  it("--setup-line names the app on an installed Mac, and node in a git checkout", () => {
+    const at = { state: "ok", code: "", at: 1, since: 1, node: APP_NODE, okNode: APP_NODE };
+    writeAccess(home, { version: 1, looking: null, told: {}, places: { drop: { ...at, folder: join(home, "Drop") }, episodes: { ...at, folder: join(home, "Episodes") } } });
+    const printed = (build) => {
+      let text = "";
+      assert.equal(accessMain(["--setup-line"], { out: { write: (t) => (text += t) }, home, build }), 0);
+      return text;
+    };
+    assert.equal(printed(INSTALLED), "  Files and Folders, at the end:  BRIMM Video Studio may look in the drop folder and in Dropbox.\n");
+    assert.equal(printed({ mode: "dev" }), "  Files and Folders, at the end:  node may look in the drop folder and in Dropbox.\n");
+  });
+});
+
 describe("postIfDue and postNewNodeIfDue (A3)", () => {
   const refusedNote = (place = "drop") => ({ version: 1, places: { [place]: { state: "refused", code: "EPERM" } }, looking: null, told: {} });
   const T0 = 1_000_000;
@@ -541,14 +671,13 @@ describe("postIfDue and postNewNodeIfDue (A3)", () => {
     }
   });
 
-  it("postNewNodeIfDue on an installed Mac gives false, posts nothing and writes nothing", () => {
+  it("postNewNodeIfDue takes no word on whether the Mac is installed: its caller never calls it there (import-access.test.js)", () => {
     const note = { version: 1, places: { drop: { state: "ok", okNode: "/a/node" } }, looking: null, told: {} };
     const said = [];
     const opts = { notify: (t) => said.push(t), clock: () => T0, node: "/b/node", needs: ["drop"], home, installed: true };
-    assert.equal(postNewNodeIfDue(note, opts), false);
-    assert.deepEqual(said, []);
-    assert.equal(note.told.newNode, undefined);
-    assert.equal(readAccess(home).told.newNode, undefined);
+    assert.equal(postNewNodeIfDue(note, opts), true);
+    assert.deepEqual(said, [accessBanner("newNode", "")]);
+    assert.deepEqual(readAccess(home).told.newNode, { node: "/b/node", at: T0 });
   });
 
   it("postNewNodeIfDue posts once per node when called twice on the same note", () => {
