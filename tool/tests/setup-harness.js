@@ -133,7 +133,7 @@ export const settingsOf = (home) => (existsSync(settingsFile(home)) ? readFileSy
 
 /** An installer for `programs.installer` that reaches the real install.sh of the app's copy, and only to ask what it would do: a guard
     that passes its arguments on when --print is among them and --yes is not, and otherwise writes "refused <arguments>" into `ran()`
-    and ends with 99. The stand-ins come first on its PATH, and BRIMM_CLAUDE is the stand-in for Claude Code, as install.test.js's
+    and ends with 99. The stand-ins come first on its PATH, HOME is the made-up Mac's home whatever the caller has, and BRIMM_CLAUDE is the stand-in for Claude Code, as install.test.js's
     askWith has them. */
 export function printOnly(m) {
   const guard = join(m.dir, "bin", "install-guard");
@@ -141,7 +141,7 @@ export function printOnly(m) {
     `has_print=0; has_yes=0`,
     `for a in "$@"; do case "$a" in --print) has_print=1 ;; --yes) has_yes=1 ;; esac; done`,
     `if [ "$has_print" = 1 ] && [ "$has_yes" = 0 ]; then`,
-    `  PATH="${join(m.dir, "bin")}:$PATH" BRIMM_CLAUDE="${join(m.home, ".local", "bin", "claude")}" exec /bin/zsh "${join(m.checkout, "tool", "install.sh")}" "$@"`,
+    `  HOME="${m.home}" PATH="${join(m.dir, "bin")}:$PATH" BRIMM_CLAUDE="${join(m.home, ".local", "bin", "claude")}" exec /bin/zsh "${join(m.checkout, "tool", "install.sh")}" "$@"`,
     `fi`,
     `echo "refused $*" >> "${join(m.dir, "ran")}"`,
     `exit 99`,

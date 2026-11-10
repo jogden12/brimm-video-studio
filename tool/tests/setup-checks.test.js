@@ -55,11 +55,19 @@ describe("the made-up Mac's guard for the installer", () => {
     });
   });
 
-  it("passes a --print call to the copy's own install.sh, which changes nothing", { skip: notAMac }, () => {
+  it("passes a --print call to the copy's own install.sh on the made-up Mac's home, whatever HOME the caller has", { skip: notAMac }, () => {
     withMac({}, (m) => {
-      const r = run(m, ["--print"]);
-      assert.notEqual(r.status, 99, r.stdout + r.stderr);
-      assert.equal(m.ran(), "");
+      const elsewhere = join(m.dir, "not-this-home");
+      const [guard] = printOnly(m);
+      const args = ["--print", "--machine", "Studio Test", "--tools", m.tools, "--app", m.app, m.root];
+      const r = spawnSync(guard, args, { encoding: "utf8", env: { ...process.env, HOME: elsewhere } });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.match(r.stdout, /^The unedited-video tool\n {2}This Mac: {2}Studio Test\n/, "the real installer's --print answered");
+      assert.ok(r.stdout.includes(`${m.home}/Downloads`), "it read the made-up Mac's home");
+      assert.ok(!r.stdout.includes(elsewhere), "and not the caller's");
+      // It asks the stand-in launchctl what is loaded, which changes nothing, and runs nothing else.
+      const calls = m.ran().split("\n").filter(Boolean);
+      assert.ok(calls.length > 0 && calls.every((line) => line.startsWith("launchctl print ")), m.ran());
     });
   });
 });
