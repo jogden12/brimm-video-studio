@@ -6984,7 +6984,7 @@ async function tellWhen(ctx, item) {
     line = told(item, seen, found ? found.item : null);
     if (found) ({ trail, item: seen } = found);
   }
-  ctx.say(line ?? stillLine(seen));
+  ctx.say(asSaid(ctx, line ?? stillLine(seen)));
   return 0;
 }
 

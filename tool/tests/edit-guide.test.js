@@ -84,6 +84,25 @@ describe("guide, from the records", () => {
     t.done();
     laptop.done();
   });
+  it("sends her to the support contact, not to Jason, on an installed Mac: in the list, for one video, and when it tells her (the sweep)", async () => {
+    const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+    const t = setup();
+    for (const v of Object.values(VIDEOS)) episodeAs(t, v);
+    const installed = light(t, { build: INSTALLED });
+    const listed = (await on(installed, "guide")).said;
+    assert.ok(listed.includes("  Morning talk (cccccc): This Mac isn't set up for HyperFrames yet: ask help@example.invalid."), listed.join("\n"));
+    assert.ok(listed.includes("  Session, 2026-10-20 (dddddd): Its teachings cannot be read on this Mac now: ask help@example.invalid, or choose the transcript only."), listed.join("\n"));
+    const one = (await on(installed, "guide", "Morning talk")).said;
+    const told = (await on(installed, "guide", "Morning talk", "tell")).said;
+    assert.deepEqual(told, ["Morning talk (cccccc): This Mac isn't set up for HyperFrames yet: ask help@example.invalid."]);
+    for (const line of [...listed, ...one, ...told]) assert.doesNotMatch(line, /Jason|install\.sh|Terminal/, line);
+    // With no support contact the asking words are left out, and a checkout says each line as it did.
+    const unnamed = (await on(light(t, { build: { ...INSTALLED, support: "" } }), "guide")).said;
+    assert.ok(unnamed.includes("  Morning talk (cccccc): This Mac isn't set up for HyperFrames yet."), unnamed.join("\n"));
+    assert.ok(unnamed.includes("  Session, 2026-10-20 (dddddd): Its teachings cannot be read on this Mac now: choose the transcript only."), unnamed.join("\n"));
+    assert.deepEqual((await on(light(t, { build: { mode: "dev" } }), "guide", "Morning talk", "tell")).said, ["Morning talk (cccccc): This Mac isn't set up for HyperFrames yet: ask Jason."]);
+    t.done();
+  });
   it("lists each video under way, waiting for her answer first, then newest first, a gated one by its label, and counts the old ones", async () => {
     const t = setup();
     for (const v of Object.values(VIDEOS)) episodeAs(t, v);

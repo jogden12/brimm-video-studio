@@ -195,6 +195,10 @@ describe("whether a Mac has BRIMM Video Studio installed", () => {
       assert.equal(saidHere(line, installed), line);
       assert.equal(saidHere(line, unnamed), line);
     }
+    // A support contact is put in as it is written, whatever signs it holds.
+    const odd = { ...installed, support: "help$&$1@example.invalid" };
+    assert.equal(saidHere("It could not be made again. Ask Jason.", odd), "It could not be made again. Ask help$&$1@example.invalid.");
+    assert.equal(askWords(odd, ": ask Jason.", "."), ": ask help$&$1@example.invalid.");
     // What is no line is given back as it is.
     for (const other of [undefined, null, 3]) assert.equal(saidHere(other, installed), other);
   });

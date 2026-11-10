@@ -33,7 +33,7 @@ export const forThisMac = (e, build) => (e && e.code === "NEWER" && isInstalled(
     Jason is at hand, the support contact its build.json names stands in his place; where it names none, `bare` stands in place of the
     words (nothing, unless given), so that the line ends as a sentence. `dev` is a line's own fixed words, never a name, a path or anything
     else a person or a file gave: every "Jason" in it is changed. */
-export const askWords = (build, dev, bare = "") => (!isInstalled(build) ? dev : build.support ? dev.replaceAll("Jason", build.support) : bare);
+export const askWords = (build, dev, bare = "") => (!isInstalled(build) ? dev : build.support ? dev.replaceAll("Jason", () => build.support) : bare);
 
 /** How a line that sends a person to Jason ends, and how an installed Mac ends it: [the checkout's last words, what stands for them where
     build.json names no support contact, what stands for them where it names one (left out where the contact simply takes Jason's place)].
