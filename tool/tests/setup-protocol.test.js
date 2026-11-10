@@ -120,6 +120,50 @@ describe("the setup protocol", () => {
     assert.equal(await reader.next(), null);
   });
 
+  it("U+2028, U+2029 and U+0085 are written escaped, so an event is one line to any reader, and parses back the same", () => {
+    for (const text of ["a\u2028b", "a\u2029b", "a\u0085b", "x\u2028y\u2029z\u0085w"]) {
+      const out = sink();
+      emitter(out)({ ...step, title: text, body: [text] });
+      const written = out.text();
+      assert.equal(/[\u0085\u2028\u2029]/.test(written), false, JSON.stringify(text));
+      assert.deepEqual(written.split(/\r\n|[\n\r\u0085\u2028\u2029]/), [written.slice(0, -1), ""]);
+      assert.deepEqual(JSON.parse(written), { ...step, title: text, body: [text] });
+    }
+    const out = sink();
+    emitter(out)({ ...step, title: "a\u2028b\u2029c\u0085d" });
+    assert.ok(out.text().includes(String.raw`"title":"a\u2028b\u2029c\u0085d"`));
+  });
+
+  it("the reader splits on a line feed only: an answer holding U+2028, U+2029 or U+0085 is one answer", async () => {
+    const input = new PassThrough();
+    const reader = readerOf(input);
+    for (const value of ["A\u2028B", "A\u2029B", "A\u0085B"]) {
+      input.write(`{"answer":"name","value":"${value}"}\n`);
+      assert.deepEqual(await reader.next(), { answer: "name", value });
+    }
+    input.end();
+    assert.equal(await reader.next(), null);
+  });
+
+  it("the reader takes a line ended by CR LF, a line in pieces, a character split between two writes, and a last line with no end", async () => {
+    const input = new PassThrough();
+    const reader = readerOf(input);
+    input.write('{"answer":"name","value":"A"}\r\n');
+    assert.deepEqual(await reader.next(), { answer: "name", value: "A" });
+    input.write('{"answer":"name",');
+    input.write('"value":"B"}\n');
+    assert.deepEqual(await reader.next(), { answer: "name", value: "B" });
+    const bytes = Buffer.from('{"answer":"name","value":"é"}\n');
+    const cut = bytes.indexOf(Buffer.from("é")) + 1;
+    input.write(bytes.subarray(0, cut));
+    input.write(bytes.subarray(cut));
+    assert.deepEqual(await reader.next(), { answer: "name", value: "é" });
+    input.write("\n   \n");
+    input.end('{"back":true}');
+    assert.deepEqual(await reader.next(), { back: true });
+    assert.equal(await reader.next(), null);
+  });
+
   it("a line holds exactly one of answer, back and cancel", () => {
     assert.equal(lineFault({ answer: "name", value: "A" }), "");
     assert.equal(lineFault({ back: true }), "");

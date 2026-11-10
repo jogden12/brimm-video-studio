@@ -2,7 +2,6 @@
 // checked in one place. A fault says which field is wrong and never repeats a value, since a value may be a pasted sign-in code.
 // Whether a value is good (a name, a folder that is there) is for the questions to say; this only says whether it can be read.
 import { isAbsolute } from "node:path";
-import { createInterface } from "node:readline";
 
 export const PROTOCOL = 1;
 export const EVENTS = ["step", "question", "progress", "summary", "done", "error"];
@@ -124,40 +123,61 @@ export function eventFault(event) {
   return broken ? `${event.event}: ${broken} holds a line break` : "";
 }
 
-/** A function that writes one event as one JSON line. It throws on a faulty event before it writes anything. */
+/** The characters that JSON.stringify writes as they are and that some readers take as a line's end: U+0085, U+2028 and U+2029. */
+const SEPARATORS = /[\u0085\u2028\u2029]/g;
+
+/** A function that writes one event as one JSON line. It throws on a faulty event before it writes anything. U+0085, U+2028 and
+    U+2029 are written as JSON's escapes of them, the same value, so that a reader that ends a line at one of them (Swift's
+    `FileHandle.bytes.lines` does) still reads one line per event. */
 export function emitter(output) {
   return (event) => {
     const fault = eventFault(event);
     if (fault) throw new Error(`The engine made a faulty event. ${fault}`);
-    output.write(`${JSON.stringify(event)}\n`);
+    const line = JSON.stringify(event).replace(SEPARATORS, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+    output.write(`${line}\n`);
   };
 }
 
-/** The shell's lines, one object each, queued so that next() may wait while other work goes on. null at the end of the input. */
+/** The shell's lines, one object each, queued so that next() may wait while other work goes on. null at the end of the input. A
+    line ends at a line feed only, and a carriage return before it is dropped: never at U+0085, U+2028 or U+2029, which a value may
+    hold (readline would end a line at the last two). Blank lines are passed over. */
 export function readerOf(input) {
   const queue = [];
   const waiting = [];
   let ended = false;
+  let held = "";
   const push = (item) => {
     const waiter = waiting.shift();
     if (waiter) waiter(item);
     else queue.push(item);
   };
-  const lines = createInterface({ input, crlfDelay: Infinity });
-  lines.on("line", (line) => {
-    if (line.trim() === "") return;
+  const take = (line) => {
+    const text = line.endsWith("\r") ? line.slice(0, -1) : line;
+    if (text.trim() === "") return;
     let value;
     try {
-      value = JSON.parse(line);
+      value = JSON.parse(text);
     } catch {
       value = undefined;
     }
     push(isObject(value) ? value : { fault: "A line was not a JSON object." });
-  });
-  lines.on("close", () => {
+  };
+  const end = () => {
+    if (ended) return;
+    take(held);
+    held = "";
     ended = true;
     while (waiting.length) waiting.shift()(null);
+  };
+  input.setEncoding("utf8");
+  input.on("data", (chunk) => {
+    if (ended) return;
+    const lines = (held + chunk).split("\n");
+    held = lines.pop();
+    for (const line of lines) take(line);
   });
+  input.on("end", end);
+  input.on("close", end);
   return {
     next() {
       if (queue.length) return Promise.resolve(queue.shift());
