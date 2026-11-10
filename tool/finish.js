@@ -16,7 +16,7 @@ import { probeArgs, factsOf, colourOf, pauseArgs, pausesOf } from "./cuts.js";
 import { clipArgs, storyCuts, STORY_MAX } from "./reframe.js";
 import { captionsOf, settled, stampedText } from "./lib.js";
 import { finalTranscript, spelled, spelledPairs, spelledCaptions } from "./final-transcript.js";
-import { buildOf, forThisMac } from "./build.js";
+import { buildOf, forThisMac, isInstalled } from "./build.js";
 import { buildHandoff, handoffText, handoffFault, inMain } from "./handoff.js";
 import { buildHandoffV2, handoffFaultV2, onPictureOf, fromSuggestionOf, hundredths, VERSION_2 } from "./handoff-v2.js";
 import { cloneIn, replaceIn, lateCheck, textWriter, cloneFile, readThrough, LATE_CHECK_MS } from "./dropbox.js";
@@ -1101,7 +1101,10 @@ export async function finishNow(ctx, found, deps = {}) {
         writeEpisode(found.folder, { ...newest.record, files: { ...newest.record.files, ...files }, finished: base ? newest.record.finished : null }, { expectRev: newest.record.rev, writeText: textWriter({ work: join(work, "record-listed"), ...opts }), writer, home: ctx.home });
         return base ? " The record lists what final/ holds now, and keeps the hand-off it had: the Reels are taken again from their exports." : " The record lists what final/ holds now, and no finish: the next finish makes every part again, from the Shares on the Mac that makes it.";
       } catch (w) {
-        return ` The record could not be written to list what final/ holds now: ${String(forThisMac(w, buildFor(ctx)).message).replace(/\.$/, "")}.${NEEDS_JASON}`;
+        // A record a newer BRIMM Video Studio wrote, on an installed Mac: the update mends it, and the line has just said how. No Jason is at
+        // hand there, so the line ends at that. Every other error, and every error on a checkout, keeps its line.
+        const build = buildFor(ctx);
+        return ` The record could not be written to list what final/ holds now: ${String(forThisMac(w, build).message).replace(/\.$/, "")}.${w.code === "NEWER" && isInstalled(build) ? "" : NEEDS_JASON}`;
       }
     };
     const before_ = readEpisode(found.folder);
