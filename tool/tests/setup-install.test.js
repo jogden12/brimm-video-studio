@@ -278,7 +278,7 @@ describe("runProgram", () => {
   /** A stand-in program in the test's own folder: prints docker's line and another, to stdout and stderr, then waits `wait` seconds. */
   const standIn = (m, wait) => {
     const file = join(m.dir, "prints");
-    writeFileSync(file, `#!/bin/sh\necho hello\necho "/bin/sh: docker: command not found" >&2\nsleep ${wait}\n`);
+    writeFileSync(file, `#!/bin/sh\necho hello\necho "/bin/sh: docker: command not found" >&2\necho $$ > "${join(m.dir, "pid")}"\nexec sleep ${wait}\n`);
     chmodSync(file, 0o755);
     return file;
   };
@@ -303,7 +303,19 @@ describe("runProgram", () => {
       await new Promise((r) => setTimeout(r, 300));
       stop.abort();
       assert.deepEqual(await ran, { code: null });
-      await new Promise((r) => setTimeout(r, 100));
+      // The stand-in is its own sleep (exec), so a stop closes its pipes: wait until it is gone, and then for its close event to be handled.
+      const pid = Number(readFileSync(join(m.dir, "pid"), "utf8"));
+      const alive = () => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      for (let i = 0; i < 100 && alive(); i++) await new Promise((r) => setTimeout(r, 50));
+      assert.ok(!alive());
+      await new Promise((r) => setTimeout(r, 300));
       assert.equal(chunks.join(""), "hello\n");
     });
   });
