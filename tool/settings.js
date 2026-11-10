@@ -35,7 +35,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildOf, isInstalled, repairLine } from "./build.js";
+import { askWords, buildOf, isInstalled, repairLine } from "./build.js";
 import { isMain } from "./is-main.js";
 import { waitingToCut } from "./cuts.js";
 import { textWriter } from "./dropbox.js";
@@ -786,14 +786,16 @@ function planned(home, rest, now, plutil = spawnSync, build) {
         [running, [wasLocal ? "Wait for each of these imports to finish, then run this again: leave the video in the old folder." : "Wait for each of these imports to finish, then run this again: leave the video in the old folder, which its late check needs."]],
         [problem, [
           ...(problemHere ? ["Try each of these again with retry, which makes its late check again from the video in the old folder: leave the video there, and run this again once the check has passed."] : []),
-          ...(problemGone ? ["A late check needs its video: where the video is no longer in the old folder, the check cannot be made again, and Jason looks at it."] : [])
+          // On an installed Mac, where no Jason is at hand, the support contact its build names is asked.
+          ...(problemGone ? [`A late check needs its video: where the video is no longer in the old folder, the check cannot be made again${isInstalled(build) ? `.${askWords(build, " Ask Jason.")}` : ", and Jason looks at it."}`] : [])
         ]],
         [imported, ["A video that is already imported leaves the old folder once its late check has passed: run this again after that."]],
         [kept, ["Delete each of these from the old folder by hand, then run this again."]],
         // The advice follows the place that could not be read: Dropbox's (macOS asks whether node may read Dropbox), the picked old folder's (the question came to the
         // app this runs in), and this Mac's own status folder (on its own disk, so System Settings cannot help).
         [unreadable, [
-          ...(unreadablePlaces.includes("dropbox") ? ["Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again."] : []),
+          // The program is named as macOS names it: the app on an installed Mac, node on a checkout.
+          ...(unreadablePlaces.includes("dropbox") ? [`Make each readable (macOS asks whether ${isInstalled(build) ? "BRIMM Video Studio" : "node"} may read Dropbox: Allow it), then run this again.`] : []),
           ...(unreadablePlaces.includes("old") ? ["Make the old folder readable (in System Settings, under Privacy & Security, Files and Folders, allow the app this runs in, if it was refused), then run this again."] : []),
           ...(unreadablePlaces.includes("own") ? ["Make this Mac's own status folder readable again (it is on this Mac's own disk, not in Dropbox), then run this again."] : [])
         ]],
@@ -1235,6 +1237,8 @@ function studio(home, rest, say, { openMinimum, freePort, tmp, uid, now, build }
 
 /** What `user-deny` says, and does, when her user settings are there but are not a JSON object whose deny rules can be added to. */
 const USER_UNREAD = "Her user settings could not be read as JSON, so nothing was added: Jason puts them right by hand.";
+/** USER_UNREAD as this Mac says it: on an installed Mac, where no Jason is at hand, the support contact its build names is asked. */
+const userUnread = (build) => (isInstalled(build) ? `Her user settings could not be read as JSON, so nothing was added.${askWords(build, " Ask Jason.")}` : USER_UNREAD);
 
 /** `user-deny` (question 5, R24): add to her user settings, ~/.claude/settings.json in `home`, the `Read()` deny rules of the places only
     brimm-video reads on this Mac (studio.js gatedReadRules, for its settings' facts; `tmp` and `uid` a test's own), each once, after
@@ -1268,7 +1272,7 @@ function userDeny(home, rest, say, { tmp, uid, openMinimum, env, build }) {
     held = JSON.parse(readFileSync(file, "utf8"));
   } catch (e) {
     if (e.code !== "ENOENT") {
-      say(USER_UNREAD);
+      say(userUnread(build));
       return 1;
     }
   }
@@ -1276,7 +1280,7 @@ function userDeny(home, rest, say, { tmp, uid, openMinimum, env, build }) {
   const permissions = object(held) ? held.permissions ?? {} : null;
   const deny = object(permissions) ? permissions.deny ?? [] : null;
   if (!Array.isArray(deny) || !deny.every((rule) => typeof rule === "string")) {
-    say(USER_UNREAD);
+    say(userUnread(build));
     return 1;
   }
   const rules = gatedReadRules(factsOf(home, got.settings, { tmp, uid, env }));

@@ -7252,7 +7252,7 @@ if (isMain(import.meta.url)) {
   // a Mac whose lock in effect is strict runs edit.js as it did before the open lock was built, and never asks ps.
   const refusedHome = homeRefusal();
   const open = !refusedHome && effectiveLock(readSettings(homeOf({})).settings ?? null) === "open";
-  const sandboxed = open ? sandboxedWhy({ env: process.env, pid: process.pid, spawn: spawnSync }) : "";
+  const sandboxed = open ? sandboxedWhy({ env: process.env, pid: process.pid, spawn: spawnSync, build: buildOf(thisCheckout()) }) : "";
   if (refusedHome) {
     process.stdout.write(`${refusedHome}\n`);
     process.exitCode = 2;

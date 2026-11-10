@@ -638,15 +638,17 @@ describe("node settings.js user-deny: her user settings' Read deny rules (questi
     // Her user settings get the rules only under the open lock (whole-branch review I2): this Mac's settings say open, and the
     // Claude Code version it was checked on is named, unless a test says otherwise.
     writeSettings(home, { ...t.given, root, ...(lock ? { lock } : {}) });
+    /** What a test adds to what the command is given: `build`, for an installed Mac. */
+    const over = {};
     const run = (...argv) => {
       t.said.length = 0;
-      return settingsMain(argv, { home, say: (line) => t.said.push(line), openMinimum: minimum, tmp, uid: 502 });
+      return settingsMain(argv, { home, say: (line) => t.said.push(line), openMinimum: minimum, tmp, uid: 502, ...over });
     };
     const user = join(home, ".claude", "settings.json");
     const settings = () => readSettings(home).settings;
     /** The Read deny rules her folder's open settings have, for this Mac: the ones her user settings are to hold too. */
     const folderReads = () => openSettingsOf({ checkout: CHECKOUT, node: "/opt/homebrew/bin/node", folder: join(home, "BRIMM Video Studio"), facts: factsOf(home, settings(), { tmp, uid: 502 }) }).permissions.deny.filter((rule) => rule.startsWith("Read("));
-    return { ...t, home, root, run, user, settings, folderReads };
+    return { ...t, home, root, run, user, settings, folderReads, over };
   }
 
   it("adds the Read deny rules to her user settings once, keeps everything else in them, and notes that it did", () => {
@@ -707,6 +709,23 @@ describe("node settings.js user-deny: her user settings' Read deny rules (questi
     assert.equal(t.run("user-deny"), 0);
     assert.equal(statSync(t.user).mode & 0o777, 0o600);
     t.done();
+  });
+  it("says, on an installed Mac, whom to ask about user settings that cannot be read, and names no Jason (the sweep)", () => {
+    for (const [build, line] of [
+      [INSTALLED, `Her user settings could not be read as JSON, so nothing was added. Ask ${INSTALLED.support}.`],
+      [{ ...INSTALLED, support: "" }, "Her user settings could not be read as JSON, so nothing was added."]
+    ]) {
+      for (const text of ["not JSON", '{"permissions": {"deny": [1]}}']) {
+        const t = userWorld();
+        t.over.build = build;
+        mkdirSync(dirname(t.user), { recursive: true });
+        writeFileSync(t.user, text);
+        assert.equal(t.run("user-deny"), 1, text);
+        assert.deepEqual(t.said, [line], text);
+        assert.equal(readFileSync(t.user, "utf8"), text);
+        t.done();
+      }
+    }
   });
   it("refuses user settings that are not a JSON object, changing nothing", () => {
     const t = userWorld();
@@ -1341,7 +1360,9 @@ describe("node settings.js write and plan, with the settings of the switch", () 
     const root = join(t.home, "BRIMM Video");
     mkdirSync(join(root, "Episodes", ".importing"), { recursive: true });
     writeSettings(t.home, { machine: "Mac Studio", root, checkout: CHECKOUT, ...held });
-    const run = async (...argv) => settingsMain(argv, { home: t.home, say: (line) => t.said.push(line), now: AT });
+    /** What a test adds to what the command is given: `build`, for an installed Mac. */
+    const over = {};
+    const run = async (...argv) => settingsMain(argv, { home: t.home, say: (line) => t.said.push(line), now: AT, ...over });
     const folder = (parent = "Unedited Video", machine = "Mac Studio") => {
       mkdirSync(join(root, parent, machine), { recursive: true });
       return join(root, parent, machine);
@@ -1354,7 +1375,7 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       writeFileSync(recordFile(path, 1), recordText(record));
     };
     const told = ["--machine", "Mac Studio", "--root", root, "--checkout", CHECKOUT];
-    return { ...t, root, run, folder, status, episode, told, file: settingsFile(t.home), held: () => readFileSync(settingsFile(t.home), "utf8") };
+    return { ...t, root, run, folder, status, episode, told, over, file: settingsFile(t.home), held: () => readFileSync(settingsFile(t.home), "utf8") };
   }
   const put = (folder, name, bytes = "video") => writeFileSync(join(folder, name), bytes);
 
@@ -1648,6 +1669,19 @@ describe("node settings.js write and plan, with the settings of the switch", () 
       t.status("Talk.mov", { problem: "Talk.rough-cut.mp4 is short" });
       assert.deepEqual(await refused(t, "--drop", "Drop"), [HEAD, "  2 late checks found a problem, of which 1 has the video still in the old folder.", PROBLEM_HERE, PROBLEM_GONE]);
       t.done();
+    });
+    it("says, on an installed Mac, whom to ask about a late check whose video is gone, and names no Jason (the sweep)", async () => {
+      for (const [build, end] of [[INSTALLED, `the check cannot be made again. Ask ${INSTALLED.support}.`], [{ ...INSTALLED, support: "" }, "the check cannot be made again."]]) {
+        const t = mac();
+        t.over.build = build;
+        t.folder();
+        t.status("Talk.mov", { problem: "Talk.rough-cut.mp4 is short" });
+        t.said.length = 0;
+        assert.equal(await t.run("write", ...t.told, "--drop", "Drop"), 1);
+        assert.equal(t.said.at(-1), `A late check needs its video: where the video is no longer in the old folder, ${end}`);
+        assert.doesNotMatch(t.said.join("\n"), /Jason|install\.sh|Terminal/);
+        t.done();
+      }
     });
     it("names a video that is there once, whether it is waiting or its import failed, and says what to do for it", async () => {
       const t = mac();
@@ -2509,13 +2543,15 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
       plutilAsked.push([program, ...args, options]);
       return Object.hasOwn(lists, args.at(-1)) ? { status: 0, stdout: JSON.stringify(lists[args.at(-1)]) } : { status: 1, stdout: "" };
     };
-    const run = async (...argv) => settingsMain(argv, { home, say: (line) => t.said.push(line), now: AT, plutil, clone: (from, to) => { clones.push(to); writeFileSync(to, readFileSync(from)); } });
+    /** What a test adds to what the command is given: `build`, for an installed Mac. */
+    const over = {};
+    const run = async (...argv) => settingsMain(argv, { home, say: (line) => t.said.push(line), now: AT, plutil, clone: (from, to) => { clones.push(to); writeFileSync(to, readFileSync(from)); }, ...over });
     const told = ["--machine", "Mac Studio", "--root", root, "--checkout", CHECKOUT];
     const folder = (parent, machine = "Mac Studio") => {
       mkdirSync(join(root, parent, machine), { recursive: true });
       return join(root, parent, machine);
     };
-    return { ...t, home, root, run, told, folder, clones, plutilAsked, file: settingsFile(home), held: () => readFileSync(settingsFile(home), "utf8"), read: () => readSettings(home).settings, desktop: join(home, "Desktop", "Drop") };
+    return { ...t, home, root, run, told, folder, clones, plutilAsked, over, file: settingsFile(home), held: () => readFileSync(settingsFile(home), "utf8"), read: () => readSettings(home).settings, desktop: join(home, "Desktop", "Drop") };
   }
 
   describe("the settings and the helpers", () => {
@@ -3112,6 +3148,9 @@ describe("a Mac's own drop folder, picked (Phase 3, L1)", () => {
         try {
           const said = await t.said();
           assert.equal(said.at(-1), "Make each readable (macOS asks whether node may read Dropbox: Allow it), then run this again.");
+          // The sweep: an installed Mac names the program as macOS does there.
+          t.over.build = INSTALLED;
+          assert.equal((await t.said()).at(-1), "Make each readable (macOS asks whether BRIMM Video Studio may read Dropbox: Allow it), then run this again.");
         } finally {
           chmodSync(dropbox, 0o755);
         }

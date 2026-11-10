@@ -142,3 +142,16 @@ describe("edit.js inside Claude Code's sandbox", () => {
     w.done();
   });
 });
+
+describe("edit.js inside the sandbox, on an installed Mac (the sweep)", () => {
+  it("names the support contact, not Jason, and is as it was on a checkout", () => {
+    const INSTALLED = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false };
+    const inside = { env: { SANDBOX_RUNTIME: "1" }, pid: 4242, spawn: () => { throw new Error("ps is never asked"); } };
+    assert.equal(sandboxedWhy({ ...inside, build: INSTALLED }), "BRIMM Video Studio was run inside Claude Code's sandbox: ask help@example.invalid.");
+    assert.equal(sandboxedWhy({ ...inside, build: { ...INSTALLED, support: "" } }), "BRIMM Video Studio was run inside Claude Code's sandbox.");
+    for (const build of [{ mode: "dev" }, undefined]) assert.equal(sandboxedWhy({ ...inside, build }), "BRIMM Video Studio was run inside Claude Code's sandbox: ask Jason.");
+    // Outside the sandbox it says nothing, whichever Mac it is.
+    assert.equal(sandboxedWhy({ env: {}, pid: 4242, spawn: () => ({ status: 0, stdout: " 1\n" }), build: INSTALLED }), "");
+  });
+});
+
