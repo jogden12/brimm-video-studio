@@ -39,7 +39,9 @@ const CLAUDE = {
     - `programs` are stand-ins in dir/bin. Each writes "<name> <arguments>" into `ran()`, prints dir/says/<name> when it is there
       and ends with the number in dir/exits/<name> when it is there. curl writes dir/says/curl's bytes to the file after --output.
       script runs what follows /dev/null as a job of its own, in a group of its own, as real script puts claude in a session of
-      its own, which a kill of script's group does not reach.
+      its own, which a kill of script's group does not reach. The job reads script's own stdin through fd 3: a shell with no job
+      control (dash, GitHub's Linux /bin/sh, which has no terminal there) gives a background job /dev/null for stdin, and
+      shares script's group with it.
     - The installer (a list: the program and its first arguments) waits while dir/hold is there, and then writes the log that its
       own check of Claude writes, in one of two ways. With dir/says/check-log-new it does as install.sh does: it takes the log
       away and writes that file's text as a new log. With dir/says/check-log it appends that file's text to the log. */
@@ -93,8 +95,9 @@ export function mac({ settings = "none", apps = [], dropbox = true, claude = "si
     `echo "script $*" >> "${ranFile}"`,
     `while [ $# -gt 0 ] && [ "$1" != "/dev/null" ]; do shift; done`,
     `shift`,
-    `set -m`,
-    `"$@" <&0 &`,
+    `exec 3<&0`,
+    `set -m 2>/dev/null`,
+    `"$@" <&3 3<&- &`,
     `child=$!`,
     `wait $child; code=$?`,
     exitsOf("script"),
