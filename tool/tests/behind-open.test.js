@@ -162,6 +162,12 @@ describe("behind, with the open lock", () => {
     delete s.studioNode;
     writeFileSync(settingsFile(w.home), JSON.stringify(s));
     refusedFor(await behindOn(w), ownLine("the node it was written with (this Mac's settings name none)"), "no node");
+    // The sweep: an installed Mac's note names no Jason and no node, which is the app's own program there.
+    const swept = await behindOn(w, { build: { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "help@example.invalid", broken: false } });
+    assert.deepEqual([swept.code, swept.text.split("\n")], [1, [
+      "This folder's lock is changed on this Mac: ask help@example.invalid before going on.",
+      "(Her folder's .claude/settings.json no longer holds the open lock as this BRIMM Video Studio writes it: the program it was written with (this Mac's settings name none). Its contents are not shown here.)"
+    ]]);
     w.done();
   });
   it("still says PR #40's lines for her folder's own settings first, on an open-lock Mac", async () => {

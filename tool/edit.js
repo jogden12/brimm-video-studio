@@ -2905,10 +2905,10 @@ const BEHIND_MS = 20000;
 export { LOCK_CHANGED } from "./loosened.js";
 
 /** One of lockLoosened's notes, each written for Jason, as this Mac says it. A checkout says it as it is. An installed Mac, where no Jason is
-    at hand, says it with his name left off, and says to choose Repair where the note gives his command, which Repair runs there. The
-    notes are the code's own, and each begins "(Jason: ". */
+    at hand, says it with his name left off, says to choose Repair where the note gives his command, which Repair runs there, and calls
+    the node her folder was written with the program, which there is the app's own. The notes are the code's own, and each begins "(Jason: ". */
 const loosenedNote = (line, build) => (isInstalled(build)
-  ? line.replace(/^\(Jason: (.)/, (_, first) => `(${first.toUpperCase()}`).replace(/ Run node tool\/settings\.js studio again\.\)$/, ` ${REPAIR})`)
+  ? line.replace(/^\(Jason: (.)/, (_, first) => `(${first.toUpperCase()}`).replace(/ Run node tool\/settings\.js studio again\.\)$/, ` ${REPAIR})`).replace("the node it was written with (this Mac's settings name none)", "the program it was written with (this Mac's settings name none)")
   : line);
 
 /** Say that her folder's lock is changed, and why, if it is (lockLoosened): 1 when it said so, else null. `build` is this Mac's build:
@@ -3285,7 +3285,7 @@ async function resolveIn(ctx, found, keep) {
         ctx.say(`The record in force lists ${aStat && listedBytes === aStat.size ? "A's size" : bStat && listedBytes === bStat.size ? "B's size" : `${listedBytes} bytes, neither side's size,`} for it.`);
       }
     }
-    if (blocked) ctx.say(blocked);
+    if (blocked) ctx.say(asSaid(ctx, blocked));
     else {
       const more = inOrder.length - 1;
       ctx.say(`Say which to keep: A or B.${more ? ` ${more} more conflicted cop${more === 1 ? "y" : "ies"} after this one.` : ""}`);
