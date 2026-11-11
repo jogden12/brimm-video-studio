@@ -27,7 +27,7 @@ const ALLOWED = [
 
 /** tool/, the folder this test's folder is in. */
 const TOOL = fileURLToPath(new URL("..", import.meta.url));
-const SKIPPED = new Set(["tests", "move-app", "vendor", "node_modules"]);
+const SKIPPED = new Set(["tests", "move-app", "vendor", "studio-app", "node_modules"]);
 
 /** Every .js and .mjs under `dir`, but the skipped folders, as paths relative to tool/. */
 function scripts(dir = TOOL) {
