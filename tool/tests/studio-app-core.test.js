@@ -137,6 +137,17 @@ describe("where the app is", { skip: noChecker }, () => {
   });
 });
 
+describe("where the guide is", { skip: noChecker }, () => {
+  it("the guide's folder is the home's BRIMM Video Work, or the stand-in's own in a stand-in build", () => {
+    for (const temp of ["/var/folders/ab/T/", "/var/folders/ab/T"]) {
+      assert.equal(ask("guide-folder", ["/Users/sallie", "no", temp]), "/Users/sallie/BRIMM Video Work");
+      assert.equal(ask("guide-folder", ["/Users/sallie", "yes", temp]), "/var/folders/ab/T/brimm-fake-engine");
+    }
+    assert.equal(check("guide-folder", ["/Users/sallie", "maybe", "/tmp"]).status, 2);
+    assert.equal(check("guide-folder", ["/Users/sallie", "yes"]).status, 2);
+  });
+});
+
 describe("the app's links", { skip: noChecker }, () => {
   it("only brimm-video-studio://check-for-updates is an action", () => {
     assert.equal(ask("url", ["brimm-video-studio://check-for-updates"]), "check-for-updates");

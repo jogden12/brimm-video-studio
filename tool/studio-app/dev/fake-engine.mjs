@@ -1,20 +1,25 @@
 // A stand-in for the setup engine, for looking at the Mac app's windows by hand (Phase 6, Task 11). It speaks the protocol between the
 // shell and the engine (version 1, tool/setup/protocol.js) and does nothing else: it keeps one file, <TMPDIR>/brimm-fake-engine/needs,
-// writes its sample guide into the same folder, and reads and writes nothing more. It starts no program and never looks at this Mac's
-// settings, launch agents or folders. It imports only node's own modules, since a --fake-engine build copies it to tool/setup/engine.js
-// of an app that holds nothing else of Studio. A setup first asks which scenario to show. The bars move on a timer, so that a whole run
-// takes about ten seconds; FAKE_ENGINE_FAST=1 takes the waits away, for the tests.
-import { mkdirSync, readFileSync, writeFileSync, writeSync } from "node:fs";
+// writes its guide into the same folder, and reads and writes nothing more but the one file it may find beside itself:
+// sample-guide.html, the real guide's page filled with sample details, which a --fake-engine build puts there. It starts no program
+// and never looks at this Mac's settings, launch agents or folders. It imports only node's own modules, since a --fake-engine build
+// copies it to tool/setup/engine.js of an app that holds nothing else of Studio. A setup first asks which scenario to show. The bars
+// move on a timer, so that a whole run takes about ten seconds; FAKE_ENGINE_FAST=1 takes the waits away, for the tests.
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const FOLDER = join(tmpdir(), "brimm-fake-engine");
+/** The real guide's page, when a --fake-engine build has put it beside the stand-in. */
+const REAL_GUIDE = join(dirname(fileURLToPath(import.meta.url)), "sample-guide.html");
 const NEEDS_FILE = join(FOLDER, "needs");
 const FAST = process.env.FAKE_ENGINE_FAST === "1";
 const HOME = homedir();
 
 // The real engine's own sentences, copied: tool/setup/engine.js's table, tool/build.js's REPAIR, tool/setup/checks.js's DAMAGED,
-// tool/setup/install.js's busy sentence and its model's download sentence, and tool/settings.js's DEV_REFUSAL.
+// tool/setup/install.js's busy sentence and its model's download sentence, tool/settings.js's DEV_REFUSAL, and the Apps step's refusals
+// of continue and its warning, from tool/setup/questions.js's continueFault and continueWarning.
 const REPAIR = "Open BRIMM Video Studio and choose Repair.";
 const SAY = {
   arguments: "BRIMM Video Studio's setup was started in a way it does not know.",
@@ -28,6 +33,17 @@ const DAMAGED = "This copy of BRIMM Video Studio may be damaged: download it aga
 const BUSY_GIVEN_UP = "BRIMM Video Studio is at work on this Mac, so setup cannot finish yet. Wait until it is done, then choose Repair.";
 const MODEL_FAILED = "The transcription model could not be downloaded (curl 6). Check this Mac's internet connection, then choose Repair.";
 const DEV_REFUSAL = 'Not written: this Mac is marked as Jason\'s development Mac ("mode": "dev" in its settings), and the app does not take it over. Its settings are as they were.';
+const APPS_FAULT = {
+  claudeCode: "Claude Code is not installed yet. Choose Install Claude Code.",
+  signIn: "Claude Code is not signed in yet. Choose Sign in.",
+  dropbox: "Dropbox is not installed yet. Install it, sign in to The BRIMM's account, then choose Continue."
+};
+/** The Apps step's warning when the Claude app or HyperFrames is not there, as continueWarning words it, or "". */
+function appsWarning(here) {
+  const missing = [["claude-app", "Claude"], ["hyperframes", "HyperFrames"]].filter(([id]) => !here[id]).map(([, name]) => name);
+  if (missing.length === 0) return "";
+  return `${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not installed yet. You can go on: the Getting Started guide lists what is still to install.`;
+}
 /** The support contact a real build carries (tool/studio-app/build-info.js), which the real engine puts on every error. */
 const CONTACT = "admin@growwiththebrimm.com";
 
@@ -110,10 +126,16 @@ function leave(word) {
   writeFileSync(NEEDS_FILE, `${word}\n`);
 }
 
-/** Writes the sample Getting Started guide and gives the done event's guide. */
+/** Writes the Getting Started guide and gives the done event's guide: the real guide's page when it is beside the stand-in, copied
+    under the guide's name, else a small sample of its own. */
 function writeGuide() {
   mkdirSync(FOLDER, { recursive: true });
   const html = join(FOLDER, "BRIMM Video Studio Getting Started.html");
+  const pdf = join(FOLDER, "BRIMM Video Studio Getting Started.pdf");
+  if (existsSync(REAL_GUIDE)) {
+    copyFileSync(REAL_GUIDE, html);
+    return { html, pdf };
+  }
   writeFileSync(
     html,
     `<!doctype html>
@@ -124,7 +146,7 @@ function writeGuide() {
 <h2>When it is ready</h2><p>Open it in HyperFrames.</p></body></html>
 `
   );
-  return { html, pdf: join(FOLDER, "BRIMM Video Studio Getting Started.pdf") };
+  return { html, pdf };
 }
 
 /** Where a folder is, in words, as the real engine words a folder in the home folder. */
@@ -256,18 +278,19 @@ const SAMPLE = {
 /** The whole setup: the nine steps and their questions, then the install. It gives "back" for a back at its first question. */
 async function whole(talk) {
   const order = FRESH_STEPS;
-  const s = { ...SAMPLE, faulted: false, warned: false, claude: "missing", here: { "claude-app": false, dropbox: false, hyperframes: false } };
+  const s = { ...SAMPLE, faulted: false, warned: false, appsWarned: false, claude: "missing", here: { "claude-app": false, dropbox: false, hyperframes: false } };
   let shown = null;
   const show = (id) => {
     if (id === shown) return;
     shown = id;
     send(stepEvent(id, order));
   };
-  const appsQuestion = () => ({
+  const appsQuestion = (said = {}) => ({
     event: "question",
     id: "apps",
     kind: "apps",
     prompt: "These apps work with BRIMM Video Studio.",
+    ...said,
     apps: [
       { id: "claude-app", name: "Claude", here: s.here["claude-app"], link: "https://claude.ai/download" },
       s.claude === "missing"
@@ -308,10 +331,23 @@ async function whole(talk) {
     {
       step: "apps",
       async run() {
+        // Continue follows the real setup's rule: refused until Claude Code is signed in and Dropbox is here, then warned of once
+        // while the Claude app or HyperFrames is not.
+        let said = {};
         for (;;) {
-          const got = await talk.ask(appsQuestion());
+          const got = await talk.ask(appsQuestion(said));
+          said = {};
           if (got.back) return "back";
-          if (got.value === "continue") return "next";
+          if (got.value === "continue") {
+            const fault = s.claude === "missing" ? APPS_FAULT.claudeCode : s.claude === "installed" ? APPS_FAULT.signIn : !s.here.dropbox ? APPS_FAULT.dropbox : "";
+            const warning = appsWarning(s.here);
+            if (fault) said = { fault };
+            else if (warning && !s.appsWarned) {
+              s.appsWarned = true;
+              said = { warning };
+            } else return "next";
+            continue;
+          }
           if (got.value === "install-claude-code") s.claude = "installed";
           else if (got.value === "check") {
             const next = Object.keys(s.here).find((id) => !s.here[id]);

@@ -134,10 +134,20 @@ func otherCopy(of app: String, home: String, exists: (String) -> Bool) -> String
 /// The background job's launch agent file.
 func agentFile(home: String) -> String { joined(home, "Library", "LaunchAgents", "\(agentLabel).plist") }
 
+/// The folder that holds the Getting Started guide: the home's BRIMM Video Work, or, in a stand-in build, the stand-in's own folder
+/// in `temp`, the app's temporary folder, where it writes its guide.
+func guideFolder(home: String, fake: Bool, temp: String) -> String {
+    fake ? joined(temp, "brimm-fake-engine") : joined(home, workFolderName)
+}
+
+/// The Getting Started guide in `folder`, and where the shell prints its PDF beside it.
+func guidePaths(folder: String) -> (html: String, pdf: String) {
+    (joined(folder, "\(guideName).html"), joined(folder, "\(guideName).pdf"))
+}
+
 /// Where the setup writes the Getting Started guide, and where the shell prints its PDF.
 func guidePaths(home: String) -> (html: String, pdf: String) {
-    let folder = joined(home, workFolderName)
-    return (joined(folder, "\(guideName).html"), joined(folder, "\(guideName).pdf"))
+    guidePaths(folder: joined(home, workFolderName))
 }
 
 // MARK: What comes next

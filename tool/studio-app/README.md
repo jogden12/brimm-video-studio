@@ -3,7 +3,7 @@
 This folder is the Mac app's own: the Swift shell, the stand-in engine for looking at its windows, and the two scripts that build it. It is never put in the app. What the app carries of Studio is the rest of `tool/`, taken from one commit.
 
 - `Sources/` is the app (SwiftUI in one AppKit window). The files that import only Foundation hold every decision that can be wrong quietly; `Check/main.swift` builds them into `studio-check`, which the tests ask.
-- `dev/fake-engine.mjs` is a stand-in engine that speaks the protocol and does nothing else.
+- `dev/fake-engine.mjs` is a stand-in engine that speaks the protocol and does nothing else. `sample-guide.js` fills the real Getting Started guide with sample details, for the stand-in to hand over as its guide.
 - `build-info.js` writes `build.json` and `Info.plist`. `vendor.pin.json` and `vendor.js` say what is vendored, and seal and check the vendor folder. `common.zsh` holds what the two scripts share. `node.entitlements` is node's alone: the app itself has none.
 
 ## The two scripts
@@ -27,7 +27,7 @@ zsh tool/studio-app/build-app.sh --out <folder> --version <semver> --build <n> -
 - `--sign` signs inside-out with the one Developer ID Application identity in the keychain, found by name and given to codesign by its SHA-1, so that an expired certificate of the same name is never taken for it. Without it every program is sealed ad hoc, for this Mac's tests only.
 - `--any-commit` builds a commit that is not on `origin/main`. Changes in `tool/` that are not committed are always refused.
 - `--print` says what it would do and does none of it.
-- `--fake-engine` puts the stand-in engine in place of Studio's tool, for looking at the windows. Such a build holds no installer, sets up nothing and is never signed with the Developer ID.
+- `--fake-engine` puts the stand-in engine in place of Studio's tool, for looking at the windows, with the real guide's page beside it, made by `sample-guide.js` from the commit's own `setup/guide.js`. Such a build holds no installer, sets up nothing and is never signed with the Developer ID.
 
 Neither script writes into a folder the background job watches, the drop folder or Dropbox. Notarizing sends the app to Apple, so `build-app.sh` never does it: with `--sign` it prints the commands.
 

@@ -13,10 +13,12 @@
 #                  for the time, which notarizing needs; that is all it sends.
 #   --any-commit   builds at a commit that is not yet on origin/main (the default refuses, so what ships is what was merged).
 #   --print        says what it would do, and does none of it.
-#   --fake-engine  puts the stand-in engine (dev/fake-engine.mjs) in place of Studio's tool, for looking at the windows. Such a build
-#                  holds no installer, so it can set up, stop or run nothing, and it is never signed with the Developer ID.
-# What goes into the bundle comes from the commit. This script's own helpers (build-info.js, vendor.js, common.zsh) are run from its
-# own folder. Notarizing sends the app to Apple, so this script never does it: it prints the commands for the by-hand step.
+#   --fake-engine  puts the stand-in engine (dev/fake-engine.mjs) in place of Studio's tool, for looking at the windows, with the real
+#                  Getting Started guide's page beside it (sample-guide.js), filled with sample details. Such a build holds no
+#                  installer, so it can set up, stop or run nothing, and it is never signed with the Developer ID.
+# What goes into the bundle comes from the commit. This script's own helpers (build-info.js, vendor.js, sample-guide.js, common.zsh)
+# are run from its own folder. Notarizing sends the app to Apple, so this script never does it: it prints the commands for the by-hand
+# step.
 
 set -u
 
@@ -89,7 +91,7 @@ if (( print_only )); then
   say "  4. Studio's five helpers, compiled with swiftc into node's bin."
   say "  5. Info.plist, checked with plutil."
   say "  6. The app's program, compiled with swiftc from the commit's Sources."
-  if (( fake )); then say "  7. The stand-in engine in place of Studio's tool."; else say "  7. (No stand-in engine.)"; fi
+  if (( fake )); then say "  7. The stand-in engine in place of Studio's tool, with the real guide's page filled with sample details."; else say "  7. (No stand-in engine.)"; fi
   if (( sign )); then
     say "  8. Each program inside, then the app, signed with the hardened runtime as $identity."
   else
@@ -145,10 +147,13 @@ sources=($from/Sources/*.swift(N))
 swiftc -O -swift-version 5 -target arm64-apple-macos13.0 -module-cache-path $work/modules -o $built/Contents/MacOS/"BRIMM Video Studio" ${(o)sources} || stop "The app did not compile."
 chmod 755 $built/Contents/MacOS/"BRIMM Video Studio" || stop "The app's program could not be made runnable."
 
-# 7. The stand-in engine, which leaves nothing of Studio's tool but package.json (it marks tool/ as modules).
+# 7. The stand-in engine, which leaves nothing of Studio's tool but package.json (it marks tool/ as modules), and beside it the real
+# guide's page, filled with sample details by the commit's own setup/guide.js before that is taken away.
 if (( fake )); then
+  node $here/sample-guide.js $tool $version $build > $work/sample-guide.html || stop "The real guide's page could not be made with sample details."
   find $tool -mindepth 1 -maxdepth 1 ! -name package.json -exec rm -rf {} + || stop "Studio's tool could not be taken out."
   mkdir -p $tool/setup && cp -X $from/dev/fake-engine.mjs $tool/setup/engine.js || stop "The stand-in engine could not be copied."
+  cp -X $work/sample-guide.html $tool/setup/sample-guide.html || stop "The real guide's page could not be copied."
   # FAKE-ENGINE.txt is what tells the app it is a stand-in, which turns off the move to Applications and Uninstall.
   say "This build's setup is a stand-in: it is for looking at the windows, and sets up nothing." > $res/FAKE-ENGINE.txt || stop "FAKE-ENGINE.txt could not be written."
 fi

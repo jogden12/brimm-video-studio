@@ -4,9 +4,9 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEV_REFUSAL } from "../settings.js";
 import { DAMAGED } from "../setup/checks.js";
@@ -44,7 +44,17 @@ const COPIED_FROM = {
   busy: { message: "setup/install.js" },
   download: { message: "setup/install.js", advice: "setup/engine.js", as: (text) => text.replace("(curl 6)", "(curl ${code})") },
   install: { message: "setup/engine.js", advice: "build.js" },
-  settings: { message: "setup/engine.js" }
+  settings: { message: "setup/engine.js" },
+  /** The Apps step's refusals of continue, and the fixed part of its warning, from questions.js's continueFault and continueWarning. */
+  apps: {
+    message: "setup/questions.js",
+    faults: [
+      "Claude Code is not installed yet. Choose Install Claude Code.",
+      "Claude Code is not signed in yet. Choose Sign in.",
+      "Dropbox is not installed yet. Install it, sign in to The BRIMM's account, then choose Continue."
+    ],
+    warning: " not installed yet. You can go on: the Getting Started guide lists what is still to install."
+  }
 };
 
 /** The shell's answer to a question of a run of `scenario`, as a line to send, or undefined for a question it does not know. An apps
@@ -68,9 +78,9 @@ function answerTo(question, scenario) {
 
 /** Runs the stand-in with `run` in `temp`, answering each question with `reply(event, events)` (undefined sends nothing), and keeps
     its stdin open until it ends. Gives its exit code, its stdout's lines and those lines read as events. */
-function drive({ run, temp, reply = () => undefined, limit = 20000 }) {
+function drive({ run, temp, reply = () => undefined, limit = 20000, script = FAKE }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [FAKE, "--run", run, "--app", APP, "--tools", TOOLS, "--protocol", "1"], {
+    const child = spawn(process.execPath, [script, "--run", run, "--app", APP, "--tools", TOOLS, "--protocol", "1"], {
       env: { ...process.env, TMPDIR: temp, FAKE_ENGINE_FAST: "1" },
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -105,8 +115,46 @@ function drive({ run, temp, reply = () => undefined, limit = 20000 }) {
   });
 }
 
-/** A setup run of `scenario` in `temp`, answered as the shell would. */
-const setupOf = (scenario, temp = newTemp()) => drive({ run: "setup", temp, reply: (e) => (e.event === "question" ? answerTo(e, scenario) : undefined) });
+/** A setup run of `scenario` in `temp`, answered as the shell would, by the stand-in at `script`. */
+const setupOf = (scenario, temp = newTemp(), script = FAKE) => drive({ run: "setup", temp, script, reply: (e) => (e.event === "question" ? answerTo(e, scenario) : undefined) });
+
+/** A whole setup in which the Apps step is answered with continue first, and each refusal is then put right: Claude Code's row by
+    its action, Dropbox by check until its row is here. Every other question is answered as the shell would. Gives the run, and
+    `answered`, which holds each apps question's answer, by the question's event. */
+async function continuingFirst() {
+  let fixing = null;
+  const answered = new Map();
+  const answer = (e) => {
+    if (e.event !== "question") return undefined;
+    if (e.kind !== "apps") return answerTo(e, "whole");
+    if (e.fault) fixing = e.fault.startsWith("Dropbox") ? "dropbox" : "claude-code";
+    if (fixing === "claude-code") {
+      fixing = null;
+      return { answer: e.id, value: e.apps.find((a) => a.action).action };
+    }
+    if (fixing === "dropbox") {
+      if (!e.apps.find((a) => a.id === "dropbox").here) return { answer: e.id, value: "check" };
+      fixing = null;
+    }
+    return { answer: e.id, value: "continue" };
+  };
+  const reply = (e) => {
+    const said = answer(e);
+    if (e.kind === "apps") answered.set(e, said.value);
+    return said;
+  };
+  return { ...(await drive({ run: "setup", temp: newTemp(), reply })), answered };
+}
+
+/** A copy of the stand-in in a folder of its own, with `guide` beside it as sample-guide.html when it is given. */
+function standInCopy(guide) {
+  const dir = join(newTemp(), "setup");
+  mkdirSync(dir);
+  const script = join(dir, "fake-engine.mjs");
+  copyFileSync(FAKE, script);
+  if (guide !== undefined) writeFileSync(join(dir, "sample-guide.html"), guide);
+  return script;
+}
 
 /** The status run's needs in `temp`. */
 async function needsIn(temp) {
@@ -179,6 +227,56 @@ describe("the stand-in engine", () => {
       else assert.ok(last.advice === undefined || realText("build.js").includes(last.advice), `the advice is not the real one: ${last.advice}`);
     });
   }
+
+  it("Continue on the Apps page is refused in the real setup's words until Claude Code is signed in and Dropbox is there", async () => {
+    const { code, events, answered } = await continuingFirst();
+    assert.equal(code, 0);
+    const apps = events.filter((e) => e.event === "question" && e.kind === "apps");
+    const faults = apps.filter((q) => q.fault).map((q) => q.fault);
+    assert.deepEqual(faults, COPIED_FROM.apps.faults);
+    // Each fault comes on the apps question sent again, right after an answer of continue to it.
+    for (const q of apps.filter((q) => q.fault)) {
+      const before = apps[apps.indexOf(q) - 1];
+      assert.ok(before, q.fault);
+      assert.equal(answered.get(before), "continue", q.fault);
+      assert.equal(events.indexOf(q) - events.indexOf(before), 1, "nothing comes between them");
+    }
+  });
+
+  it("a missing Claude app or HyperFrames is a warning, once", async () => {
+    const { code, events } = await continuingFirst();
+    assert.equal(code, 0);
+    const warned = events.filter((e) => e.event === "question" && e.kind === "apps" && e.warning);
+    assert.equal(warned.length, 1);
+    const [question] = warned;
+    assert.ok(question.apps.find((a) => a.id === "claude-code").here && question.apps.find((a) => a.id === "dropbox").here);
+    assert.equal(question.warning, `HyperFrames is${COPIED_FROM.apps.warning}`);
+    // The same answer again goes on: the next thing after the warned question is the next step.
+    const after = events.slice(events.indexOf(question) + 1);
+    assert.equal(after[0].event, "step");
+    assert.equal(after[0].id, "dropbox");
+    assert.equal(after.filter((e) => e.event === "question" && e.kind === "apps").length, 0);
+  });
+
+  it("the Apps step's sentences are the real setup's", () => {
+    const from = COPIED_FROM.apps;
+    for (const sentence of [...from.faults, from.warning]) assert.ok(realText(from.message).includes(sentence), `${from.message} does not hold: ${sentence}`);
+    assert.ok(readFileSync(FAKE, "utf8").includes(from.warning));
+  });
+
+  it("with the real guide's page beside it, the stand-in hands that page over", async () => {
+    const page = "<!doctype html>\n<title>The real guide</title>\n<p>Studio Test Mac</p>\n";
+    const { events } = await setupOf("whole", newTemp(), standInCopy(page));
+    const done = events[events.length - 1];
+    assert.equal(done.outcome, "installed");
+    assert.equal(readFileSync(done.guide.html, "utf8"), page);
+  });
+
+  it("with none beside it, the stand-in writes its own small sample", async () => {
+    const { events } = await setupOf("whole", newTemp(), standInCopy());
+    const done = events[events.length - 1];
+    assert.ok(readFileSync(done.guide.html, "utf8").includes("A sample guide from the stand-in, for looking at the windows."));
+  });
 
   it("the crash scenario ends with no last event", async () => {
     const { code, events } = await setupOf("crash");
@@ -277,5 +375,15 @@ describe("the stand-in engine and the shell", { skip: noChecker }, () => {
         assert.ok(ran.json.rows.every((r) => r.mark === "done"), JSON.stringify(ran.json.rows));
       }
     }
+  });
+
+  it("the stand-in's guide is where the app looks for it", async () => {
+    const temp = newTemp();
+    const { events } = await setupOf("whole", temp);
+    const done = events[events.length - 1];
+    // The app's own temporary folder, NSTemporaryDirectory(), ends with a slash.
+    const ran = check("guide-folder", [homedir(), "yes", `${temp}/`]);
+    assert.equal(ran.status, 0, ran.stderr);
+    assert.equal(dirname(done.guide.html), ran.json);
   });
 });

@@ -126,6 +126,12 @@ func checkGuidePaths(_ args: [String]) -> Never {
     emit(["html": paths.html, "pdf": paths.pdf])
 }
 
+/// guide-folder <home> <stand-in build yes|no> <temp>.
+func checkGuideFolder(_ args: [String]) -> Never {
+    let words = exactly(3, args, "guide-folder")
+    emit(guideFolder(home: words[0], fake: yesNo(words[1]), temp: words[2]))
+}
+
 func checkURL(_ args: [String]) -> Never {
     emit(urlAction(exactly(1, args, "url")[0]))
 }
@@ -511,6 +517,7 @@ case "move-target": checkMoveTarget(rest)
 case "other-copy": checkOtherCopy(rest)
 case "agent-file": checkAgentFile(rest)
 case "guide-paths": checkGuidePaths(rest)
+case "guide-folder": checkGuideFolder(rest)
 case "url": checkURL(rest)
 case "names": checkNames(rest)
 case "next": checkNext(rest)

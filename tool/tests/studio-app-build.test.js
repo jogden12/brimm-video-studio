@@ -178,6 +178,7 @@ describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () =>
     const tool = join(plain.app, "Contents", "Resources", "Studio", "tool");
     for (const path of ["install.sh", "unedited.js", "busy.js", "setup/engine.js"]) assert.ok(existsSync(join(tool, path)), path);
     assert.equal(existsSync(join(plain.app, "Contents", "Resources", "FAKE-ENGINE.txt")), false);
+    assert.equal(existsSync(join(tool, "setup", "sample-guide.html")), false, "only a stand-in build holds the sample guide");
     assert.deepEqual(readFileSync(join(tool, "setup", "engine.js")), readFileSync(join(w.tool, "setup", "engine.js")));
     const res = join(plain.app, "Contents", "Resources");
     assert.equal(readFileSync(join(res, "node", "LICENSE"), "utf8"), "node's licence.\n");
@@ -565,18 +566,40 @@ describe("build-app.sh: --print, the refusals and the options", { skip: notAMac 
     }
   });
 
-  it("--fake-engine leaves only the stand-in in the bundle's tool", () => {
+  it("--fake-engine leaves only the stand-in and the real guide's page in the bundle's tool", () => {
     const w = world();
     try {
       const { app, r } = built(w, "out", "--fake-engine");
       const tool = join(app, "Contents", "Resources", "Studio", "tool");
-      assert.deepEqual(tree(tool), ["package.json", "setup", "setup/engine.js"]);
+      assert.deepEqual(tree(tool), ["package.json", "setup", "setup/engine.js", "setup/sample-guide.html"]);
       assert.deepEqual(readFileSync(join(tool, "setup", "engine.js")), readFileSync(FAKE_ENGINE));
+      const guide = readFileSync(join(tool, "setup", "sample-guide.html"), "utf8");
+      for (const words of ["Studio Test Mac", VERSION, 'url("data:font/']) assert.ok(guide.includes(words), words);
+      assert.equal(guide.includes("{{"), false);
       assert.ok(existsSync(join(app, "Contents", "Resources", "FAKE-ENGINE.txt")));
       assert.ok(existsSync(join(app, "Contents", "Resources", "Studio", "build.json")));
       assert.ok(r.stdout.includes("This build's setup is a stand-in: it is for looking at the windows, and sets up nothing."), r.stdout);
       // The helpers are still there: the bin is the same as a real build's.
       assert.ok(existsSync(join(app, "Contents", "Resources", "node", "bin", "brimm-faces")));
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  it("a sample guide that cannot be made stops the build", () => {
+    const w = world();
+    try {
+      // The change is committed, and origin/main moved to it, so that the build refuses neither an uncommitted change nor the commit.
+      writeFileSync(join(w.tool, "studio-app", "sample-guide.js"), "process.exit(1);\n");
+      w.git("add", ".");
+      w.git("commit", "-q", "-m", "three");
+      w.git("update-ref", "refs/remotes/origin/main", w.git("rev-parse", "HEAD"));
+      const out = join(w.dir, "out");
+      const r = w.build(...w.needed(out), "--fake-engine");
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.match(r.stdout, /^The real guide's page could not be made with sample details\.$/m);
+      assert.equal(existsSync(out), false);
+      assert.deepEqual(readdirSync(w.tmp), []);
     } finally {
       w.cleanup();
     }
