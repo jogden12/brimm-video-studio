@@ -21,37 +21,6 @@ let noUpdatesYet = "Updates are not part of this build yet."
 /// What the window says when a stand-in build is asked to move itself.
 let fakeNeverMoved = "A stand-in build is never moved."
 
-/// Runs `command` with `environment` and gives its status and its whole output and error. Both are read at the same time, so a full
-/// pipe never stops the program. It blocks until the program has ended, so it is never called on the main thread.
-private func runToEnd(_ command: Command, environment: [String: String]) -> (status: Int32, out: String, err: String) {
-    let child = Process()
-    child.executableURL = URL(fileURLWithPath: command.program)
-    child.arguments = command.arguments
-    child.environment = environment
-    child.standardInput = FileHandle.nullDevice
-    let out = Pipe()
-    let err = Pipe()
-    child.standardOutput = out
-    child.standardError = err
-    do {
-        try child.run()
-    } catch {
-        return (status: 127, out: "", err: "")
-    }
-    var errors = Data()
-    let group = DispatchGroup()
-    group.enter()
-    DispatchQueue.global().async {
-        errors = err.fileHandleForReading.readDataToEndOfFile()
-        group.leave()
-    }
-    let output = out.fileHandleForReading.readDataToEndOfFile()
-    group.wait()
-    child.waitUntilExit()
-    let status = child.terminationReason == .uncaughtSignal ? 128 + child.terminationStatus : child.terminationStatus
-    return (status: status, out: String(decoding: output, as: UTF8.self), err: String(decoding: errors, as: UTF8.self))
-}
-
 /// Uninstall's own function, named here so that the model's uninstall() does not hide it.
 private func stopBackgroundJob(app: String, fake: Bool, environment: [String: String]) -> Uninstalled {
     uninstall(app: app, fake: fake) { runToEnd($0, environment: environment) }

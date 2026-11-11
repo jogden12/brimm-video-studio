@@ -155,6 +155,36 @@ describe("Uninstall", { skip: noChecker }, () => {
   });
 });
 
+/** studio-check run: the app's own runToEnd, which Uninstall and the move use, started on `program` with `args`. */
+const run = (program, args = []) => ask("run", [program, ...args], { env: { HOME: folder(), PATH: "/usr/bin:/bin" } });
+
+describe("the app's program runner", { skip: noChecker }, () => {
+  it("gives the status, the whole output and the whole error", () => {
+    assert.deepEqual(run("/bin/sh", ["-c", "printf out; printf err >&2; exit 3"]), { status: 3, out: "out", err: "err" });
+  });
+
+  it("reads a full pipe on both sides without stopping the program", () => {
+    const ran = run("/bin/sh", ["-c", "head -c 200000 /dev/zero | tr '\\0' a; head -c 200000 /dev/zero | tr '\\0' b >&2"]);
+    assert.equal(ran.status, 0);
+    assert.equal(ran.out.length, 200000);
+    assert.equal(ran.err.length, 200000);
+  });
+
+  it("a program that cannot be started gives 127", () => {
+    assert.deepEqual(run(join(folder(), "not-there")), { status: 127, out: "", err: "" });
+  });
+
+  it("a program ended by a signal gives 128 and the signal", () => {
+    assert.equal(run("/bin/sh", ["-c", "kill -9 $$"]).status, 137);
+  });
+
+  it("starts the program with the environment it is given, and nothing else", () => {
+    const home = folder();
+    const ran = ask("run", ["/bin/sh", "-c", "printf '%s|%s' \"$HOME\" \"$STRAY\""], { env: { HOME: home, PATH: "/usr/bin:/bin", STRAY: "x" } });
+    assert.equal(ran.out, `${home}|`);
+  });
+});
+
 const SOURCES = fileURLToPath(new URL("../studio-app/Sources/", import.meta.url));
 
 /** The names of the Swift files in Sources/. */
@@ -191,6 +221,14 @@ describe("the app's sources", () => {
     const text = source("AppModel.swift");
     for (const name of ["nextFromStatus(", "shouldCheck(", "quitRule("]) assert.ok(text.includes(name), `AppModel.swift never asks ${name}`);
     assert.match(text, /func uninstall\(\)\s*\{\s*guard screen == \.status\b/);
+  });
+
+  it("the model and the checker share one program runner, the one the tests drive", () => {
+    assert.ok(!source("AppModel.swift").includes("Process()"), "AppModel.swift starts a program of its own");
+    assert.ok(source("AppModel.swift").includes("runToEnd("), "AppModel.swift never asks runToEnd");
+    const checker = readFileSync(join(SOURCES, "..", "Check", "main.swift"), "utf8");
+    assert.ok(!checker.includes("Process()"), "Check/main.swift starts a program of its own");
+    assert.match(checker, /uninstall\(app: [^\n]*runToEnd\(/);
   });
 
   it("main.swift answers --agent before anything of AppKit", () => {

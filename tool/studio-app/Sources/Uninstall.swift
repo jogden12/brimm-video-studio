@@ -15,6 +15,39 @@ let cannotTell = "BRIMM Video Studio could not tell whether it is at work, so no
 /// What the window says when install.sh --remove failed.
 let notStopped = "BRIMM Video Studio could not stop its background job. Open it again and choose Repair."
 
+/// Runs `command` with `environment` and gives its status and its whole output and error. Both are read at the same time, so a full
+/// pipe never stops the program. A program that cannot be started gives 127, and one ended by a signal 128 and the signal. It blocks
+/// until the program has ended, so the app never calls it on the main thread. The app's Uninstall and its move, and studio-check, all
+/// use it.
+func runToEnd(_ command: Command, environment: [String: String]) -> (status: Int32, out: String, err: String) {
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: command.program)
+    child.arguments = command.arguments
+    child.environment = environment
+    child.standardInput = FileHandle.nullDevice
+    let out = Pipe()
+    let err = Pipe()
+    child.standardOutput = out
+    child.standardError = err
+    do {
+        try child.run()
+    } catch {
+        return (status: 127, out: "", err: "")
+    }
+    var errors = Data()
+    let group = DispatchGroup()
+    group.enter()
+    DispatchQueue.global().async {
+        errors = err.fileHandleForReading.readDataToEndOfFile()
+        group.leave()
+    }
+    let output = out.fileHandleForReading.readDataToEndOfFile()
+    group.wait()
+    child.waitUntilExit()
+    let status = child.terminationReason == .uncaughtSignal ? 128 + child.terminationStatus : child.terminationStatus
+    return (status: status, out: String(decoding: output, as: UTF8.self), err: String(decoding: errors, as: UTF8.self))
+}
+
 /// Uninstall's two command lines, both from inside the app: busy.js idle-why, then install.sh --remove, which takes neither
 /// --tools nor --app.
 func uninstallCommands(app: String) -> [Command] {
