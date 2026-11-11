@@ -7,7 +7,7 @@
 // move on a timer, so that a whole run takes about ten seconds; FAKE_ENGINE_FAST=1 takes the waits away, for the tests.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const FOLDER = join(tmpdir(), "brimm-fake-engine");
@@ -18,8 +18,9 @@ const FAST = process.env.FAKE_ENGINE_FAST === "1";
 const HOME = homedir();
 
 // The real engine's own sentences, copied: tool/setup/engine.js's table, tool/build.js's REPAIR, tool/setup/checks.js's DAMAGED,
-// tool/setup/install.js's busy sentence and its model's download sentence, tool/settings.js's DEV_REFUSAL, and the Apps step's refusals
-// of continue and its warning, from tool/setup/questions.js's continueFault and continueWarning.
+// tool/setup/install.js's busy sentence and its model's download sentence, tool/settings.js's DEV_REFUSAL, the Apps step's refusals
+// of continue and its warning, from tool/setup/questions.js's continueFault and continueWarning, the name's refusals from
+// tool/settings.js's machineFault, and the drop folder's warning, from tool/setup/questions.js and tool/settings.js's cloudFolder.
 const REPAIR = "Open BRIMM Video Studio and choose Repair.";
 const SAY = {
   arguments: "BRIMM Video Studio's setup was started in a way it does not know.",
@@ -44,6 +45,42 @@ function appsWarning(here) {
   if (missing.length === 0) return "";
   return `${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not installed yet. You can go on: the Getting Started guide lists what is still to install.`;
 }
+
+/** What is wrong with a name for a Mac, already trimmed, as tool/settings.js's machineFault words it, or "". A space at its start
+    or end cannot be left after the trim, so that phrase is not copied. */
+function nameFault(text) {
+  if (!text) return "a Mac's name cannot be empty";
+  if ([...text].length > 40) return "a Mac's name can be 40 characters long at most";
+  if (/\p{Cc}/u.test(text)) return "a Mac's name cannot hold a control character, such as a tab or a line break";
+  if (/[/\\:*?"<>|]/.test(text)) return 'a Mac\'s name cannot hold any of / \\ : * ? " < > |';
+  if (text.startsWith(".")) return "a Mac's name cannot start with a dot";
+  return "";
+}
+
+/** A phrase as a sentence, as tool/setup/questions.js's sentence() makes it: a capital first letter and a full stop. */
+function sentence(words) {
+  const text = String(words).trim();
+  if (text === "") return "";
+  const capital = text.charAt(0).toUpperCase() + text.slice(1);
+  return /[.!?]$/.test(capital) ? capital : `${capital}.`;
+}
+
+/** The cloud a folder is kept in, as tool/settings.js's cloudFolder names it, or "". Judged from the path's text alone: the stand-in
+    never reads the disk, so a link is not followed. */
+function cloudOf(path) {
+  const fold = (p) => p.normalize("NFKC").toLowerCase().replace(/ı/g, "i");
+  const under = (real, dir) => real === dir || real.startsWith(`${dir}/`);
+  const real = fold(resolve(path));
+  const storage = fold(join(HOME, "Library", "CloudStorage"));
+  if (under(real, fold(join(HOME, "Dropbox"))) || (under(real, storage) && real.slice(storage.length + 1).startsWith("dropbox"))) return "Dropbox";
+  if (under(real, fold(join(HOME, "Library", "Mobile Documents")))) return "iCloud Drive";
+  if (under(real, fold(join(HOME, "Desktop"))) || under(real, fold(join(HOME, "Documents")))) return "iCloud Drive, if it keeps Desktop & Documents";
+  if (real.startsWith(`${storage}/`)) return "a cloud folder";
+  return "";
+}
+
+/** The drop folder's warning for a folder kept in `cloud`, as tool/setup/questions.js words it. */
+const dropWarning = (cloud) => `This folder is kept in ${cloud}: every video dropped here would be uploaded there too. A folder on this Mac itself, such as BRIMM Video Work › Drop, is better.`;
 /** The support contact a real build carries (tool/studio-app/build-info.js), which the real engine puts on every error. */
 const CONTACT = "admin@growwiththebrimm.com";
 
@@ -278,7 +315,7 @@ const SAMPLE = {
 /** The whole setup: the nine steps and their questions, then the install. It gives "back" for a back at its first question. */
 async function whole(talk) {
   const order = FRESH_STEPS;
-  const s = { ...SAMPLE, faulted: false, warned: false, appsWarned: false, claude: "missing", here: { "claude-app": false, dropbox: false, hyperframes: false } };
+  const s = { ...SAMPLE, appsWarned: false, warnedDrops: new Set(), claude: "missing", here: { "claude-app": false, dropbox: false, hyperframes: false } };
   let shown = null;
   const show = (id) => {
     if (id === shown) return;
@@ -313,17 +350,18 @@ async function whole(talk) {
     {
       step: "name",
       async run() {
-        let fault = {};
+        let said = { suggested: s.machine };
         for (;;) {
-          const got = await talk.ask({ event: "question", id: "name", kind: "text", prompt: "What should this Mac be called?", suggested: s.machine, ...fault });
+          const got = await talk.ask({ event: "question", id: "name", kind: "text", prompt: "What should this Mac be called?", ...said });
           if (got.back) return "back";
-          // The run's first answer here is refused once, so that the window shows a fault.
-          if (!s.faulted) {
-            s.faulted = true;
-            fault = { fault: "A Mac's name is made of letters, numbers, spaces and hyphens." };
+          // The real setup's rule: the answer is trimmed, and refused in its words, with the refused text as the suggestion.
+          const text = typeof got.value === "string" ? got.value : "";
+          const fault = nameFault(text.trim());
+          if (fault) {
+            said = { suggested: text, fault: sentence(fault) };
             continue;
           }
-          if (typeof got.value === "string" && got.value.trim()) s.machine = got.value.trim();
+          s.machine = text.trim();
           return "next";
         }
       }
@@ -332,19 +370,28 @@ async function whole(talk) {
       step: "apps",
       async run() {
         // Continue follows the real setup's rule: refused until Claude Code is signed in and Dropbox is here, then warned of once
-        // while the Claude app or HyperFrames is not.
+        // while the Claude app or HyperFrames is not. A sentence shown stays through the window's check, as in the real setup,
+        // while the apps are as they were or while Continue would still say exactly that sentence.
+        const continueSays = () => {
+          const fault = s.claude === "missing" ? APPS_FAULT.claudeCode : s.claude === "installed" ? APPS_FAULT.signIn : !s.here.dropbox ? APPS_FAULT.dropbox : "";
+          if (fault) return { fault };
+          const warning = appsWarning(s.here);
+          return warning ? { warning } : {};
+        };
+        const appsNow = () => JSON.stringify([s.here, s.claude]);
         let said = {};
         for (;;) {
+          const shown = said;
+          const before = appsNow();
           const got = await talk.ask(appsQuestion(said));
           said = {};
           if (got.back) return "back";
           if (got.value === "continue") {
-            const fault = s.claude === "missing" ? APPS_FAULT.claudeCode : s.claude === "installed" ? APPS_FAULT.signIn : !s.here.dropbox ? APPS_FAULT.dropbox : "";
-            const warning = appsWarning(s.here);
-            if (fault) said = { fault };
-            else if (warning && !s.appsWarned) {
+            const now = continueSays();
+            if (now.fault) said = now;
+            else if (now.warning && !s.appsWarned) {
               s.appsWarned = true;
-              said = { warning };
+              said = now;
             } else return "next";
             continue;
           }
@@ -352,6 +399,10 @@ async function whole(talk) {
           else if (got.value === "check") {
             const next = Object.keys(s.here).find((id) => !s.here[id]);
             if (next) s.here[next] = true;
+            const same = appsNow() === before;
+            const now = continueSays();
+            if (shown.fault && (same || now.fault === shown.fault)) said = { fault: shown.fault };
+            if (shown.warning && (same || now.warning === shown.warning)) said = { warning: shown.warning };
           } else if (got.value === "sign-in") {
             const signed = await talk.ask({ event: "question", id: "sign-in", kind: "sign-in", prompt: "Sign in to Claude in the browser. If it gives a code, paste it here.", paste: true, link: "https://claude.ai/" });
             if (!signed.back) s.claude = "signed";
@@ -385,17 +436,19 @@ async function whole(talk) {
     {
       step: "folders",
       async run() {
-        let warning = {};
+        let said = { suggested: s.drop };
         for (;;) {
-          const got = await talk.ask({ event: "question", id: "drop-folder", kind: "folder", prompt: "Where will videos be dropped on this Mac?", suggested: s.drop, words: wordsOf(s.drop), purpose: "drop", ...warning });
+          const got = await talk.ask({ event: "question", id: "drop-folder", kind: "folder", prompt: "Where will videos be dropped on this Mac?", ...said, words: wordsOf(said.suggested), purpose: "drop" });
           if (got.back) return "back";
-          // The run's first answer here is warned of once, so that the window shows a warning; the answer that follows is taken.
-          if (!s.warned) {
-            s.warned = true;
-            warning = { warning: "This folder is kept in Dropbox: every video dropped here would be uploaded there too. A folder on this Mac itself, such as BRIMM Video Work › Drop, is better." };
+          // The real setup's rule: a folder kept in a cloud is warned of once, and the same folder answered again is taken.
+          const folder = typeof got.value === "string" && isAbsolute(got.value) ? got.value : null;
+          const cloud = folder ? cloudOf(folder) : "";
+          if (cloud && !s.warnedDrops.has(folder)) {
+            s.warnedDrops.add(folder);
+            said = { suggested: folder, warning: dropWarning(cloud) };
             continue;
           }
-          if (typeof got.value === "string" && isAbsolute(got.value)) s.drop = got.value;
+          if (folder) s.drop = folder;
           return "next";
         }
       }

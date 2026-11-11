@@ -54,8 +54,29 @@ const COPIED_FROM = {
       "Dropbox is not installed yet. Install it, sign in to The BRIMM's account, then choose Continue."
     ],
     warning: " not installed yet. You can go on: the Getting Started guide lists what is still to install."
+  },
+  /** The name's refusals, from settings.js's machineFault. The one that holds a backslash and quotes is compared by two fixed parts. */
+  name: {
+    message: "settings.js",
+    phrases: [
+      "a Mac's name cannot be empty",
+      "a Mac's name can be 40 characters long at most",
+      "a Mac's name cannot hold a control character, such as a tab or a line break",
+      "a Mac's name cannot hold any of / ",
+      ' : * ? " < > |',
+      "a Mac's name cannot start with a dot"
+    ]
+  },
+  /** The drop folder's warning, from questions.js, and the names of the clouds it names, from settings.js's cloudFolder. */
+  drop: {
+    message: "setup/questions.js",
+    warning: ["This folder is kept in ", ": every video dropped here would be uploaded there too. A folder on this Mac itself, such as BRIMM Video Work › Drop, is better."],
+    clouds: { from: "settings.js", names: ['return "Dropbox"', 'return "iCloud Drive"', 'return "iCloud Drive, if it keeps Desktop & Documents"', 'return "a cloud folder"'] }
   }
 };
+
+/** The drop folder's warning for a folder kept in `cloud`, as the real setup words it. */
+const dropWarning = (cloud) => `${COPIED_FROM.drop.warning[0]}${cloud}${COPIED_FROM.drop.warning[1]}`;
 
 /** The shell's answer to a question of a run of `scenario`, as a line to send, or undefined for a question it does not know. An apps
     question is answered with a row's action first, then with check while a row is not here, then with continue. */
@@ -187,8 +208,9 @@ describe("the stand-in engine", () => {
     assert.equal(code, 0);
     const questions = events.filter((e) => e.event === "question" && e.id !== "scenario");
     assert.deepEqual([...new Set(questions.map((q) => q.kind))].sort(), [...KINDS].sort());
-    assert.equal(questions.filter((q) => q.warning).length, 1);
-    assert.equal(questions.filter((q) => q.fault).length, 1);
+    // The shell's own answers are the suggestions, and each row put right before continue: none is warned of or refused.
+    assert.equal(questions.filter((q) => q.warning).length, 0);
+    assert.equal(questions.filter((q) => q.fault).length, 0);
     const apps = questions.filter((q) => q.kind === "apps");
     const hereIn = (q) => q.apps.filter((a) => a.here).length;
     assert.equal(hereIn(apps[0]), 0);
@@ -232,14 +254,120 @@ describe("the stand-in engine", () => {
     const { code, events, answered } = await continuingFirst();
     assert.equal(code, 0);
     const apps = events.filter((e) => e.event === "question" && e.kind === "apps");
-    const faults = apps.filter((q) => q.fault).map((q) => q.fault);
-    assert.deepEqual(faults, COPIED_FROM.apps.faults);
-    // Each fault comes on the apps question sent again, right after an answer of continue to it.
-    for (const q of apps.filter((q) => q.fault)) {
+    const faulted = apps.filter((q) => q.fault);
+    assert.deepEqual([...new Set(faulted.map((q) => q.fault))], COPIED_FROM.apps.faults);
+    // Each fault comes on the apps question sent again, right after an answer of continue to it, or of check to the same fault.
+    for (const q of faulted) {
       const before = apps[apps.indexOf(q) - 1];
       assert.ok(before, q.fault);
-      assert.equal(answered.get(before), "continue", q.fault);
+      assert.equal(answered.get(before), before.fault === q.fault ? "check" : "continue", q.fault);
       assert.equal(events.indexOf(q) - events.indexOf(before), 1, "nothing comes between them");
+    }
+  });
+
+  it("a refusal on the Apps page stays through a check while Continue would still give it", async () => {
+    const sent = [];
+    const reply = (e) => {
+      if (e.event !== "question") return undefined;
+      if (e.kind !== "apps") return answerTo(e, "whole");
+      const value = ["continue", "check", "check", "install-claude-code"][sent.length] ?? null;
+      if (value === null) return { cancel: true };
+      sent.push(value);
+      return { answer: e.id, value };
+    };
+    const { events } = await drive({ run: "setup", temp: newTemp(), reply });
+    const apps = events.filter((e) => e.event === "question" && e.kind === "apps");
+    assert.equal(apps.length, 5);
+    const refusal = COPIED_FROM.apps.faults[0];
+    assert.deepEqual(apps.map((q) => q.fault), [undefined, refusal, refusal, refusal, undefined]);
+    const hereIn = (q) => q.apps.filter((a) => a.here).length;
+    assert.deepEqual(apps.map(hereIn), [0, 0, 1, 2, 2]);
+    assert.equal(apps[4].apps.find((a) => a.id === "claude-code").action, "sign-in");
+    assert.equal(events[events.length - 1].outcome, "cancelled");
+  });
+
+  it("the suggested name is taken at once", async () => {
+    const { code, events } = await setupOf("whole");
+    assert.equal(code, 0);
+    const names = events.filter((e) => e.event === "question" && e.id === "name");
+    assert.equal(names.length, 1);
+    assert.equal(names[0].fault, undefined);
+    assert.equal(events.find((e) => e.event === "summary" && e.id === "setup").lines[0].value, names[0].suggested);
+  });
+
+  it("a name the real setup refuses is refused in its words", async () => {
+    const tries = ["Studio/Test", "", "x".repeat(41), ".Studio", "Good Name"];
+    const faults = [
+      'A Mac\'s name cannot hold any of / \\ : * ? " < > |.',
+      "A Mac's name cannot be empty.",
+      "A Mac's name can be 40 characters long at most.",
+      "A Mac's name cannot start with a dot."
+    ];
+    let at = 0;
+    const reply = (e) => {
+      if (e.event !== "question") return undefined;
+      if (e.id === "name") return { answer: "name", value: tries[at++] };
+      if (e.kind === "apps") return { cancel: true };
+      return answerTo(e, "whole");
+    };
+    const { events } = await drive({ run: "setup", temp: newTemp(), reply });
+    const names = events.filter((e) => e.event === "question" && e.id === "name");
+    assert.equal(names.length, 5);
+    assert.equal(names[0].fault, undefined);
+    for (let i = 1; i < 5; i += 1) {
+      assert.equal(names[i].fault, faults[i - 1]);
+      assert.equal(names[i].suggested, tries[i - 1]);
+    }
+    // The good name after them goes on, to the Apps step.
+    const after = events.slice(events.indexOf(names[4]) + 1);
+    assert.equal(after[0].event, "step");
+    assert.equal(after[0].id, "apps");
+  });
+
+  it("a drop folder in a cloud is warned of once, in the real words", async () => {
+    const answering = (drops) => {
+      let at = 0;
+      return (e) => {
+        if (e.event !== "question") return undefined;
+        if (e.id === "drop-folder") return { answer: e.id, value: drops[at++] ?? e.suggested };
+        if (e.id === "exports-folder") return { cancel: true };
+        return answerTo(e, "whole");
+      };
+    };
+    const dropsOf = (events) => events.filter((e) => e.event === "question" && e.id === "drop-folder");
+    const inDropbox = join(homedir(), "Dropbox", "Videos");
+    const first = await drive({ run: "setup", temp: newTemp(), reply: answering([inDropbox, inDropbox]) });
+    const asked = dropsOf(first.events);
+    assert.equal(asked.length, 2);
+    assert.equal(asked[0].warning, undefined);
+    assert.equal(asked[1].warning, dropWarning("Dropbox"));
+    assert.equal(asked[1].suggested, inDropbox);
+    // The same answer again goes on, to the exports folder.
+    assert.equal(first.events.filter((e) => e.event === "question" && e.id === "exports-folder").length, 1);
+
+    const inDocuments = join(homedir(), "Documents", "Drop");
+    const second = await drive({ run: "setup", temp: newTemp(), reply: answering([inDocuments, inDocuments]) });
+    assert.equal(dropsOf(second.events)[1].warning, dropWarning("iCloud Drive, if it keeps Desktop & Documents"));
+
+    const third = await drive({ run: "setup", temp: newTemp(), reply: answering([]) });
+    assert.equal(dropsOf(third.events).length, 1);
+    assert.equal(dropsOf(third.events)[0].warning, undefined);
+  });
+
+  it("the name's and the drop folder's sentences are the real setup's", () => {
+    const fake = realText("studio-app/dev/fake-engine.mjs");
+    const { name, drop } = COPIED_FROM;
+    for (const phrase of name.phrases) {
+      assert.ok(realText(name.message).includes(phrase), `${name.message} does not hold: ${phrase}`);
+      assert.ok(fake.includes(phrase), `the stand-in does not hold: ${phrase}`);
+    }
+    for (const part of drop.warning) {
+      assert.ok(realText(drop.message).includes(part), `${drop.message} does not hold: ${part}`);
+      assert.ok(fake.includes(part), `the stand-in does not hold: ${part}`);
+    }
+    for (const said of drop.clouds.names) {
+      assert.ok(realText(drop.clouds.from).includes(said), `${drop.clouds.from} does not hold: ${said}`);
+      assert.ok(fake.includes(said), `the stand-in does not hold: ${said}`);
     }
   });
 
