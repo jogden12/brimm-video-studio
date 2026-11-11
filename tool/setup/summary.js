@@ -78,15 +78,20 @@ export function reviewSummary({ kind, moved, answers, home, build, printed, plan
   return { event: "summary", id: "review", ok: printed.code === 0 && Boolean(made), lines, details: made ? text : `${planned?.why ?? PLAN_FAILED}\n\n${text}`, exit: printed.code };
 }
 
+/** The three lines that say where a set-up Mac's folders are, from its settings: the setup summary and the status word them alike. */
+const folderLines = (settings, home) => [
+  line("BRIMM Video in Dropbox", folderWords(settings.root, home)),
+  line("Drop folder", folderWords(dropFolderOf(settings, home), home)),
+  line("Exports folder", folderWords(exportsFolderOf(settings, home), home))
+];
+
 /** The setup summary: a whole `summary` event, id `setup`. Its ok is whether Claude answered from the background job; when it did not,
     the check's own line is its details. The old copy of a takeover is named and left as it is. */
 export function setupSummary({ kind, home, settings, build, claude, check, missing, old }) {
   const lines = [
     line("This Mac", settings.machine),
     line("BRIMM Video Studio", versionLine(build)),
-    line("BRIMM Video in Dropbox", folderWords(settings.root, home)),
-    line("Drop folder", folderWords(dropFolderOf(settings, home), home)),
-    line("Exports folder", folderWords(exportsFolderOf(settings, home), home)),
+    ...folderLines(settings, home),
     line("Claude Code", claudeLine(claude)),
     line("Background job", check.answered ? "Claude answered from the background job." : "Claude did not answer from the background job.")
   ];
@@ -102,13 +107,15 @@ const SETUP = {
   installed: "BRIMM Video Studio is set up on this Mac."
 };
 
-/** The status: a whole `summary` event, id `status`, with what this Mac needs. It starts no program and reads no file. */
+/** The status: a whole `summary` event, id `status`, with what this Mac needs, and its folders when it has settings. It starts no
+    program and reads no file: the settings are the ones kindOf already read. */
 export function statusSummary({ found, home, build }) {
   const state = found.kind === "installed" ? (found.moved ? "moved" : "installed") : found.kind === "takeover" ? "takeover" : "fresh";
   const needs = { fresh: "setup", takeover: "setup", moved: "repair", installed: "nothing" }[state];
   const lines = [];
   if (found.settings?.machine) lines.push(line("This Mac", found.settings.machine));
   lines.push(line("BRIMM Video Studio", versionLine(build)), line("Setup", SETUP[state]));
+  if (found.settings) lines.push(...folderLines(found.settings, home));
   return { event: "summary", id: "status", ok: needs === "nothing", lines, needs };
 }
 

@@ -301,7 +301,7 @@ describe("the status", () => {
       assert.equal(summary.needs, "nothing");
       assert.equal(summary.ok, true);
       assert.equal(summary.id, "status");
-      assert.deepEqual(labelsOf(summary), ["This Mac", "BRIMM Video Studio", "Setup"]);
+      assert.deepEqual(labelsOf(summary), ["This Mac", "BRIMM Video Studio", "Setup", "BRIMM Video in Dropbox", "Drop folder", "Exports folder"]);
       assert.equal(valueOf(summary, "Setup"), "BRIMM Video Studio is set up on this Mac.");
       assert.equal(valueOf(summary, "This Mac"), "Studio Test");
     });
@@ -332,6 +332,54 @@ describe("the status", () => {
       assert.equal(summary.needs, "setup");
       assert.equal(valueOf(summary, "Setup"), "This Mac runs BRIMM Video Studio from an older copy. Setup moves it to this app.");
     });
+  });
+
+  it("an installed Mac's status says its folders, in the setup summary's own words", async () => {
+    const folders = ["BRIMM Video in Dropbox", "Drop folder", "Exports folder"];
+    for (const settings of ["takeover", "installed", "moved"]) {
+      await withMac({ settings }, (m) => {
+        const found = kindOf({ home: m.home, checkout: m.checkout });
+        const status = statusOf(m);
+        const setup = setupSummary({ kind: found.kind, home: m.home, settings: found.settings, build: buildOf(m.checkout), claude: claudeOf(m), check: { answered: true, line: "" }, missing: [], old: null });
+        assert.deepEqual(labelsOf(status), ["This Mac", "BRIMM Video Studio", "Setup", ...folders], settings);
+        for (const label of folders) assert.equal(valueOf(status, label), valueOf(setup, label), `${settings}: ${label}`);
+        assert.equal(valueOf(status, "Drop folder"), folderWords(dropFolderOf(found.settings, m.home), m.home), settings);
+      });
+    }
+  });
+
+  it("a Mac marked as a development Mac, if its status were made, says the same three folder lines", async () => {
+    // The engine refuses a development Mac before a status is made; this pins what statusSummary itself does with such settings.
+    await withMac({ settings: "dev" }, (m) => {
+      const found = kindOf({ home: m.home, checkout: m.checkout });
+      assert.equal(found.kind, "dev");
+      assert.equal(found.settings.mode, "dev");
+      const status = statusOf(m);
+      const folders = ["BRIMM Video in Dropbox", "Drop folder", "Exports folder"];
+      assert.deepEqual(labelsOf(status), ["This Mac", "BRIMM Video Studio", "Setup", ...folders]);
+      assert.equal(valueOf(status, "BRIMM Video in Dropbox"), folderWords(found.settings.root, m.home));
+      assert.equal(valueOf(status, "Drop folder"), folderWords(dropFolderOf(found.settings, m.home), m.home));
+      assert.equal(valueOf(status, "Exports folder"), folderWords(exportsFolderOf(found.settings, m.home), m.home));
+      assert.equal(status.needs, "setup");
+      assert.equal(status.ok, false);
+      assert.equal(eventFault(status), "");
+    });
+  });
+
+  it("a fresh Mac's status has no folder lines", async () => {
+    await withMac({ settings: "none" }, (m) => {
+      const summary = statusOf(m);
+      assert.deepEqual(labelsOf(summary), ["BRIMM Video Studio", "Setup"]);
+      for (const label of ["BRIMM Video in Dropbox", "Drop folder", "Exports folder"]) assert.equal(valueOf(summary, label), undefined, label);
+    });
+  });
+
+  it("the status is still a whole event", async () => {
+    for (const settings of ["none", "takeover", "installed", "moved"]) {
+      await withMac({ settings }, (m) => {
+        assert.equal(eventFault(statusOf(m)), "", settings);
+      });
+    }
   });
 });
 

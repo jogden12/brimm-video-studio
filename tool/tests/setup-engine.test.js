@@ -435,33 +435,113 @@ describe("a setup, step by step", () => {
     });
   });
 
-  it("a failed Claude Code install comes back as the apps question's fault, and the run goes on", async () => {
-    await withMac({ settings: "none", apps: EVERY_APP, claude: "none" }, async (m) => {
-      writeFileSync(join(m.checkout, "tool", "claude-code.pin.json"), JSON.stringify({ version: "2.1.300", url: "https://example.invalid/claude", sha256: "0".repeat(64) }));
-      writeFileSync(join(m.dir, "says", "curl"), `#!/bin/sh\necho ran > "${join(m.dir, "was-run")}"\n`);
-      const seen = [];
+  it("a refusal of continue stays through the window's check, and goes when the check finds what it asked for", async () => {
+    await withMac({ settings: "none", apps: EVERY_APP, claude: "signed-out" }, async (m) => {
+      let checks = 0;
       const apps = (q) => {
-        seen.push(q);
-        const row = q.apps.find((a) => a.id === "claude-code");
-        if (!row.action) return undefined;
-        if (q.fault) return "check";
-        return seen.some((one) => one.fault) ? undefined : "install-claude-code";
+        if (!q.fault && checks === 0) return "continue";
+        checks += 1;
+        // Before the third check, Claude Code is signed in, as if in Terminal.
+        if (checks === 3) writeFileSync(join(m.dir, "says", "claude-status"), SIGNED_IN);
+        return "check";
       };
-      const first = (e) => (e.event === "question" && e.id === "apps" && seen.some((one) => one.fault) && !e.fault ? { cancel: true } : undefined);
+      const first = (e) => (e.event === "question" && e.id === "apps" && checks === 3 ? { cancel: true } : undefined);
+      const { events } = await go(m, { run: "setup", answers: reply({ ...FRESH, apps }, first) });
+      const asked = questionsOf(events).filter((q) => q.id === "apps");
+      assert.equal(asked.length, 5);
+      const refusal = "Claude Code is not signed in yet. Choose Sign in.";
+      assert.deepEqual(asked.map((q) => q.fault), [undefined, refusal, refusal, refusal, undefined]);
+      // The row was not ready while the refusal stood, and is once the check has found the sign-in.
+      assert.equal(asked[3].apps.find((a) => a.id === "claude-code").here, false);
+      assert.equal(asked[4].apps.find((a) => a.id === "claude-code").here, true);
+      assert.equal(lastOf(events).outcome, "cancelled");
+    });
+  });
+
+  it("a refusal that Continue would still give stays when another row changes", async () => {
+    await withMac({ settings: "none", apps: ["claude-app", "hyperframes"], claude: "signed-out" }, async (m) => {
+      let checked = false;
+      const apps = (q) => {
+        if (!q.fault) return "continue";
+        // The Dropbox app appears before the check: a row the refusal is not about.
+        mkdirSync(join(m.home, "Applications", "Dropbox.app"), { recursive: true });
+        checked = true;
+        return "check";
+      };
+      const first = (e) => (e.event === "question" && e.id === "apps" && checked ? { cancel: true } : undefined);
+      const { events } = await go(m, { run: "setup", answers: reply({ ...FRESH, apps }, first) });
+      const asked = questionsOf(events).filter((q) => q.id === "apps");
+      assert.equal(asked.length, 3);
+      assert.equal(asked[1].apps.find((a) => a.id === "dropbox").here, false);
+      assert.equal(asked[2].apps.find((a) => a.id === "dropbox").here, true);
+      assert.equal(asked[2].fault, "Claude Code is not signed in yet. Choose Sign in.");
+      assert.equal(lastOf(events).outcome, "cancelled");
+    });
+  });
+
+  it("the apps warning stays through a check, and continue after it goes on", async () => {
+    await withMac({ settings: "none", apps: ["dropbox"] }, async (m) => {
+      let checked = false;
+      const apps = (q) => {
+        if (q.warning && !checked) return ((checked = true), "check");
+        return "continue";
+      };
+      const { events } = await go(m, { run: "setup", answers: reply({ ...FRESH, apps }, cancelAt("drop-folder")) });
+      const asked = questionsOf(events).filter((q) => q.id === "apps");
+      const warning = "Claude and HyperFrames are not installed yet. You can go on: the Getting Started guide lists what is still to install.";
+      assert.deepEqual(asked.map((q) => q.warning), [undefined, warning, warning]);
+      assert.deepEqual(asked.map((q) => q.fault), [undefined, undefined, undefined]);
+      assert.deepEqual(stepsOf(events), ["welcome", "name", "apps", "dropbox", "folders"]);
+      assert.equal(lastOf(events).outcome, "cancelled");
+    });
+  });
+
+  /** Has Claude Code's install at the Apps step fail: a pin, and a download that is not the pinned one. */
+  const failingInstall = (m) => {
+    writeFileSync(join(m.checkout, "tool", "claude-code.pin.json"), JSON.stringify({ version: "2.1.300", url: "https://example.invalid/claude", sha256: "0".repeat(64) }));
+    writeFileSync(join(m.dir, "says", "curl"), `#!/bin/sh\necho ran > "${join(m.dir, "was-run")}"\n`);
+  };
+  const FAILED_INSTALL = "The copy of Claude Code that was downloaded is not the one BRIMM Video Studio expects. Nothing of it was kept.";
+
+  it("a failed Claude Code install comes back as the apps question's fault, with its row as it was", async () => {
+    await withMac({ settings: "none", apps: EVERY_APP, claude: "none" }, async (m) => {
+      failingInstall(m);
+      const apps = (q) => (q.apps.find((a) => a.id === "claude-code").action && !q.fault ? "install-claude-code" : undefined);
+      const first = (e) => (e.event === "question" && e.id === "apps" && e.fault ? { cancel: true } : undefined);
       const { events } = await go(m, { run: "setup", answers: reply({ ...FRESH, apps }, first) });
       const asked = questionsOf(events).filter((q) => q.id === "apps");
       const rows = asked.map((q) => q.apps.find((a) => a.id === "claude-code"));
       assert.deepEqual(rows[0], { id: "claude-code", name: "Claude Code", here: false, note: "Not installed.", action: "install-claude-code" });
       assert.deepEqual(rows[1], { id: "claude-code", name: "Claude Code", here: false, note: "Downloading Claude Code." });
-      const failed = asked.find((q) => q.fault);
-      assert.equal(failed.fault, "The copy of Claude Code that was downloaded is not the one BRIMM Video Studio expects. Nothing of it was kept.");
-      assert.equal(asked[asked.length - 1].fault, undefined);
+      const failed = asked[asked.length - 1];
+      assert.equal(failed.fault, FAILED_INSTALL);
+      assert.deepEqual(failed.apps.find((a) => a.id === "claude-code"), rows[0]);
       assert.equal(existsSync(join(m.dir, "was-run")), false);
       assert.match(m.ran(), /^curl --fail /m);
       const done = lastOf(events);
       assert.equal(done.outcome, "cancelled");
       assert.deepEqual(done.notes, []);
       assert.deepEqual(installCalls(m.ran()), []);
+    });
+  });
+
+  it("a failed install's sentence stays through a check while the apps are as they were", async () => {
+    await withMac({ settings: "none", apps: EVERY_APP, claude: "none" }, async (m) => {
+      failingInstall(m);
+      let checked = false;
+      const apps = (q) => {
+        if (!q.apps.find((a) => a.id === "claude-code").action) return undefined;
+        if (!q.fault) return "install-claude-code";
+        checked = true;
+        return "check";
+      };
+      const first = (e) => (e.event === "question" && e.id === "apps" && checked ? { cancel: true } : undefined);
+      const { events } = await go(m, { run: "setup", answers: reply({ ...FRESH, apps }, first) });
+      const faulted = questionsOf(events).filter((q) => q.id === "apps" && q.fault);
+      assert.equal(faulted.length, 2);
+      assert.deepEqual(faulted.map((q) => q.fault), [FAILED_INSTALL, FAILED_INSTALL]);
+      assert.deepEqual(faulted[1].apps, faulted[0].apps);
+      assert.equal(lastOf(events).outcome, "cancelled");
     });
   });
 
