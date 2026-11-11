@@ -38,6 +38,9 @@ private final class GuidePrinter: NSObject, WKNavigationDelegate {
     let began = Date()
     var done: ((Bool) -> Void)?
     var watchdog: Timer?
+    /// True from the start of the print until it has said it has ended. A job ended while it is true stays in `printers`, so the
+    /// print's late answer still finds it and removes the part file the print may have gone on to write.
+    var printing = false
 
     init(html: URL, pdf: URL, done: @escaping (Bool) -> Void) {
         self.html = html
@@ -84,6 +87,7 @@ private final class GuidePrinter: NSObject, WKNavigationDelegate {
         operation.showsPrintPanel = false
         operation.showsProgressPanel = false
         operation.view?.frame = NSRect(origin: .zero, size: letterPage)
+        printing = true
         operation.runModal(for: window, delegate: self, didRun: #selector(printed(_:success:contextInfo:)), contextInfo: nil)
     }
 
@@ -95,15 +99,23 @@ private final class GuidePrinter: NSObject, WKNavigationDelegate {
 
     /// The print's end: the part file is renamed onto the PDF's name when the print says it worked and the file is there. The print
     /// may say so from a thread of its own, so the rest is done on the main thread, where the window is closed and `done` is given.
+    /// When the job was already ended (the watchdog), the print may have written the part file after it was removed: it is removed
+    /// again here, and the job is let go.
     @objc func printed(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
         DispatchQueue.main.async { [self] in
-            guard done != nil else { return }
+            printing = false
+            guard done != nil else {
+                try? FileManager.default.removeItem(at: part)
+                printers.removeAll { $0 === self }
+                return
+            }
             let made = success && FileManager.default.fileExists(atPath: part.path) && rename(part.path, pdf.path) == 0
             finish(made)
         }
     }
 
-    /// Gives the answer, once: it stops the watchdog, closes the window, removes any part file and lets the job go.
+    /// Gives the answer, once: it stops the watchdog, closes the window, removes any part file and lets the job go, unless its print
+    /// has not yet ended, when `printed` lets it go.
     func finish(_ made: Bool) {
         guard let done else { return }
         self.done = nil
@@ -112,7 +124,7 @@ private final class GuidePrinter: NSObject, WKNavigationDelegate {
         web.stopLoading()
         window.close()
         try? FileManager.default.removeItem(at: part)
-        printers.removeAll { $0 === self }
+        if !printing { printers.removeAll { $0 === self } }
         done(made)
     }
 }
