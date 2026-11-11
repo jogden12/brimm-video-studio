@@ -197,6 +197,7 @@ func stateValue(_ s: SetupState, undecoded: Int) -> [String: Any] {
         "review": orNull(s.review.map(summaryValue)), "result": orNull(s.result.map(summaryValue)), "status": orNull(s.status.map(summaryValue)),
         "done": orNull(s.done.map(doneValue)), "failure": orNull(s.failure.map(failureValue)),
         "running": s.running, "installing": s.installing, "awaitingCheck": s.awaitingCheck, "undecoded": undecoded,
+        "quit": quitRule(s).rawValue, "shouldCheck": shouldCheck(s),
     ]
 }
 
@@ -207,7 +208,11 @@ func inputLines() -> [Data] {
     return lines.filter { !$0.isEmpty }
 }
 
-/// state [--idle] [--sent-check] [--ended]: stdin is the engine's lines, one event each.
+/// The line on the state command's stdin that stands for the shell sending a check at that point.
+let sentCheckLine = Data("sent-check".utf8)
+
+/// state [--idle] [--sent-check] [--ended]: stdin is the engine's lines, one event each. A line that is exactly `sent-check` is
+/// the shell sending a check there, and is not counted as undecoded.
 func checkState(_ args: [String]) -> Never {
     let known = ["--idle", "--sent-check", "--ended"]
     for word in args where !known.contains(word) { fail("state does not know \"\(word)\".") }
@@ -215,7 +220,13 @@ func checkState(_ args: [String]) -> Never {
     if !args.contains("--idle") { state.began() }
     var undecoded = 0
     for line in inputLines() {
-        if let event = decodeEvent(line) { state.take(event) } else { undecoded += 1 }
+        if line == sentCheckLine {
+            state.sentCheck()
+        } else if let event = decodeEvent(line) {
+            state.take(event)
+        } else {
+            undecoded += 1
+        }
     }
     if args.contains("--sent-check") { state.sentCheck() }
     if args.contains("--ended") { state.ended() }
@@ -226,6 +237,59 @@ func checkSteps(_ args: [String]) -> Never {
     let word = exactly(1, args, "steps")[0]
     guard let of = Int(word) else { fail("\"\(word)\" is not a number of steps.") }
     emit(stepList(of: of).map { ["id": $0.id, "title": $0.title] })
+}
+
+// MARK: Flow.swift
+
+/// reply <kind> [<text>]: the line the shell sends for an answer of `kind` to a question whose id is "q". `confirm` takes no text;
+/// `text`, `choice`, `folder` and `apps` take one; `sign-in` takes a code or none.
+func checkReply(_ args: [String]) -> Never {
+    let words = atLeast(1, args, "reply")
+    let kind = words[0]
+    let reply: Reply
+    switch kind {
+    case "confirm":
+        _ = exactly(1, words, "reply confirm")
+        reply = .confirm
+    case "text": reply = .text(exactly(2, words, "reply text")[1])
+    case "choice": reply = .choice(exactly(2, words, "reply choice")[1])
+    case "folder": reply = .folder(exactly(2, words, "reply folder")[1])
+    case "apps":
+        let word = exactly(2, words, "reply apps")[1]
+        guard let value = AppsReply(rawValue: word) else { fail("\"\(word)\" is not an answer to the apps question.") }
+        reply = .apps(value)
+    case "sign-in":
+        if words.count > 2 { fail("reply sign-in takes at most 2 words, and was given \(words.count).") }
+        reply = .signIn(code: words.count == 2 ? words[1] : nil)
+    default: fail("\"\(kind)\" is not a question's kind.")
+    }
+    emit(["answer": "q", "value": replyValue(reply)])
+}
+
+/// next-from-status <translocated yes|no> <chosen: setup|repair|none> <other yes|no>: stdin is a status run's event lines, and
+/// the run then ended.
+func checkNextFromStatus(_ args: [String]) -> Never {
+    let words = exactly(3, args, "next-from-status")
+    let chosen: Run?
+    switch words[1] {
+    case "setup", "repair": chosen = runOf(words[1])
+    case "none": chosen = nil
+    default: fail("\"\(words[1])\" is not setup, repair or none.")
+    }
+    var state = SetupState()
+    state.began()
+    for line in inputLines() {
+        if let event = decodeEvent(line) { state.take(event) }
+    }
+    state.ended()
+    emit(nextFromStatus(state, translocated: yesNo(words[0]), chosen: chosen, other: yesNo(words[2])).rawValue)
+}
+
+/// offers <next> <agent file yes|no> <guide yes|no>.
+func checkOffers(_ args: [String]) -> Never {
+    let words = exactly(3, args, "offers")
+    guard let next = Next(rawValue: words[0]) else { fail("\"\(words[0])\" is not a screen that follows a status.") }
+    emit(statusOffers(next: next, agentFileThere: yesNo(words[1]), guideThere: yesNo(words[2])))
 }
 
 // MARK: Agent.swift
@@ -258,6 +322,9 @@ case "names": checkNames(rest)
 case "next": checkNext(rest)
 case "state": checkState(rest)
 case "steps": checkSteps(rest)
+case "reply": checkReply(rest)
+case "next-from-status": checkNextFromStatus(rest)
+case "offers": checkOffers(rest)
 case "agent": checkAgent(rest)
 default: fail("studio-check does not know the command \"\(command)\".")
 }

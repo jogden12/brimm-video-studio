@@ -2,6 +2,7 @@
 // (Phase 6, Task 6). The real engine's events come from setup-harness.js's made-up Macs.
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { answerFault } from "../setup/protocol.js";
 import { drive, mac } from "./setup-harness.js";
 import { check, checkerPath, noChecker } from "./studio-app-check.js";
 
@@ -79,7 +80,7 @@ describe("the window's state, event by event", { skip: noChecker }, () => {
     const state = stateOf([], ["--idle"]);
     assert.deepEqual(state, {
       rows: [], step: null, question: null, bars: [], review: null, result: null, status: null, done: null, failure: null,
-      running: false, installing: false, awaitingCheck: false, undecoded: 0
+      running: false, installing: false, awaitingCheck: false, quit: "now", shouldCheck: false, undecoded: 0
     });
     assert.equal(stateOf([]).running, true);
   });
@@ -191,5 +192,102 @@ describe("the window's state, event by event", { skip: noChecker }, () => {
     assert.equal(stateOf([apps]).awaitingCheck, false);
     const state = stateOf([apps]);
     assert.deepEqual(state.question.apps, [{ id: "dropbox", name: "Dropbox", here: true, link: null, note: null, action: null }]);
+  });
+});
+
+describe("what each answer sends, and what follows", { skip: noChecker }, () => {
+  const apps = { event: "question", id: "apps", kind: "apps", prompt: "Apps", apps: [{ id: "dropbox", name: "Dropbox", here: true }] };
+  const done = { event: "done", outcome: "installed", summary: "", studio: "", guide: null, notes: [] };
+
+  /** The next that studio-check gives for `events` of a status run, which then ended, with the command's three words. */
+  const nextOf = (events, words = ["no", "none", "no"]) => {
+    const input = events.map((e) => JSON.stringify(e)).join("\n") + "\n";
+    return ask("next-from-status", words, { input });
+  };
+
+  it("each kind's answer is one the engine can read", () => {
+    const question = (kind, more = {}) => ({ id: "q", kind, prompt: "Go on?", ...more });
+    const cases = [
+      [question("confirm", { ok: "Continue" }), ["confirm"]],
+      [question("text", { suggested: "Studio" }), ["text", "Studio Test"]],
+      [question("choice", { options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] }), ["choice", "a"]],
+      [question("folder", { suggested: "/Users/x/Drop", words: "Drop", purpose: "drop" }), ["folder", "/Users/x/Drop"]]
+    ];
+    const rows = [
+      { id: "claude-app", name: "Claude", here: false, action: "install-claude-code" },
+      { id: "dropbox", name: "Dropbox", here: true, action: "sign-in" }
+    ];
+    for (const value of ["check", "continue", "install-claude-code", "sign-in"]) cases.push([question("apps", { apps: rows }), ["apps", value]]);
+    const signIn = question("sign-in", { paste: true });
+    for (const code of [["ABC-123"], [], ["  "]]) cases.push([signIn, ["sign-in", ...code]]);
+    for (const [q, args] of cases) {
+      const line = ask("reply", args);
+      assert.equal(line.answer, "q");
+      assert.equal(answerFault(q, line), "", `${args.join(" ")} gave ${JSON.stringify(line)}`);
+    }
+    assert.deepEqual(ask("reply", ["confirm"]), { answer: "q", value: true });
+    assert.deepEqual(ask("reply", ["apps", "continue"]), { answer: "q", value: "continue" });
+    assert.deepEqual(ask("reply", ["sign-in", "ABC-123"]), { answer: "q", value: { code: "ABC-123" } });
+    assert.deepEqual(ask("reply", ["sign-in"]), { answer: "q", value: {} });
+    assert.deepEqual(ask("reply", ["sign-in", "  "]), { answer: "q", value: {} });
+  });
+
+  it("what follows the real engine's status, for each kind of Mac", async () => {
+    const statusOf = async (settings) => {
+      const m = mac({ settings });
+      try {
+        return (await drive(m, { run: "status" })).events;
+      } finally {
+        m.done();
+      }
+    };
+    assert.equal(nextOf(await statusOf("none")), "setup");
+    assert.equal(nextOf(await statusOf("takeover")), "setup");
+    assert.equal(nextOf(await statusOf("installed")), "status");
+    const moved = await statusOf("moved");
+    assert.equal(nextOf(moved), "repair");
+    assert.equal(nextOf(moved, ["no", "none", "yes"]), "twoCopies");
+    assert.equal(nextOf(await statusOf("dev")), "refused");
+    assert.equal(nextOf(await statusOf("unusable")), "refused");
+  });
+
+  it("a status run that ended with no last event is refused", () => {
+    assert.equal(nextOf([{ event: "summary", id: "status", ok: true, lines: [], needs: "nothing" }]), "refused");
+  });
+
+  it("check is sent only while the apps question is open and the last one was answered", () => {
+    assert.equal(stateOf([apps]).shouldCheck, true);
+    assert.equal(stateOf([apps], ["--sent-check"]).shouldCheck, false);
+    assert.equal(stateOf([apps, "sent-check"]).shouldCheck, false);
+    assert.equal(stateOf([apps, "sent-check", apps]).shouldCheck, true);
+    assert.equal(stateOf([confirm("welcome")]).shouldCheck, false);
+    assert.equal(stateOf([apps, done]).shouldCheck, false);
+  });
+
+  it("an apps question that comes after a sent check clears awaitingCheck", () => {
+    const sent = stateOf([apps, "sent-check"]);
+    assert.equal(sent.awaitingCheck, true);
+    assert.equal(sent.undecoded, 0);
+    const answered = stateOf([apps, "sent-check", apps]);
+    assert.equal(answered.awaitingCheck, false);
+    assert.equal(answered.undecoded, 0);
+  });
+
+  it("while the installer may be running, quitting waits", () => {
+    assert.equal(stateOf([step("review", 7), step("install", 8)]).quit, "wait");
+    assert.equal(stateOf([step("review", 7), confirm("review")]).quit, "cancel");
+    assert.equal(stateOf([]).quit, "cancel");
+    assert.equal(stateOf([], ["--idle"]).quit, "now");
+    assert.equal(stateOf([step("install", 8), done]).quit, "now");
+  });
+
+  it("a Mac that is set up is offered updates, Repair, the guide and Uninstall", () => {
+    assert.deepEqual(ask("offers", ["status", "yes", "yes"]), ["updates", "repair", "guide", "uninstall"]);
+    assert.deepEqual(ask("offers", ["status", "no", "no"]), ["updates", "repair"]);
+    assert.deepEqual(ask("offers", ["status", "no", "yes"]), ["updates", "repair", "guide"]);
+  });
+
+  it("a refused Mac is offered nothing", () => {
+    for (const next of ["refused", "move", "twoCopies", "setup", "repair"]) assert.deepEqual(ask("offers", [next, "yes", "yes"]), [], next);
   });
 });
