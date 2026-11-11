@@ -348,6 +348,24 @@ describe("the status", () => {
     }
   });
 
+  it("a Mac marked as a development Mac, if its status were made, says the same three folder lines", async () => {
+    // The engine refuses a development Mac before a status is made; this pins what statusSummary itself does with such settings.
+    await withMac({ settings: "dev" }, (m) => {
+      const found = kindOf({ home: m.home, checkout: m.checkout });
+      assert.equal(found.kind, "dev");
+      assert.equal(found.settings.mode, "dev");
+      const status = statusOf(m);
+      const folders = ["BRIMM Video in Dropbox", "Drop folder", "Exports folder"];
+      assert.deepEqual(labelsOf(status), ["This Mac", "BRIMM Video Studio", "Setup", ...folders]);
+      assert.equal(valueOf(status, "BRIMM Video in Dropbox"), folderWords(found.settings.root, m.home));
+      assert.equal(valueOf(status, "Drop folder"), folderWords(dropFolderOf(found.settings, m.home), m.home));
+      assert.equal(valueOf(status, "Exports folder"), folderWords(exportsFolderOf(found.settings, m.home), m.home));
+      assert.equal(status.needs, "setup");
+      assert.equal(status.ok, false);
+      assert.equal(eventFault(status), "");
+    });
+  });
+
   it("a fresh Mac's status has no folder lines", async () => {
     await withMac({ settings: "none" }, (m) => {
       const summary = statusOf(m);

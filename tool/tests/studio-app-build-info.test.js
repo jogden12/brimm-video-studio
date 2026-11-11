@@ -101,4 +101,35 @@ describe("build-info.js", () => {
     assert.match(missing.stderr, /version/);
     assert.equal(run("nonsense").status, 2);
   });
+
+  it("an option it does not know is a fault that never repeats what was typed, which may be a stray value", () => {
+    const run = (...args) => spawnSync(process.execPath, [FILE, ...args], { encoding: "utf8" });
+    const faults = [];
+    for (const stray of ["--secret-word-123", "a-pasted-code-987"]) {
+      for (const which of ["json", "plist"]) {
+        const made = run(which, "--version", "1.0.0", "--build", "3", stray);
+        assert.equal(made.status, 2, made.stderr);
+        assert.equal(made.stdout, "");
+        assert.ok(!made.stderr.includes(stray), made.stderr);
+        assert.match(made.stderr, /option/);
+        faults.push(made.stderr);
+      }
+    }
+    assert.equal(new Set(faults).size, 1, "the same words, whatever was typed");
+  });
+
+  it("json and plist refuse a version and a build in the same words", () => {
+    const run = (...args) => spawnSync(process.execPath, [FILE, ...args], { encoding: "utf8" });
+    const json = (version, build) => run("json", "--version", version, "--build", build, "--commit", COMMIT, "--channel", "beta");
+    const plist = (version, build) => run("plist", "--version", version, "--build", build);
+    for (const [version, build] of [["1.0", "3"], ["1.0.0", "0"], ["1.0.0", "1.5"], ["1.0.0", "x"]]) {
+      const a = json(version, build);
+      const b = plist(version, build);
+      assert.equal(a.status, 2);
+      assert.equal(b.status, 2);
+      assert.equal(a.stderr, b.stderr, `${version} ${build}`);
+      assert.ok(a.stderr.length > 1);
+    }
+    assert.equal(plist("1.0.0", "1.5").stderr, `${buildJson({ ...GOOD, build: 1.5 }).fault}\n`);
+  });
 });

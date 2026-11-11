@@ -16,10 +16,18 @@ export const MIN_MACOS = "13.0";
 /** The sentence every usage line of Info.plist says. */
 const USAGE = `${APP_NAME} looks in this folder for new videos and for the videos HyperFrames exports.`;
 
+/** The fault in a version or a build, as a sentence that names the option and never its value, or "". build.json and Info.plist
+    both ask it, so the two refuse in the same words. */
+function versionBuildFault(version, build) {
+  if (typeof version !== "string" || !VERSION.test(version)) return "The version is not one like 1.0.0 or 1.0.0-beta.1.";
+  if (!Number.isSafeInteger(build) || build <= 0) return "The build is not a whole number above 0.";
+  return "";
+}
+
 /** build.json's whole text for the build, or { fault } naming the first option that will not do (never its value). */
 export function buildJson({ version, build, commit, channel }) {
-  if (typeof version !== "string" || !VERSION.test(version)) return { fault: "The version is not one like 1.0.0 or 1.0.0-beta.1." };
-  if (!Number.isSafeInteger(build) || build <= 0) return { fault: "The build is not a whole number above 0." };
+  const fault = versionBuildFault(version, build);
+  if (fault) return { fault };
   if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) return { fault: "The commit is not 40 hexadecimal characters." };
   if (channel !== "stable" && channel !== "beta") return { fault: "The channel is not stable or beta." };
   return { text: `${JSON.stringify({ version, build, commit, short: commit.slice(0, 7), feed: FEED, channel, support: SUPPORT }, null, 2)}\n` };
@@ -55,14 +63,15 @@ export function infoPlist({ version, build, icon }) {
   ].join("");
 }
 
-/** The command line's options, as an object of strings (a flag with no value is true), or { fault }. */
+/** The command line's options, as an object of strings (a flag with no value is true), or { fault }. The fault never repeats what
+    was typed: an unknown word may be a stray value. */
 function optionsOf(args) {
   const given = {};
   for (let i = 0; i < args.length; i++) {
     const name = args[i];
     if (name === "--icon") given.icon = true;
     else if (["--version", "--build", "--commit", "--channel"].includes(name) && i + 1 < args.length) given[name.slice(2)] = args[++i];
-    else return { fault: `The option ${name} is not one this command takes, or has no value.` };
+    else return { fault: "An option this command does not know was given, or an option has no value." };
   }
   return given;
 }
@@ -76,8 +85,8 @@ function command(args) {
   // A build number is a whole number written in digits; anything else becomes NaN and is refused by name below.
   const build = typeof given.build === "string" && /^\d+$/.test(given.build) ? Number(given.build) : NaN;
   if (which === "json") return buildJson({ version: given.version, build, commit: given.commit, channel: given.channel });
-  if (typeof given.version !== "string" || !VERSION.test(given.version)) return { fault: "The version is not one like 1.0.0 or 1.0.0-beta.1." };
-  if (!Number.isSafeInteger(build) || build <= 0) return { fault: "The build is not a whole number above 0." };
+  const fault = versionBuildFault(given.version, build);
+  if (fault) return { fault };
   return { text: infoPlist({ version: given.version, build, icon: given.icon === true }) };
 }
 
