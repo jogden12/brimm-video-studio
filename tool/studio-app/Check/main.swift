@@ -155,6 +155,79 @@ func checkNext(_ args: [String]) -> Never {
     emit(nextStep(translocated: yesNo(words[0]), needs: needs, failed: yesNo(words[2]), chosen: chosen, other: yesNo(words[4])).rawValue)
 }
 
+// MARK: State.swift
+
+/// `value`, or JSON's null for a nil.
+func orNull(_ value: Any?) -> Any { value ?? NSNull() }
+
+func stepValue(_ s: StepEvent) -> [String: Any] { ["id": s.id, "n": s.n, "of": s.of, "title": s.title, "body": s.body] }
+
+func questionValue(_ q: Question) -> [String: Any] {
+    [
+        "id": q.id, "kind": q.kind.rawValue, "prompt": q.prompt, "warning": orNull(q.warning), "fault": orNull(q.fault), "ok": orNull(q.ok),
+        "suggested": orNull(q.suggested), "words": orNull(q.words), "purpose": orNull(q.purpose),
+        "options": q.options.map { ["value": $0.value, "label": $0.label, "detail": orNull($0.detail)] },
+        "apps": q.apps.map { ["id": $0.id, "name": $0.name, "here": $0.here, "link": orNull($0.link), "note": orNull($0.note), "action": orNull($0.action)] },
+        "link": orNull(q.link), "paste": q.paste,
+    ]
+}
+
+func barValue(_ b: Bar) -> [String: Any] {
+    ["part": b.part, "label": b.label, "done": b.done, "total": orNull(b.total), "state": b.state, "detail": orNull(b.detail)]
+}
+
+func summaryValue(_ s: Summary) -> [String: Any] {
+    ["id": s.id, "ok": s.ok, "lines": s.lines.map { ["label": $0.label, "value": $0.value] }, "details": orNull(s.details), "needs": orNull(s.needs)]
+}
+
+func doneValue(_ d: Done) -> [String: Any] {
+    let guide: Any? = d.guide.map { ["html": $0.html, "pdf": $0.pdf] }
+    return ["outcome": d.outcome, "summary": d.summary, "studio": d.studio, "guide": orNull(guide), "notes": d.notes]
+}
+
+func failureValue(_ f: Failure) -> [String: Any] {
+    ["code": f.code, "message": f.message, "advice": orNull(f.advice), "contact": orNull(f.contact), "details": orNull(f.details)]
+}
+
+/// The state as the tests read it, with `undecoded`, the number of lines that were no event. A later task adds its own keys here.
+func stateValue(_ s: SetupState, undecoded: Int) -> [String: Any] {
+    [
+        "rows": s.rows.map { ["id": $0.id, "title": $0.title, "mark": $0.mark.rawValue] },
+        "step": orNull(s.step.map(stepValue)), "question": orNull(s.question.map(questionValue)), "bars": s.bars.map(barValue),
+        "review": orNull(s.review.map(summaryValue)), "result": orNull(s.result.map(summaryValue)), "status": orNull(s.status.map(summaryValue)),
+        "done": orNull(s.done.map(doneValue)), "failure": orNull(s.failure.map(failureValue)),
+        "running": s.running, "installing": s.installing, "awaitingCheck": s.awaitingCheck, "undecoded": undecoded,
+    ]
+}
+
+/// The lines of stdin, split as the shell splits the engine's output. Empty lines are passed over.
+func inputLines() -> [Data] {
+    var splitter = LineSplitter()
+    let lines = splitter.feed(readInput()) + [splitter.rest()]
+    return lines.filter { !$0.isEmpty }
+}
+
+/// state [--idle] [--sent-check] [--ended]: stdin is the engine's lines, one event each.
+func checkState(_ args: [String]) -> Never {
+    let known = ["--idle", "--sent-check", "--ended"]
+    for word in args where !known.contains(word) { fail("state does not know \"\(word)\".") }
+    var state = SetupState()
+    if !args.contains("--idle") { state.began() }
+    var undecoded = 0
+    for line in inputLines() {
+        if let event = decodeEvent(line) { state.take(event) } else { undecoded += 1 }
+    }
+    if args.contains("--sent-check") { state.sentCheck() }
+    if args.contains("--ended") { state.ended() }
+    emit(stateValue(state, undecoded: undecoded))
+}
+
+func checkSteps(_ args: [String]) -> Never {
+    let word = exactly(1, args, "steps")[0]
+    guard let of = Int(word) else { fail("\"\(word)\" is not a number of steps.") }
+    emit(stepList(of: of).map { ["id": $0.id, "title": $0.title] })
+}
+
 // MARK: Agent.swift
 
 /// agent <app> <arguments…>: the background job itself. It prints nothing and ends with what runAgent gives back.
@@ -183,6 +256,8 @@ case "guide-paths": checkGuidePaths(rest)
 case "url": checkURL(rest)
 case "names": checkNames(rest)
 case "next": checkNext(rest)
+case "state": checkState(rest)
+case "steps": checkSteps(rest)
 case "agent": checkAgent(rest)
 default: fail("studio-check does not know the command \"\(command)\".")
 }
