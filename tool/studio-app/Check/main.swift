@@ -300,6 +300,118 @@ func checkAgent(_ args: [String]) -> Never {
     exit(runAgent(rest: Array(words.dropFirst()), app: words[0]))
 }
 
+// MARK: EngineClient.swift
+
+/// An event as one JSON object: its name as the engine writes it, and its fields as the state command gives them.
+func eventValue(_ event: Event) -> [String: Any] {
+    let (name, fields): (String, [String: Any])
+    switch event {
+    case .step(let given): (name, fields) = ("step", stepValue(given))
+    case .question(let given): (name, fields) = ("question", questionValue(given))
+    case .progress(let given): (name, fields) = ("progress", barValue(given))
+    case .summary(let given): (name, fields) = ("summary", summaryValue(given))
+    case .done(let given): (name, fields) = ("done", doneValue(given))
+    case .failure(let given): (name, fields) = ("error", failureValue(given))
+    }
+    return fields.merging(["event": name]) { _, named in named }
+}
+
+/// Writes `value` as one line of JSON on stdout.
+func writeLine(_ value: Any) {
+    guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes]) else {
+        fail("studio-check could not write a line as JSON.")
+    }
+    FileHandle.standardOutput.write(data + Data([10]))
+}
+
+/// One of a drive's answers: a reply command's words, or ["back"] or ["cancel"].
+enum DriveAnswer {
+    case reply(Reply)
+    case back
+    case cancel
+}
+
+/// The answer that `words` say.
+func driveAnswer(_ words: [String]) -> DriveAnswer {
+    guard let kind = words.first else { fail("an answer in the answers file is empty.") }
+    let text = words.count == 2 ? words[1] : nil
+    switch (kind, words.count) {
+    case ("back", 1): return .back
+    case ("cancel", 1): return .cancel
+    case ("confirm", 1): return .reply(.confirm)
+    case ("text", 2): return .reply(.text(text!))
+    case ("choice", 2): return .reply(.choice(text!))
+    case ("folder", 2): return .reply(.folder(text!))
+    case ("apps", 2):
+        guard let value = AppsReply(rawValue: text!) else { fail("\"\(text!)\" is not an answer to the apps question.") }
+        return .reply(.apps(value))
+    case ("sign-in", 1), ("sign-in", 2): return .reply(.signIn(code: text))
+    default: fail("an answer in the answers file has the wrong kind or the wrong number of words.")
+    }
+}
+
+/// The answers file's answers, one JSON array of strings a line. Empty lines are passed over.
+func driveAnswers(_ path: String) -> [DriveAnswer] {
+    guard let data = FileManager.default.contents(atPath: path) else { fail("drive could not read the answers file.") }
+    var splitter = LineSplitter()
+    let lines = (splitter.feed(data) + [splitter.rest()]).filter { !$0.isEmpty }
+    return lines.map { line in
+        guard let words = (try? JSONSerialization.jsonObject(with: line)) as? [String] else {
+            fail("a line of the answers file is not a JSON array of strings.")
+        }
+        return driveAnswer(words)
+    }
+}
+
+/// The client that drive runs, kept here for the whole run.
+var driven: EngineClient?
+
+/// drive [--answer-after-end] <answers file> <program> <arguments…>: starts the program through an EngineClient with the checker's
+/// own environment and prints each event as a line as it comes. The next answer is sent at each question. At the end it prints
+/// { ended, undecoded }; with --answer-after-end it first sends one more answer. The answers themselves are never printed.
+func checkDrive(_ args: [String]) -> Never {
+    var words = args
+    let afterEnd = words.first == "--answer-after-end"
+    if afterEnd { words.removeFirst() }
+    words = atLeast(2, words, "drive")
+    var answers = driveAnswers(words[0])
+    let client = EngineClient(command: Command(program: words[1], arguments: Array(words.dropFirst(2))), environment: ProcessInfo.processInfo.environment)
+    var undecoded = 0
+    var lastQuestion = "q"
+
+    // Sends the next answer, if there is one left, to the question `id`.
+    let sendNext = { (id: String) in
+        guard !answers.isEmpty else { return }
+        switch answers.removeFirst() {
+        case .reply(let reply): client.answer(id, reply)
+        case .back: client.back()
+        case .cancel: client.cancel()
+        }
+    }
+    client.onEvent = { event in
+        writeLine(eventValue(event))
+        if case .question(let question) = event {
+            lastQuestion = question.id
+            sendNext(question.id)
+        }
+    }
+    client.onUndecoded = { undecoded += 1 }
+    client.onEnd = { status in
+        if afterEnd {
+            if answers.isEmpty { client.answer(lastQuestion, .confirm) } else { sendNext(lastQuestion) }
+        }
+        writeLine(["ended": status, "undecoded": undecoded])
+        exit(0)
+    }
+    do {
+        try client.start()
+    } catch {
+        fail("drive could not start \(words[1]): \(error.localizedDescription)")
+    }
+    driven = client
+    dispatchMain()
+}
+
 // MARK: The commands
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -326,5 +438,6 @@ case "reply": checkReply(rest)
 case "next-from-status": checkNextFromStatus(rest)
 case "offers": checkOffers(rest)
 case "agent": checkAgent(rest)
+case "drive": checkDrive(rest)
 default: fail("studio-check does not know the command \"\(command)\".")
 }
