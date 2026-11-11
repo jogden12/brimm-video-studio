@@ -7,6 +7,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
+import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { REPAIR, buildOf } from "../build.js";
 import { idleWhy } from "../busy.js";
@@ -364,13 +365,22 @@ const STEP = {
     for (;;) {
       const now = { here: state.here, claude: state.claude };
       const question = appsQuestion(now, { pin, warning, fault, support });
+      const shown = { fault, warning };
       fault = warning = undefined;
       const got = await ask(ctx, question);
       if (got.back) return "back";
       const said = read(question, got.value, { home, state: now, pin, support });
       if (said.fault) fault = said.fault;
-      else if (said.value === "check") lookAgain();
-      else if (said.value === "install-claude-code") {
+      else if (said.value === "check") {
+        // The window asks for a check every few seconds, so a sentence shown with the question stays through one: while the apps
+        // are as they were, or while Continue would still say exactly that sentence.
+        lookAgain();
+        const after = { here: state.here, claude: state.claude };
+        const same = isDeepStrictEqual(now, after);
+        const continued = read(question, "continue", { home, state: after, pin, support });
+        if (shown.fault && (same || continued.fault === shown.fault)) fault = shown.fault;
+        if (shown.warning && (same || continued.warning === shown.warning)) warning = shown.warning;
+      } else if (said.value === "install-claude-code") {
         fault = await installClaude(ctx, state, { pin, support });
         lookAgain();
       } else if (said.value === "sign-in") fault = await signInHere(ctx, state);
