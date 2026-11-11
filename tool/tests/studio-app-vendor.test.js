@@ -2,15 +2,19 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NEEDED, PIN_NAMES, SEAL, readPins, seal, sealFault, sourceName } from "../studio-app/vendor.js";
 
 const FILE = fileURLToPath(new URL("../studio-app/vendor.js", import.meta.url));
 const PIN_FILE = fileURLToPath(new URL("../studio-app/vendor.pin.json", import.meta.url));
 const SHA = "a".repeat(64);
+const STUDIO_APP = fileURLToPath(new URL("../studio-app/", import.meta.url));
+const IS_MAIN = fileURLToPath(new URL("../is-main.js", import.meta.url));
+const notAMac = process.platform !== "darwin" || !existsSync("/bin/zsh") ? "the vendor build runs on a Mac, which has zsh and plutil" : false;
 
 /** A pin file's text made from `pins`, in a new folder under `root`, and its path. */
 function pinFileOf(root, pins, name = "pins.json") {
@@ -168,6 +172,178 @@ describe("vendor.js", () => {
       assert.equal(run("nonsense").status, 2);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+const WATCHED_SENTENCE = "That folder is watched or is in Dropbox, and a build never writes there.";
+
+/** A world for one test: a temporary folder with a copy of tool/studio-app/ (and the one file it imports) whose pin file the test may
+    rewrite, a temporary HOME, `bin/` holding a stand-in curl that records its arguments into `ran` and copies
+    $FAKE_DOWNLOADS/<the address's last part> to the file after --output, and `fake/` for the stand-in's downloads. The stand-in is
+    first on PATH and the folder of this test's own node is last. Gives back `build(...args)` and the pieces a test looks at. */
+function world() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "studio-vendor-build-")));
+  const home = join(root, "home");
+  const bin = join(root, "bin");
+  const fake = join(root, "fake");
+  const copy = join(root, "tool", "studio-app");
+  for (const dir of [home, bin, fake]) mkdirSync(dir);
+  cpSync(STUDIO_APP, copy, { recursive: true });
+  copyFileSync(IS_MAIN, join(root, "tool", "is-main.js"));
+  const ran = join(root, "ran");
+  writeFileSync(ran, "");
+  writeFileSync(
+    join(bin, "curl"),
+    `#!/bin/sh
+echo "curl $*" >> "$RAN"
+out=
+last=
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--output" ]; then out=$2; fi
+  last=$1
+  shift
+done
+cp "$FAKE_DOWNLOADS/\${last##*/}" "$out"
+`,
+  );
+  chmodSync(join(bin, "curl"), 0o755);
+  const env = {
+    HOME: home,
+    RAN: ran,
+    FAKE_DOWNLOADS: fake,
+    PATH: `${bin}:/usr/bin:/bin:/usr/sbin:/sbin:${dirname(process.execPath)}`,
+  };
+  const pinFile = join(copy, "vendor.pin.json");
+  /** Puts fake downloads in place for every pin, and writes the pin file to match their bytes (or, for `wrong`, a pin that does not). */
+  const stage = (wrong = "") => {
+    const pins = JSON.parse(readFileSync(pinFile, "utf8"));
+    for (const name of PIN_NAMES) {
+      const file = pins[name].url.split("/").pop();
+      const bytes = `the fake bytes of ${name}\n`;
+      writeFileSync(join(fake, file), bytes);
+      pins[name].sha256 = name === wrong ? SHA : createHash("sha256").update(bytes).digest("hex");
+    }
+    writeFileSync(pinFile, `${JSON.stringify(pins, null, 2)}\n`);
+    return pins;
+  };
+  const build = (...args) => spawnSync("/bin/zsh", [join(copy, "build-vendor.sh"), ...args], { encoding: "utf8", env, cwd: root, timeout: 60000 });
+  return { root, home, ran, fake, copy, pinFile, stage, build, ranText: () => readFileSync(ran, "utf8"), out: join(root, "out") };
+}
+
+describe("build-vendor.sh", { skip: notAMac }, () => {
+  it("--print fetches nothing and makes no folder", () => {
+    const w = world();
+    try {
+      const printed = w.build("--out", w.out, "--print");
+      assert.equal(printed.status, 0, printed.stderr);
+      assert.equal(existsSync(w.out), false);
+      assert.doesNotMatch(w.ranText(), /curl/);
+      for (const name of PIN_NAMES) assert.match(printed.stdout, new RegExp(`${name} .*https://`), `${name} is named with its address`);
+      assert.match(printed.stdout, /Nothing was changed/);
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
+    }
+  });
+
+  it("an unknown option, no --out, or a folder with a space ends with 2", () => {
+    const w = world();
+    try {
+      const space = join(w.root, "a folder");
+      for (const args of [["--out", w.out, "--bogus"], ["--print"], ["--out"], ["--out", w.out, "--print", "--fetch"], ["--out", space, "--print"], ["--out", space]]) {
+        const made = w.build(...args);
+        assert.equal(made.status, 2, `${args.join(" ")}: ${made.stdout}${made.stderr}`);
+        assert.equal(`${made.stdout}${made.stderr}`.trim().split("\n").length, 1, `${args.join(" ")} says one line`);
+      }
+      assert.match(w.build("--out", space, "--print").stdout, /configure cannot take a path with a space: pick a folder without one\.$/m);
+      assert.equal(existsSync(space), false);
+      assert.equal(existsSync(w.out), false);
+      assert.doesNotMatch(w.ranText(), /curl/);
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
+    }
+  });
+
+  it("a folder the launch agent watches, the drop folder or Dropbox is refused", () => {
+    const w = world();
+    try {
+      const watched = join(w.root, "watched");
+      mkdirSync(watched);
+      mkdirSync(join(w.home, "Library", "LaunchAgents"), { recursive: true });
+      writeFileSync(
+        join(w.home, "Library", "LaunchAgents", "com.thebrimm.unedited.plist"),
+        `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>com.thebrimm.unedited</string><key>WatchPaths</key><array><string>${watched}</string></array></dict></plist>\n`,
+      );
+      const drop = join(w.home, "BRIMM Video Work", "Drop");
+      mkdirSync(drop, { recursive: true });
+      symlinkSync(drop, join(w.home, "BRIMM-Drop-link"));
+      mkdirSync(join(w.home, "Dropbox"));
+      mkdirSync(join(w.home, "Library", "CloudStorage"));
+      const targets = [
+        join(watched, "x"),
+        join(w.home, "Dropbox", "x"),
+        join(w.home, "Library", "CloudStorage", "x"),
+        join(w.home, "BRIMM-Drop-link", "x"),
+        join(w.home, "DROPBOX-Work", "x"),
+        join(w.home, "dropbox", "x"),
+      ];
+      for (const target of targets) {
+        for (const mode of ["--print", "--fetch"]) {
+          const made = w.build("--out", target, mode);
+          assert.equal(made.status, 1, `${target} ${mode}: ${made.stdout}${made.stderr}`);
+          assert.equal(made.stdout.trim(), WATCHED_SENTENCE);
+        }
+        assert.equal(existsSync(target), false, `${target} was made`);
+      }
+      assert.deepEqual(readdirSync(drop), []);
+      assert.doesNotMatch(w.ranText(), /curl/);
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
+    }
+  });
+
+  it("--fetch keeps a download whose SHA-256 is the pin's", () => {
+    const w = world();
+    try {
+      const pins = w.stage();
+      const made = w.build("--out", w.out, "--fetch");
+      assert.equal(made.status, 0, `${made.stdout}${made.stderr}`);
+      const files = readdirSync(join(w.out, "downloads")).sort();
+      assert.deepEqual(files, PIN_NAMES.map((name) => pins[name].url.split("/").pop()).sort());
+      assert.equal(existsSync(join(w.out, "build")), false);
+      assert.equal(existsSync(join(w.out, "vendor")), false);
+      const lines = w.ranText().split("\n").filter(Boolean);
+      assert.equal(lines.length, 6);
+      for (const line of lines) {
+        assert.match(line, /--proto =https/);
+        assert.match(line, /--proto-redir =https/);
+        assert.match(line, /--fail --location/);
+        assert.match(line, /--output \S+\.part /);
+      }
+      // A second run finds all six there with the right SHA-256 and fetches nothing.
+      const again = w.build("--out", w.out, "--fetch");
+      assert.equal(again.status, 0, `${again.stdout}${again.stderr}`);
+      assert.equal(w.ranText().split("\n").filter(Boolean).length, 6);
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
+    }
+  });
+
+  it("a download that is not the pinned one is set aside and nothing is unpacked", () => {
+    const w = world();
+    try {
+      const pins = w.stage("ffmpeg");
+      const made = w.build("--out", w.out);
+      assert.equal(made.status, 1, `${made.stdout}${made.stderr}`);
+      assert.match(made.stdout, /ffmpeg's download is not the pinned one, so it was set aside and nothing was unpacked\.$/m);
+      const file = pins.ffmpeg.url.split("/").pop();
+      assert.equal(existsSync(join(w.out, "downloads", `${file}.rejected`)), true);
+      assert.equal(existsSync(join(w.out, "downloads", file)), false);
+      assert.equal(existsSync(join(w.out, "downloads", `${file}.part`)), false);
+      assert.equal(existsSync(join(w.out, "build")), false);
+      assert.equal(existsSync(join(w.out, "vendor")), false);
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
     }
   });
 });
