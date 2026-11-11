@@ -46,6 +46,10 @@ Mistakes made or nearly made on Studio, and how not to repeat them. Seeded on 20
 - **Claude Code keeps its sign-in in the keychain under the account's name, which it reads from `USER`.** An environment built from scratch must pass `USER` (and `LOGNAME`): the setup's `claudeEnv` had only `HOME`, `PATH` and `LANG`, so the setup signed in and read one keychain entry and Terminal another, and `claude auth logout` in Terminal left the setup signed in (check 3, Studio Test, 2026-11-10).
 - **macOS's `script` exits at once when its input is a socket** ("tcgetattr/ioctl: Operation not supported on socket"). Node's stdio pipes are socketpairs, and on macOS a named FIFO is one too; a shell `|` pipe works. The setup's sign-in feeds `script` through `cat` and a shell pipe (#62, 2026-11-10).
 - **The Code tab's `/status` shows no version** (Claude takes it as a question). The installer's print shows Claude Code's version.
+- **A print operation run with `run()` and no shown window never returns, and writes to its file without end.** Run it with `runModal(for:delegate:didRun:contextInfo:)` on a window that is never shown. Its `didRun` callback comes on a background thread, so move to the main thread before finishing (Phase 6, the guide's PDF, 2026-11-11).
+- **SwiftUI's `@State` does not compile with the Command Line Tools alone**: it expands as a macro whose plugin the tools lack. `@StateObject`, `@ObservedObject` and `@Binding` do, so keep a view's own state in a small `ObservableObject` (Phase 6, Task 14, 2026-11-11).
+- **A test must never run a program inside an app bundle it built with a stand-in `codesign`.** The bundle is never sealed, so macOS shows "is damaged and can't be opened" on the screen and holds the process until someone answers. Test that a program can be run by its mode bits, and run what must run with the test's own node, outside the bundle (Phase 6, Task 15, 2026-11-11).
+- **ffmpeg keeps its configure line, with the build folder's path, inside the binary**, and the GPL source zip is published: build vendored programs outside the home folder (`/Users/Shared/brimm-studio-vendor`), or the account's name ends up in published files (Phase 6, 2026-11-11).
 
 ## Git, CI and pull requests
 
@@ -53,6 +57,8 @@ Mistakes made or nearly made on Studio, and how not to repeat them. Seeded on 20
 - **Stacked PRs must be retargeted to `main` after each merge**; branches are not deleted on merge.
 - **Each merge of main into a PR branch** regenerates `tool/tests/fixtures/today-says.json` (`cd tool && UPDATE_TODAY=1 node --test tests/edit-labels.test.js`, help-only) and updates the architecture spec's Status line.
 - **The repo is public**: committed docs leave out the Dropbox account label, absolute local paths, client names, keys and tokens.
+- **Subagents take the session's folder at the moment they start**, and a hook lets them write only in that worktree. While agents are being started, the session stays in the build's worktree (use subshells and `git -C` for anything elsewhere); a task started while the session was in another worktree could commit nothing (Phase 6, 2026-11-11).
+- **The whole suite takes about four minutes of silence**, which read as a stall when every implementer ran it. Implementers run their own test files; the whole suite runs once between tasks, on a separate checkout at the commit under test (Phase 6, 2026-11-11).
 
 ## Writing by-hand checks
 

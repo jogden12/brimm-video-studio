@@ -29,23 +29,24 @@ Today a Mac is set up with "Move to Studio.app", which opens Terminal on a 1,900
 
 ### 1. One app: **BRIMM Video Studio.app**
 - **What's in it.** It is signed with Developer ID, notarized and versioned (semver), for Apple silicon on macOS 13 or later. The bundle carries:
-  - Studio's code at one commit, from `git archive` of `tool/` without tests or move-app;
-  - `build.json`: version, build number, full and short commit, update feed URL, channel, support contact;
+  - Studio's code at one commit, from `git archive` of `tool/` without tests or move-app, and without `tool/studio-app/`, the build's own sources (Phase 6);
+  - `build.json`: version, build number, full and short commit, update feed URL, channel, support contact. The version lives in two places: `build.json` holds the whole semver (`1.0.0-beta.1`), and `Info.plist`'s `CFBundleShortVersionString` holds only the numbers before the hyphen, with `CFBundleVersion` the build number (Phase 6);
   - node and npm;
   - static ffmpeg and ffprobe, with VideoToolbox, `scale_vt` and libx264;
   - a static whisper-cli built with Metal;
+  - (Phase 6: node, ffmpeg, ffprobe and whisper-cli are built once by `build-vendor.sh`, from the pins in `tool/studio-app/vendor.pin.json`, into a sealed vendor folder. The app's build does not compile them, and refuses a folder whose seal does not hold.)
   - Studio's Swift helpers, compiled ahead of time;
-  - Sparkle 2.
+  - Sparkle 2, from Phase 7. The first Phase 6 build has no Sparkle: its Check for Updates… says `Updates are not part of this build yet.`
 - **Downloaded during setup instead,** each checked against a pin, but for Chrome:
   - the whisper model;
   - the HyperFrames CLI, pinned by npm's own integrity check (`hyperframes.pin.json`), and its Chrome, which the pinned CLI fetches with its own `browser ensure`, as today. Studio has no pin of Chrome's (Phase 5 plan, Open for Jason 2);
   - Claude Code, via its user-level native installer into `~/.local/bin`, where `install.sh:281` and `unedited.js:117` already look.
 - **First open.**
-  - If macOS is running it from a quarantine location (App Translocation), it refuses to set up and offers to move itself to /Applications, or to ~/Applications for a user who isn't an admin.
+  - If macOS is running it from a quarantine location (App Translocation), it refuses to set up and offers to move itself to /Applications, or to ~/Applications for a user who isn't an admin. (Phase 6: the app asks whether `/Applications` can be written to, which is what being an admin gives.)
   - Then it opens the setup assistant.
 - **Later opens.**
-  - It shows status, settings, Check for Updates…, Repair, Open Getting Started guide, and Uninstall. Uninstall removes the background job and leaves the person's data.
-  - On every launch it compares its own path with `settings.checkout` and repairs if they differ.
+  - It shows status, settings, Check for Updates…, Repair, Open Getting Started guide, and Uninstall. Uninstall removes the background job and leaves the person's data. (Phase 6: the status shows this Mac's name, the version, one line and the three folders, and changes none: a folder is changed by asking Claude. Uninstall runs `busy.js idle-why` first, and only when nothing is at work runs `install.sh --remove`.)
+  - On every launch it compares its own path with `settings.checkout` and repairs if they differ. (Phase 6: the app never reads the settings. Its `--run status` says that a copy was moved (`needs: "repair"`), and when another copy is in the other Applications folder the app asks which one to use instead of repairing.)
 - **No git and no deploy key** on any installed Mac. Only the Mac Studio stays a git checkout, marked `"mode": "dev"` in its settings, and the app refuses to take it over.
 
 ### 2. The setup assistant (no Terminal)
@@ -64,11 +65,11 @@ A SwiftUI window shows its steps down the side, each with a live status. Every q
 6. **Permissions.** macOS's privacy prompts (Downloads, Dropbox, the drop folder) are triggered here, while the person is there to click Allow. They name "BRIMM Video Studio".
 7. **Review.** A plain summary of what will change, from the gate in `install.sh --print`. Its exit code decides, and the full text sits under a Details disclosure. Then an **Install** button.
 8. **Install.** One progress bar per part: copying the programs, the model, the HyperFrames CLI and Chrome, the installer run, and the check that Claude answers from the background job.
-9. **Done.** The Getting Started PDF opens in Preview. There are also "Copy setup summary" and "Open your BRIMM Video Studio folder in Claude" buttons.
+9. **Done.** The Getting Started PDF opens in Preview. There are also "Copy setup summary" and "Open your BRIMM Video Studio folder in Claude" buttons. (Phase 6: no link is known that opens a folder in the Claude app's Code tab, so the second button opens the Claude app, and the guide says the rest.)
 
 **The Getting Started PDF**
 - It is made at the end from an HTML template with this Mac's own details: its name, its drop folder and exports folder in Finder's words, and the app versions.
-- The Swift app turns it into a PDF (`WKWebView.createPDF`), so no packages are needed.
+- The Swift app turns it into a PDF, so no packages are needed. (Phase 6: it prints the page to a file with a print operation, run modally on a window that is never shown, which gives Letter pages. `WKWebView.createPDF` gives one sheet as tall as the page.)
 - It is saved in `~/BRIMM Video Work/` and can be reopened from the app.
 - It covers:
   - adding the drop folder to Finder's sidebar;

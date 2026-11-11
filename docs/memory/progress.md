@@ -18,13 +18,13 @@ Where Studio stands. Last brought up to date on 2026-11-11 (main at 268d10c). Da
 
 ## In progress (2026-11-11)
 
-- **The Mac app, Phase 6 (the app and its build)**: its task plan is written, `docs/superpowers/plans/2026-11-09-studio-mac-app-phase-6-plan.md`, on branch `app-development-phase-6`: fifteen tasks, read by three reviewers. Nothing is built yet. It waits on Jason's review, his choice of how it is built, and its nine open questions.
+- **The Mac app, Phase 6 (the app and its build)** is built on the branch `app-development-phase-6` (2026-11-11), to `docs/superpowers/plans/2026-11-09-studio-mac-app-phase-6-plan.md`: its fifteen tasks, a whole-branch review, and one wave of fixes for what the review found. It is not pushed and not merged, and none of its by-hand checks has been done. The build's decisions are in the plan's "Decided", 23 to 46; the plan's nine open questions stand at their recommendations until Jason answers them.
 - **A sweep of the lines that still name Jason, `install.sh` or node on an installed Mac**, in its own session.
 
 ## Next, and waiting on Jason
 
 - **Sallie's laptop**: check 46 (a first video, Jason's own recording), 47 (the BRIMM Ops page on her laptop), 48 (delete brimm-video's old GitHub deploy key, on his yes), the open boxes of checks 41 and 43; check 88 was never confirmed.
-- **The Mac app**: the Phase 6 plan's "Open for Jason" (the bundle ID, Claude Code's pin, the first version, the feed's address, ffmpeg's source zip, the Claude button, an icon, when to sign, a macOS CI job); the Phase 5 plan's open questions that are still open.
+- **The Mac app**: Jason's yes to push Phase 6's branch and open its pull request; the Phase 6 plan's "Open for Jason" (the bundle ID, Claude Code's pin, the first version, the feed's address, ffmpeg's source zip, the Claude button, an icon, when to sign, a macOS CI job); Phase 6's ten by-hand checks (the plan's "By hand"; recommended: checks 1 to 3 before the merge, 4 to 10 after it); the Phase 5 plan's open questions that are still open.
 - **Calls from the build plan**: `finish`'s NEVER_OPENED line on a Mac with the app off; whether `free` takes a Reel's video; a toolchain lock file; whether the "One Video, Start to Finish" page is retired.
 - **The import notice**: item 3 ("I allowed it" → look); B1 at the next `brew upgrade node`; a signed helper later.
 - **Her folder**: whether the open lock writes the feedback `env` (when an open lock is named).
