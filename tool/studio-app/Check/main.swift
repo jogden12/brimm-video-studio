@@ -443,6 +443,62 @@ func checkPDF(_ args: [String]) -> Never {
     exit(1)
 }
 
+// MARK: Mover.swift
+
+/// move <from> <folder> <a trash folder>: moveApp, whose trash moves the item into the trash folder. It prints the sentence, or null.
+func checkMove(_ args: [String]) -> Never {
+    let words = exactly(3, args, "move")
+    let trash = { (path: String) -> Bool in
+        let into = (words[2] as NSString).appendingPathComponent((path as NSString).lastPathComponent)
+        return (try? FileManager.default.moveItem(atPath: path, toPath: into)) != nil
+    }
+    emit(moveApp(from: words[0], to: words[1], trash: trash))
+}
+
+// MARK: Uninstall.swift
+
+/// Starts `command` with the shell's environment, its home the checker's own HOME, and waits for it: { status, out, err }. A command
+/// that cannot be started gives -1 and says nothing.
+func runWaiting(_ command: Command, app: String) -> (status: Int32, out: String, err: String) {
+    let given = ProcessInfo.processInfo.environment
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: command.program)
+    child.arguments = command.arguments
+    child.environment = childEnvironment(from: given, home: given["HOME"] ?? NSHomeDirectory(), app: app)
+    let out = Pipe()
+    let err = Pipe()
+    child.standardOutput = out
+    child.standardError = err
+    child.standardInput = FileHandle.nullDevice
+    do {
+        try child.run()
+    } catch {
+        return (-1, "", "")
+    }
+    // stderr is read on a queue of its own, so that a full pipe on either side never holds the child up.
+    var errData = Data()
+    let reading = DispatchGroup()
+    reading.enter()
+    DispatchQueue.global().async {
+        errData = err.fileHandleForReading.readDataToEndOfFile()
+        reading.leave()
+    }
+    let outData = out.fileHandleForReading.readDataToEndOfFile()
+    reading.wait()
+    child.waitUntilExit()
+    let text = { (data: Data) in String(decoding: data, as: UTF8.self) }
+    return (child.terminationReason == .exit ? child.terminationStatus : -1, text(outData), text(errData))
+}
+
+/// uninstall <app> <fake yes|no>: prints "removed" or { notice }.
+func checkUninstall(_ args: [String]) -> Never {
+    let words = exactly(2, args, "uninstall")
+    switch uninstall(app: words[0], fake: yesNo(words[1]), run: { runWaiting($0, app: words[0]) }) {
+    case .removed: emit("removed")
+    case .notice(let line): emit(["notice": line])
+    }
+}
+
 // MARK: The commands
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -471,5 +527,7 @@ case "offers": checkOffers(rest)
 case "agent": checkAgent(rest)
 case "drive": checkDrive(rest)
 case "pdf": checkPDF(rest)
+case "move": checkMove(rest)
+case "uninstall": checkUninstall(rest)
 default: fail("studio-check does not know the command \"\(command)\".")
 }
