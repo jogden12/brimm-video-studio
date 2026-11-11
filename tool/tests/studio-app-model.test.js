@@ -192,4 +192,26 @@ describe("the app's sources", () => {
     for (const name of ["nextFromStatus(", "shouldCheck(", "quitRule("]) assert.ok(text.includes(name), `AppModel.swift never asks ${name}`);
     assert.match(text, /func uninstall\(\)\s*\{\s*guard screen == \.status\b/);
   });
+
+  it("main.swift answers --agent before anything of AppKit", () => {
+    const code = source("main.swift")
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//"))
+      .join("\n");
+    const appKit = code.indexOf("NSApplication");
+    assert.ok(appKit >= 0, "main.swift never makes the NSApplication");
+    for (const name of ["launchOf", "runAgent"]) {
+      const at = code.indexOf(name);
+      assert.ok(at >= 0 && at < appKit, `main.swift does not ask ${name} before its first NSApplication`);
+    }
+  });
+
+  it("the views never know a question's id", () => {
+    for (const name of ["SetupViews.swift", "StatusViews.swift"]) {
+      const text = source(name);
+      for (const word of ['"welcome"', '"name"', '"dropbox"', '"drop-folder"', '"exports-folder"', '"review"', '"scenario"', '"permission-', "question.id =="]) {
+        assert.ok(!text.includes(word), `${name} holds ${word}`);
+      }
+    }
+  });
 });
