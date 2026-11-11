@@ -62,9 +62,19 @@ export function checkerPath() {
   return made;
 }
 
-/** Runs studio-check with `command` and `args`. `env`, when given, is the whole environment. `json` is the parsed stdout when the status is 0. */
+/**
+ * Runs studio-check with `command` and `args`. `env`, when given, is the whole environment. `json` is the parsed stdout when the status
+ * is 0; a status-0 run whose stdout is not JSON throws an error that names the command and shows what it printed.
+ */
 export function check(command, args = [], { input, env, timeout = 60000 } = {}) {
   const ran = spawnSync(checkerPath(), [command, ...args], { input, env: env ?? process.env, encoding: "utf8", timeout });
-  const json = ran.status === 0 ? JSON.parse(ran.stdout) : undefined;
+  let json;
+  if (ran.status === 0) {
+    try {
+      json = JSON.parse(ran.stdout);
+    } catch {
+      throw new Error(`studio-check ${[command, ...args].join(" ")} ended with 0, and printed what is not JSON:\n${ran.stdout.slice(0, 2000)}`);
+    }
+  }
   return { status: ran.status, stdout: ran.stdout, stderr: ran.stderr, json };
 }

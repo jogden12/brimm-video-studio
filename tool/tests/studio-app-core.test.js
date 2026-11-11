@@ -1,7 +1,7 @@
 // The shell's pure decisions, from tool/studio-app/Sources/Core.swift, asked through studio-check (Phase 6, Task 4).
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -146,7 +146,7 @@ describe("the app's links", { skip: noChecker }, () => {
 });
 
 describe("the shell's names", { skip: noChecker }, () => {
-  it("the shell's names and paths are Studio's own", () => {
+  it("the shell's names and paths are Studio's own", (t) => {
     const names = ask("names");
     assert.equal(names.appName, "BRIMM Video Studio");
     assert.equal(names.agentLabel, AGENT_LABEL);
@@ -160,10 +160,23 @@ describe("the shell's names", { skip: noChecker }, () => {
     assert.ok(ask("agent-file", ["/Users/sallie"]).endsWith(`/Library/LaunchAgents/${AGENT_LABEL}.plist`));
     assert.equal(ask("agent-file", ["/Users/sallie"]), `/Users/sallie/Library/LaunchAgents/${AGENT_LABEL}.plist`);
     const home = mkdtempSync(join(tmpdir(), "studio-core-"));
+    t.after(() => rmSync(home, { recursive: true, force: true }));
     const settings = { machine: "A Mac", root: `${home}/Dropbox/BRIMM Video`, dropPath: `${home}/BRIMM Video Work/Drop`, exportsPath: `${home}/Movies/Exports` };
     const data = guideData({ home, settings, build: { version: "1.0.0", build: "abc1234" } });
     const written = writeGuide({ home, data, template: readFileSync(TEMPLATE, "utf8"), fonts: FONTS });
     assert.deepEqual(ask("guide-paths", [home]), { html: written.html, pdf: written.pdf });
+  });
+
+  it("an answer that ends with 0 but is not JSON is an error that names the command and shows what was printed", (t) => {
+    // The agent command prints only what the app's node prints: here a node that prints a word that is not JSON and ends with 0.
+    const dir = mkdtempSync(join(tmpdir(), "studio-core-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const app = join(dir, "BRIMM Video Studio.app");
+    const bin = join(app, "Contents", "Resources", "node", "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "node"), "#!/bin/sh\nprintf 'not-json'\n");
+    chmodSync(join(bin, "node"), 0o755);
+    assert.throws(() => check("agent", [app]), (error) => error.message.includes("studio-check agent") && error.message.includes("not-json"));
   });
 
   it("an unknown command, or a command missing its words, ends with 2", () => {

@@ -1,10 +1,10 @@
 // The stand-in engine, tool/studio-app/dev/fake-engine.mjs, which a build option puts in place of the real one so that the windows
 // can be looked at by hand (Phase 6, Task 11). Each run is started with the test's own node, a temp folder as TMPDIR and
 // FAKE_ENGINE_FAST=1, and is answered line by line as the shell would answer it.
-import { before, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,7 +21,31 @@ const ERRORS = ["damaged", "dev", "busy", "download", "install", "settings"];
 const SCENARIOS = ["whole", ...ERRORS, "crash", "moved", "fresh"];
 const KINDS = ["confirm", "text", "choice", "folder", "apps", "sign-in"];
 
-const newTemp = () => mkdtempSync(join(tmpdir(), "brimm-fake-engine-test-"));
+/** The folders this file has made, each removed when the file ends. */
+const folders = [];
+after(() => {
+  for (const dir of folders) rmSync(dir, { recursive: true, force: true });
+});
+
+const newTemp = () => {
+  const dir = mkdtempSync(join(tmpdir(), "brimm-fake-engine-test-"));
+  folders.push(dir);
+  return dir;
+};
+
+/** The text of the real file at `path`, relative to tool/, with an escaped quote read as the quote itself. */
+const realText = (path) => readFileSync(fileURLToPath(new URL(`../${path}`, import.meta.url)), "utf8").replace(/\\(['"])/g, "$1");
+
+/** Where each error scenario's sentences come from in the real code: the message's file, and the advice's file when it has one. The
+    model's download sentence carries curl's status, which install.js writes as a template. */
+const COPIED_FROM = {
+  damaged: { message: "setup/checks.js" },
+  dev: { message: "settings.js" },
+  busy: { message: "setup/install.js" },
+  download: { message: "setup/install.js", advice: "setup/engine.js", as: (text) => text.replace("(curl 6)", "(curl ${code})") },
+  install: { message: "setup/engine.js", advice: "build.js" },
+  settings: { message: "setup/engine.js" }
+};
 
 /** The shell's answer to a question of a run of `scenario`, as a line to send, or undefined for a question it does not know. An apps
     question is answered with a row's action first, then with check while a row is not here, then with continue. */
@@ -148,6 +172,11 @@ describe("the stand-in engine", () => {
       assert.equal(events.filter((e) => e.event === "step").length, 2);
       if (code === "damaged") assert.equal(last.message, DAMAGED);
       if (code === "dev") assert.equal(last.message, DEV_REFUSAL);
+      const from = COPIED_FROM[code];
+      const as = from.as ?? ((text) => text);
+      assert.ok(realText(from.message).includes(as(last.message)), `${from.message} does not hold: ${last.message}`);
+      if (from.advice) assert.ok(realText(from.advice).includes(last.advice), `${from.advice} does not hold: ${last.advice}`);
+      else assert.ok(last.advice === undefined || realText("build.js").includes(last.advice), `the advice is not the real one: ${last.advice}`);
     });
   }
 

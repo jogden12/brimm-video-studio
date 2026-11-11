@@ -242,33 +242,41 @@ func checkSteps(_ args: [String]) -> Never {
 
 // MARK: Flow.swift
 
-/// reply <kind> [<text>]: the line the shell sends for an answer of `kind` to a question whose id is "q". `confirm` takes no text;
-/// `text`, `choice`, `folder` and `apps` take one; `sign-in` takes a code or none.
-func checkReply(_ args: [String]) -> Never {
-    let words = atLeast(1, args, "reply")
-    let kind = words[0]
-    let reply: Reply
+/// The Reply that a reply command's words say: its kind, then its text. `confirm` takes no text; `text`, `choice`, `folder` and
+/// `apps` take one; `sign-in` takes a code or none. `reply` and `drive` both read their answers with it.
+func replyOf(_ words: [String]) -> Reply {
+    guard let kind = words.first else { fail("a reply needs its kind.") }
+    let rest = Array(words.dropFirst())
+    /// The one text the kind takes.
+    let one = { () -> String in
+        guard rest.count == 1, let text = rest.first else { fail("reply \(kind) takes 2 words, and was given \(words.count).") }
+        return text
+    }
     switch kind {
     case "confirm":
-        _ = exactly(1, words, "reply confirm")
-        reply = .confirm
-    case "text": reply = .text(exactly(2, words, "reply text")[1])
-    case "choice": reply = .choice(exactly(2, words, "reply choice")[1])
-    case "folder": reply = .folder(exactly(2, words, "reply folder")[1])
+        if !rest.isEmpty { fail("reply confirm takes 1 word, and was given \(words.count).") }
+        return .confirm
+    case "text": return .text(one())
+    case "choice": return .choice(one())
+    case "folder": return .folder(one())
     case "apps":
-        let word = exactly(2, words, "reply apps")[1]
+        let word = one()
         guard let value = AppsReply(rawValue: word) else { fail("\"\(word)\" is not an answer to the apps question.") }
-        reply = .apps(value)
+        return .apps(value)
     case "sign-in":
-        if words.count > 2 { fail("reply sign-in takes at most 2 words, and was given \(words.count).") }
-        reply = .signIn(code: words.count == 2 ? words[1] : nil)
+        if rest.count > 1 { fail("reply sign-in takes at most 2 words, and was given \(words.count).") }
+        return .signIn(code: rest.first)
     default: fail("\"\(kind)\" is not a question's kind.")
     }
-    emit(["answer": "q", "value": replyValue(reply)])
+}
+
+/// reply <kind> [<text>]: the line the shell sends for an answer of `kind` to a question whose id is "q".
+func checkReply(_ args: [String]) -> Never {
+    emit(["answer": "q", "value": replyValue(replyOf(atLeast(1, args, "reply")))])
 }
 
 /// next-from-status <translocated yes|no> <chosen: setup|repair|none> <other yes|no>: stdin is a status run's event lines, and
-/// the run then ended.
+/// the run then ended. A line that is no event ends it with 2.
 func checkNextFromStatus(_ args: [String]) -> Never {
     let words = exactly(3, args, "next-from-status")
     let chosen: Run?
@@ -280,7 +288,8 @@ func checkNextFromStatus(_ args: [String]) -> Never {
     var state = SetupState()
     state.began()
     for line in inputLines() {
-        if let event = decodeEvent(line) { state.take(event) }
+        guard let event = decodeEvent(line) else { fail("a line of next-from-status's input is no event: \(String(decoding: line, as: UTF8.self))") }
+        state.take(event)
     }
     state.ended()
     emit(nextFromStatus(state, translocated: yesNo(words[0]), chosen: chosen, other: yesNo(words[2])).rawValue)
@@ -332,22 +341,12 @@ enum DriveAnswer {
     case cancel
 }
 
-/// The answer that `words` say.
+/// The answer that `words` say: back, cancel, or a reply command's words.
 func driveAnswer(_ words: [String]) -> DriveAnswer {
-    guard let kind = words.first else { fail("an answer in the answers file is empty.") }
-    let text = words.count == 2 ? words[1] : nil
-    switch (kind, words.count) {
-    case ("back", 1): return .back
-    case ("cancel", 1): return .cancel
-    case ("confirm", 1): return .reply(.confirm)
-    case ("text", 2): return .reply(.text(text!))
-    case ("choice", 2): return .reply(.choice(text!))
-    case ("folder", 2): return .reply(.folder(text!))
-    case ("apps", 2):
-        guard let value = AppsReply(rawValue: text!) else { fail("\"\(text!)\" is not an answer to the apps question.") }
-        return .reply(.apps(value))
-    case ("sign-in", 1), ("sign-in", 2): return .reply(.signIn(code: text))
-    default: fail("an answer in the answers file has the wrong kind or the wrong number of words.")
+    switch words {
+    case ["back"]: return .back
+    case ["cancel"]: return .cancel
+    default: return .reply(replyOf(words))
     }
 }
 

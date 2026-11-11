@@ -19,7 +19,9 @@ section + section { break-before: page; }
 <section><h1>Three</h1><p>The third page.</p></section>
 </body></html>`;
 
-/** The folders this file has made, each removed when the file ends. */
+/** The folders this file has made, each removed when the file ends. WebKit's own folders for the checker are not among them: macOS
+    makes them in the user's temp folder whatever TMPDIR says, once for each compile of the checker, and refuses to let them be
+    removed. */
 const folders = [];
 after(() => {
   for (const dir of folders) rmSync(dir, { recursive: true, force: true });
@@ -32,8 +34,8 @@ const newFolder = (prefix) => {
   return dir;
 };
 
-/** Runs the pdf command, with a TMPDIR of its own so that WebKit's folders go with the test's. Where there is no window server the
-    test is skipped, and this gives null. */
+/** Runs the pdf command, with a TMPDIR of its own, so that whatever the checker puts there goes with the test's folders. Where there
+    is no window server the test is skipped, and this gives null. */
 function makePDF(t, html, pdf) {
   const ran = check("pdf", [html, pdf], { timeout: 90000, env: { ...process.env, TMPDIR: newFolder("brimm-studio-pdf-tmp-") } });
   if (ran.status === 3) {

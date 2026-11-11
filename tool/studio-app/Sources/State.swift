@@ -218,7 +218,8 @@ private func readFailure(_ f: Fields) -> Failure? {
 }
 
 /// The event one of the engine's lines holds; nil for a line that is not one of the six, has a question kind the shell does not
-/// know, or lacks a field its kind must have.
+/// know, or lacks a field its kind must have. It checks less than tool/setup/protocol.js does, on purpose: the engine checks every
+/// event against the protocol before it writes it, so the shell reads only what it needs to draw.
 func decodeEvent(_ line: Data) -> Event? {
     guard let object = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any], let name = object["event"] as? String else { return nil }
     let f = Fields(object: object)

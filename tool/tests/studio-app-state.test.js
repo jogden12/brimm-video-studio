@@ -6,8 +6,6 @@ import { answerFault } from "../setup/protocol.js";
 import { drive, mac } from "./setup-harness.js";
 import { check, checkerPath, noChecker } from "./studio-app-check.js";
 
-const CRASH_MESSAGE = "BRIMM Video Studio's setup stopped on a fault of its own.";
-const CRASH_ADVICE = "Open BRIMM Video Studio and choose Repair.";
 const EVERY_APP = ["claude-app", "dropbox", "hyperframes"];
 
 /** studio-check's answer to `command` with `args`, which must have ended with 0. */
@@ -155,7 +153,8 @@ describe("the window's state, event by event", { skip: noChecker }, () => {
 
   it("a run that ends with neither done nor error shows the engine's own last words", () => {
     const state = stateOf([step("welcome", 1), confirm("welcome")], ["--ended"]);
-    assert.deepEqual(state.failure, { code: "engine", message: CRASH_MESSAGE, advice: CRASH_ADVICE, contact: null, details: null });
+    const { crashMessage, crashAdvice } = ask("names");
+    assert.deepEqual(state.failure, { code: "engine", message: crashMessage, advice: crashAdvice, contact: null, details: null });
     assert.equal(state.running, false);
     const error = { event: "error", code: "busy", message: "A video is being taken in." };
     assert.equal(stateOf([step("welcome", 1), error], ["--ended"]).failure.code, "busy");
@@ -230,6 +229,7 @@ describe("what each answer sends, and what follows", { skip: noChecker }, () => 
     assert.deepEqual(ask("reply", ["sign-in", "ABC-123"]), { answer: "q", value: { code: "ABC-123" } });
     assert.deepEqual(ask("reply", ["sign-in"]), { answer: "q", value: {} });
     assert.deepEqual(ask("reply", ["sign-in", "  "]), { answer: "q", value: {} });
+    assert.deepEqual(ask("reply", ["sign-in", " ABC-123 "]), { answer: "q", value: { code: "ABC-123" } });
   });
 
   it("what follows the real engine's status, for each kind of Mac", async () => {
@@ -249,6 +249,13 @@ describe("what each answer sends, and what follows", { skip: noChecker }, () => 
     assert.equal(nextOf(moved, ["no", "none", "yes"]), "twoCopies");
     assert.equal(nextOf(await statusOf("dev")), "refused");
     assert.equal(nextOf(await statusOf("unusable")), "refused");
+  });
+
+  it("a line of a status run that cannot be read ends next-from-status with 2, and says so", () => {
+    const ran = check("next-from-status", ["no", "none", "no"], { input: `${JSON.stringify(done)}\nnot an event\n` });
+    assert.equal(ran.status, 2);
+    assert.equal(ran.stdout, "");
+    assert.match(ran.stderr, /no event: not an event\n$/);
   });
 
   it("a status run that ended with no last event is refused", () => {
