@@ -16,7 +16,7 @@ struct RootView: View {
             case .setup, .repairing: SetupPage(model: model)
             case .twoCopies: TwoCopiesPage(model: model)
             case .status: StatusPage(model: model)
-            case .removed: RemovedPage()
+            case .removed: RemovedPage(model: model)
             }
         }
         .frame(width: 760, height: 560)
@@ -167,10 +167,21 @@ struct UninstallSheet: View {
     }
 }
 
+/// After Uninstall: what it did, Repair to start the background job again, and Close. A stand-in build says first that it changed
+/// nothing.
 struct RemovedPage: View {
+    @ObservedObject var model: AppModel
+
     var body: some View {
         Page {
+            if model.fake {
+                Text("This build's setup is a stand-in: it changes nothing on this Mac.").foregroundColor(Brand.fog)
+            }
             Text("BRIMM Video Studio no longer watches for new videos on this Mac. To start it again, open it and choose Repair.")
+            HStack {
+                Button("Repair") { model.begin(chosen: .repair) }
+                Button("Close") { NSApp.terminate(nil) }.buttonStyle(MainButtonStyle())
+            }
         }
     }
 }

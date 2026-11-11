@@ -59,6 +59,12 @@ final class AppModel: ObservableObject {
     private let app = Bundle.main.bundlePath
     private let home = NSHomeDirectory()
 
+    /// The Getting Started guide's HTML and PDF: in the home's BRIMM Video Work, or, in a stand-in build, in the stand-in's own folder
+    /// in the app's temporary folder, where it writes its guide.
+    private var guide: (html: String, pdf: String) {
+        guidePaths(folder: guideFolder(home: home, fake: fake, temp: NSTemporaryDirectory()))
+    }
+
     /// Each client from its start until its onEnd has come: the client's own callbacks hold it weakly, so it is kept here, or its
     /// run would be lost and the engine would read the closed stdin as a cancel.
     private var clients: [ObjectIdentifier: EngineClient] = [:]
@@ -92,7 +98,7 @@ final class AppModel: ObservableObject {
     var offers: [String] {
         guard screen == .status else { return [] }
         let files = FileManager.default
-        let guide = guidePaths(home: home)
+        let guide = self.guide
         return statusOffers(
             next: .status, agentFileThere: files.fileExists(atPath: agentFile(home: home)),
             guideThere: files.fileExists(atPath: guide.html) || files.fileExists(atPath: guide.pdf))
@@ -279,8 +285,8 @@ final class AppModel: ObservableObject {
     /// Opens the other copy and quits this one. When it cannot be opened, this one stays and says so.
     func openOtherCopy() {
         guard let other else { return }
-        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: other), configuration: NSWorkspace.OpenConfiguration()) { opened, _ in
-            DispatchQueue.main.async { [weak self] in
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: other), configuration: NSWorkspace.OpenConfiguration()) { [weak self] opened, _ in
+            DispatchQueue.main.async {
                 if opened != nil {
                     NSApp.terminate(nil)
                 } else {
@@ -294,7 +300,7 @@ final class AppModel: ObservableObject {
 
     /// Opens the guide's PDF when it is there. Otherwise the HTML is made into the PDF first, and is opened itself if that fails.
     func openGuide() {
-        let guide = guidePaths(home: home)
+        let guide = self.guide
         let files = FileManager.default
         if files.fileExists(atPath: guide.pdf) {
             NSWorkspace.shared.open(URL(fileURLWithPath: guide.pdf))

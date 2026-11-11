@@ -245,6 +245,27 @@ describe("the app's program runner", { skip: noChecker }, () => {
 });
 
 const SOURCES = fileURLToPath(new URL("../studio-app/Sources/", import.meta.url));
+const SAMPLE_GUIDE = fileURLToPath(new URL("../studio-app/sample-guide.js", import.meta.url));
+const TOOL = fileURLToPath(new URL("..", import.meta.url));
+
+describe("the real guide for a stand-in build", () => {
+  it("sample-guide.js prints the real guide for a sample Mac", () => {
+    const ran = spawnSync(process.execPath, [SAMPLE_GUIDE, TOOL, "1.0.0-beta.1", "7"], { encoding: "utf8", timeout: 60000 });
+    assert.equal(ran.status, 0, ran.stderr);
+    for (const words of ["Studio Test Mac", "1.0.0-beta.1", "<li>HyperFrames</li>", "<h2>Notes</h2>", 'url("data:font/']) assert.ok(ran.stdout.includes(words), words);
+    assert.equal(ran.stdout.includes("{{"), false);
+    assert.equal(ran.stderr, "");
+  });
+
+  it("sample-guide.js with the wrong number of words says how it is called and ends with 2", () => {
+    for (const args of [[], [TOOL, "1.0.0"], [TOOL, "1.0.0", "7", "more"]]) {
+      const ran = spawnSync(process.execPath, [SAMPLE_GUIDE, ...args], { encoding: "utf8", timeout: 60000 });
+      assert.equal(ran.status, 2, args.join(" "));
+      assert.equal(ran.stdout, "");
+      assert.match(ran.stderr, /^node sample-guide\.js <tool folder> <version> <build>\n$/);
+    }
+  });
+});
 
 /** The names of the Swift files in Sources/. */
 const swiftFiles = () => readdirSync(SOURCES).filter((name) => name.endsWith(".swift")).sort();
@@ -253,11 +274,13 @@ const swiftFiles = () => readdirSync(SOURCES).filter((name) => name.endsWith(".s
 const source = (name) => readFileSync(join(SOURCES, name), "utf8");
 
 describe("the app's sources", () => {
-  it("the app's sources typecheck", { skip: noChecker, timeout: 180000 }, () => {
+  it("the app's sources typecheck, and the typecheck prints no warning", { skip: noChecker, timeout: 180000 }, () => {
     mkdirSync(MODULES, { recursive: true });
     const flags = ["-typecheck", "-swift-version", "5", "-target", "arm64-apple-macos13.0", "-module-cache-path", MODULES];
     const ran = spawnSync("/usr/bin/swiftc", [...flags, ...swiftFiles().map((name) => join(SOURCES, name))], { encoding: "utf8", timeout: 180000 });
     assert.equal(ran.status, 0, `swiftc -typecheck ended with ${ran.status}:\n${(ran.stderr ?? "").split("\n").slice(-20).join("\n")}`);
+    const said = `${ran.stdout ?? ""}${ran.stderr ?? ""}`;
+    assert.equal(said.includes("warning:"), false, said.split("\n").slice(0, 20).join("\n"));
   });
 
   it("the app's sources never log", () => {
@@ -320,6 +343,19 @@ describe("the app's sources", () => {
     for (const name of ["launchOf", "runAgent"]) {
       const at = code.indexOf(name);
       assert.ok(at >= 0 && at < appKit, `main.swift does not ask ${name} before its first NSApplication`);
+    }
+  });
+
+  it("the setup page says that a run stopped, and shows its top", () => {
+    const text = source("SetupViews.swift");
+    for (const words of ['"Setup stopped"', '"Repair stopped"', "ScrollViewReader", "scrollTo("]) assert.ok(text.includes(words), `SetupViews.swift never holds ${words}`);
+  });
+
+  it("the page after Uninstall offers Repair and Close", () => {
+    const text = source("StatusViews.swift");
+    const page = text.slice(text.indexOf("struct RemovedPage"), text.indexOf("struct RefusedPage"));
+    for (const words of ['Button("Repair") { model.begin(chosen: .repair) }', 'Button("Close") { NSApp.terminate(nil) }', "This build's setup is a stand-in: it changes nothing on this Mac."]) {
+      assert.ok(page.includes(words), `the removed page never holds ${words}`);
     }
   });
 

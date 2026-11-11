@@ -129,7 +129,8 @@ struct StepList: View {
     }
 }
 
-/// One bar: its label and detail, a measured bar with a total, an unmeasured one without while it runs, and a mark at its end.
+/// One line of the progress: its label and detail, and a mark or a bar. Only a line that is running draws a bar, measured when it has
+/// a total; one that is done has a tick, skipped a dash and failed a cross, and one that is waiting has only its label and detail.
 struct BarView: View {
     let bar: Bar
 
@@ -144,10 +145,12 @@ struct BarView: View {
                 }
                 Text(bar.label)
             }
-            if let total = bar.total {
-                ProgressView(value: Double(min(bar.done, total)), total: Double(max(total, 1)))
-            } else if bar.state == "running" {
-                ProgressView().progressViewStyle(.linear)
+            if bar.state == "running" {
+                if let total = bar.total {
+                    ProgressView(value: Double(min(bar.done, total)), total: Double(max(total, 1)))
+                } else {
+                    ProgressView().progressViewStyle(.linear)
+                }
             }
             if let detail = bar.detail { Text(detail).font(.callout).foregroundColor(Brand.fog) }
         }
@@ -304,10 +307,11 @@ struct DoneView: View {
                 if let result = model.state.result { SummaryLines(lines: result.lines) }
                 notes
                 if let notice = model.notice { Text(notice).foregroundColor(Brand.fog) }
-                HStack {
-                    Button("Copy setup summary") { model.copySummary() }
-                    Button("Open Getting Started guide") { model.openGuide() }
-                    Button("Open your BRIMM Video Studio folder in Claude") { model.openClaude() }
+                // One under another, so that each keeps its whole title.
+                VStack(alignment: .leading, spacing: 8) {
+                    Button("Copy setup summary") { model.copySummary() }.fixedSize()
+                    Button("Open Getting Started guide") { model.openGuide() }.fixedSize()
+                    Button("Open your BRIMM Video Studio folder in Claude") { model.openClaude() }.fixedSize()
                 }
             }
             Button("Close") { close() }.buttonStyle(MainButtonStyle())
@@ -328,49 +332,81 @@ struct DoneView: View {
     }
 }
 
-/// The setup and repair screen.
+/// The setup and repair screen. Its page shows its top whenever the step or the open question changes, and when the run ends, so that
+/// a page taller than the window opens at its heading. A run that failed is headed as stopped, without the step's own words: the
+/// fault is not about that step, and the list beside the page still shows where it stopped.
 struct SetupPage: View {
     @ObservedObject var model: AppModel
+
+    /// The mark at the top of the page, which the page is scrolled to.
+    private static let top = "top"
 
     var body: some View {
         let state = model.state
         HStack(spacing: 0) {
             StepList(rows: state.rows)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if let step = state.step {
-                        Heading(text: step.title)
-                        ForEach(step.body.indices, id: \.self) { at in Text(step.body[at]) }
-                    }
-                    if let review = state.review {
-                        SummaryLines(lines: review.lines)
-                        if let details = review.details { DetailsBox(text: details) }
-                    }
-                    if let question = state.question {
-                        QuestionView(model: model, question: question).id(questionKey(question, step: state.step))
-                    }
-                    if !state.bars.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(state.bars, id: \.part) { bar in BarView(bar: bar) }
+            ScrollViewReader { reader in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        // The mark at the page's top, taking no room.
+                        Color.clear.frame(height: 0).id(SetupPage.top)
+                        VStack(alignment: .leading, spacing: 16) {
+                            if state.failure != nil && state.done == nil {
+                                Heading(text: model.screen == .repairing ? "Repair stopped" : "Setup stopped")
+                            } else if let step = state.step {
+                                Heading(text: step.title)
+                                ForEach(step.body.indices, id: \.self) { at in Text(step.body[at]) }
+                            }
+                            if let review = state.review {
+                                SummaryLines(lines: review.lines)
+                                if let details = review.details { DetailsBox(text: details) }
+                            }
+                            if let question = state.question {
+                                QuestionView(model: model, question: question).id(questionKey(question, step: state.step))
+                            }
+                            // At Done every line is finished, and the summary says so; on a failure they stay.
+                            if !state.bars.isEmpty && state.done == nil {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(state.bars, id: \.part) { bar in BarView(bar: bar) }
+                                }
+                            }
+                            if let done = state.done {
+                                DoneView(model: model, done: done)
+                            } else if let failure = state.failure {
+                                FailureView(model: model, failure: failure, offersRepair: true)
+                            }
+                            if state.running {
+                                HStack {
+                                    if !state.installing { Button("Back") { model.back() } }
+                                    Button("Cancel") { model.cancel() }.disabled(state.installing)
+                                }
+                            }
+                            if state.done == nil, let notice = model.notice { Text(notice).foregroundColor(Brand.fog) }
                         }
+                        .padding(24)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    if let done = state.done {
-                        DoneView(model: model, done: done)
-                    } else if let failure = state.failure {
-                        FailureView(model: model, failure: failure, offersRepair: true)
-                    }
-                    if state.running {
-                        HStack {
-                            if !state.installing { Button("Back") { model.back() } }
-                            Button("Cancel") { model.cancel() }.disabled(state.installing)
-                        }
-                    }
-                    if state.done == nil, let notice = model.notice { Text(notice).foregroundColor(Brand.fog) }
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .onAppear { showTop(reader) }
+                .onChange(of: pageKey(state)) { _ in showTop(reader) }
             }
         }
+    }
+
+    /// Scrolls the page to its top, now and again once the page has been laid out, since the first content is laid out after it
+    /// appears.
+    private func showTop(_ reader: ScrollViewProxy) {
+        reader.scrollTo(SetupPage.top, anchor: .top)
+        DispatchQueue.main.async { reader.scrollTo(SetupPage.top, anchor: .top) }
+    }
+
+    /// What changes when the page should show its top again: the step, the open question (as questionKey tells one from the next,
+    /// so the apps question asked again by its timer is the same), and whether the run is still running.
+    private func pageKey(_ state: SetupState) -> String {
+        [
+            state.step.map { "\($0.n) \($0.title)" } ?? "", state.question.map { questionKey($0, step: state.step) } ?? "",
+            state.running ? "running" : "ended",
+        ].joined(separator: "\u{1}")
     }
 
     /// What tells one question from the next for the view's own state, such as a field's text, made without the question's id: a
