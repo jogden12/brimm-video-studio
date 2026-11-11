@@ -1,8 +1,8 @@
 // The guide as a PDF, from tool/studio-app/Sources/GuidePDF.swift, run through studio-check's pdf command (Phase 6, Task 9). The
 // command needs a window server: where there is none it ends with 3, and the test skips itself.
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GUIDE_NAME, guideData, writeGuide } from "../setup/guide.js";
@@ -19,9 +19,23 @@ section + section { break-before: page; }
 <section><h1>Three</h1><p>The third page.</p></section>
 </body></html>`;
 
-/** Runs the pdf command. Where there is no window server the test is skipped, and this gives null. */
+/** The folders this file has made, each removed when the file ends. */
+const folders = [];
+after(() => {
+  for (const dir of folders) rmSync(dir, { recursive: true, force: true });
+});
+
+/** A new folder, with `prefix` in its name, removed when the file ends. */
+const newFolder = (prefix) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  folders.push(dir);
+  return dir;
+};
+
+/** Runs the pdf command, with a TMPDIR of its own so that WebKit's folders go with the test's. Where there is no window server the
+    test is skipped, and this gives null. */
 function makePDF(t, html, pdf) {
-  const ran = check("pdf", [html, pdf], { timeout: 90000 });
+  const ran = check("pdf", [html, pdf], { timeout: 90000, env: { ...process.env, TMPDIR: newFolder("brimm-studio-pdf-tmp-") } });
   if (ran.status === 3) {
     t.skip("no window server");
     return null;
@@ -30,7 +44,7 @@ function makePDF(t, html, pdf) {
 }
 
 /** A new folder for one test, with a space in its name. */
-const folder = () => mkdtempSync(join(tmpdir(), "brimm studio pdf-"));
+const folder = () => newFolder("brimm studio pdf-");
 
 describe("the guide as a PDF", { skip: noChecker }, () => {
   it("page breaks become Letter pages", (t) => {
@@ -46,7 +60,7 @@ describe("the guide as a PDF", { skip: noChecker }, () => {
   });
 
   it("the real guide becomes a PDF of Letter pages", (t) => {
-    const home = mkdtempSync(join(tmpdir(), "brimm-studio-pdf-home-"));
+    const home = newFolder("brimm-studio-pdf-home-");
     const settings = { machine: "A Test Mac", root: join(home, "Dropbox", "BRIMM Video"), dropPath: join(home, "BRIMM Video Work", "Drop"), exportsPath: join(home, "Movies", "Exports") };
     const build = { version: "1.2.3", build: "abc1234", support: "help@example.test" };
     const data = guideData({ home, settings, build, missing: ["HyperFrames"], notes: ["A note."], now: new Date(2026, 10, 11, 12) });
@@ -74,6 +88,19 @@ describe("the guide as a PDF", { skip: noChecker }, () => {
     assert.equal(readFileSync(pdf).subarray(0, 4).toString("latin1"), "%PDF");
   });
 
+  it("a part file an abandoned job left is removed by the next job", (t) => {
+    const dir = folder();
+    const html = join(dir, "three.html");
+    const pdf = join(dir, "three.pdf");
+    writeFileSync(html, THREE_PAGES);
+    writeFileSync(`${pdf}.0F6B3C1E-2D4A-4E8B-9C7D-5A1B2C3D4E5F.part`, "a part file left by a job that was given up on");
+    writeFileSync(`${pdf}.part`, "a part file left by an older build");
+    const ran = makePDF(t, html, pdf);
+    if (!ran) return;
+    assert.equal(ran.status, 0, ran.stderr);
+    assert.deepEqual(readdirSync(dir).sort(), ["three.html", "three.pdf"]);
+  });
+
   it("a page that is not there makes no PDF", (t) => {
     const dir = folder();
     const pdf = join(dir, "missing.pdf");
@@ -82,6 +109,6 @@ describe("the guide as a PDF", { skip: noChecker }, () => {
     assert.equal(ran.status, 1, ran.stderr);
     assert.equal(ran.stdout, "");
     assert.ok(!existsSync(pdf));
-    assert.ok(!existsSync(`${pdf}.part`));
+    assert.deepEqual(readdirSync(dir).filter((name) => name.endsWith(".part")), []);
   });
 });

@@ -20,8 +20,9 @@ private let letterPage = NSSize(width: 612, height: 792)
 private var printers: [GuidePrinter] = []
 
 /// Prints the page at `html` to a PDF at `pdf`. It is called on the main thread, and `done` comes on the main thread, once: true when
-/// the PDF is there. The PDF is first written to `<pdf>.part` and renamed onto its name, so a half-made file never has the PDF's name
-/// and an older PDF is replaced. A failure leaves no part file, and nothing is thrown.
+/// the PDF is there. The PDF is first written to a part file of the job's own, `<pdf>.<a UUID>.part`, and renamed onto its name, so a
+/// half-made file never has the PDF's name and an older PDF is replaced, and a job given up on can remove only its own part file. A
+/// failure leaves no part file, and nothing is thrown.
 func makePDF(html: URL, pdf: URL, done: @escaping (Bool) -> Void) {
     let printer = GuidePrinter(html: html, pdf: pdf, done: done)
     printers.append(printer)
@@ -39,13 +40,14 @@ private final class GuidePrinter: NSObject, WKNavigationDelegate {
     var done: ((Bool) -> Void)?
     var watchdog: Timer?
     /// True from the start of the print until it has said it has ended. A job ended while it is true stays in `printers`, so the
-    /// print's late answer still finds it and removes the part file the print may have gone on to write.
+    /// print's late answer still finds it and removes the part file the print may have gone on to write. The print is started only
+    /// while it is false, so a page that finishes loading more than once is printed once.
     var printing = false
 
     init(html: URL, pdf: URL, done: @escaping (Bool) -> Void) {
         self.html = html
         self.pdf = pdf
-        part = pdf.deletingLastPathComponent().appendingPathComponent(pdf.lastPathComponent + ".part")
+        part = pdf.deletingLastPathComponent().appendingPathComponent("\(pdf.lastPathComponent).\(UUID().uuidString).part")
         self.done = done
         let frame = NSRect(origin: .zero, size: letterPage)
         web = WKWebView(frame: frame, configuration: WKWebViewConfiguration())
@@ -56,9 +58,15 @@ private final class GuidePrinter: NSObject, WKNavigationDelegate {
         web.navigationDelegate = self
     }
 
-    /// Starts the watchdog and loads the page, with read access to its own folder only.
+    /// Starts the watchdog and loads the page, with read access to its own folder only. The part files of this PDF that belong to
+    /// no job at work, left by a job that was given up on or by an app that ended, are removed first.
     func start() {
-        try? FileManager.default.removeItem(at: part)
+        let folder = pdf.deletingLastPathComponent()
+        let live = Set(printers.map { $0.part.lastPathComponent })
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        where name.hasPrefix("\(pdf.lastPathComponent).") && name.hasSuffix(".part") && !live.contains(name) {
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+        }
         let timer = Timer(timeInterval: pdfWatchEvery, repeats: true) { [weak self] _ in self?.watch() }
         RunLoop.main.add(timer, forMode: .common)
         watchdog = timer
@@ -72,7 +80,7 @@ private final class GuidePrinter: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard done != nil else { return }
+        guard done != nil, !printing else { return }
         let info = NSPrintInfo()
         info.paperSize = letterPage
         info.topMargin = 0
