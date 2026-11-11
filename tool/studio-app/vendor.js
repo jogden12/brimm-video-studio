@@ -105,7 +105,13 @@ export function sealFault(folder, pinFile) {
     return unsealed;
   }
   if (manifest === null || typeof manifest !== "object" || manifest.files === null || typeof manifest.files !== "object") return unsealed;
-  if (manifest.pins !== sha256(readFileSync(pinFile))) return "The vendored programs were built from other pins: run build-vendor.sh again.";
+  let pins;
+  try {
+    pins = sha256(readFileSync(pinFile));
+  } catch {
+    return "The pin file cannot be read, so the vendored programs cannot be checked.";
+  }
+  if (manifest.pins !== pins) return "The vendored programs were built from other pins: run build-vendor.sh again.";
   for (const path of NEEDED) if (!existsSync(join(folder, path))) return `${path} is missing from the vendored programs.`;
   const now = sealedListing(folder);
   const paths = [...new Set([...Object.keys(manifest.files), ...Object.keys(now)])].sort();

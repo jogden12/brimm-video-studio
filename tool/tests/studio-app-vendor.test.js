@@ -144,6 +144,12 @@ describe("vendor.js", () => {
       assert.equal(sealFault(folder, pinFile), "");
       rmSync(join(folder, "node/bin/whisper-cli"));
       assert.equal(sealFault(folder, pinFile), "node/bin/whisper-cli is missing from the vendored programs.");
+
+      // A pin file that cannot be read is a sentence, not a throw.
+      const unread = sealFault(folder, join(root, "no-such-pins.json"));
+      assert.equal(typeof unread, "string");
+      assert.ok(unread.length > 0 && !unread.includes("\n"), unread);
+      assert.ok(!unread.includes(root), "it names no path");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -278,6 +284,10 @@ describe("build-vendor.sh", { skip: notAMac }, () => {
       assert.doesNotMatch(w.ranText(), /curl/);
       for (const name of PIN_NAMES) assert.match(printed.stdout, new RegExp(`${name} .*https://`), `${name} is named with its address`);
       assert.match(printed.stdout, /Nothing was changed/);
+      // It says what it would do, never that it has done it.
+      assert.ok(!printed.stdout.includes("Fetched into"), printed.stdout);
+      assert.ok(printed.stdout.includes(`It would fetch into ${join(w.out, "downloads")}, and check each against its pinned SHA-256:`), printed.stdout);
+      assert.ok(printed.stdout.includes(`It would then build in ${join(w.out, "build")}, `), printed.stdout);
     } finally {
       rmSync(w.root, { recursive: true, force: true });
     }
@@ -334,6 +344,93 @@ describe("build-vendor.sh", { skip: notAMac }, () => {
       }
       assert.deepEqual(readdirSync(drop), []);
       assert.doesNotMatch(w.ranText(), /curl/);
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
+    }
+  });
+
+  it("a folder inside the home folder is refused with 2, after the watched-folder refusal, and nothing is made", () => {
+    const w = world();
+    try {
+      const sentence = "That folder is inside your home folder, and its path is written into ffmpeg and into the source zip, which are published: pick one that names no person, such as /Users/Shared/brimm-studio-vendor.";
+      w.stage();
+      for (const target of [join(w.home, "vendor"), join(w.home, "Library", "Caches", "brimm"), w.home]) {
+        for (const mode of [["--print"], ["--fetch"], []]) {
+          const made = w.build("--out", target, ...mode);
+          assert.equal(made.status, 2, `${target} ${mode}: ${made.stdout}${made.stderr}`);
+          assert.equal(made.stdout.trim(), sentence);
+        }
+      }
+      assert.deepEqual(readdirSync(w.home), [], "nothing was made in the home folder");
+      assert.doesNotMatch(w.ranText(), /curl/);
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
+    }
+  });
+
+  it("a folder that is not empty and is not one it made is refused with 2, and nothing in it is touched", () => {
+    const w = world();
+    try {
+      const sentence = "That folder is not empty and is not one this script made, so nothing in it is touched: pick an empty folder, or one from an earlier run.";
+      w.stage();
+      mkdirSync(join(w.out, "source-notes"), { recursive: true });
+      writeFileSync(join(w.out, "source-notes", "keep"), "mine\n");
+      for (const mode of [["--print"], ["--fetch"], []]) {
+        const made = w.build("--out", w.out, ...mode);
+        assert.equal(made.status, 2, `${mode}: ${made.stdout}${made.stderr}`);
+        assert.equal(made.stdout.trim(), sentence);
+      }
+      assert.deepEqual(readdirSync(w.out), ["source-notes"]);
+      assert.equal(readFileSync(join(w.out, "source-notes", "keep"), "utf8"), "mine\n");
+      assert.doesNotMatch(w.ranText(), /curl/);
+      // An empty folder is taken.
+      const empty = join(w.root, "empty");
+      mkdirSync(empty);
+      assert.equal(w.build("--out", empty, "--fetch").status, 0);
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
+    }
+  });
+
+  it("the source zip holds the script laid out so it runs from the zip, and BUILD.txt names no build folder", () => {
+    const w = world();
+    try {
+      w.stage();
+      assert.equal(w.build("--out", w.out, "--fetch").status, 0);
+      // make_source_zip alone, from the script itself: the script is sourced with --print, and its own `exit 0` after the plan is
+      // caught to call make_source_zip with everything the script defined. Nothing is built; ditto makes the zip.
+      const caught = 'exit() { if (( ${+CATCH} )) && [[ ${1-} == 0 ]]; then unset CATCH; make_source_zip; fi; builtin exit ${1-0}; }; CATCH=1; source "$1" --out "$2" --print';
+      const made = spawnSync("/bin/zsh", ["-c", caught, "zsh", join(w.copy, "build-vendor.sh"), w.out], {
+        encoding: "utf8",
+        env: { HOME: w.home, PATH: `/usr/bin:/bin:/usr/sbin:/sbin:${dirname(process.execPath)}` },
+        cwd: w.root,
+        timeout: 60000,
+      });
+      assert.equal(made.status, 0, made.stdout + made.stderr);
+      const name = sourceName(readPins(w.pinFile).pins);
+      const base = name.replace(/\.zip$/, "");
+      const zip = join(w.out, "source", name);
+      assert.deepEqual(readdirSync(join(w.out, "source")), [name], "only the zip is left");
+      const listed = spawnSync("/usr/bin/unzip", ["-Z1", zip], { encoding: "utf8" }).stdout.split("\n").filter((p) => p && !p.endsWith("/"));
+      const pins = readPins(w.pinFile).pins;
+      const expected = [
+        pins.ffmpeg.url.split("/").pop(), pins.x264.url.split("/").pop(), "BUILD.txt",
+        "tool/is-main.js", "tool/studio-app/build-vendor.sh", "tool/studio-app/common.zsh", "tool/studio-app/vendor.js", "tool/studio-app/vendor.pin.json",
+      ].map((p) => `${base}/${p}`);
+      assert.deepEqual(listed.sort(), expected.sort());
+      const opened = join(w.root, "opened");
+      mkdirSync(opened);
+      assert.equal(spawnSync("/usr/bin/ditto", ["-x", "-k", zip, opened]).status, 0);
+      // vendor.js's own import finds is-main.js, so the script's first step works from the zip.
+      const pinsRun = spawnSync(process.execPath, [join(opened, base, "tool", "studio-app", "vendor.js"), "pins"], { encoding: "utf8", cwd: opened });
+      assert.equal(pinsRun.status, 0, pinsRun.stderr);
+      assert.equal(pinsRun.stdout.split("\n").filter(Boolean).length, 6);
+      const text = readFileSync(join(opened, base, "BUILD.txt"), "utf8");
+      assert.ok(!text.includes(w.out) && !text.includes(w.root), text);
+      assert.match(text, /--prefix=<build>\/prefix /);
+      assert.match(text, /--pkg-config=<build>\/tools\/bin\/pkgconf /);
+      assert.ok(text.includes("tool/studio-app/build-vendor.sh"), text);
+      assert.ok(text.includes("tool/is-main.js"), text);
     } finally {
       rmSync(w.root, { recursive: true, force: true });
     }

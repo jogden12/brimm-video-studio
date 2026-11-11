@@ -7,7 +7,10 @@
 #             into <folder>/vendor, with their licences, a seal (manifest.json) and, in <folder>/source, the GPL source zip.
 # What is fetched is data until its SHA-256 is the pin's (vendor.pin.json). A whole run downloads about 170 MB and compiles for about
 # fifteen minutes, so it is a by-hand step. <folder> is on this Mac's own disk: never a watched folder, a drop folder or Dropbox,
-# and its path has no space, which ffmpeg's and x264's configure cannot take. Nothing is signed here: the app's build signs.
+# and its path has no space, which ffmpeg's and x264's configure cannot take. It is not in the home folder either: ffmpeg keeps its
+# configure line, paths and all, inside itself, so the path must name no person (/Users/Shared/brimm-studio-vendor will do). It is
+# empty, or one an earlier run made: nothing is deleted in a folder this script did not make. Nothing is signed here: the app's
+# build signs.
 set -u
 HERE=${0:A:h}
 source $HERE/common.zsh
@@ -39,6 +42,18 @@ if [[ $out == *[[:space:]]* ]]; then
   exit 2
 fi
 refuse_watched "$out"
+if [[ ${(L)out:A} == ${(L)HOME:A} || ${(L)out:A} == ${(L)HOME:A}/* ]]; then
+  say "That folder is inside your home folder, and its path is written into ffmpeg and into the source zip, which are published: pick one that names no person, such as /Users/Shared/brimm-studio-vendor."
+  exit 2
+fi
+# A folder that is there and holds something, but none of what this script makes, is someone else's: nothing in it is touched.
+if [[ -d $out ]]; then
+  inside=("$out"/*(DN))
+  if (( ${#inside} )) && [[ ! -e $out/downloads && ! -e $out/build && ! -e $out/vendor && ! -e $out/source ]]; then
+    say "That folder is not empty and is not one this script made, so nothing in it is touched: pick an empty folder, or one from an earlier run."
+    exit 2
+  fi
+fi
 
 # The pins, one line each: name, version, address, the address's last part, SHA-256. node reads the pin file.
 pins_text=$(node $HERE/vendor.js pins) || stop "The pins could not be read: what vendor.js said is above."
@@ -90,11 +105,11 @@ CMAKE_ARGS=(
 print_plan() {
   say "BRIMM Video Studio's vendored programs. --print changes nothing, fetches nothing and makes no folder."
   say ""
-  say "Fetched into $downloads, each checked against its pinned SHA-256:"
+  say "It would fetch into $downloads, and check each against its pinned SHA-256:"
   local name
   for name in $PIN_NAMES; do say "  $name ${PIN_VERSION[$name]} ${PIN_URL[$name]}"; done
   say ""
-  say "Then built in $b, with PATH=$SYSTEM_PATH and MACOSX_DEPLOYMENT_TARGET=13.0:"
+  say "It would then build in $b, with PATH=$SYSTEM_PATH and MACOSX_DEPLOYMENT_TARGET=13.0:"
   say "  pkgconf, for the build alone"
   say "  x264, as a static library: ./configure ${X264_CONFIGURE[*]}"
   say "  ffmpeg and ffprobe: ./configure ${FFMPEG_CONFIGURE[*]}"
@@ -149,23 +164,29 @@ run_logged() {
 }
 
 # The matching source, for the GPL: both source archives exactly as they were fetched, the scripts that built them, and the lines
-# they were configured with. ditto leaves out resource forks and extended attributes, so no ._ file is in it.
+# they were configured with. The script and what it reads are laid out as in the repo (tool/studio-app/ and tool/is-main.js, which
+# vendor.js imports), so it runs from the zip. The lines name the build folder <build>, never its path. ditto leaves out resource
+# forks and extended attributes, so no ._ file is in it.
 make_source_zip() {
   local base=${source_name%.zip} z=$out/source/${source_name%.zip}
   rm -rf $out/source
-  mkdir -p $z || stop "$z could not be made."
-  cp $downloads/${PIN_FILE[ffmpeg]} $downloads/${PIN_FILE[x264]} $HERE/build-vendor.sh $HERE/common.zsh $HERE/vendor.pin.json $z/ || stop "The source zip's files could not be copied."
+  mkdir -p $z/tool/studio-app || stop "$z could not be made."
+  cp $downloads/${PIN_FILE[ffmpeg]} $downloads/${PIN_FILE[x264]} $z/ &&
+    cp $HERE/build-vendor.sh $HERE/common.zsh $HERE/vendor.pin.json $HERE/vendor.js $z/tool/studio-app/ &&
+    cp $HERE/../is-main.js $z/tool/ || stop "The source zip's files could not be copied."
   {
     print -r -- "How ffmpeg and ffprobe were built, for BRIMM Video Studio"
     print -r -- ""
     print -r -- "ffmpeg ${PIN_VERSION[ffmpeg]}: ${PIN_FILE[ffmpeg]}, from ${PIN_URL[ffmpeg]}, SHA-256 ${PIN_SHA[ffmpeg]}"
     print -r -- "x264 at commit ${PIN_VERSION[x264]}: ${PIN_FILE[x264]}, from ${PIN_URL[x264]}, SHA-256 ${PIN_SHA[x264]}"
-    print -r -- "Both are GPL software (ffmpeg built with --enable-gpl; x264 is GPL version 2 or later). build-vendor.sh, common.zsh and"
-    print -r -- "vendor.pin.json are the script and the pins that built them. pkgconf ${PIN_VERSION[pkgconf]} was used to build, and is in neither program."
+    print -r -- "Both are GPL software (ffmpeg built with --enable-gpl; x264 is GPL version 2 or later). The script and the pins that built"
+    print -r -- "them are in tool/studio-app: build-vendor.sh, with common.zsh, vendor.pin.json and vendor.js beside it, and tool/is-main.js,"
+    print -r -- "which vendor.js imports. From this folder: zsh tool/studio-app/build-vendor.sh --out <folder>. pkgconf ${PIN_VERSION[pkgconf]} was used to"
+    print -r -- "build, and is in neither program. <build> below is the build folder, <folder>/build."
     print -r -- ""
-    print -r -- "x264: ./configure ${X264_CONFIGURE[*]}"
+    print -r -- "x264: ./configure ${X264_CONFIGURE[*]//$b/<build>}"
     print -r -- "      make, then make install-lib-static"
-    print -r -- "ffmpeg: PKG_CONFIG_PATH=<prefix>/lib/pkgconfig PKG_CONFIG_LIBDIR=<prefix>/lib/pkgconfig ./configure ${FFMPEG_CONFIGURE[*]}"
+    print -r -- "ffmpeg: PKG_CONFIG_PATH=<build>/prefix/lib/pkgconfig PKG_CONFIG_LIBDIR=<build>/prefix/lib/pkgconfig ./configure ${FFMPEG_CONFIGURE[*]//$b/<build>}"
     print -r -- "        make, then make install"
     print -r -- "Built with PATH=$SYSTEM_PATH and MACOSX_DEPLOYMENT_TARGET=13.0, with Apple's clang."
   } > $z/BUILD.txt

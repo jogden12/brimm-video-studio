@@ -11,8 +11,10 @@ This folder is the Mac app's own: the Swift shell, the stand-in engine for looki
 `build-vendor.sh` makes the programs the app carries that are not its own (node, ffmpeg, ffprobe, whisper-cli), once, into a sealed folder, with the GPL source zip:
 
 ```
-zsh tool/studio-app/build-vendor.sh --out <folder> [--print | --fetch]
+zsh tool/studio-app/build-vendor.sh --out /Users/Shared/brimm-studio-vendor [--print | --fetch]
 ```
+
+The folder is never in the home folder: ffmpeg keeps its configure line, paths and all, inside itself, and the source zip prints the same lines, so the path must name no person. It is empty, or one an earlier run made: the script deletes nothing in a folder it did not make.
 
 `build-app.sh` makes `BRIMM Video Studio.app` and `BRIMM-Video-Studio-<version>.zip` in `<folder>`, from the commit that is checked out and that sealed folder, and replaces only those two:
 
@@ -22,7 +24,7 @@ zsh tool/studio-app/build-app.sh --out <folder> --version <semver> --build <n> -
 ```
 
 - `--channel` is `stable` when not given.
-- `--sign` signs inside-out with the one Developer ID Application identity in the keychain, found by name. Without it every program is sealed ad hoc, for this Mac's tests only.
+- `--sign` signs inside-out with the one Developer ID Application identity in the keychain, found by name and given to codesign by its SHA-1, so that an expired certificate of the same name is never taken for it. Without it every program is sealed ad hoc, for this Mac's tests only.
 - `--any-commit` builds a commit that is not on `origin/main`. Changes in `tool/` that are not committed are always refused.
 - `--print` says what it would do and does none of it.
 - `--fake-engine` puts the stand-in engine in place of Studio's tool, for looking at the windows. Such a build holds no installer, sets up nothing and is never signed with the Developer ID.
@@ -35,8 +37,8 @@ Claude runs both scripts only with `--print`, or inside a test (`tool/tests/stud
 
 ## A real build, in order
 
-1. The vendor folder, once: `build-vendor.sh --out <a folder in ~/Library/Caches>`. About fifteen minutes and 170 MB of downloads. It ends by naming the sealed folder and the source zip. A pin that moves makes the folder unusable, and it is built again.
-2. The app, from a commit on `origin/main`: `build-app.sh --out <folder> --version <v> --build <n> --vendor <that folder>/vendor`, with `--sign` for a copy that leaves the Mac Studio. The build number goes up by one with every such build.
+1. The vendor folder, once: `build-vendor.sh --out /Users/Shared/brimm-studio-vendor`. About fifteen minutes and 170 MB of downloads. It ends by naming the sealed folder and the source zip. A pin that moves makes the folder unusable, and it is built again.
+2. The app, from a commit on `origin/main`: `build-app.sh --out <folder> --version <v> --build <n> --vendor /Users/Shared/brimm-studio-vendor/vendor`, with `--sign` for a copy that leaves the Mac Studio. The build number goes up by one with every such build.
 3. With `--sign`, the notarizing commands it prints, then the zip again, after stapling.
 
 ## The by-hand checks
