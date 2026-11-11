@@ -155,6 +155,14 @@ func checkNext(_ args: [String]) -> Never {
     emit(nextStep(translocated: yesNo(words[0]), needs: needs, failed: yesNo(words[2]), chosen: chosen, other: yesNo(words[4])).rawValue)
 }
 
+// MARK: Agent.swift
+
+/// agent <app> <arguments…>: the background job itself. It prints nothing and ends with what runAgent gives back.
+func checkAgent(_ args: [String]) -> Never {
+    let words = atLeast(1, args, "agent")
+    exit(runAgent(rest: Array(words.dropFirst()), app: words[0]))
+}
+
 // MARK: The commands
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -175,5 +183,6 @@ case "guide-paths": checkGuidePaths(rest)
 case "url": checkURL(rest)
 case "names": checkNames(rest)
 case "next": checkNext(rest)
+case "agent": checkAgent(rest)
 default: fail("studio-check does not know the command \"\(command)\".")
 }
