@@ -160,7 +160,8 @@ final class AppModel: ObservableObject {
     }
 
     /// Starts `run` into a new state: began, then each event, then ended at the client's end, and then `then` with the state made.
-    /// A program that cannot be started ends at once, on a fault of its own.
+    /// A program that cannot be started ends at once, on a fault of its own. With no command line at all, which only a colon in the
+    /// app's path gives, the run ends at once too, through `then`, on the colon refusal.
     private func start(_ run: Run, then: @escaping (SetupState) -> Void) {
         guard let command = engineCommand(run: run, app: app) else {
             var refused = SetupState()
@@ -202,7 +203,10 @@ final class AppModel: ObservableObject {
         current = nil
         state.ended()
         then(state)
-        if let asked = beginAsked, current == nil { begin(chosen: asked.chosen) }
+        if let asked = beginAsked {
+            beginAsked = nil
+            if current == nil { begin(chosen: asked.chosen) }
+        }
     }
 
     /// The apps timer: when the apps question is open and the last check was answered, it asks the engine to check again.
