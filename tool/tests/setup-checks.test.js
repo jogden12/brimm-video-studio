@@ -364,7 +364,7 @@ describe("the apps on this Mac", () => {
     assert.equal(by["claude-code"].link, undefined);
     assert.deepEqual(APPS.map((app) => app.name), ["Claude", "Claude Code", "Dropbox", "HyperFrames"]);
     assert.deepEqual([by["claude-app"].folder, by.dropbox.folder, by.hyperframes.folder], ["Claude.app", "Dropbox.app", "HyperFrames.app"]);
-    assert.equal(by.hyperframes.note, "HyperFrames asks you to sign in to HeyGen the first time it opens.");
+    assert.equal(by.hyperframes.note, "HyperFrames asks you to sign in to HeyGen the first time it opens, then what you want to make. Answer both once, before Studio opens a project in it.");
     for (const id of ["claude-app", "dropbox", "hyperframes"]) assert.match(by[id].link, /^https:/);
     assert.equal(APPS.filter((app) => app.administrator).length, 3);
     for (const app of APPS.filter((app) => app.link)) assert.equal(app.administrator, "If this Mac asks for an administrator's password, drag the app into the Applications folder inside your home folder instead.");

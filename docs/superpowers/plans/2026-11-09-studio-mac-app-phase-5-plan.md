@@ -342,7 +342,7 @@ Nothing is left for this task. Its number is kept so that the other tasks keep t
 **The lines:**
 - `nameClash`'s warning: `Another Mac already uses the name "<name>" in BRIMM Video. Two Macs with one name would share a drop folder: choose another name, unless this is that Mac being set up again.`
 - `NO_BRIMM_VIDEO`: `BRIMM Video was not found in Dropbox on this Mac.`, `Open Dropbox, sign in to The BRIMM's account, and wait until "The BRIMM DB" shows in Finder.`, `Then choose Look again.`
-- `APPS`: `claude-app`, "Claude", `Claude.app`, `https://claude.ai/download`; `claude-code`, "Claude Code", no link; `dropbox`, "Dropbox", `Dropbox.app`, `https://www.dropbox.com/install`; `hyperframes`, "HyperFrames", `HyperFrames.app`, `https://hyperframes.dev/studio/download`, with the note `HyperFrames asks you to sign in to HeyGen the first time it opens.` One note for the three with a link: `If this Mac asks for an administrator's password, drag the app into the Applications folder inside your home folder instead.`
+- `APPS`: `claude-app`, "Claude", `Claude.app`, `https://claude.ai/download`; `claude-code`, "Claude Code", no link; `dropbox`, "Dropbox", `Dropbox.app`, `https://www.dropbox.com/install`; `hyperframes`, "HyperFrames", `HyperFrames.app`, `https://hyperframes.dev/studio/download`, with the note `HyperFrames asks you to sign in to HeyGen the first time it opens, then what you want to make. Answer both once, before Studio opens a project in it.` One note for the three with a link: `If this Mac asks for an administrator's password, drag the app into the Applications folder inside your home folder instead.`
 
 **The rules:**
 - `brimmVideoFolders` looks in the four places `search_brimm_video` looks, in its order: `Library/CloudStorage/Dropbox*/The BRIMM DB/BRIMM Video`, `Library/CloudStorage/Dropbox*/*/The BRIMM DB/BRIMM Video`, `Dropbox*/The BRIMM DB/BRIMM Video` and `Dropbox*/*/The BRIMM DB/BRIMM Video`, under `home`. Folders only. One folder reached by two spellings is counted once, by its real path, and the first spelling is kept.
@@ -681,7 +681,7 @@ Nothing is left for this task. Its number is kept so that the other tasks keep t
 **The lines:**
 - The agent: `In HyperFrames, the agent is Claude Code with Auto access, never Full.`
 - Telemetry: `Telemetry stays off.`
-- HeyGen: `HyperFrames asks you to sign in to HeyGen the first time it opens.`
+- HeyGen: `HyperFrames asks you to sign in to HeyGen the first time it opens, then what you want to make. Answer both once, before Studio opens a project in it.`
 - The cloud: `Never render in the cloud: every video is made on this Mac.`
 - Sallie: `The BRIMM does not use an AI avatar, lip-sync, or an AI-generated Sallie, her face or her voice, for now.`
 - Nothing to install: `Nothing: every app is here.`

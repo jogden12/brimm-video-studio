@@ -58,12 +58,12 @@ describe("the Getting Started guide", () => {
     assert.ok(!html.includes("<b>A&B</b>"));
   });
 
-  it("the guide says Auto, never Full; telemetry off; never render in the cloud; and the HeyGen sign-in", () => {
+  it("the guide says Auto, never Full; telemetry off; never render in the cloud; and the HeyGen sign-in and welcome question", () => {
     const html = page();
     for (const say of [
       "In HyperFrames, the agent is Claude Code with Auto access, never Full.",
       "Telemetry stays off.",
-      "HyperFrames asks you to sign in to HeyGen the first time it opens.",
+      "HyperFrames asks you to sign in to HeyGen the first time it opens, then what you want to make. Answer both once, before Studio opens a project in it.",
       "Never render in the cloud: every video is made on this Mac.",
       "The BRIMM does not use an AI avatar, lip-sync, or an AI-generated Sallie, her face or her voice, for now.",
     ]) assert.ok(html.includes(say), say);
