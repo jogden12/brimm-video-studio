@@ -58,8 +58,8 @@ func uninstallCommands(app: String) -> [Command] {
     ]
 }
 
-/// The first line of `text` with no blank around it, or nil when there is none.
-private func firstLine(_ text: String) -> String? {
+/// The first line of `text` with no blank around it, or nil when there is none. The move asks it too.
+func firstLine(_ text: String) -> String? {
     let line = text.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n", maxSplits: 1).first.map(String.init)
     let trimmed = line?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     return trimmed.isEmpty ? nil : trimmed

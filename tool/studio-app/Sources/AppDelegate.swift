@@ -64,6 +64,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Whether quitting waits for the run to end, and whether it may now end the app whatever the rule says.
     private var quitWhenEnded = false
     private var mayQuit = false
+    /// Whether AppKit was told .terminateLater and waits for its reply. A logout, a restart or a shutdown then waits for the run
+    /// instead of being cancelled.
+    private var replyOwed = false
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         let updates = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdatesChosen(_:)), keyEquivalent: "")
@@ -139,22 +142,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// `now` quits. `cancel` sends a cancel and quits when the run ends, or after five seconds. `wait` says the setup is finishing
-    /// and quits when the run ends: the installer is never stopped.
+    /// and quits when the run ends: the installer is never stopped. In both of those AppKit is told .terminateLater and is answered
+    /// when the app may quit, so a logout, a restart or a shutdown waits for the run. While it waits, AppKit runs the main run loop in
+    /// its modal panel mode; the engine's events and end, the five seconds and the model's timer all come through the main queue or
+    /// the common modes, so they still come. Once a quit has been asked, the model starts no new run.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if mayQuit { return .terminateNow }
+        model.quitAsked()
         switch model.quit {
         case .now:
             return .terminateNow
         case .cancel:
-            guard !quitWhenEnded else { return .terminateCancel }
+            guard !quitWhenEnded else { return .terminateLater }
             quitWhenEnded = true
+            replyOwed = true
             model.cancel()
             DispatchQueue.main.asyncAfter(deadline: .now() + cancelWaitLimit) { [weak self] in self?.cancelWaitEnded() }
-            return .terminateCancel
+            return .terminateLater
         case .wait:
             quitWhenEnded = true
+            replyOwed = true
             model.notice = setupFinishing
-            return .terminateCancel
+            return .terminateLater
         }
     }
 
@@ -174,9 +183,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.async { [weak self] in self?.quitNow() }
     }
 
+    /// Quits: AppKit is given the reply it waits for, or, when it waits for none, is asked to terminate again.
     private func quitNow() {
         guard !mayQuit else { return }
         mayQuit = true
-        NSApp.terminate(nil)
+        if replyOwed {
+            replyOwed = false
+            NSApp.reply(toApplicationShouldTerminate: true)
+        } else {
+            NSApp.terminate(nil)
+        }
     }
 }

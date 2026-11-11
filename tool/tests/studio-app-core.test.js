@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_LABEL } from "../busy.js";
 import { REPAIR } from "../build.js";
+import { DAMAGED } from "../setup/checks.js";
 import { GUIDE_NAME, guideData, writeGuide } from "../setup/guide.js";
 import { check, checkerPath, noChecker } from "./studio-app-check.js";
 
@@ -154,6 +155,7 @@ describe("the shell's names", { skip: noChecker }, () => {
     assert.ok(readFileSync(ENGINE, "utf8").includes(names.crashMessage), names.crashMessage);
     assert.equal(names.crashMessage, "BRIMM Video Studio's setup stopped on a fault of its own.");
     assert.equal(names.crashAdvice, REPAIR);
+    assert.equal(names.damagedAdvice, DAMAGED);
     assert.equal(names.checkEvery, 3);
     assert.ok(ask("agent-file", ["/Users/sallie"]).endsWith(`/Library/LaunchAgents/${AGENT_LABEL}.plist`));
     assert.equal(ask("agent-file", ["/Users/sallie"]), `/Users/sallie/Library/LaunchAgents/${AGENT_LABEL}.plist`);

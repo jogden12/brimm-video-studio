@@ -13,6 +13,9 @@ let workFolderName = "BRIMM Video Work"
 let crashMessage = "BRIMM Video Studio's setup stopped on a fault of its own."
 let crashAdvice = "Open BRIMM Video Studio and choose Repair."
 
+/// What the refused screen, which offers no Repair, advises for a failure of code `engine`: install.sh's DAMAGED.
+let damagedAdvice = "This copy of BRIMM Video Studio may be damaged: download it again, then open it and choose Repair."
+
 /// The time, in seconds, between one of the shell's checks and the next.
 let checkEvery = 3.0
 

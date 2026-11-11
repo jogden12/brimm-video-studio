@@ -2,10 +2,10 @@
 // (Phase 6, Task 12). Each test works in a folder of its own. The move uses the real ditto and xattr; Uninstall starts only the
 // temp app's own stand-in node and install.sh, never the real ones. The app's model, AppModel.swift, is checked by a typecheck of all
 // the sources and by its text (Task 13), and by hand in its windows.
-import { before, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,8 +23,21 @@ function ask(command, args = [], options) {
   return ran.json;
 }
 
+/** The folders this file has made, each removed when the file ends. */
+const folders = [];
+after(() => {
+  for (const dir of folders) rmSync(dir, { recursive: true, force: true });
+});
+
 /** A new folder for one test. */
-const folder = () => mkdtempSync(join(tmpdir(), "brimm-studio-model-"));
+const folder = () => {
+  const dir = mkdtempSync(join(tmpdir(), "brimm-studio-model-"));
+  folders.push(dir);
+  return dir;
+};
+
+/** studio-check move with `args`: { said, asked }, the sentence or null, and whether it asked whether this Mac is at work. */
+const move = (args) => ask("move", args);
 
 /** A BRIMM Video Studio.app in `parent` that holds one file, `Contents/marker`, with `text` in it. */
 function makeBundle(parent, text) {
@@ -51,7 +64,7 @@ describe("the move to Applications", { skip: noChecker }, () => {
     assert.ok(quarantined(source));
     const target = join(here, "Applications");
     mkdirSync(target);
-    assert.equal(ask("move", [source, target, join(here, "Trash")]), null);
+    assert.equal(move([source, target, join(here, "Trash")]).said, null);
     const moved = join(target, APP_NAME);
     assert.equal(readFileSync(join(moved, "Contents", "marker"), "utf8"), "new");
     assert.equal(quarantined(moved), false);
@@ -62,7 +75,16 @@ describe("the move to Applications", { skip: noChecker }, () => {
     const here = folder();
     const source = makeBundle(join(here, "Downloads"), "new");
     const target = join(here, "home", "Applications");
-    assert.equal(ask("move", [source, target, join(here, "Trash")]), null);
+    assert.equal(move([source, target, join(here, "Trash")]).said, null);
+    assert.equal(readFileSync(join(target, APP_NAME, "Contents", "marker"), "utf8"), "new");
+  });
+
+  it("with no copy there, whether this Mac is at work is never asked", () => {
+    const here = folder();
+    const source = makeBundle(join(here, "Downloads"), "new");
+    const target = join(here, "Applications");
+    mkdirSync(target);
+    assert.deepEqual(move([source, target, join(here, "Trash"), "busy:An import is at work."]), { said: null, asked: false });
     assert.equal(readFileSync(join(target, APP_NAME, "Contents", "marker"), "utf8"), "new");
   });
 
@@ -73,18 +95,55 @@ describe("the move to Applications", { skip: noChecker }, () => {
     makeBundle(target, "old");
     const trash = join(here, "Trash");
     mkdirSync(trash);
-    assert.equal(ask("move", [source, target, trash]), null);
+    assert.deepEqual(move([source, target, trash, "idle"]), { said: null, asked: true });
     assert.equal(readFileSync(join(trash, APP_NAME, "Contents", "marker"), "utf8"), "old");
     assert.equal(readFileSync(join(target, APP_NAME, "Contents", "marker"), "utf8"), "new");
     assert.deepEqual(readdirSync(target), [APP_NAME]);
+  });
+
+  it("an older copy is left as it was while this Mac is at work", () => {
+    const here = folder();
+    const source = makeBundle(join(here, "Downloads"), "new");
+    const target = join(here, "Applications");
+    makeBundle(target, "old");
+    const trash = join(here, "Trash");
+    mkdirSync(trash);
+    const line = "An import is at work: it holds its lock (process 5). Nothing was moved: try again when it is done.";
+    assert.deepEqual(move([source, target, trash, `busy:${line}`]), { said: line, asked: true });
+    assert.equal(readFileSync(join(target, APP_NAME, "Contents", "marker"), "utf8"), "old");
+    assert.deepEqual(readdirSync(trash), []);
+    assert.deepEqual(readdirSync(target), [APP_NAME]);
+  });
+
+  it("a link at the destination that leads nowhere goes to the Trash too", () => {
+    const here = folder();
+    const source = makeBundle(join(here, "Downloads"), "new");
+    const target = join(here, "Applications");
+    mkdirSync(target);
+    symlinkSync(join(here, "not-there"), join(target, APP_NAME));
+    const trash = join(here, "Trash");
+    mkdirSync(trash);
+    assert.deepEqual(move([source, target, trash]), { said: null, asked: true });
+    assert.ok(lstatSync(join(trash, APP_NAME)).isSymbolicLink());
+    assert.equal(readFileSync(join(target, APP_NAME, "Contents", "marker"), "utf8"), "new");
   });
 
   it("a move that fails leaves nothing half-made", () => {
     const here = folder();
     const target = join(here, "Applications");
     mkdirSync(target);
-    assert.equal(ask("move", [join(here, "Downloads", APP_NAME), target, join(here, "Trash")]), NOT_MOVED);
+    assert.equal(move([join(here, "Downloads", APP_NAME), target, join(here, "Trash")]).said, NOT_MOVED);
     assert.deepEqual(readdirSync(target), []);
+  });
+
+  it("a later step that fails leaves nothing half-made", () => {
+    const here = folder();
+    const source = makeBundle(join(here, "Downloads"), "new");
+    const target = join(here, "Applications");
+    makeBundle(target, "old");
+    assert.deepEqual(move([source, target, join(here, "Trash")]), { said: NOT_MOVED, asked: true });
+    assert.equal(readFileSync(join(target, APP_NAME, "Contents", "marker"), "utf8"), "old");
+    assert.deepEqual(readdirSync(target), [APP_NAME]);
   });
 });
 
@@ -178,7 +237,7 @@ describe("the app's program runner", { skip: noChecker }, () => {
     assert.equal(run("/bin/sh", ["-c", "kill -9 $$"]).status, 137);
   });
 
-  it("starts the program with the environment it is given, and nothing else", () => {
+  it("a program it runs for the app gets the app's own environment: HOME is kept, and a stray variable never reaches it", () => {
     const home = folder();
     const ran = ask("run", ["/bin/sh", "-c", "printf '%s|%s' \"$HOME\" \"$STRAY\""], { env: { HOME: home, PATH: "/usr/bin:/bin", STRAY: "x" } });
     assert.equal(ran.out, `${home}|`);
@@ -221,6 +280,26 @@ describe("the app's sources", () => {
     const text = source("AppModel.swift");
     for (const name of ["nextFromStatus(", "shouldCheck(", "quitRule("]) assert.ok(text.includes(name), `AppModel.swift never asks ${name}`);
     assert.match(text, /func uninstall\(\)\s*\{\s*guard screen == \.status\b/);
+  });
+
+  it("no run starts while the move or Uninstall works", () => {
+    const text = source("AppModel.swift");
+    assert.match(text, /@Published private\(set\) var working\b/);
+    assert.match(text, /func begin\(chosen: Run\?\) \{\s*guard [^\n{]*!working\b/);
+    assert.match(text, /func useThisCopy\(\) \{\s*guard [^\n{]*!working\b/);
+    assert.match(text, /case \.removed:[^}]*if screen == \.status && current == nil \{ screen = \.removed \}/);
+    const views = source("StatusViews.swift");
+    for (const words of ["Moving BRIMM Video Studio…", "Stopping the background job…", ".disabled(model.working)"]) assert.ok(views.includes(words), `StatusViews.swift never holds ${words}`);
+  });
+
+  it("a logout, restart or shutdown during a run waits instead of being cancelled", () => {
+    const text = source("AppDelegate.swift");
+    const asked = text.slice(text.indexOf("func applicationShouldTerminate"), text.indexOf("private func cancelWaitEnded"));
+    const branch = (name, next) => asked.slice(asked.indexOf(`case .${name}:`), next ? asked.indexOf(`case .${next}:`) : undefined);
+    assert.match(branch("cancel", "wait"), /return \.terminateLater/);
+    assert.match(branch("wait"), /return \.terminateLater/);
+    assert.ok(!asked.includes(".terminateCancel"), "applicationShouldTerminate still cancels a quit");
+    assert.ok(text.includes("reply(toApplicationShouldTerminate: true)"), "AppDelegate.swift never gives AppKit its reply");
   });
 
   it("the model and the checker share one program runner, the one the tests drive", () => {

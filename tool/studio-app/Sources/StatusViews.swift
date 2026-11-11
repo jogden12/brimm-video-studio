@@ -37,6 +37,18 @@ struct Page<Content: View>: View {
     }
 }
 
+/// A small spinner and what is being done, while the move or Uninstall works.
+struct Working: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text(text).foregroundColor(Brand.fog)
+        }
+    }
+}
+
 struct CheckingPage: View {
     var body: some View {
         VStack(spacing: 12) {
@@ -50,21 +62,17 @@ struct CheckingPage: View {
 struct MovePage: View {
     @ObservedObject var model: AppModel
 
-    /// Whether the app goes in the home's own Applications folder, the folder the move itself picks.
-    private var toHome: Bool {
-        moveTarget(home: NSHomeDirectory(), systemWritable: FileManager.default.isWritableFile(atPath: "/Applications")) != "/Applications"
-    }
-
     var body: some View {
         Page {
             Heading(text: "Move BRIMM Video Studio to your Applications folder")
             Text(
                 "BRIMM Video Studio is running from the place it was downloaded to, and macOS keeps it apart there. It needs to be in your Applications folder before it can set up this Mac."
             )
-            if toHome {
+            if model.movesToHome {
                 Text("It goes in the Applications folder in your home folder, which needs no administrator's password.")
             }
-            Button("Move to Applications") { model.moveToApplications() }.buttonStyle(MainButtonStyle())
+            Button("Move to Applications") { model.moveToApplications() }.buttonStyle(MainButtonStyle()).disabled(model.working)
+            if model.working { Working(text: "Moving BRIMM Video Studio…") }
             if let notice = model.notice { Text(notice).foregroundColor(Brand.fog) }
         }
     }
@@ -111,6 +119,8 @@ struct StatusPage: View {
             HStack {
                 ForEach(offers, id: \.self) { offer in button(offer) }
             }
+            .disabled(model.working)
+            if model.working { Working(text: "Stopping the background job…") }
             if let notice = model.notice { Text(notice).foregroundColor(Brand.fog) }
         }
         .sheet(isPresented: $asking.shown) {
@@ -166,16 +176,18 @@ struct RemovedPage: View {
 }
 
 /// A Mac the app will not set up: the failure, with only Close. A status that ended without saying what this Mac needs is shown
-/// with the engine's own last-resort words.
+/// with the engine's own last-resort words. Since this screen offers no Repair, a failure of code `engine` (the shell's own crash
+/// failure, or the engine's catch-all) is shown with the advice to download the app again, never with an advice to choose Repair.
 struct RefusedPage: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
+        let given = model.state.failure ?? Failure(code: "engine", message: crashMessage, advice: crashAdvice, contact: nil, details: nil)
+        let shown =
+            given.code == "engine"
+            ? Failure(code: given.code, message: given.message, advice: damagedAdvice, contact: given.contact, details: given.details) : given
         Page {
-            FailureView(
-                model: model,
-                failure: model.state.failure ?? Failure(code: "engine", message: crashMessage, advice: crashAdvice, contact: nil, details: nil),
-                offersRepair: false)
+            FailureView(model: model, failure: shown, offersRepair: false)
         }
     }
 }

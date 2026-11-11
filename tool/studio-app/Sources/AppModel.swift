@@ -9,8 +9,9 @@ enum Screen {
     case checking, move, refused, setup, repairing, twoCopies, status, removed
 }
 
-/// What the window says when the app is in a folder with a colon in its name, where the engine cannot be started.
-let colonRefused = "BRIMM Video Studio cannot run from a folder with a colon in its name. Move it to your Applications folder, then open it again."
+/// What the window says when the app is in a folder with a colon in its name, where the engine cannot be started. Finder shows a
+/// colon in a name as a slash.
+let colonRefused = "BRIMM Video Studio cannot run from a folder with a slash or a colon in its name. Move it to your Applications folder, then open it again."
 
 /// What the window says when the guide could not be made into a PDF, before the HTML's path and a full stop.
 let guideNotMade = "The Getting Started guide could not be made into a PDF. It is here as a web page:"
@@ -20,6 +21,12 @@ let noUpdatesYet = "Updates are not part of this build yet."
 
 /// What the window says when a stand-in build is asked to move itself.
 let fakeNeverMoved = "A stand-in build is never moved."
+
+/// What the window says when the moved copy could not be opened.
+let movedNotOpened = "BRIMM Video Studio is in your Applications folder now, but it could not be opened from there. Open it from your Applications folder."
+
+/// What the window says when the other copy could not be opened.
+let otherNotOpened = "The other copy could not be opened. Open it in Finder, or choose Use this copy instead."
 
 /// Uninstall's own function, named here so that the model's uninstall() does not hide it.
 private func stopBackgroundJob(app: String, fake: Bool, environment: [String: String]) -> Uninstalled {
@@ -37,9 +44,16 @@ final class AppModel: ObservableObject {
     @Published private(set) var other: String?
     /// Whether the last guide the engine wrote was made into a PDF, or nil while none has been asked for since the run began.
     @Published private(set) var guideMade: Bool?
+    /// True while the move or Uninstall runs off the main thread: the pages then show it and take no click.
+    @Published private(set) var working = false
 
     /// Whether this is a stand-in build: a file named FAKE-ENGINE.txt is in the app's Resources.
     let fake: Bool
+
+    /// The Applications folder the move goes into, worked out once.
+    let moveFolder: String
+    /// Whether the move goes into the home's own Applications folder.
+    var movesToHome: Bool { moveFolder != "/Applications" }
 
     /// The app this copy is, and the home it works for.
     private let app = Bundle.main.bundlePath
@@ -52,12 +66,21 @@ final class AppModel: ObservableObject {
     private var current: EngineClient?
     /// For each PDF being made, what waits for its answer. A second ask for the same PDF waits for the first, which is never doubled.
     private var pdfWaiting: [String: [(Bool) -> Void]] = [:]
-    /// True while the move or Uninstall runs off the main thread.
-    private var working = false
+    /// A begin the person asked for while the run shown had ended by its events but its client had not yet: it is done, with the
+    /// run it chose, when the client has ended.
+    private struct BeginAsked {
+        let chosen: Run?
+    }
+    private var beginAsked: BeginAsked?
+    /// True once the app has been asked to quit: no run starts after that.
+    private var quitting = false
+    /// The sentence that the last guide could not be made into a PDF, kept for the screens that follow until a guide is made.
+    private var guideNotice: String?
     private var timer: Timer?
 
     init() {
         fake = FileManager.default.fileExists(atPath: (app as NSString).appendingPathComponent("Contents/Resources/FAKE-ENGINE.txt"))
+        moveFolder = moveTarget(home: home, systemWritable: FileManager.default.isWritableFile(atPath: "/Applications"))
         let made = Timer(timeInterval: checkEvery, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(made, forMode: .common)
         timer = made
@@ -80,11 +103,20 @@ final class AppModel: ObservableObject {
 
     // MARK: The runs
 
+    /// The app is quitting: no run starts from now on.
+    func quitAsked() { quitting = true }
+
     /// Starts with a status, and goes on to what follows it. `chosen` is the run the person asked for. It does nothing while a run
-    /// is running.
+    /// is running, while the move or Uninstall works, or once the app is quitting. When the run shown has ended by its events and its
+    /// client has not yet ended, it is done as soon as the client has.
     func begin(chosen: Run?) {
-        guard current == nil else { return }
-        notice = nil
+        guard !working, !quitting else { return }
+        if current != nil {
+            if !state.running { beginAsked = BeginAsked(chosen: chosen) }
+            return
+        }
+        beginAsked = nil
+        notice = guideNotice
         other = nil
         if isTranslocated(app) {
             screen = .move
@@ -99,7 +131,7 @@ final class AppModel: ObservableObject {
         }
         screen = .checking
         start(.status) { [weak self] ended in
-            guard let self else { return }
+            guard let self, !self.quitting else { return }
             let found = otherCopy(of: self.app, home: self.home) { FileManager.default.fileExists(atPath: $0) }
             switch nextFromStatus(ended, translocated: isTranslocated(self.app), chosen: chosen, other: found != nil) {
             case .move: self.screen = .move
@@ -130,7 +162,15 @@ final class AppModel: ObservableObject {
     /// Starts `run` into a new state: began, then each event, then ended at the client's end, and then `then` with the state made.
     /// A program that cannot be started ends at once, on a fault of its own.
     private func start(_ run: Run, then: @escaping (SetupState) -> Void) {
-        guard let command = engineCommand(run: run, app: app) else { return }
+        guard let command = engineCommand(run: run, app: app) else {
+            var refused = SetupState()
+            refused.began()
+            refused.take(.failure(Failure(code: "colon", message: colonRefused, advice: nil, contact: nil, details: nil)))
+            refused.ended()
+            state = refused
+            then(state)
+            return
+        }
         let client = EngineClient(command: command, environment: childEnvironment(from: ProcessInfo.processInfo.environment, home: home, app: app))
         let id = ObjectIdentifier(client)
         client.onEvent = { [weak self] event in self?.took(event, from: id) }
@@ -162,32 +202,33 @@ final class AppModel: ObservableObject {
         current = nil
         state.ended()
         then(state)
+        if let asked = beginAsked, current == nil { begin(chosen: asked.chosen) }
     }
 
     /// The apps timer: when the apps question is open and the last check was answered, it asks the engine to check again.
     private func tick() {
-        guard shouldCheck(state), let current, let question = state.question else { return }
-        current.answer(question.id, .apps(.check))
-        state.sentCheck()
+        guard shouldCheck(state), let question = state.question else { return }
+        answer(question.id, .apps(.check))
     }
 
     // MARK: What the person does
 
-    /// Answers the open question.
-    func answer(_ reply: Reply) {
-        guard let current, let question = state.question else { return }
-        current.answer(question.id, reply)
+    /// Answers the question `id`, which the button was drawn for. It does nothing unless that question is the one open now.
+    func answer(_ id: String, _ reply: Reply) {
+        guard let current, state.question?.id == id else { return }
+        current.answer(id, reply)
         if case .apps(.check) = reply { state.sentCheck() }
     }
 
     func back() { current?.back() }
 
-    /// Cancels the run while it runs. After a setup that installed, it closes the Done step, and the status window follows.
+    /// Cancels the run while it runs. After a setup that installed, it closes the Done step, and the status window follows, even
+    /// when the ended engine's client has not yet ended: the decision is taken from the state.
     func cancel() {
-        if let current {
-            current.cancel()
-        } else if screen == .setup, state.done?.outcome == "installed" {
+        if screen == .setup, state.done?.outcome == "installed" {
             begin(chosen: nil)
+        } else if state.running {
+            current?.cancel()
         }
     }
 
@@ -200,15 +241,18 @@ final class AppModel: ObservableObject {
         guard !working else { return }
         working = true
         let app = self.app
-        let folder = moveTarget(home: home, systemWritable: FileManager.default.isWritableFile(atPath: "/Applications"))
+        let folder = moveFolder
+        let environment = childEnvironment(from: ProcessInfo.processInfo.environment, home: home, app: app)
         // The model is kept until the move has said how it went.
         DispatchQueue.global().async { [self] in
-            let said = moveApp(from: app, to: folder) { path in
-                (try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)) != nil
-            }
+            var said = moveApp(
+                from: app, to: folder,
+                trash: { path in (try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)) != nil },
+                idle: { atWorkBeforeMove(app: app) { runToEnd($0, environment: environment) } })
             if said == nil {
                 let moved = (folder as NSString).appendingPathComponent("\(appName).app")
-                _ = runToEnd(Command(program: "/usr/bin/open", arguments: ["-n", moved]), environment: ProcessInfo.processInfo.environment)
+                let opened = runToEnd(Command(program: "/usr/bin/open", arguments: ["-n", moved]), environment: ProcessInfo.processInfo.environment)
+                if opened.status != 0 { said = movedNotOpened }
             }
             DispatchQueue.main.async { [self] in
                 working = false
@@ -223,16 +267,22 @@ final class AppModel: ObservableObject {
 
     /// Repairs this copy, so that it is the one the Mac runs.
     func useThisCopy() {
-        guard current == nil else { return }
+        guard current == nil, !working, !quitting else { return }
         notice = nil
         startRepair()
     }
 
-    /// Opens the other copy and quits this one.
+    /// Opens the other copy and quits this one. When it cannot be opened, this one stays and says so.
     func openOtherCopy() {
         guard let other else { return }
         NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: other), configuration: NSWorkspace.OpenConfiguration()) { opened, _ in
-            if opened != nil { DispatchQueue.main.async { NSApp.terminate(nil) } }
+            DispatchQueue.main.async { [weak self] in
+                if opened != nil {
+                    NSApp.terminate(nil)
+                } else {
+                    self?.notice = otherNotOpened
+                }
+            }
         }
     }
 
@@ -282,7 +332,9 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async { [self] in
                 working = false
                 switch result {
-                case .removed: screen = .removed
+                case .removed:
+                    // Uninstall's end never covers another screen, nor a run.
+                    if screen == .status && current == nil { screen = .removed }
                 case .notice(let said): notice = said
                 }
             }
@@ -297,8 +349,9 @@ final class AppModel: ObservableObject {
         pdf(html: guide.html, pdf: guide.pdf) { [weak self] made in
             guard let self else { return }
             self.guideMade = made
+            self.guideNotice = made ? nil : "\(guideNotMade) \(guide.html)."
             if !made {
-                self.notice = "\(guideNotMade) \(guide.html)."
+                self.notice = self.guideNotice
             } else if outcome == "installed" {
                 self.openInPreview(guide.pdf)
             }

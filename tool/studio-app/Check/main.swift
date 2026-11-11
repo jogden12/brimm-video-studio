@@ -134,7 +134,7 @@ func checkNames(_ args: [String]) -> Never {
     _ = exactly(0, args, "names")
     emit([
         "appName": appName, "agentLabel": agentLabel, "guideName": guideName, "workFolderName": workFolderName,
-        "crashMessage": crashMessage, "crashAdvice": crashAdvice, "checkEvery": checkEvery,
+        "crashMessage": crashMessage, "crashAdvice": crashAdvice, "damagedAdvice": damagedAdvice, "checkEvery": checkEvery,
     ])
 }
 
@@ -445,14 +445,28 @@ func checkPDF(_ args: [String]) -> Never {
 
 // MARK: Mover.swift
 
-/// move <from> <folder> <a trash folder>: moveApp, whose trash moves the item into the trash folder. It prints the sentence, or null.
+/// move <from> <folder> <a trash folder> [idle | busy:<line>]: moveApp, whose trash moves the item into the trash folder and whose
+/// idle says nothing (idle, when not given) or the line after busy:. It prints { said, asked }: the sentence or null, and whether
+/// idle was asked.
 func checkMove(_ args: [String]) -> Never {
-    let words = exactly(3, args, "move")
+    if args.count != 3 && args.count != 4 { fail("move takes 3 or 4 words, and was given \(args.count).") }
+    let words = args
+    let busy: String?
+    switch words.count == 4 ? words[3] : "idle" {
+    case "idle": busy = nil
+    case let word where word.hasPrefix("busy:"): busy = String(word.dropFirst("busy:".count))
+    case let word: fail("\"\(word)\" is neither idle nor busy:<line>.")
+    }
     let trash = { (path: String) -> Bool in
         let into = (words[2] as NSString).appendingPathComponent((path as NSString).lastPathComponent)
         return (try? FileManager.default.moveItem(atPath: path, toPath: into)) != nil
     }
-    emit(moveApp(from: words[0], to: words[1], trash: trash))
+    var asked = false
+    let said = moveApp(from: words[0], to: words[1], trash: trash) {
+        asked = true
+        return busy
+    }
+    emit(["said": orNull(said), "asked": asked])
 }
 
 // MARK: Uninstall.swift

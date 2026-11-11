@@ -163,7 +163,8 @@ final class Typed: ObservableObject {
     init(text: String) { self.text = text }
 }
 
-/// The open question, drawn by its kind. Each button sends a Reply through the model.
+/// The open question, drawn by its kind. Each button sends a Reply through the model, with the id of the question it was drawn for,
+/// so that a click on a question that has since gone sends nothing.
 struct QuestionView: View {
     @ObservedObject var model: AppModel
     let question: Question
@@ -212,25 +213,25 @@ struct QuestionView: View {
     private var buttons: some View {
         switch question.kind {
         case .confirm:
-            Button(question.ok ?? "") { model.answer(.confirm) }.buttonStyle(MainButtonStyle())
+            Button(question.ok ?? "Continue") { model.answer(question.id, .confirm) }.buttonStyle(MainButtonStyle())
         case .text:
-            Button("Continue") { model.answer(.text(typed.text)) }.buttonStyle(MainButtonStyle())
+            Button("Continue") { model.answer(question.id, .text(typed.text)) }.buttonStyle(MainButtonStyle())
         case .choice:
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(question.options, id: \.value) { option in
                     VStack(alignment: .leading, spacing: 2) {
-                        Button(option.label) { model.answer(.choice(option.value)) }
+                        Button(option.label) { model.answer(question.id, .choice(option.value)) }
                         if let detail = option.detail { Text(detail).font(.callout).foregroundColor(Brand.fog) }
                     }
                 }
             }
         case .folder:
             HStack {
-                Button("Use this folder") { model.answer(.folder(question.suggested ?? "")) }.buttonStyle(MainButtonStyle())
+                Button("Use this folder") { model.answer(question.id, .folder(question.suggested ?? "")) }.buttonStyle(MainButtonStyle())
                 Button("Choose another folder…") { chooseFolder() }
             }
         case .apps:
-            Button("Continue") { model.answer(.apps(.proceed)) }.buttonStyle(MainButtonStyle())
+            Button("Continue") { model.answer(question.id, .apps(.proceed)) }.buttonStyle(MainButtonStyle())
         case .signIn:
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -240,11 +241,12 @@ struct QuestionView: View {
                     Button("Continue") {
                         let sent = typed.code
                         typed.code = ""
-                        model.answer(.signIn(code: sent))
+                        model.answer(question.id, .signIn(code: sent))
                     }
                     .buttonStyle(MainButtonStyle())
+                    .disabled(typed.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                Button("I signed in in the browser") { model.answer(.signIn(code: nil)) }
+                Button("I signed in in the browser") { model.answer(question.id, .signIn(code: nil)) }
             }
         }
     }
@@ -263,8 +265,8 @@ struct QuestionView: View {
                 Button("Download") { openLink(link) }
             }
             switch row.action.flatMap(AppsReply.init(rawValue:)) {
-            case .installClaudeCode: Button("Install Claude Code") { model.answer(.apps(.installClaudeCode)) }
-            case .signIn: Button("Sign in") { model.answer(.apps(.signIn)) }
+            case .installClaudeCode: Button("Install Claude Code") { model.answer(question.id, .apps(.installClaudeCode)) }
+            case .signIn: Button("Sign in") { model.answer(question.id, .apps(.signIn)) }
             default: EmptyView()
             }
         }
@@ -283,7 +285,7 @@ struct QuestionView: View {
         panel.allowsMultipleSelection = false
         if let suggested = question.suggested { panel.directoryURL = URL(fileURLWithPath: suggested, isDirectory: true) }
         if panel.runModal() == .OK, let picked = panel.url {
-            model.answer(.folder(picked.path))
+            model.answer(question.id, .folder(picked.path))
         }
     }
 }
