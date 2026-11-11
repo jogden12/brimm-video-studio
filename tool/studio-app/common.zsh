@@ -40,9 +40,11 @@ refuse_watched() {
 }
 
 # The one Developer ID Application identity in the keychain, found by name as tool/move-app/build-app.sh finds it, so that nothing
-# secret is in any file. Sets `identity`, or stops.
+# secret is in any file. Sets `identity` (its name, for the words) and `identity_hash` (the certificate's SHA-1, the 40 hexadecimal
+# characters before the name), or stops. codesign is given the hash: after a renewal the expired certificate stays in the keychain
+# under the same name, and codesign calls the name ambiguous. The hash is a fingerprint, not a secret.
 find_identity() {
-  local -a found
+  local -a found words
   found=("${(@f)$(security find-identity -v -p codesigning | grep 'Developer ID Application')}")
   found=(${found:#})
   if (( ${#found} != 1 )); then
@@ -50,20 +52,34 @@ find_identity() {
   fi
   identity=${found[1]#*\"}
   identity=${identity%\"*}
+  words=(${=found[1]})
+  identity_hash=${words[2]-}
+  [[ $identity_hash =~ '^[0-9A-Fa-f]{40}$' ]] || stop "The Developer ID Application identity's line does not start with its SHA-1, so it cannot be named for codesign."
 }
 
 # Says, for each program given, every library it loads that is not macOS's own (anything outside /usr/lib/ and /System/), and
-# returns 1 when there is one.
+# returns 1 when there is one. It returns 1 too when otool fails or lists no library, since then nothing has been checked.
 only_system() {
-  local program lib bad=0
+  local program lib listed bad=0 n
   for program in "$@"; do
-    for lib in "${(@f)$(otool -L "$program" | tail -n +2 | sed -E 's/^[[:space:]]+//; s/ \(compatibility.*$//')}"; do
+    if ! listed=$(otool -L "$program"); then
+      say "  otool could not read ${program:t}, so what it loads is not known."
+      bad=1
+      continue
+    fi
+    n=0
+    for lib in "${(@f)$(print -r -- "$listed" | tail -n +2 | sed -E 's/^[[:space:]]+//; s/ \(compatibility.*$//')}"; do
       [[ -n $lib ]] || continue
+      (( n++ ))
       if [[ $lib != /usr/lib/* && $lib != /System/* ]]; then
         say "  ${program:t} loads $lib, which is not one of macOS's own libraries."
         bad=1
       fi
     done
+    if (( n == 0 )); then
+      say "  otool lists no library for ${program:t}, so what it loads is not known."
+      bad=1
+    fi
   done
   return $bad
 }

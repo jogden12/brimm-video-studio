@@ -176,6 +176,43 @@ describe("vendor.js", () => {
   });
 });
 
+describe("common.zsh's only_system", { skip: process.platform !== "darwin" || !existsSync("/bin/zsh") ? "common.zsh is zsh, on a Mac" : false }, () => {
+  /** only_system run on one made-up program, with a stand-in otool that prints `listing` and ends with `status`. */
+  const onlySystem = (listing, status = 0) => {
+    const root = mkdtempSync(join(tmpdir(), "studio-vendor-otool-"));
+    try {
+      const bin = join(root, "bin");
+      mkdirSync(bin);
+      writeFileSync(join(root, "listing"), listing);
+      writeFileSync(join(bin, "otool"), `#!/bin/sh\ncat "${join(root, "listing")}"\nexit ${status}\n`);
+      chmodSync(join(bin, "otool"), 0o755);
+      const common = join(STUDIO_APP, "common.zsh");
+      return spawnSync("/bin/zsh", ["-c", 'source "$1"; only_system "$2"', "zsh", common, join(root, "prog")], {
+        encoding: "utf8",
+        env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root },
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  it("passes a program that loads only macOS's own libraries, and fails one that loads another", () => {
+    assert.equal(onlySystem("prog:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1.0.0)\n").status, 0);
+    const other = onlySystem("prog:\n\t/opt/homebrew/lib/libx.dylib (compatibility version 1.0.0, current version 1.0.0)\n");
+    assert.equal(other.status, 1);
+    assert.match(other.stdout, /loads \/opt\/homebrew\/lib\/libx\.dylib/);
+  });
+
+  it("fails when otool fails or lists no library, since then nothing was checked", () => {
+    const failed = onlySystem("", 1);
+    assert.equal(failed.status, 1, failed.stdout);
+    assert.ok(failed.stdout.trim().length > 0, "it says why");
+    const none = onlySystem("prog:\n");
+    assert.equal(none.status, 1, none.stdout);
+    assert.ok(none.stdout.trim().length > 0, "it says why");
+  });
+});
+
 const WATCHED_SENTENCE = "That folder is watched or is in Dropbox, and a build never writes there.";
 
 /** A world for one test: a temporary folder with a copy of tool/studio-app/ (and the one file it imports) whose pin file the test may

@@ -9,7 +9,7 @@
 #   --vendor       the folder build-vendor.sh made: node, ffmpeg, ffprobe and whisper-cli, sealed under this commit's pins.
 #   --channel      stable (when not given) or beta, written into build.json.
 #   --sign         signs inside-out with the one "Developer ID Application" identity in the keychain, found by name (nothing secret is
-#                  in any file), with the hardened runtime and a secure timestamp. codesign --timestamp asks Apple's timestamp server
+#                  in any file) and given to codesign by its SHA-1, with the hardened runtime and a secure timestamp. codesign --timestamp asks Apple's timestamp server
 #                  for the time, which notarizing needs; that is all it sends.
 #   --any-commit   builds at a commit that is not yet on origin/main (the default refuses, so what ships is what was merged).
 #   --print        says what it would do, and does none of it.
@@ -69,7 +69,7 @@ if (( ! any_commit )) && ! git -C $repo merge-base --is-ancestor $commit refs/re
 fi
 why=$(node $here/vendor.js check $vendor 2>&1) || stop $why
 vendor=${vendor:A}
-identity=
+identity= identity_hash=
 (( sign )) && find_identity
 
 out=${out:A}
@@ -109,10 +109,13 @@ studio=$res/Studio
 tool=$studio/tool
 mkdir -p $built/Contents/MacOS $studio || stop "The bundle's folders could not be made."
 
-# 1. Studio's tool, from the commit. tool/studio-app is kept aside, in the temporary folder, for the steps that need its files.
-git -C $repo archive --format=tar $commit tool | tar -xf - -C $studio || stop "The commit's tool could not be unpacked."
+# 1. Studio's tool, from the commit. tool/studio-app is kept aside, in the temporary folder, for the steps that need its files. The
+# archive is written to a file first, so that a git archive that fails is not hidden by a tar that was given nothing.
+git -C $repo archive --format=tar -o $work/tool.tar $commit tool || stop "The commit's tool could not be unpacked."
+tar -xf $work/tool.tar -C $studio || stop "The commit's tool could not be unpacked."
+rm -f $work/tool.tar || stop "The commit's tool could not be unpacked."
 mv $tool/studio-app $work/studio-app || stop "The commit has no tool/studio-app."
-rm -rf $tool/tests $tool/move-app
+rm -rf $tool/tests $tool/move-app || stop "The tests and move-app could not be taken out."
 find $tool \( -name .env -o -name '.env.*' \) -prune -exec rm -rf {} + || stop "The .env files could not be taken out."
 from=$work/studio-app
 
@@ -140,13 +143,14 @@ plutil -lint $built/Contents/Info.plist >/dev/null || stop "The Info.plist did n
 sources=($from/Sources/*.swift(N))
 (( ${#sources} )) || stop "The commit has no Swift sources in tool/studio-app/Sources."
 swiftc -O -swift-version 5 -target arm64-apple-macos13.0 -module-cache-path $work/modules -o $built/Contents/MacOS/"BRIMM Video Studio" ${(o)sources} || stop "The app did not compile."
-chmod 755 $built/Contents/MacOS/"BRIMM Video Studio"
+chmod 755 $built/Contents/MacOS/"BRIMM Video Studio" || stop "The app's program could not be made runnable."
 
 # 7. The stand-in engine, which leaves nothing of Studio's tool but package.json (it marks tool/ as modules).
 if (( fake )); then
   find $tool -mindepth 1 -maxdepth 1 ! -name package.json -exec rm -rf {} + || stop "Studio's tool could not be taken out."
   mkdir -p $tool/setup && cp -X $from/dev/fake-engine.mjs $tool/setup/engine.js || stop "The stand-in engine could not be copied."
-  say "This build's setup is a stand-in: it is for looking at the windows, and sets up nothing." > $res/FAKE-ENGINE.txt
+  # FAKE-ENGINE.txt is what tells the app it is a stand-in, which turns off the move to Applications and Uninstall.
+  say "This build's setup is a stand-in: it is for looking at the windows, and sets up nothing." > $res/FAKE-ENGINE.txt || stop "FAKE-ENGINE.txt could not be written."
 fi
 
 # 8. Signing, inside-out: every program and library under node first, sorted by path, then the app. Only files that can be programs or
@@ -158,9 +162,9 @@ done
 for f in ${(o)inside} $built; do
   if (( sign )); then
     if [[ $f == $res/node/bin/node ]]; then
-      codesign --force --options runtime --timestamp --sign $identity --entitlements $from/node.entitlements $f || stop "Signing ${f#$built/} failed."
+      codesign --force --options runtime --timestamp --sign $identity_hash --entitlements $from/node.entitlements $f || stop "Signing ${f#$built/} failed."
     else
-      codesign --force --options runtime --timestamp --sign $identity $f || stop "Signing ${f#$built/} failed."
+      codesign --force --options runtime --timestamp --sign $identity_hash $f || stop "Signing ${f#$built/} failed."
     fi
   else
     codesign --force --sign - --timestamp=none $f || stop "${f#$built/} could not be sealed."
@@ -173,9 +177,26 @@ codesign --verify --deep --strict --verbose=2 $built || stop "The signature did 
 # 10. The zip.
 ditto -c -k --norsrc --noextattr --keepParent $built $work/app.zip || stop "The zip could not be made."
 
+# Into --out: both go in under hidden names first, then the earlier pair is moved aside, the new pair renamed, and the earlier pair
+# taken away. A failure on the way takes the new ones out and puts the earlier ones back, so --out never holds a new app with an old
+# zip, or an app with no zip. The hidden names are this script's own; one left by a run that was stopped is taken away first.
 mkdir -p $out || stop "The out folder could not be made."
-rm -rf $app $zip
-mv $built $app && mv $work/app.zip $zip || stop "The app and its zip could not be moved into $out."
+new_app=$out/".${app:t}.new" new_zip=$out/".${zip:t}.new" old_app=$out/".${app:t}.old" old_zip=$out/".${zip:t}.old"
+swapped=0
+put_back() {
+  rm -rf $new_app $new_zip
+  (( swapped )) && rm -rf $app $zip
+  [[ -e $old_app && ! -e $app ]] && mv $old_app $app
+  [[ -e $old_zip && ! -e $zip ]] && mv $old_zip $zip
+  stop "The app and its zip could not be moved into $out."
+}
+rm -rf $new_app $new_zip $old_app $old_zip || stop "The app and its zip could not be moved into $out."
+{ mv $built $new_app && mv $work/app.zip $new_zip } || put_back
+if [[ -e $app ]]; then mv $app $old_app || put_back; fi
+if [[ -e $zip ]]; then mv $zip $old_zip || put_back; fi
+swapped=1
+{ mv $new_app $app && mv $new_zip $zip } || put_back
+rm -rf $old_app $old_zip || stop "The new app and zip are in $out, but the earlier ones could not be taken away from beside them."
 
 say "Made $app"
 say "Made $zip"

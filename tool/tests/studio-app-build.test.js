@@ -22,7 +22,8 @@ const VENDOR_JS = join(TOOL, "studio-app", "vendor.js");
 const FAKE_ENGINE = join(TOOL, "studio-app", "dev", "fake-engine.mjs");
 const notAMac = process.platform !== "darwin" || !existsSync("/bin/zsh") ? "the app is built on a Mac, which has zsh, plutil, ditto and file" : false;
 const NAME = "Developer ID Application: Test Person (TEAMID)";
-const IDENTITY = `  1) 1111111111111111111111111111111111111111 "${NAME}"`;
+const HASH = "1111111111111111111111111111111111111111";
+const IDENTITY = `  1) ${HASH} "${NAME}"`;
 const APP = "BRIMM Video Studio.app";
 const VERSION = "1.0.0-beta.1";
 const run = (cmd, args, options = {}) => spawnSync(cmd, args, { encoding: "utf8", ...options });
@@ -156,6 +157,8 @@ describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () =>
   after(() => w?.cleanup());
 
   it("the bundle holds Studio's tool without tests, move-app, studio-app or a .env, and the programs appCopy names", () => {
+    // The commit really holds tool/.env, so that leaving it out is the build's doing.
+    assert.equal(w.git("ls-files", "--", "tool/.env"), "tool/.env");
     const listing = tree(plain.app);
     for (const path of listing) {
       assert.equal(/(^|\/)(tests|move-app|studio-app)(\/|$)/.test(path), false, path);
@@ -263,7 +266,9 @@ describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () =>
     assert.ok(force[force.length - 1].endsWith(`/${APP}`), force[force.length - 1]);
     for (const line of force.slice(0, -1)) assert.match(inApp(line), /^BRIMM Video Studio\.app\/Contents\/Resources\/node\//, line);
     for (const line of force) {
-      assert.ok(line.startsWith(`codesign --force --options runtime --timestamp --sign ${NAME} `), line);
+      // The certificate is named by its SHA-1, never by its name, which an expired one from before a renewal shares.
+      assert.ok(line.startsWith(`codesign --force --options runtime --timestamp --sign ${HASH} `), line);
+      assert.equal(line.includes(NAME), false, line);
       assert.equal(line.includes("--deep"), false, line);
     }
     const entitled = force.filter((l) => l.includes("--entitlements"));
@@ -332,9 +337,12 @@ describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () =>
 describe("build-app.sh: --print, the refusals and the options", { skip: notAMac }, () => {
   const WATCHED = "That folder is watched or is in Dropbox, and a build never writes there.";
 
-  it("--print writes nothing and starts no compiler", () => {
+  it("--print writes nothing and starts no compiler, ditto or tar", () => {
     const w = world();
     try {
+      // Stand-ins that record, then run the real one: --print must start neither.
+      standIn(w.bin, "ditto", 'exec /usr/bin/ditto "$@"\n');
+      standIn(w.bin, "tar", 'exec /usr/bin/tar "$@"\n');
       const out = join(w.dir, "out");
       const r = w.build(...w.needed(out), "--print");
       assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -351,7 +359,58 @@ describe("build-app.sh: --print, the refusals and the options", { skip: notAMac 
       assert.equal(withSign.status, 0, withSign.stdout);
       assert.ok(withSign.stdout.includes(NAME), withSign.stdout);
       assert.equal(/^codesign /m.test(w.ran()), false);
+      assert.equal(/^(ditto|tar) /m.test(w.ran()), false, w.ran());
       assert.equal(existsSync(out), false);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  /** An out folder holding an earlier app and zip, made by hand, and a way to see that it is just as it was. */
+  const earlier = (w) => {
+    const out = join(w.dir, "out");
+    mkdirSync(join(out, APP), { recursive: true });
+    writeFileSync(join(out, APP, "old.txt"), "the earlier app\n");
+    writeFileSync(join(out, `BRIMM-Video-Studio-${VERSION}.zip`), "the earlier zip\n");
+    writeFileSync(join(out, "keep.txt"), "mine\n");
+    const before = tree(out);
+    return {
+      out,
+      same: () => {
+        assert.deepEqual(tree(out), before);
+        assert.equal(readFileSync(join(out, APP, "old.txt"), "utf8"), "the earlier app\n");
+        assert.equal(readFileSync(join(out, `BRIMM-Video-Studio-${VERSION}.zip`), "utf8"), "the earlier zip\n");
+      },
+    };
+  };
+
+  it("a git archive that fails stops the build with 1, though tar is given nothing, and leaves --out as it was", () => {
+    const w = world();
+    try {
+      const { out, same } = earlier(w);
+      standIn(w.bin, "git", 'case " $* " in *" archive "*) echo "fatal: the archive failed" >&2; exit 128 ;; esac\nexec /usr/bin/git "$@"\n');
+      const r = w.build(...w.needed(out));
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.match(r.stdout, /^The commit's tool could not be unpacked\.$/m);
+      same();
+      assert.deepEqual(readdirSync(w.tmp), []);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  it("a move into --out that fails half way puts back the earlier app and zip", () => {
+    const w = world();
+    try {
+      const { out, same } = earlier(w);
+      // mv fails only when it would put the new zip under its own name: the new app is in place by then.
+      const zip = join(out, `BRIMM-Video-Studio-${VERSION}.zip`);
+      standIn(w.bin, "mv", `for last; do :; done\ncase "$1" in *.new) if [ "$last" = "${zip}" ]; then : > "${join(w.dir, "mv-failed")}"; exit 1; fi ;; esac\nexec /bin/mv "$@"\n`);
+      const r = w.build(...w.needed(out));
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.ok(existsSync(join(w.dir, "mv-failed")), "the stand-in's failure was reached");
+      assert.match(r.stdout, /^The app and its zip could not be moved into /m);
+      same();
     } finally {
       w.cleanup();
     }
