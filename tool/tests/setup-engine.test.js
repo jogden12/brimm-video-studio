@@ -451,6 +451,8 @@ describe("a setup, step by step", () => {
       assert.equal(asked.length, 5);
       const refusal = "Claude Code is not signed in yet. Choose Sign in.";
       assert.deepEqual(asked.map((q) => q.fault), [undefined, refusal, refusal, refusal, undefined]);
+      // The row was not ready while the refusal stood, and is once the check has found the sign-in.
+      assert.equal(asked[3].apps.find((a) => a.id === "claude-code").here, false);
       assert.equal(asked[4].apps.find((a) => a.id === "claude-code").here, true);
       assert.equal(lastOf(events).outcome, "cancelled");
     });
@@ -501,7 +503,7 @@ describe("a setup, step by step", () => {
   };
   const FAILED_INSTALL = "The copy of Claude Code that was downloaded is not the one BRIMM Video Studio expects. Nothing of it was kept.";
 
-  it("a failed Claude Code install comes back as the apps question's fault, and the run goes on", async () => {
+  it("a failed Claude Code install comes back as the apps question's fault, with its row as it was", async () => {
     await withMac({ settings: "none", apps: EVERY_APP, claude: "none" }, async (m) => {
       failingInstall(m);
       const apps = (q) => (q.apps.find((a) => a.id === "claude-code").action && !q.fault ? "install-claude-code" : undefined);
