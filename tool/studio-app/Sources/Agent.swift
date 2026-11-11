@@ -17,14 +17,21 @@ func runAgent(rest: [String], app: String) -> Int32 {
     child.arguments = command.arguments
 
     // Each signal is ignored by the job itself and watched on a queue of its own, before node starts, so that none is lost and
-    // none ends the job before node does. Node starts with the default dispositions.
+    // none ends the job before node does. Node starts with the default dispositions. A signal that comes before node has started is
+    // kept, and sent on as soon as it has. `started` and `kept` are read and changed on the queue only.
     let queue = DispatchQueue(label: "com.thebrimm.video-studio.agent-signals")
+    var started = false
+    var kept: [Int32] = []
     var sources: [DispatchSourceSignal] = []
     for number in passedOn {
         signal(number, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: number, queue: queue)
         source.setEventHandler {
-            if child.isRunning { kill(child.processIdentifier, number) }
+            if !started {
+                kept.append(number)
+            } else if child.isRunning {
+                kill(child.processIdentifier, number)
+            }
         }
         source.resume()
         sources.append(source)
@@ -39,6 +46,11 @@ func runAgent(rest: [String], app: String) -> Int32 {
         while words.hasSuffix(".") { words.removeLast() }
         FileHandle.standardError.write(Data("BRIMM Video Studio could not start its background job: \(words).\n".utf8))
         return 1
+    }
+    queue.sync {
+        started = true
+        for number in kept where child.isRunning { kill(child.processIdentifier, number) }
+        kept = []
     }
     child.waitUntilExit()
     let status = child.terminationStatus

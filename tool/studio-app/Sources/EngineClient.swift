@@ -5,7 +5,9 @@ import Foundation
 
 /// Starts one run of the engine and tells what it says. The callbacks come on the main queue, in the order the lines came, and onEnd
 /// comes once, after the last of them, when the process has ended and its stdout has been read to its end. start, answer, back and
-/// cancel are called on the main queue. An answer's text is sent and never kept.
+/// cancel are called on the main queue. An answer's text is sent and never kept. The client's own callbacks hold it weakly, so its
+/// owner must keep it until onEnd has come: a client let go before then loses its run, and the engine reads the closed stdin as a
+/// cancel.
 final class EngineClient {
     private let command: Command
     private let environment: [String: String]

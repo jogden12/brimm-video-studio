@@ -1,9 +1,9 @@
 // The engine's client, from tool/studio-app/Sources/EngineClient.swift, run through studio-check's drive command (Phase 6, Task 8).
 // Each stand-in engine is a small node script the test writes and starts with the test's own node.
-import { before, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkerPath, noChecker } from "./studio-app-check.js";
@@ -45,10 +45,17 @@ const question = (id = "welcome", more = {}) => ({ event: "question", id, kind: 
 const done = { event: "done", outcome: "set-up", summary: "All set.", studio: "/x", notes: [] };
 `;
 
+/** The folders this file has made, each removed when the file ends. */
+const folders = [];
+after(() => {
+  for (const dir of folders) rmSync(dir, { recursive: true, force: true });
+});
+
 /** A new folder with a stand-in engine whose body is `body`, an answers file holding `answers`, one JSON array a line, and the path of
     the stand-in's `got` file. */
 function standIn(body, answers = []) {
   const folder = mkdtempSync(join(tmpdir(), "brimm-studio-engine-"));
+  folders.push(folder);
   const got = join(folder, "got");
   const script = join(folder, "engine.mjs");
   writeFileSync(script, `${PRELUDE(got)}\n${body}\n`);
@@ -220,6 +227,24 @@ process.exit(0);`,
 process.exit(0);`, [["confirm"]]);
     const { names, end } = told(await drive(made, ["--answer-after-end"]));
     assert.deepEqual(names, ["done"]);
+    assert.deepEqual(end, { ended: 0, undecoded: 0 });
+  });
+
+  it("an answer to an engine that has stopped reading goes into a dead pipe, and the client still ends", async () => {
+    // The stand-in closes its stdin and only then asks, so the answer is written to a pipe nobody reads while the engine still
+    // runs: without SIGPIPE ignored, or with a write that is not guarded, the checker would die on it.
+    const made = standIn(
+      `process.stdin.destroy();
+(await import("node:fs")).closeSync(0);
+await sleep(200);
+say(question());
+await sleep(500);
+say(done);
+process.exit(0);`,
+      [["confirm"]]
+    );
+    const { names, end } = told(await drive(made));
+    assert.deepEqual(names, ["question", "done"]);
     assert.deepEqual(end, { ended: 0, undecoded: 0 });
   });
 

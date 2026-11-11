@@ -1,21 +1,28 @@
 // The background job, from tool/studio-app/Sources/Agent.swift, run through studio-check's agent command (Phase 6, Task 5). Each test
 // makes an app folder whose node is a shell script that writes down how it was started.
-import { before, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkerPath, noChecker } from "./studio-app-check.js";
 
+/** The folders this file has made, each removed when the file ends. */
+const folders = [];
+after(() => {
+  for (const dir of folders) rmSync(dir, { recursive: true, force: true });
+});
+
 /**
  * A new app folder whose Contents/Resources/node/bin/node is a shell script that writes its arguments, one a line, then
  * $XPC_SERVICE_NAME and $PATH into `ran`, and its own process number into `pid`, and then runs `body`. The `ran` file is written
- * under another name and renamed, so it is whole once it is there. `body` may be a function of the folder's `got` file's path. With
- * `node: false` there is no node at all.
+ * under another name and renamed, so it is whole once it is there. `body` may be a function of the folder's `got` and `ready` files'
+ * paths. With `node: false` there is no node at all.
  */
 function makeApp(body = "exit 0", { node = true } = {}) {
   const folder = mkdtempSync(join(tmpdir(), "brimm-studio-agent-"));
+  folders.push(folder);
   const app = join(folder, "BRIMM Video Studio.app");
   const bin = join(app, "Contents", "Resources", "node", "bin");
   const tool = join(app, "Contents", "Resources", "Studio", "tool");
@@ -25,6 +32,7 @@ function makeApp(body = "exit 0", { node = true } = {}) {
   const ran = join(folder, "ran");
   const pid = join(folder, "pid");
   const got = join(folder, "got");
+  const ready = join(folder, "ready");
   if (node) {
     const script = [
       "#!/bin/sh",
@@ -32,13 +40,13 @@ function makeApp(body = "exit 0", { node = true } = {}) {
       `for word in "$@"; do printf '%s\\n' "$word"; done > '${ran}.part'`,
       `printf '%s\\n%s\\n' "$XPC_SERVICE_NAME" "$PATH" >> '${ran}.part'`,
       `mv '${ran}.part' '${ran}'`,
-      typeof body === "function" ? body(got) : body,
+      typeof body === "function" ? body(got, ready) : body,
       ""
     ].join("\n");
     writeFileSync(join(bin, "node"), script);
     chmodSync(join(bin, "node"), 0o755);
   }
-  return { app, ran, pid, got, tool };
+  return { app, ran, pid, got, ready, tool };
 }
 
 /** The lines of the `ran` file, without the last line feed. */
@@ -68,21 +76,24 @@ async function until(test, limit = 10000) {
   }
 }
 
-/** Starts the agent on a node that traps `name`, sends `name` to the agent once node is there, and gives the agent's status. */
+/** Starts the agent on a node that traps `name`, sends `name` to the agent once node's trap is set (node writes `ready` after its
+    trap line), and gives the agent's status. */
 async function signalled(name) {
-  const made = makeApp((got) => `trap 'printf "got ${name}\\n" >> "${got}"; exit 9' ${name}\nwhile :; do sleep 0.1; done`);
+  const made = makeApp((got, ready) => `trap 'printf "got ${name}\\n" >> "${got}"; exit 9' ${name}\n: > '${ready}'\nwhile :; do sleep 0.1; done`);
   const child = spawn(checkerPath(), ["agent", made.app], { stdio: ["ignore", "ignore", "pipe"] });
   let stderr = "";
   child.stderr.on("data", (chunk) => (stderr += chunk));
   const ended = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
   let node = null;
+  let timer;
   try {
-    await until(() => existsSync(made.ran));
+    await until(() => existsSync(made.ready));
     node = Number(readFileSync(made.pid, "utf8"));
     child.kill(`SIG${name}`);
-    const end = await Promise.race([ended, new Promise((resolve) => setTimeout(() => resolve(null), 10000))]);
+    const end = await Promise.race([ended, new Promise((resolve) => (timer = setTimeout(() => resolve(null), 10000)))]);
     return { end, stderr, got: readFileSync(made.got, "utf8"), node };
   } finally {
+    clearTimeout(timer);
     // Nothing of the test is left running, whatever happened above.
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     if (node && alive(node)) process.kill(node, "SIGKILL");
@@ -116,8 +127,8 @@ describe("the background job", { skip: noChecker }, () => {
     assert.equal(agent([makeApp("kill -9 $$").app]).status, 137);
   });
 
-  it("a TERM sent to the agent reaches node, and the agent ends with node's status", async () => {
-    for (const name of ["TERM", "INT"]) {
+  it("a TERM, INT or HUP sent to the agent reaches node, and the agent ends with node's status", async () => {
+    for (const name of ["TERM", "INT", "HUP"]) {
       const { end, stderr, got, node } = await signalled(name);
       assert.deepEqual(end, { code: 9, signal: null }, `after ${name}: ${stderr}`);
       assert.equal(got, `got ${name}\n`);
