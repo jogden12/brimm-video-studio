@@ -2,6 +2,7 @@
 // 0, or says why on stderr and ends with 2. Each command is one small function, and the switch at the end names them all: a later
 // task adds its own functions and cases and touches no other.
 import Foundation
+import PDFKit
 
 /// Prints `value` as JSON and ends with 0. A nil prints as null, a Bool as true or false and a String as a JSON string.
 func emit(_ value: Any?) -> Never {
@@ -412,6 +413,36 @@ func checkDrive(_ args: [String]) -> Never {
     dispatchMain()
 }
 
+// MARK: GuidePDF.swift
+
+/// pdf <html> <pdf>: prints the page to a PDF through makePDF, with an NSApplication that never shows itself and its main loop, and
+/// prints { pages, width, height }, the first page's size in points. It ends with 1 when the PDF was not made, and with 3 when there
+/// is no window server to print with.
+func checkPDF(_ args: [String]) -> Never {
+    let words = exactly(2, args, "pdf")
+    guard CGSessionCopyCurrentDictionary() != nil else {
+        FileHandle.standardError.write(Data("no window server\n".utf8))
+        exit(3)
+    }
+    let app = NSApplication.shared
+    app.setActivationPolicy(.prohibited)
+    let pdf = URL(fileURLWithPath: words[1])
+    makePDF(html: URL(fileURLWithPath: words[0]), pdf: pdf) { made in
+        guard made else {
+            FileHandle.standardError.write(Data("the PDF was not made\n".utf8))
+            exit(1)
+        }
+        guard let document = PDFDocument(url: pdf), let page = document.page(at: 0) else {
+            FileHandle.standardError.write(Data("the PDF was made but could not be read\n".utf8))
+            exit(1)
+        }
+        let box = page.bounds(for: .mediaBox)
+        emit(["pages": document.pageCount, "width": Double(box.width), "height": Double(box.height)])
+    }
+    app.run()
+    exit(1)
+}
+
 // MARK: The commands
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -439,5 +470,6 @@ case "next-from-status": checkNextFromStatus(rest)
 case "offers": checkOffers(rest)
 case "agent": checkAgent(rest)
 case "drive": checkDrive(rest)
+case "pdf": checkPDF(rest)
 default: fail("studio-check does not know the command \"\(command)\".")
 }
