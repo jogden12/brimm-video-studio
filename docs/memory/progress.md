@@ -1,6 +1,6 @@
 # Progress
 
-Where Studio stands. Last brought up to date on 2026-11-11 (main at 8fbcc0a). Dated lines say what was true then; check `git log` and the By-Hand Checks page before relying on them.
+Where Studio stands. Last brought up to date on 2026-11-11 (main at 268d10c). Dated lines say what was true then; check `git log` and the By-Hand Checks page before relying on them.
 
 ## Done
 
@@ -14,23 +14,23 @@ Where Studio stands. Last brought up to date on 2026-11-11 (main at 8fbcc0a). Da
 - **The Move to Studio app**, notarized; Jason's MacBook (check 80) and Sallie's laptop (checks 74, 41 to 45) moved to Studio on 2026-11-08. The Mac Studio moved on 2026-11-03 (check 40).
 - **The Mac app, Phases 0 to 4** merged on 2026-11-09 (#53 to #57); spikes S1 to S4 and S7 passed. **Review fixes** #58 merged on 2026-11-10.
 - **This memory system** (`docs/memory/`, `docs/wiki/`), 2026-11-10.
-- **The Mac app, Phase 5 (the setup engine)** merged on 2026-11-10 (#61), and **its sign-in fix** (#62, c979291: macOS's `script` refuses node's pipes). In Studio Test on 2026-11-10: spike S5 passed (check 108; Claude Code signs in with no Terminal), S6 passed (check 109; the HyperFrames app runs, plays and exports on This Mac with no Homebrew), and Phase 5's check 3 passed (the setup's own sign-in takes a pasted code with a newline, the link comes through whole, and nothing is left running after a cancel). Check 3 found that the setup's sign-in was kept apart from Terminal's (no `USER`; see `gotchas.md`): fixed by #63 (8fbcc0a), and on 2026-11-11 check 4 passed (one sign-in for the setup and Terminal) and check 5 passed (`hyperframes open` opens the project once the app is past its welcome question). The Mac Studio's live checkout was pulled to 8fbcc0a the same day.
+- **The Mac app, Phase 5 (the setup engine)** merged on 2026-11-10 (#61), and **its sign-in fix** (#62, c979291: macOS's `script` refuses node's pipes). In Studio Test on 2026-11-10: spike S5 passed (check 108; Claude Code signs in with no Terminal), S6 passed (check 109; the HyperFrames app runs, plays and exports on This Mac with no Homebrew), and Phase 5's check 3 passed (the setup's own sign-in takes a pasted code with a newline, the link comes through whole, and nothing is left running after a cancel). Check 3 found that the setup's sign-in was kept apart from Terminal's (no `USER`; see `gotchas.md`): fixed by #63 (8fbcc0a), and on 2026-11-11 check 4 passed (one sign-in for the setup and Terminal) and check 5 passed (`hyperframes open` opens the project once the app is past its welcome question). The Mac Studio's live checkout was pulled to 8fbcc0a the same day, and then to 268d10c. **The setup and the Getting Started guide say to answer HyperFrames' welcome question once** (#64, 268d10c, what check 5 found).
 
 ## In progress (2026-11-11)
 
-- **The setup and the Getting Started guide say to answer HyperFrames' welcome question once**, before Studio opens a project in it (what check 5 found), on branch `app-development-hf-welcome-note`. Its pull request waits on Jason's yes.
+- **The Mac app, Phase 6 (the app and its build)**: its task plan is written, `docs/superpowers/plans/2026-11-09-studio-mac-app-phase-6-plan.md`, on branch `app-development-phase-6`: fifteen tasks, read by three reviewers. Nothing is built yet. It waits on Jason's review, his choice of how it is built, and its nine open questions.
 - **A sweep of the lines that still name Jason, `install.sh` or node on an installed Mac**, in its own session.
 
 ## Next, and waiting on Jason
 
 - **Sallie's laptop**: check 46 (a first video, Jason's own recording), 47 (the BRIMM Ops page on her laptop), 48 (delete brimm-video's old GitHub deploy key, on his yes), the open boxes of checks 41 and 43; check 88 was never confirmed.
-- **The Mac app**: Phase 6 (the window); the bundle ID (suggested `com.thebrimm.video-studio`); a GPL source zip on R2; the Phase 5 plan's six open questions; whether to add a macOS CI job (a cost call).
+- **The Mac app**: the Phase 6 plan's "Open for Jason" (the bundle ID, Claude Code's pin, the first version, the feed's address, ffmpeg's source zip, the Claude button, an icon, when to sign, a macOS CI job); the Phase 5 plan's open questions that are still open.
 - **Calls from the build plan**: `finish`'s NEVER_OPENED line on a Mac with the app off; whether `free` takes a Reel's video; a toolchain lock file; whether the "One Video, Start to Finish" page is retired.
 - **The import notice**: item 3 ("I allowed it" → look); B1 at the next `brew upgrade node`; a signed helper later.
 - **Her folder**: whether the open lock writes the feedback `env` (when an open lock is named).
 - **Blocked**: plan PRs 12 to 14 (session videos) wait on A0 items 2 and 5 and on D5 with brimm-operations. Read `~/BRIMM Video Work/A0 app test/results.md` first.
 - **Deferred minors** (final touches): a stray `.new` after a kill; `exports.js`'s own `plainName` copy; an empty `set aside/` after a failed move; an export only in an older `renders/`.
-- **Carried forward for the Mac app**: cap retries after `install.sh`'s exit 75 and show the line; the npm update notifier off; hide the HyperFrames CLI's "docker: command not found"; DAMAGED advice for a broken app copy; refuse `:` in a `--tools` path; one `launchctl print` parser; Phase 6 ships the transcriber as `whisper-cli`; Phase 8 drops the bare `node` from `editStart`.
+- **Carried forward for the Mac app**: Phase 6 ships the transcriber as `whisper-cli` and makes every zip with `ditto --norsrc --noextattr` (both in its plan); `install.sh` has no check of its own for a `:` in `--tools` (the engine refuses it); Phase 8 drops the bare `node` from `editStart`. (The retry cap after exit 75, the npm notifier, the docker line, the DAMAGED advice and the one `launchctl print` parser were done in Phase 5.)
 - **Later**: remove the old Dropbox-wait code once Sallie's laptop has no episode from before the switch; `docs/setup/sallies-laptop.md` still describes brimm-video.
 
 ## Open from past reviews (harvested 2026-11-10)
