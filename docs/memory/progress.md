@@ -1,6 +1,6 @@
 # Progress
 
-Where Studio stands. Last brought up to date on 2026-11-10 (main at c979291). Dated lines say what was true then; check `git log` and the By-Hand Checks page before relying on them.
+Where Studio stands. Last brought up to date on 2026-11-11 (main at 8fbcc0a). Dated lines say what was true then; check `git log` and the By-Hand Checks page before relying on them.
 
 ## Done
 
@@ -14,18 +14,17 @@ Where Studio stands. Last brought up to date on 2026-11-10 (main at c979291). Da
 - **The Move to Studio app**, notarized; Jason's MacBook (check 80) and Sallie's laptop (checks 74, 41 to 45) moved to Studio on 2026-11-08. The Mac Studio moved on 2026-11-03 (check 40).
 - **The Mac app, Phases 0 to 4** merged on 2026-11-09 (#53 to #57); spikes S1 to S4 and S7 passed. **Review fixes** #58 merged on 2026-11-10.
 - **This memory system** (`docs/memory/`, `docs/wiki/`), 2026-11-10.
-- **The Mac app, Phase 5 (the setup engine)** merged on 2026-11-10 (#61), and **its sign-in fix** (#62, c979291: macOS's `script` refuses node's pipes). In Studio Test on 2026-11-10: spike S5 passed (check 108; Claude Code signs in with no Terminal), S6 passed (check 109; the HyperFrames app runs, plays and exports on This Mac with no Homebrew), and Phase 5's check 3 passed (the setup's own sign-in takes a pasted code with a newline, the link comes through whole, and nothing is left running after a cancel). Check 3 found that the setup's sign-in was kept apart from Terminal's (no `USER`; see `gotchas.md`).
+- **The Mac app, Phase 5 (the setup engine)** merged on 2026-11-10 (#61), and **its sign-in fix** (#62, c979291: macOS's `script` refuses node's pipes). In Studio Test on 2026-11-10: spike S5 passed (check 108; Claude Code signs in with no Terminal), S6 passed (check 109; the HyperFrames app runs, plays and exports on This Mac with no Homebrew), and Phase 5's check 3 passed (the setup's own sign-in takes a pasted code with a newline, the link comes through whole, and nothing is left running after a cancel). Check 3 found that the setup's sign-in was kept apart from Terminal's (no `USER`; see `gotchas.md`): fixed by #63 (8fbcc0a), and on 2026-11-11 check 4 passed (one sign-in for the setup and Terminal) and check 5 passed (`hyperframes open` opens the project once the app is past its welcome question). The Mac Studio's live checkout was pulled to 8fbcc0a the same day.
 
-## In progress (2026-11-10)
+## In progress (2026-11-11)
 
-- **The setup passes `USER` and `LOGNAME` to Claude Code**, on branch `app-development-claude-env-user`, so that its sign-in is Terminal's. Its pull request waits on Jason's yes; then check 4 on the Mac App By-Hand Checks page re-tests it in Studio Test.
-- **Check 5 on the Mac App By-Hand Checks page**: whether `hyperframes open` opens a project in the app once the app is past its welcome questions (S6 found it only listed).
+- **The setup and the Getting Started guide say to answer HyperFrames' welcome question once**, before Studio opens a project in it (what check 5 found), on branch `app-development-hf-welcome-note`. Its pull request waits on Jason's yes.
 - **A sweep of the lines that still name Jason, `install.sh` or node on an installed Mac**, in its own session.
 
 ## Next, and waiting on Jason
 
 - **Sallie's laptop**: check 46 (a first video, Jason's own recording), 47 (the BRIMM Ops page on her laptop), 48 (delete brimm-video's old GitHub deploy key, on his yes), the open boxes of checks 41 and 43; check 88 was never confirmed.
-- **The Mac app**: checks 4 and 5 on the Mac App By-Hand Checks page; Phase 6 (the window); the bundle ID (suggested `com.thebrimm.video-studio`); a GPL source zip on R2; the Phase 5 plan's six open questions; whether to add a macOS CI job (a cost call); pulling the Mac Studio's live checkout to the newest main.
+- **The Mac app**: Phase 6 (the window); the bundle ID (suggested `com.thebrimm.video-studio`); a GPL source zip on R2; the Phase 5 plan's six open questions; whether to add a macOS CI job (a cost call).
 - **Calls from the build plan**: `finish`'s NEVER_OPENED line on a Mac with the app off; whether `free` takes a Reel's video; a toolchain lock file; whether the "One Video, Start to Finish" page is retired.
 - **The import notice**: item 3 ("I allowed it" → look); B1 at the next `brew upgrade node`; a signed helper later.
 - **Her folder**: whether the open lock writes the feedback `env` (when an open lock is named).

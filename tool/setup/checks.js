@@ -186,7 +186,7 @@ export const APPS = [
   { id: "claude-app", name: "Claude", folder: "Claude.app", link: "https://claude.ai/download", administrator: ADMINISTRATOR },
   { id: "claude-code", name: "Claude Code" },
   { id: "dropbox", name: "Dropbox", folder: "Dropbox.app", link: "https://www.dropbox.com/install", administrator: ADMINISTRATOR },
-  { id: "hyperframes", name: "HyperFrames", folder: "HyperFrames.app", link: "https://hyperframes.dev/studio/download", note: "HyperFrames asks you to sign in to HeyGen the first time it opens.", administrator: ADMINISTRATOR }
+  { id: "hyperframes", name: "HyperFrames", folder: "HyperFrames.app", link: "https://hyperframes.dev/studio/download", note: "HyperFrames asks you to sign in to HeyGen the first time it opens, then what you want to make. Answer both once, before Studio opens a project in it.", administrator: ADMINISTRATOR }
 ];
 
 /** Which of the apps with a folder are here: in `system` or in the home's Applications folder. */

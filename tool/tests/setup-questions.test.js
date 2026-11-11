@@ -83,11 +83,12 @@ describe("the apps question", () => {
       assert.equal(row(q, "dropbox").note, undefined);
       assert.match(row(q, "claude-app").note, /administrator's password/);
       assert.match(row(q, "hyperframes").note, /sign in to HeyGen/);
+      assert.match(row(q, "hyperframes").note, /what you want to make/);
       assert.match(row(q, "hyperframes").note, /administrator's password/);
     });
     withMac({ apps: ["hyperframes"] }, (m) => {
       const r = row(appsQuestion(state(m), { pin: PIN }), "hyperframes");
-      assert.equal(r.note, "HyperFrames asks you to sign in to HeyGen the first time it opens.");
+      assert.equal(r.note, "HyperFrames asks you to sign in to HeyGen the first time it opens, then what you want to make. Answer both once, before Studio opens a project in it.");
     });
   });
 
