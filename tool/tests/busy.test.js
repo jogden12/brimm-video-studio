@@ -2,11 +2,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CANNOT_TELL, RUNS_LOCK_STALE_MS, idleWhy, launchdPid, pidFromPrint } from "../busy.js";
+import { CANNOT_TELL, RUNS_LOCK_STALE_MS, idleWhy, launchdPid, markUpdating, pidFromPrint } from "../busy.js";
 import { lockOf, whenReadyLockOf } from "../detached.js";
 import { lockFile } from "../run.js";
 import { runsFolder, workFolder } from "../settings.js";
@@ -199,6 +199,42 @@ describe("idleWhy", () => {
       assert.equal(whyOn(home, { agentPid: null, alive }), "A command is at work on an episode: finish (process 4321).");
       rmSync(lockOf(home, folder));
       assert.equal(whyOn(home, { agentPid: null, alive }), "A video is being made ready for HyperFrames (process 4321).");
+    });
+  });
+
+  it("idle-why says the same with a live marker", () => {
+    withHome((home) => {
+      const now = Date.now();
+      const idle = whyOn(home, { agentPid: null, alive, now });
+      assert.equal(idle, "");
+      assert.equal(markUpdating({ home, now }), true);
+      assert.equal(whyOn(home, { agentPid: null, alive, now }), idle);
+    });
+    withHome((home) => {
+      const now = Date.now();
+      importLock(home);
+      const held = whyOn(home, { agentPid: null, alive, now });
+      assert.equal(held, LOCK);
+      assert.equal(markUpdating({ home, now }), true);
+      assert.equal(whyOn(home, { agentPid: null, alive, now }), held);
+    });
+  });
+
+  it("a runs folder or work folder that cannot be listed cannot be told, and one that is not there is nothing at work", { skip: process.getuid?.() === 0 ? "root can read it" : false }, () => {
+    withHome((home) => {
+      assert.equal(whyOn(home, { agentPid: null, alive }), "");
+      mkdirSync(workFolder(home), { recursive: true });
+      assert.equal(whyOn(home, { agentPid: null, alive }), "");
+      for (const shut of [runsFolder(home), workFolder(home)]) {
+        mkdirSync(shut, { recursive: true });
+        chmodSync(shut, 0o000);
+        try {
+          assert.equal(whyOn(home, { agentPid: null, alive }), CANNOT_TELL, shut);
+        } finally {
+          chmodSync(shut, 0o755);
+        }
+        assert.equal(whyOn(home, { agentPid: null, alive }), "");
+      }
     });
   });
 
