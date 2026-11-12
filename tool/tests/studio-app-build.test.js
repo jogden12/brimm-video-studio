@@ -5,11 +5,13 @@
 // with an identity and nothing is sent to Apple. The vendor folder is made up: copies of /usr/bin/true, sealed with the real vendor.js.
 // No test runs any program inside a bundle it built: such a bundle is never really sealed, and macOS would put up its "damaged" dialog.
 // The bundle's JavaScript is run by the test's own node. HOME is a temporary folder. The tests need a Mac (zsh, plutil, ditto, file);
-// anywhere else they skip themselves and say why.
+// anywhere else they skip themselves and say why. Sparkle's archive is made up too (Phase 7, Task 7): a real .tar.xz laid out as
+// Sparkle's, with the framework's links, whose SHA-256 the temporary repo's sparkle.pin.json names beside a made-up public key.
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +28,17 @@ const HASH = "1111111111111111111111111111111111111111";
 const IDENTITY = `  1) ${HASH} "${NAME}"`;
 const APP = "BRIMM Video Studio.app";
 const VERSION = "1.0.0-beta.1";
+const KEY = `${"A1b2+/".repeat(7)}x=`;
+const FEED = "https://updates.thebrimminsights.com/appcast.xml";
+const FRAMEWORK = `${APP}/Contents/Frameworks/Sparkle.framework`;
+/** Sparkle's five parts, in the order Sparkle's own documentation signs them: inside-out, the framework itself last. */
+const SPARKLE_PARTS = [
+  `${FRAMEWORK}/Versions/B/XPCServices/Installer.xpc`,
+  `${FRAMEWORK}/Versions/B/XPCServices/Downloader.xpc`,
+  `${FRAMEWORK}/Versions/B/Autoupdate`,
+  `${FRAMEWORK}/Versions/B/Updater.app`,
+  FRAMEWORK,
+];
 const run = (cmd, args, options = {}) => spawnSync(cmd, args, { encoding: "utf8", ...options });
 
 /** Every file and folder under `dir`, as paths from it, sorted. */
@@ -68,8 +81,38 @@ function vendorFolder(dir, { sealed = true } = {}) {
   return folder;
 }
 
+/** A made-up Sparkle archive in `dir`, packed with tar -cJf as Sparkle's own is, with no folder at its top: Sparkle.framework, whose
+    Versions/B holds Sparkle, Autoupdate, Updater.app and the two XPC services (each program a copy of /usr/bin/true, never run), with
+    Versions/Current and the top-level links; LICENSE; and bin/ with generate_appcast and generate_keys. */
+function sparkleArchive(dir, name = "Sparkle-made-up.tar.xz") {
+  const packed = join(dir, `${name}.packed`);
+  const framework = join(packed, "Sparkle.framework");
+  const b = join(framework, "Versions", "B");
+  for (const d of ["Updater.app/Contents/MacOS", "XPCServices/Installer.xpc/Contents/MacOS", "XPCServices/Downloader.xpc/Contents/MacOS", "Resources"]) {
+    mkdirSync(join(b, d), { recursive: true });
+  }
+  for (const program of ["Sparkle", "Autoupdate", "Updater.app/Contents/MacOS/Updater", "XPCServices/Installer.xpc/Contents/MacOS/Installer", "XPCServices/Downloader.xpc/Contents/MacOS/Downloader"]) {
+    copyFileSync("/usr/bin/true", join(b, program));
+  }
+  writeFileSync(join(b, "Resources", "Info.plist"), "a made-up Info.plist\n");
+  symlinkSync("B", join(framework, "Versions", "Current"));
+  for (const link of ["Sparkle", "Autoupdate", "Updater.app", "XPCServices", "Resources"]) symlinkSync(`Versions/Current/${link}`, join(framework, link));
+  writeFileSync(join(packed, "LICENSE"), "Sparkle's made-up licence.\n");
+  mkdirSync(join(packed, "bin"));
+  for (const program of ["generate_appcast", "generate_keys"]) {
+    writeFileSync(join(packed, "bin", program), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(packed, "bin", program), 0o755);
+  }
+  const archive = join(dir, name);
+  const packing = run("/usr/bin/tar", ["-cJf", archive, "-C", packed, "Sparkle.framework", "LICENSE", "bin"]);
+  assert.equal(packing.status, 0, packing.stderr);
+  rmSync(packed, { recursive: true, force: true });
+  return archive;
+}
+
 /** A world: a temporary folder with a repo holding a copy of tool/ (with tool/tests/x.test.js, tool/move-app/x and tool/.env added),
-    committed, `bin/` of stand-ins, `tmp/` as TMPDIR, `home/` as HOME and a sealed vendor folder. `identities` is what the stand-in
+    committed, `bin/` of stand-ins, `tmp/` as TMPDIR, `home/` as HOME, a sealed vendor folder, and a made-up Sparkle archive whose
+    SHA-256, with a made-up public key, is in the repo's committed sparkle.pin.json. `identities` is what the stand-in
     security lists; `behind` leaves origin/main one commit behind the head. `build(...args)` runs the copy's build-app.sh with the
     `ran` file emptied first. */
 function world({ identities = [IDENTITY], behind = false } = {}) {
@@ -89,6 +132,10 @@ function world({ identities = [IDENTITY], behind = false } = {}) {
   mkdirSync(join(tool, "move-app"));
   writeFileSync(join(tool, "move-app", "x"), "the old app\n");
   writeFileSync(join(tool, ".env"), "NOT_READ=1\n");
+  const sparkle = sparkleArchive(dir);
+  const pinFile = join(tool, "studio-app", "sparkle.pin.json");
+  const pin = JSON.parse(readFileSync(pinFile, "utf8"));
+  writeFileSync(pinFile, `${JSON.stringify({ ...pin, sha256: createHash("sha256").update(readFileSync(sparkle)).digest("hex"), publicKey: KEY }, null, 2)}\n`);
   const git = (...args) => {
     const r = run("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-C", repo, ...args], { env: { PATH: "/usr/bin:/bin", HOME: dir } });
     assert.equal(r.status, 0, r.stderr);
@@ -108,14 +155,16 @@ function world({ identities = [IDENTITY], behind = false } = {}) {
   standIn(bin, "security", `printf '%s\\n' ${identities.map((i) => `'${i}'`).join(" ")} '     ${identities.length} valid identities found'\n`);
   standIn(bin, "codesign", "");
   standIn(bin, "xcrun", "");
+  standIn(bin, "generate_appcast", "");
+  standIn(bin, "generate_keys", "");
   const env = { PATH: `${bin}:/usr/bin:/bin:/usr/sbin:/sbin:${dirname(process.execPath)}`, HOME: home, TMPDIR: tmp, RAN: join(dir, "ran") };
   const script = join(tool, "studio-app", "build-app.sh");
   const vendor = vendorFolder(dir);
   const ran = () => (existsSync(join(dir, "ran")) ? readFileSync(join(dir, "ran"), "utf8") : "");
   return {
-    dir, repo, tool, tmp, home, head, first, bin, env, git, vendor, ran,
+    dir, repo, tool, tmp, home, head, first, bin, env, git, vendor, sparkle, pinFile, ran,
     /** The options every build needs, into `out`. */
-    needed: (out) => ["--out", out, "--version", VERSION, "--build", "7", "--vendor", vendor],
+    needed: (out) => ["--out", out, "--version", VERSION, "--build", "7", "--vendor", vendor, "--sparkle", sparkle],
     build: (...args) => {
       rmSync(join(dir, "ran"), { force: true });
       return run("/bin/zsh", [script, ...args], { env, cwd: dir });
@@ -144,6 +193,11 @@ const plistValue = (app, key) => run("plutil", ["-extract", key, "raw", "-o", "-
 /** The `codesign --force` lines of `ran`, each with its path made relative to the app. */
 const forced = (ran) => ran.split("\n").filter((l) => l.startsWith("codesign --force"));
 const inApp = (line) => line.slice(line.indexOf(APP));
+/** The forced lines before the first one under Contents/Frameworks/: node's programs. */
+const nodeLines = (force) => {
+  const first = force.findIndex((l) => inApp(l).startsWith(`${APP}/Contents/Frameworks/`));
+  return first === -1 ? force.slice(0, -1) : force.slice(0, first);
+};
 
 describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () => {
   let w;
@@ -242,16 +296,39 @@ describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () =>
     assert.equal(plistValue(plain.app, "CFBundleURLTypes.0.CFBundleURLSchemes.0"), "brimm-video-studio");
     assert.equal(plistValue(plain.app, "LSMinimumSystemVersion"), "13.0");
     assert.equal(plistValue(plain.app, "CFBundleVersion"), "7");
-    assert.equal(plistValue(plain.app, "CFBundleShortVersionString"), "1.0.0");
+    assert.equal(plistValue(plain.app, "CFBundleShortVersionString"), "1.0.0-beta.1");
+  });
+
+  it("the Info.plist names the feed and the repo's public key", () => {
+    assert.equal(plistValue(plain.app, "SUFeedURL"), FEED);
+    assert.equal(plistValue(plain.app, "SUPublicEDKey"), KEY);
+    assert.equal(plistValue(signed.app, "SUPublicEDKey"), KEY);
+  });
+
+  it("the framework is in the bundle with its links", () => {
+    const framework = join(plain.app, "Contents", "Frameworks", "Sparkle.framework");
+    assert.ok(lstatSync(join(framework, "Versions", "Current")).isSymbolicLink(), "Versions/Current is a link");
+    assert.ok(lstatSync(join(framework, "Sparkle")).isSymbolicLink(), "the top-level Sparkle is a link");
+    assert.ok(lstatSync(join(framework, "Versions", "B", "Sparkle")).isFile(), "Versions/B/Sparkle is a file");
+    for (const part of ["Versions/B/Autoupdate", "Versions/B/Updater.app/Contents/MacOS/Updater", "Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader"]) {
+      assert.ok(lstatSync(join(framework, part)).isFile(), part);
+    }
+    assert.equal(readFileSync(join(plain.app, "Contents", "Resources", "Licenses", "Sparkle-LICENSE"), "utf8"), "Sparkle's made-up licence.\n");
+    // Only the framework is taken from the archive: its programs for making a release stay out of the app.
+    assert.deepEqual(readdirSync(join(plain.app, "Contents", "Frameworks")), ["Sparkle.framework"]);
+    assert.equal(tree(plain.app).some((p) => p.includes("generate_")), false);
   });
 
   it("compiles the app from the commit's Sources, sorted, with the phase's flags", () => {
     const swift = plain.ran.split("\n").find((l) => l.startsWith("swiftc -O -swift-version 5"));
     assert.ok(swift, plain.ran);
-    const m = swift.match(/^swiftc -O -swift-version 5 -target arm64-apple-macos13\.0 -module-cache-path (\S+) -o (.+\/BRIMM Video Studio) (\S+\.swift( \S+\.swift)*)$/);
+    const m = swift.match(
+      /^swiftc -O -swift-version 5 -target arm64-apple-macos13\.0 -module-cache-path (\S+) -F (\S+) -framework Sparkle -Xlinker -rpath -Xlinker @executable_path\/\.\.\/Frameworks -o (.+\/BRIMM Video Studio) (\S+\.swift( \S+\.swift)*)$/,
+    );
     assert.ok(m, swift);
     assert.ok(m[1].startsWith(`${w.tmp}/`), "the module cache is in a temporary folder");
-    const names = m[3].split(" ").map((p) => p.split("/").pop());
+    assert.ok(m[2].startsWith(`${w.tmp}/`) && m[2].endsWith("/sparkle"), "Sparkle is found where its archive was unpacked, in the temporary folder");
+    const names = m[4].split(" ").map((p) => p.split("/").pop());
     const expected = readdirSync(join(w.tool, "studio-app", "Sources")).filter((n) => n.endsWith(".swift")).sort();
     assert.deepEqual(names, expected);
     // The five helpers, from build-helpers.js, into the bundle's bin.
@@ -263,9 +340,11 @@ describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () =>
   it("every program inside is signed before the app, node alone with its entitlements, and --deep is only on the verify", () => {
     const lines = signed.ran.split("\n");
     const force = forced(signed.ran);
-    assert.ok(force.length >= 11, signed.ran);
+    assert.ok(force.length >= 16, signed.ran);
     assert.ok(force[force.length - 1].endsWith(`/${APP}`), force[force.length - 1]);
-    for (const line of force.slice(0, -1)) assert.match(inApp(line), /^BRIMM Video Studio\.app\/Contents\/Resources\/node\//, line);
+    const node = nodeLines(force);
+    assert.ok(node.length >= 10, signed.ran);
+    for (const line of node) assert.match(inApp(line), /^BRIMM Video Studio\.app\/Contents\/Resources\/node\//, line);
     for (const line of force) {
       // The certificate is named by its SHA-1, never by its name, which an expired one from before a renewal shares.
       assert.ok(line.startsWith(`codesign --force --options runtime --timestamp --sign ${HASH} `), line);
@@ -276,7 +355,7 @@ describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () =>
     assert.equal(entitled.length, 1);
     assert.ok(entitled[0].endsWith("/Contents/Resources/node/bin/node"), entitled[0]);
     assert.match(entitled[0], /--entitlements \S*node\.entitlements /);
-    const relative = force.slice(0, -1).map(inApp);
+    const relative = node.map(inApp);
     assert.deepEqual(relative, [...relative].sort(), "sorted by path");
     for (const name of ["node", "npm", "ffmpeg", "ffprobe", "whisper-cli", "brimm-faces"]) {
       assert.ok(relative.includes(`${APP}/Contents/Resources/node/bin/${name}`), name);
@@ -288,6 +367,27 @@ describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () =>
     assert.ok(verify[0].endsWith(`/${APP}`));
     assert.ok(lines.indexOf(verify[0]) > lines.indexOf(force[force.length - 1]));
     assert.match(signed.r.stdout, new RegExp(`^Signed as ${NAME.replace(/[()]/g, "\\$&")}\\.$`, "m"));
+  });
+
+  it("Sparkle's five parts are signed after node's programs and before the app, the downloader alone keeping its entitlements", () => {
+    for (const [ran, start] of [
+      [signed.ran, `codesign --force --options runtime --timestamp --sign ${HASH} `],
+      [plain.ran, "codesign --force --sign - --timestamp=none "],
+    ]) {
+      const force = forced(ran);
+      const node = nodeLines(force);
+      const rest = force.slice(node.length);
+      assert.deepEqual(rest.map(inApp), [...SPARKLE_PARTS, APP], ran);
+      for (const line of rest) {
+        assert.ok(line.startsWith(start), line);
+        assert.equal(line.includes("--entitlements"), false, line);
+        assert.equal(line.includes("--deep"), false, line);
+      }
+      const keeping = force.filter((l) => l.includes("--preserve-metadata"));
+      assert.equal(keeping.length, 1, ran);
+      assert.ok(keeping[0].startsWith(`${start}--preserve-metadata=entitlements `), keeping[0]);
+      assert.equal(inApp(keeping[0]), SPARKLE_PARTS[1]);
+    }
   });
 
   it("node.entitlements holds the three entitlements, each true", () => {
@@ -318,6 +418,17 @@ describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () =>
     assert.equal(/^xcrun /m.test(signed.ran), false);
     assert.equal(/^xcrun /m.test(plain.ran), false);
     assert.equal(plain.r.stdout.includes("notarytool"), false);
+  });
+
+  it("the release line is printed after the notarizing lines, and nothing of it is run", () => {
+    const lines = signed.r.stdout.split("\n");
+    const release = `Then the release: zsh tool/studio-app/release.sh --app "${signed.app}" --releases <folder> --sparkle "${w.sparkle}" --print`;
+    const at = lines.indexOf(release);
+    assert.ok(at !== -1, signed.r.stdout);
+    assert.ok(at > lines.findIndex((l) => l.includes("spctl --assess")), signed.r.stdout);
+    assert.ok(at > lines.indexOf("The zip is made again after stapling, since a zip made before it has no ticket."), signed.r.stdout);
+    for (const ran of [signed.ran, plain.ran]) assert.equal(/release\.sh|^generate_/m.test(ran), false, ran);
+    assert.equal(plain.r.stdout.includes("release.sh"), false, plain.r.stdout);
   });
 
   it("the zip holds no ._ file and no extended attribute's shadow", () => {
@@ -487,9 +598,11 @@ describe("build-app.sh: --print, the refusals and the options", { skip: notAMac 
         without("--version"),
         without("--build"),
         without("--vendor"),
+        without("--sparkle"),
         [...all, "--channel"],
-        ["--out", out, "--version", "1.0", "--build", "7", "--vendor", w.vendor],
-        ["--out", out, "--version", VERSION, "--build", "0", "--vendor", w.vendor],
+        [...all, "--sparkle"],
+        ["--out", out, "--version", "1.0", "--build", "7", "--vendor", w.vendor, "--sparkle", w.sparkle],
+        ["--out", out, "--version", VERSION, "--build", "0", "--vendor", w.vendor, "--sparkle", w.sparkle],
         [...all, "--channel", "nightly"],
       ];
       for (const args of cases) {
@@ -497,12 +610,72 @@ describe("build-app.sh: --print, the refusals and the options", { skip: notAMac 
         assert.equal(r.status, 2, `${args.join(" ")}: ${r.stdout}${r.stderr}`);
         assert.equal(r.stdout.trim().split("\n").length, 1, r.stdout);
       }
-      assert.match(w.build("--out", out, "--version", "1.0", "--build", "7", "--vendor", w.vendor).stdout, /^The version is not one like 1\.0\.0 or 1\.0\.0-beta\.1\.$/m);
+      assert.match(w.build("--out", out, "--version", "1.0", "--build", "7", "--vendor", w.vendor, "--sparkle", w.sparkle).stdout, /^The version is not one like 1\.0\.0 or 1\.0\.0-beta\.1\.$/m);
       const fake = w.build(...all, "--fake-engine", "--sign");
       assert.equal(fake.status, 2);
       assert.equal(fake.stdout.trim(), "A build with the stand-in engine is never signed with the Developer ID.");
       assert.equal(existsSync(out), false);
       assert.equal(w.ran(), "");
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  it("--sparkle is needed", () => {
+    const w = world();
+    try {
+      const out = join(w.dir, "out");
+      const all = w.needed(out).slice(0, -2);
+      for (const extra of [[], ["--print"]]) {
+        const r = w.build(...all, ...extra);
+        assert.equal(r.status, 2, r.stdout + r.stderr);
+        assert.equal(r.stdout.trim(), "Say where Sparkle is: --sparkle and the archive fetch-sparkle.sh fetched.");
+      }
+      // It comes after the version's and the build's faults.
+      const version = w.build("--out", out, "--version", "1.0", "--build", "7", "--vendor", w.vendor);
+      assert.equal(version.status, 2);
+      assert.equal(version.stdout.trim(), "The version is not one like 1.0.0 or 1.0.0-beta.1.");
+      const build = w.build("--out", out, "--version", VERSION, "--build", "0", "--vendor", w.vendor);
+      assert.equal(build.status, 2);
+      assert.equal(build.stdout.trim(), "The build is not a whole number above 0.");
+      assert.equal(existsSync(out), false);
+      assert.equal(w.ran(), "");
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  it("an archive that is not the pinned one, or a pin with no public key, stops the build before anything is written", () => {
+    const w = world();
+    try {
+      const out = join(w.dir, "out");
+      const all = w.needed(out).slice(0, -2);
+      const other = join(w.dir, "other.tar.xz");
+      writeFileSync(other, "not Sparkle's archive\n");
+      for (const archive of [other, join(w.dir, "missing.tar.xz")]) {
+        for (const extra of [[], ["--print"], ["--sign"]]) {
+          const r = w.build(...all, "--sparkle", archive, ...extra);
+          assert.equal(r.status, 1, r.stdout + r.stderr);
+          assert.equal(r.stdout.trim(), "That is not the pinned Sparkle archive, so it was not unpacked.");
+          assert.equal(existsSync(out), false);
+          assert.deepEqual(readdirSync(w.tmp), []);
+          assert.equal(w.ran(), "");
+        }
+      }
+      // The pin with no public key is committed, and origin/main moved to it, so that the build refuses neither an uncommitted change
+      // nor the commit.
+      writeFileSync(w.pinFile, `${JSON.stringify({ ...JSON.parse(readFileSync(w.pinFile, "utf8")), publicKey: "" }, null, 2)}\n`);
+      w.git("add", ".");
+      w.git("commit", "-q", "-m", "three");
+      w.git("update-ref", "refs/remotes/origin/main", w.git("rev-parse", "HEAD"));
+      for (const extra of [[], ["--print"], ["--sign"]]) {
+        const r = w.build(...w.needed(out), ...extra);
+        assert.equal(r.status, 1, r.stdout + r.stderr);
+        assert.equal(r.stdout.trim(), "The update key's public half is not in sparkle.pin.json yet. Reading it is a by-hand step.");
+        assert.equal(existsSync(out), false);
+        assert.deepEqual(readdirSync(w.tmp), []);
+        assert.equal(w.ran(), "");
+      }
     } finally {
       w.cleanup();
     }
@@ -581,6 +754,10 @@ describe("build-app.sh: --print, the refusals and the options", { skip: notAMac 
       assert.ok(r.stdout.includes("This build's setup is a stand-in: it is for looking at the windows, and sets up nothing."), r.stdout);
       // The helpers are still there: the bin is the same as a real build's.
       assert.ok(existsSync(join(app, "Contents", "Resources", "node", "bin", "brimm-faces")));
+      // It carries Sparkle as a real build does, signed in the same order.
+      assert.ok(lstatSync(join(app, "Contents", "Frameworks", "Sparkle.framework", "Versions", "Current")).isSymbolicLink());
+      const force = forced(w.ran());
+      assert.deepEqual(force.slice(nodeLines(force).length).map(inApp), [...SPARKLE_PARTS, APP]);
     } finally {
       w.cleanup();
     }
