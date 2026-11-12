@@ -98,7 +98,8 @@ import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, 
 import { isMedia } from "./lib.js";
 import { quotable, shellWord, studioFiles, studioFolder } from "./studio.js";
 import { UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "./build.js";
-import { AGENT_LABEL, launchdPid } from "./busy.js";
+import { AGENT_LABEL, KICK_TIMEOUT_MS, launchdPid, updatingWaitedFile, updatingWhy } from "./busy.js";
+import { UNFINISHED, unfinished } from "./set-up.js";
 import { checkForUpdate, updateLine } from "./update-check.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
@@ -1806,9 +1807,10 @@ function accessFindingOf(ctx) {
 
 /** Ask the launch agent to look in this Mac's drop folder now, as it does when something lands there: with its own
     arguments, its own environment and its own lock. When it is running already, nothing more is started, and its run
-    looks again within a minute. Throws, saying why in launchctl's words, when it could not be asked. */
+    looks again within a minute. Throws, saying why in launchctl's words, when it could not be asked. Like busy.js's own, it
+    waits KICK_TIMEOUT_MS at most for launchctl to answer, so that a launchd that does not answer never holds the command. */
 function kickstart() {
-  const ran = spawnSync("/bin/launchctl", ["kickstart", `gui/${process.getuid()}/${AGENT}`], { encoding: "utf8" });
+  const ran = spawnSync("/bin/launchctl", ["kickstart", `gui/${process.getuid()}/${AGENT}`], { encoding: "utf8", timeout: KICK_TIMEOUT_MS });
   if (ran.status !== 0) throw new Error(lastLine(ran.stderr));
 }
 
@@ -2899,11 +2901,27 @@ function refuseIfLoosened(lock, say) {
   return 1;
 }
 
+/** When a run of the import waited for the marker of an update (busy.js updatingWaitedFile), the marker is no longer live and no run
+    is at work: asks the launch agent to look, once, and takes the note away. Whether it asked. A note that cannot be read, a kick
+    that throws and a note that cannot be taken away are let be: the note is looked at again by the next `behind`. Never throws. */
+function lookAfterUpdate(ctx) {
+  try {
+    if (!existsSync(updatingWaitedFile(ctx.home))) return false;
+    if (updatingWhy({ home: ctx.home, now: ctx.now() })) return false;
+    if (!noRunAtWork(ctx, dropFolderOf(ctx.settings, ctx.home), ctx.agentPid())) return false;
+    ctx.kickstart();
+    rmSync(updatingWaitedFile(ctx.home), { force: true });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 /** `behind`: whether this Mac's checkout of brimm-video is behind main on GitHub, by git, in this Mac's checkout: it fetches
     main, and counts the changes there that this checkout has not. First it clears the copies `show` opened (clearShown), the one thing it
     writes. Then it looks at the lock on her folder for Claude (lockLoosened): when that is loosened it says so, to ask Jason, and
     ends with 1 without asking git, since she is not to go on (editMain asks it too when this Mac has no settings for episodes). On her laptop git reaches GitHub with the deploy key. It changes nothing in the
-    checkout, and otherwise always ends with 0: a check that could not be made is said. A checkout with no .git of its own is not asked of git (phase 1): it says in one line that it could not check, and that this is why. An installed Mac's line is the update check's (phase 3). With the open lock in effect on this Mac it
+    checkout, and otherwise always ends with 0: a check that could not be made is said. A checkout with no .git of its own is not asked of git (phase 1): it says in one line that it could not check, and that this is why. An installed Mac's line is the update check's (phase 3), and before it, on a Mac whose app has an update to finish, UNFINISHED (set-up.js). With the open lock in effect on this Mac it
     also says, and goes on, when Claude Code has not trusted her folder yet (UNTRUSTED, first), and, after its other lines, the entries
     this Mac's settings add to what her folder allows, so that a change shows (design section 2). On a Mac whose settings turn the app
     on it also says, whatever git answered and before those entries, one line when the pinned HyperFrames command line is not the one
@@ -2914,6 +2932,12 @@ async function behind(ctx) {
   clearShown(ctx);
   const refused = refuseIfLoosened({ home: ctx.home, checkout: ctx.settings.checkout, deps: ctx.deps }, ctx.say);
   if (refused !== null) return refused;
+  // A run of the import that was refused while an update was under way left a note (busy.js noteWaited). When the marker has lapsed
+  // by itself, as after a crash, and no run is at work, nothing else asks the job to look: it is asked here, once, and the note goes.
+  // Nothing of it is said. It needs no network.
+  const kicked = lookAfterUpdate(ctx);
+  // An installed Mac whose app is another build than the one that last set it up has an update to finish: that is said first.
+  if (unfinished(ctx.home, ctx.build)) ctx.say(UNFINISHED);
   const open = lockFor(ctx.settings, ctx.deps) === "open";
   if (open) {
     let folder = null;
@@ -2946,7 +2970,7 @@ async function behind(ctx) {
       ctx.say(found.line);
       if (found.finding.kind === "newNode") {
         try {
-          if (noRunAtWork(ctx, dropFolderOf(ctx.settings, ctx.home), ctx.agentPid())) ctx.kickstart();
+          if (!kicked && noRunAtWork(ctx, dropFolderOf(ctx.settings, ctx.home), ctx.agentPid())) ctx.kickstart();
         } catch (e) {
           // the line is said all the same
         }
@@ -7209,6 +7233,18 @@ export async function editMain(argv, deps = {}) {
   // The command and its words are on ctx, so that findEpisode, which every command finds its episode by, asks the gate (gate.js)
   // before the command goes on: the folder a detached run is given by `--now` is found by it too.
   const ctx = { ...made, asked: { command, words: rest } };
+  // While an update of BRIMM Video Studio is under way no command starts (busy.js), but `behind`, `update` and a second half: a run
+  // Studio started itself (`--now`, `app --when-ready`), outside Claude Code, which holds a lock that the update waits for. A detached
+  // run is started without CLAUDECODE (detached.js spawnDetached), and a chat can type `--now`.
+  const env = ctx.deps.env || process.env;
+  const secondHalf = env.CLAUDECODE !== "1" && (rest[0] === "--now" || (command === "app" && rest[0] === "--when-ready"));
+  if (command !== "behind" && command !== "update" && !secondHalf) {
+    const updatingLine = updatingWhy({ home: ctx.home, now: ctx.now() });
+    if (updatingLine) {
+      ctx.say(updatingLine);
+      return 1;
+    }
+  }
   // Under Claude Code, each command first takes away the words files a day old (held.js clearOldWords).
   if ((ctx.deps.env || process.env).CLAUDECODE === "1") clearOldWords(ctx.home, ctx.now());
   let code;

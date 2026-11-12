@@ -1,13 +1,9 @@
-// What the windows show and do. Every launch runs a status first, and what comes next is asked of nextFromStatus; the setup and the
-// repair runs, the apps timer, the guide's PDF, the move to Applications, Uninstall and the status window's buttons are here. The
-// decisions themselves are in the Foundation-only files, which node's tests ask: this file only calls them and publishes what they give.
+// What the windows show and do. Every launch runs a status first, and what comes next is asked of nextFromStatus; the setup, the
+// repair and the update runs, the apps timer, the guide's PDF, the move to Applications, Uninstall, a check for updates and the
+// status window's buttons are here. The decisions themselves are in the Foundation-only files, which node's tests ask: this file
+// only calls them and publishes what they give.
 import AppKit
 import Combine
-
-/// The page the window shows.
-enum Screen {
-    case checking, move, refused, setup, repairing, twoCopies, status, removed
-}
 
 /// What the window says when the app is in a folder with a colon in its name, where the engine cannot be started. Finder shows a
 /// colon in a name as a slash.
@@ -15,9 +11,6 @@ let colonRefused = "BRIMM Video Studio cannot run from a folder with a slash or 
 
 /// What the window says when the guide could not be made into a PDF, before the HTML's path and a full stop.
 let guideNotMade = "The Getting Started guide could not be made into a PDF. It is here as a web page:"
-
-/// What the window says when Check for Updates is chosen, until Phase 7 replaces checkForUpdates's body.
-let noUpdatesYet = "Updates are not part of this build yet."
 
 /// What the window says when a stand-in build is asked to move itself.
 let fakeNeverMoved = "A stand-in build is never moved."
@@ -46,6 +39,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var guideMade: Bool?
     /// True while the move or Uninstall runs off the main thread: the pages then show it and take no click.
     @Published private(set) var working = false
+    /// Where a check for updates is, and the line its page shows: busy.js's own line while something is at work.
+    @Published private(set) var update: UpdatePhase = .none
+    @Published private(set) var updateLine = ""
+
+    /// Called when a quit that waits for a check for updates may go on. The delegate sets it to its reply to AppKit.
+    var quitMayGo: (() -> Void)?
 
     /// Whether this is a stand-in build: a file named FAKE-ENGINE.txt is in the app's Resources.
     let fake: Bool
@@ -84,12 +83,60 @@ final class AppModel: ObservableObject {
     private var guideNotice: String?
     private var timer: Timer?
 
+    /// The updater. It is made here and started only when a check is first asked for.
+    private let updater: SparkleUpdater
+    /// The one queue that runs busy.js's updating begin and updating end --look, one at a time, in the order they were asked.
+    private let markers = DispatchQueue(label: "com.thebrimm.video-studio.updating")
+    /// Whether the last answer of idle-why was idle, when the check began or went on, and when the marker was last asked to be written.
+    private var idleBefore = false
+    private var began = 0.0
+    private var lastMarked = 0.0
+    /// Counts each entry into waiting or holding, so that an answer that belongs to an earlier one is never taken.
+    private var entry = 0
+    /// Whether the entry now may be looked at: from the end of its begin until holding lets go.
+    private var mayLook = false
+    /// True while an idle-why runs, so that no two run at once.
+    private var looking = false
+    /// When the look now running began, the entry it belongs to, and a count of the looks, so that a look given up after lookLimit
+    /// seconds, or one of an earlier entry, has its late answer dropped.
+    private var lookStarted = 0.0
+    private var lookEntry = 0
+    private var lookCount = 0
+    /// True while a check waits for the cancelled setup run's client to end.
+    private var updatesAfterRun = false
+    /// True while a quit waits for the check.
+    private var quitWaiting = false
+
     init() {
         fake = FileManager.default.fileExists(atPath: (app as NSString).appendingPathComponent("Contents/Resources/FAKE-ENGINE.txt"))
         moveFolder = moveTarget(home: home, systemWritable: FileManager.default.isWritableFile(atPath: "/Applications"))
+        let build = FileManager.default.contents(atPath: (studioFolder(app: app) as NSString).appendingPathComponent("build.json")) ?? Data()
+        updater = SparkleUpdater(channels: allowedChannels(build: build))
         let made = Timer(timeInterval: checkEvery, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(made, forMode: .common)
         timer = made
+
+        // What the updater tells. Each is called on the main thread.
+        updater.onUnpacked = { [weak self] in
+            guard let self, self.update == .offered else { return }
+            self.update = .unpacked
+        }
+        // A cycle that ends in Offered, or that failed from Unpacked on, ends the check as a skip does, so a quit that waits for
+        // it gets its reply.
+        updater.onEnded = { [weak self] error in
+            guard let self, endsCheck(phase: self.update, failed: error != nil) else { return }
+            self.endCheck(ended: { [weak self] in self?.replyToQuit() })
+        }
+        updater.onSkipped = { [weak self] in
+            guard let self, self.update == .unpacked || self.update == .holding else { return }
+            self.endCheck(ended: { [weak self] in self?.replyToQuit() })
+        }
+        // An install is held only when it is asked for from the update's window, in Offered or Unpacked, and on the updates page.
+        updater.onInstallAsked = { [weak self] in
+            guard let self, self.update == .offered || self.update == .unpacked else { return }
+            self.screen = .updates
+            self.enterHolding()
+        }
     }
 
     deinit { timer?.invalidate() }
@@ -113,10 +160,11 @@ final class AppModel: ObservableObject {
     func quitAsked() { quitting = true }
 
     /// Starts with a status, and goes on to what follows it. `chosen` is the run the person asked for. It does nothing while a run
-    /// is running, while the move or Uninstall works, or once the app is quitting. When the run shown has ended by its events and its
-    /// client has not yet ended, it is done as soon as the client has.
+    /// is running, while the move or Uninstall works, while a check for updates is under way, or once the app is quitting. When the
+    /// run shown has ended by its events and its client has not yet ended, it is done as soon as the client has. Every way back from
+    /// a check sets the phase to none before it calls this.
     func begin(chosen: Run?) {
-        guard !working, !quitting else { return }
+        guard !working, !quitting, update == .none else { return }
         if current != nil {
             if !state.running { beginAsked = BeginAsked(chosen: chosen) }
             return
@@ -144,6 +192,7 @@ final class AppModel: ObservableObject {
             case .refused: self.screen = .refused
             case .setup: self.startSetup()
             case .repair: self.startRepair()
+            case .update: self.startUpdate()
             case .twoCopies:
                 self.other = found
                 self.screen = .twoCopies
@@ -163,6 +212,14 @@ final class AppModel: ObservableObject {
         start(.repair) { [weak self] ended in
             if ended.done?.outcome == "repaired" { self?.begin(chosen: nil) }
         }
+    }
+
+    /// The update run, which a copy starts when the Mac was set up by another build. Nothing follows it by itself: its last page
+    /// keeps the engine's note until the person chooses Continue, and a run that failed starts again only when the app is opened
+    /// again or Repair is chosen. Only a status's end starts it.
+    private func startUpdate() {
+        screen = .updating
+        start(.update) { _ in }
     }
 
     /// Starts `run` into a new state: began, then each event, then ended at the client's end, and then `then` with the state made.
@@ -209,14 +266,23 @@ final class AppModel: ObservableObject {
         current = nil
         state.ended()
         then(state)
+        if updatesAfterRun {
+            // Check for Updates was chosen on the setup screen, and the run it cancelled has now ended.
+            updatesAfterRun = false
+            beginAsked = nil
+            if current == nil && !quitting { startWaiting() }
+            return
+        }
         if let asked = beginAsked {
             beginAsked = nil
             if current == nil { begin(chosen: asked.chosen) }
         }
     }
 
-    /// The apps timer: when the apps question is open and the last check was answered, it asks the engine to check again.
+    /// The apps timer: when the apps question is open and the last check was answered, it asks the engine to check again. Each tick
+    /// also does a check for updates' part first, which sends no apps check.
     private func tick() {
+        updateTick()
         guard shouldCheck(state), let question = state.question else { return }
         answer(question.id, .apps(.check))
     }
@@ -296,8 +362,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func checkForUpdates() { notice = noUpdatesYet }
-
     /// Opens the guide's PDF when it is there. Otherwise the HTML is made into the PDF first, and is opened itself if that fails.
     func openGuide() {
         let guide = self.guide
@@ -350,6 +414,222 @@ final class AppModel: ObservableObject {
             }
         }
     }
+
+    // MARK: A check for updates
+
+    /// Whether Check for Updates may be chosen now: the menu item is enabled by it, and a link is acted on by it.
+    var mayCheck: Bool {
+        !working && mayCheckForUpdates(screen: screen, quit: quit, failure: state.failure?.code, fake: fake, phase: update)
+    }
+
+    /// Check for Updates, from the menu, the status window's button or a link. Where it may not be chosen, a stand-in build says so
+    /// and nothing else happens. The updater is started first; on the setup screen the run is cancelled, and the check waits for its
+    /// client to end.
+    func checkForUpdates() {
+        guard mayCheck else {
+            if fake { notice = updatesStandIn }
+            return
+        }
+        guard updater.startUpdater() else {
+            notice = updatesCannotStart
+            return
+        }
+        if screen == .setup {
+            updatesAfterRun = true
+            cancel()
+            return
+        }
+        // A begin kept from a run that has ended is not done under the check.
+        beginAsked = nil
+        startWaiting()
+    }
+
+    /// The updates page, waiting until nothing is at work.
+    private func startWaiting() {
+        screen = .updates
+        enterWaiting()
+    }
+
+    /// Not now, shown only while waiting.
+    func notNow() {
+        guard update == .waiting else { return }
+        endCheck()
+    }
+
+    /// Show the update window and Install now: the updater's own window, brought to the front.
+    func showUpdateWindow() { updater.check() }
+
+    /// Waiting: the look starts again from nothing, and the marker is written.
+    private func enterWaiting() {
+        update = .waiting
+        idleBefore = false
+        entered()
+    }
+
+    /// Holding the install until nothing is at work: the look starts again from nothing, and the marker is written.
+    private func enterHolding() {
+        update = .holding
+        idleBefore = false
+        entered()
+    }
+
+    /// The rest of entering waiting or holding. The check begins now with an empty line, updating begin is queued, and the first
+    /// look is asked only once that has ended. A begin that did not end with 0 cannot tell.
+    private func entered() {
+        began = clock
+        updateLine = ""
+        entry += 1
+        let mine = entry
+        mayLook = false
+        queueBegin { [weak self] status in
+            guard let self, mine == self.entry, self.update == .waiting || self.update == .holding else { return }
+            self.mayLook = true
+            if status != 0 { self.gated(.cannotTell) }
+        }
+    }
+
+    /// Every way back to the status: the phase is none and its line empty, then the marker is taken away and the job asked to look,
+    /// then the status follows, with `said` under it. `ended` is called once the end command has ended.
+    private func endCheck(saying said: String? = nil, ended: (() -> Void)? = nil) {
+        update = .none
+        updateLine = ""
+        queueEnd(then: ended)
+        begin(chosen: nil)
+        if let said { notice = said }
+    }
+
+    /// A quit while waiting: the phase is none, the marker is taken away and the job asked to look, and the quit goes on once that
+    /// has ended.
+    func endForQuit() {
+        update = .none
+        updateLine = ""
+        quitWaiting = true
+        queueEnd(then: { [weak self] in self?.replyToQuit() })
+    }
+
+    /// A quit from Offered on: it waits on the updates page, holding until nothing is at work. Its reply comes when holding lets go,
+    /// or with a skip.
+    func holdForQuit() {
+        quitWaiting = true
+        screen = .updates
+        if update != .holding { enterHolding() }
+    }
+
+    /// Lets a quit that waits for the check go on.
+    private func replyToQuit() {
+        guard quitWaiting else { return }
+        quitWaiting = false
+        quitMayGo?()
+    }
+
+    /// A check's part of each tick: waiting too long, a look that has run too long, the marker's upkeep, and one look at a time while
+    /// waiting or holding.
+    private func updateTick() {
+        guard update != .none else { return }
+        let at = clock
+        if update == .waiting && waitedTooLong(now: at, began: began) {
+            endCheck(saying: updatesWaitedTooLong)
+            return
+        }
+        if looking && at - lookStarted >= lookLimit {
+            // The look is given up: its late answer is dropped, and it counts as one that cannot tell, but only for the entry it
+            // was asked for.
+            looking = false
+            lookCount += 1
+            if lookEntry == entry, mayLook, update == .waiting || update == .holding {
+                gated(.cannotTell)
+                if update == .none { return }
+            }
+        }
+        let limited = update == .waiting || update == .offered || update == .unpacked || update == .installing
+        if markDue(now: at, lastMarked: lastMarked, began: began, limited: limited) { queueBegin() }
+        guard update == .waiting || update == .holding, mayLook, !looking else { return }
+        look()
+    }
+
+    /// Asks busy.js idle-why, the command Uninstall asks first, off the main thread, and gives its answer to the gate. An answer
+    /// that comes after the phase or the entry has changed, or after the look was given up, is not taken.
+    private func look() {
+        looking = true
+        lookStarted = clock
+        lookEntry = entry
+        lookCount += 1
+        let mine = (entry: entry, look: lookCount)
+        let command = uninstallCommands(app: app)[0]
+        let environment = childEnvironment(from: ProcessInfo.processInfo.environment, home: home, app: app)
+        DispatchQueue.global().async { [weak self] in
+            let ran = runToEnd(command, environment: environment, limit: lookLimit)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, mine.look == self.lookCount else { return }
+                self.looking = false
+                guard mine.entry == self.entry, self.mayLook, self.update == .waiting || self.update == .holding else { return }
+                self.gated(gateNext(status: ran.status, out: ran.out, idleBefore: self.idleBefore))
+            }
+        }
+    }
+
+    /// What follows one answer of idle-why while waiting or holding. The two-idle count is kept by idleAfter for every answer.
+    private func gated(_ next: GateNext) {
+        idleBefore = idleAfter(next, before: idleBefore)
+        switch next {
+        case .again:
+            break
+        case .wait(let line):
+            updateLine = line
+        case .cannotTell:
+            if update == .waiting {
+                endCheck(saying: updatesCannotTell)
+            } else {
+                // While holding the marker stays, and nothing is asked to look.
+                updateLine = updatesCannotTell
+            }
+        case .go:
+            if update == .waiting {
+                update = .offered
+                began = clock
+                updater.check()
+            } else {
+                // Holding lets go once: no look is asked from here on.
+                mayLook = false
+                queueBegin { [weak self] _ in
+                    guard let self, self.update == .holding else { return }
+                    self.update = .installing
+                    // Installing begins anew, so its marker lapses half an hour on if the installer never ends the app.
+                    self.began = self.clock
+                    self.updater.install()
+                    self.replyToQuit()
+                }
+            }
+        }
+    }
+
+    /// Queues busy.js updating begin behind every marker command asked before it. When its turn comes it looks at the phase first,
+    /// and is dropped when that is none. `then` is given its status on the main thread.
+    private func queueBegin(then: ((Int32) -> Void)? = nil) {
+        lastMarked = clock
+        let command = updatingCommands(app: app)?.begin
+        let environment = childEnvironment(from: ProcessInfo.processInfo.environment, home: home, app: app)
+        markers.async { [weak self] in
+            let phase: UpdatePhase = DispatchQueue.main.sync { self?.update ?? UpdatePhase.none }
+            guard phase != .none else { return }
+            let status = command.map { runToEnd($0, environment: environment, limit: lookLimit).status } ?? 127
+            DispatchQueue.main.async { then?(status) }
+        }
+    }
+
+    /// Queues busy.js updating end --look behind every marker command asked before it. `then` is called on the main thread once it
+    /// has ended.
+    private func queueEnd(then: (() -> Void)? = nil) {
+        let command = updatingCommands(app: app)?.end
+        let environment = childEnvironment(from: ProcessInfo.processInfo.environment, home: home, app: app)
+        markers.async {
+            if let command { _ = runToEnd(command, environment: environment, limit: lookLimit) }
+            DispatchQueue.main.async { then?() }
+        }
+    }
+
+    /// The time now, in seconds.
+    private var clock: Double { Date().timeIntervalSinceReferenceDate }
 
     // MARK: The guide
 

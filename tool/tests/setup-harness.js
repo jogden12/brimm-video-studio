@@ -5,7 +5,8 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { PassThrough, Writable } from "node:stream";
 import { dirname, join } from "node:path";
-import { appCopy } from "./app-copy.js";
+import { WHOLE, appCopy } from "./app-copy.js";
+import { writeSetUp } from "../set-up.js";
 import { settingsFile, writeSettings } from "../settings.js";
 import { LABELS } from "../setup/install.js";
 
@@ -31,6 +32,8 @@ const CLAUDE = {
     - `settings`: "none"; "takeover" (usable settings whose checkout is a git clone in the folder); "installed" (the checkout is
       this app's copy); "moved" (the checkout is another app's copy); "dev" (takeover's, marked as Jason's development Mac);
       "unusable" (a settings file that holds `{`).
+    - `record`: with installed settings, the record of the build that set this Mac up (set-up.json): "this" is the app copy's own
+      build (WHOLE's), "older" is build 141, version 1.4.1, and "none" writes no record. With other settings it writes nothing.
     - `apps`: any of "claude-app", "dropbox" and "hyperframes", each made as that app's folder in the home's Applications folder.
     - `dropbox`: whether there is a BRIMM Video folder (`root`) in Dropbox, with Drop, Unedited Video and one episode.
     - `claude`: "none", "signed-out", "old" or "signed-in": the Claude Code in ~/.local/bin. It says what dir/says/claude-version
@@ -46,7 +49,7 @@ const CLAUDE = {
     - The installer (a list: the program and its first arguments) waits while dir/hold is there, and then writes the log that its
       own check of Claude writes, in one of two ways. With dir/says/check-log-new it does as install.sh does: it takes the log
       away and writes that file's text as a new log. With dir/says/check-log it appends that file's text to the log. */
-export function mac({ settings = "none", apps = [], dropbox = true, claude = "signed-in" } = {}) {
+export function mac({ settings = "none", record = "this", apps = [], dropbox = true, claude = "signed-in" } = {}) {
   const copy = appCopy({ under: "Copy" });
   const { dir, app, tools, checkout } = copy;
   const home = join(dir, "home");
@@ -136,6 +139,10 @@ export function mac({ settings = "none", apps = [], dropbox = true, claude = "si
     mkdirSync(dirname(settingsFile(home)), { recursive: true });
     writeFileSync(settingsFile(home), "{");
   } else if (settings !== "none") throw new Error(`no such kind of settings: ${settings}`);
+  // The record of the build that set an installed Mac up, written as the engine writes it.
+  if (!["this", "older", "none"].includes(record)) throw new Error(`no such record: ${record}`);
+  if (settings === "installed" && record === "this") writeSetUp(home, { build: WHOLE.build, version: WHOLE.version });
+  if (settings === "installed" && record === "older") writeSetUp(home, { build: 141, version: "1.4.1" });
 
   return { dir, home, root, app, tools, checkout, programs, ran: copy.ran, done: copy.done };
 }

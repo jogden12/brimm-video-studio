@@ -35,6 +35,7 @@ import { linksOf } from "./finish.js";
 import { clearChecking, clearProblem, flagProblem, problemNotice } from "./finish-check.js";
 import { randomUUID } from "node:crypto";
 import { buildOf, forThisMac, isInstalled } from "./build.js";
+import { noteWaited, updatingWhy } from "./busy.js";
 
 /** How long a recording must be to be an episode, in seconds. One that is shorter is a short video. */
 const SHORT_UNDER = 90;
@@ -1658,6 +1659,8 @@ export async function importEpisodes(dir, deps, importOne) {
   const { episode, log = () => {}, wait, clock = Date.now, keepAwake = caffeinate } = deps;
   // The launch agent's deps carry neither a clock nor `alive`: a check is given these, resolved, and never calls deps.clock or deps.alive as given.
   const alive = deps.alive || isRunning;
+  // The line of an update under way, or "" (busy.js updatingWhy).
+  const updating = deps.updating || (() => updatingWhy({ home: episode.home, now: Date.now() }));
   // When the Mac last woke or started (ruling 33): its own answer, but none when a test gives a clock, which is not the Mac's.
   const wokeAt = deps.wokeAt || (deps.clock ? () => null : lastWake);
   let woke = null;
@@ -1814,6 +1817,13 @@ export async function importEpisodes(dir, deps, importOne) {
     episodesStopped = ["refused", "locked", "error"].includes(look.state);
   };
   const importWaiting = async (first) => {
+    // While an update of BRIMM Video Studio is under way no new video is taken in (busy.js). The late checks are still made, so a
+    // run that was waiting ends; one still going when the update is over takes in what waited at its next look. A note says that it
+    // waited, so that `behind` asks the job to look should the marker lapse by itself, as after a crash, when nothing else would.
+    if (updating()) {
+      noteWaited({ home: episode.home });
+      return;
+    }
     const look = lookAt("drop", dir, noted);
     // A folder that is not there was said by the caller (unedited.js uneditedFolders), which goes on to it only on a Mac with a drop folder of its own.
     sayLook("drop", dir, look);
@@ -1838,6 +1848,12 @@ export async function importEpisodes(dir, deps, importOne) {
     const names = waitingToCut(look.names).filter((name) => !seen.has(key(name)));
     if (first) log(names.length ? `Looked in the folder: ${names.length} waiting.` : "Looked in the folder: nothing is waiting.");
     for (const name of names) {
+      // An update that began while an earlier video of this look imported takes no more of them in. Those left are not seen, so a
+      // look once the update is over takes them in.
+      if (updating()) {
+        noteWaited({ home: episode.home });
+        return;
+      }
       // A late check that came due while an earlier video imported took this video out of the folder: it is no video to import,
       // and none to say failed.
       if (!statSync(join(dir, name), { throwIfNoEntry: false })) continue;

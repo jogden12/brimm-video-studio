@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { buildOf, isInstalled } from "../build.js";
 import { devMarked, machineFault, readSettings, sameFolder, settingsFile } from "../settings.js";
 import { HELPERS } from "../helpers.js";
+import { readSetUp } from "../set-up.js";
 import { hasFilters, hasHwaccel } from "../workcopy.js";
 
 /** The programs the app carries in its tools folder (--tools): install.sh's TOOLS_PROGRAMS, then each of Studio's compiled helpers. */
@@ -58,16 +59,16 @@ export function copyFault({ app, tools, checkout, programs, deep = true }) {
 
 /** Which kind of Mac this is, from its settings and the checkout of the copy that is running:
     fresh (no settings), unusable (settings that cannot be read, with `why` in their own words), dev (marked as Jason's development Mac,
-    whatever its checkout), installed (the settings' checkout is an app's copy: this one, or `moved`, another), or takeover (anything
-    else: a git clone, or a folder that is gone). */
+    whatever its checkout), installed (the settings' checkout is an app's copy: this one, or `moved`, another; `setUpBy` is the build
+    that last set it up, as readSetUp gives it), or takeover (anything else: a git clone, or a folder that is gone). */
 export function kindOf({ home, checkout }) {
   if (!existsSync(settingsFile(home))) return { kind: "fresh" };
   const read = readSettings(home);
   if (read.why) return { kind: "unusable", why: read.why };
   const { settings } = read;
   if (devMarked(settings)) return { kind: "dev", settings };
-  if (sameFolder(settings.checkout, checkout)) return { kind: "installed", settings, moved: false };
-  if (/\.app\/Contents\/Resources\/Studio\/?$/.test(settings.checkout)) return { kind: "installed", settings, moved: true };
+  if (sameFolder(settings.checkout, checkout)) return { kind: "installed", settings, moved: false, setUpBy: readSetUp(home) };
+  if (/\.app\/Contents\/Resources\/Studio\/?$/.test(settings.checkout)) return { kind: "installed", settings, moved: true, setUpBy: readSetUp(home) };
   return { kind: "takeover", settings };
 }
 

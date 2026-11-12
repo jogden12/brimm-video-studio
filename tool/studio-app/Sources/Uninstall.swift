@@ -18,8 +18,9 @@ let notStopped = "BRIMM Video Studio could not stop its background job. Open it 
 /// Runs `command` with `environment` and gives its status and its whole output and error. Both are read at the same time, so a full
 /// pipe never stops the program. A program that cannot be started gives 127, and one ended by a signal 128 and the signal. It blocks
 /// until the program has ended, so the app never calls it on the main thread. The app's Uninstall and its move, and studio-check, all
-/// use it.
-func runToEnd(_ command: Command, environment: [String: String]) -> (status: Int32, out: String, err: String) {
+/// use it. With a `limit`, in seconds, a program still running when it is up is sent TERM, and KILL three seconds later if it is
+/// running still, so its status is then 143 or 137.
+func runToEnd(_ command: Command, environment: [String: String], limit: Double? = nil) -> (status: Int32, out: String, err: String) {
     let child = Process()
     child.executableURL = URL(fileURLWithPath: command.program)
     child.arguments = command.arguments
@@ -33,6 +34,16 @@ func runToEnd(_ command: Command, environment: [String: String]) -> (status: Int
         try child.run()
     } catch {
         return (status: 127, out: "", err: "")
+    }
+    if let limit {
+        let id = child.processIdentifier
+        DispatchQueue.global().asyncAfter(deadline: .now() + limit) {
+            guard child.isRunning else { return }
+            child.terminate()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                if child.isRunning { kill(id, SIGKILL) }
+            }
+        }
     }
     var errors = Data()
     let group = DispatchGroup()

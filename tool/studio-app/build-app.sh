@@ -1,13 +1,16 @@
 #!/bin/zsh
 # Builds BRIMM Video Studio.app and its zip from one commit and a sealed vendor folder (Phase 6). Run on a Mac with the Xcode command
 # line tools:
-#   zsh tool/studio-app/build-app.sh --out <folder> --version <semver> --build <n> --vendor <folder>
+#   zsh tool/studio-app/build-app.sh --out <folder> --version <semver> --build <n> --vendor <folder> --sparkle <archive>
 #                                    [--channel stable|beta] [--sign] [--any-commit] [--print] [--fake-engine]
 # It makes <folder>/BRIMM Video Studio.app and <folder>/BRIMM-Video-Studio-<version>.zip, replacing only those two from an earlier
 # build. Everything is put together in a temporary folder, which it takes away, and the two are moved into <folder> only when every
 # step has passed. Without --sign every program is sealed ad hoc (codesign --sign -), which is local and sends nothing.
 #   --vendor       the folder build-vendor.sh made: node, ffmpeg, ffprobe and whisper-cli, sealed under this commit's pins.
-#   --channel      stable (when not given) or beta, written into build.json.
+#   --sparkle      Sparkle's archive, as fetch-sparkle.sh fetched it. It is used only when its SHA-256 is sparkle.pin.json's, and that
+#                  file must hold the update key's public half, which goes into Info.plist.
+#   --channel      stable (when not given) or beta, written into build.json. A version with a pre-release part, as 1.0.0-beta.2 has,
+#                  goes on beta, and only such a version does: build-info.js refuses any other pairing before anything is written.
 #   --sign         signs inside-out with the one "Developer ID Application" identity in the keychain, found by name (nothing secret is
 #                  in any file) and given to codesign by its SHA-1, with the hardened runtime and a secure timestamp. codesign --timestamp asks Apple's timestamp server
 #                  for the time, which notarizing needs; that is all it sends.
@@ -26,18 +29,19 @@ here=${0:A:h}
 repo=${here:h:h}
 source $here/common.zsh
 
-out= version= build= vendor= channel=stable
+out= version= build= vendor= sparkle= channel=stable
 sign=0 any_commit=0 print_only=0 fake=0
 
 while (( $# )); do
   case $1 in
-    --out|--version|--build|--vendor|--channel)
+    --out|--version|--build|--vendor|--sparkle|--channel)
       (( $# >= 2 )) || { say "$1 needs a value."; exit 2 }
       case $1 in
         --out) out=$2 ;;
         --version) version=$2 ;;
         --build) build=$2 ;;
         --vendor) vendor=$2 ;;
+        --sparkle) sparkle=$2 ;;
         --channel) channel=$2 ;;
       esac
       shift 2 ;;
@@ -61,6 +65,7 @@ commit=$(git -C $repo rev-parse HEAD 2>/dev/null) || stop "This is not a git che
 
 # build-info.js says the first fault in the version, the build or the channel; it is asked here, before anything is written.
 fault=$(node $here/build-info.js json --version $version --build $build --commit $commit --channel $channel 2>&1 >/dev/null) || { say $fault; exit 2 }
+[[ -n $sparkle ]] || { say "Say where Sparkle is: --sparkle and the archive fetch-sparkle.sh fetched."; exit 2 }
 
 refuse_watched $out
 if [[ -n $(git -C $repo status --porcelain -- tool) ]]; then
@@ -71,6 +76,13 @@ if (( ! any_commit )) && ! git -C $repo merge-base --is-ancestor $commit refs/re
 fi
 why=$(node $here/vendor.js check $vendor 2>&1) || stop $why
 vendor=${vendor:A}
+# Sparkle's archive must be the pinned one, and the pin must hold the update key's public half. unpack_sparkle checks the archive
+# again before it unpacks it.
+why=$(node $here/sparkle.js check $sparkle 2>&1) || stop $why
+sparkle=${sparkle:A}
+# The key is what sparkle.js prints on stdout alone, so nothing node says on stderr is glued onto it. Only when the command fails is
+# it asked again, for everything it says.
+public_key=$(node $here/sparkle.js key 2>/dev/null) || stop "$(node $here/sparkle.js key 2>&1)"
 identity= identity_hash=
 (( sign )) && find_identity
 
@@ -80,7 +92,7 @@ zip=$out/BRIMM-Video-Studio-$version.zip
 source_name=$(node $here/vendor.js source-name) || stop "The name of ffmpeg's source zip could not be read."
 
 if (( print_only )); then
-  say "Would build BRIMM Video Studio $version, build $build, at commit $commit, with the vendored programs in $vendor."
+  say "Would build BRIMM Video Studio $version, build $build, at commit $commit, with the vendored programs in $vendor and Sparkle from $sparkle."
   say "It would make:"
   say "  $app"
   say "  $zip"
@@ -88,17 +100,18 @@ if (( print_only )); then
   say "  1. Studio's tool from the commit (git archive), without tests, move-app, studio-app or any .env file."
   say "  2. build.json, on the $channel channel."
   say "  3. node, ffmpeg, ffprobe and whisper-cli from the vendored programs, with their licences and the line naming $source_name."
-  say "  4. Studio's five helpers, compiled with swiftc into node's bin."
-  say "  5. Info.plist, checked with plutil."
-  say "  6. The app's program, compiled with swiftc from the commit's Sources."
-  if (( fake )); then say "  7. The stand-in engine in place of Studio's tool, with the real guide's page filled with sample details."; else say "  7. (No stand-in engine.)"; fi
+  say "  4. Sparkle.framework from the pinned archive, checked again and unpacked, into Contents/Frameworks with its links, and its licence."
+  say "  5. Studio's five helpers, compiled with swiftc into node's bin."
+  say "  6. Info.plist, with the feed and the update key's public half, checked with plutil."
+  say "  7. The app's program, compiled with swiftc from the commit's Sources and linked to Sparkle."
+  if (( fake )); then say "  8. The stand-in engine in place of Studio's tool, with the real guide's page filled with sample details."; else say "  8. (No stand-in engine.)"; fi
   if (( sign )); then
-    say "  8. Each program inside, then the app, signed with the hardened runtime as $identity."
+    say "  9. Each program under node, then Sparkle's parts in Sparkle's own order, then the app, signed with the hardened runtime as $identity."
   else
-    say "  8. Each program inside, then the app, sealed ad hoc, for this Mac's tests only."
+    say "  9. Each program under node, then Sparkle's parts in Sparkle's own order, then the app, sealed ad hoc, for this Mac's tests only."
   fi
-  say "  9. The signature checked with codesign --verify --deep --strict."
-  say "  10. The zip, with ditto, without resource forks or extended attributes."
+  say "  10. The signature checked with codesign --verify --deep --strict."
+  say "  11. The zip, with ditto, without resource forks or extended attributes."
   say "Nothing was done."
   exit 0
 fi
@@ -129,25 +142,35 @@ ditto $vendor/node $res/node || stop "The vendored programs could not be copied.
 ditto $vendor/licenses $res/Licenses || stop "The licences could not be copied."
 say "ffmpeg and x264 are free software under the GNU General Public License. The source this copy was built from, with the build's own script, is at https://updates.thebrimminsights.com/source/$source_name." > $res/Licenses/ffmpeg-source.txt || stop "ffmpeg-source.txt could not be written."
 
-# 4. Studio's helpers, beside node.
+# 4. Sparkle's framework, from its archive, which unpack_sparkle checks against the pin again before it unpacks it. ditto keeps the
+# framework's links (Versions/Current and those at its top), which codesign needs to find its parts. Only the framework and its
+# licence go into the app: the archive's programs for making a release stay out.
+mkdir -p $work/sparkle $built/Contents/Frameworks || stop "The folders for Sparkle could not be made."
+unpack_sparkle $sparkle $work/sparkle
+ditto $work/sparkle/Sparkle.framework $built/Contents/Frameworks/Sparkle.framework || stop "Sparkle's framework could not be copied."
+cp -X $work/sparkle/LICENSE $res/Licenses/Sparkle-LICENSE || stop "Sparkle's licence could not be copied."
+
+# 5. Studio's helpers, beside node.
 node $tool/build-helpers.js $res/node/bin >/dev/null || stop "Studio's helpers did not compile."
 
-# 5. Info.plist, with the icon when the commit has one.
+# 6. Info.plist, with the icon when the commit has one, and the update key's public half from sparkle.pin.json.
 icon=()
 if [[ -f $from/AppIcon.icns ]]; then
   icon=(--icon)
   cp -X $from/AppIcon.icns $res/AppIcon.icns || stop "The icon could not be copied."
 fi
-node $here/build-info.js plist --version $version --build $build $icon > $built/Contents/Info.plist || stop "Info.plist could not be written."
+node $here/build-info.js plist --version $version --build $build --public-key $public_key $icon > $built/Contents/Info.plist || stop "Info.plist could not be written."
 plutil -lint $built/Contents/Info.plist >/dev/null || stop "The Info.plist did not pass plutil."
 
-# 6. The app's program.
+# 7. The app's program, linked to Sparkle and told to look for it in the bundle's Frameworks. The app's program is also the background
+# job's, so a run path that is wrong stops both.
 sources=($from/Sources/*.swift(N))
 (( ${#sources} )) || stop "The commit has no Swift sources in tool/studio-app/Sources."
-swiftc -O -swift-version 5 -target arm64-apple-macos13.0 -module-cache-path $work/modules -o $built/Contents/MacOS/"BRIMM Video Studio" ${(o)sources} || stop "The app did not compile."
+swiftc -O -swift-version 5 -target arm64-apple-macos13.0 -module-cache-path $work/modules -F $work/sparkle -framework Sparkle \
+  -Xlinker -rpath -Xlinker @executable_path/../Frameworks -o $built/Contents/MacOS/"BRIMM Video Studio" ${(o)sources} || stop "The app did not compile."
 chmod 755 $built/Contents/MacOS/"BRIMM Video Studio" || stop "The app's program could not be made runnable."
 
-# 7. The stand-in engine, which leaves nothing of Studio's tool but package.json (it marks tool/ as modules), and beside it the real
+# 8. The stand-in engine, which leaves nothing of Studio's tool but package.json (it marks tool/ as modules), and beside it the real
 # guide's page, filled with sample details by the commit's own setup/guide.js before that is taken away.
 if (( fake )); then
   node $here/sample-guide.js $tool $version $build > $work/sample-guide.html || stop "The real guide's page could not be made with sample details."
@@ -158,28 +181,35 @@ if (( fake )); then
   say "This build's setup is a stand-in: it is for looking at the windows, and sets up nothing." > $res/FAKE-ENGINE.txt || stop "FAKE-ENGINE.txt could not be written."
 fi
 
-# 8. Signing, inside-out: every program and library under node first, sorted by path, then the app. Only files that can be programs or
-# libraries are asked whether they are Mach-O, as the spike's node-app.sh asks: npm's own thousands of JavaScript files are not.
+# 9. Signing, inside-out: every program and library under node first, sorted by path; then Sparkle's five parts, in the order
+# Sparkle's own documentation signs them; then the app. Only files under node that can be programs or libraries are asked whether
+# they are Mach-O, as the spike's node-app.sh asks: npm's own thousands of JavaScript files are not. Node alone is given its
+# entitlements, and Sparkle's downloader alone keeps its own. Nothing is signed with --deep.
 inside=()
 for f in "${(@f)$(find $res/node -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.node' -o -name '*.so' \))}"; do
   [[ -n $f ]] && is_macho $f && inside+=($f)
 done
-for f in ${(o)inside} $built; do
+framework=$built/Contents/Frameworks/Sparkle.framework
+downloader=$framework/Versions/B/XPCServices/Downloader.xpc
+parts=($framework/Versions/B/XPCServices/Installer.xpc $downloader $framework/Versions/B/Autoupdate $framework/Versions/B/Updater.app $framework)
+for f in $parts; do
+  [[ -e $f ]] || stop "${f#$built/} is not in the bundle, so Sparkle's parts cannot be signed."
+done
+for f in ${(o)inside} $parts $built; do
+  keep=() entitled=()
+  [[ $f == $downloader ]] && keep=(--preserve-metadata=entitlements)
+  [[ $f == $res/node/bin/node ]] && entitled=(--entitlements $from/node.entitlements)
   if (( sign )); then
-    if [[ $f == $res/node/bin/node ]]; then
-      codesign --force --options runtime --timestamp --sign $identity_hash --entitlements $from/node.entitlements $f || stop "Signing ${f#$built/} failed."
-    else
-      codesign --force --options runtime --timestamp --sign $identity_hash $f || stop "Signing ${f#$built/} failed."
-    fi
+    codesign --force --options runtime --timestamp --sign $identity_hash $keep $entitled $f || stop "Signing ${f#$built/} failed."
   else
-    codesign --force --sign - --timestamp=none $f || stop "${f#$built/} could not be sealed."
+    codesign --force --sign - --timestamp=none $keep $f || stop "${f#$built/} could not be sealed."
   fi
 done
 
-# 9. The whole bundle's signature.
+# 10. The whole bundle's signature.
 codesign --verify --deep --strict --verbose=2 $built || stop "The signature did not check."
 
-# 10. The zip.
+# 11. The zip.
 ditto -c -k --norsrc --noextattr --keepParent $built $work/app.zip || stop "The zip could not be made."
 
 # Into --out: both go in under hidden names first, then the earlier pair is moved aside, the new pair renamed, and the earlier pair
@@ -216,6 +246,8 @@ if (( sign )); then
   say "  ditto -c -k --norsrc --noextattr --keepParent \"$app\" \"$zip\""
   say "  spctl --assess --type execute -vv \"$app\""
   say "The zip is made again after stapling, since a zip made before it has no ticket."
+  say "Then the release: zsh tool/studio-app/release.sh --app \"$app\" --releases <folder> --sparkle \"$sparkle\" --print"
+  say "For the first release, add --first-release."
 else
   say "Not signed with the Developer ID: every program is sealed ad hoc, so this build is for this Mac's tests only."
 fi

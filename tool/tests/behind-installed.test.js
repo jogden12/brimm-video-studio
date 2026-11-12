@@ -2,12 +2,13 @@
 // told in the app's words ("choose Repair"). The feed is a stand-in, git is never reached, and every program `behind` runs is written down.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editMain, LOCK_CHANGED } from "../edit.js";
 import { PIN } from "../hyperframes.js";
 import { ASKING_MS, accessLine, writeAccess } from "../access.js";
 import { dropWords } from "../guide.js";
+import { UNFINISHED, setUpFile, writeSetUp } from "../set-up.js";
 import { dropFolderOf, readSettings, writeSettings } from "../settings.js";
 import { writeStudio } from "../studio.js";
 import { UPDATE_EVERY_MS, updateCheckFile } from "../update-check.js";
@@ -30,8 +31,11 @@ const feed = (answer) => {
 const NEWER_FEED = () => feed(appcast({ build: 150, version: "1.5.0" }));
 const NEWEST_FEED = () => feed(appcast({ build: 142, version: "1.4.2" }));
 
-/** `behind` on the made-up Mac `t` as an installed Mac, the feed being `fetch`, and every program it runs written down. */
-async function on(t, fetch, more = {}) {
+/** `behind` on the made-up Mac `t` as an installed Mac, the feed being `fetch`, and every program it runs written down. The Mac was
+    set up by `record` (this build unless another is given, and by none when it is null). */
+async function on(t, fetch, more = {}, { record = INSTALLED } = {}) {
+  if (record) writeSetUp(t.home, record);
+  else rmSync(setUpFile(t.home), { force: true });
   const said = [];
   const runs = [];
   const code = await editMain(["behind"], { ...t.ctx.deps, build: INSTALLED, fetch, now: () => NOW, run: async (cmd, args) => { runs.push([cmd, ...args]); return { code: 0, stderr: "" }; }, say: (x) => said.push(x), ...more });
@@ -99,6 +103,18 @@ describe("behind: on an installed Mac", () => {
     writeSettings(t.home, { app: "hyperframes" });
     const r = await on(t, NEWEST_FEED().fetch);
     assert.deepEqual(r.said, [NEWEST, `HyperFrames' command line on this Mac is not the one Studio needs. Open BRIMM Video Studio and choose Repair when it suits. (Studio is pinned to version ${PIN.version}, and this Mac has none.)`]);
+    t.done();
+  });
+  it("behind says an update is not finished", async () => {
+    for (const record of [{ ...INSTALLED, build: 141, version: "1.4.1" }, null]) {
+      const t = setup();
+      const r = await on(t, NEWEST_FEED().fetch, {}, { record });
+      assert.deepEqual([r.code, r.said], [0, [UNFINISHED, NEWEST]], JSON.stringify(record));
+      t.done();
+    }
+    const t = setup();
+    const r = await on(t, NEWEST_FEED().fetch);
+    assert.deepEqual([r.code, r.said], [0, [NEWEST]]);
     t.done();
   });
   it("still refuses first when the lock is loosened, and asks the feed nothing", async () => {

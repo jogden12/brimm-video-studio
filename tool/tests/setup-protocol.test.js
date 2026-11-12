@@ -74,6 +74,13 @@ describe("the setup protocol", () => {
     assert.notEqual(eventFault({ ...error, message: "" }), "");
   });
 
+  it("the protocol takes update among a status's needs, and no other new word", () => {
+    for (const needs of ["nothing", "setup", "repair", "update"]) assert.equal(eventFault({ ...summary, needs }), "", needs);
+    for (const needs of ["updated", "updating", "Update", "install", "", undefined, null]) assert.notEqual(eventFault({ ...summary, needs }), "", String(needs));
+    assert.notEqual(eventFault({ ...summary, id: "setup", needs: "update" }), "");
+    assert.equal(PROTOCOL, 1);
+  });
+
   it("a string with a line break is a fault outside details, summary and body", () => {
     assert.notEqual(eventFault({ ...step, title: "a\nb" }), "");
     assert.equal(eventFault({ ...summary, id: "review", needs: undefined, details: "a\nb" }), "");

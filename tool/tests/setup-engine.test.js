@@ -11,6 +11,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { accessFile } from "../access.js";
+import { markUpdating, updatingFile } from "../busy.js";
+import { readSetUp, setUpFile } from "../set-up.js";
 import { DEV_REFUSAL, defaultDropFolder, downloadsFolder, episodesFolder, folderWords } from "../settings.js";
 import { studioFolder } from "../studio.js";
 import { DAMAGED, NO_BRIMM_VIDEO, nameClash } from "../setup/checks.js";
@@ -101,7 +103,8 @@ describe("the start: the arguments, the kind of Mac and the copy", () => {
         const { code, events } = await go(m, { run });
         assert.equal(code, 1);
         assert.deepEqual(events, [{ event: "error", code: "damaged", message: DAMAGED, contact: SUPPORT, details: "ffmpeg is missing" }]);
-        assert.equal(m.ran(), "");
+        // Nothing ran but the ask to the background job to look, which every run that ends before its installer makes.
+        assert.equal(m.ran(), `launchctl kickstart gui/${process.getuid()}/com.thebrimm.unedited\n`);
       });
     }
   });
@@ -246,6 +249,183 @@ describe("a repair and an update", () => {
       const guide = readFileSync(done.guide.html, "utf8");
       assert.equal(guide.includes("HyperFrames"), true);
     });
+  });
+});
+
+describe("the record of the build that set this Mac up, and the marker of an update", () => {
+  const UNRECORDED = "BRIMM Video Studio could not note this update, so it finishes it again the next time it is opened.";
+  const recordOf = (m) => JSON.parse(readFileSync(setUpFile(m.home), "utf8"));
+  /** The installer is a stand-in that first writes into `ran()` whether the marker of an update is there, then is the harness's. */
+  const lookingInstaller = (m) => {
+    const file = join(m.dir, "bin", "installer-looking");
+    writeFileSync(file, `#!/bin/sh\nif [ -f "${updatingFile(m.home)}" ]; then echo "marker there" >> "${join(m.dir, "ran")}"; else echo "marker gone" >> "${join(m.dir, "ran")}"; fi\nexec "${m.programs.installer[0]}" "$@"\n`);
+    chmodSync(file, 0o755);
+    m.programs.installer = [file];
+  };
+  const KICK = `launchctl kickstart gui/${process.getuid()}/com.thebrimm.unedited`;
+
+  it("a setup, a repair and an update each leave the record of this build", async () => {
+    for (const run of ["setup", "repair", "update"]) {
+      await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+        answering(m);
+        assert.equal(readSetUp(m.home), 141);
+        const { code, events } = await go(m, { run, answers: reply(HELD) });
+        assert.equal(code, 0, `${run}: ${JSON.stringify(lastOf(events))}`);
+        assert.deepEqual(recordOf(m), { version: 1, build: WHOLE.build, app: WHOLE.version }, run);
+        assert.equal(readFileSync(setUpFile(m.home), "utf8").endsWith("}\n"), true, run);
+        assert.equal(lastOf(events).notes.includes(UNRECORDED), false, run);
+        const status = await go(m, { run: "status" });
+        assert.equal(status.events[0].needs, "nothing", run);
+      });
+    }
+    for (const run of ["repair", "update"]) {
+      await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+        answering(m);
+        writeFileSync(join(m.dir, "exits", "installer"), "1");
+        const { code, events } = await go(m, { run });
+        assert.equal(code, 1, run);
+        assert.equal(lastOf(events).code, "install", run);
+        assert.equal(readSetUp(m.home), 141, run);
+      });
+    }
+  });
+
+  it("a record that cannot be written is noted, and the run ends well", async () => {
+    for (const run of ["repair", "update"]) {
+      await withMac({ settings: "installed", record: "none", apps: EVERY_APP }, async (m) => {
+        answering(m);
+        // A folder where the record would be: it cannot be written over.
+        mkdirSync(join(setUpFile(m.home), "held"), { recursive: true });
+        const { code, events } = await go(m, { run });
+        assert.equal(code, 0, `${run}: ${JSON.stringify(lastOf(events))}`);
+        const done = lastOf(events);
+        assert.equal(done.event, "done");
+        assert.equal(done.outcome, run === "update" ? "updated" : "repaired");
+        assert.equal(done.notes.at(-1), UNRECORDED, run);
+        assert.equal(readSetUp(m.home), null, run);
+      });
+    }
+  });
+
+  it("an update run goes through with a live marker, and takes it away", async () => {
+    await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+      answering(m);
+      lookingInstaller(m);
+      assert.equal(markUpdating({ home: m.home }), true);
+      const { code, events } = await go(m, { run: "update" });
+      assert.equal(code, 0, JSON.stringify(lastOf(events)));
+      const done = lastOf(events);
+      assert.equal(done.outcome, "updated");
+      assert.deepEqual(done.notes, ["Start a new chat in Claude so it reads this version."]);
+      const lines = m.ran().split("\n");
+      assert.ok(lines.includes("marker gone"), m.ran());
+      assert.equal(lines.includes("marker there"), false, m.ran());
+      assert.ok(lines.indexOf("marker gone") < lines.findIndex((line) => line.startsWith("installer ")), m.ran());
+      assert.equal(existsSync(updatingFile(m.home)), false);
+      assert.equal(lines.includes(KICK), false, m.ran());
+    });
+    // An update may be asked for on a Mac whose record is already this build.
+    await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
+      answering(m);
+      const { code, events } = await go(m, { run: "update" });
+      assert.equal(code, 0, JSON.stringify(lastOf(events)));
+      assert.equal(lastOf(events).outcome, "updated");
+      assert.equal(readSetUp(m.home), WHOLE.build);
+    });
+  });
+
+  it("an installer that fails asks the job to look", async () => {
+    for (const run of ["repair", "update"]) {
+      await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+        answering(m);
+        markUpdating({ home: m.home });
+        writeFileSync(join(m.dir, "exits", "installer"), "1");
+        const { code } = await go(m, { run });
+        assert.equal(code, 1, run);
+        const lines = m.ran().split("\n");
+        assert.deepEqual(lines.filter((line) => line.startsWith("launchctl ")), [KICK], run);
+        assert.ok(lines.indexOf(KICK) > lines.findLastIndex((line) => line.startsWith("installer ")), m.ran());
+        assert.equal(existsSync(updatingFile(m.home)), false, run);
+      });
+      await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+        answering(m);
+        const { code } = await go(m, { run });
+        assert.equal(code, 0, run);
+        assert.equal(m.ran().split("\n").some((line) => line.startsWith("launchctl ")), false, m.ran());
+      });
+    }
+    // A run that gave up waiting for the Mac to be idle asks the job to look too.
+    await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
+      markUpdating({ home: m.home });
+      const { code, events } = await go(m, { run: "update", why: () => "An import is at work: it holds its lock (process 42)." });
+      assert.equal(code, 1);
+      assert.equal(lastOf(events).code, "busy");
+      assert.deepEqual(m.ran().split("\n").filter((line) => line.startsWith("launchctl ")), [KICK]);
+      assert.equal(existsSync(updatingFile(m.home)), false);
+    });
+  });
+
+  const kicks = (m) => m.ran().split("\n").filter((line) => line.startsWith("launchctl "));
+
+  it("an update on a damaged copy takes the marker away and asks the job to look, once", async () => {
+    await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+      markUpdating({ home: m.home });
+      rmSync(join(m.tools, "ffmpeg"));
+      const { code, events } = await go(m, { run: "update" });
+      assert.equal(code, 1);
+      assert.equal(lastOf(events).code, "damaged");
+      assert.equal(existsSync(updatingFile(m.home)), false);
+      assert.deepEqual(kicks(m), [KICK], m.ran());
+    });
+  });
+
+  it("an update whose stage fails takes the marker away and asks the job to look, once", async () => {
+    await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+      markUpdating({ home: m.home });
+      const model = async () => {
+        throw Object.assign(new Error("The transcription model could not be downloaded (curl 22)."), { code: "download" });
+      };
+      const { code, events } = await go(m, { run: "update", stages: { model } });
+      assert.equal(code, 1);
+      assert.equal(lastOf(events).code, "download");
+      assert.equal(existsSync(updatingFile(m.home)), false);
+      assert.deepEqual(kicks(m), [KICK], m.ran());
+      assert.equal(installCalls(m.ran()).length, 0);
+    });
+  });
+
+  it("a setup cancelled at a question takes the marker away and asks the job to look, once", async () => {
+    await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+      markUpdating({ home: m.home });
+      const { code, events } = await go(m, { run: "setup", answers: reply(HELD, cancelAt("apps")) });
+      assert.equal(code, 0);
+      assert.equal(lastOf(events).outcome, "cancelled");
+      assert.equal(existsSync(updatingFile(m.home)), false);
+      assert.deepEqual(kicks(m), [KICK], m.ran());
+      assert.equal(installCalls(m.ran()).length, 0);
+    });
+  });
+
+  it("a status run leaves a live marker where it is, and asks the job nothing", async () => {
+    await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+      assert.equal(markUpdating({ home: m.home }), true);
+      const { code } = await go(m, { run: "status" });
+      assert.equal(code, 0);
+      assert.equal(existsSync(updatingFile(m.home)), true);
+      assert.deepEqual(kicks(m), []);
+    });
+  });
+
+  it("a run from a build that is not installed writes no record", async () => {
+    for (const build of ["missing", "broken"]) {
+      await withMac({ settings: "installed", record: "none", apps: EVERY_APP }, async (m) => {
+        answering(m);
+        if (build === "missing") rmSync(join(m.checkout, "build.json"));
+        else writeFileSync(join(m.checkout, "build.json"), "{");
+        await go(m, { run: "repair" });
+        assert.equal(existsSync(setUpFile(m.home)), false, build);
+      });
+    }
   });
 });
 

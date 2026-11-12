@@ -58,9 +58,9 @@ struct LineSplitter {
 
 // MARK: Command lines
 
-/// The engine runs the shell starts. It never starts `update`: that is Phase 7's.
+/// The engine runs the shell starts. `update` is a repair that a copy runs when it finds the Mac was set up by another build.
 enum Run: String {
-    case setup, repair, status
+    case setup, repair, update, status
 }
 
 struct Command {
@@ -153,17 +153,20 @@ func guidePaths(home: String) -> (html: String, pdf: String) {
 // MARK: What comes next
 
 enum Next: String {
-    case move, refused, setup, repair, twoCopies, status
+    case move, refused, setup, repair, update, twoCopies, status
 }
 
-/// The screen that follows a status. `needs` is the status's own word ("setup", "repair" or "nothing"), `failed` says the status
-/// run ended with an error, `chosen` is the run the person asked for, and `other` says another copy of the app is there.
+/// The screen that follows a status. `needs` is the status's own word ("setup", "repair", "update" or "nothing"), `failed` says
+/// the status run ended with an error, `chosen` is the run the person asked for, and `other` says another copy of the app is there.
+/// An update follows whatever was chosen and whether or not another copy is there: the engine says `update` only of the copy the
+/// Mac was set up from, and an update run is a repair.
 func nextStep(translocated: Bool, needs: String?, failed: Bool, chosen: Run?, other: Bool) -> Next {
     if translocated { return .move }
     if failed { return .refused }
     switch needs {
     case "setup": return .setup
     case "repair": return other ? .twoCopies : .repair
+    case "update": return .update
     case "nothing": return chosen == .repair ? .repair : .status
     default: return .refused
     }

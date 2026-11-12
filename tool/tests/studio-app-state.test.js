@@ -251,6 +251,36 @@ describe("what each answer sends, and what follows", { skip: noChecker }, () => 
     assert.equal(nextOf(await statusOf("unusable")), "refused");
   });
 
+  it("what follows the real engine's status after an update", async () => {
+    const m = mac({ settings: "installed", record: "older" });
+    let events;
+    try {
+      events = (await drive(m, { run: "status" })).events;
+    } finally {
+      m.done();
+    }
+    assert.equal(events.find((e) => e.event === "summary" && e.id === "status").needs, "update");
+    assert.equal(nextOf(events), "update");
+    assert.equal(nextOf(events, ["no", "repair", "no"]), "update");
+    assert.equal(nextOf(events, ["no", "none", "yes"]), "update");
+    assert.equal(nextOf(events, ["no", "update", "no"]), "update");
+    assert.equal(nextOf(events, ["yes", "none", "no"]), "move");
+  });
+
+  it("the events of a real update run end updated, with its note", async () => {
+    const events = await eventsOf({ settings: "installed", record: "older", apps: EVERY_APP }, "update");
+    const state = stateOf(events);
+    assert.equal(state.undecoded, 0);
+    assert.equal(state.failure, null);
+    assert.equal(state.done.outcome, "updated");
+    assert.ok(state.done.notes.includes("Start a new chat in Claude so it reads this version."), JSON.stringify(state.done.notes));
+    assert.equal(state.step.id, "done");
+    assert.deepEqual(state.step.body, ["BRIMM Video Studio was updated on this Mac."]);
+    assert.deepEqual(state.rows.map((r) => [r.id, r.mark]), [["install", "done"], ["done", "done"]]);
+    assert.equal(state.running, false);
+    assert.equal(state.quit, "now");
+  });
+
   it("a line of a status run that cannot be read ends next-from-status with 2, and says so", () => {
     const ran = check("next-from-status", ["no", "none", "no"], { input: `${JSON.stringify(done)}\nnot an event\n` });
     assert.equal(ran.status, 2);

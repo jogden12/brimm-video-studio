@@ -4,15 +4,17 @@
 // may install and sign in: its looks in the three folders write nothing, not even the import's note of them (access.json). The
 // Install changes the rest, through install.sh and the three stages. A repair or an update asks nothing, and goes straight to the
 // Install.
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
-import { REPAIR, buildOf } from "../build.js";
-import { idleWhy } from "../busy.js";
+import { REPAIR, buildOf, isInstalled } from "../build.js";
+import { AGENT_LABEL, KICK_TIMEOUT_MS, endUpdating, idleWhy } from "../busy.js";
 import { toolchainDiffers, toolchainHolds } from "../hyperframes.js";
 import { isMain } from "../is-main.js";
+import { writeSetUp } from "../set-up.js";
 import { DEV_REFUSAL, defaultDropFolder, downloadsFolder, dropFolderOf, episodesFolder, exportsFolderOf, folderWords } from "../settings.js";
 import { studioFolder } from "../studio.js";
 import { APPS, DAMAGED, NO_BRIMM_VIDEO, appsHere, brimmVideoFolders, claudeState, copyFault, kindOf, nameClash, nameSuggestion, peekAt } from "./checks.js";
@@ -74,7 +76,8 @@ const NOTE = {
   refused: (words) => `BRIMM Video Studio is not yet allowed to look in ${words}. Allow it in System Settings, under Privacy & Security, then Files and Folders.`,
   unseen: (words) => `BRIMM Video Studio could not look in ${words}.`,
   claudeStays: "Claude Code was installed on this Mac during setup, and stays.",
-  staged: "What setup had already put on this Mac stays, and the next run uses it."
+  staged: "What setup had already put on this Mac stays, and the next run uses it.",
+  unrecorded: "BRIMM Video Studio could not note this update, so it finishes it again the next time it is opened."
 };
 
 /** What readerOf gives for a line that is no JSON object. */
@@ -260,6 +263,9 @@ async function install(ctx, answers) {
     if (!line && ctx.bars.installer === "waiting") bar(ctx, "installer", "running");
     return line;
   };
+  // The marker of an update under way goes first, with no kick: the installer starts the background job itself. A run that ends
+  // without the installer at 0 asks the job to look all the same, in runSetup.
+  endUpdating({ home });
   let result;
   try {
     result = await installWhenIdle({ args: installerArgs(answers, { app, tools }), home, programs, why, wait: ctx.wait, progress: ctx.progress });
@@ -273,6 +279,7 @@ async function install(ctx, answers) {
     bar(ctx, "installer", "failed");
     throw new Ending("install", outcome === "refused" ? SAY.refused : SAY.notSetUp, { advice: REPAIR, details: result.text });
   }
+  ctx.installed.done = true;
   bar(ctx, "installer", "done");
   bar(ctx, "claude", "running");
   const check = checkLogSays(home, { before });
@@ -283,7 +290,9 @@ async function install(ctx, answers) {
 /** The names of the apps still to install: each app with a folder that is not here, and Claude Code when it is not here. */
 const missingOf = (here, claude) => APPS.filter((app) => (app.folder ? !here[app.id] : !claude?.here)).map((app) => app.name);
 
-/** Done: the step, the Getting Started guide, the setup summary and the `done` event. `settings` are what the run set up (Decided 32). */
+/** Done: the step, the Getting Started guide, the setup summary and the `done` event. `settings` are what the run set up (Decided 32).
+    The installer ended with 0, so the record of this build as the one that set the Mac up is written here, when the build is an
+    installed one whose build file can be read; a record that cannot be written is a note, and the run still ends well. */
 function finish(ctx, { outcome, settings, claude, here, check, placeNotes = [] }) {
   const { home, build, found } = ctx;
   step(ctx, "done", [DONE_BODY[outcome]]);
@@ -293,6 +302,7 @@ function finish(ctx, { outcome, settings, claude, here, check, placeNotes = [] }
   if (found.kind === "takeover") notes.push(NOTE.takeover);
   if (!check.answered) notes.push(NOTE.claude);
   if (ctx.run === "update") notes.push(NOTE.update);
+  if (isInstalled(build) && !build.broken && !writeSetUp(home, build)) notes.push(NOTE.unrecorded);
   const guide = writeGuide({ home, data: guideData({ home, settings, build, missing, notes, now: ctx.now() }) });
   const summary = setupSummary({ kind: found.kind, home, settings, build, claude, check, missing, old: found.kind === "takeover" ? found.settings.checkout : undefined });
   ctx.send(summary);
@@ -600,6 +610,17 @@ export async function runSetup({ argv, input, output, errors, home, checkout, pr
     return 1;
   };
   let talk = null;
+  // A run of setup, repair or update is under way from its copy's first check. One that ends without its installer at 0 (a damaged
+  // copy, a stage that fails, a cancel or an error before the installer, an installer that ended otherwise, or a Mac never idle)
+  // takes the marker of an update away and asks the job to look, once, so that the videos that waited are taken in all the same.
+  let underWay = false;
+  const installed = { done: false };
+  let looked = false;
+  const askJobToLook = () => {
+    if (!underWay || installed.done || looked) return;
+    looked = true;
+    endUpdating({ home, kick: () => spawnSync(programs.launchctl, ["kickstart", `gui/${process.getuid()}/${AGENT_LABEL}`], { stdio: "ignore", timeout: KICK_TIMEOUT_MS }) });
+  };
   try {
     const args = argsOf(argv);
     if (args.fault) {
@@ -618,6 +639,7 @@ export async function runSetup({ argv, input, output, errors, home, checkout, pr
       return 0;
     }
     if (found.kind === "fresh" && run !== "setup") throw new Ending("no-settings", SAY.noSettings);
+    underWay = true;
     const damaged = copyFault({ app, tools, checkout, programs, deep: false });
     if (damaged) throw new Ending("damaged", DAMAGED, { details: damaged });
     talk = conversation({ input, send, errors });
@@ -627,11 +649,12 @@ export async function runSetup({ argv, input, output, errors, home, checkout, pr
       send({ event: "progress", part: p.part, label: p.label, done: p.done, total: p.total, state: p.state, ...(p.detail !== undefined ? { detail: one(p.detail) } : {}) });
     };
     const runProgramHere = (program, list, options) => runProgram(program, list, { ...options, errors });
-    const ctx = { run, app, tools, home, checkout, programs, build, found, talk, send, errors, why, wait, now, look, applications, pty, stages, had, bars, progress, runProgram: runProgramHere, order: ["install", "done"], warned: new Set() };
+    const ctx = { run, app, tools, home, checkout, programs, build, found, talk, send, errors, why, wait, now, look, applications, pty, stages, had, bars, progress, runProgram: runProgramHere, installed, order: ["install", "done"], warned: new Set() };
     if (run === "setup") await setup(ctx);
     else await renew(ctx);
     return 0;
   } catch (e) {
+    askJobToLook();
     try {
       return end(e);
     } catch (again) {

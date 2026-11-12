@@ -54,9 +54,17 @@ describe("the engine's command line and environment", { skip: noChecker }, () =>
   it("an app whose path holds a colon, or is not absolute, starts no engine", () => {
     assert.equal(ask("engine-command", ["setup", "/Volumes/a:b/BRIMM Video Studio.app"]), null);
     assert.equal(ask("engine-command", ["setup", "Applications/BRIMM Video Studio.app"]), null);
-    const update = check("engine-command", ["update", APP]);
-    assert.equal(update.status, 2);
-    assert.ok(update.stderr.length > 0);
+    assert.equal(ask("engine-command", ["update", "/Volumes/a:b/BRIMM Video Studio.app"]), null);
+  });
+
+  it("engine-command update gives the engine's command", () => {
+    assert.deepEqual(ask("engine-command", ["update", APP]), {
+      program: `${TOOLS}/node`,
+      arguments: [`${STUDIO}/tool/setup/engine.js`, "--run", "update", "--app", APP, "--tools", TOOLS, "--protocol", "1"]
+    });
+    const other = check("engine-command", ["upgrade", APP]);
+    assert.equal(other.status, 2);
+    assert.ok(other.stderr.length > 0);
   });
 
   it("the engine's environment is built from scratch", () => {
@@ -86,9 +94,9 @@ describe("the engine's command line and environment", { skip: noChecker }, () =>
 
 describe("what comes next", { skip: noChecker }, () => {
   it("a translocated copy moves first, whatever the status", () => {
-    for (const needs of ["setup", "repair", "nothing", "none"])
+    for (const needs of ["setup", "repair", "update", "nothing", "none"])
       for (const failed of ["yes", "no"])
-        for (const chosen of ["setup", "repair", "none"])
+        for (const chosen of ["setup", "repair", "update", "none"])
           for (const other of ["yes", "no"]) assert.equal(next("yes", needs, failed, chosen, other), "move", `${needs} ${failed} ${chosen} ${other}`);
   });
 
@@ -101,9 +109,20 @@ describe("what comes next", { skip: noChecker }, () => {
     assert.equal(next("no", "setup", "no", "none", "yes"), "setup");
   });
 
-  it("a moved copy is repaired, and a second copy is asked about", () => {
+  it("a status that needs an update is followed by the update run, alone, with Repair chosen, and with another copy there", () => {
+    assert.equal(next("no", "update", "no", "none", "no"), "update");
+    assert.equal(next("no", "update", "no", "repair", "no"), "update");
+    assert.equal(next("no", "update", "no", "none", "yes"), "update");
+    assert.equal(next("no", "update", "no", "repair", "yes"), "update");
+    assert.equal(next("no", "update", "yes", "none", "no"), "refused");
+  });
+
+  it("a moved copy is still repaired, and a second copy still asked about", () => {
     assert.equal(next("no", "repair", "no", "none", "no"), "repair");
     assert.equal(next("no", "repair", "no", "none", "yes"), "twoCopies");
+    assert.equal(next("no", "repair", "no", "repair", "no"), "repair");
+    assert.equal(next("no", "repair", "no", "repair", "yes"), "twoCopies");
+    assert.equal(next("no", "nothing", "no", "update", "no"), "status");
   });
 
   it("a Mac that needs nothing shows its status, and repairs only when asked", () => {

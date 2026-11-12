@@ -2,7 +2,7 @@
 // with the real node; nothing here writes a setting, runs the installer or asks the real launchd.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildOf } from "../build.js";
@@ -10,6 +10,8 @@ import { dropFolderOf, exportsFolderOf, folderWords } from "../settings.js";
 import { eventFault } from "../setup/protocol.js";
 import { APPS, claudeState, kindOf } from "../setup/checks.js";
 import { planArgs, planOf, reviewSummary, setupSummary, statusSummary, summaryText } from "../setup/summary.js";
+import { readSetUp, writeSetUp } from "../set-up.js";
+import { WHOLE } from "./app-copy.js";
 import { mac, settingsOf } from "./setup-harness.js";
 
 const INSTALL = readFileSync(fileURLToPath(new URL("../install.sh", import.meta.url)), "utf8");
@@ -364,6 +366,45 @@ describe("the status", () => {
       assert.equal(status.ok, false);
       assert.equal(eventFault(status), "");
     });
+  });
+
+  it("an installed Mac set up by another build needs an update, and one with no record does too", async () => {
+    for (const record of ["older", "none"]) {
+      await withMac({ settings: "installed", record }, (m) => {
+        const summary = statusOf(m);
+        assert.equal(summary.needs, "update", record);
+        assert.equal(summary.ok, false, record);
+        assert.equal(valueOf(summary, "Setup"), "BRIMM Video Studio was updated on this Mac. It finishes the update when it is opened.", record);
+        assert.deepEqual(labelsOf(summary), ["This Mac", "BRIMM Video Studio", "Setup", "BRIMM Video in Dropbox", "Drop folder", "Exports folder"], record);
+        assert.equal(eventFault(summary), "", record);
+      });
+    }
+    await withMac({ settings: "installed" }, (m) => {
+      assert.equal(readSetUp(m.home), WHOLE.build);
+      assert.equal(statusOf(m).needs, "nothing");
+    });
+  });
+
+  it("a moved copy needs a repair whatever its record", async () => {
+    for (const record of [null, 141, WHOLE.build]) {
+      await withMac({ settings: "moved" }, (m) => {
+        if (record !== null) writeSetUp(m.home, { build: record, version: "1.4.1" });
+        const summary = statusOf(m);
+        assert.equal(summary.needs, "repair", String(record));
+        assert.equal(valueOf(summary, "Setup"), "This Mac was set up from a copy of BRIMM Video Studio that is no longer where it was. Repair points it at this one.", String(record));
+      });
+    }
+  });
+
+  it("an app whose build file cannot be read never needs an update", async () => {
+    for (const record of ["older", "none", "this"]) {
+      await withMac({ settings: "installed", record }, (m) => {
+        writeFileSync(join(m.checkout, "build.json"), "{");
+        const summary = statusOf(m);
+        assert.equal(summary.needs, "nothing", record);
+        assert.equal(valueOf(summary, "Setup"), "BRIMM Video Studio is set up on this Mac.", record);
+      });
+    }
   });
 
   it("a fresh Mac's status has no folder lines", async () => {

@@ -24,6 +24,7 @@ import { importingFolder } from "../settings.js";
 import { fingerprintOf } from "../versions.js";
 import { zoomTimeOf } from "../kinds.js";
 import { accessLog, placeWordsOf } from "../access.js";
+import { UPDATING, UPDATING_HOLD_MS, markUpdating, updatingWaitedFile } from "../busy.js";
 
 const FACTS = { duration: 23.423, width: 1280, height: 720, fps: "30000/1001", sound: true, soundStart: 0, device: { make: "", model: "" } };
 /** Where ffmpeg heard silence in the made-up recording. */
@@ -796,6 +797,54 @@ describe("a folder of unedited videos", () => {
     assert.equal(t.calls.length, 5);
     assert.ok(existsSync(lockFile(t.dir, t.locks)));
     t.done();
+  });
+  /** A run of the watcher on a folder worked the old way, under the test's lock folder, and on this Mac's drop folder for episodes,
+      whose lock would be kept in BRIMM Video Work/.runs, each with one video waiting. `how` says what the run is told of an update:
+      "told", its `updating` gives UPDATING; "marked", no `updating` is given and the marker is written in the made-up Mac's home now;
+      "lapsed", the same with a marker written UPDATING_HOLD_MS and a second ago. Gives each run's world, what it gave back, and the
+      folder's names before and after it, without the made-up Mac's home, which holds the marker and the note. */
+  async function watcherWhile(how) {
+    const seen = [];
+    for (const make of [() => setup(), () => episodic()]) {
+      const t = make();
+      // The marker and the note are kept in the test's own home, never this Mac's.
+      assert.equal(t.deps.home, t.home);
+      const episodes = Boolean(t.drop);
+      const dir = episodes ? t.drop : t.dir;
+      if (episodes) {
+        t.put("Talk.mov");
+        delete t.deps.lockDir;
+      } else t.video("a.mov");
+      const names = () => readdirSync(dir).filter((n) => n !== "home").sort();
+      const before = names();
+      if (how === "told") t.deps.updating = () => UPDATING;
+      else assert.equal(markUpdating({ home: t.home, now: how === "marked" ? Date.now() : Date.now() - (UPDATING_HOLD_MS + 1000) }), true);
+      const results = await uneditedFolder(dir, t.deps);
+      seen.push({ t, results, before, after: names() });
+    }
+    return seen;
+  }
+  for (const how of ["told", "marked"]) {
+    it(`a run of the watcher starts nothing while an update is under way (${how === "told" ? "as its deps say" : "by the marker in its home"}), and notes that it waited`, async () => {
+      for (const { t, results, before, after } of await watcherWhile(how)) {
+        assert.deepEqual(results, []);
+        assert.deepEqual(t.logs, [UPDATING, "Nothing was started. What is in the drop folder waits for the next look."]);
+        assert.deepEqual([t.calls, readdirSync(t.locks)], [[], []]);
+        assert.equal(existsSync(join(t.home, "BRIMM Video Work", ".runs")), false);
+        assert.deepEqual(after, before);
+        assert.equal(existsSync(updatingWaitedFile(t.home)), true);
+        t.done();
+      }
+    });
+  }
+  it("a run of the watcher takes the video in once the marker in its home has lapsed, and notes nothing", async () => {
+    for (const { t, results } of await watcherWhile("lapsed")) {
+      assert.equal(results.length, 1);
+      assert.equal(results[0].ok, true);
+      assert.ok(!t.logs.includes(UPDATING));
+      assert.equal(existsSync(updatingWaitedFile(t.home)), false);
+      t.done();
+    }
   });
   it("leaves a video where it is, and puts its files beside it, when it cannot be moved. It still counts as done, and no empty folder is left", async () => {
     const t = setup();

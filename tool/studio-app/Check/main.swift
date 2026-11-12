@@ -141,23 +141,29 @@ func checkNames(_ args: [String]) -> Never {
     emit([
         "appName": appName, "agentLabel": agentLabel, "guideName": guideName, "workFolderName": workFolderName,
         "crashMessage": crashMessage, "crashAdvice": crashAdvice, "damagedAdvice": damagedAdvice, "checkEvery": checkEvery,
+        "busyCannotTell": busyCannotTell, "updatesHeading": updatesHeading, "updatesWaiting": updatesWaiting, "updatesOffered": updatesOffered,
+        "updatesUnpacked": updatesUnpacked, "updatesHolding": updatesHolding, "updatesCannotTell": updatesCannotTell,
+        "updatesWaitedTooLong": updatesWaitedTooLong, "updatesCannotStart": updatesCannotStart, "updatesStandIn": updatesStandIn,
+        "updatesNotNow": updatesNotNow, "updatesShowWindow": updatesShowWindow, "updatesInstallNow": updatesInstallNow,
+        "updateMarkEvery": updateMarkEvery, "updateMarkLimit": updateMarkLimit, "lookLimit": lookLimit,
     ])
 }
 
-/// next <translocated yes|no> <needs: setup|repair|nothing|none> <failed yes|no> <chosen: setup|repair|none> <other yes|no>.
+/// next <translocated yes|no> <needs: setup|repair|update|nothing|none> <failed yes|no> <chosen: setup|repair|update|none>
+/// <other yes|no>.
 func checkNext(_ args: [String]) -> Never {
     let words = exactly(5, args, "next")
     let needs: String?
     switch words[1] {
-    case "setup", "repair", "nothing": needs = words[1]
+    case "setup", "repair", "update", "nothing": needs = words[1]
     case "none": needs = nil
-    default: fail("\"\(words[1])\" is not setup, repair, nothing or none.")
+    default: fail("\"\(words[1])\" is not setup, repair, update, nothing or none.")
     }
     let chosen: Run?
     switch words[3] {
-    case "setup", "repair": chosen = runOf(words[3])
+    case "setup", "repair", "update": chosen = runOf(words[3])
     case "none": chosen = nil
-    default: fail("\"\(words[3])\" is not setup, repair or none.")
+    default: fail("\"\(words[3])\" is not setup, repair, update or none.")
     }
     emit(nextStep(translocated: yesNo(words[0]), needs: needs, failed: yesNo(words[2]), chosen: chosen, other: yesNo(words[4])).rawValue)
 }
@@ -281,15 +287,15 @@ func checkReply(_ args: [String]) -> Never {
     emit(["answer": "q", "value": replyValue(replyOf(atLeast(1, args, "reply")))])
 }
 
-/// next-from-status <translocated yes|no> <chosen: setup|repair|none> <other yes|no>: stdin is a status run's event lines, and
-/// the run then ended. A line that is no event ends it with 2.
+/// next-from-status <translocated yes|no> <chosen: setup|repair|update|none> <other yes|no>: stdin is a status run's event lines,
+/// and the run then ended. A line that is no event ends it with 2.
 func checkNextFromStatus(_ args: [String]) -> Never {
     let words = exactly(3, args, "next-from-status")
     let chosen: Run?
     switch words[1] {
-    case "setup", "repair": chosen = runOf(words[1])
+    case "setup", "repair", "update": chosen = runOf(words[1])
     case "none": chosen = nil
-    default: fail("\"\(words[1])\" is not setup, repair or none.")
+    default: fail("\"\(words[1])\" is not setup, repair, update or none.")
     }
     var state = SetupState()
     state.began()
@@ -491,6 +497,15 @@ func checkRun(_ args: [String]) -> Never {
     emit(["status": Int(ran.status), "out": ran.out, "err": ran.err])
 }
 
+/// limited-run <seconds> <program> [<argument>...]: the app's own runToEnd with that limit, given the same environment as run: its
+/// status.
+func checkLimitedRun(_ args: [String]) -> Never {
+    let words = atLeast(2, args, "limited-run")
+    let ran = runToEnd(
+        Command(program: words[1], arguments: Array(words.dropFirst(2))), environment: uninstallEnvironment(app: "/nowhere"), limit: secondsOf(words[0]))
+    emit(Int(ran.status))
+}
+
 /// uninstall <app> <fake yes|no>: prints "removed" or { notice }.
 func checkUninstall(_ args: [String]) -> Never {
     let words = exactly(2, args, "uninstall")
@@ -498,6 +513,100 @@ func checkUninstall(_ args: [String]) -> Never {
     case .removed: emit("removed")
     case .notice(let line): emit(["notice": line])
     }
+}
+
+// MARK: Updates.swift
+
+/// The UpdatePhase that `word` names.
+func phaseOf(_ word: String) -> UpdatePhase {
+    guard let phase = UpdatePhase(rawValue: word) else { fail("\"\(word)\" is not a phase of a check for updates.") }
+    return phase
+}
+
+/// The Screen that `word` names.
+func screenOf(_ word: String) -> Screen {
+    guard let screen = Screen(rawValue: word) else { fail("\"\(word)\" is not a screen.") }
+    return screen
+}
+
+/// The number of seconds that `word` says.
+func secondsOf(_ word: String) -> Double {
+    guard let seconds = Double(word) else { fail("\"\(word)\" is not a number of seconds.") }
+    return seconds
+}
+
+/// gate-next <status> <idle-before yes|no>: stdin is busy.js's stdout. Prints "go", "again", "cannotTell" or { wait }.
+func checkGateNext(_ args: [String]) -> Never {
+    let words = exactly(2, args, "gate-next")
+    guard let status = Int32(words[0]) else { fail("\"\(words[0])\" is not a status.") }
+    switch gateNext(status: status, out: String(decoding: readInput(), as: UTF8.self), idleBefore: yesNo(words[1])) {
+    case .wait(let line): emit(["wait": line])
+    case .again: emit("again")
+    case .go: emit("go")
+    case .cannotTell: emit("cannotTell")
+    }
+}
+
+/// idle-after <again|go|wait|cannotTell> <before yes|no>.
+func checkIdleAfter(_ args: [String]) -> Never {
+    let words = exactly(2, args, "idle-after")
+    let next: GateNext
+    switch words[0] {
+    case "again": next = .again
+    case "go": next = .go
+    case "wait": next = .wait("Something is at work on this Mac.")
+    case "cannotTell": next = .cannotTell
+    default: fail("\"\(words[0])\" is not again, go, wait or cannotTell.")
+    }
+    emit(idleAfter(next, before: yesNo(words[1])))
+}
+
+/// ends-check <phase> <failed yes|no>.
+func checkEndsCheck(_ args: [String]) -> Never {
+    let words = exactly(2, args, "ends-check")
+    emit(endsCheck(phase: phaseOf(words[0]), failed: yesNo(words[1])))
+}
+
+/// update-quit <phase>.
+func checkUpdateQuit(_ args: [String]) -> Never {
+    emit(updateQuit(phaseOf(exactly(1, args, "update-quit")[0])).rawValue)
+}
+
+/// may-check <screen> <now|cancel|wait> <failure code, or -> <fake yes|no> <phase>.
+func checkMayCheck(_ args: [String]) -> Never {
+    let words = exactly(5, args, "may-check")
+    guard let quit = Quit(rawValue: words[1]) else { fail("\"\(words[1])\" is not now, cancel or wait.") }
+    let failure = words[2] == "-" ? nil : words[2]
+    emit(mayCheckForUpdates(screen: screenOf(words[0]), quit: quit, failure: failure, fake: yesNo(words[3]), phase: phaseOf(words[4])))
+}
+
+/// keeps-ask <screen>.
+func checkKeepsAsk(_ args: [String]) -> Never {
+    emit(keepsUpdatesAsk(screen: screenOf(exactly(1, args, "keeps-ask")[0])))
+}
+
+/// mark-due <now> <last marked> <began> <limited yes|no>.
+func checkMarkDue(_ args: [String]) -> Never {
+    let words = exactly(4, args, "mark-due")
+    emit(markDue(now: secondsOf(words[0]), lastMarked: secondsOf(words[1]), began: secondsOf(words[2]), limited: yesNo(words[3])))
+}
+
+/// waited-too-long <now> <began>.
+func checkWaitedTooLong(_ args: [String]) -> Never {
+    let words = exactly(2, args, "waited-too-long")
+    emit(waitedTooLong(now: secondsOf(words[0]), began: secondsOf(words[1])))
+}
+
+/// channels: stdin is the build.json.
+func checkChannels(_ args: [String]) -> Never {
+    _ = exactly(0, args, "channels")
+    emit(allowedChannels(build: readInput()))
+}
+
+/// updating-commands <app>: { begin, end }, or null.
+func checkUpdatingCommands(_ args: [String]) -> Never {
+    guard let commands = updatingCommands(app: exactly(1, args, "updating-commands")[0]) else { emit(nil) }
+    emit(["begin": commandValue(commands.begin), "end": commandValue(commands.end)])
 }
 
 // MARK: The commands
@@ -532,5 +641,16 @@ case "pdf": checkPDF(rest)
 case "move": checkMove(rest)
 case "uninstall": checkUninstall(rest)
 case "run": checkRun(rest)
+case "limited-run": checkLimitedRun(rest)
+case "gate-next": checkGateNext(rest)
+case "update-quit": checkUpdateQuit(rest)
+case "idle-after": checkIdleAfter(rest)
+case "ends-check": checkEndsCheck(rest)
+case "may-check": checkMayCheck(rest)
+case "keeps-ask": checkKeepsAsk(rest)
+case "mark-due": checkMarkDue(rest)
+case "waited-too-long": checkWaitedTooLong(rest)
+case "channels": checkChannels(rest)
+case "updating-commands": checkUpdatingCommands(rest)
 default: fail("studio-check does not know the command \"\(command)\".")
 }

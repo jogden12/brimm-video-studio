@@ -3,15 +3,16 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hasXcodeTools } from "../helpers.js";
+import { readSparklePin } from "../studio-app/sparkle.js";
 
 const STUDIO_APP = fileURLToPath(new URL("../studio-app/", import.meta.url));
 
 /** The Sources files studio-check is made from, in this order, when they are there. The app's own main.swift is never one of them. */
-const SOURCE_NAMES = ["Core.swift", "State.swift", "Flow.swift", "Agent.swift", "EngineClient.swift", "GuidePDF.swift", "Mover.swift", "Uninstall.swift"];
+const SOURCE_NAMES = ["Core.swift", "State.swift", "Flow.swift", "Agent.swift", "EngineClient.swift", "GuidePDF.swift", "Mover.swift", "Uninstall.swift", "Updates.swift"];
 
 /** False, or why the tests that ask studio-check are skipped. swiftc is never run to find out whether it is there. */
 export const noChecker =
@@ -25,6 +26,23 @@ export const CHECK_SOURCES = [
   ...SOURCE_NAMES.map((name) => join(STUDIO_APP, "Sources", name)).filter((path) => existsSync(path)),
   join(STUDIO_APP, "Check", "main.swift")
 ];
+
+/**
+ * The folder that holds Sparkle.framework for the tests: BRIMM_SPARKLE when it is set, else the copy fetch-sparkle.sh unpacks into
+ * this home's caches for the pin's version, else null. A BRIMM_SPARKLE that holds no Sparkle.framework throws, naming the folder, so
+ * a run asked to typecheck with Sparkle never skips that quietly. Nothing is written to either.
+ */
+export function sparkleForTests() {
+  const given = process.env.BRIMM_SPARKLE;
+  if (given) {
+    if (existsSync(join(given, "Sparkle.framework"))) return given;
+    throw new Error(`BRIMM_SPARKLE is ${given}, which holds no Sparkle.framework.`);
+  }
+  const { pin } = readSparklePin(join(STUDIO_APP, "sparkle.pin.json"));
+  if (!pin) return null;
+  const cached = join(homedir(), "Library", "Caches", "brimm-studio-app", "sparkle", `Sparkle-${pin.version}`);
+  return existsSync(join(cached, "Sparkle.framework")) ? cached : null;
+}
 
 /** The longest a compile may take, in milliseconds. */
 const COMPILE_LIMIT = 180000;

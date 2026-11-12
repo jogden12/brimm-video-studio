@@ -9,7 +9,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MODULES, check, checkerPath, noChecker } from "./studio-app-check.js";
+import { MODULES, check, checkerPath, noChecker, sparkleForTests } from "./studio-app-check.js";
 
 const APP_NAME = "BRIMM Video Studio.app";
 const NOT_MOVED = "BRIMM Video Studio could not be moved to your Applications folder. Drag it there in Finder, then open it again.";
@@ -273,14 +273,261 @@ const swiftFiles = () => readdirSync(SOURCES).filter((name) => name.endsWith(".s
 /** The text of the Sources/ file `name`. */
 const source = (name) => readFileSync(join(SOURCES, name), "utf8");
 
+/** Typechecks every Swift file in Sources/ with `more` flags, and asserts that it passed with no warning. */
+function typecheck(more = []) {
+  mkdirSync(MODULES, { recursive: true });
+  const flags = ["-typecheck", "-swift-version", "5", "-target", "arm64-apple-macos13.0", "-module-cache-path", MODULES, ...more];
+  const ran = spawnSync("/usr/bin/swiftc", [...flags, ...swiftFiles().map((name) => join(SOURCES, name))], { encoding: "utf8", timeout: 180000 });
+  assert.equal(ran.status, 0, `swiftc -typecheck ended with ${ran.status}:\n${(ran.stderr ?? "").split("\n").slice(-20).join("\n")}`);
+  const said = `${ran.stdout ?? ""}${ran.stderr ?? ""}`;
+  assert.equal(said.includes("warning:"), false, said.split("\n").slice(0, 20).join("\n"));
+}
+
+/** The folder that holds Sparkle.framework for the typecheck, or null. */
+const SPARKLE = sparkleForTests();
+
+/** The text of `text` from `start` to the end of the function that begins there: the next line that is four spaces and a brace. */
+function body(text, start) {
+  const at = text.indexOf(start);
+  assert.ok(at >= 0, `there is no ${start}`);
+  const end = text.indexOf("\n    }\n", at);
+  return text.slice(at, end < 0 ? undefined : end);
+}
+
+/** The text of `text` from `start` to the end of the closure that begins there: the next line that is eight spaces and a brace. */
+function closure(text, start) {
+  const at = text.indexOf(start);
+  assert.ok(at >= 0, `there is no ${start}`);
+  const end = text.indexOf("\n        }\n", at);
+  return text.slice(at, end < 0 ? undefined : end);
+}
+
+/** Every index at which `word` occurs in `text`. */
+function indexesOf(text, word) {
+  const found = [];
+  for (let at = text.indexOf(word); at >= 0; at = text.indexOf(word, at + 1)) found.push(at);
+  return found;
+}
+
 describe("the app's sources", () => {
   it("the app's sources typecheck, and the typecheck prints no warning", { skip: noChecker, timeout: 180000 }, () => {
-    mkdirSync(MODULES, { recursive: true });
-    const flags = ["-typecheck", "-swift-version", "5", "-target", "arm64-apple-macos13.0", "-module-cache-path", MODULES];
-    const ran = spawnSync("/usr/bin/swiftc", [...flags, ...swiftFiles().map((name) => join(SOURCES, name))], { encoding: "utf8", timeout: 180000 });
-    assert.equal(ran.status, 0, `swiftc -typecheck ended with ${ran.status}:\n${(ran.stderr ?? "").split("\n").slice(-20).join("\n")}`);
-    const said = `${ran.stdout ?? ""}${ran.stderr ?? ""}`;
-    assert.equal(said.includes("warning:"), false, said.split("\n").slice(0, 20).join("\n"));
+    typecheck();
+  });
+
+  it("the sources typecheck with Sparkle's framework", {
+    skip: noChecker || (!SPARKLE && "Sparkle is not on this Mac for the tests: set BRIMM_SPARKLE, or run fetch-sparkle.sh"),
+    timeout: 180000
+  }, () => {
+    typecheck(["-F", SPARKLE]);
+  });
+
+  it("only one file names Sparkle, inside canImport", () => {
+    for (const name of swiftFiles().filter((name) => name !== "SparkleUpdater.swift")) {
+      const text = source(name);
+      assert.ok(!/\bimport Sparkle\b/.test(text), `${name} imports Sparkle`);
+      assert.ok(!/\b(SPU|SU)[A-Z][a-z]/.test(text), `${name} names one of Sparkle's types`);
+    }
+    const lines = source("SparkleUpdater.swift")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "" && !line.startsWith("//"));
+    assert.equal(lines[0], "#if canImport(Sparkle)");
+    assert.equal(lines.at(-1), "#endif");
+    assert.equal(lines.filter((line) => line === "#else").length, 1);
+  });
+
+  it("the model asks the gate, and never decides itself", () => {
+    const text = source("AppModel.swift");
+    for (const name of ["gateNext(", "markDue(", "waitedTooLong(", "mayCheckForUpdates("]) assert.ok(text.includes(name), `AppModel.swift never asks ${name}`);
+    assert.ok(!text.includes("Process()"), "AppModel.swift starts a program of its own");
+  });
+
+  it("a quit asks the update's rule where it used to end at once", () => {
+    const text = source("AppDelegate.swift");
+    const asked = text.slice(text.indexOf("func applicationShouldTerminate"), text.indexOf("private func cancelWaitEnded"));
+    const from = asked.indexOf("case .now:");
+    assert.ok(from >= 0, "applicationShouldTerminate has no case .now");
+    const branch = asked.slice(from, asked.indexOf("case ", from + "case .now:".length));
+    assert.ok(branch.includes("updateQuit("), "a quit that may end at once never asks updateQuit");
+    assert.ok(!text.includes(".terminateCancel"), "AppDelegate.swift cancels a quit");
+    assert.ok(text.includes("reply(toApplicationShouldTerminate: true)"), "AppDelegate.swift never gives AppKit its reply");
+
+    // Each arm of the update's rule, by itself.
+    const start = asked.indexOf("switch updateQuit(model.update)");
+    assert.ok(start >= 0, "applicationShouldTerminate never switches on updateQuit(model.update)");
+    const inner = asked.slice(start, asked.indexOf("case .cancel:"));
+    const arm = (name, next) => {
+      const at = inner.indexOf(`case .${name}:`);
+      assert.ok(at >= 0, `the update's rule has no case .${name}`);
+      return inner.slice(at, next ? inner.indexOf(`case .${next}:`) : undefined);
+    };
+    assert.ok(arm("now", "end").includes("return .terminateNow"), "a quit with no check under way does not end at once");
+    const inOrder = (said, words, what) => {
+      let at = -1;
+      for (const word of words) {
+        const next = said.indexOf(word, at + 1);
+        assert.ok(next > at, `${what}: ${word} is missing or out of order`);
+        at = next;
+      }
+      assert.ok(!said.includes(".terminateNow"), `${what} ends at once`);
+    };
+    inOrder(arm("end", "hold"), ["replyOwed = true", "model.endForQuit()", "return .terminateLater"], "a quit while waiting");
+    inOrder(arm("hold"), ["replyOwed = true", "model.holdForQuit()", "return .terminateLater"], "a quit from Offered on");
+
+    const model = source("AppModel.swift");
+    const hold = body(model, "func holdForQuit()");
+    for (const words of ["quitWaiting = true", "screen = .updates"]) assert.ok(hold.includes(words), `holdForQuit never holds ${words}`);
+    assert.ok(body(model, "func endForQuit()").includes("replyToQuit"), "endForQuit never replies to the quit");
+    assert.ok(closure(model, "onSkipped = {").includes("replyToQuit"), "a skip never replies to a quit that waits");
+  });
+
+  it("an update window's cycle that failed ends the check, and answers a quit that waits", () => {
+    const text = source("AppModel.swift");
+    const ended = closure(text, "onEnded = {");
+    assert.match(ended, /^onEnded = \{ \[weak self\] error in/, "the model's onEnded takes no argument");
+    for (const words of ["endsCheck(", "error != nil", "endCheck(", "replyToQuit"]) assert.ok(ended.includes(words), `onEnded never names ${words}`);
+    const sparkle = source("SparkleUpdater.swift");
+    assert.equal(indexesOf(sparkle, "var onEnded: ((Error?) -> Void)?").length, 2, "both halves of SparkleUpdater.swift do not give onEnded the error");
+    assert.match(sparkle, /didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error\?\) \{ onEnded\?\(error\) \}/);
+
+    // The backstop: installing begins anew and its marker is limited.
+    const gated = body(text, "private func gated(");
+    const go = gated.slice(gated.indexOf("case .go:"));
+    const installing = go.indexOf("update = .installing");
+    assert.ok(installing >= 0 && go.indexOf("began = ", installing) > installing, "installing never takes a new began");
+    const tick = body(text, "private func updateTick(");
+    assert.match(tick, /let limited = [^\n]*update == \.installing/, "installing's marker is not limited");
+  });
+
+  it("no check is chosen while the move or Uninstall works, and none runs under a waiting check", () => {
+    const text = source("AppModel.swift");
+    assert.ok(body(text, "var mayCheck: Bool").includes("!working"), "mayCheck never asks whether the move or Uninstall works");
+    const guardLine = body(text, "func begin(chosen: Run?)").match(/guard [^\n]*/)[0];
+    assert.ok(guardLine.includes("update == .none"), "begin's first guard lets a run start under a check");
+    const checking = body(text, "func checkForUpdates()");
+    const cleared = checking.indexOf("beginAsked = nil");
+    assert.ok(cleared >= 0 && cleared < checking.lastIndexOf("startWaiting()"), "checkForUpdates keeps a begin asked before it starts waiting");
+  });
+
+  it("a link kept while a run goes on is acted on once that run has ended", () => {
+    const text = source("AppDelegate.swift");
+    const changed = body(text, "private func stateChanged(");
+    for (const words of ["updatesAsked", "mayCheck", "checkForUpdates()", "keepsUpdatesAsk("]) assert.ok(changed.includes(words), `stateChanged never names ${words}`);
+    const link = body(text, "func application(_ application: NSApplication, open urls: [URL])");
+    assert.ok(link.includes("model.fake"), "a link in a stand-in build never says it does not look for updates");
+  });
+
+  it("a look that never ends is given up, and its late answer is dropped", () => {
+    const text = source("AppModel.swift");
+    const tick = body(text, "private func updateTick(");
+    for (const words of ["lookLimit", "looking = false", "lookCount += 1", "gated(.cannotTell)"]) assert.ok(tick.includes(words), `updateTick never holds ${words}`);
+    const look = body(text, "private func look(");
+    assert.ok(look.includes("limit: lookLimit"), "the look's run has no limit");
+    const answered = look.slice(look.indexOf("DispatchQueue.main.async"));
+    assert.ok(answered.includes("lookCount"), "the look's answer never compares the look's count");
+    for (const name of ["private func queueBegin(", "private func queueEnd("]) assert.ok(body(text, name).includes("limit: lookLimit"), `${name}'s command has no limit`);
+    assert.ok(source("Uninstall.swift").includes("limit: Double? = nil"), "runToEnd takes no limit");
+  });
+
+  it("every answer of the gate keeps the two-idle count through idleAfter", () => {
+    assert.ok(body(source("AppModel.swift"), "private func gated(").includes("idleBefore = idleAfter(next, before: idleBefore)"), "the gate never asks idleAfter");
+  });
+
+  it("an install asked for is held only from Offered or Unpacked, on the updates page", () => {
+    const text = source("AppModel.swift");
+    const asked = closure(text, "onInstallAsked = {");
+    for (const words of ["self.update == .offered || self.update == .unpacked", "self.screen = .updates", "self.enterHolding()"]) assert.ok(asked.includes(words), `onInstallAsked never holds ${words}`);
+    assert.ok(text.includes("private func startUpdate()"), "startUpdate can be called from outside the model");
+  });
+
+  it("a BRIMM_SPARKLE that holds no Sparkle.framework fails loudly", () => {
+    const bad = folder();
+    const kept = process.env.BRIMM_SPARKLE;
+    process.env.BRIMM_SPARKLE = bad;
+    try {
+      assert.throws(() => sparkleForTests(), (error) => error.message.includes(bad));
+    } finally {
+      if (kept === undefined) delete process.env.BRIMM_SPARKLE;
+      else process.env.BRIMM_SPARKLE = kept;
+    }
+  });
+
+  it("every way back to the status ends the check first", () => {
+    const text = source("AppModel.swift");
+    const calls = indexesOf(text, "queueEnd(").filter((at) => !text.slice(0, at).endsWith("func "));
+    assert.ok(calls.length >= 2, "AppModel.swift queues the end command fewer than twice");
+    for (const at of calls) {
+      const within = text.slice(text.lastIndexOf("func ", at), at);
+      assert.ok(within.includes("update = .none"), `the end command at ${at} is queued before the phase is none`);
+    }
+    const ended = body(text, "private func endCheck(");
+    const none = ended.indexOf("update = .none");
+    const line = ended.indexOf('updateLine = ""');
+    const end = ended.indexOf("queueEnd(");
+    const status = ended.indexOf("begin(chosen: nil)");
+    assert.ok(none >= 0 && none < line && line < end && end < status, "endCheck does not end the check in the plan's order");
+    assert.ok(body(text, "func notNow()").includes("endCheck("), "Not now never ends the check");
+    assert.ok(closure(text, "onEnded = {").includes("endCheck("), "the end of Sparkle's check never ends the check");
+  });
+
+  it("the marker's commands run one at a time, in order", () => {
+    const text = source("AppModel.swift");
+    assert.equal(indexesOf(text, "DispatchQueue(label:").length, 1, "AppModel.swift does not make exactly one queue of its own");
+    assert.match(text, /private let markers = DispatchQueue\(label: "[^"]+"\)\n/);
+    for (const name of ["private func queueBegin(", "private func queueEnd("]) assert.ok(body(text, name).includes("markers.async"), `${name} does not go through the one queue`);
+    const begin = body(text, "private func queueBegin(");
+    const looked = begin.indexOf("!= .none");
+    assert.ok(looked >= 0 && looked < begin.indexOf("runToEnd("), "the begin's block runs before it looks at the phase");
+  });
+
+  it("holding lets go once", () => {
+    const text = source("AppModel.swift");
+    const gated = body(text, "private func gated(");
+    const go = gated.slice(gated.indexOf("case .go:"));
+    const installing = go.indexOf("update = .installing");
+    assert.ok(installing >= 0 && installing < go.indexOf("updater.install()"), "holding installs before it is installing");
+    for (const phase of ["waiting", "holding"]) {
+      const sets = indexesOf(text, `update = .${phase}\n`);
+      assert.ok(sets.length >= 1, `nothing sets .${phase}`);
+      for (const at of sets) assert.ok(text.slice(at, text.indexOf("\n    }\n", at)).includes("idleBefore = false"), `.${phase} is set without idleBefore = false`);
+    }
+    const cannot = gated.slice(gated.indexOf("case .cannotTell:"), gated.indexOf("case .go:"));
+    const asked = cannot.indexOf("update == .waiting");
+    assert.ok(asked >= 0 && asked < cannot.indexOf("endCheck("), "cannot tell ends the check without asking whether it is waiting");
+  });
+
+  it("the updater is started only when a check is asked for", () => {
+    for (const name of swiftFiles().filter((name) => name !== "SparkleUpdater.swift" && name !== "AppModel.swift")) {
+      assert.ok(!source(name).includes(".startUpdater()"), `${name} starts the updater`);
+    }
+    const text = source("AppModel.swift");
+    assert.equal(indexesOf(text, ".startUpdater()").length, 1);
+    assert.ok(body(text, "func checkForUpdates()").includes(".startUpdater()"), "the updater is started outside checkForUpdates");
+    const sparkle = source("SparkleUpdater.swift");
+    assert.match(sparkle, /private var started: Bool\?/);
+    assert.match(sparkle, /if let started \{ return started \}/);
+    assert.match(sparkle, /SPUStandardUpdaterController\(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil\)/);
+    assert.ok(!source("main.swift").includes("Updater"), "main.swift makes the updater");
+  });
+
+  it("a skip ends the check", () => {
+    const text = source("AppModel.swift");
+    assert.ok(closure(text, "onSkipped = {").includes("endCheck("), "onSkipped never ends the check");
+    assert.match(body(text, "private func endCheck("), /\{\s*update = \.none\n/);
+    assert.match(source("SparkleUpdater.swift"), /choice == \.skip/);
+  });
+
+  it("the page shows the plan's sentences and buttons", () => {
+    const text = source("StatusViews.swift");
+    const page = text.slice(text.indexOf("struct UpdatesPage"));
+    for (const name of [
+      "updatesHeading", "updatesWaiting", "updatesOffered", "updatesUnpacked", "updatesHolding", "model.updateLine",
+      "Button(updatesNotNow)", "Button(updatesShowWindow)", "Button(updatesInstallNow)"
+    ]) {
+      assert.ok(page.includes(name), `the updates page never names ${name}`);
+    }
+    assert.match(text, /case \.updates: UpdatesPage\(model: model\)/);
+    assert.ok(!source("AppModel.swift").includes("noUpdatesYet"), "AppModel.swift still says updates are not part of this build");
   });
 
   it("the app's sources never log", () => {
@@ -349,6 +596,25 @@ describe("the app's sources", () => {
   it("the setup page says that a run stopped, and shows its top", () => {
     const text = source("SetupViews.swift");
     for (const words of ['"Setup stopped"', '"Repair stopped"', "ScrollViewReader", "scrollTo("]) assert.ok(text.includes(words), `SetupViews.swift never holds ${words}`);
+  });
+
+  it("an updated copy's last page has Continue alone", () => {
+    const text = source("SetupViews.swift");
+    const done = text.slice(text.indexOf("struct DoneView"), text.indexOf("struct SetupPage"));
+    for (const words of ['"updated"', "model.begin(chosen: nil)"]) assert.ok(done.includes(words), `DoneView never holds ${words}`);
+    const model = source("AppModel.swift");
+    const at = model.indexOf("func startUpdate()");
+    assert.ok(at >= 0, "AppModel.swift has no startUpdate");
+    const body = model.slice(at, model.indexOf("\n    }\n", at));
+    assert.ok(body.includes("start(.update)"), "startUpdate never starts the update run");
+    assert.ok(!body.includes("begin("), "startUpdate calls begin at the run's end");
+  });
+
+  it("the update's page has its own two headings", () => {
+    const text = source("SetupViews.swift");
+    for (const words of ["updateHeading", "updateStopped", '"Repair stopped"', '"Setup stopped"']) assert.ok(text.includes(words), `SetupViews.swift never holds ${words}`);
+    const views = source("StatusViews.swift");
+    assert.match(views, /case \.setup, \.repairing, \.updating: SetupPage\(model: model\)/);
   });
 
   it("the page after Uninstall offers Repair and Close", () => {
