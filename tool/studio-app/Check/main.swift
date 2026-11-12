@@ -141,6 +141,11 @@ func checkNames(_ args: [String]) -> Never {
     emit([
         "appName": appName, "agentLabel": agentLabel, "guideName": guideName, "workFolderName": workFolderName,
         "crashMessage": crashMessage, "crashAdvice": crashAdvice, "damagedAdvice": damagedAdvice, "checkEvery": checkEvery,
+        "busyCannotTell": busyCannotTell, "updatesHeading": updatesHeading, "updatesWaiting": updatesWaiting, "updatesOffered": updatesOffered,
+        "updatesUnpacked": updatesUnpacked, "updatesHolding": updatesHolding, "updatesCannotTell": updatesCannotTell,
+        "updatesWaitedTooLong": updatesWaitedTooLong, "updatesCannotStart": updatesCannotStart, "updatesStandIn": updatesStandIn,
+        "updatesNotNow": updatesNotNow, "updatesShowWindow": updatesShowWindow, "updatesInstallNow": updatesInstallNow,
+        "updateMarkEvery": updateMarkEvery, "updateMarkLimit": updateMarkLimit,
     ])
 }
 
@@ -501,6 +506,80 @@ func checkUninstall(_ args: [String]) -> Never {
     }
 }
 
+// MARK: Updates.swift
+
+/// The UpdatePhase that `word` names.
+func phaseOf(_ word: String) -> UpdatePhase {
+    guard let phase = UpdatePhase(rawValue: word) else { fail("\"\(word)\" is not a phase of a check for updates.") }
+    return phase
+}
+
+/// The Screen that `word` names.
+func screenOf(_ word: String) -> Screen {
+    guard let screen = Screen(rawValue: word) else { fail("\"\(word)\" is not a screen.") }
+    return screen
+}
+
+/// The number of seconds that `word` says.
+func secondsOf(_ word: String) -> Double {
+    guard let seconds = Double(word) else { fail("\"\(word)\" is not a number of seconds.") }
+    return seconds
+}
+
+/// gate-next <status> <idle-before yes|no>: stdin is busy.js's stdout. Prints "go", "again", "cannotTell" or { wait }.
+func checkGateNext(_ args: [String]) -> Never {
+    let words = exactly(2, args, "gate-next")
+    guard let status = Int32(words[0]) else { fail("\"\(words[0])\" is not a status.") }
+    switch gateNext(status: status, out: String(decoding: readInput(), as: UTF8.self), idleBefore: yesNo(words[1])) {
+    case .wait(let line): emit(["wait": line])
+    case .again: emit("again")
+    case .go: emit("go")
+    case .cannotTell: emit("cannotTell")
+    }
+}
+
+/// update-quit <phase>.
+func checkUpdateQuit(_ args: [String]) -> Never {
+    emit(updateQuit(phaseOf(exactly(1, args, "update-quit")[0])).rawValue)
+}
+
+/// may-check <screen> <now|cancel|wait> <failure code, or -> <fake yes|no> <phase>.
+func checkMayCheck(_ args: [String]) -> Never {
+    let words = exactly(5, args, "may-check")
+    guard let quit = Quit(rawValue: words[1]) else { fail("\"\(words[1])\" is not now, cancel or wait.") }
+    let failure = words[2] == "-" ? nil : words[2]
+    emit(mayCheckForUpdates(screen: screenOf(words[0]), quit: quit, failure: failure, fake: yesNo(words[3]), phase: phaseOf(words[4])))
+}
+
+/// keeps-ask <screen>.
+func checkKeepsAsk(_ args: [String]) -> Never {
+    emit(keepsUpdatesAsk(screen: screenOf(exactly(1, args, "keeps-ask")[0])))
+}
+
+/// mark-due <now> <last marked> <began> <limited yes|no>.
+func checkMarkDue(_ args: [String]) -> Never {
+    let words = exactly(4, args, "mark-due")
+    emit(markDue(now: secondsOf(words[0]), lastMarked: secondsOf(words[1]), began: secondsOf(words[2]), limited: yesNo(words[3])))
+}
+
+/// waited-too-long <now> <began>.
+func checkWaitedTooLong(_ args: [String]) -> Never {
+    let words = exactly(2, args, "waited-too-long")
+    emit(waitedTooLong(now: secondsOf(words[0]), began: secondsOf(words[1])))
+}
+
+/// channels: stdin is the build.json.
+func checkChannels(_ args: [String]) -> Never {
+    _ = exactly(0, args, "channels")
+    emit(allowedChannels(build: readInput()))
+}
+
+/// updating-commands <app>: { begin, end }, or null.
+func checkUpdatingCommands(_ args: [String]) -> Never {
+    guard let commands = updatingCommands(app: exactly(1, args, "updating-commands")[0]) else { emit(nil) }
+    emit(["begin": commandValue(commands.begin), "end": commandValue(commands.end)])
+}
+
 // MARK: The commands
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -533,5 +612,13 @@ case "pdf": checkPDF(rest)
 case "move": checkMove(rest)
 case "uninstall": checkUninstall(rest)
 case "run": checkRun(rest)
+case "gate-next": checkGateNext(rest)
+case "update-quit": checkUpdateQuit(rest)
+case "may-check": checkMayCheck(rest)
+case "keeps-ask": checkKeepsAsk(rest)
+case "mark-due": checkMarkDue(rest)
+case "waited-too-long": checkWaitedTooLong(rest)
+case "channels": checkChannels(rest)
+case "updating-commands": checkUpdatingCommands(rest)
 default: fail("studio-check does not know the command \"\(command)\".")
 }

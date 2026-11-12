@@ -11,7 +11,7 @@ import { hasXcodeTools } from "../helpers.js";
 const STUDIO_APP = fileURLToPath(new URL("../studio-app/", import.meta.url));
 
 /** The Sources files studio-check is made from, in this order, when they are there. The app's own main.swift is never one of them. */
-const SOURCE_NAMES = ["Core.swift", "State.swift", "Flow.swift", "Agent.swift", "EngineClient.swift", "GuidePDF.swift", "Mover.swift", "Uninstall.swift"];
+const SOURCE_NAMES = ["Core.swift", "State.swift", "Flow.swift", "Agent.swift", "EngineClient.swift", "GuidePDF.swift", "Mover.swift", "Uninstall.swift", "Updates.swift"];
 
 /** False, or why the tests that ask studio-check are skipped. swiftc is never run to find out whether it is there. */
 export const noChecker =
