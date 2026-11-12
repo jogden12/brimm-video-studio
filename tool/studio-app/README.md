@@ -4,7 +4,7 @@ This folder is the Mac app's own: the Swift shell, the stand-in engine for looki
 
 - `Sources/` is the app (SwiftUI in one AppKit window). The files that import only Foundation hold every decision that can be wrong quietly; `Check/main.swift` builds them into `studio-check`, which the tests ask.
 - `dev/fake-engine.mjs` is a stand-in engine that speaks the protocol and does nothing else. `sample-guide.js` fills the real Getting Started guide with sample details, for the stand-in to hand over as its guide.
-- `build-info.js` writes `build.json` and `Info.plist`. `vendor.pin.json` and `vendor.js` say what is vendored, and seal and check the vendor folder. `sparkle.pin.json` and `sparkle.js` say which Sparkle archive the app carries, by its SHA-256, and hold the update key's public half. `common.zsh` holds what the scripts share. `node.entitlements` is node's alone: the app itself has none.
+- `build-info.js` writes `build.json` and `Info.plist`. `vendor.pin.json` and `vendor.js` say what is vendored, and seal and check the vendor folder. `sparkle.pin.json` and `sparkle.js` say which Sparkle archive the app carries, by its SHA-256, and hold the update key's public half. `release.js` says whether a build may be released and checks the appcast a release writes. `common.zsh` holds what the scripts share. `node.entitlements` is node's alone: the app itself has none.
 
 ## The scripts
 
@@ -42,7 +42,7 @@ No script writes into a folder the background job watches, the drop folder or Dr
 
 ## Who runs them
 
-Claude runs the scripts only with `--print`, or inside a test (`tool/tests/studio-app-build.test.js`, `studio-app-vendor.test.js` and `studio-app-sparkle.test.js`, with stand-ins for swiftc, codesign, security, xcrun and curl). A real build, a vendor build, a fetch of Sparkle, signing, notarizing and opening the app are by-hand steps, each on Jason's yes.
+Claude runs the scripts only with `--print`, or inside a test (`tool/tests/studio-app-build.test.js`, `studio-app-vendor.test.js`, `studio-app-sparkle.test.js` and `studio-app-release.test.js`, with stand-ins for swiftc, codesign, security, xcrun, curl, cf, generate_keys and generate_appcast). A real build, a vendor build, a fetch of Sparkle, signing, notarizing, a real release, publishing and opening the app are by-hand steps, each on Jason's yes.
 
 ## A real build, in order
 
@@ -54,7 +54,24 @@ Claude runs the scripts only with `--print`, or inside a test (`tool/tests/studi
 
 ## A release
 
-`release.sh`, which makes the appcast and prints the publishing commands, comes with Phase 7's last task, and its lines will be written here then.
+`release.sh` copies the stapled zip into the releases folder, has Sparkle's `generate_appcast` write the signed appcast there, checks it with the same reader `behind` uses (`release.js`), and prints what to publish. It never publishes:
+
+```
+zsh tool/studio-app/release.sh --app <the stapled app> --releases <folder> --sparkle <archive> [--source <the GPL source zip>] [--print]
+```
+
+- `--releases` is kept from one release to the next, never in the home's Dropbox or a watched folder: `generate_appcast` makes deltas from the earlier zips in it and keeps its own appcast there. The script deletes nothing in it but its own two files, `unfinished-release.txt` and `appcast.xml.before`, once a run has ended well. A run that stopped leaves them, and the next run stops until the folder is put right as `unfinished-release.txt`'s sentence says.
+- Before anything it refuses a beta version off the beta channel (or a stable one on it), a build number not above every item's in the feed, a version or zip the feed already has, a zip made before stapling, and an archive that is not Sparkle's pinned one.
+- It reads only the update key's public half (`generate_keys -p`), and stops before writing anything when that is not the app's `SUPublicEDKey`. `generate_appcast` signs with the key in the login keychain, so macOS may ask whether it may use the keychain.
+- `--print` says what it would do, makes no folder and starts neither `generate_keys`, `generate_appcast`, `xcrun` nor `cf`.
+
+The order of a release:
+
+1. The build: `build-app.sh --sign`, as above.
+2. Notarizing and stapling, with the commands `build-app.sh --sign` prints, then the zip again.
+3. `release.sh --print`, to see what it would do.
+4. The real `release.sh`, on Jason's yes.
+5. Publishing: the `cf` and `curl` lines it prints, by hand and in their order, on Jason's yes: the zip and its deltas (and the source zip with `--source`) first, each only when the line before it answered, and the appcast last, only when each answered 200.
 
 ## The by-hand checks
 
