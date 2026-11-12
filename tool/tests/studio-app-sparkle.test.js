@@ -234,6 +234,28 @@ describe("fetch-sparkle.sh and unpack_sparkle", { skip: notAMac }, () => {
     }
   });
 
+  it("unpack_sparkle checks the copy it unpacks, not the archive it was given", () => {
+    const w = world();
+    try {
+      // A tar that says what it was given, then runs the real one, and a cp that writes other bytes to its destination: the archive
+      // given is the pinned one, but its copy is not.
+      writeFileSync(join(w.root, "bin", "tar"), '#!/bin/sh\necho "tar $*" >> "$RAN"\nexec /usr/bin/tar "$@"\n');
+      writeFileSync(join(w.root, "bin", "cp"), '#!/bin/sh\necho "cp $*" >> "$RAN"\nfor last; do :; done\nprintf "other bytes\\n" > "$last"\n');
+      chmodSync(join(w.root, "bin", "tar"), 0o755);
+      chmodSync(join(w.root, "bin", "cp"), 0o755);
+      const into = join(w.root, "into");
+      mkdirSync(into);
+      const refused = spawnSync("/bin/zsh", ["-c", 'here=$1; source "$here/common.zsh"; unpack_sparkle "$2" "$3"', "zsh", join(w.root, "studio-app"), w.archive, into], { encoding: "utf8", env: w.env });
+      assert.equal(refused.status, 1, `${refused.stdout}${refused.stderr}`);
+      assert.ok(w.ranText().includes("cp "), w.ranText());
+      assert.match(refused.stdout, /That is not the pinned Sparkle archive, so it was not unpacked\./);
+      assert.deepEqual(readdirSync(into), []);
+      assert.equal(w.ranText().includes("tar "), false, w.ranText());
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
+    }
+  });
+
   it("an archive that unpacks without Sparkle's parts is refused", () => {
     const w = world();
     try {

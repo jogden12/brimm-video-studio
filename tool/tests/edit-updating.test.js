@@ -4,7 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { COMMAND_NAMES, editMain } from "../edit.js";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { UPDATING, markUpdating, noteWaited, updatingWaitedFile } from "../busy.js";
 import { setup } from "./episodes.js";
 
@@ -110,5 +110,15 @@ describe("edit.js while an update is under way", () => {
     const r = await on(t, ["status"]);
     assert.ok(!r.said.includes(UPDATING));
     t.done();
+  });
+});
+
+describe("edit.js's own kickstart", () => {
+  it("is given the same time limit as busy.js's", () => {
+    const text = readFileSync(new URL("../edit.js", import.meta.url), "utf8");
+    const at = text.indexOf("function kickstart(");
+    assert.ok(at !== -1, "edit.js has function kickstart(");
+    const body = text.slice(at, text.indexOf("\n}\n", at));
+    assert.ok(body.includes("KICK_TIMEOUT_MS"), body);
   });
 });

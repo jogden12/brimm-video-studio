@@ -247,6 +247,7 @@ if (( sign )); then
   say "  spctl --assess --type execute -vv \"$app\""
   say "The zip is made again after stapling, since a zip made before it has no ticket."
   say "Then the release: zsh tool/studio-app/release.sh --app \"$app\" --releases <folder> --sparkle \"$sparkle\" --print"
+  say "For the first release, add --first-release."
 else
   say "Not signed with the Developer ID: every program is sealed ad hoc, so this build is for this Mac's tests only."
 fi

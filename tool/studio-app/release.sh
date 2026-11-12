@@ -142,6 +142,13 @@ app_key=$(plutil -extract SUPublicEDKey raw -o - "$app/Contents/Info.plist" 2>/d
 [[ $key == $app_key ]] || stop "This build carries another update key than the one in your login keychain, so no Mac would take the update. Nothing was written."
 
 mkdir -p "$releases" || stop "$releases could not be made."
+# A folder (or anything else that is not a plain file) where the kept copy goes would take the copy inside it, and the run would go on
+# with no appcast.xml.before beside unfinished-release.txt.
+for in_the_way in "$before" "$before.part"; do
+  if [[ -e $in_the_way || -L $in_the_way ]] && [[ ! -f $in_the_way || -L $in_the_way ]]; then
+    stop "${in_the_way:t} is in the way in $releases: it is not a file. Take it out first. Nothing was written."
+  fi
+done
 # The appcast is kept first, by a copy renamed into place, so that unfinished-release.txt is only ever written beside a whole
 # appcast.xml.before, and appcast.xml.before is there exactly when there was an appcast.
 if [[ -f $appcast ]]; then

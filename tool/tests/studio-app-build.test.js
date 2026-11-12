@@ -428,6 +428,7 @@ describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () =>
     const release = `Then the release: zsh tool/studio-app/release.sh --app "${signed.app}" --releases <folder> --sparkle "${w.sparkle}" --print`;
     const at = lines.indexOf(release);
     assert.ok(at !== -1, signed.r.stdout);
+    assert.equal(lines[at + 1], "For the first release, add --first-release.", signed.r.stdout);
     assert.ok(at > lines.findIndex((l) => l.includes("spctl --assess")), signed.r.stdout);
     assert.ok(at > lines.indexOf("The zip is made again after stapling, since a zip made before it has no ticket."), signed.r.stdout);
     for (const ran of [signed.ran, plain.ran]) assert.equal(/release\.sh|^generate_/m.test(ran), false, ran);

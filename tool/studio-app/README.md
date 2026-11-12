@@ -50,9 +50,9 @@ The tests that typecheck the app's Swift against Sparkle need Sparkle's framewor
 
 1. The vendor folder, once: `build-vendor.sh --out /Users/Shared/brimm-studio-vendor`. About fifteen minutes and 170 MB of downloads. It ends by naming the sealed folder and the source zip. A pin that moves makes the folder unusable, and it is built again.
 2. Sparkle's archive, once for each pin: `fetch-sparkle.sh`.
-3. The app, from a commit on `origin/main`: `build-app.sh --out <folder> --version <v> --build <n> --vendor /Users/Shared/brimm-studio-vendor/vendor --sparkle ~/Library/Caches/brimm-studio-app/sparkle/Sparkle-<version>.tar.xz`, with `--sign` for a copy that leaves the Mac Studio. The build number goes up by one with every such build.
+3. The app, from a commit on `origin/main`: `build-app.sh --out <folder> --version 1.0.0-beta.2 --channel beta --build <n> --vendor /Users/Shared/brimm-studio-vendor/vendor --sparkle ~/Library/Caches/brimm-studio-app/sparkle/Sparkle-<version>.tar.xz`, with `--sign` for a copy that leaves the Mac Studio. A stable version, with no pre-release part, leaves out `--channel beta`. The build number goes up by one with every such build.
 4. With `--sign`, the notarizing commands it prints, then the zip again, after stapling.
-5. Then the release, as the last line `build-app.sh --sign` prints. Its own lines go in the next part.
+5. Then the release, as the last two lines `build-app.sh --sign` prints say, with `--first-release` for the first one. Its own lines go in the next part.
 
 ## A release
 

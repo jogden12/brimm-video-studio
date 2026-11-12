@@ -98,7 +98,7 @@ import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, 
 import { isMedia } from "./lib.js";
 import { quotable, shellWord, studioFiles, studioFolder } from "./studio.js";
 import { UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "./build.js";
-import { AGENT_LABEL, launchdPid, updatingWaitedFile, updatingWhy } from "./busy.js";
+import { AGENT_LABEL, KICK_TIMEOUT_MS, launchdPid, updatingWaitedFile, updatingWhy } from "./busy.js";
 import { UNFINISHED, unfinished } from "./set-up.js";
 import { checkForUpdate, updateLine } from "./update-check.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
@@ -1807,9 +1807,10 @@ function accessFindingOf(ctx) {
 
 /** Ask the launch agent to look in this Mac's drop folder now, as it does when something lands there: with its own
     arguments, its own environment and its own lock. When it is running already, nothing more is started, and its run
-    looks again within a minute. Throws, saying why in launchctl's words, when it could not be asked. */
+    looks again within a minute. Throws, saying why in launchctl's words, when it could not be asked. Like busy.js's own, it
+    waits KICK_TIMEOUT_MS at most for launchctl to answer, so that a launchd that does not answer never holds the command. */
 function kickstart() {
-  const ran = spawnSync("/bin/launchctl", ["kickstart", `gui/${process.getuid()}/${AGENT}`], { encoding: "utf8" });
+  const ran = spawnSync("/bin/launchctl", ["kickstart", `gui/${process.getuid()}/${AGENT}`], { encoding: "utf8", timeout: KICK_TIMEOUT_MS });
   if (ran.status !== 0) throw new Error(lastLine(ran.stderr));
 }
 

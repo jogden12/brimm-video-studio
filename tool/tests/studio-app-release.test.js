@@ -33,7 +33,7 @@ const WATCHED_SENTENCE = "That folder is watched or is in Dropbox, and a build n
 const PUBLISH_HEAD = "Publishing is a by-hand step, on Jason's yes. In this order, each only when the line before it answered:";
 const NO_APPCAST_SENTENCE = (releases) => `There is no appcast in ${releases}. If this is the first release, say --first-release.`;
 const FIRST_WITH_APPCAST_SENTENCE = (releases) => `--first-release was said, but ${releases} already has an appcast.`;
-const KEPT_BEFORE_SENTENCE = "appcast.xml could not be kept as appcast.xml.before, so nothing was written. Nothing is to be published.";
+const IN_THE_WAY_SENTENCE = (releases) => `appcast.xml.before is in the way in ${releases}: it is not a file. Take it out first. Nothing was written.`;
 const NOT_CHECKED_SENTENCE = "The appcast could not be checked.";
 const CHECK_FEED = `Check that the live feed says the same before putting the appcast: curl -s ${FEED}`;
 const NO_FEED_BEFORE = "There was no feed before this release.";
@@ -573,6 +573,27 @@ describe("release.sh", { skip: notAMac }, () => {
     }
   });
 
+  it("an appcast.xml.before that is a folder, even one that can be written into, stops the run before anything is written", () => {
+    const w = world();
+    try {
+      mkdirSync(w.releases);
+      const earlier = appcast({ build: 1, version: "1.0.0-beta.1", channel: "beta" });
+      writeFileSync(join(w.releases, "appcast.xml"), earlier);
+      mkdirSync(join(w.releases, "appcast.xml.before"));
+      w.makeApp();
+      w.says(appcast({ build: 1, version: "1.0.0-beta.1", channel: "beta" }, { build: 2, version: BETA2.version, channel: "beta" }));
+      const made = w.release(w.standard());
+      assert.equal(made.status, 1, said(made));
+      assert.equal(made.stdout.trim().split("\n").pop(), IN_THE_WAY_SENTENCE(w.releases));
+      assert.equal(existsSync(join(w.releases, "unfinished-release.txt")), false);
+      assert.equal(readFileSync(join(w.releases, "appcast.xml"), "utf8"), earlier);
+      assert.equal(w.ranText().includes("generate_appcast"), false, w.ranText());
+      assert.deepEqual(readdirSync(join(w.releases, "appcast.xml.before")), []);
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
+    }
+  });
+
   it("an appcast.xml that cannot be kept as appcast.xml.before stops the run before anything is written", () => {
     const w = world();
     const before = join(w.root, "releases", "appcast.xml.before");
@@ -587,7 +608,7 @@ describe("release.sh", { skip: notAMac }, () => {
       w.says(appcast({ build: 1, version: "1.0.0-beta.1", channel: "beta" }, { build: 2, version: BETA2.version, channel: "beta" }));
       const made = w.release(w.standard());
       assert.equal(made.status, 1, said(made));
-      assert.equal(made.stdout.trim().split("\n").pop(), KEPT_BEFORE_SENTENCE);
+      assert.equal(made.stdout.trim().split("\n").pop(), IN_THE_WAY_SENTENCE(w.releases));
       assert.equal(existsSync(join(w.releases, "unfinished-release.txt")), false);
       assert.equal(readFileSync(join(w.releases, "appcast.xml"), "utf8"), earlier);
       assert.equal(w.ranText().includes("generate_appcast"), false, w.ranText());
@@ -610,6 +631,21 @@ describe("release.sh", { skip: notAMac }, () => {
       const lines = made.stdout.split("\n");
       assert.ok(lines.includes(`cf r2 objects put "releases/BRIMM Video Studio2-1.delta" --bucket-name ${BUCKET} --file "${join(w.releases, "BRIMM Video Studio2-1.delta")}" --content-type application/octet-stream`), made.stdout);
       assert.ok(lines.includes(`curl -sI "${RELEASES_URL}BRIMM%20Video%20Studio2-1.delta"`), made.stdout);
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
+    }
+  });
+
+  it("a delta whose url escapes a character is checked at the url the appcast gives, not one made from its name", () => {
+    const w = world();
+    try {
+      w.makeApp();
+      w.says(appcast({ build: 2, version: BETA2.version, channel: "beta", deltas: ["Studio%2B2-1.delta"] }));
+      const made = w.release(w.standard(["--first-release"]), { DELTAS_SAYS: "Studio+2-1.delta" });
+      assert.equal(made.status, 0, said(made));
+      const lines = made.stdout.split("\n");
+      assert.ok(lines.includes(`cf r2 objects put "releases/Studio+2-1.delta" --bucket-name ${BUCKET} --file "${join(w.releases, "Studio+2-1.delta")}" --content-type application/octet-stream`), made.stdout);
+      assert.ok(lines.includes(`curl -sI "${RELEASES_URL}Studio%2B2-1.delta"`), made.stdout);
     } finally {
       rmSync(w.root, { recursive: true, force: true });
     }
