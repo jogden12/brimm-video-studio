@@ -3,10 +3,11 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hasXcodeTools } from "../helpers.js";
+import { readSparklePin } from "../studio-app/sparkle.js";
 
 const STUDIO_APP = fileURLToPath(new URL("../studio-app/", import.meta.url));
 
@@ -25,6 +26,19 @@ export const CHECK_SOURCES = [
   ...SOURCE_NAMES.map((name) => join(STUDIO_APP, "Sources", name)).filter((path) => existsSync(path)),
   join(STUDIO_APP, "Check", "main.swift")
 ];
+
+/**
+ * The folder that holds Sparkle.framework for the tests: BRIMM_SPARKLE when it holds one, else the copy fetch-sparkle.sh unpacks
+ * into this home's caches for the pin's version, else null. Nothing is written to either.
+ */
+export function sparkleForTests() {
+  const given = process.env.BRIMM_SPARKLE;
+  if (given && existsSync(join(given, "Sparkle.framework"))) return given;
+  const { pin } = readSparklePin(join(STUDIO_APP, "sparkle.pin.json"));
+  if (!pin) return null;
+  const cached = join(homedir(), "Library", "Caches", "brimm-studio-app", "sparkle", `Sparkle-${pin.version}`);
+  return existsSync(join(cached, "Sparkle.framework")) ? cached : null;
+}
 
 /** The longest a compile may take, in milliseconds. */
 const COMPILE_LIMIT = 180000;

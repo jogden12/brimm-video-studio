@@ -1,5 +1,5 @@
 // The window's one view, which switches on the model's screen, and every screen but setup, repair and update: checking, the move to
-// Applications, two copies, the status window and its Uninstall, removed, and refused.
+// Applications, two copies, the status window and its Uninstall, removed, refused, and Check for Updates.
 import AppKit
 import SwiftUI
 
@@ -17,6 +17,7 @@ struct RootView: View {
             case .twoCopies: TwoCopiesPage(model: model)
             case .status: StatusPage(model: model)
             case .removed: RemovedPage(model: model)
+            case .updates: UpdatesPage(model: model)
             }
         }
         .frame(width: 760, height: 560)
@@ -199,6 +200,35 @@ struct RefusedPage: View {
             ? Failure(code: given.code, message: given.message, advice: damagedAdvice, contact: given.contact, details: given.details) : given
         Page {
             FailureView(model: model, failure: shown, offersRepair: false)
+        }
+    }
+}
+
+/// Check for Updates: what the check is doing, by its phase. While waiting, busy.js's line and Not now; once the update's own window
+/// has the check, a button that brings that window to the front.
+struct UpdatesPage: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        Page {
+            Heading(text: updatesHeading)
+            switch model.update {
+            case .waiting:
+                Text(updatesWaiting)
+                if !model.updateLine.isEmpty { Text(model.updateLine).foregroundColor(Brand.fog) }
+                Button(updatesNotNow) { model.notNow() }
+            case .offered:
+                Text(updatesOffered)
+                Button(updatesShowWindow) { model.showUpdateWindow() }
+            case .unpacked:
+                Text(updatesUnpacked)
+                Button(updatesInstallNow) { model.showUpdateWindow() }.buttonStyle(MainButtonStyle())
+            case .holding, .installing:
+                Text(updatesHolding)
+                if !model.updateLine.isEmpty { Text(model.updateLine).foregroundColor(Brand.fog) }
+            case .none:
+                EmptyView()
+            }
         }
     }
 }

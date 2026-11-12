@@ -50,15 +50,12 @@ private func makeMainMenu(updates: NSMenuItem) -> (main: NSMenu, window: NSMenu)
     return (main, window)
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation {
     private let model = AppModel()
     private var window: NSWindow?
     private var watching: [AnyCancellable] = []
 
-    /// Whether the first begin has been called, and whether it has since shown a screen other than checking.
-    private var begun = false
-    private var shown = false
-    /// A check-for-updates link that came before the first screen was shown, kept until it is.
+    /// A check-for-updates link that came on a screen that passes by itself, kept until a screen that does not.
     private var updatesAsked = false
 
     /// Whether quitting waits for the run to end, and whether it may now end the app whatever the rule says.
@@ -90,42 +87,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Each published value comes before it is set, so the value given is the one used, never the model's.
         model.$screen.sink { [weak self] screen in self?.screenChanged(screen) }.store(in: &watching)
         model.$state.sink { [weak self] state in self?.stateChanged(state) }.store(in: &watching)
+        model.quitMayGo = { [weak self] in self?.quitNow() }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         front()
-        begun = true
         model.begin(chosen: nil)
     }
 
-    // MARK: Links
+    // MARK: Check for Updates
 
-    /// Each link is taken through urlAction. One that comes before the first screen is shown is kept and acted on then.
+    /// Each link is taken through urlAction. It brings the window to the front, and checks for updates where a check may be chosen.
+    /// One that comes on a screen that passes by itself, such as the first status, is kept and acted on at the screen after.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where urlAction(url.absoluteString) == "check-for-updates" {
-            if shown {
-                checkForUpdates()
-            } else {
+            if model.mayCheck {
+                front()
+                model.checkForUpdates()
+            } else if keepsUpdatesAsk(screen: model.screen) {
                 updatesAsked = true
+            } else {
+                front()
             }
         }
     }
 
-    @objc private func checkForUpdatesChosen(_ sender: Any?) { checkForUpdates() }
-
-    /// Brings the window to the front and, on the status screen only, checks for updates.
-    private func checkForUpdates() {
+    /// The menu's Check for Updates…, enabled only where a check may be chosen.
+    @objc private func checkForUpdatesChosen(_ sender: Any?) {
         front()
-        if model.screen == .status { model.checkForUpdates() }
+        model.checkForUpdates()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard menuItem.action == #selector(checkForUpdatesChosen(_:)) else { return true }
+        return model.mayCheck
     }
 
     private func screenChanged(_ screen: Screen) {
-        guard begun, !shown, screen != .checking else { return }
-        shown = true
-        guard updatesAsked else { return }
+        guard updatesAsked, !keepsUpdatesAsk(screen: screen) else { return }
         updatesAsked = false
         // The screen is not yet set while its change is told, so the link is acted on once it is.
-        DispatchQueue.main.async { [weak self] in self?.checkForUpdates() }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.front()
+            if self.model.mayCheck { self.model.checkForUpdates() }
+        }
     }
 
     private func front() {
@@ -145,13 +151,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// and quits when the run ends: the installer is never stopped. In both of those AppKit is told .terminateLater and is answered
     /// when the app may quit, so a logout, a restart or a shutdown waits for the run. While it waits, AppKit runs the main run loop in
     /// its modal panel mode; the engine's events and end, the five seconds and the model's timer all come through the main queue or
-    /// the common modes, so they still come. Once a quit has been asked, the model starts no new run.
+    /// the common modes, so they still come. Once a quit has been asked, the model starts no new run. Where no run holds the quit, a
+    /// check for updates is asked: none or installing quits; waiting ends the check first and quits once the marker is taken away;
+    /// from Offered on, the quit waits on the updates page until nothing is at work, or until the update is skipped.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if mayQuit { return .terminateNow }
         model.quitAsked()
         switch model.quit {
         case .now:
-            return .terminateNow
+            // A quit already waits for its reply.
+            if replyOwed { return .terminateLater }
+            switch updateQuit(model.update) {
+            case .now:
+                return .terminateNow
+            case .end:
+                replyOwed = true
+                model.endForQuit()
+                return .terminateLater
+            case .hold:
+                replyOwed = true
+                front()
+                model.holdForQuit()
+                return .terminateLater
+            }
         case .cancel:
             guard !quitWhenEnded else { return .terminateLater }
             quitWhenEnded = true

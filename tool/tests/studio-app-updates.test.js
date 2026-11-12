@@ -32,7 +32,7 @@ function walk(answers) {
 /** may-check's answer: the screen, the quit rule, the failure's code or -, whether the build is a stand-in, and the phase. */
 const may = (screen, quit, failure = "-", fake = "no", phase = "none") => ask("may-check", [screen, quit, failure, fake, phase]);
 
-const SCREENS = ["checking", "move", "refused", "setup", "repairing", "updating", "twoCopies", "status", "removed"];
+const SCREENS = ["checking", "move", "refused", "setup", "repairing", "updating", "twoCopies", "status", "removed", "updates"];
 const PHASES = ["none", "waiting", "offered", "unpacked", "holding", "installing"];
 
 // The first test may wait for the compile, which has its own 180-second limit.
@@ -96,7 +96,7 @@ describe("where Check for Updates may be chosen", { skip: noChecker }, () => {
     assert.equal(may("refused", "now", "colon"), false);
 
     // No other screen, in any state.
-    for (const screen of ["checking", "move", "twoCopies", "removed"]) {
+    for (const screen of ["checking", "move", "twoCopies", "removed", "updates"]) {
       for (const quit of ["now", "cancel", "wait"]) {
         assert.equal(may(screen, quit), false, `${screen} ${quit}`);
         assert.equal(may(screen, quit, "install"), false, `${screen} ${quit} install`);

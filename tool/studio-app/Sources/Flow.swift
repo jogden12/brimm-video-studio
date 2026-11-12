@@ -5,9 +5,10 @@ import Foundation
 
 // MARK: The pages
 
-/// The page the window shows. A screen's raw value is the word studio-check takes for it.
+/// The page the window shows. A screen's raw value is the word studio-check takes for it. `updates` is the Check for Updates page,
+/// and `updating` the update run's.
 enum Screen: String {
-    case checking, move, refused, setup, repairing, updating, twoCopies, status, removed
+    case checking, move, refused, setup, repairing, updating, twoCopies, status, removed, updates
 }
 
 /// The updating page's heading while the update run goes on, and its heading when the run stopped on a failure.
