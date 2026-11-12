@@ -456,7 +456,7 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
   - on the status screen;
   - on the setup screen while `quit` is `.cancel` (a run is at a question and the installer has not begun);
   - on the updating and repairing screens once their run has failed (`quit` is `.now` and `failure` is not nil);
-  - on the refused screen unless `failure` is `dev` or `colon`. The development Mac only ever shows refused, with `dev`.
+  - on the refused screen unless `failure` is `dev` or `colon`. The development Mac only ever shows refused, with `dev`. (Not so: see ruling 38, which is what was built.)
   It is false on every other screen and in every other state.
 - `keepsUpdatesAsk`: true for the checking, repairing and updating screens, which pass by themselves, so a link that arrives then waits for the screen after. False for the others.
 - `markDue`: true when `now - lastMarked >= updateMarkEvery` and, if `limited`, `now - began < updateMarkLimit`. `waitedTooLong`: `now - began >= updateMarkLimit`.
@@ -575,7 +575,7 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
   - a version with a pre-release part whose channel is not `beta`, or one without whose channel is `beta`: `A beta version goes on the beta channel, and only a beta version does. Build it again with the right --channel.`;
   - an item in the appcast whose build is this build or higher: `Build <n> is not above the feed's newest, <m>. A release needs a higher build number.`;
   - an item of this version, or this zip's name in an enclosure: `The feed already has <version>. A release needs a new version.`
-  No appcast is the first release and is allowed.
+  No appcast is the first release and is allowed. (Tightened during the build: see ruling 42.)
 - `check` reads the appcast through `appcastItems`. It refuses, each in one sentence that names what is wrong:
   - an appcast longer than `APPCAST_MAX_CHARS`, which `behind` would not read: `The appcast is longer than Studio reads. Take its oldest items out first.`;
   - no item with this build; an item of this build whose version is not this version; a beta build's item that is not tagged `beta`, or a stable build's item that is tagged at all;
@@ -627,7 +627,7 @@ Each is settled here for this phase. The spec is corrected with the phase's pull
 ## Final check
 
 - [ ] Run `cd tool && BRIMM_SPARKLE="$HOME/Library/Caches/brimm-studio-spikes/s7/sparkle-2.10.1" node --test`. Expected: every test passes or skips with its reason, the typecheck with Sparkle among those that ran, and `contract.test.js` passes with the same hashes.
-- [ ] Run `cd tool && node tests/unused-exports.mjs`. It counts neither tests nor `tool/studio-app` as users. Expected: the only new lines are `busy.js`'s `markUpdating`, `UPDATING_HOLD_MS` and `updatingFile`, and `update-check.js`'s `APPCAST_ITEM_MAX_CHARS` and `appcastItems`.
+- [ ] Run `cd tool && node tests/unused-exports.mjs`. It counts neither tests nor `tool/studio-app` as users. Expected: the only new lines are `busy.js`'s `markUpdating`, `UPDATING_HOLD_MS` and `updatingFile`, and `update-check.js`'s `APPCAST_ITEM_MAX_CHARS` and `appcastItems`. (As built, three more, each in a task's Interfaces and used only by tests: `busy.js`'s `UPDATING` and `UPDATING_UNTOLD`, and `set-up.js`'s `setUpFile`.)
 - [ ] Run `git diff --stat main -- tool/install.sh tool/studio-app/vendor.pin.json tool/studio-app/build-vendor.sh tool/studio/SKILL.md tool/shared tool/lib.js tool/run.js tool/guide.js tool/guide-note.js tool/handoff.js tool/handoff-v2.js tool/tests/fixtures`. Expected: nothing.
 - [ ] Run `git status --short`. Nothing is left over but `.cloudflare/`, and no file outside `tool/` and `docs/` was touched.
 - [ ] With the pull request: correct the spec in the places "Where the spec and the code disagree" names, and the build plan's row 7; bring `docs/memory/progress.md` up to date (it still says pull request 65 is not merged) and add to `docs/memory/gotchas.md` what the build taught.
@@ -686,7 +686,28 @@ Claude's rulings, 2026-11-12 (Jason can overrule any of them):
 31. CLAUDE.md's lines about updates (the spec's last list) wait for Phase 8, with the rollout's other changes to it.
 32. Four reviewers read this plan before it was committed (the spec and the rules; interfaces and tests; the code's facts; an attempt to break the update), and a sceptic checked each serious finding against the code. Fifty-six held and are in it. The two gravest were quits: a quit while Sparkle's window had the check took the marker away, and the quit's own rule was never reached.
 
+Jason, during the build:
+33. "Yes, build it" (12 November 2026). The update key is the one in his login keychain since the spike, with its backup found, and the bundle ID stays `com.thebrimm.video-studio` (By-Hand page checks 16 and 17, the same day). On his "Yes, read it", the key's public half was read with `generate_keys -p` and is in `sparkle.pin.json`.
+
+Claude's rulings during the build, 2026-11-12 (Jason can overrule any of them). Where one of these and a task's rule differ, this is what was built:
+34. Every run of setup, repair or update that got as far as its first check of the app's copy, and does not end with its installer at 0, ends by taking the marker away and asking the job to look, once (Task 4 named only a failed installer). A refusal before that check touches nothing and asks nothing, so the development Mac's job is never asked. The kick has a five-second limit, one constant in `busy.js`. The record is written only for an installed build that can be read.
+35. A run of the watcher that is refused for the marker leaves a note, and `behind` asks the job to look once the marker has lapsed and nothing is at work. So a video dropped during an update that was abandoned is taken in at the next Claude session. This narrows ruling 13.
+36. An error from Sparkle once an update is unpacked ends the check, as Skip does. A check that ends with no error once an update is unpacked does not: that update is still installed at a quit. The marker is limited to half an hour while installing too. This replaces ruling 15 and Task 10's rules 6 and 7.
+37. A look that has gone twenty seconds is given up as "cannot tell", and its program is ended, so one look that never ends cannot leave a quit unanswered.
+38. The refused screen offers a check only when its failure has a code that is none of `dev`, `colon` and `settings`. The development Mac can refuse with no code, or with `settings`, and a check there would mark its real support folder. This replaces Task 9's rule for that screen.
+39. A check cannot be chosen while Uninstall or the move is working, no engine run starts while a check is under way, and a link that arrives during a run is acted on when that run ends.
+40. `busy.js updating end --look` asks the job to look only when no `BRIMM_VIDEO_HOME` is set, so no test can reach this Mac's job.
+41. The count of idle answers is a function of its own (`idleAfter`), so the tests can ask it.
+42. `release.sh` takes `--first-release`, and without it refuses a folder that has no appcast. A mistyped folder would otherwise pass for a first release, and the printed last line would overwrite the live feed. This replaces Task 11's "No appcast is the first release and is allowed".
+43. `release.sh` keeps `appcast.xml.before` before it writes `unfinished-release.txt`; its check also takes the appcast as it was and refuses an item this release did not make; every enclosure in the appcast's text is checked; and `generate_appcast` is told to keep every version (`--maximum-versions 0`).
+44. A version with a pre-release part goes on the beta channel, and only such a version does. `buildJson` checks it, so the build refuses it too, before anything is signed.
+45. Sparkle's pin takes only a version that is a version and an address whose last part is a plain `.tar.xz` name, and `unpack_sparkle` checks and unpacks one copy of the archive.
+46. The controller made two small commits itself: the test that compares the app's end command puts the word together, so the guard on asking this Mac's job to look passes (the whole suite found it); and the key's public half, with its test.
+47. The whole branch was read by four reviewers (the Node side's safety; the Swift shell; the build and the release; the tests, the rules and the plan), with a sceptic for each. Nothing critical was found. Twenty important findings held and one did not. They were fixed in one wave by three fixers on separate files, each re-reviewed, and a last list of five.
+
 ## Open for Jason
+
+Answered on 12 November: 5 (the key in his keychain since the spike) and 7 (`com.thebrimm.video-studio`). The others stand at their recommendations, as built.
 
 1. **Sparkle's own daily look.** Recommended: off, as ruling 20. The other way is a second notice, in the app's own window, on the days it is open. Built as recommended; the other way changes one switch in Task 6.
 2. **The version macOS shows.** Recommended: the whole version, `1.0.0-beta.2`, in Finder, in the update's window and in the appcast. Apple's own format for that key is three numbers; Phase 6 kept to it, and a beta then reads as `1.0.0` everywhere but in Studio's own window. Built as recommended; the other way changes Task 6 and has `release.sh` write the version into the appcast itself.

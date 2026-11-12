@@ -30,13 +30,13 @@ Today a Mac is set up with "Move to Studio.app", which opens Terminal on a 1,900
 ### 1. One app: **BRIMM Video Studio.app**
 - **What's in it.** It is signed with Developer ID, notarized and versioned (semver), for Apple silicon on macOS 13 or later. The bundle carries:
   - Studio's code at one commit, from `git archive` of `tool/` without tests or move-app, and without `tool/studio-app/`, the build's own sources (Phase 6);
-  - `build.json`: version, build number, full and short commit, update feed URL, channel, support contact. The version lives in two places: `build.json` holds the whole semver (`1.0.0-beta.1`), and `Info.plist`'s `CFBundleShortVersionString` holds only the numbers before the hyphen, with `CFBundleVersion` the build number (Phase 6);
+  - `build.json`: version, build number, full and short commit, update feed URL, channel, support contact. The version lives in two places: `build.json` holds the whole semver (`1.0.0-beta.1`), and `Info.plist`'s `CFBundleShortVersionString` holds only the numbers before the hyphen, with `CFBundleVersion` the build number (Phase 6). (Phase 7: `CFBundleShortVersionString` holds the whole version too, since the appcast, `behind` and the update's own window all show it; the build number is still what is compared. A version with a pre-release part is always on the beta channel.);
   - node and npm;
   - static ffmpeg and ffprobe, with VideoToolbox, `scale_vt` and libx264;
   - a static whisper-cli built with Metal;
   - (Phase 6: node, ffmpeg, ffprobe and whisper-cli are built once by `build-vendor.sh`, from the pins in `tool/studio-app/vendor.pin.json`, into a sealed vendor folder. The app's build does not compile them, and refuses a folder whose seal does not hold.)
   - Studio's Swift helpers, compiled ahead of time;
-  - Sparkle 2, from Phase 7. The first Phase 6 build has no Sparkle: its Check for Updates… says `Updates are not part of this build yet.`
+  - Sparkle 2, from Phase 7. The first Phase 6 build has no Sparkle: its Check for Updates… says `Updates are not part of this build yet.` (Phase 7: Sparkle 2.10.1, from its own pinned archive, `tool/studio-app/sparkle.pin.json`, checked by its SHA-256 every time it is used. It is not one of the vendor folder's pins, so that folder's seal is as it was.)
 - **Downloaded during setup instead,** each checked against a pin, but for Chrome:
   - the whisper model;
   - the HyperFrames CLI, pinned by npm's own integrity check (`hyperframes.pin.json`), and its Chrome, which the pinned CLI fetches with its own `browser ensure`, as today. Studio has no pin of Chrome's (Phase 5 plan, Open for Jason 2);
@@ -101,6 +101,7 @@ A SwiftUI window shows its steps down the side, each with a live status. Every q
   - Automatic installs are off; the person decides.
   - Sparkle also checks that each update is signed by the same team.
   - Delta updates keep the downloads small.
+  - (Phase 7: each download is signed and is checked before it is unpacked; the feed itself is not signed. Sparkle looks only when the person asks: the daily look is `behind`'s. Deltas are made by Sparkle's `generate_appcast` from the earlier zips in a kept releases folder, so the first release has none.)
 - **The notice in Claude needs no new hook.** Studio's skill already runs `behind` at the start of every session (`tool/studio/SKILL.md:14`), right after the lock check.
   - In installed mode, `behind` reads a new `tool/update-check.js`. It looks at the same appcast at most once a day, with a 3-second timeout. It caches its answer in Application Support, still works offline, and sends nothing about the Mac.
   - `behind` then says "A newer BRIMM Video Studio is ready: 1.5.0 (this Mac has 1.4.2)." Claude passes that on in one line and says the person can say "update Studio" whenever it suits.
@@ -112,7 +113,13 @@ A SwiftUI window shows its steps down the side, each with a live status. Every q
   1. The app writes an `updating.json` marker, which expires when its process is gone or after 30 minutes.
   2. It waits until the system is idle. A single `idleWhy()` checks all of these: the agent has no process, the runs lock is free, and neither `episode.lock` nor `when-ready.lock` is held.
   3. It stops the agent and installs.
-- **After relaunching,** it repairs the plist, the Claude folder (`settings.js studio`) and the HyperFrames pin, starts the agent again, and says "start a new chat".
+- **Updating safely, as Phase 7 built it:**
+  - The marker is `updating.json` in Studio's support folder. It is live for two minutes after it was last written, by the file's own time, and the app writes it every thirty seconds: for at most half an hour while it waits and while the update's window is open, and for as long as an install or a quit is waiting. It does not die with its process, which would let work start in the seconds before the swap.
+  - `idleWhy` never reads the marker. The marker stops work from starting: a run of the watcher, a running watcher's next look, and every `edit.js` command but `behind` and `update`. `idleWhy` says whether work is still going.
+  - The app waits until nothing is at work before Sparkle is asked at all, and once more before the install. Sparkle installs an update it has unpacked whenever the app ends, so from the moment Sparkle has the check a quit, a log-out or a restart is held until nothing is at work.
+  - The background job is not unloaded. Unloaded, it would stay so if the update were abandoned at the wrong moment.
+  - Check for Updates… also works while setup is at a question, and after an update or a repair that stopped.
+- **After relaunching,** it repairs the plist, the Claude folder (`settings.js studio`) and the HyperFrames pin, starts the agent again, and says "start a new chat". (Phase 7: Sparkle tells the new copy nothing and does not always relaunch it. The engine records the build that set the Mac up, in `set-up.json`; the status says `needs: "update"` when the app's build is another, the app runs the update when it is next opened, and until then `behind` says so at the start of each session.)
 - **Compatibility.** Commands stay backward-compatible for one release, for a chat that spans an update.
 
 ### 6. What changes in Studio outside the installer
@@ -135,6 +142,6 @@ A SwiftUI window shows its steps down the side, each with a live status. Every q
 - **The BRIMM Ops contract is unchanged.** `madeBy` stays `brimm-video <short commit>` and still passes `handoff-v2.js:207`. `tool/shared/`, `lib.js`, `run.js`, the fixtures and their hashes are untouched.
 - **CLAUDE.md:**
   - Only the Mac Studio uses git and a key.
-  - The person's own click in the app is their yes; Claude only runs `--print`, the tests, or `release.sh --print`.
+  - The person's own click in the app is their yes; Claude only runs `--print`, the tests, or `release.sh --print`. (Phase 7: `--print` signs nothing. The real `release.sh` signs the appcast with the key in Jason's keychain, so it is a by-hand step on his yes, as a signed build is; publishing is his.)
   - Updates come only from signed builds on the feed.
   - Correct the stale line that says Sallie's laptop still runs brimm-video.
