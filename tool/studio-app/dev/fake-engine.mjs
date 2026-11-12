@@ -107,11 +107,16 @@ const BODIES = {
 };
 const FRESH_STEPS = ["welcome", "name", "apps", "dropbox", "folders", "permissions", "review", "install", "done"];
 const REPAIR_STEPS = ["install", "done"];
+/** The status's Setup line for each word it may say, as tool/setup/summary.js words it. */
 const SETUP_LINE = {
   setup: "BRIMM Video Studio is not set up on this Mac yet.",
   repair: "This Mac was set up from a copy of BRIMM Video Studio that is no longer where it was. Repair points it at this one.",
+  update: "BRIMM Video Studio was updated on this Mac. It finishes the update when it is opened.",
   nothing: "BRIMM Video Studio is set up on this Mac."
 };
+/** The update run's done body and its note, as tool/setup/engine.js words them. */
+const UPDATED_BODY = "BRIMM Video Studio was updated on this Mac.";
+const UPDATED_NOTE = "Start a new chat in Claude so it reads this version.";
 const LABELS = {
   programs: "Checking BRIMM Video Studio",
   model: "Transcription model",
@@ -133,7 +138,8 @@ const SCENARIOS = [
   ["settings", "Settings that cannot be read", "Two steps, then the error settings."],
   ["crash", "A crash", "One step, then the run ends with no last event."],
   ["moved", "A moved copy", "The next status says repair."],
-  ["fresh", "A fresh Mac", "The next status says setup."]
+  ["fresh", "A fresh Mac", "The next status says setup."],
+  ["updated", "An updated copy", "The next status says update."]
 ];
 
 /** Writes one event and its line feed in one write to fd 1, so that a run that ends at once has written everything. A shell that has
@@ -563,8 +569,8 @@ async function setup(talk) {
       await pause(800);
       return 1;
     }
-    if (scenario === "moved" || scenario === "fresh") {
-      leave(scenario === "moved" ? "repair" : "setup");
+    if (scenario === "moved" || scenario === "fresh" || scenario === "updated") {
+      leave({ moved: "repair", fresh: "setup", updated: "update" }[scenario]);
       cancelled();
       return 0;
     }
@@ -576,6 +582,15 @@ async function repair(talk) {
   send(stepEvent("install", REPAIR_STEPS));
   await bars();
   finish("repaired", { order: REPAIR_STEPS, body: "BRIMM Video Studio was repaired on this Mac.", ...SAMPLE, notes: [] });
+  return 0;
+}
+
+/** An update is a repair that ends updated, with the real engine's note. */
+async function update(talk) {
+  talk.installing = true;
+  send(stepEvent("install", REPAIR_STEPS));
+  await bars();
+  finish("updated", { order: REPAIR_STEPS, body: UPDATED_BODY, ...SAMPLE, notes: [UPDATED_NOTE] });
   return 0;
 }
 
@@ -607,7 +622,7 @@ function runOf(argv) {
   const known = ["--run", "--app", "--tools", "--protocol"];
   if (argv.length !== 8 || given.size !== 4 || !known.every((name) => given.has(name))) return { code: "arguments", details: "The options are not --run, --app, --tools and --protocol, each once." };
   if (given.get("--protocol") !== "1") return { code: "protocol", details: "--protocol is not 1." };
-  if (!["status", "setup", "repair"].includes(given.get("--run"))) return { code: "arguments", details: "--run is not status, setup or repair." };
+  if (!["status", "setup", "repair", "update"].includes(given.get("--run"))) return { code: "arguments", details: "--run is not status, setup, repair or update." };
   return { run: given.get("--run") };
 }
 
@@ -621,7 +636,8 @@ async function main() {
   if (args.run === "status") return status();
   const talk = listen(process.stdin);
   try {
-    return args.run === "setup" ? await setup(talk) : await repair(talk);
+    if (args.run === "setup") return await setup(talk);
+    return args.run === "update" ? await update(talk) : await repair(talk);
   } catch (e) {
     if (!(e instanceof Cancel)) throw e;
     cancelled();

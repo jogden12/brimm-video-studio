@@ -18,7 +18,7 @@ const APP = "/Applications/BRIMM Video Studio.app";
 const TOOLS = `${APP}/Contents/Resources/node/bin`;
 
 const ERRORS = ["damaged", "dev", "busy", "download", "install", "settings"];
-const SCENARIOS = ["whole", ...ERRORS, "crash", "moved", "fresh"];
+const SCENARIOS = ["whole", ...ERRORS, "crash", "moved", "fresh", "updated"];
 const KINDS = ["confirm", "text", "choice", "folder", "apps", "sign-in"];
 
 /** The folders this file has made, each removed when the file ends. */
@@ -66,6 +66,13 @@ const COPIED_FROM = {
       ' : * ? " < > |',
       "a Mac's name cannot start with a dot"
     ]
+  },
+  /** The status's Setup line after an update, from summary.js, and the update run's done body and note, from engine.js. */
+  updated: {
+    message: "setup/summary.js",
+    setup: "BRIMM Video Studio was updated on this Mac. It finishes the update when it is opened.",
+    body: { from: "setup/engine.js", said: "BRIMM Video Studio was updated on this Mac." },
+    note: { from: "setup/engine.js", said: "Start a new chat in Claude so it reads this version." }
   },
   /** The drop folder's warning, from questions.js, and the names of the clouds it names, from settings.js's cloudFolder. */
   drop: {
@@ -194,7 +201,7 @@ function listing(dir, at = "") {
 
 describe("the stand-in engine", () => {
   it("every line of every scenario is a whole event", async () => {
-    const runs = [...SCENARIOS.map((scenario) => ["setup", scenario]), ["repair"], ["status"]];
+    const runs = [...SCENARIOS.map((scenario) => ["setup", scenario]), ["repair"], ["update"], ["status"]];
     for (const [run, scenario] of runs) {
       const temp = newTemp();
       const { lines } = run === "setup" ? await setupOf(scenario, temp) : await drive({ run, temp });
@@ -439,6 +446,30 @@ describe("the stand-in engine", () => {
     assert.equal(await needsIn(temp), "nothing");
   });
 
+  it("the stand-in takes an update run, in the real engine's words", async () => {
+    const from = COPIED_FROM.updated;
+    assert.ok(realText(from.message).includes(from.setup), `${from.message} does not hold: ${from.setup}`);
+    assert.ok(realText(from.body.from).includes(from.body.said), `${from.body.from} does not hold: ${from.body.said}`);
+    assert.ok(realText(from.note.from).includes(from.note.said), `${from.note.from} does not hold: ${from.note.said}`);
+    const temp = newTemp();
+    await setupOf("whole", temp);
+    const left = await setupOf("updated", temp);
+    assert.equal(left.events[left.events.length - 1].outcome, "cancelled");
+    const status = await drive({ run: "status", temp });
+    const summary = status.events.find((e) => e.event === "summary" && e.id === "status");
+    assert.equal(summary.needs, "update");
+    assert.equal(summary.lines.find((l) => l.label === "Setup").value, from.setup);
+    const { code, events } = await drive({ run: "update", temp });
+    assert.equal(code, 0);
+    assert.deepEqual(events.filter((e) => e.event === "step").map((e) => e.id), ["install", "done"]);
+    assert.deepEqual(events.filter((e) => e.event === "step").pop().body, [from.body.said]);
+    assert.deepEqual([...new Set(events.filter((e) => e.event === "progress").map((e) => e.part))], PARTS);
+    const done = events[events.length - 1];
+    assert.equal(done.outcome, "updated");
+    assert.deepEqual(done.notes, [from.note.said]);
+    assert.equal(await needsIn(temp), "nothing");
+  });
+
   it("a back sends the question before again, and a cancel before the install ends the run", async () => {
     let backed = false;
     const reply = (e) => {
@@ -478,6 +509,7 @@ describe("the stand-in engine", () => {
     const before = listing(temp);
     await setupOf("whole", temp);
     await drive({ run: "repair", temp });
+    await drive({ run: "update", temp });
     await drive({ run: "status", temp });
     const added = listing(temp).filter((path) => !before.includes(path));
     assert.ok(added.length > 0);
@@ -492,7 +524,7 @@ before(() => {
 
 describe("the stand-in engine and the shell", { skip: noChecker }, () => {
   it("the shell understands every line of every scenario", async () => {
-    const runs = [...SCENARIOS.map((scenario) => ["setup", scenario]), ["repair"], ["status"]];
+    const runs = [...SCENARIOS.map((scenario) => ["setup", scenario]), ["repair"], ["update"], ["status"]];
     for (const [run, scenario] of runs) {
       const { lines } = run === "setup" ? await setupOf(scenario) : await drive({ run, temp: newTemp() });
       const ran = check("state", ["--ended"], { input: `${lines.join("\n")}\n` });

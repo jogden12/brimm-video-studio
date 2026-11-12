@@ -351,6 +351,25 @@ describe("the app's sources", () => {
     for (const words of ['"Setup stopped"', '"Repair stopped"', "ScrollViewReader", "scrollTo("]) assert.ok(text.includes(words), `SetupViews.swift never holds ${words}`);
   });
 
+  it("an updated copy's last page has Continue alone", () => {
+    const text = source("SetupViews.swift");
+    const done = text.slice(text.indexOf("struct DoneView"), text.indexOf("struct SetupPage"));
+    for (const words of ['"updated"', "model.begin(chosen: nil)"]) assert.ok(done.includes(words), `DoneView never holds ${words}`);
+    const model = source("AppModel.swift");
+    const at = model.indexOf("func startUpdate()");
+    assert.ok(at >= 0, "AppModel.swift has no startUpdate");
+    const body = model.slice(at, model.indexOf("\n    }\n", at));
+    assert.ok(body.includes("start(.update)"), "startUpdate never starts the update run");
+    assert.ok(!body.includes("begin("), "startUpdate calls begin at the run's end");
+  });
+
+  it("the update's page has its own two headings", () => {
+    const text = source("SetupViews.swift");
+    for (const words of ["updateHeading", "updateStopped", '"Repair stopped"', '"Setup stopped"']) assert.ok(text.includes(words), `SetupViews.swift never holds ${words}`);
+    const views = source("StatusViews.swift");
+    assert.match(views, /case \.setup, \.repairing, \.updating: SetupPage\(model: model\)/);
+  });
+
   it("the page after Uninstall offers Repair and Close", () => {
     const text = source("StatusViews.swift");
     const page = text.slice(text.indexOf("struct RemovedPage"), text.indexOf("struct RefusedPage"));

@@ -1,4 +1,4 @@
-// The window's one view, which switches on the model's screen, and every screen but setup and repair: checking, the move to
+// The window's one view, which switches on the model's screen, and every screen but setup, repair and update: checking, the move to
 // Applications, two copies, the status window and its Uninstall, removed, and refused.
 import AppKit
 import SwiftUI
@@ -13,7 +13,7 @@ struct RootView: View {
             case .checking: CheckingPage()
             case .move: MovePage(model: model)
             case .refused: RefusedPage(model: model)
-            case .setup, .repairing: SetupPage(model: model)
+            case .setup, .repairing, .updating: SetupPage(model: model)
             case .twoCopies: TwoCopiesPage(model: model)
             case .status: StatusPage(model: model)
             case .removed: RemovedPage(model: model)

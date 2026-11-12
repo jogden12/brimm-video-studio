@@ -1,5 +1,5 @@
-// The setup and repair screen: the steps down the left, and on the right the step, the review, the open question, the bars and the
-// ending. A question is drawn by its kind, never by its id, and every answer goes through the model's answer with a Reply.
+// The setup, repair and update screen: the steps down the left, and on the right the step, the review, the open question, the bars
+// and the ending. A question is drawn by its kind, never by its id, and every answer goes through the model's answer with a Reply.
 import AppKit
 import SwiftUI
 
@@ -293,28 +293,37 @@ struct QuestionView: View {
     }
 }
 
-/// The end of a setup: its summary, the notes and the buttons that follow, or that it was stopped.
+/// The end of a setup: its summary, the notes and the buttons that follow, or that it was stopped. The end of an update shows the
+/// done step's body and every note, as they came, with Continue alone, which goes on to the status: the note stays until it is read.
 struct DoneView: View {
     @ObservedObject var model: AppModel
     let done: Done
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if done.outcome == "cancelled" {
-                Text("Setup was stopped.")
-                notes
-            } else {
-                if let result = model.state.result { SummaryLines(lines: result.lines) }
-                notes
-                if let notice = model.notice { Text(notice).foregroundColor(Brand.fog) }
-                // One under another, so that each keeps its whole title.
-                VStack(alignment: .leading, spacing: 8) {
-                    Button("Copy setup summary") { model.copySummary() }.fixedSize()
-                    Button("Open Getting Started guide") { model.openGuide() }.fixedSize()
-                    Button("Open your BRIMM Video Studio folder in Claude") { model.openClaude() }.fixedSize()
+            if done.outcome == "updated" {
+                if let step = model.state.step {
+                    ForEach(step.body.indices, id: \.self) { at in Text(step.body[at]) }
                 }
+                notes
+                Button("Continue") { model.begin(chosen: nil) }.buttonStyle(MainButtonStyle())
+            } else {
+                if done.outcome == "cancelled" {
+                    Text("Setup was stopped.")
+                    notes
+                } else {
+                    if let result = model.state.result { SummaryLines(lines: result.lines) }
+                    notes
+                    if let notice = model.notice { Text(notice).foregroundColor(Brand.fog) }
+                    // One under another, so that each keeps its whole title.
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button("Copy setup summary") { model.copySummary() }.fixedSize()
+                        Button("Open Getting Started guide") { model.openGuide() }.fixedSize()
+                        Button("Open your BRIMM Video Studio folder in Claude") { model.openClaude() }.fixedSize()
+                    }
+                }
+                Button("Close") { close() }.buttonStyle(MainButtonStyle())
             }
-            Button("Close") { close() }.buttonStyle(MainButtonStyle())
         }
     }
 
@@ -332,9 +341,9 @@ struct DoneView: View {
     }
 }
 
-/// The setup and repair screen. Its page shows its top whenever the step or the open question changes, and when the run ends, so that
-/// a page taller than the window opens at its heading. A run that failed is headed as stopped, without the step's own words: the
-/// fault is not about that step, and the list beside the page still shows where it stopped.
+/// The setup, repair and update screen. Its page shows its top whenever the step or the open question changes, and when the run
+/// ends, so that a page taller than the window opens at its heading. A run that failed is headed as stopped, without the step's own
+/// words: the fault is not about that step, and the list beside the page still shows where it stopped.
 struct SetupPage: View {
     @ObservedObject var model: AppModel
 
@@ -352,7 +361,13 @@ struct SetupPage: View {
                         Color.clear.frame(height: 0).id(SetupPage.top)
                         VStack(alignment: .leading, spacing: 16) {
                             if state.failure != nil && state.done == nil {
-                                Heading(text: model.screen == .repairing ? "Repair stopped" : "Setup stopped")
+                                Heading(text: stoppedHeading)
+                            } else if model.screen == .updating {
+                                // The update has its own heading over the bars. At its end DoneView shows the done step's body.
+                                Heading(text: updateHeading)
+                                if state.done == nil, let step = state.step {
+                                    ForEach(step.body.indices, id: \.self) { at in Text(step.body[at]) }
+                                }
                             } else if let step = state.step {
                                 Heading(text: step.title)
                                 ForEach(step.body.indices, id: \.self) { at in Text(step.body[at]) }
@@ -390,6 +405,15 @@ struct SetupPage: View {
                 .onAppear { showTop(reader) }
                 .onChange(of: pageKey(state)) { _ in showTop(reader) }
             }
+        }
+    }
+
+    /// The heading of a run that stopped on a failure, by the screen it ran on.
+    private var stoppedHeading: String {
+        switch model.screen {
+        case .updating: return updateStopped
+        case .repairing: return "Repair stopped"
+        default: return "Setup stopped"
         }
     }
 

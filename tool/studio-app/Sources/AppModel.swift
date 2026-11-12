@@ -1,13 +1,9 @@
-// What the windows show and do. Every launch runs a status first, and what comes next is asked of nextFromStatus; the setup and the
-// repair runs, the apps timer, the guide's PDF, the move to Applications, Uninstall and the status window's buttons are here. The
-// decisions themselves are in the Foundation-only files, which node's tests ask: this file only calls them and publishes what they give.
+// What the windows show and do. Every launch runs a status first, and what comes next is asked of nextFromStatus; the setup, the
+// repair and the update runs, the apps timer, the guide's PDF, the move to Applications, Uninstall and the status window's buttons
+// are here. The decisions themselves are in the Foundation-only files, which node's tests ask: this file only calls them and
+// publishes what they give.
 import AppKit
 import Combine
-
-/// The page the window shows.
-enum Screen {
-    case checking, move, refused, setup, repairing, twoCopies, status, removed
-}
 
 /// What the window says when the app is in a folder with a colon in its name, where the engine cannot be started. Finder shows a
 /// colon in a name as a slash.
@@ -144,6 +140,7 @@ final class AppModel: ObservableObject {
             case .refused: self.screen = .refused
             case .setup: self.startSetup()
             case .repair: self.startRepair()
+            case .update: self.startUpdate()
             case .twoCopies:
                 self.other = found
                 self.screen = .twoCopies
@@ -163,6 +160,14 @@ final class AppModel: ObservableObject {
         start(.repair) { [weak self] ended in
             if ended.done?.outcome == "repaired" { self?.begin(chosen: nil) }
         }
+    }
+
+    /// The update run, which a copy starts when the Mac was set up by another build. Nothing follows it by itself: its last page
+    /// keeps the engine's note until the person chooses Continue, and a run that failed starts again only when the app is opened
+    /// again or Repair is chosen.
+    func startUpdate() {
+        screen = .updating
+        start(.update) { _ in }
     }
 
     /// Starts `run` into a new state: began, then each event, then ended at the client's end, and then `then` with the state made.

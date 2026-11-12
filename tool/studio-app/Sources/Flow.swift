@@ -1,7 +1,18 @@
-// The shell's decisions around a run: the value each answer sends, the screen that follows a status, when the apps question is
-// asked to check again, when quitting is allowed, and what the status window offers. It imports only Foundation, so studio-check is
-// compiled from it and node's tests ask it each answer.
+// The shell's decisions around a run: the pages the window shows, the value each answer sends, the screen that follows a status,
+// when the apps question is asked to check again, when quitting is allowed, and what the status window offers. It imports only
+// Foundation, so studio-check is compiled from it and node's tests ask it each answer.
 import Foundation
+
+// MARK: The pages
+
+/// The page the window shows. A screen's raw value is the word studio-check takes for it.
+enum Screen: String {
+    case checking, move, refused, setup, repairing, updating, twoCopies, status, removed
+}
+
+/// The updating page's heading while the update run goes on, and its heading when the run stopped on a failure.
+let updateHeading = "Finishing the update"
+let updateStopped = "The update stopped"
 
 // MARK: The answers
 

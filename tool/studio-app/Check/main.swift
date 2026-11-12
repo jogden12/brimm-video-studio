@@ -144,20 +144,21 @@ func checkNames(_ args: [String]) -> Never {
     ])
 }
 
-/// next <translocated yes|no> <needs: setup|repair|nothing|none> <failed yes|no> <chosen: setup|repair|none> <other yes|no>.
+/// next <translocated yes|no> <needs: setup|repair|update|nothing|none> <failed yes|no> <chosen: setup|repair|update|none>
+/// <other yes|no>.
 func checkNext(_ args: [String]) -> Never {
     let words = exactly(5, args, "next")
     let needs: String?
     switch words[1] {
-    case "setup", "repair", "nothing": needs = words[1]
+    case "setup", "repair", "update", "nothing": needs = words[1]
     case "none": needs = nil
-    default: fail("\"\(words[1])\" is not setup, repair, nothing or none.")
+    default: fail("\"\(words[1])\" is not setup, repair, update, nothing or none.")
     }
     let chosen: Run?
     switch words[3] {
-    case "setup", "repair": chosen = runOf(words[3])
+    case "setup", "repair", "update": chosen = runOf(words[3])
     case "none": chosen = nil
-    default: fail("\"\(words[3])\" is not setup, repair or none.")
+    default: fail("\"\(words[3])\" is not setup, repair, update or none.")
     }
     emit(nextStep(translocated: yesNo(words[0]), needs: needs, failed: yesNo(words[2]), chosen: chosen, other: yesNo(words[4])).rawValue)
 }
@@ -281,15 +282,15 @@ func checkReply(_ args: [String]) -> Never {
     emit(["answer": "q", "value": replyValue(replyOf(atLeast(1, args, "reply")))])
 }
 
-/// next-from-status <translocated yes|no> <chosen: setup|repair|none> <other yes|no>: stdin is a status run's event lines, and
-/// the run then ended. A line that is no event ends it with 2.
+/// next-from-status <translocated yes|no> <chosen: setup|repair|update|none> <other yes|no>: stdin is a status run's event lines,
+/// and the run then ended. A line that is no event ends it with 2.
 func checkNextFromStatus(_ args: [String]) -> Never {
     let words = exactly(3, args, "next-from-status")
     let chosen: Run?
     switch words[1] {
-    case "setup", "repair": chosen = runOf(words[1])
+    case "setup", "repair", "update": chosen = runOf(words[1])
     case "none": chosen = nil
-    default: fail("\"\(words[1])\" is not setup, repair or none.")
+    default: fail("\"\(words[1])\" is not setup, repair, update or none.")
     }
     var state = SetupState()
     state.began()
