@@ -94,10 +94,15 @@ is_macho() { [[ $(file -b "$1") == Mach-O* ]] }
 # Unpacks Sparkle's archive into a folder that is there, but only once sparkle.js says the archive is the pinned one, and stops unless
 # the framework and the two programs the release needs came out of it. The archive has no folder of its own at its top, so its parts
 # land in the folder itself. sparkle.js is found by `here`, which each script that sources this file sets to its own folder first.
+# The archive is copied into the folder first, and the copy is what is checked and unpacked, so that a file swapped at the archive's
+# path between the check and tar is never unpacked. The copy is taken away again either way.
 unpack_sparkle() {
   local archive=$1 folder=$2
-  node "$here/sparkle.js" check "$archive" || exit 1
-  tar -xJf "$archive" -C "$folder" || stop "Sparkle's archive could not be unpacked."
+  local copy=$folder/.sparkle-archive-being-unpacked.tar.xz
+  cp -X "$archive" "$copy" || { rm -f "$copy"; stop "Sparkle's archive could not be copied to be checked, so it was not unpacked." }
+  node "$here/sparkle.js" check "$copy" || { rm -f "$copy"; exit 1 }
+  tar -xJf "$copy" -C "$folder" || { rm -f "$copy"; stop "Sparkle's archive could not be unpacked." }
+  rm -f "$copy" || stop "Sparkle's archive could not be unpacked."
   [[ -f $folder/Sparkle.framework/Versions/B/Sparkle && -f $folder/bin/generate_appcast && -f $folder/bin/generate_keys ]] ||
     stop "Sparkle's archive does not hold Sparkle.framework, generate_appcast and generate_keys, so it is not used."
 }

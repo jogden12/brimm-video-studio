@@ -21,7 +21,8 @@ function pinFault(pin) {
   if (pin === null || typeof pin !== "object" || Array.isArray(pin)) return "Sparkle's pin is not an object.";
   for (const key of Object.keys(pin)) if (!KEYS.includes(key)) return `Sparkle's pin has a key it should not have: ${key}.`;
   for (const key of KEYS) if (typeof pin[key] !== "string") return `Sparkle's pin has no ${key}.`;
-  if (pin.version === "" || /[\r\n]/.test(pin.version)) return "Sparkle's pin's version is not one line, or is empty.";
+  // The version names a folder fetch-sparkle.sh empties with rm -rf, so it holds no slash, no dot-dot, no tab and no space.
+  if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$/.test(pin.version)) return "Sparkle's pin's version is not a version like 2.10.1.";
   let address;
   try {
     address = new URL(pin.url);
@@ -31,6 +32,8 @@ function pinFault(pin) {
   if (address.protocol !== "https:" || address.username || address.password || address.search || address.hash || pin.url.includes("?") || pin.url.includes("#")) {
     return "Sparkle's pin's url is not https, or has a user, a password, a query or a hash.";
   }
+  // The url's last part is the archive's file name in the fetch folder, so it is one plain name ending .tar.xz.
+  if (!/^[0-9A-Za-z][0-9A-Za-z._+-]*\.tar\.xz$/.test(address.pathname.split("/").pop())) return "Sparkle's pin's url does not end in a plain file name ending .tar.xz.";
   if (!/^[0-9a-f]{64}$/.test(pin.sha256)) return "Sparkle's pin's sha256 is not 64 lowercase hexadecimal characters.";
   if (pin.publicKey !== "" && !PUBLIC_KEY.test(pin.publicKey)) return "Sparkle's pin's publicKey is neither empty nor a public key.";
   return "";

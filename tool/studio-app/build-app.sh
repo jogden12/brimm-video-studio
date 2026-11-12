@@ -9,7 +9,8 @@
 #   --vendor       the folder build-vendor.sh made: node, ffmpeg, ffprobe and whisper-cli, sealed under this commit's pins.
 #   --sparkle      Sparkle's archive, as fetch-sparkle.sh fetched it. It is used only when its SHA-256 is sparkle.pin.json's, and that
 #                  file must hold the update key's public half, which goes into Info.plist.
-#   --channel      stable (when not given) or beta, written into build.json.
+#   --channel      stable (when not given) or beta, written into build.json. A version with a pre-release part, as 1.0.0-beta.2 has,
+#                  goes on beta, and only such a version does: build-info.js refuses any other pairing before anything is written.
 #   --sign         signs inside-out with the one "Developer ID Application" identity in the keychain, found by name (nothing secret is
 #                  in any file) and given to codesign by its SHA-1, with the hardened runtime and a secure timestamp. codesign --timestamp asks Apple's timestamp server
 #                  for the time, which notarizing needs; that is all it sends.
@@ -79,7 +80,9 @@ vendor=${vendor:A}
 # again before it unpacks it.
 why=$(node $here/sparkle.js check $sparkle 2>&1) || stop $why
 sparkle=${sparkle:A}
-public_key=$(node $here/sparkle.js key 2>&1) || stop $public_key
+# The key is what sparkle.js prints on stdout alone, so nothing node says on stderr is glued onto it. Only when the command fails is
+# it asked again, for everything it says.
+public_key=$(node $here/sparkle.js key 2>/dev/null) || stop "$(node $here/sparkle.js key 2>&1)"
 identity= identity_hash=
 (( sign )) && find_identity
 

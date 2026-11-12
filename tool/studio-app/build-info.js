@@ -25,12 +25,17 @@ function versionBuildFault(version, build) {
   return "";
 }
 
+/** Why a version and a channel do not go together. It names the option and never a value. */
+const CHANNEL_FAULT = "A version with a pre-release part goes on the beta channel, and only such a version does (--channel).";
+
 /** build.json's whole text for the build, or { fault } naming the first option that will not do (never its value). */
 export function buildJson({ version, build, commit, channel }) {
   const fault = versionBuildFault(version, build);
   if (fault) return { fault };
   if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) return { fault: "The commit is not 40 hexadecimal characters." };
   if (channel !== "stable" && channel !== "beta") return { fault: "The channel is not stable or beta." };
+  // The same rule release.js keeps, asked here too so that build-app.sh refuses before anything is built, signed or notarized.
+  if (version.includes("-") !== (channel === "beta")) return { fault: CHANNEL_FAULT };
   return { text: `${JSON.stringify({ version, build, commit, short: commit.slice(0, 7), feed: FEED, channel, support: SUPPORT }, null, 2)}\n` };
 }
 

@@ -53,6 +53,19 @@ describe("build-info.js", () => {
     }
   });
 
+  it("a version with a pre-release part goes on the beta channel, and only such a version does", () => {
+    const SENTENCE = "A version with a pre-release part goes on the beta channel, and only such a version does (--channel).";
+    assert.equal(buildJson({ ...GOOD, version: "1.0.0-beta.2", channel: "stable" }).fault, SENTENCE);
+    assert.equal(buildJson({ ...GOOD, version: "1.0.0", channel: "beta" }).fault, SENTENCE);
+    assert.equal(typeof buildJson({ ...GOOD, version: "1.0.0-beta.2", channel: "beta" }).text, "string");
+    assert.equal(typeof buildJson({ ...GOOD, version: "1.0.0", channel: "stable" }).text, "string");
+    const run = (...args) => spawnSync(process.execPath, [FILE, ...args], { encoding: "utf8" });
+    const refused = run("json", "--version", "1.0.0-beta.2", "--build", "3", "--commit", COMMIT, "--channel", "stable");
+    assert.equal(refused.status, 2);
+    assert.equal(refused.stdout, "");
+    assert.equal(refused.stderr, `${SENTENCE}\n`);
+  });
+
   it("the Info.plist names the app, its scheme and macOS 13", () => {
     const text = infoPlist({ version: "1.0.0-beta.1", build: 3, publicKey: KEY });
     const pairs = [

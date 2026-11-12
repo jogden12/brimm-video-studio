@@ -96,10 +96,17 @@ describe("sparkle.js", () => {
       };
       assert.equal(write(realPin()).fault, undefined);
       assert.equal(write({ ...realPin(), publicKey: KEY }).pin.publicKey, KEY);
+      assert.equal(write({ ...realPin(), version: "2.11.0-beta.1" }).fault, undefined);
       const cases = [
         [{ ...realPin(), extra: "secret-value" }, "extra", "secret-value"],
         [{ ...realPin(), version: "" }, "version", null],
         [{ ...realPin(), version: "2.10.1\n2.10.2" }, "version", "2.10.2"],
+        [{ ...realPin(), version: "2.10.1/../../x" }, "version", "2.10.1/../../x"],
+        [{ ...realPin(), version: "2.10.1\tx" }, "version", null],
+        [{ ...realPin(), version: "2.10" }, "version", null],
+        [{ ...realPin(), url: URL_.replace(/Sparkle-2\.10\.1\.tar\.xz$/, "") }, "url", "github.com"],
+        [{ ...realPin(), url: URL_.replace(/\.tar\.xz$/, ".zip") }, "url", "github.com"],
+        [{ ...realPin(), url: "https://github.com/" }, "url", "github.com"],
         [{ ...realPin(), url: URL_.replace("https:", "http:") }, "url", "github.com"],
         [{ ...realPin(), url: `${URL_}?x=1` }, "url", "github.com"],
         [{ ...realPin(), url: `${URL_}#top` }, "url", "github.com"],
@@ -188,6 +195,40 @@ describe("fetch-sparkle.sh and unpack_sparkle", { skip: notAMac }, () => {
       assert.equal(fetched.stdout.trim().split("\n").pop(), REJECTED_SENTENCE);
       assert.match(w.ranText(), /curl --fail --location --proto =https --proto-redir =https --silent --show-error --output /);
       assert.deepEqual(readdirSync(w.out).sort(), ["Sparkle-2.10.1.tar.xz.rejected"]);
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
+    }
+  });
+
+  it("unpack_sparkle checks and unpacks its own copy of the archive, and leaves no copy behind", () => {
+    const w = world();
+    try {
+      // A tar that says what it was given, then runs the real one.
+      writeFileSync(join(w.root, "bin", "tar"), '#!/bin/sh\necho "tar $*" >> "$RAN"\nexec /usr/bin/tar "$@"\n');
+      chmodSync(join(w.root, "bin", "tar"), 0o755);
+      const unpack = (archive, into) =>
+        spawnSync("/bin/zsh", ["-c", 'here=$1; source "$here/common.zsh"; unpack_sparkle "$2" "$3"', "zsh", join(w.root, "studio-app"), archive, into], { encoding: "utf8", env: w.env });
+      const into = join(w.root, "into");
+      mkdirSync(into);
+      const made = unpack(w.archive, into);
+      assert.equal(made.status, 0, `${made.stdout}${made.stderr}`);
+      assert.deepEqual(readdirSync(into).sort(), ["Sparkle.framework", "bin"]);
+      const tarLine = w.ranText().split("\n").find((l) => l.startsWith("tar "));
+      assert.ok(tarLine, w.ranText());
+      assert.ok(!tarLine.includes(w.archive), `tar opened the archive itself: ${tarLine}`);
+      assert.ok(tarLine.includes(`${into}/`), `tar opened something outside the folder: ${tarLine}`);
+
+      // An archive that is not the pinned one leaves nothing in the folder, its copy neither, and tar is not started.
+      writeFileSync(w.ran, "");
+      const changed = join(w.root, "changed.tar.xz");
+      writeFileSync(changed, Buffer.concat([readFileSync(w.archive), Buffer.from("x")]));
+      const other = join(w.root, "other");
+      mkdirSync(other);
+      const refused = unpack(changed, other);
+      assert.equal(refused.status, 1);
+      assert.match(refused.stdout, /That is not the pinned Sparkle archive, so it was not unpacked\./);
+      assert.deepEqual(readdirSync(other), []);
+      assert.equal(w.ranText().includes("tar "), false, w.ranText());
     } finally {
       rmSync(w.root, { recursive: true, force: true });
     }

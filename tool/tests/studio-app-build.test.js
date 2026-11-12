@@ -84,7 +84,7 @@ function vendorFolder(dir, { sealed = true } = {}) {
 /** A made-up Sparkle archive in `dir`, packed with tar -cJf as Sparkle's own is, with no folder at its top: Sparkle.framework, whose
     Versions/B holds Sparkle, Autoupdate, Updater.app and the two XPC services (each program a copy of /usr/bin/true, never run), with
     Versions/Current and the top-level links; LICENSE; and bin/ with generate_appcast and generate_keys. */
-function sparkleArchive(dir, name = "Sparkle-made-up.tar.xz") {
+function sparkleArchive(dir, name = "Sparkle-made-up.tar.xz", { autoupdate = true } = {}) {
   const packed = join(dir, `${name}.packed`);
   const framework = join(packed, "Sparkle.framework");
   const b = join(framework, "Versions", "B");
@@ -92,11 +92,13 @@ function sparkleArchive(dir, name = "Sparkle-made-up.tar.xz") {
     mkdirSync(join(b, d), { recursive: true });
   }
   for (const program of ["Sparkle", "Autoupdate", "Updater.app/Contents/MacOS/Updater", "XPCServices/Installer.xpc/Contents/MacOS/Installer", "XPCServices/Downloader.xpc/Contents/MacOS/Downloader"]) {
-    copyFileSync("/usr/bin/true", join(b, program));
+    if (program !== "Autoupdate" || autoupdate) copyFileSync("/usr/bin/true", join(b, program));
   }
   writeFileSync(join(b, "Resources", "Info.plist"), "a made-up Info.plist\n");
   symlinkSync("B", join(framework, "Versions", "Current"));
-  for (const link of ["Sparkle", "Autoupdate", "Updater.app", "XPCServices", "Resources"]) symlinkSync(`Versions/Current/${link}`, join(framework, link));
+  for (const link of ["Sparkle", "Autoupdate", "Updater.app", "XPCServices", "Resources"]) {
+    if (link !== "Autoupdate" || autoupdate) symlinkSync(`Versions/Current/${link}`, join(framework, link));
+  }
   writeFileSync(join(packed, "LICENSE"), "Sparkle's made-up licence.\n");
   mkdirSync(join(packed, "bin"));
   for (const program of ["generate_appcast", "generate_keys"]) {
@@ -164,7 +166,8 @@ function world({ identities = [IDENTITY], behind = false } = {}) {
   return {
     dir, repo, tool, tmp, home, head, first, bin, env, git, vendor, sparkle, pinFile, ran,
     /** The options every build needs, into `out`. */
-    needed: (out) => ["--out", out, "--version", VERSION, "--build", "7", "--vendor", vendor, "--sparkle", sparkle],
+    // VERSION has a pre-release part, so it goes on the beta channel. --sparkle stays last: some tests drop the last two words.
+    needed: (out) => ["--out", out, "--version", VERSION, "--build", "7", "--channel", "beta", "--vendor", vendor, "--sparkle", sparkle],
     build: (...args) => {
       rmSync(join(dir, "ran"), { force: true });
       return run("/bin/zsh", [script, ...args], { env, cwd: dir });
@@ -281,7 +284,7 @@ describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () =>
     assert.equal(build.version, VERSION);
     assert.equal(build.build, 7);
     assert.equal(build.commit, w.head);
-    assert.equal(build.channel, "stable");
+    assert.equal(build.channel, "beta");
   });
 
   it("the Info.plist names the bundle, the program and the scheme, as install.sh needs them", () => {
@@ -676,6 +679,71 @@ describe("build-app.sh: --print, the refusals and the options", { skip: notAMac 
         assert.deepEqual(readdirSync(w.tmp), []);
         assert.equal(w.ran(), "");
       }
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  it("a version with a pre-release part off the beta channel, or one without on it, is refused before anything is written", () => {
+    const w = world();
+    try {
+      const out = join(w.dir, "out");
+      const SENTENCE = "A version with a pre-release part goes on the beta channel, and only such a version does (--channel).";
+      const rest = ["--build", "7", "--vendor", w.vendor, "--sparkle", w.sparkle];
+      const cases = [
+        ["--out", out, "--version", VERSION, ...rest],
+        ["--out", out, "--version", VERSION, "--channel", "stable", ...rest],
+        ["--out", out, "--version", "1.0.0", "--channel", "beta", ...rest],
+      ];
+      for (const args of cases) {
+        for (const extra of [[], ["--print"], ["--sign"]]) {
+          const r = w.build(...args, ...extra);
+          assert.equal(r.status, 2, `${args.join(" ")} ${extra}: ${r.stdout}${r.stderr}`);
+          assert.equal(r.stdout.trim(), SENTENCE);
+          assert.equal(existsSync(out), false);
+          assert.deepEqual(readdirSync(w.tmp), []);
+          assert.equal(w.ran(), "");
+        }
+      }
+      // A version without a pre-release part, with no --channel, is on the stable channel.
+      const stable = w.build("--out", out, "--version", "1.0.0", ...rest, "--print");
+      assert.equal(stable.status, 0, stable.stdout + stable.stderr);
+      assert.match(stable.stdout, /build\.json, on the stable channel\./);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  it("the update key is what sparkle.js key printed on stdout, without what node said on stderr", () => {
+    const w = world();
+    try {
+      // A node that says something on stderr when it is asked for the key, as a warning from node would.
+      writeFileSync(join(w.bin, "node"), `#!/bin/sh\ncase "$1 $2" in *sparkle.js\\ key) echo "a warning from node" >&2 ;; esac\nexec "${process.execPath}" "$@"\n`);
+      chmodSync(join(w.bin, "node"), 0o755);
+      const { app } = built(w, "out");
+      assert.equal(plistValue(app, "SUPublicEDKey"), KEY);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  it("a part of Sparkle that is not in the bundle stops the build before anything is signed", () => {
+    const w = world();
+    try {
+      const archive = sparkleArchive(w.dir, "Sparkle-no-autoupdate.tar.xz", { autoupdate: false });
+      // The pin naming it is committed, and origin/main moved to it, so that the build refuses neither an uncommitted change nor the
+      // commit.
+      writeFileSync(w.pinFile, `${JSON.stringify({ ...JSON.parse(readFileSync(w.pinFile, "utf8")), sha256: createHash("sha256").update(readFileSync(archive)).digest("hex") }, null, 2)}\n`);
+      w.git("add", ".");
+      w.git("commit", "-q", "-m", "three");
+      w.git("update-ref", "refs/remotes/origin/main", w.git("rev-parse", "HEAD"));
+      const out = join(w.dir, "out");
+      const r = w.build(...w.needed(out).slice(0, -2), "--sparkle", archive);
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.equal(r.stdout.trim().split("\n").pop(), "Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate is not in the bundle, so Sparkle's parts cannot be signed.");
+      assert.equal(/^codesign /m.test(w.ran()), false, w.ran());
+      assert.equal(existsSync(out), false);
+      assert.deepEqual(readdirSync(w.tmp), []);
     } finally {
       w.cleanup();
     }
