@@ -59,6 +59,34 @@ describe("the gate before the update's window", { skip: noChecker }, () => {
     assert.equal(gate(127, "A video is being read.\n", false), "cannotTell");
   });
 
+  it("a busy answer or one that cannot tell starts the two-idle count again", () => {
+    const after = (next, before) => ask("idle-after", [next, before ? "yes" : "no"]);
+    assert.equal(after("again", false), true);
+    assert.equal(after("again", true), true);
+    assert.equal(after("go", true), true);
+    assert.equal(after("go", false), false);
+    for (const next of ["wait", "cannotTell"]) {
+      assert.equal(after(next, true), false, next);
+      assert.equal(after(next, false), false, next);
+    }
+
+    // The model's own count, answer by answer, as the gate keeps it with idle-after.
+    const answers = { idle: [0, ""], busy: [1, "A video is being read.\n"], cannot: [2, ""] };
+    const name = (said) => (typeof said === "string" ? said : "wait");
+    function run(names) {
+      let idleBefore = false;
+      return names.map((which) => {
+        const [status, out] = answers[which];
+        const said = gate(status, out, idleBefore);
+        idleBefore = after(name(said), idleBefore);
+        return name(said);
+      });
+    }
+    assert.deepEqual(run(["idle", "idle"]), ["again", "go"]);
+    assert.deepEqual(run(["idle", "busy", "idle"]), ["again", "wait", "again"]);
+    assert.deepEqual(run(["idle", "cannot", "idle"]), ["again", "cannotTell", "again"]);
+  });
+
   it("the cannot-tell line is busy.js's own", () => {
     assert.equal(ask("names").busyCannotTell, CANNOT_TELL);
   });
@@ -68,6 +96,35 @@ describe("a quit while a check is under way", { skip: noChecker }, () => {
   it("once the update's window has the check, a quit waits for idle", () => {
     const quits = Object.fromEntries(PHASES.map((phase) => [phase, ask("update-quit", [phase])]));
     assert.deepEqual(quits, { none: "now", waiting: "end", offered: "hold", unpacked: "hold", holding: "hold", installing: "now" });
+  });
+});
+
+describe("the end of the update window's cycle", { skip: noChecker }, () => {
+  it("a cycle that failed ends the check from Offered on, and one that did not ends it only in Offered", () => {
+    const ends = (phase, failed) => ask("ends-check", [phase, failed ? "yes" : "no"]);
+    const told = Object.fromEntries(PHASES.map((phase) => [phase, [ends(phase, false), ends(phase, true)]]));
+    assert.deepEqual(told, {
+      none: [false, false],
+      waiting: [false, false],
+      offered: [true, true],
+      // A window dismissed once an update is unpacked still installs it at a quit, so only an error ends the check there.
+      unpacked: [false, true],
+      holding: [false, true],
+      installing: [false, true]
+    });
+  });
+});
+
+describe("a look that runs too long", { skip: noChecker }, () => {
+  it("a run with a limit is stopped once the limit is up", () => {
+    const started = Date.now();
+    assert.equal(ask("limited-run", ["1", "/bin/sleep", "5"]), 143);
+    assert.ok(Date.now() - started < 4000, `the limited run took ${Date.now() - started} ms`);
+    assert.equal(ask("limited-run", ["5", "/bin/sh", "-c", "exit 3"]), 3);
+  });
+
+  it("a look is given up after the model's own limit", () => {
+    assert.equal(ask("names").lookLimit, 20);
   });
 });
 
@@ -89,9 +146,12 @@ describe("where Check for Updates may be chosen", { skip: noChecker }, () => {
       assert.equal(may(screen, "cancel", "install"), false, screen);
     }
 
-    // The refused screen, but for the development Mac and a colon in the app's path.
+    // The refused screen, only with a code that cannot be the development Mac's: not dev, not a colon in the app's path, not
+    // settings that could not be read, and not a refusal with no code at all.
     assert.equal(may("refused", "now", "translocated"), true);
-    assert.equal(may("refused", "now"), true);
+    assert.equal(may("refused", "now", "damaged"), true);
+    assert.equal(may("refused", "now"), false);
+    assert.equal(may("refused", "now", "settings"), false);
     assert.equal(may("refused", "now", "dev"), false);
     assert.equal(may("refused", "now", "colon"), false);
 

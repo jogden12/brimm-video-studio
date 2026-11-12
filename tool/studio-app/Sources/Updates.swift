@@ -36,6 +36,32 @@ func gateNext(status: Int32, out: String, idleBefore: Bool) -> GateNext {
     }
 }
 
+/// Whether the answer after `next` is idle before it, `before` being whether the one before `next` was: an idle answer that does
+/// not go makes it true, a go keeps it, and a busy answer or one that cannot tell makes it false, so the two-idle count starts again.
+func idleAfter(_ next: GateNext, before: Bool) -> Bool {
+    switch next {
+    case .again: return true
+    case .go: return before
+    case .wait, .cannotTell: return false
+    }
+}
+
+/// The longest one look, or one of the marker's commands, may run, in seconds. A look that has run this long is given up, and
+/// counts as one that cannot tell.
+let lookLimit = 20.0
+
+/// Whether the end of the update window's cycle ends the check. In Offered it always does: nothing was unpacked. From Unpacked on
+/// only a cycle that failed does, such as an unpacking that failed, a refused administrator's password or an installer that
+/// failed. A window dismissed once an update is unpacked ends with no error, and the update is still installed at a quit, so the
+/// check goes on. In none and waiting the window has not been given the check.
+func endsCheck(phase: UpdatePhase, failed: Bool) -> Bool {
+    switch phase {
+    case .offered: return true
+    case .unpacked, .holding, .installing: return failed
+    case .none, .waiting: return false
+    }
+}
+
 /// What a quit does in a phase: end now, end the check first (take the marker away and ask the job to look), or hold the quit until
 /// nothing is at work.
 enum UpdateQuit: String {
@@ -54,14 +80,18 @@ func updateQuit(_ phase: UpdatePhase) -> UpdateQuit {
 /// Whether Check for Updates may be chosen. `failure` is the code of the run's failure, `colon` for the shell's own refusal of a
 /// colon in the app's path, and nil when nothing failed. Never in a stand-in build and never while a check is under way. Otherwise
 /// on the status screen, on the setup screen while a run is at a question, on the updating and repairing screens once their run has
-/// failed, and on the refused screen unless it is the development Mac or a colon. Every other screen gives false.
+/// failed, and on the refused screen only with a code that cannot be the development Mac's. The development Mac refuses with dev,
+/// but also with settings when its settings cannot be read, and with no code when the status could not be started, so none of
+/// those offers a check; nor does a colon in the app's path. Every other screen gives false.
 func mayCheckForUpdates(screen: Screen, quit: Quit, failure: String?, fake: Bool, phase: UpdatePhase) -> Bool {
     if fake || phase != .none { return false }
     switch screen {
     case .status: return true
     case .setup: return quit == .cancel
     case .updating, .repairing: return quit == .now && failure != nil
-    case .refused: return failure != "dev" && failure != "colon"
+    case .refused:
+        guard let failure else { return false }
+        return !["dev", "colon", "settings"].contains(failure)
     default: return false
     }
 }

@@ -28,12 +28,16 @@ export const CHECK_SOURCES = [
 ];
 
 /**
- * The folder that holds Sparkle.framework for the tests: BRIMM_SPARKLE when it holds one, else the copy fetch-sparkle.sh unpacks
- * into this home's caches for the pin's version, else null. Nothing is written to either.
+ * The folder that holds Sparkle.framework for the tests: BRIMM_SPARKLE when it is set, else the copy fetch-sparkle.sh unpacks into
+ * this home's caches for the pin's version, else null. A BRIMM_SPARKLE that holds no Sparkle.framework throws, naming the folder, so
+ * a run asked to typecheck with Sparkle never skips that quietly. Nothing is written to either.
  */
 export function sparkleForTests() {
   const given = process.env.BRIMM_SPARKLE;
-  if (given && existsSync(join(given, "Sparkle.framework"))) return given;
+  if (given) {
+    if (existsSync(join(given, "Sparkle.framework"))) return given;
+    throw new Error(`BRIMM_SPARKLE is ${given}, which holds no Sparkle.framework.`);
+  }
   const { pin } = readSparklePin(join(STUDIO_APP, "sparkle.pin.json"));
   if (!pin) return null;
   const cached = join(homedir(), "Library", "Caches", "brimm-studio-app", "sparkle", `Sparkle-${pin.version}`);

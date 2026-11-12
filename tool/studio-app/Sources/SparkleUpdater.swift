@@ -11,8 +11,8 @@ import Sparkle
 final class SparkleUpdater: NSObject, SPUUpdaterDelegate {
     /// Called when the updater starts to unpack an update, and when it has unpacked one.
     var onUnpacked: (() -> Void)?
-    /// Called when a check, with whatever followed it in the updater's window, has ended.
-    var onEnded: (() -> Void)?
+    /// Called when a check, with whatever followed it in the updater's window, has ended, with the error it ended on, or nil.
+    var onEnded: ((Error?) -> Void)?
     /// Called when the person chose Skip for an update.
     var onSkipped: (() -> Void)?
     /// Called when an update's install asks to relaunch the app, which is postponed until install() is called.
@@ -74,7 +74,7 @@ final class SparkleUpdater: NSObject, SPUUpdaterDelegate {
         if choice == .skip { onSkipped?() }
     }
 
-    func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) { onEnded?() }
+    func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) { onEnded?(error) }
 
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem, untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
         installKept = installHandler
@@ -88,7 +88,7 @@ import Foundation
 /// The same members without the framework: it never starts, and checks and installs nothing.
 final class SparkleUpdater: NSObject {
     var onUnpacked: (() -> Void)?
-    var onEnded: (() -> Void)?
+    var onEnded: ((Error?) -> Void)?
     var onSkipped: (() -> Void)?
     var onInstallAsked: (() -> Void)?
 

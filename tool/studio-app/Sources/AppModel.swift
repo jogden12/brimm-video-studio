@@ -97,6 +97,11 @@ final class AppModel: ObservableObject {
     private var mayLook = false
     /// True while an idle-why runs, so that no two run at once.
     private var looking = false
+    /// When the look now running began, the entry it belongs to, and a count of the looks, so that a look given up after lookLimit
+    /// seconds, or one of an earlier entry, has its late answer dropped.
+    private var lookStarted = 0.0
+    private var lookEntry = 0
+    private var lookCount = 0
     /// True while a check waits for the cancelled setup run's client to end.
     private var updatesAfterRun = false
     /// True while a quit waits for the check.
@@ -116,16 +121,20 @@ final class AppModel: ObservableObject {
             guard let self, self.update == .offered else { return }
             self.update = .unpacked
         }
-        updater.onEnded = { [weak self] in
-            guard let self, self.update == .offered else { return }
-            self.endCheck()
+        // A cycle that ends in Offered, or that failed from Unpacked on, ends the check as a skip does, so a quit that waits for
+        // it gets its reply.
+        updater.onEnded = { [weak self] error in
+            guard let self, endsCheck(phase: self.update, failed: error != nil) else { return }
+            self.endCheck(ended: { [weak self] in self?.replyToQuit() })
         }
         updater.onSkipped = { [weak self] in
             guard let self, self.update == .unpacked || self.update == .holding else { return }
             self.endCheck(ended: { [weak self] in self?.replyToQuit() })
         }
+        // An install is held only when it is asked for from the update's window, in Offered or Unpacked, and on the updates page.
         updater.onInstallAsked = { [weak self] in
-            guard let self, self.update != .holding else { return }
+            guard let self, self.update == .offered || self.update == .unpacked else { return }
+            self.screen = .updates
             self.enterHolding()
         }
     }
@@ -151,10 +160,11 @@ final class AppModel: ObservableObject {
     func quitAsked() { quitting = true }
 
     /// Starts with a status, and goes on to what follows it. `chosen` is the run the person asked for. It does nothing while a run
-    /// is running, while the move or Uninstall works, or once the app is quitting. When the run shown has ended by its events and its
-    /// client has not yet ended, it is done as soon as the client has.
+    /// is running, while the move or Uninstall works, while a check for updates is under way, or once the app is quitting. When the
+    /// run shown has ended by its events and its client has not yet ended, it is done as soon as the client has. Every way back from
+    /// a check sets the phase to none before it calls this.
     func begin(chosen: Run?) {
-        guard !working, !quitting else { return }
+        guard !working, !quitting, update == .none else { return }
         if current != nil {
             if !state.running { beginAsked = BeginAsked(chosen: chosen) }
             return
@@ -206,8 +216,8 @@ final class AppModel: ObservableObject {
 
     /// The update run, which a copy starts when the Mac was set up by another build. Nothing follows it by itself: its last page
     /// keeps the engine's note until the person chooses Continue, and a run that failed starts again only when the app is opened
-    /// again or Repair is chosen.
-    func startUpdate() {
+    /// again or Repair is chosen. Only a status's end starts it.
+    private func startUpdate() {
         screen = .updating
         start(.update) { _ in }
     }
@@ -409,7 +419,7 @@ final class AppModel: ObservableObject {
 
     /// Whether Check for Updates may be chosen now: the menu item is enabled by it, and a link is acted on by it.
     var mayCheck: Bool {
-        mayCheckForUpdates(screen: screen, quit: quit, failure: state.failure?.code, fake: fake, phase: update)
+        !working && mayCheckForUpdates(screen: screen, quit: quit, failure: state.failure?.code, fake: fake, phase: update)
     }
 
     /// Check for Updates, from the menu, the status window's button or a link. Where it may not be chosen, a stand-in build says so
@@ -429,6 +439,8 @@ final class AppModel: ObservableObject {
             cancel()
             return
         }
+        // A begin kept from a run that has ended is not done under the check.
+        beginAsked = nil
         startWaiting()
     }
 
@@ -510,7 +522,8 @@ final class AppModel: ObservableObject {
         quitMayGo?()
     }
 
-    /// A check's part of each tick: waiting too long, the marker's upkeep, and one look at a time while waiting or holding.
+    /// A check's part of each tick: waiting too long, a look that has run too long, the marker's upkeep, and one look at a time while
+    /// waiting or holding.
     private func updateTick() {
         guard update != .none else { return }
         let at = clock
@@ -518,44 +531,56 @@ final class AppModel: ObservableObject {
             endCheck(saying: updatesWaitedTooLong)
             return
         }
-        let limited = update == .waiting || update == .offered || update == .unpacked
+        if looking && at - lookStarted >= lookLimit {
+            // The look is given up: its late answer is dropped, and it counts as one that cannot tell, but only for the entry it
+            // was asked for.
+            looking = false
+            lookCount += 1
+            if lookEntry == entry, mayLook, update == .waiting || update == .holding {
+                gated(.cannotTell)
+                if update == .none { return }
+            }
+        }
+        let limited = update == .waiting || update == .offered || update == .unpacked || update == .installing
         if markDue(now: at, lastMarked: lastMarked, began: began, limited: limited) { queueBegin() }
         guard update == .waiting || update == .holding, mayLook, !looking else { return }
         look()
     }
 
     /// Asks busy.js idle-why, the command Uninstall asks first, off the main thread, and gives its answer to the gate. An answer
-    /// that comes after the phase or the entry has changed is not taken.
+    /// that comes after the phase or the entry has changed, or after the look was given up, is not taken.
     private func look() {
         looking = true
-        let mine = entry
+        lookStarted = clock
+        lookEntry = entry
+        lookCount += 1
+        let mine = (entry: entry, look: lookCount)
         let command = uninstallCommands(app: app)[0]
         let environment = childEnvironment(from: ProcessInfo.processInfo.environment, home: home, app: app)
         DispatchQueue.global().async { [weak self] in
-            let ran = runToEnd(command, environment: environment)
+            let ran = runToEnd(command, environment: environment, limit: lookLimit)
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+                guard let self, mine.look == self.lookCount else { return }
                 self.looking = false
-                guard mine == self.entry, self.mayLook, self.update == .waiting || self.update == .holding else { return }
+                guard mine.entry == self.entry, self.mayLook, self.update == .waiting || self.update == .holding else { return }
                 self.gated(gateNext(status: ran.status, out: ran.out, idleBefore: self.idleBefore))
             }
         }
     }
 
-    /// What follows one answer of idle-why while waiting or holding.
+    /// What follows one answer of idle-why while waiting or holding. The two-idle count is kept by idleAfter for every answer.
     private func gated(_ next: GateNext) {
+        idleBefore = idleAfter(next, before: idleBefore)
         switch next {
         case .again:
-            idleBefore = true
+            break
         case .wait(let line):
-            idleBefore = false
             updateLine = line
         case .cannotTell:
             if update == .waiting {
                 endCheck(saying: updatesCannotTell)
             } else {
                 // While holding the marker stays, and nothing is asked to look.
-                idleBefore = false
                 updateLine = updatesCannotTell
             }
         case .go:
@@ -569,6 +594,8 @@ final class AppModel: ObservableObject {
                 queueBegin { [weak self] _ in
                     guard let self, self.update == .holding else { return }
                     self.update = .installing
+                    // Installing begins anew, so its marker lapses half an hour on if the installer never ends the app.
+                    self.began = self.clock
                     self.updater.install()
                     self.replyToQuit()
                 }
@@ -585,7 +612,7 @@ final class AppModel: ObservableObject {
         markers.async { [weak self] in
             let phase: UpdatePhase = DispatchQueue.main.sync { self?.update ?? UpdatePhase.none }
             guard phase != .none else { return }
-            let status = command.map { runToEnd($0, environment: environment).status } ?? 127
+            let status = command.map { runToEnd($0, environment: environment, limit: lookLimit).status } ?? 127
             DispatchQueue.main.async { then?(status) }
         }
     }
@@ -596,7 +623,7 @@ final class AppModel: ObservableObject {
         let command = updatingCommands(app: app)?.end
         let environment = childEnvironment(from: ProcessInfo.processInfo.environment, home: home, app: app)
         markers.async {
-            if let command { _ = runToEnd(command, environment: environment) }
+            if let command { _ = runToEnd(command, environment: environment, limit: lookLimit) }
             DispatchQueue.main.async { then?() }
         }
     }

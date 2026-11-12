@@ -98,10 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     // MARK: Check for Updates
 
     /// Each link is taken through urlAction. It brings the window to the front, and checks for updates where a check may be chosen.
-    /// One that comes on a screen that passes by itself, such as the first status, is kept and acted on at the screen after.
+    /// One that comes on a screen that passes by itself, such as the first status, is kept and acted on at the screen after, or once
+    /// its run has ended. In a stand-in build the model says that it does not look for updates.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where urlAction(url.absoluteString) == "check-for-updates" {
-            if model.mayCheck {
+            if model.mayCheck || model.fake {
                 front()
                 model.checkForUpdates()
             } else if keepsUpdatesAsk(screen: model.screen) {
@@ -200,6 +201,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     private func stateChanged(_ state: SetupState) {
+        if updatesAsked && !state.running {
+            // A link kept while a run went on, which has now ended and may have stopped on its own screen. It is looked at again
+            // on the next turn, since a status's end is told before what follows it starts another run.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.updatesAsked, !self.model.state.running, !self.mayQuit, !self.quitWhenEnded, !self.replyOwed else { return }
+                if self.model.mayCheck {
+                    self.updatesAsked = false
+                    self.front()
+                    self.model.checkForUpdates()
+                } else if !keepsUpdatesAsk(screen: self.model.screen) {
+                    self.updatesAsked = false
+                    self.front()
+                }
+            }
+        }
         guard quitWhenEnded, !mayQuit, !state.running else { return }
         // The state is not yet set while its change is told, so the app quits once it is.
         DispatchQueue.main.async { [weak self] in self?.quitNow() }

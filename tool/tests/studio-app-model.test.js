@@ -351,6 +351,105 @@ describe("the app's sources", () => {
     assert.ok(branch.includes("updateQuit("), "a quit that may end at once never asks updateQuit");
     assert.ok(!text.includes(".terminateCancel"), "AppDelegate.swift cancels a quit");
     assert.ok(text.includes("reply(toApplicationShouldTerminate: true)"), "AppDelegate.swift never gives AppKit its reply");
+
+    // Each arm of the update's rule, by itself.
+    const start = asked.indexOf("switch updateQuit(model.update)");
+    assert.ok(start >= 0, "applicationShouldTerminate never switches on updateQuit(model.update)");
+    const inner = asked.slice(start, asked.indexOf("case .cancel:"));
+    const arm = (name, next) => {
+      const at = inner.indexOf(`case .${name}:`);
+      assert.ok(at >= 0, `the update's rule has no case .${name}`);
+      return inner.slice(at, next ? inner.indexOf(`case .${next}:`) : undefined);
+    };
+    assert.ok(arm("now", "end").includes("return .terminateNow"), "a quit with no check under way does not end at once");
+    const inOrder = (said, words, what) => {
+      let at = -1;
+      for (const word of words) {
+        const next = said.indexOf(word, at + 1);
+        assert.ok(next > at, `${what}: ${word} is missing or out of order`);
+        at = next;
+      }
+      assert.ok(!said.includes(".terminateNow"), `${what} ends at once`);
+    };
+    inOrder(arm("end", "hold"), ["replyOwed = true", "model.endForQuit()", "return .terminateLater"], "a quit while waiting");
+    inOrder(arm("hold"), ["replyOwed = true", "model.holdForQuit()", "return .terminateLater"], "a quit from Offered on");
+
+    const model = source("AppModel.swift");
+    const hold = body(model, "func holdForQuit()");
+    for (const words of ["quitWaiting = true", "screen = .updates"]) assert.ok(hold.includes(words), `holdForQuit never holds ${words}`);
+    assert.ok(body(model, "func endForQuit()").includes("replyToQuit"), "endForQuit never replies to the quit");
+    assert.ok(closure(model, "onSkipped = {").includes("replyToQuit"), "a skip never replies to a quit that waits");
+  });
+
+  it("an update window's cycle that failed ends the check, and answers a quit that waits", () => {
+    const text = source("AppModel.swift");
+    const ended = closure(text, "onEnded = {");
+    assert.match(ended, /^onEnded = \{ \[weak self\] error in/, "the model's onEnded takes no argument");
+    for (const words of ["endsCheck(", "error != nil", "endCheck(", "replyToQuit"]) assert.ok(ended.includes(words), `onEnded never names ${words}`);
+    const sparkle = source("SparkleUpdater.swift");
+    assert.equal(indexesOf(sparkle, "var onEnded: ((Error?) -> Void)?").length, 2, "both halves of SparkleUpdater.swift do not give onEnded the error");
+    assert.match(sparkle, /didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error\?\) \{ onEnded\?\(error\) \}/);
+
+    // The backstop: installing begins anew and its marker is limited.
+    const gated = body(text, "private func gated(");
+    const go = gated.slice(gated.indexOf("case .go:"));
+    const installing = go.indexOf("update = .installing");
+    assert.ok(installing >= 0 && go.indexOf("began = ", installing) > installing, "installing never takes a new began");
+    const tick = body(text, "private func updateTick(");
+    assert.match(tick, /let limited = [^\n]*update == \.installing/, "installing's marker is not limited");
+  });
+
+  it("no check is chosen while the move or Uninstall works, and none runs under a waiting check", () => {
+    const text = source("AppModel.swift");
+    assert.ok(body(text, "var mayCheck: Bool").includes("!working"), "mayCheck never asks whether the move or Uninstall works");
+    const guardLine = body(text, "func begin(chosen: Run?)").match(/guard [^\n]*/)[0];
+    assert.ok(guardLine.includes("update == .none"), "begin's first guard lets a run start under a check");
+    const checking = body(text, "func checkForUpdates()");
+    const cleared = checking.indexOf("beginAsked = nil");
+    assert.ok(cleared >= 0 && cleared < checking.lastIndexOf("startWaiting()"), "checkForUpdates keeps a begin asked before it starts waiting");
+  });
+
+  it("a link kept while a run goes on is acted on once that run has ended", () => {
+    const text = source("AppDelegate.swift");
+    const changed = body(text, "private func stateChanged(");
+    for (const words of ["updatesAsked", "mayCheck", "checkForUpdates()", "keepsUpdatesAsk("]) assert.ok(changed.includes(words), `stateChanged never names ${words}`);
+    const link = body(text, "func application(_ application: NSApplication, open urls: [URL])");
+    assert.ok(link.includes("model.fake"), "a link in a stand-in build never says it does not look for updates");
+  });
+
+  it("a look that never ends is given up, and its late answer is dropped", () => {
+    const text = source("AppModel.swift");
+    const tick = body(text, "private func updateTick(");
+    for (const words of ["lookLimit", "looking = false", "lookCount += 1", "gated(.cannotTell)"]) assert.ok(tick.includes(words), `updateTick never holds ${words}`);
+    const look = body(text, "private func look(");
+    assert.ok(look.includes("limit: lookLimit"), "the look's run has no limit");
+    const answered = look.slice(look.indexOf("DispatchQueue.main.async"));
+    assert.ok(answered.includes("lookCount"), "the look's answer never compares the look's count");
+    for (const name of ["private func queueBegin(", "private func queueEnd("]) assert.ok(body(text, name).includes("limit: lookLimit"), `${name}'s command has no limit`);
+    assert.ok(source("Uninstall.swift").includes("limit: Double? = nil"), "runToEnd takes no limit");
+  });
+
+  it("every answer of the gate keeps the two-idle count through idleAfter", () => {
+    assert.ok(body(source("AppModel.swift"), "private func gated(").includes("idleBefore = idleAfter(next, before: idleBefore)"), "the gate never asks idleAfter");
+  });
+
+  it("an install asked for is held only from Offered or Unpacked, on the updates page", () => {
+    const text = source("AppModel.swift");
+    const asked = closure(text, "onInstallAsked = {");
+    for (const words of ["self.update == .offered || self.update == .unpacked", "self.screen = .updates", "self.enterHolding()"]) assert.ok(asked.includes(words), `onInstallAsked never holds ${words}`);
+    assert.ok(text.includes("private func startUpdate()"), "startUpdate can be called from outside the model");
+  });
+
+  it("a BRIMM_SPARKLE that holds no Sparkle.framework fails loudly", () => {
+    const bad = folder();
+    const kept = process.env.BRIMM_SPARKLE;
+    process.env.BRIMM_SPARKLE = bad;
+    try {
+      assert.throws(() => sparkleForTests(), (error) => error.message.includes(bad));
+    } finally {
+      if (kept === undefined) delete process.env.BRIMM_SPARKLE;
+      else process.env.BRIMM_SPARKLE = kept;
+    }
   });
 
   it("every way back to the status ends the check first", () => {

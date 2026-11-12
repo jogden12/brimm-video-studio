@@ -145,7 +145,7 @@ func checkNames(_ args: [String]) -> Never {
         "updatesUnpacked": updatesUnpacked, "updatesHolding": updatesHolding, "updatesCannotTell": updatesCannotTell,
         "updatesWaitedTooLong": updatesWaitedTooLong, "updatesCannotStart": updatesCannotStart, "updatesStandIn": updatesStandIn,
         "updatesNotNow": updatesNotNow, "updatesShowWindow": updatesShowWindow, "updatesInstallNow": updatesInstallNow,
-        "updateMarkEvery": updateMarkEvery, "updateMarkLimit": updateMarkLimit,
+        "updateMarkEvery": updateMarkEvery, "updateMarkLimit": updateMarkLimit, "lookLimit": lookLimit,
     ])
 }
 
@@ -497,6 +497,15 @@ func checkRun(_ args: [String]) -> Never {
     emit(["status": Int(ran.status), "out": ran.out, "err": ran.err])
 }
 
+/// limited-run <seconds> <program> [<argument>...]: the app's own runToEnd with that limit, given the same environment as run: its
+/// status.
+func checkLimitedRun(_ args: [String]) -> Never {
+    let words = atLeast(2, args, "limited-run")
+    let ran = runToEnd(
+        Command(program: words[1], arguments: Array(words.dropFirst(2))), environment: uninstallEnvironment(app: "/nowhere"), limit: secondsOf(words[0]))
+    emit(Int(ran.status))
+}
+
 /// uninstall <app> <fake yes|no>: prints "removed" or { notice }.
 func checkUninstall(_ args: [String]) -> Never {
     let words = exactly(2, args, "uninstall")
@@ -536,6 +545,26 @@ func checkGateNext(_ args: [String]) -> Never {
     case .go: emit("go")
     case .cannotTell: emit("cannotTell")
     }
+}
+
+/// idle-after <again|go|wait|cannotTell> <before yes|no>.
+func checkIdleAfter(_ args: [String]) -> Never {
+    let words = exactly(2, args, "idle-after")
+    let next: GateNext
+    switch words[0] {
+    case "again": next = .again
+    case "go": next = .go
+    case "wait": next = .wait("Something is at work on this Mac.")
+    case "cannotTell": next = .cannotTell
+    default: fail("\"\(words[0])\" is not again, go, wait or cannotTell.")
+    }
+    emit(idleAfter(next, before: yesNo(words[1])))
+}
+
+/// ends-check <phase> <failed yes|no>.
+func checkEndsCheck(_ args: [String]) -> Never {
+    let words = exactly(2, args, "ends-check")
+    emit(endsCheck(phase: phaseOf(words[0]), failed: yesNo(words[1])))
 }
 
 /// update-quit <phase>.
@@ -612,8 +641,11 @@ case "pdf": checkPDF(rest)
 case "move": checkMove(rest)
 case "uninstall": checkUninstall(rest)
 case "run": checkRun(rest)
+case "limited-run": checkLimitedRun(rest)
 case "gate-next": checkGateNext(rest)
 case "update-quit": checkUpdateQuit(rest)
+case "idle-after": checkIdleAfter(rest)
+case "ends-check": checkEndsCheck(rest)
 case "may-check": checkMayCheck(rest)
 case "keeps-ask": checkKeepsAsk(rest)
 case "mark-due": checkMarkDue(rest)
