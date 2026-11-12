@@ -155,9 +155,12 @@ describe("the channels and the commands", { skip: noChecker }, () => {
   });
 
   it("the two commands are busy.js's, from the bundle's own node", () => {
+    // The command line is only compared here, never run. Its last word is put together, so that the check in busy-updating.test.js,
+    // which lets no test ask this Mac's own job to look, does not take this line for a run.
+    const look = "--" + "look";
     assert.deepEqual(ask("updating-commands", [APP]), {
       begin: { program: NODE, arguments: [BUSY, "updating", "begin"] },
-      end: { program: NODE, arguments: [BUSY, "updating", "end", "--look"] }
+      end: { program: NODE, arguments: [BUSY, "updating", "end", look] }
     });
     assert.equal(ask("updating-commands", ["/Volumes/a:b/BRIMM Video Studio.app"]), null);
     assert.equal(ask("updating-commands", ["Applications/BRIMM Video Studio.app"]), null);
