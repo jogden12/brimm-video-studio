@@ -15,6 +15,7 @@ import { readStatusesIn, writeStatusIn } from "../importing.js";
 import { importingFolder } from "../settings.js";
 import { zoomTimeOf } from "../kinds.js";
 import { OWN_CHECKOUT, OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
+import { UPDATING } from "../busy.js";
 
 const ROOT = "/Users/jasonogden/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
 const SETTINGS = { version: 1, machine: "Mac Studio", root: ROOT, checkout: "/Users/jasonogden/Claude Code/BRIMM video" };
@@ -314,6 +315,42 @@ describe("the wait for late checks", () => {
     assert.equal(seen[0].due, L + LATE_CHECK_MS);
     assert.deepEqual([w.statuses(), existsSync(X.pendingFile)], [[], false]);
     w.done();
+  });
+  /** A run with one late check open, of X, and nothing in the drop folder at its start. Each wait moves the clock on a minute. At the
+      first wait a second video, Y, is put in the drop folder, and from then on `updating` gives UPDATING, until `over` waits have
+      passed, when it gives "" again. Gives back the videos the run took in, whether X's check was made, what is in the drop folder
+      at the end, and how many waits there were. */
+  async function waitingWhileUpdating(over = Infinity) {
+    const w = world([]);
+    const L = Date.parse("2026-10-27T10:00:00");
+    const X = holdCheck(w, "X.mov", L);
+    let now = L + 60 * 1000;
+    let waits = 0;
+    const wait = async (ms) => {
+      waits += 1;
+      if (waits === 1) writeFileSync(join(w.folder, "Y.mov"), "the bytes of Y.mov");
+      now += ms;
+    };
+    const updating = () => (waits >= 1 && waits <= over ? UPDATING : "");
+    const imported = [];
+    const importOne = async (name) => {
+      imported.push(name);
+      return { ok: true, name };
+    };
+    const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait, updating, clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, keepAwake: () => {}, log: () => {} };
+    await importEpisodes(w.folder, deps, importOne);
+    const seen = { imported, checked: !existsSync(X.pendingFile), drop: readdirSync(w.folder), waits };
+    w.done();
+    return seen;
+  }
+  it("a watcher that is waiting for a late check takes no new video in", async () => {
+    const seen = await waitingWhileUpdating();
+    assert.deepEqual([seen.imported, seen.checked, seen.drop], [[], true, ["Y.mov"]]);
+    assert.ok(seen.waits > 1, "the run waited for the check, and then ended");
+  });
+  it("once the update is over it takes in what waited", async () => {
+    const seen = await waitingWhileUpdating(1);
+    assert.deepEqual([seen.imported, seen.checked], [["Y.mov"], true]);
   });
   it("36. gives the status of a check that found a problem no due", async () => {
     const w = world([]);

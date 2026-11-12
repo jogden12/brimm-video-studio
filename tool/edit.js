@@ -98,7 +98,7 @@ import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, 
 import { isMedia } from "./lib.js";
 import { quotable, shellWord, studioFiles, studioFolder } from "./studio.js";
 import { UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "./build.js";
-import { AGENT_LABEL, launchdPid } from "./busy.js";
+import { AGENT_LABEL, launchdPid, updatingWhy } from "./busy.js";
 import { checkForUpdate, updateLine } from "./update-check.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
@@ -7209,6 +7209,18 @@ export async function editMain(argv, deps = {}) {
   // The command and its words are on ctx, so that findEpisode, which every command finds its episode by, asks the gate (gate.js)
   // before the command goes on: the folder a detached run is given by `--now` is found by it too.
   const ctx = { ...made, asked: { command, words: rest } };
+  // While an update of BRIMM Video Studio is under way no command starts (busy.js), but `behind`, `update` and a second half: a run
+  // Studio started itself (`--now`, `app --when-ready`), outside Claude Code, which holds a lock that the update waits for. A detached
+  // run is started without CLAUDECODE (detached.js spawnDetached), and a chat can type `--now`.
+  const env = ctx.deps.env || process.env;
+  const secondHalf = env.CLAUDECODE !== "1" && (rest[0] === "--now" || (command === "app" && rest[0] === "--when-ready"));
+  if (command !== "behind" && command !== "update" && !secondHalf) {
+    const updatingLine = updatingWhy({ home: ctx.home, now: ctx.now() });
+    if (updatingLine) {
+      ctx.say(updatingLine);
+      return 1;
+    }
+  }
   // Under Claude Code, each command first takes away the words files a day old (held.js clearOldWords).
   if ((ctx.deps.env || process.env).CLAUDECODE === "1") clearOldWords(ctx.home, ctx.now());
   let code;
