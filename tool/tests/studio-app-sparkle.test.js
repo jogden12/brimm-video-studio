@@ -142,6 +142,8 @@ describe("sparkle.js", () => {
   it("key says the public half, or that it is not there yet", { skip: notAMac }, () => {
     const w = world();
     try {
+      // The repo's own pin has its key since by-hand check 2, so the pin with none is written here.
+      writeFileSync(w.pinFile, `${JSON.stringify({ ...realPin(), publicKey: "" })}\n`);
       const none = w.sparkle("key");
       assert.equal(none.status, 1);
       assert.equal(`${none.stdout}${none.stderr}`, `${NO_KEY_SENTENCE}\n`);
