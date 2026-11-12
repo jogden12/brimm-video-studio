@@ -103,7 +103,8 @@ describe("the start: the arguments, the kind of Mac and the copy", () => {
         const { code, events } = await go(m, { run });
         assert.equal(code, 1);
         assert.deepEqual(events, [{ event: "error", code: "damaged", message: DAMAGED, contact: SUPPORT, details: "ffmpeg is missing" }]);
-        assert.equal(m.ran(), "");
+        // Nothing ran but the ask to the background job to look, which every run that ends before its installer makes.
+        assert.equal(m.ran(), `launchctl kickstart gui/${process.getuid()}/com.thebrimm.unedited\n`);
       });
     }
   });
@@ -362,6 +363,69 @@ describe("the record of the build that set this Mac up, and the marker of an upd
       assert.deepEqual(m.ran().split("\n").filter((line) => line.startsWith("launchctl ")), [KICK]);
       assert.equal(existsSync(updatingFile(m.home)), false);
     });
+  });
+
+  const kicks = (m) => m.ran().split("\n").filter((line) => line.startsWith("launchctl "));
+
+  it("an update on a damaged copy takes the marker away and asks the job to look, once", async () => {
+    await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+      markUpdating({ home: m.home });
+      rmSync(join(m.tools, "ffmpeg"));
+      const { code, events } = await go(m, { run: "update" });
+      assert.equal(code, 1);
+      assert.equal(lastOf(events).code, "damaged");
+      assert.equal(existsSync(updatingFile(m.home)), false);
+      assert.deepEqual(kicks(m), [KICK], m.ran());
+    });
+  });
+
+  it("an update whose stage fails takes the marker away and asks the job to look, once", async () => {
+    await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+      markUpdating({ home: m.home });
+      const model = async () => {
+        throw Object.assign(new Error("The transcription model could not be downloaded (curl 22)."), { code: "download" });
+      };
+      const { code, events } = await go(m, { run: "update", stages: { model } });
+      assert.equal(code, 1);
+      assert.equal(lastOf(events).code, "download");
+      assert.equal(existsSync(updatingFile(m.home)), false);
+      assert.deepEqual(kicks(m), [KICK], m.ran());
+      assert.equal(installCalls(m.ran()).length, 0);
+    });
+  });
+
+  it("a setup cancelled at a question takes the marker away and asks the job to look, once", async () => {
+    await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+      markUpdating({ home: m.home });
+      const { code, events } = await go(m, { run: "setup", answers: reply(HELD, cancelAt("apps")) });
+      assert.equal(code, 0);
+      assert.equal(lastOf(events).outcome, "cancelled");
+      assert.equal(existsSync(updatingFile(m.home)), false);
+      assert.deepEqual(kicks(m), [KICK], m.ran());
+      assert.equal(installCalls(m.ran()).length, 0);
+    });
+  });
+
+  it("a status run leaves a live marker where it is, and asks the job nothing", async () => {
+    await withMac({ settings: "installed", record: "older", apps: EVERY_APP }, async (m) => {
+      assert.equal(markUpdating({ home: m.home }), true);
+      const { code } = await go(m, { run: "status" });
+      assert.equal(code, 0);
+      assert.equal(existsSync(updatingFile(m.home)), true);
+      assert.deepEqual(kicks(m), []);
+    });
+  });
+
+  it("a run from a build that is not installed writes no record", async () => {
+    for (const build of ["missing", "broken"]) {
+      await withMac({ settings: "installed", record: "none", apps: EVERY_APP }, async (m) => {
+        answering(m);
+        if (build === "missing") rmSync(join(m.checkout, "build.json"));
+        else writeFileSync(join(m.checkout, "build.json"), "{");
+        await go(m, { run: "repair" });
+        assert.equal(existsSync(setUpFile(m.home)), false, build);
+      });
+    }
   });
 });
 

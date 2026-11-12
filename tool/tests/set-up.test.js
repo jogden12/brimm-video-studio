@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { settingsFile } from "../settings.js";
-import { UNFINISHED, readSetUp, setUpFile, unfinished, writeSetUp } from "../set-up.js";
+import { UNFINISHED, readSetUp, setUpFile, unfinished, unfinishedBy, writeSetUp } from "../set-up.js";
 
 const BUILD = { mode: "installed", version: "1.4.2", build: 142, commit: "0123456789abcdef0123456789abcdef01234567", short: "0123456", feed: "https://updates.example.invalid/appcast.xml", channel: "stable", support: "", broken: false };
 
@@ -65,5 +65,14 @@ describe("the record of the build that set this Mac up", () => {
       writeSetUp(home, BUILD);
       assert.equal(unfinished(home, BUILD), false, "this build's record");
     });
+  });
+
+  it("the rule of an unfinished update, given the record's build: one rule for unfinished and the status", () => {
+    assert.equal(unfinishedBy(null, BUILD), true, "no record");
+    assert.equal(unfinishedBy(141, BUILD), true, "another build's record");
+    assert.equal(unfinishedBy(142, BUILD), false, "this build's record");
+    assert.equal(unfinishedBy(null, { mode: "dev" }), false, "a checkout");
+    assert.equal(unfinishedBy(null, { ...BUILD, version: "", build: 0, broken: true }), false, "a build file that cannot be read");
+    assert.equal(unfinishedBy(0, { ...BUILD, version: "", build: 0, broken: true }), false, "a broken build and a record of 0");
   });
 });

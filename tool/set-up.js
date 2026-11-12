@@ -47,6 +47,9 @@ export function writeSetUp(home, build) {
   }
 }
 
-/** Whether this Mac has an app whose update is not finished: the build is an installed Mac's, its build file can be read, and the
-    record is not of this build (or there is none). */
-export const unfinished = (home, build) => isInstalled(build) && !build.broken && readSetUp(home) !== build.build;
+/** The rule of an unfinished update, given `setUpBy`, the build number the record holds (what readSetUp gives): the build is an
+    installed Mac's, its build file can be read, and the record is not of this build (or there is none). Reads no file. */
+export const unfinishedBy = (setUpBy, build) => isInstalled(build) && !build.broken && setUpBy !== build.build;
+
+/** Whether this Mac has an app whose update is not finished: unfinishedBy, with this Mac's record. */
+export const unfinished = (home, build) => unfinishedBy(readSetUp(home), build);

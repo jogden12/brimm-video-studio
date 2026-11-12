@@ -3,7 +3,7 @@
 // never from what the installer prints (that goes under `details`). The one function here that starts a program is planOf.
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { isInstalled } from "../build.js";
+import { unfinishedBy } from "../set-up.js";
 import { dropFolderOf, exportsFolderOf, folderWords } from "../settings.js";
 import { installerEnv, quiet } from "./install.js";
 
@@ -111,10 +111,10 @@ const SETUP = {
 
 /** The status: a whole `summary` event, id `status`, with what this Mac needs, and its folders when it has settings. It starts no
     program and reads no file: the settings, and the record of the build that set the Mac up, are the ones kindOf already read. An
-    installed Mac that was not moved needs an update when set-up.js's `unfinished` holds: the app's build is an installed one that
-    can be read, and the record is of another build, or there is none. */
+    installed Mac that was not moved needs an update when set-up.js's `unfinishedBy` holds for kindOf's record: the app's build is an
+    installed one that can be read, and the record is of another build, or there is none. */
 export function statusSummary({ found, home, build }) {
-  const updated = isInstalled(build) && !build.broken && found.setUpBy !== build.build;
+  const updated = unfinishedBy(found.setUpBy, build);
   const state = found.kind === "installed" ? (found.moved ? "moved" : updated ? "updated" : "installed") : found.kind === "takeover" ? "takeover" : "fresh";
   const needs = { fresh: "setup", takeover: "setup", moved: "repair", updated: "update", installed: "nothing" }[state];
   const lines = [];
