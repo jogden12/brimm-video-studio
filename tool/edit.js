@@ -99,6 +99,7 @@ import { isMedia } from "./lib.js";
 import { quotable, shellWord, studioFiles, studioFolder } from "./studio.js";
 import { UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "./build.js";
 import { AGENT_LABEL, launchdPid, updatingWhy } from "./busy.js";
+import { UNFINISHED, unfinished } from "./set-up.js";
 import { checkForUpdate, updateLine } from "./update-check.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
 import { sandboxedWhy } from "./sandboxed.js";
@@ -2903,7 +2904,7 @@ function refuseIfLoosened(lock, say) {
     main, and counts the changes there that this checkout has not. First it clears the copies `show` opened (clearShown), the one thing it
     writes. Then it looks at the lock on her folder for Claude (lockLoosened): when that is loosened it says so, to ask Jason, and
     ends with 1 without asking git, since she is not to go on (editMain asks it too when this Mac has no settings for episodes). On her laptop git reaches GitHub with the deploy key. It changes nothing in the
-    checkout, and otherwise always ends with 0: a check that could not be made is said. A checkout with no .git of its own is not asked of git (phase 1): it says in one line that it could not check, and that this is why. An installed Mac's line is the update check's (phase 3). With the open lock in effect on this Mac it
+    checkout, and otherwise always ends with 0: a check that could not be made is said. A checkout with no .git of its own is not asked of git (phase 1): it says in one line that it could not check, and that this is why. An installed Mac's line is the update check's (phase 3), and before it, on a Mac whose app has an update to finish, UNFINISHED (set-up.js). With the open lock in effect on this Mac it
     also says, and goes on, when Claude Code has not trusted her folder yet (UNTRUSTED, first), and, after its other lines, the entries
     this Mac's settings add to what her folder allows, so that a change shows (design section 2). On a Mac whose settings turn the app
     on it also says, whatever git answered and before those entries, one line when the pinned HyperFrames command line is not the one
@@ -2914,6 +2915,8 @@ async function behind(ctx) {
   clearShown(ctx);
   const refused = refuseIfLoosened({ home: ctx.home, checkout: ctx.settings.checkout, deps: ctx.deps }, ctx.say);
   if (refused !== null) return refused;
+  // An installed Mac whose app is another build than the one that last set it up has an update to finish: that is said first.
+  if (unfinished(ctx.home, ctx.build)) ctx.say(UNFINISHED);
   const open = lockFor(ctx.settings, ctx.deps) === "open";
   if (open) {
     let folder = null;

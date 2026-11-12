@@ -13,7 +13,7 @@ export const RUNS = ["setup", "repair", "update", "status"];
 const KINDS = ["confirm", "text", "choice", "folder", "apps", "sign-in"];
 const STATES = ["waiting", "running", "done", "skipped", "failed"];
 const SUMMARIES = ["review", "setup", "status"];
-const NEEDS = ["nothing", "setup", "repair"];
+const NEEDS = ["nothing", "setup", "repair", "update"];
 const OUTCOMES = ["installed", "repaired", "updated", "status", "cancelled"];
 const APP_IDS = ["claude-app", "claude-code", "dropbox", "hyperframes"];
 const APP_ACTIONS = ["install-claude-code", "sign-in"];
@@ -95,7 +95,7 @@ const FIELDS = {
     if (!listOf(e.lines, (l) => isObject(l) && isString(l.label) && isString(l.value))) return "summary: lines is not a list of label and value";
     if (!optional(e, "details", isString)) return "summary: details is not a text";
     if (!optional(e, "exit", Number.isInteger)) return "summary: exit is not a whole number";
-    if (e.id === "status") return NEEDS.includes(e.needs) ? "" : "summary: needs is not nothing, setup or repair";
+    if (e.id === "status") return NEEDS.includes(e.needs) ? "" : "summary: needs is not nothing, setup, repair or update";
     return e.needs === undefined ? "" : "summary: needs belongs to status only";
   },
   done: (e) => {

@@ -3,6 +3,7 @@
 // never from what the installer prints (that goes under `details`). The one function here that starts a program is planOf.
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { isInstalled } from "../build.js";
 import { dropFolderOf, exportsFolderOf, folderWords } from "../settings.js";
 import { installerEnv, quiet } from "./install.js";
 
@@ -104,14 +105,18 @@ const SETUP = {
   fresh: "BRIMM Video Studio is not set up on this Mac yet.",
   takeover: "This Mac runs BRIMM Video Studio from an older copy. Setup moves it to this app.",
   moved: "This Mac was set up from a copy of BRIMM Video Studio that is no longer where it was. Repair points it at this one.",
-  installed: "BRIMM Video Studio is set up on this Mac."
+  installed: "BRIMM Video Studio is set up on this Mac.",
+  updated: "BRIMM Video Studio was updated on this Mac. It finishes the update when it is opened."
 };
 
 /** The status: a whole `summary` event, id `status`, with what this Mac needs, and its folders when it has settings. It starts no
-    program and reads no file: the settings are the ones kindOf already read. */
+    program and reads no file: the settings, and the record of the build that set the Mac up, are the ones kindOf already read. An
+    installed Mac that was not moved needs an update when set-up.js's `unfinished` holds: the app's build is an installed one that
+    can be read, and the record is of another build, or there is none. */
 export function statusSummary({ found, home, build }) {
-  const state = found.kind === "installed" ? (found.moved ? "moved" : "installed") : found.kind === "takeover" ? "takeover" : "fresh";
-  const needs = { fresh: "setup", takeover: "setup", moved: "repair", installed: "nothing" }[state];
+  const updated = isInstalled(build) && !build.broken && found.setUpBy !== build.build;
+  const state = found.kind === "installed" ? (found.moved ? "moved" : updated ? "updated" : "installed") : found.kind === "takeover" ? "takeover" : "fresh";
+  const needs = { fresh: "setup", takeover: "setup", moved: "repair", updated: "update", installed: "nothing" }[state];
   const lines = [];
   if (found.settings?.machine) lines.push(line("This Mac", found.settings.machine));
   lines.push(line("BRIMM Video Studio", versionLine(build)), line("Setup", SETUP[state]));
