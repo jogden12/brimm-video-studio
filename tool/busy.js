@@ -36,6 +36,13 @@ const USAGE = "Say: node busy.js idle-why [--launchd -], or node busy.js updatin
 /** The marker of an update under way: updating.json, in the folder settings.json is in. */
 export const updatingFile = (home) => join(dirname(settingsFile(home)), "updating.json");
 
+/** The note that a run was refused for the marker: updating-waited.json, beside the marker. While it is there something waited in the
+    drop folder that nothing has yet asked the background job to look at. */
+export const updatingWaitedFile = (home) => join(dirname(settingsFile(home)), "updating-waited.json");
+
+/** How long an ask to the background job to look may hold its caller: launchctl answers at once, and one that hangs is left. */
+export const KICK_TIMEOUT_MS = 5000;
+
 /** Whether an error says that a file or folder is not there. */
 const notThere = (e) => e?.code === "ENOENT" || e?.code === "ENOTDIR";
 
@@ -50,6 +57,29 @@ export function markUpdating(options = {}) {
     temp = join(dirname(file), `.updating.json.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`);
     writeFileSync(temp, `${JSON.stringify({ version: 1, at: new Date(now).toISOString() })}\n`);
     utimesSync(temp, new Date(now), new Date(now));
+    renameSync(temp, file);
+    return true;
+  } catch (e) {
+    try {
+      if (temp) rmSync(temp, { force: true });
+    } catch (e2) {
+      // A temp file that cannot be taken away is left.
+    }
+    return false;
+  }
+}
+
+/** Writes the note that a run was refused for the marker (updatingWaitedFile): to a temp file beside it, then renamed into place. The
+    support folder is made when it is not there. `behind` reads it once the marker has lapsed by itself, and asks the background job
+    to look. False when the note could not be written. Never throws. */
+export function noteWaited(options = {}) {
+  let temp = "";
+  try {
+    const { home = studioHome(), now = Date.now() } = options;
+    const file = updatingWaitedFile(home);
+    mkdirSync(dirname(file), { recursive: true });
+    temp = join(dirname(file), `.updating-waited.json.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`);
+    writeFileSync(temp, `${JSON.stringify({ version: 1, at: new Date(now).toISOString() })}\n`);
     renameSync(temp, file);
     return true;
   } catch (e) {
@@ -80,8 +110,9 @@ export function updatingWhy(options = {}) {
   }
 }
 
-/** Takes the marker away, then calls `kick`, when one is given, to ask the background job to take in what waited. Never throws: a
-    marker that is not there is no fault, and neither is a kick that throws. */
+/** Takes the marker away, and the note that a run waited for it (every caller either asks the job to look or runs the installer,
+    which starts the job), then calls `kick`, when one is given, to ask the background job to take in what waited. Never throws: a
+    marker or a note that is not there is no fault, and neither is a kick that throws. */
 export function endUpdating(options = {}) {
   const { kick } = options;
   try {
@@ -89,6 +120,12 @@ export function endUpdating(options = {}) {
     rmSync(updatingFile(home), { force: true });
   } catch (e) {
     // A marker that cannot be taken away lapses by itself.
+  }
+  try {
+    const { home = studioHome() } = options;
+    rmSync(updatingWaitedFile(home), { force: true });
+  } catch (e) {
+    // A note that cannot be taken away makes behind ask the job to look once more, which is harmless.
   }
   try {
     if (kick) kick();
@@ -213,8 +250,10 @@ if (isMain(import.meta.url)) {
     process.exit(1);
   }
   if (endAsked) {
-    // With --look the background job is asked to take in what waited while the update was under way. How that ends is not minded.
-    const kick = look ? () => spawnSync("/bin/launchctl", ["kickstart", `gui/${process.getuid()}/${AGENT_LABEL}`], { stdio: "ignore" }) : undefined;
+    // With --look the background job is asked to take in what waited while the update was under way. How that ends is not minded,
+    // and it may hold this command KICK_TIMEOUT_MS at most. Only a run that names no other home asks: the app never sets
+    // BRIMM_VIDEO_HOME, and every test and by-hand run with a home of its own does, so none of them asks this Mac's own job to look.
+    const kick = look && !process.env.BRIMM_VIDEO_HOME ? () => spawnSync("/bin/launchctl", ["kickstart", `gui/${process.getuid()}/${AGENT_LABEL}`], { stdio: "ignore", timeout: KICK_TIMEOUT_MS }) : undefined;
     endUpdating({ kick });
     process.exit(0);
   }

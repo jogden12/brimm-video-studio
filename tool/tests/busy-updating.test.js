@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { UPDATING, UPDATING_HOLD_MS, UPDATING_UNTOLD, endUpdating, markUpdating, updatingFile, updatingWhy } from "../busy.js";
+import { KICK_TIMEOUT_MS, UPDATING, UPDATING_HOLD_MS, UPDATING_UNTOLD, endUpdating, markUpdating, noteWaited, updatingFile, updatingWaitedFile, updatingWhy } from "../busy.js";
 import { settingsFile } from "../settings.js";
 
 const TOOL = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -113,6 +113,40 @@ describe("the marker of an update", () => {
       endUpdating({ home });
     });
   });
+
+  it("a run refused for the marker leaves a note, which taking the marker away takes away too", () => {
+    withHome((home) => {
+      assert.equal(updatingWaitedFile(home), join(dirname(settingsFile(home)), "updating-waited.json"));
+      assert.equal(markUpdating({ home, now: Date.now() }), true);
+      assert.equal(noteWaited({ home }), true);
+      assert.equal(existsSync(updatingWaitedFile(home)), true);
+      // Only the marker and the note are left in the support folder: the note's temp file was renamed into place.
+      assert.deepEqual(readdirSync(dirname(updatingFile(home))).sort(), ["updating-waited.json", "updating.json"]);
+      endUpdating({ home });
+      assert.deepEqual([existsSync(updatingFile(home)), existsSync(updatingWaitedFile(home))], [false, false]);
+      // With no marker the note is written all the same, and the support folder is made for it.
+      rmSync(dirname(updatingFile(home)), { recursive: true, force: true });
+      assert.equal(noteWaited({ home }), true);
+      assert.equal(existsSync(updatingWaitedFile(home)), true);
+    });
+    withHome((home) => {
+      // A support folder that is a file takes no note, and that does not throw.
+      mkdirSync(join(home, "Library", "Application Support"), { recursive: true });
+      writeFileSync(dirname(updatingFile(home)), "x");
+      assert.equal(noteWaited({ home }), false);
+    });
+  });
+
+  it("the ask to look has the engine's time limit, of one constant", () => {
+    assert.equal(KICK_TIMEOUT_MS, 5000);
+    const kickLines = readFileSync(BUSY, "utf8").split("\n").filter((line) => line.includes('"kickstart"'));
+    assert.equal(kickLines.length, 1);
+    assert.ok(kickLines[0].includes("timeout: KICK_TIMEOUT_MS"), kickLines[0]);
+    const engine = readFileSync(join(TOOL, "setup", "engine.js"), "utf8");
+    assert.equal(/const KICK_TIMEOUT_MS\s*=/.test(engine), false, "the engine has no constant of its own");
+    assert.ok(/import \{[^}]*\bKICK_TIMEOUT_MS\b[^}]*\} from "\.\.\/busy\.js"/.test(engine), "the engine takes busy.js's");
+    assert.ok(engine.includes("timeout: KICK_TIMEOUT_MS"));
+  });
 });
 
 describe("node busy.js updating", () => {
@@ -131,6 +165,24 @@ describe("node busy.js updating", () => {
         const ran = ask(home, bad);
         assert.deepEqual([ran.status, ran.stdout, ran.stderr], [2, "", `${USAGE}\n`], bad.join(" "));
       }
+    });
+  });
+
+  it("a run with a home of its own never asks this Mac's job to look", () => {
+    // The app never names a home (BRIMM_VIDEO_HOME); every test's run does, and so is never the Mac's own.
+    const kickLines = readFileSync(BUSY, "utf8").split("\n").filter((line) => line.includes('"kickstart"'));
+    assert.equal(kickLines.length, 1);
+    assert.ok(kickLines[0].includes("process.env.BRIMM_VIDEO_HOME"), kickLines[0]);
+  });
+
+  it("ending with a look, with a home of its own, takes the marker and the note away and ends 0", () => {
+    withHome((home) => {
+      const begun = ask(home, ["updating", "begin"]);
+      assert.equal(begun.status, 0);
+      assert.equal(noteWaited({ home }), true);
+      const ended = ask(home, ["updating", "end", "--" + "look"]);
+      assert.deepEqual([ended.status, ended.stdout, ended.stderr], [0, "", ""]);
+      assert.deepEqual([existsSync(updatingFile(home)), existsSync(updatingWaitedFile(home))], [false, false]);
     });
   });
 

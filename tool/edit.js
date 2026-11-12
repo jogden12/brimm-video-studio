@@ -98,7 +98,7 @@ import { ITEM_LISTS, CHECK_NAMES, SESSION_LABEL, SESSION_NAME_MOST, accountWhy, 
 import { isMedia } from "./lib.js";
 import { quotable, shellWord, studioFiles, studioFolder } from "./studio.js";
 import { UPDATE_SAY, brokenLine, buildOf, forThisMac, isInstalled, repairLine } from "./build.js";
-import { AGENT_LABEL, launchdPid, updatingWhy } from "./busy.js";
+import { AGENT_LABEL, launchdPid, updatingWaitedFile, updatingWhy } from "./busy.js";
 import { UNFINISHED, unfinished } from "./set-up.js";
 import { checkForUpdate, updateLine } from "./update-check.js";
 import { LOCK_CHANGED, factsFor, lockFor, lockLoosened, trustWhy } from "./loosened.js";
@@ -2900,6 +2900,22 @@ function refuseIfLoosened(lock, say) {
   return 1;
 }
 
+/** When a run of the import waited for the marker of an update (busy.js updatingWaitedFile), the marker is no longer live and no run
+    is at work: asks the launch agent to look, once, and takes the note away. Whether it asked. A note that cannot be read, a kick
+    that throws and a note that cannot be taken away are let be: the note is looked at again by the next `behind`. Never throws. */
+function lookAfterUpdate(ctx) {
+  try {
+    if (!existsSync(updatingWaitedFile(ctx.home))) return false;
+    if (updatingWhy({ home: ctx.home, now: ctx.now() })) return false;
+    if (!noRunAtWork(ctx, dropFolderOf(ctx.settings, ctx.home), ctx.agentPid())) return false;
+    ctx.kickstart();
+    rmSync(updatingWaitedFile(ctx.home), { force: true });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 /** `behind`: whether this Mac's checkout of brimm-video is behind main on GitHub, by git, in this Mac's checkout: it fetches
     main, and counts the changes there that this checkout has not. First it clears the copies `show` opened (clearShown), the one thing it
     writes. Then it looks at the lock on her folder for Claude (lockLoosened): when that is loosened it says so, to ask Jason, and
@@ -2915,6 +2931,10 @@ async function behind(ctx) {
   clearShown(ctx);
   const refused = refuseIfLoosened({ home: ctx.home, checkout: ctx.settings.checkout, deps: ctx.deps }, ctx.say);
   if (refused !== null) return refused;
+  // A run of the import that was refused while an update was under way left a note (busy.js noteWaited). When the marker has lapsed
+  // by itself, as after a crash, and no run is at work, nothing else asks the job to look: it is asked here, once, and the note goes.
+  // Nothing of it is said. It needs no network.
+  const kicked = lookAfterUpdate(ctx);
   // An installed Mac whose app is another build than the one that last set it up has an update to finish: that is said first.
   if (unfinished(ctx.home, ctx.build)) ctx.say(UNFINISHED);
   const open = lockFor(ctx.settings, ctx.deps) === "open";
@@ -2949,7 +2969,7 @@ async function behind(ctx) {
       ctx.say(found.line);
       if (found.finding.kind === "newNode") {
         try {
-          if (noRunAtWork(ctx, dropFolderOf(ctx.settings, ctx.home), ctx.agentPid())) ctx.kickstart();
+          if (!kicked && noRunAtWork(ctx, dropFolderOf(ctx.settings, ctx.home), ctx.agentPid())) ctx.kickstart();
         } catch (e) {
           // the line is said all the same
         }

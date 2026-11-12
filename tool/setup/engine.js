@@ -11,7 +11,7 @@ import { PassThrough } from "node:stream";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { REPAIR, buildOf, isInstalled } from "../build.js";
-import { AGENT_LABEL, endUpdating, idleWhy } from "../busy.js";
+import { AGENT_LABEL, KICK_TIMEOUT_MS, endUpdating, idleWhy } from "../busy.js";
 import { toolchainDiffers, toolchainHolds } from "../hyperframes.js";
 import { isMain } from "../is-main.js";
 import { writeSetUp } from "../set-up.js";
@@ -79,9 +79,6 @@ const NOTE = {
   staged: "What setup had already put on this Mac stays, and the next run uses it.",
   unrecorded: "BRIMM Video Studio could not note this update, so it finishes it again the next time it is opened."
 };
-
-/** How long the ask to the background job to look may hold the engine: launchctl answers at once, and one that hangs is left. */
-const KICK_TIMEOUT_MS = 5000;
 
 /** What readerOf gives for a line that is no JSON object. */
 const NOT_JSON = "A line was not a JSON object.";

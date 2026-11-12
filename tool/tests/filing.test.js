@@ -15,7 +15,7 @@ import { readStatusesIn, writeStatusIn } from "../importing.js";
 import { importingFolder } from "../settings.js";
 import { zoomTimeOf } from "../kinds.js";
 import { OWN_CHECKOUT, OWN_COMMIT, WITHOUT_COMMIT } from "./own-checkout.js";
-import { UPDATING } from "../busy.js";
+import { UPDATING, endUpdating, markUpdating, updatingWaitedFile } from "../busy.js";
 
 const ROOT = "/Users/jasonogden/Library/CloudStorage/Dropbox/The BRIMM DB/BRIMM Video";
 const SETTINGS = { version: 1, machine: "Mac Studio", root: ROOT, checkout: "/Users/jasonogden/Claude Code/BRIMM video" };
@@ -318,9 +318,11 @@ describe("the wait for late checks", () => {
   });
   /** A run with one late check open, of X, and nothing in the drop folder at its start. Each wait moves the clock on a minute. At the
       first wait a second video, Y, is put in the drop folder, and from then on `updating` gives UPDATING, until `over` waits have
-      passed, when it gives "" again. Gives back the videos the run took in, whether X's check was made, what is in the drop folder
-      at the end, and how many waits there were. */
-  async function waitingWhileUpdating(over = Infinity) {
+      passed, when it gives "" again. With `real`, no `updating` is given: the marker itself is written in the made-up Mac's home at
+      the first wait, by the wall clock, which is what the watcher's own look reads, and taken away (busy.js endUpdating) when the
+      update is over. Gives back the videos the run took in, whether X's check was made, what is in the drop folder at the end, how
+      many waits there were, and whether the note that a run waited for the marker is there at the end. */
+  async function waitingWhileUpdating(over = Infinity, { real = false } = {}) {
     const w = world([]);
     const L = Date.parse("2026-10-27T10:00:00");
     const X = holdCheck(w, "X.mov", L);
@@ -329,6 +331,8 @@ describe("the wait for late checks", () => {
     const wait = async (ms) => {
       waits += 1;
       if (waits === 1) writeFileSync(join(w.folder, "Y.mov"), "the bytes of Y.mov");
+      if (real && waits === 1) assert.equal(markUpdating({ home: w.home, now: Date.now() }), true);
+      if (real && waits === over + 1) endUpdating({ home: w.home });
       now += ms;
     };
     const updating = () => (waits >= 1 && waits <= over ? UPDATING : "");
@@ -337,20 +341,61 @@ describe("the wait for late checks", () => {
       imported.push(name);
       return { ok: true, name };
     };
-    const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait, updating, clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, keepAwake: () => {}, log: () => {} };
+    const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait, ...(real ? {} : { updating }), clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, keepAwake: () => {}, log: () => {} };
     await importEpisodes(w.folder, deps, importOne);
-    const seen = { imported, checked: !existsSync(X.pendingFile), drop: readdirSync(w.folder), waits };
+    const seen = { imported, checked: !existsSync(X.pendingFile), drop: readdirSync(w.folder), waits, noted: existsSync(updatingWaitedFile(w.home)) };
     w.done();
     return seen;
   }
-  it("a watcher that is waiting for a late check takes no new video in", async () => {
-    const seen = await waitingWhileUpdating();
-    assert.deepEqual([seen.imported, seen.checked, seen.drop], [[], true, ["Y.mov"]]);
-    assert.ok(seen.waits > 1, "the run waited for the check, and then ended");
+  for (const real of [false, true]) {
+    const by = real ? " (by the marker in its home)" : "";
+    it(`a watcher that is waiting for a late check takes no new video in${by}, and notes that it waited`, async () => {
+      const seen = await waitingWhileUpdating(Infinity, { real });
+      assert.deepEqual([seen.imported, seen.checked, seen.drop], [[], true, ["Y.mov"]]);
+      assert.ok(seen.waits > 1, "the run waited for the check, and then ended");
+      assert.equal(seen.noted, true);
+    });
+    it(`once the update is over it takes in what waited${by}`, async () => {
+      const seen = await waitingWhileUpdating(1, { real });
+      assert.deepEqual([seen.imported, seen.checked], [["Y.mov"], true]);
+    });
+  }
+  /** A run with one late check open, of X, which keeps it waiting, and two videos, A and B, in the drop folder at its start.
+      `updating` gives "" until A's import has returned, and UPDATING after it; with `back`, "" again from the first wait on. Gives
+      back the videos the run took in, what is in the drop folder at the end, and whether the note that a run waited is there. */
+  async function batchWhileUpdating(back) {
+    const w = world(["A.mov", "B.mov"]);
+    const L = Date.parse("2026-10-27T10:00:00");
+    holdCheck(w, "X.mov", L);
+    let now = L + 60 * 1000;
+    let waits = 0;
+    const wait = async (ms) => {
+      waits += 1;
+      now += ms;
+    };
+    let aDone = false;
+    const updating = () => (!aDone || (back && waits >= 1) ? "" : UPDATING);
+    const imported = [];
+    const importOne = async (name) => {
+      imported.push(name);
+      if (name === "A.mov") aDone = true;
+      return { ok: true, name };
+    };
+    const deps = { episode: { root: w.root, machine: "Mac Studio", home: w.home }, clock: () => now, wait, updating, clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, keepAwake: () => {}, log: () => {} };
+    await importEpisodes(w.folder, deps, importOne);
+    const seen = { imported, drop: readdirSync(w.folder).sort(), noted: existsSync(updatingWaitedFile(w.home)) };
+    w.done();
+    return seen;
+  }
+  it("a watcher that is taking in a batch takes no more of it in once an update is under way, and notes that it waited", async () => {
+    const seen = await batchWhileUpdating(false);
+    assert.deepEqual(seen.imported, ["A.mov"]);
+    assert.ok(seen.drop.includes("B.mov"), "B is still in the drop folder");
+    assert.equal(seen.noted, true);
   });
-  it("once the update is over it takes in what waited", async () => {
-    const seen = await waitingWhileUpdating(1);
-    assert.deepEqual([seen.imported, seen.checked], [["Y.mov"], true]);
+  it("once that update is over it takes in the rest of the batch", async () => {
+    const seen = await batchWhileUpdating(true);
+    assert.deepEqual(seen.imported, ["A.mov", "B.mov"]);
   });
   it("36. gives the status of a check that found a problem no due", async () => {
     const w = world([]);

@@ -59,7 +59,7 @@ import { readStatusesIn, importState, shownStep } from "./importing.js";
 import { ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, notWholeHere, recordingAt } from "./where.js";
 import { putHereNow } from "./put-here.js";
 import { hasXcodeTools, helperCommand, ownBin } from "./helpers.js";
-import { updatingWhy } from "./busy.js";
+import { noteWaited, updatingWhy } from "./busy.js";
 
 /** How often a file's size is looked at while it arrives, and how many looks before it is left for the next time. They are the
     transcript tool's own numbers. */
@@ -1528,10 +1528,12 @@ export async function uneditedFolder(dir, deps) {
     return [];
   }
   // While an update of BRIMM Video Studio is under way nothing new starts (busy.js): no lock is taken and no folder is made, and
-  // what is in the folder waits for the next look.
+  // what is in the folder waits for the next look. A note says that it waited, so that `behind` asks the job to look should the
+  // marker lapse by itself, as after a crash, when nothing else would.
   const updating = deps.updating || (() => updatingWhy({ home, now: Date.now() }));
   const updatingLine = updating();
   if (updatingLine) {
+    noteWaited({ home });
     log(updatingLine);
     log("Nothing was started. What is in the drop folder waits for the next look.");
     return [];
