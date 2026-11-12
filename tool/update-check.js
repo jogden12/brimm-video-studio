@@ -7,7 +7,8 @@ import { VERSION, isInstalled } from "./build.js";
 export const UPDATE_TIMEOUT_MS = 3000;
 export const UPDATE_EVERY_MS = 86400000;
 export const USER_AGENT = "BRIMM Video Studio";
-export const APPCAST_MAX_CHARS = 1000000;
+export const APPCAST_MAX_CHARS = 262144;
+export const APPCAST_ITEM_MAX_CHARS = 16384;
 
 const SYSTEM_PLIST = "/System/Library/CoreServices/SystemVersion.plist";
 const DOTTED = /^\d+(\.\d+)*$/;
@@ -43,13 +44,15 @@ function withoutComments(xml) {
   }
 }
 
-/** The text of each `<item …>…</item>` of `xml`, found by walking with indexOf. An `<item` with no `</item>` after it ends the walk. */
+/** Each `<item …>…</item>` of `xml`, found by walking with indexOf: { text, body }, where text runs from `<item` to `</item>` and body is
+    what lies between the two tags. An `<item` with no `</item>` after it ends the walk. An item whose text is longer than
+    APPCAST_ITEM_MAX_CHARS is passed over, so that no one item can take long to read. */
 function itemsIn(xml) {
-  const bodies = [];
+  const found = [];
   let at = 0;
   for (;;) {
     const open = xml.indexOf("<item", at);
-    if (open < 0) return bodies;
+    if (open < 0) return found;
     const next = xml[open + 5];
     if (next !== undefined && !/[\s>/]/.test(next)) {
       at = open + 5;
@@ -57,23 +60,29 @@ function itemsIn(xml) {
     }
     const start = xml.indexOf(">", open);
     const close = start < 0 ? -1 : xml.indexOf("</item>", start);
-    if (close < 0) return bodies;
-    bodies.push(xml.slice(start + 1, close));
+    if (close < 0) return found;
     at = close + 7;
+    if (at - open > APPCAST_ITEM_MAX_CHARS) continue;
+    found.push({ text: xml.slice(open, at), body: xml.slice(start + 1, close) });
   }
 }
 
-/** The items of an appcast, each { build, version, channel, minimumSystemVersion }. An item without a whole build above 0 or without a
-    version of the form 1.2.3 is skipped. Comments are ignored. */
-export function parseAppcast(xml) {
+/** The items of an appcast, in order, each { build, version, channel, minimumSystemVersion, text }, where text is the item's own text from
+    `<item` to `</item>`. An item without a whole build above 0 or without a version of the form 1.2.3 is skipped. Comments are ignored. */
+export function appcastItems(xml) {
   const items = [];
-  for (const body of itemsIn(withoutComments(String(xml)))) {
+  for (const { text, body } of itemsIn(withoutComments(String(xml)))) {
     const build = elementOf(body, "version") ?? attributeOf(body, "version") ?? "";
     const version = elementOf(body, "shortVersionString") ?? attributeOf(body, "shortVersionString") ?? "";
     if (!/^\d+$/.test(build) || !Number.isSafeInteger(Number(build)) || Number(build) <= 0 || !VERSION.test(version)) continue;
-    items.push({ build: Number(build), version, channel: elementOf(body, "channel") ?? "", minimumSystemVersion: elementOf(body, "minimumSystemVersion") ?? "" });
+    items.push({ build: Number(build), version, channel: elementOf(body, "channel") ?? "", minimumSystemVersion: elementOf(body, "minimumSystemVersion") ?? "", text });
   }
   return items;
+}
+
+/** The items of an appcast, each { build, version, channel, minimumSystemVersion }: appcastItems without their text. */
+export function parseAppcast(xml) {
+  return appcastItems(xml).map(({ text, ...item }) => item);
 }
 
 /** Whether the dotted number `have` is `need` or later, compared part by part as numbers, a missing part counting as 0. */

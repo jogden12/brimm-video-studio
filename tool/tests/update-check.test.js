@@ -8,7 +8,9 @@ import {
   UPDATE_EVERY_MS,
   USER_AGENT,
   APPCAST_MAX_CHARS,
+  APPCAST_ITEM_MAX_CHARS,
   updateCheckFile,
+  appcastItems,
   parseAppcast,
   newestFor,
   systemVersion,
@@ -60,6 +62,58 @@ test("reads each item's build, version, channel and minimum", () => {
   assert.deepEqual(parseAppcast(`<rss><!-- ${item({ build: 150, version: "1.5.0" })} --></rss>`), []);
   const bad = [item({ build: "abc", version: "1.5.0" }), item({ build: 0, version: "1.5.0" }), item({ build: 1.5, version: "1.5.0" }), item({ build: 150, version: "1.5" })];
   assert.deepEqual(parseAppcast(`<rss>${bad.join("")}</rss>`), []);
+});
+
+test("an item longer than 16,384 characters is passed over, and the others are read", () => {
+  assert.equal(APPCAST_ITEM_MAX_CHARS, 16384);
+  const first = item({ build: 150, version: "1.5.0" });
+  const last = item({ build: 170, version: "1.7.0" });
+  const pad = (text, length) => text.replace("<title>", `<title>${" ".repeat(length - text.length)}`);
+  const long = pad(item({ build: 160, version: "1.6.0" }), APPCAST_ITEM_MAX_CHARS + 1);
+  assert.equal(long.length, APPCAST_ITEM_MAX_CHARS + 1);
+  assert.deepEqual(parseAppcast(`<rss>${first}${long}${last}</rss>`).map((i) => i.build), [150, 170]);
+  const most = pad(item({ build: 160, version: "1.6.0" }), APPCAST_ITEM_MAX_CHARS);
+  assert.deepEqual(parseAppcast(`<rss>${first}${most}${last}</rss>`).map((i) => i.build), [150, 160, 170]);
+});
+
+test("an appcast as generate_appcast writes it is read whole", () => {
+  const xml = `<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>BRIMM Video Studio</title>
+        <item>
+            <title>1.0.0-beta.3</title>
+            <pubDate>Thu, 12 Nov 2026 10:00:00 -0600</pubDate>
+            <sparkle:version>3</sparkle:version>
+            <sparkle:shortVersionString>1.0.0-beta.3</sparkle:shortVersionString>
+            <sparkle:channel>beta</sparkle:channel>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://updates.example.invalid/BRIMM-Video-Studio-3.zip" length="104857600" type="application/octet-stream" sparkle:edSignature="QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODk="/>
+            <sparkle:deltas>
+                <enclosure url="https://updates.example.invalid/BRIMM-Video-Studio3-2.delta" sparkle:deltaFrom="2" length="2097152" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="1048576" sparkle:deltaFromSparkleLocales="en" sparkle:edSignature="ZGVsdGEy"/>
+                <enclosure url="https://updates.example.invalid/BRIMM-Video-Studio3-1.delta" sparkle:deltaFrom="1" length="3145728" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="1048576" sparkle:deltaFromSparkleLocales="en" sparkle:edSignature="ZGVsdGEx"/>
+            </sparkle:deltas>
+        </item>
+    </channel>
+</rss>
+`;
+  assert.deepEqual(parseAppcast(xml), [{ build: 3, version: "1.0.0-beta.3", channel: "beta", minimumSystemVersion: "13.0" }]);
+});
+
+test("each item comes with its own text", () => {
+  const a = item({ build: 150, version: "1.5.0" }).replace("s.zip", "a.zip");
+  const b = item({ build: 160, version: "1.6.0", channel: "beta" }).replace("s.zip", "b.zip");
+  const items = appcastItems(`<rss><channel><title>x</title>${a}<!-- a comment -->${b}</channel></rss>`);
+  assert.deepEqual(items.map(({ text, ...rest }) => rest), [
+    { build: 150, version: "1.5.0", channel: "", minimumSystemVersion: "" },
+    { build: 160, version: "1.6.0", channel: "beta", minimumSystemVersion: "" },
+  ]);
+  assert.equal(items[0].text, a);
+  assert.equal(items[1].text, b);
+  assert.ok(items[0].text.includes("a.zip") && !items[0].text.includes("b.zip"));
+  assert.ok(items[1].text.includes("b.zip") && !items[1].text.includes("a.zip"));
+  assert.ok(items[0].text.startsWith("<item") && items[0].text.endsWith("</item>"));
 });
 
 test("counts an item with a channel only for that channel, and one for a newer macOS not at all", () => {
@@ -171,6 +225,17 @@ test("a page that is not an appcast, a failed status, or a body too long is no a
     assert.deepEqual(await run(home, feed(a).fetch), { state: "unknown" });
     assert.equal(existsSync(updateCheckFile(home)), false);
   }
+});
+
+test("a body longer than 262,144 characters is no answer", async () => {
+  assert.equal(APPCAST_MAX_CHARS, 262144);
+  const good = appcast({ build: 150, version: "1.5.0" });
+  const most = good + " ".repeat(APPCAST_MAX_CHARS - good.length);
+  assert.equal(most.length, APPCAST_MAX_CHARS);
+  assert.deepEqual(await run(homeDir(), feed(most).fetch), { state: "newer", version: "1.5.0", have: "1.4.2" });
+  const home = homeDir();
+  assert.deepEqual(await run(home, feed(most + " ").fetch), { state: "unknown" });
+  assert.equal(existsSync(updateCheckFile(home)), false);
 });
 
 test("gives up after its timeout, whether the answer or its body never comes", async () => {
