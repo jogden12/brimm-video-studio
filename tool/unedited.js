@@ -49,7 +49,7 @@ import { reelCandidates, reelsFile, readReels, mergeCandidates, REELS_FILE } fro
 import { reporter, progressFolder, noProgress } from "./progress.js";
 import { isWhole, readThrough, textWriter, replaceIn, sameBytes, startsAlike, LATE_CHECK_MS } from "./dropbox.js";
 import { heldFolderOf, episodeMode, episodeKind, fileEpisode, pendingFor, statusReporter, statusWriteFolder, statusReadFolders, importEpisodes, writePending, removePending, readPendings, dueAt, fileId, importIdOf, commitOf, thisCheckout, readSeen, seenKey } from "./filing.js";
-import { readSettings, runsFolder, episodeWork, episodesFolder, importingFolder, importingFolderOf, statusFoldersOf, isLocal, needsFilesAccess, episodeFilesFolder } from "./settings.js";
+import { readSettings, runsFolder, episodeWork, episodesFolder, importingFolder, importingFolderOf, statusFoldersOf, isLocal, needsFilesAccess, episodeFilesFolder, rootGone } from "./settings.js";
 import { shownName, localStamp, readEpisode, writeEpisode, undone, heldText, heldElsewhere, RECORD_DIR, recordNumbers, conflictedCopies, conflictedOf, kindOf } from "./episode.js";
 import { cameFrom, guessKind, labelFor, namesOf, numbered, seenLine, withoutNames } from "./kinds.js";
 import { fingerprintOf, matchVersion } from "./versions.js";
@@ -540,6 +540,12 @@ async function workOn(file, deps) {
   // A Mac with a drop folder of its own names the episode's folder from Episodes, so before any work it must be able to list it: an error but its not
   // being there leaves the video for the next look, as a video still arriving is, with no status, one line in the log and the drop file left.
   if (episode && episode.local && !into) {
+    // Episodes not being there is fine, since the filing makes it, but BRIMM Video's folder not being there is not: Dropbox has signed
+    // out or moved, and the filing would make a new, empty one in its place, which syncs to nothing. The video waits, as above.
+    if (rootGone(episode.root)) {
+      log(`${shown}: BRIMM Video's folder is not where this Mac's settings say, so this video is looked at again later.`);
+      return { ok: false, name, arriving: true, message: "BRIMM Video's folder is not where this Mac's settings say" };
+    }
     try {
       readdirSync(episodesFolder(episode.root));
     } catch (e) {

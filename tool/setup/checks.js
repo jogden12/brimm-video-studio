@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { buildOf, isInstalled } from "../build.js";
-import { devMarked, machineFault, readSettings, sameFolder, settingsFile } from "../settings.js";
+import { devMarked, machineFault, readSettings, rootGone, sameFolder, settingsFile } from "../settings.js";
 import { HELPERS } from "../helpers.js";
 import { readSetUp } from "../set-up.js";
 import { hasFilters, hasHwaccel } from "../workcopy.js";
@@ -184,16 +184,10 @@ export const NO_BRIMM_VIDEO = ["BRIMM Video was not found in Dropbox on this Mac
 export const ROOT_GONE = "BRIMM Video's folder in Dropbox is not where this Mac's settings say it is.";
 export const ROOT_ADVICE = "Check that Dropbox is open and signed in on this Mac, then try again.";
 
-/** Whether BRIMM Video's folder at `root`, as this Mac's settings give it, is gone: nothing is there, or what is there is no folder.
-    A folder that could not be looked at (its parent shut to this account, say) is not gone: a repair and an update have no
-    Permissions step to say so, and must not stop for it. */
-export function rootGone(root) {
-  try {
-    return !statSync(root).isDirectory();
-  } catch (e) {
-    return e?.code === "ENOENT" || e?.code === "ENOTDIR";
-  }
-}
+/** Whether BRIMM Video's folder at `root`, as this Mac's settings give it, is gone: settings.js's, which the import asks as well. A
+    folder that could not be looked at (its parent shut to this account, say) is not gone: a repair and an update have no Permissions
+    step to say so, and must not stop for it. */
+export { rootGone };
 
 const ADMINISTRATOR = "If this Mac asks for an administrator's password, drag the app into the Applications folder inside your home folder instead.";
 
