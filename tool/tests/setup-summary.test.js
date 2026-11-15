@@ -216,6 +216,9 @@ describe("the review", () => {
       assert.equal(valueOf(gone, "BRIMM Video in Dropbox"), `${ROOT_GONE} ${ROOT_ADVICE}`);
       assert.deepEqual(labelsOf(gone), labelsOf(whole));
       assert.equal(eventFault(gone), "");
+      // The question sends her to Details, so they say first why there is no Install, and then what the installer printed.
+      assert.equal(gone.details, `${ROOT_GONE} ${ROOT_ADVICE}\n\nNothing was changed.\n`);
+      assert.equal(whole.details, "Nothing was changed.\n");
     });
   });
 

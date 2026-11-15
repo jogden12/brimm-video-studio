@@ -285,10 +285,62 @@ describe("a repair and an update", () => {
       await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
         answering(m);
         rmSync(m.root, { recursive: true });
-        const { code, events } = await go(m, { run });
+        // Stages that note each call: none of them may run.
+        const staged = [];
+        const noting = (part) => async ({ progress }) => {
+          staged.push(part);
+          progress({ part, label: LABELS[part], done: 0, total: null, state: "done" });
+          return "done";
+        };
+        const { code, events } = await go(m, { run, stages: { model: noting("model"), cli: noting("hyperframes"), chrome: noting("chrome") } });
         assert.equal(code, 1, run);
         assert.deepEqual(lastOf(events), { event: "error", code: "root", message: ROOT_GONE, advice: ROOT_ADVICE, contact: SUPPORT }, run);
+        assert.deepEqual(staged, [], run);
+        assert.equal(stepsOf(events).includes("install"), false, run);
+        assert.equal(events.some((e) => e.event === "progress"), false, run);
         assert.deepEqual(installCalls(m.ran()), [], run);
+        assert.equal(existsSync(m.root), false, run);
+      });
+    }
+  });
+
+  it("a takeover and an update whose folder goes while a stage runs end with error root, before the installer", async () => {
+    for (const [run, settings] of [["setup", "takeover"], ["update", "installed"], ["update", "takeover"]]) {
+      await withMac({ settings, apps: EVERY_APP }, async (m) => {
+        answering(m);
+        // Dropbox signs out while Chrome is fetched: the folder was there at the review, and is not when the installer would run.
+        const leaving = async ({ progress }) => {
+          rmSync(m.root, { recursive: true });
+          for (const state of ["running", "done"]) progress({ part: "chrome", label: LABELS.chrome, done: 0, total: null, state });
+          return "done";
+        };
+        const { code, events } = await go(m, { run, answers: reply(HELD), stages: { chrome: leaving } });
+        assert.equal(code, 1, run);
+        assert.deepEqual(lastOf(events), { event: "error", code: "root", message: ROOT_GONE, advice: ROOT_ADVICE, contact: SUPPORT }, `${run} ${settings}`);
+        assert.equal(installCalls(m.ran()).some((call) => call.includes("--yes")), false, `${run} ${settings}`);
+        assert.equal(lastStates(events).installer, "failed", `${run} ${settings}`);
+        assert.equal(existsSync(m.root), false, `${run} ${settings}`);
+      });
+    }
+  });
+
+  it("a folder that goes while the installer waits for an idle Mac ends with error root, before the installer", async () => {
+    for (const run of ["setup", "update"]) {
+      await withMac({ settings: "takeover", apps: EVERY_APP }, async (m) => {
+        answering(m);
+        // Something is at work on the first look, and the folder goes meanwhile; on the next look nothing is at work.
+        let looks = 0;
+        const why = () => {
+          looks++;
+          if (looks > 1) return "";
+          rmSync(m.root, { recursive: true });
+          return "A video is being taken in.";
+        };
+        const { code, events } = await go(m, { run, answers: reply(HELD), why });
+        assert.equal(code, 1, run);
+        assert.deepEqual(lastOf(events), { event: "error", code: "root", message: ROOT_GONE, advice: ROOT_ADVICE, contact: SUPPORT }, run);
+        assert.equal(installCalls(m.ran()).some((call) => call.includes("--yes")), false, run);
+        assert.equal(lastStates(events).installer, "failed", run);
         assert.equal(existsSync(m.root), false, run);
       });
     }
@@ -836,19 +888,28 @@ describe("a setup, step by step", () => {
       answering(m);
       rmSync(m.root, { recursive: true });
       let reviews = 0;
-      const { events } = await go(m, { run: "setup", answers: reply({ ...HELD, review: () => (reviews++ === 0 ? "again" : undefined) }, (e) => (e.event === "question" && e.id === "review" && reviews >= 1 ? { cancel: true } : undefined)) });
+      // Dropbox puts the folder back before she chooses Check again: the second look finds it, and Install is offered.
+      const again = () => {
+        if (reviews++ > 0) return undefined;
+        mkdirSync(m.root);
+        return "again";
+      };
+      const { events } = await go(m, { run: "setup", answers: reply({ ...HELD, review: again }, (e) => (e.event === "question" && e.id === "review" && reviews >= 1 ? { cancel: true } : undefined)) });
       const summaries = events.filter((e) => e.event === "summary" && e.id === "review");
       assert.equal(summaries.length, 2);
-      for (const summary of summaries) {
-        assert.equal(summary.ok, false);
-        assert.equal(summary.lines.filter((l) => l.label === "BRIMM Video in Dropbox").length, 1);
-        assert.equal(valueOf(summary, "BRIMM Video in Dropbox"), `${ROOT_GONE} ${ROOT_ADVICE}`);
-      }
+      const [first, second] = summaries;
+      assert.equal(first.ok, false);
+      assert.equal(first.lines.filter((l) => l.label === "BRIMM Video in Dropbox").length, 1);
+      assert.equal(valueOf(first, "BRIMM Video in Dropbox"), `${ROOT_GONE} ${ROOT_ADVICE}`);
+      assert.equal(first.details.startsWith(ROOT_GONE), true);
+      assert.equal(second.ok, true);
+      assert.equal(valueOf(second, "BRIMM Video in Dropbox"), folderWords(m.root, m.home));
       const asked = questionsOf(events).filter((q) => q.id === "review");
-      for (const q of asked) assert.deepEqual([q.kind, q.options], ["choice", [{ value: "again", label: "Check again" }]]);
+      assert.equal(asked.length, 2);
+      assert.deepEqual([asked[0].kind, asked[0].options], ["choice", [{ value: "again", label: "Check again" }]]);
+      assert.deepEqual([asked[1].kind, asked[1].ok], ["confirm", "Install"]);
       assert.equal(installCalls(m.ran()).some((call) => call.includes("--yes")), false);
       assert.equal(lastOf(events).outcome, "cancelled");
-      assert.equal(existsSync(m.root), false);
     });
   });
 

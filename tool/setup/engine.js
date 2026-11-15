@@ -223,8 +223,8 @@ function close(ctx, part, detail) {
   if (["waiting", "running"].includes(ctx.bars[part])) bar(ctx, part, "failed", detail);
 }
 
-/** The Install, part by part: the copy's whole check, the three stages, the installer once nothing is at work, and whether Claude
-    answered from the background job, which it gives back. */
+/** The Install, part by part: the copy's whole check, the three stages, the installer once nothing is at work and a held Mac's
+    BRIMM Video folder is still there, and whether Claude answered from the background job, which it gives back. */
 async function install(ctx, answers) {
   const { home, app, tools, checkout, programs, talk } = ctx;
   step(ctx, "install");
@@ -258,8 +258,21 @@ async function install(ctx, answers) {
   const before = checkLogMark(home);
   talk.installerMayRun();
   bar(ctx, "installer", "running");
+  // A held Mac's BRIMM Video folder was looked for at the review, or at the start of a repair or an update, but Dropbox can sign out
+  // or move it while the stages run, or while the installer waits for an idle Mac, and the installer would then make a new, empty
+  // one where it was. So it is looked for again now, and before each try.
+  const rootThere = () => {
+    if (answers.kind === "held" && rootGone(answers.root)) throw new Ending("root", ROOT_GONE, { advice: ROOT_ADVICE });
+  };
+  try {
+    rootThere();
+  } catch (e) {
+    bar(ctx, "installer", "failed");
+    throw e;
+  }
   // installWhenIdle asks `why` before each try: when nothing is at work after a wait, the bar is running again.
   const why = () => {
+    rootThere();
     const line = ctx.why();
     if (!line && ctx.bars.installer === "waiting") bar(ctx, "installer", "running");
     return line;

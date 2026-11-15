@@ -59,7 +59,7 @@ const MOVING = {
 
 /** The review: a whole `summary` event, id `review`. Its ok is the installer's exit code being 0 and a plan that was made, and its
     details are the installer's text, with the plan's refusal first when it refused. A held Mac whose BRIMM Video folder is `gone`
-    is never ok, and its one BRIMM Video row says so in place of the folder's words. */
+    is never ok, its one BRIMM Video row says so in place of the folder's words, and its details say so before anything else. */
 export function reviewSummary({ kind, moved, answers, home, build, printed, planned, claude, here, gone = false }) {
   const made = planned?.code === 0 && planned.settings;
   const settings = made ? planned.settings : null;
@@ -78,7 +78,10 @@ export function reviewSummary({ kind, moved, answers, home, build, printed, plan
   if (kind === "takeover") lines.push(line("Moving to this app", MOVING.takeover));
   else if (kind === "installed" && moved) lines.push(line("Moving to this app", MOVING.moved));
   const text = String(printed.text ?? "");
-  return { event: "summary", id: "review", ok: printed.code === 0 && Boolean(made) && !gone, lines, details: made ? text : `${planned?.why ?? PLAN_FAILED}\n\n${text}`, exit: printed.code };
+  // The question sends her to Details, and the installer's print there says it would make the folders: a folder that is gone says
+  // why first, as a plan's refusal does.
+  const reasons = [...(gone ? [`${ROOT_GONE} ${ROOT_ADVICE}`] : []), ...(made ? [] : [planned?.why ?? PLAN_FAILED])];
+  return { event: "summary", id: "review", ok: printed.code === 0 && Boolean(made) && !gone, lines, details: [...reasons, text].join("\n\n"), exit: printed.code };
 }
 
 /** The three lines that say where a set-up Mac's folders are, from its settings: the setup summary and the status word them alike. */

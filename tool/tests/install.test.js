@@ -3083,6 +3083,16 @@ describe("BRIMM Video Studio's background job through the app (--app; Studio app
           const r = askWith({ bare: true, install: copy.install, files: [[SETTINGS_PATHS[3], l.text]] }, "--print", "--machine", machine, "--tools", copy.tools, "--app", copy.app, d.root);
           assert.equal(r.status, 0, r.err + r.out);
           assert.match(r.out, /\n\nNothing was changed\.\n$/);
+          // The settings it would write, as it prints them after "This Mac's settings, in ...:" up to the first line that is "}"
+          // alone: every one given, with only the checkout the copy's, and the teachings' accounts shown as "(not shown)".
+          const lines = r.out.split("\n");
+          const from = lines.findIndex((line) => line.startsWith("  This Mac's settings, in "));
+          assert.ok(from >= 0, r.out);
+          const to = lines.indexOf("}", from);
+          assert.ok(to > from, r.out);
+          const shown = l.given.sessionTeachings ? { sessionTeachings: { ...l.given.sessionTeachings, accounts: { cli: "(not shown)", app: "(not shown)" } } } : {};
+          assert.deepEqual(JSON.parse(lines.slice(from + 1, to + 1).join("\n")), { ...l.given, ...shown, checkout: copy.checkout });
+          assert.ok(!r.out.includes("@example.invalid"), r.out);
           assert.ok(r.out.includes(l.fields.dropPath), r.out);
           assert.ok(!r.out.includes("Homebrew") && !r.out.includes("brew"), r.out);
           assert.equal(r.agents.length, 1, r.out);
