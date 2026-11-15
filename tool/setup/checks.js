@@ -148,9 +148,10 @@ export function nameClash(name, root) {
   return taken ? `Another Mac already uses the name "${name}" in BRIMM Video. Two Macs with one name would share a drop folder: choose another name, unless this is that Mac being set up again.` : "";
 }
 
-/** The BRIMM Video folders in Dropbox under `home`, looked for in the four places move.zsh's search_brimm_video looks, in its order.
-    Folders only; one folder reached by two spellings counts once, by its real path (`real` gives it), and the first spelling is
-    kept. A folder that goes before its real path is read is passed over. */
+/** The BRIMM Video folders in Dropbox under `home`, looked for in four places, in this order: the top of each Dropbox in
+    ~/Library/CloudStorage, a level below that, the top of each ~/Dropbox*, and a level below that. Folders only; one folder reached
+    by two spellings counts once, by its real path (`real` gives it), and the first spelling is kept. A folder that goes before its
+    real path is read is passed over. */
 export function brimmVideoFolders(home, { real: realOf = realpathSync } = {}) {
   const dropboxes = (parent) => foldersIn(parent).filter((name) => name.startsWith("Dropbox")).sort().map((name) => join(parent, name));
   const below = (folders) => folders.flatMap((folder) => foldersIn(folder).filter((name) => !name.startsWith(".")).sort().map((name) => join(folder, name)));

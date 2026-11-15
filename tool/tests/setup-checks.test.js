@@ -364,12 +364,6 @@ describe("the search for BRIMM Video in Dropbox", () => {
     assert.equal(ROOT_GONE, "BRIMM Video's folder in Dropbox is not where this Mac's settings say it is.");
     assert.equal(ROOT_ADVICE, "Check that Dropbox is open and signed in on this Mac, then try again.");
   });
-
-  it("looks as move.zsh's search_brimm_video looks", () => {
-    const move = readFileSync(fileURLToPath(new URL("../move-app/move.zsh", import.meta.url)), "utf8");
-    const body = move.slice(move.indexOf("search_brimm_video() {"));
-    for (const glob of ['Library/CloudStorage/Dropbox*/"The BRIMM DB/BRIMM Video"(N/)', 'Library/CloudStorage/Dropbox*/*/"The BRIMM DB/BRIMM Video"(N/)', '$HOME/Dropbox*/"The BRIMM DB/BRIMM Video"(N/)', '$HOME/Dropbox*/*/"The BRIMM DB/BRIMM Video"(N/)']) assert.ok(body.includes(glob), glob);
-  });
 });
 
 describe("the apps on this Mac", () => {

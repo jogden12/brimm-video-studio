@@ -40,10 +40,10 @@ refuse_watched() {
   return 0
 }
 
-# The one Developer ID Application identity in the keychain, found by name as tool/move-app/build-app.sh finds it, so that nothing
-# secret is in any file. Sets `identity` (its name, for the words) and `identity_hash` (the certificate's SHA-1, the 40 hexadecimal
-# characters before the name), or stops. codesign is given the hash: after a renewal the expired certificate stays in the keychain
-# under the same name, and codesign calls the name ambiguous. The hash is a fingerprint, not a secret.
+# The one Developer ID Application identity in the keychain, found by name, so that nothing secret is in any file. Sets `identity`
+# (its name, for the words) and `identity_hash` (the certificate's SHA-1, the 40 hexadecimal characters before the name), or stops.
+# codesign is given the hash: after a renewal the expired certificate stays in the keychain under the same name, and codesign calls
+# the name ambiguous. The hash is a fingerprint, not a secret.
 find_identity() {
   local -a found words
   found=("${(@f)$(security find-identity -v -p codesigning | grep 'Developer ID Application')}")
