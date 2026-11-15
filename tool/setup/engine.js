@@ -73,6 +73,7 @@ const NOTE = {
   missing: (names) => `Still to install: ${names.join(", ")}.`,
   update: "Start a new chat in Claude so it reads this version.",
   takeover: "The older copy of BRIMM Video Studio on this Mac is no longer used, and was left as it is.",
+  oldChats: "Close every chat in Claude that was open before this, and start a new one so it reads this version.",
   refused: (words) => `BRIMM Video Studio is not yet allowed to look in ${words}. Allow it in System Settings, under Privacy & Security, then Files and Folders.`,
   unseen: (words) => `BRIMM Video Studio could not look in ${words}.`,
   claudeStays: "Claude Code was installed on this Mac during setup, and stays.",
@@ -301,8 +302,11 @@ function finish(ctx, { outcome, settings, claude, here, check, placeNotes = [] }
   if (missing.length > 0) notes.push(NOTE.missing(missing));
   if (found.kind === "takeover") notes.push(NOTE.takeover);
   if (!check.answered) notes.push(NOTE.claude);
-  if (ctx.run === "update") notes.push(NOTE.update);
+  // A takeover's last note says to start a new chat, so a takeover is not told so by the note of an update as well.
+  if (ctx.run === "update" && found.kind !== "takeover") notes.push(NOTE.update);
   if (isInstalled(build) && !build.broken && !writeSetUp(home, build)) notes.push(NOTE.unrecorded);
+  // A chat in Claude that was open before a takeover keeps the older copy's skill and guard, so a takeover ends by saying to close it.
+  if (found.kind === "takeover") notes.push(NOTE.oldChats);
   const guide = writeGuide({ home, data: guideData({ home, settings, build, missing, notes, now: ctx.now() }) });
   const summary = setupSummary({ kind: found.kind, home, settings, build, claude, check, missing, old: found.kind === "takeover" ? found.settings.checkout : undefined });
   ctx.send(summary);

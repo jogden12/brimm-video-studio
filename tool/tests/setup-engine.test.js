@@ -241,13 +241,42 @@ describe("a repair and an update", () => {
       const { code, events } = await go(m, { run: "repair" });
       assert.equal(code, 0, JSON.stringify(lastOf(events)));
       const done = lastOf(events);
-      assert.deepEqual(done.notes, ["Still to install: Claude, HyperFrames.", "The older copy of BRIMM Video Studio on this Mac is no longer used, and was left as it is."]);
+      assert.deepEqual(done.notes, ["Still to install: Claude, HyperFrames.", "The older copy of BRIMM Video Studio on this Mac is no longer used, and was left as it is.", "Close every chat in Claude that was open before this, and start a new one so it reads this version."]);
       const summary = events[events.length - 2];
       assert.equal(summary.lines.find((l) => l.label === "Older copy").value, `${folderWords(clone, m.home)} is no longer used, and was left as it is.`);
       assert.equal(summary.lines.find((l) => l.label === "Still to install").value, "Claude, HyperFrames");
       assert.equal(existsSync(join(clone, ".git")), true);
       const guide = readFileSync(done.guide.html, "utf8");
       assert.equal(guide.includes("HyperFrames"), true);
+    });
+  });
+  it("a takeover ends by saying to close the old chats, and a fresh setup does not", async () => {
+    const UPDATE = "Start a new chat in Claude so it reads this version.";
+    const OLD_CHATS = "Close every chat in Claude that was open before this, and start a new one so it reads this version.";
+    await withMac({ settings: "none", apps: EVERY_APP }, async (m) => {
+      answering(m);
+      const { code, events } = await go(m, { run: "setup", answers: reply(FRESH) });
+      assert.equal(code, 0, JSON.stringify(lastOf(events)));
+      const { notes } = lastOf(events);
+      assert.equal(notes.includes(UPDATE), false);
+      assert.equal(notes.includes(OLD_CHATS), false);
+    });
+    await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
+      answering(m);
+      const { code, events } = await go(m, { run: "update" });
+      assert.equal(code, 0, JSON.stringify(lastOf(events)));
+      const { notes } = lastOf(events);
+      assert.equal(notes.includes(UPDATE), true);
+      assert.equal(notes.includes(OLD_CHATS), false);
+    });
+    await withMac({ settings: "takeover", apps: EVERY_APP }, async (m) => {
+      answering(m);
+      const { code, events } = await go(m, { run: "update" });
+      assert.equal(code, 0, JSON.stringify(lastOf(events)));
+      const { notes } = lastOf(events);
+      assert.equal(notes.filter((n) => n === OLD_CHATS).length, 1);
+      assert.equal(notes.includes(UPDATE), false);
+      assert.equal(notes[notes.length - 1], OLD_CHATS);
     });
   });
 });
@@ -525,7 +554,7 @@ describe("a setup, step by step", () => {
         for (const call of calls) assert.equal(call.includes("--drop-folder"), false);
         const done = lastOf(events);
         assert.equal(done.outcome, "installed");
-        assert.deepEqual(done.notes, settings === "takeover" ? ["The older copy of BRIMM Video Studio on this Mac is no longer used, and was left as it is."] : []);
+        assert.deepEqual(done.notes, settings === "takeover" ? ["The older copy of BRIMM Video Studio on this Mac is no longer used, and was left as it is.", "Close every chat in Claude that was open before this, and start a new one so it reads this version."] : []);
         const review = events.find((e) => e.event === "summary" && e.id === "review");
         assert.equal(Boolean(valueOf(review, "Moving to this app")), settings === "takeover");
         assert.equal(valueOf(events[events.length - 2], "Exports folder"), folderWords(join(m.home, "Exports"), m.home));
