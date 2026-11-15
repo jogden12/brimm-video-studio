@@ -35,7 +35,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { homedir, tmpdir } from "node:os";
 import { homeRefusal, studioHome } from "./home.js";
 import { NEWER_SAY, buildOf, forThisMac, isInstalled, repairLine } from "./build.js";
-import { bracket, lookerOf, noteState, postNewNodeIfDue, readAccess } from "./access.js";
+import { bracket, lookerOf, noteState, postNewNodeIfDue, postRootGoneIfDue, readAccess } from "./access.js";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { isMain } from "./is-main.js";
 import { localDay, stamp } from "./shared/text.js";
@@ -539,13 +539,20 @@ async function workOn(file, deps) {
   const arrived = episode && !into ? fileId(file) : null;
   // A Mac with a drop folder of its own names the episode's folder from Episodes, so before any work it must be able to list it: an error but its not
   // being there leaves the video for the next look, as a video still arriving is, with no status, one line in the log and the drop file left.
+  /** What a video gives that waits because BRIMM Video's folder is gone, here before the work or at the filing (filing.js fileLocal's ROOT_GONE):
+      one line in the log, the notice for whoever is at the Mac when it is due (access.js postRootGoneIfDue: once, and again only an hour
+      later), and the result of a video still arriving, so that it stays in the drop folder for a later run. */
+  const rootWaits = () => {
+    log(`${shown}: BRIMM Video's folder is not where this Mac's settings say, so this video is looked at again later.`);
+    postRootGoneIfDue(true, { notify, clock: deps.clock || Date.now, home: episode.home });
+    return { ok: false, name, arriving: true, message: "BRIMM Video's folder is not where this Mac's settings say" };
+  };
   if (episode && episode.local && !into) {
     // Episodes not being there is fine, since the filing makes it, but BRIMM Video's folder not being there is not: Dropbox has signed
-    // out or moved, and the filing would make a new, empty one in its place, which syncs to nothing. The video waits, as above.
-    if (rootGone(episode.root)) {
-      log(`${shown}: BRIMM Video's folder is not where this Mac's settings say, so this video is looked at again later.`);
-      return { ok: false, name, arriving: true, message: "BRIMM Video's folder is not where this Mac's settings say" };
-    }
+    // out or moved, and the filing would make a new, empty one in its place, which syncs to nothing. The video waits, as above. A folder
+    // that is there takes away the note of a notice posted, so that its going again is said at once.
+    if (rootGone(episode.root)) return rootWaits();
+    postRootGoneIfDue(false, { home: episode.home });
     try {
       readdirSync(episodesFolder(episode.root));
     } catch (e) {
@@ -707,6 +714,11 @@ async function workOn(file, deps) {
           progress.drop();
           return { ok: false, name, arriving: true, changed: true, message: "it changed in the drop folder while it was imported" };
         }
+        // BRIMM Video's folder went while the video was read: nothing was filed, and the video waits as it does when the folder is gone before the work.
+        if (e.code === "ROOT_GONE") {
+          progress.drop();
+          return rootWaits();
+        }
         const why = plain(`it could not be filed into Episodes: ${String(e.message).replace(/\.$/, "")}`);
         progress.fail(why);
         log(`${shown}: ${why}. It stays in the drop folder, and is done again the next time.`);
@@ -837,6 +849,12 @@ async function workOn(file, deps) {
           log(`${shown}: it changed in the drop folder while it was imported, so this import is stopped, and the new file is imported on its own.`);
           progress.drop();
           return { ok: false, name, arriving: true, changed: true, message: "it changed in the drop folder while it was imported" };
+        }
+        // BRIMM Video's folder went while the video was worked on: nothing was filed, and the video waits as it does when the folder is gone
+        // before the work. What was made of it is made again then.
+        if (e.code === "ROOT_GONE") {
+          progress.drop();
+          return rootWaits();
         }
         // The record is the last file filed: why it could not be, as a clone's error naming the file, is said in its
         // status with nothing of the file's names in it.

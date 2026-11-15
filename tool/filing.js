@@ -16,7 +16,7 @@ import { LATE_CHECK_MS, cloneFile, cloneIn, isWhole, lateCheck, onSameDisk, repl
 import { RECORD_DIR, recordFile, conflictedCopies, conflictedOf, lastWritten, newEpisode, newId, localStamp, readEpisode, recordCopies, recordNumbers, writeEpisode, shownName } from "./episode.js";
 import { episodeFolderName, fileSafe } from "./names.js";
 import { putHereNow } from "./put-here.js";
-import { downloadsFolder, dropFolderOf, episodeFilesFolder, episodeWork, episodesFolder, importingFolder, pendingFolder, runsFolder, sameFolder, seenFile, workFolder } from "./settings.js";
+import { downloadsFolder, dropFolderOf, episodeFilesFolder, episodeWork, episodesFolder, importingFolder, pendingFolder, rootGone, runsFolder, sameFolder, seenFile, workFolder } from "./settings.js";
 // detached.js takes caffeinate and thisCheckout from here: each is used only when called, as kinds.js's are, so the cycle costs nothing at load.
 import { releaseEpisodeLock, runningCommand, takeEpisodeLock } from "./detached.js";
 // finish-ended.js takes its result from detached.js: used only when called, like detached.js's own names.
@@ -351,7 +351,9 @@ function clearWriting(folder) {
     copy kept (`deps.onRecordCopy({ from, to, bytes })`, if given, is told when that copy is whole and before it is cloned in), and then the drop
     file is deleted, if it is unchanged. Only the first record is in Dropbox. If anything fails before the record, only the files this run
     wrote are taken away, then the marker, then video/ if it is empty, and the drop file stays; the call throws. A drop file that cannot be
-    deleted stays, held by its episode, and the log says so. Gives back { name, path, record, entries }, `entries` being the record's alone. */
+    deleted stays, held by its episode, and the log says so. Gives back { name, path, record, entries }, `entries` being the record's alone.
+    BRIMM Video's folder itself is never made: when it is gone (settings.js rootGone), as when Dropbox signed out or moved while the video
+    was worked on, the call throws ROOT_GONE before it makes or writes anything, and the drop file stays. */
 function fileLocal({ file, made, at, facts, printed, kind, read, reels, work, dropFile, answer, label, fingerprint }, deps) {
   const { episode, log = () => {} } = deps;
   const opts = { ...(deps.clone ? { clone: deps.clone } : {}), ...(deps.sameDisk ? { sameDisk: deps.sameDisk } : {}), log };
@@ -359,6 +361,9 @@ function fileLocal({ file, made, at, facts, printed, kind, read, reels, work, dr
   const bytes = statSync(file).size;
   const day = deps.today ? deps.today() : localDay();
   const episodes = episodesFolder(episode.root);
+  // Episodes is made when it is not there, but BRIMM Video's folder never is: one made here would be a new, empty folder where Dropbox's was,
+  // which syncs to nothing. The video then waits in the drop folder.
+  if (rootGone(episode.root)) throw Object.assign(new Error("BRIMM Video's folder is not where this Mac's settings say"), { code: "ROOT_GONE" });
   mkdirSync(episodes, { recursive: true });
   const found = findFolder(episodes, { video, bytes, machine: episode.machine, day, work: workFolder(episode.home), importId: importIdOf(dropFile), dropId: dropIdOf(dropFile) });
   const path = join(episodes, found.name);
@@ -1509,7 +1514,9 @@ function waitingStatus(pending, deps, step) {
     the log says each problem; the first time, the cut plan's text in the episode is written again with the problem first,
     and a new record lists its size, and a banner says so; the status says the problem; and the raw video, the work copies
     and the pending check stay, so that the next run checks again and the video is never imported twice. Gives back
-    { ok, problems }. */
+    { ok, problems }. While BRIMM Video's folder is gone (settings.js rootGone) no check is made, since a file put in again would make that
+    folder anew where Dropbox's was: nothing is changed, the log says so, and it gives back { ok: false, problems: [], waits: true }, the
+    pending staying for a later run. */
 export function finishLate(pending, deps) {
   const { notify = () => {} } = deps;
   // A light import's video is named by its label, and its episode by its id, in every line of its late check; and what the check
@@ -1518,6 +1525,10 @@ export function finishLate(pending, deps) {
   const plain = (text) => (pending.label ? withoutNames(text, [...namesOf(pending.video, pending.drop), pending.name, pending.folder], [pending.label]) : text);
   const logged = deps.log || (() => {});
   const log = (line) => logged(plain(line));
+  if (rootGone(pending.root)) {
+    log(`${who}: its late check waits: BRIMM Video's folder is not where this Mac's settings say. It is made at a later run.`);
+    return { ok: false, problems: [], waits: true };
+  }
   const opts = ruleOpts({ ...deps, log });
   // The video in the drop folder is the work copy of the raw video only while it is the file that was imported: one dropped
   // again under the same name is another recording, and is never copied in for it, nor deleted.
