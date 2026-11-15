@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { unfinishedBy } from "../set-up.js";
 import { dropFolderOf, exportsFolderOf, folderWords } from "../settings.js";
+import { ROOT_ADVICE, ROOT_GONE } from "./checks.js";
 import { installerEnv, quiet } from "./install.js";
 
 /** The arguments settings.js's plan is given for these answers: install.sh's own (its settings_plan, and --drop-folder and
@@ -57,13 +58,14 @@ const MOVING = {
 };
 
 /** The review: a whole `summary` event, id `review`. Its ok is the installer's exit code being 0 and a plan that was made, and its
-    details are the installer's text, with the plan's refusal first when it refused. */
-export function reviewSummary({ kind, moved, answers, home, build, printed, planned, claude, here }) {
+    details are the installer's text, with the plan's refusal first when it refused. A held Mac whose BRIMM Video folder is `gone`
+    is never ok, and its one BRIMM Video row says so in place of the folder's words. */
+export function reviewSummary({ kind, moved, answers, home, build, printed, planned, claude, here, gone = false }) {
   const made = planned?.code === 0 && planned.settings;
   const settings = made ? planned.settings : null;
   const name = settings?.machine ?? answers.machine;
   const root = settings?.root ?? answers.root;
-  const lines = [line("This Mac", name), line("BRIMM Video in Dropbox", folderWords(root, home))];
+  const lines = [line("This Mac", name), line("BRIMM Video in Dropbox", gone ? `${ROOT_GONE} ${ROOT_ADVICE}` : folderWords(root, home))];
   if (settings) lines.push(line("Drop folder", folderWords(dropFolderOf(settings, home), home)), line("Exports folder", folderWords(exportsFolderOf(settings, home), home)));
   else if (answers.kind === "fresh") lines.push(line("Drop folder", folderWords(answers.drop, home)), line("Exports folder", folderWords(answers.exports, home)));
   lines.push(
@@ -76,7 +78,7 @@ export function reviewSummary({ kind, moved, answers, home, build, printed, plan
   if (kind === "takeover") lines.push(line("Moving to this app", MOVING.takeover));
   else if (kind === "installed" && moved) lines.push(line("Moving to this app", MOVING.moved));
   const text = String(printed.text ?? "");
-  return { event: "summary", id: "review", ok: printed.code === 0 && Boolean(made), lines, details: made ? text : `${planned?.why ?? PLAN_FAILED}\n\n${text}`, exit: printed.code };
+  return { event: "summary", id: "review", ok: printed.code === 0 && Boolean(made) && !gone, lines, details: made ? text : `${planned?.why ?? PLAN_FAILED}\n\n${text}`, exit: printed.code };
 }
 
 /** The three lines that say where a set-up Mac's folders are, from its settings: the setup summary and the status word them alike. */

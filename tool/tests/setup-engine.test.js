@@ -15,7 +15,7 @@ import { markUpdating, updatingFile } from "../busy.js";
 import { readSetUp, setUpFile } from "../set-up.js";
 import { DEV_REFUSAL, defaultDropFolder, downloadsFolder, episodesFolder, folderWords } from "../settings.js";
 import { studioFolder } from "../studio.js";
-import { DAMAGED, NO_BRIMM_VIDEO, nameClash } from "../setup/checks.js";
+import { DAMAGED, NO_BRIMM_VIDEO, ROOT_ADVICE, ROOT_GONE, nameClash } from "../setup/checks.js";
 import { GUIDE_NAME } from "../setup/guide.js";
 import { LABELS } from "../setup/install.js";
 import { PARTS, STEPS, eventFault } from "../setup/protocol.js";
@@ -278,6 +278,20 @@ describe("a repair and an update", () => {
       assert.equal(notes.includes(UPDATE), false);
       assert.equal(notes[notes.length - 1], OLD_CHATS);
     });
+  });
+
+  it("a repair and an update stop before the installer when the folder is gone", async () => {
+    for (const run of ["repair", "update"]) {
+      await withMac({ settings: "installed", apps: EVERY_APP }, async (m) => {
+        answering(m);
+        rmSync(m.root, { recursive: true });
+        const { code, events } = await go(m, { run });
+        assert.equal(code, 1, run);
+        assert.deepEqual(lastOf(events), { event: "error", code: "root", message: ROOT_GONE, advice: ROOT_ADVICE, contact: SUPPORT }, run);
+        assert.deepEqual(installCalls(m.ran()), [], run);
+        assert.equal(existsSync(m.root), false, run);
+      });
+    }
   });
 });
 
@@ -814,6 +828,41 @@ describe("a setup, step by step", () => {
       for (const q of asked) assert.deepEqual([q.kind, q.options], ["choice", [{ value: "again", label: "Check again" }]]);
       assert.deepEqual(installCalls(m.ran()).map((call) => call[0]), ["--print", "--print"]);
       assert.equal(lastOf(events).outcome, "cancelled");
+    });
+  });
+
+  it("a takeover whose BRIMM Video folder is gone cannot go on to Install", async () => {
+    await withMac({ settings: "takeover", apps: EVERY_APP }, async (m) => {
+      answering(m);
+      rmSync(m.root, { recursive: true });
+      let reviews = 0;
+      const { events } = await go(m, { run: "setup", answers: reply({ ...HELD, review: () => (reviews++ === 0 ? "again" : undefined) }, (e) => (e.event === "question" && e.id === "review" && reviews >= 1 ? { cancel: true } : undefined)) });
+      const summaries = events.filter((e) => e.event === "summary" && e.id === "review");
+      assert.equal(summaries.length, 2);
+      for (const summary of summaries) {
+        assert.equal(summary.ok, false);
+        assert.equal(summary.lines.filter((l) => l.label === "BRIMM Video in Dropbox").length, 1);
+        assert.equal(valueOf(summary, "BRIMM Video in Dropbox"), `${ROOT_GONE} ${ROOT_ADVICE}`);
+      }
+      const asked = questionsOf(events).filter((q) => q.id === "review");
+      for (const q of asked) assert.deepEqual([q.kind, q.options], ["choice", [{ value: "again", label: "Check again" }]]);
+      assert.equal(installCalls(m.ran()).some((call) => call.includes("--yes")), false);
+      assert.equal(lastOf(events).outcome, "cancelled");
+      assert.equal(existsSync(m.root), false);
+    });
+  });
+
+  it("a fresh setup is not asked about a folder it has not chosen yet", async () => {
+    await withMac({ settings: "none", apps: EVERY_APP }, async (m) => {
+      answering(m);
+      const { code, events } = await go(m, { run: "setup", answers: reply(FRESH) });
+      assert.equal(code, 0, JSON.stringify(lastOf(events)));
+      const review = events.find((e) => e.event === "summary" && e.id === "review");
+      assert.equal(review.ok, true);
+      assert.equal(valueOf(review, "BRIMM Video in Dropbox"), folderWords(m.root, m.home));
+      assert.equal(events.some((e) => e.event === "error"), false);
+      assert.equal(lastOf(events).outcome, "installed");
+      assert.deepEqual(installCalls(m.ran()).map((call) => call[0]), ["--print", "--yes"]);
     });
   });
 });

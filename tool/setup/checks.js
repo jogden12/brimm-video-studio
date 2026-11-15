@@ -179,6 +179,21 @@ export function brimmVideoFolders(home, { real: realOf = realpathSync } = {}) {
 /** The lines a person reads when no BRIMM Video is found. */
 export const NO_BRIMM_VIDEO = ["BRIMM Video was not found in Dropbox on this Mac.", 'Open Dropbox, sign in to The BRIMM\'s account, and wait until "The BRIMM DB" shows in Finder.', "Then choose Look again."];
 
+/** What a person reads when BRIMM Video's folder is not where this Mac's settings say, and what to do about it. */
+export const ROOT_GONE = "BRIMM Video's folder in Dropbox is not where this Mac's settings say it is.";
+export const ROOT_ADVICE = "Check that Dropbox is open and signed in on this Mac, then try again.";
+
+/** Whether BRIMM Video's folder at `root`, as this Mac's settings give it, is gone: nothing is there, or what is there is no folder.
+    A folder that could not be looked at (its parent shut to this account, say) is not gone: a repair and an update have no
+    Permissions step to say so, and must not stop for it. */
+export function rootGone(root) {
+  try {
+    return !statSync(root).isDirectory();
+  } catch (e) {
+    return e?.code === "ENOENT" || e?.code === "ENOTDIR";
+  }
+}
+
 const ADMINISTRATOR = "If this Mac asks for an administrator's password, drag the app into the Applications folder inside your home folder instead.";
 
 /** The four apps the setup needs: each one's id, name, its folder in Applications (none for Claude Code), where to get it (none for

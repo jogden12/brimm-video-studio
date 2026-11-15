@@ -11,7 +11,7 @@ import { HELPERS } from "../helpers.js";
 import { readSettings, writeSettings } from "../settings.js";
 import { DAMAGED as INSTALL_DAMAGED, HDR_LISTS, appCopy } from "./app-copy.js";
 import { installCalls, mac, notAMac, printOnly } from "./setup-harness.js";
-import { APPS, DAMAGED, GUARD_CLAUDE, NO_BRIMM_VIDEO, PROGRAMS, appsHere, brimmVideoFolders, claudeAt, claudeEnv, claudeState, copyFault, kindOf, nameClash, nameSuggestion, namesInUse, peekAt, versionAtLeast } from "../setup/checks.js";
+import { APPS, DAMAGED, GUARD_CLAUDE, NO_BRIMM_VIDEO, PROGRAMS, ROOT_ADVICE, ROOT_GONE, appsHere, brimmVideoFolders, claudeAt, claudeEnv, claudeState, copyFault, kindOf, nameClash, nameSuggestion, namesInUse, peekAt, rootGone, versionAtLeast } from "../setup/checks.js";
 
 const INSTALL = readFileSync(fileURLToPath(new URL("../install.sh", import.meta.url)), "utf8");
 
@@ -336,6 +336,33 @@ describe("the search for BRIMM Video in Dropbox", () => {
 
   it("says what to do when none is found", () => {
     assert.deepEqual(NO_BRIMM_VIDEO, ["BRIMM Video was not found in Dropbox on this Mac.", 'Open Dropbox, sign in to The BRIMM\'s account, and wait until "The BRIMM DB" shows in Finder.', "Then choose Look again."]);
+  });
+
+  it("rootGone: a folder that is not there is gone, a file is gone, a folder is not, and one that cannot be looked at is not", () => {
+    withMac({}, (m) => {
+      assert.equal(rootGone(m.root), false);
+      const file = join(m.home, "Dropbox", "The BRIMM DB", "BRIMM Video");
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, "not a folder");
+      assert.equal(rootGone(file), true);
+      assert.equal(rootGone(join(file, "Inside")), true);
+      rmSync(m.root, { recursive: true });
+      assert.equal(rootGone(m.root), true);
+      const parent = join(m.home, "Shut");
+      const hidden = join(parent, "BRIMM Video");
+      mkdirSync(hidden, { recursive: true });
+      chmodSync(parent, 0o000);
+      try {
+        assert.equal(rootGone(hidden), false);
+      } finally {
+        chmodSync(parent, 0o755);
+      }
+    });
+  });
+
+  it("says what to do when BRIMM Video's folder is not where the settings say", () => {
+    assert.equal(ROOT_GONE, "BRIMM Video's folder in Dropbox is not where this Mac's settings say it is.");
+    assert.equal(ROOT_ADVICE, "Check that Dropbox is open and signed in on this Mac, then try again.");
   });
 
   it("looks as move.zsh's search_brimm_video looks", () => {

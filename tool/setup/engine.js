@@ -17,7 +17,7 @@ import { isMain } from "../is-main.js";
 import { writeSetUp } from "../set-up.js";
 import { DEV_REFUSAL, defaultDropFolder, downloadsFolder, dropFolderOf, episodesFolder, exportsFolderOf, folderWords } from "../settings.js";
 import { studioFolder } from "../studio.js";
-import { APPS, DAMAGED, NO_BRIMM_VIDEO, appsHere, brimmVideoFolders, claudeState, copyFault, kindOf, nameClash, nameSuggestion, peekAt } from "./checks.js";
+import { APPS, DAMAGED, NO_BRIMM_VIDEO, ROOT_ADVICE, ROOT_GONE, appsHere, brimmVideoFolders, claudeState, copyFault, kindOf, nameClash, nameSuggestion, peekAt, rootGone } from "./checks.js";
 import { guideData, writeGuide } from "./guide.js";
 import { LABELS, checkLogMark, checkLogSays, claudePin, installClaudeCode, installWhenIdle, installerArgs, installerOutcome, modelPath, modelPin, runInstaller, runProgram, signIn, stageChrome, stageCli, stageModel } from "./install.js";
 import { STEPS, answerFault, argsOf, emitter, lineFault, readerOf } from "./protocol.js";
@@ -486,7 +486,10 @@ const STEP = {
       const printed = await runInstaller({ args: installerArgs(answers, { app, tools, print: true }), home, programs });
       talk.checkpoint();
       const here = { model: existsSync(modelPath(home)), cli: toolchainDiffers(toolchainHolds(home)) === "" };
-      const summary = reviewSummary({ kind: found.kind, moved: found.moved, answers, home, build, printed, planned, claude: state.claude, here });
+      // A held Mac's BRIMM Video folder comes from its settings, and is looked for on each pass: the installer would make a new,
+      // empty one where it was, so a review whose folder is gone offers no Install until Dropbox puts it back.
+      const gone = state.kind === "held" && rootGone(answers.root);
+      const summary = reviewSummary({ kind: found.kind, moved: found.moved, answers, home, build, printed, planned, claude: state.claude, here, gone });
       ctx.send(summary);
       const question = reviewQuestion(summary.ok);
       const got = await ask(ctx, question);
@@ -579,6 +582,9 @@ async function setup(ctx) {
 async function renew(ctx) {
   const { home, tools, found, applications } = ctx;
   const answers = { kind: "held", machine: found.settings.machine, root: found.settings.root };
+  // The installer would make a new, empty BRIMM Video folder where the settings say it is, so a run whose folder is gone stops
+  // here, before anything is staged.
+  if (rootGone(found.settings.root)) throw new Ending("root", ROOT_GONE, { advice: ROOT_ADVICE });
   const claude = claudeState({ home, tools });
   const here = appsHere({ home, system: applications });
   const check = await install(ctx, answers);

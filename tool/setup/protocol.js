@@ -7,7 +7,7 @@ export const PROTOCOL = 1;
 export const EVENTS = ["step", "question", "progress", "summary", "done", "error"];
 export const STEPS = ["welcome", "name", "apps", "dropbox", "folders", "permissions", "review", "install", "done"];
 export const PARTS = ["programs", "model", "hyperframes", "chrome", "installer", "claude"];
-export const CODES = ["arguments", "protocol", "damaged", "dev", "no-settings", "settings", "busy", "install", "download", "engine"];
+export const CODES = ["arguments", "protocol", "damaged", "dev", "no-settings", "settings", "root", "busy", "install", "download", "engine"];
 export const RUNS = ["setup", "repair", "update", "status"];
 
 const KINDS = ["confirm", "text", "choice", "folder", "apps", "sign-in"];
