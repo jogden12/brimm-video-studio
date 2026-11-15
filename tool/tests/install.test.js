@@ -16,7 +16,7 @@ import { PIN, childEnv, cliPath, toolchainDir } from "../hyperframes.js";
 import { HELPERS } from "../helpers.js";
 import { writeAccess } from "../access.js";
 import { hasFilters, hasHwaccel } from "../workcopy.js";
-import { DEV_REFUSAL } from "../settings.js";
+import { DEV_REFUSAL, settingsFile, writeSettings } from "../settings.js";
 import { DAMAGED, HDR_LISTS, TOOLS_PROGRAMS, WHOLE, appCopy, xml } from "./app-copy.js";
 
 const INSTALL = fileURLToPath(new URL("../install.sh", import.meta.url));
@@ -3047,6 +3047,74 @@ describe("BRIMM Video Studio's background job through the app (--app; Studio app
       d.done();
     }
   });
+  // The two laptops the old installer set up on 8 November, as git checkouts, which the app is about to take over: their settings
+  // as the tool wrote them (version 1, and no mode), each naming a clone made in the test's own folder and a drop folder of the
+  // Mac's own outside BRIMM Video. Sallie's still holds the older drop setting beside it, the strict lock her folder was written
+  // with, and the teachings from sessions turned on, with made-up accounts.
+  const LAPTOPS = {
+    "Jason's MacBook": {},
+    "Sallie's laptop": {
+      drop: "Drop",
+      lock: "strict",
+      sessionTeachings: { on: true, at: "2026-11-08T10:15:00-07:00", accounts: { cli: "cli@example.invalid", app: "app@example.invalid" } }
+    }
+  };
+  const SETTINGS_PATHS = ["Library", "Library/Application Support", "Library/Application Support/BRIMM Video", "Library/Application Support/BRIMM Video/settings.json"];
+  /** A laptop's settings, written by writeSettings into a home made inside the test's folder: the fields given, the file's text,
+      and that home. */
+  function laptop(d, machine) {
+    const checkout = join(d.dir, "Studio clone");
+    mkdirSync(join(checkout, ".git"), { recursive: true });
+    const dropPath = join(d.dir, "Drop");
+    mkdirSync(dropPath, { recursive: true });
+    const home = join(d.dir, "home");
+    const fields = { machine, root: d.root, dropPath, import: "light", handoffVersion: 2, checkout, ...LAPTOPS[machine] };
+    const file = writeSettings(home, fields);
+    return { fields, home, text: readFileSync(file, "utf8"), given: JSON.parse(readFileSync(file, "utf8")) };
+  }
+  for (const machine of Object.keys(LAPTOPS)) {
+    describe(machine, () => {
+      it("the app's copy plans a takeover of a Mac a git checkout set up: exit 0, and nothing changes", () => {
+        const d = dropbox();
+        try {
+          const l = laptop(d, machine);
+          assert.equal(l.given.version, 1);
+          assert.equal(l.given.mode, undefined);
+          const r = askWith({ bare: true, install: copy.install, files: [[SETTINGS_PATHS[3], l.text]] }, "--print", "--machine", machine, "--tools", copy.tools, "--app", copy.app, d.root);
+          assert.equal(r.status, 0, r.err + r.out);
+          assert.match(r.out, /\n\nNothing was changed\.\n$/);
+          assert.ok(r.out.includes(l.fields.dropPath), r.out);
+          assert.ok(!r.out.includes("Homebrew") && !r.out.includes("brew"), r.out);
+          assert.equal(r.agents.length, 1, r.out);
+          assert.ok(r.agents[0].ProgramArguments[0].startsWith(`${copy.app}/Contents/MacOS/`), r.agents[0].text);
+          assert.equal(r.agents[0].ProgramArguments[1], "--agent");
+          assert.deepEqual(r.agents[0].WatchPaths, [l.fields.dropPath]);
+          assert.deepEqual([r.left, r.ran], [SETTINGS_PATHS, ""]);
+          assert.equal(copy.ran(), "");
+        } finally {
+          d.done();
+        }
+      });
+      it("the plan the app's copy makes for that Mac keeps every setting but the checkout", () => {
+        const d = dropbox();
+        try {
+          const l = laptop(d, machine);
+          // As install.sh's settings_plan asks it: the copy's node, the copy's settings.js, and the copy's Studio as the checkout.
+          const r = spawnSync(join(copy.tools, "node"), [join(copy.tool, "settings.js"), "plan", "--machine", machine, "--root", d.root, "--checkout", copy.checkout], { encoding: "utf8", env: { HOME: l.home, PATH: "/usr/bin:/bin", TMPDIR: d.dir } });
+          assert.equal(r.status, 0, r.stderr + r.stdout);
+          const json = r.stdout.slice(0, r.stdout.indexOf("\nThe import will be: "));
+          // The plan shows the accounts the teachings were turned on for as "(not shown)", never the accounts themselves.
+          const shown = l.given.sessionTeachings ? { sessionTeachings: { ...l.given.sessionTeachings, accounts: { cli: "(not shown)", app: "(not shown)" } } } : {};
+          assert.deepEqual(JSON.parse(json), { ...l.given, ...shown, checkout: copy.checkout });
+          assert.ok(!r.stdout.includes("@example.invalid"), r.stdout);
+          // And nothing was written: the file is as it was given.
+          assert.equal(readFileSync(settingsFile(l.home), "utf8"), l.text);
+        } finally {
+          d.done();
+        }
+      });
+    });
+  }
   it("keeps dev mode's launch agent as it was: node and unedited.js, no AssociatedBundleIdentifiers, no blank line", () => {
     const r = ask("--print", "/Volumes/Work/Unedited video");
     assert.equal(r.status, 0, r.err + r.out);
