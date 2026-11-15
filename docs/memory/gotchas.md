@@ -60,6 +60,9 @@ Mistakes made or nearly made on Studio, and how not to repeat them. Seeded on 20
 - **Without `BRIMM_SPARKLE` (or a fetched Sparkle) the typecheck of the Sparkle code skips**, and a suite that looks green has not compiled it. A run counts only when that test ran (Phase 7).
 - **`value=$(command 2>&1)` glues a warning onto the value.** `build-app.sh` read the update key that way; take stdout alone and say stderr only on a failure (Phase 7).
 - **`generate_appcast` makes an item for every zip in its folder, keeps three versions unless told otherwise, and only warns when the key does not match.** `release.sh` keeps the folder as state, passes `--maximum-versions 0`, compares the key first, and refuses an item the release did not make (Phase 7).
+- **The move to Applications copies the app and leaves the one it was opened from** (`Mover.swift`). A downloaded app runs from a read-only copy macOS makes of it, so after an install from a download a second copy with the same id stays in Downloads, and unzipping again beside it makes "BRIMM Video Studio 2". Trash the leftover, and open a copy by its path, never by its id (Studio Test, checks 22 and 26, 2026-11-15).
+- **A published file is checked without downloading it.** The bucket answers `curl -sI` with the file's size and, for a file put in one piece, its MD5 as the `etag`: compare both with the local file, and `diff` the feed itself against the local appcast. Read the feed before the appcast is put, too: it must show the build the release says was the newest (the first two releases, 2026-11-15).
+- **`cf` leaves a `.cloudflare` folder in the folder it is run from.** Run from a worktree it shows there as untracked: add files by name, and never add it (2026-11-15).
 
 ## Git, CI and pull requests
 
@@ -77,6 +80,9 @@ Mistakes made or nearly made on Studio, and how not to repeat them. Seeded on 20
 - **Say where output appears**: Studio's notices are Mac notifications titled "BRIMM unedited video" (hidden if Script Editor's notifications are off), never Terminal output; `guide "<video>" tell` waits in Terminal instead.
 - **A video opened straight in HyperFrames is not an episode**: a check that needs one says how to make it from the drop folder.
 - **Several sessions publish the By-Hand Checks page**: change only your own group, and re-read the live page before each publish. Subagents report their steps to the coordinator and never publish the page.
+- **Say which account each step is done in, and whose step it is.** A check whose last step was in Studio Test was read as wholly there: a command with `$HOME` in it, run in that account, looked for the checkout in a home that has none ("can't open input file"; it changed nothing). Name the account at every step where it changes, and start a step of Claude's with "Claude" (Phase 7, check 23, 2026-11-15).
+- **Claude cannot reach another account's Downloads or Trash, or see its screen.** Clearing up there is a step of Jason's, written on the page as Finder actions. From the developer's account these can be read: the other account's Applications folder (the installed copy's Info.plist and seal), every account's running processes, and the Mac's log (Phase 7, checks 22 to 26).
+- **What someone did on screen is in the Mac's log, so read it before recording the step.** macOS's question for a downloaded app is syspolicyd's "Prompt shown" and "Marked application as user approved"; an app opening or closing is launchd's "Successfully spawned" and loginwindow's "appDeath"; an update being installed starts with Sparkle's Autoupdate being spawned (2026-11-15).
 
 ## From past reviews (harvested 2026-11-10)
 
