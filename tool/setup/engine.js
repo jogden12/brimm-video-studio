@@ -17,7 +17,7 @@ import { isMain } from "../is-main.js";
 import { writeSetUp } from "../set-up.js";
 import { DEV_REFUSAL, defaultDropFolder, downloadsFolder, dropFolderOf, episodesFolder, exportsFolderOf, folderWords } from "../settings.js";
 import { studioFolder } from "../studio.js";
-import { APPS, DAMAGED, NO_BRIMM_VIDEO, appsHere, brimmVideoFolders, claudeState, copyFault, kindOf, nameClash, nameSuggestion, peekAt } from "./checks.js";
+import { APPS, DAMAGED, NO_BRIMM_VIDEO, ROOT_ADVICE, ROOT_GONE, appsHere, brimmVideoFolders, claudeState, copyFault, kindOf, nameClash, nameSuggestion, peekAt, rootGone } from "./checks.js";
 import { guideData, writeGuide } from "./guide.js";
 import { LABELS, checkLogMark, checkLogSays, claudePin, installClaudeCode, installWhenIdle, installerArgs, installerOutcome, modelPath, modelPin, runInstaller, runProgram, signIn, stageChrome, stageCli, stageModel } from "./install.js";
 import { STEPS, answerFault, argsOf, emitter, lineFault, readerOf } from "./protocol.js";
@@ -73,6 +73,7 @@ const NOTE = {
   missing: (names) => `Still to install: ${names.join(", ")}.`,
   update: "Start a new chat in Claude so it reads this version.",
   takeover: "The older copy of BRIMM Video Studio on this Mac is no longer used, and was left as it is.",
+  oldChats: "Close every chat in Claude that was open before this, and start a new one so it reads this version.",
   refused: (words) => `BRIMM Video Studio is not yet allowed to look in ${words}. Allow it in System Settings, under Privacy & Security, then Files and Folders.`,
   unseen: (words) => `BRIMM Video Studio could not look in ${words}.`,
   claudeStays: "Claude Code was installed on this Mac during setup, and stays.",
@@ -222,8 +223,8 @@ function close(ctx, part, detail) {
   if (["waiting", "running"].includes(ctx.bars[part])) bar(ctx, part, "failed", detail);
 }
 
-/** The Install, part by part: the copy's whole check, the three stages, the installer once nothing is at work, and whether Claude
-    answered from the background job, which it gives back. */
+/** The Install, part by part: the copy's whole check, the three stages, the installer once nothing is at work and a held Mac's
+    BRIMM Video folder is still there, and whether Claude answered from the background job, which it gives back. */
 async function install(ctx, answers) {
   const { home, app, tools, checkout, programs, talk } = ctx;
   step(ctx, "install");
@@ -257,8 +258,21 @@ async function install(ctx, answers) {
   const before = checkLogMark(home);
   talk.installerMayRun();
   bar(ctx, "installer", "running");
+  // A held Mac's BRIMM Video folder was looked for at the review, or at the start of a repair or an update, but Dropbox can sign out
+  // or move it while the stages run, or while the installer waits for an idle Mac, and the installer would then make a new, empty
+  // one where it was. So it is looked for again now, and before each try.
+  const rootThere = () => {
+    if (answers.kind === "held" && rootGone(answers.root)) throw new Ending("root", ROOT_GONE, { advice: ROOT_ADVICE });
+  };
+  try {
+    rootThere();
+  } catch (e) {
+    bar(ctx, "installer", "failed");
+    throw e;
+  }
   // installWhenIdle asks `why` before each try: when nothing is at work after a wait, the bar is running again.
   const why = () => {
+    rootThere();
     const line = ctx.why();
     if (!line && ctx.bars.installer === "waiting") bar(ctx, "installer", "running");
     return line;
@@ -301,8 +315,11 @@ function finish(ctx, { outcome, settings, claude, here, check, placeNotes = [] }
   if (missing.length > 0) notes.push(NOTE.missing(missing));
   if (found.kind === "takeover") notes.push(NOTE.takeover);
   if (!check.answered) notes.push(NOTE.claude);
-  if (ctx.run === "update") notes.push(NOTE.update);
+  // A takeover's last note says to start a new chat, so a takeover is not told so by the note of an update as well.
+  if (ctx.run === "update" && found.kind !== "takeover") notes.push(NOTE.update);
   if (isInstalled(build) && !build.broken && !writeSetUp(home, build)) notes.push(NOTE.unrecorded);
+  // A chat in Claude that was open before a takeover keeps the older copy's skill and guard, so a takeover ends by saying to close it.
+  if (found.kind === "takeover") notes.push(NOTE.oldChats);
   const guide = writeGuide({ home, data: guideData({ home, settings, build, missing, notes, now: ctx.now() }) });
   const summary = setupSummary({ kind: found.kind, home, settings, build, claude, check, missing, old: found.kind === "takeover" ? found.settings.checkout : undefined });
   ctx.send(summary);
@@ -482,7 +499,10 @@ const STEP = {
       const printed = await runInstaller({ args: installerArgs(answers, { app, tools, print: true }), home, programs });
       talk.checkpoint();
       const here = { model: existsSync(modelPath(home)), cli: toolchainDiffers(toolchainHolds(home)) === "" };
-      const summary = reviewSummary({ kind: found.kind, moved: found.moved, answers, home, build, printed, planned, claude: state.claude, here });
+      // A held Mac's BRIMM Video folder comes from its settings, and is looked for on each pass: the installer would make a new,
+      // empty one where it was, so a review whose folder is gone offers no Install until Dropbox puts it back.
+      const gone = state.kind === "held" && rootGone(answers.root);
+      const summary = reviewSummary({ kind: found.kind, moved: found.moved, answers, home, build, printed, planned, claude: state.claude, here, gone });
       ctx.send(summary);
       const question = reviewQuestion(summary.ok);
       const got = await ask(ctx, question);
@@ -575,6 +595,9 @@ async function setup(ctx) {
 async function renew(ctx) {
   const { home, tools, found, applications } = ctx;
   const answers = { kind: "held", machine: found.settings.machine, root: found.settings.root };
+  // The installer would make a new, empty BRIMM Video folder where the settings say it is, so a run whose folder is gone stops
+  // here, before anything is staged.
+  if (rootGone(found.settings.root)) throw new Ending("root", ROOT_GONE, { advice: ROOT_ADVICE });
   const claude = claudeState({ home, tools });
   const here = appsHere({ home, system: applications });
   const check = await install(ctx, answers);

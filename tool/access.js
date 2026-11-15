@@ -318,6 +318,37 @@ export function postNewNodeIfDue(note, { notify, clock = Date.now, node = proces
   return true;
 }
 
+/** The notice for a video that waits in the drop folder because BRIMM Video's folder is not where this Mac's settings say. It names no
+    file and no folder's path: her screen may be shared. */
+export const ROOT_GONE_NOTICE = "BRIMM Video's folder in Dropbox is not where this Mac's settings say it is. Check that Dropbox is open and signed in on this Mac. The video waits in the drop folder. It is taken in the next time a video is put in the drop folder, or when you log in again.";
+
+/** Post ROOT_GONE_NOTICE when `gone` and it is due, by the rule postIfDue keeps for a folder macOS refuses: the first time, then again only
+    once the last one is more than an hour old while the folder stays gone. A folder that is there posts nothing and takes `told.root` away,
+    so that its going again is said at once; nothing is written when there was nothing to take away. `told` is read from the note in `home`
+    and written there, never kept in the run's memory (a run starts again on every dropped video). `notify` failing costs only the notice.
+    Gives whether it was posted. */
+export function postRootGoneIfDue(gone, { notify, clock = Date.now, home } = {}) {
+  const note = readAccess(home);
+  const told = note.told;
+  if (!gone) {
+    if ("root" in told) {
+      delete told.root;
+      writeAccess(home, note);
+    }
+    return false;
+  }
+  const now = clock();
+  if (told.root && now - told.root.at <= BANNER_AGAIN_MS) return false;
+  try {
+    notify(ROOT_GONE_NOTICE);
+  } catch {
+    return false;
+  }
+  told.root = { key: "gone", at: now };
+  writeAccess(home, note);
+  return true;
+}
+
 /** Where each place is now, from this Mac's settings: {} when none can be read. */
 function placesFromSettings(home) {
   try {

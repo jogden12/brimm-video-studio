@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { buildOf, isInstalled } from "../build.js";
-import { devMarked, machineFault, readSettings, sameFolder, settingsFile } from "../settings.js";
+import { devMarked, machineFault, readSettings, rootGone, sameFolder, settingsFile } from "../settings.js";
 import { HELPERS } from "../helpers.js";
 import { readSetUp } from "../set-up.js";
 import { hasFilters, hasHwaccel } from "../workcopy.js";
@@ -148,9 +148,10 @@ export function nameClash(name, root) {
   return taken ? `Another Mac already uses the name "${name}" in BRIMM Video. Two Macs with one name would share a drop folder: choose another name, unless this is that Mac being set up again.` : "";
 }
 
-/** The BRIMM Video folders in Dropbox under `home`, looked for in the four places move.zsh's search_brimm_video looks, in its order.
-    Folders only; one folder reached by two spellings counts once, by its real path (`real` gives it), and the first spelling is
-    kept. A folder that goes before its real path is read is passed over. */
+/** The BRIMM Video folders in Dropbox under `home`, looked for in four places, in this order: the top of each Dropbox in
+    ~/Library/CloudStorage, a level below that, the top of each ~/Dropbox*, and a level below that. Folders only; one folder reached
+    by two spellings counts once, by its real path (`real` gives it), and the first spelling is kept. A folder that goes before its
+    real path is read is passed over. */
 export function brimmVideoFolders(home, { real: realOf = realpathSync } = {}) {
   const dropboxes = (parent) => foldersIn(parent).filter((name) => name.startsWith("Dropbox")).sort().map((name) => join(parent, name));
   const below = (folders) => folders.flatMap((folder) => foldersIn(folder).filter((name) => !name.startsWith(".")).sort().map((name) => join(folder, name)));
@@ -178,6 +179,15 @@ export function brimmVideoFolders(home, { real: realOf = realpathSync } = {}) {
 
 /** The lines a person reads when no BRIMM Video is found. */
 export const NO_BRIMM_VIDEO = ["BRIMM Video was not found in Dropbox on this Mac.", 'Open Dropbox, sign in to The BRIMM\'s account, and wait until "The BRIMM DB" shows in Finder.', "Then choose Look again."];
+
+/** What a person reads when BRIMM Video's folder is not where this Mac's settings say, and what to do about it. */
+export const ROOT_GONE = "BRIMM Video's folder in Dropbox is not where this Mac's settings say it is.";
+export const ROOT_ADVICE = "Check that Dropbox is open and signed in on this Mac, then try again.";
+
+/** Whether BRIMM Video's folder at `root`, as this Mac's settings give it, is gone: settings.js's, which the import asks as well. A
+    folder that could not be looked at (its parent shut to this account, say) is not gone: a repair and an update have no Permissions
+    step to say so, and must not stop for it. */
+export { rootGone };
 
 const ADMINISTRATOR = "If this Mac asks for an administrator's password, drag the app into the Applications folder inside your home folder instead.";
 

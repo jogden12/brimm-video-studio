@@ -1,5 +1,7 @@
 # The Move to Studio app
 
+Retired in Phase 8: `tool/move-app/` is gone, and BRIMM Video Studio.app sets a Mac up now. What follows is kept until `docs/setup/studio-app.md` replaces it.
+
 For Jason, who runs the move with Sallie. This is a small Mac app that moves her laptop from brimm-video to Studio, and sets up Jason's MacBook too: moved from brimm-video, or set up fresh if it has none (6 November). On her laptop it does the Terminal work of checks 41, 42 and 44 on the Studio By-Hand Checks page (https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT) and part of check 43 and check 48. Checks 45 to 47 stay on screen, by hand.
 
 The app, its build and the notarizing are all run from that page, each on Jason's yes. Nothing is installed on any Mac by building the app.

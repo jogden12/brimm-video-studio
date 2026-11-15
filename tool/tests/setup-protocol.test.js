@@ -25,7 +25,7 @@ describe("the setup protocol", () => {
     assert.deepEqual(EVENTS, ["step", "question", "progress", "summary", "done", "error"]);
     assert.deepEqual(STEPS, ["welcome", "name", "apps", "dropbox", "folders", "permissions", "review", "install", "done"]);
     assert.deepEqual(PARTS, ["programs", "model", "hyperframes", "chrome", "installer", "claude"]);
-    assert.deepEqual(CODES, ["arguments", "protocol", "damaged", "dev", "no-settings", "settings", "busy", "install", "download", "engine"]);
+    assert.deepEqual(CODES, ["arguments", "protocol", "damaged", "dev", "no-settings", "settings", "root", "busy", "install", "download", "engine"]);
     assert.deepEqual(RUNS, ["setup", "repair", "update", "status"]);
   });
 

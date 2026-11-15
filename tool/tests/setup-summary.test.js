@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { buildOf } from "../build.js";
 import { dropFolderOf, exportsFolderOf, folderWords } from "../settings.js";
 import { eventFault } from "../setup/protocol.js";
-import { APPS, claudeState, kindOf } from "../setup/checks.js";
+import { APPS, ROOT_ADVICE, ROOT_GONE, claudeState, kindOf } from "../setup/checks.js";
 import { planArgs, planOf, reviewSummary, setupSummary, statusSummary, summaryText } from "../setup/summary.js";
 import { readSetUp, writeSetUp } from "../set-up.js";
 import { WHOLE } from "./app-copy.js";
@@ -199,6 +199,26 @@ describe("the review", () => {
       assert.equal(valueOf(summary, "BRIMM Video in Dropbox"), "Dropbox › The BRIMM DB › BRIMM Video");
       assert.ok(valueOf(summary, "Drop folder"));
       assert.ok(valueOf(summary, "Exports folder"));
+    });
+  });
+
+  it("a review of a Mac whose folder is gone is not ok, and says so in the one row", async () => {
+    await withMac({ settings: "takeover" }, (m) => {
+      const found = kindOf({ home: m.home, checkout: m.checkout });
+      const answers = heldAnswers(m);
+      const given = { kind: found.kind, moved: found.moved, answers, home: m.home, build: buildOf(m.checkout), printed: { code: 0, text: "Nothing was changed.\n" }, planned: planOf({ answers, home: m.home, checkout: m.checkout }), claude: claudeOf(m), here: HERE };
+      const whole = reviewSummary({ ...given, gone: false });
+      assert.equal(whole.ok, true);
+      assert.equal(valueOf(whole, "BRIMM Video in Dropbox"), "Dropbox › The BRIMM DB › BRIMM Video");
+      const gone = reviewSummary({ ...given, gone: true });
+      assert.equal(gone.ok, false);
+      assert.equal(gone.lines.filter((line) => line.label === "BRIMM Video in Dropbox").length, 1);
+      assert.equal(valueOf(gone, "BRIMM Video in Dropbox"), `${ROOT_GONE} ${ROOT_ADVICE}`);
+      assert.deepEqual(labelsOf(gone), labelsOf(whole));
+      assert.equal(eventFault(gone), "");
+      // The question sends her to Details, so they say first why there is no Install, and then what the installer printed.
+      assert.equal(gone.details, `${ROOT_GONE} ${ROOT_ADVICE}\n\nNothing was changed.\n`);
+      assert.equal(whole.details, "Nothing was changed.\n");
     });
   });
 

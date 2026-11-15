@@ -52,6 +52,17 @@ export const settingsFile = (home) => join(home, "Library", "Application Support
 export const dropFolder = (root, machine, folder = "Unedited Video") => join(root, folder, machine);
 /** The folder of episodes, in BRIMM Video. No Mac watches it. */
 export const episodesFolder = (root) => join(root, "Episodes");
+/** Whether BRIMM Video's folder at `root`, as this Mac's settings give it, is gone: nothing is there, or what is there is no folder,
+    as when Dropbox has signed out or been moved. A folder that could not be looked at (its parent shut to this account, say) is not
+    gone. Setup asks it before the installer, and the import before it files a video, since either would otherwise make a new, empty
+    BRIMM Video folder where Dropbox's was, which syncs to nothing. */
+export function rootGone(root) {
+  try {
+    return !statSync(root).isDirectory();
+  } catch (e) {
+    return e?.code === "ENOENT" || e?.code === "ENOTDIR";
+  }
+}
 /** The reference folder, in BRIMM Video: screenshots and pictures of post styles that Sallie adds to from any device and names when
     she wants one followed (references.js; design 2026-11-03, section 7). Studio only reads it, and no Mac watches it. */
 export const referencesFolder = (root) => join(root, "References");

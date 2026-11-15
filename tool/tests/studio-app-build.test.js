@@ -1,5 +1,5 @@
 // BRIMM Video Studio.app's build, tool/studio-app/build-app.sh (Phase 6, Task 15). The build is run from a temporary git repo that holds
-// a copy of this checkout's tool/ (with a test, a move-app file and a .env added, which the bundle must leave out), committed, with
+// a copy of this checkout's tool/ (with a test and a .env added, which the bundle must leave out), committed, with
 // origin/main at its head. Stand-ins come first on its PATH for swiftc, security, codesign and xcrun: each records "name args" into a
 // `ran` file. swiftc's copies /usr/bin/true to the file after -o. No test runs the real codesign, security or xcrun, nothing is signed
 // with an identity and nothing is sent to Apple. The vendor folder is made up: copies of /usr/bin/true, sealed with the real vendor.js.
@@ -57,12 +57,12 @@ function standIn(bin, name, body) {
   chmodSync(join(bin, name), 0o755);
 }
 
-/** The files of this checkout's tool/ that git has or would add, but its tests and move-app, as paths from tool/. Only these are
+/** The files of this checkout's tool/ that git has or would add, but its tests, as paths from tool/. Only these are
     copied: never an ignored file, so no real .env is ever touched. */
 function trackedTool() {
   const listed = run("git", ["-C", TOOL, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."]);
   assert.equal(listed.status, 0, listed.stderr);
-  return listed.stdout.split("\0").filter((p) => p && !p.startsWith("tests/") && !p.startsWith("move-app/") && existsSync(join(TOOL, p)));
+  return listed.stdout.split("\0").filter((p) => p && !p.startsWith("tests/") && existsSync(join(TOOL, p)));
 }
 
 /** A vendor folder in `dir`, as build-vendor.sh lays it out: node/bin with the five programs (copies of /usr/bin/true), node/lib/x.js,
@@ -112,7 +112,7 @@ function sparkleArchive(dir, name = "Sparkle-made-up.tar.xz", { autoupdate = tru
   return archive;
 }
 
-/** A world: a temporary folder with a repo holding a copy of tool/ (with tool/tests/x.test.js, tool/move-app/x and tool/.env added),
+/** A world: a temporary folder with a repo holding a copy of tool/ (with tool/tests/x.test.js and tool/.env added),
     committed, `bin/` of stand-ins, `tmp/` as TMPDIR, `home/` as HOME, a sealed vendor folder, and a made-up Sparkle archive whose
     SHA-256, with a made-up public key, is in the repo's committed sparkle.pin.json. `identities` is what the stand-in
     security lists; `behind` leaves origin/main one commit behind the head. `build(...args)` runs the copy's build-app.sh with the
@@ -131,8 +131,6 @@ function world({ identities = [IDENTITY], behind = false } = {}) {
   }
   mkdirSync(join(tool, "tests"));
   writeFileSync(join(tool, "tests", "x.test.js"), "// a test\n");
-  mkdirSync(join(tool, "move-app"));
-  writeFileSync(join(tool, "move-app", "x"), "the old app\n");
   writeFileSync(join(tool, ".env"), "NOT_READ=1\n");
   const sparkle = sparkleArchive(dir);
   const pinFile = join(tool, "studio-app", "sparkle.pin.json");
@@ -213,12 +211,12 @@ describe("build-app.sh: one build, read by many tests", { skip: notAMac }, () =>
   });
   after(() => w?.cleanup());
 
-  it("the bundle holds Studio's tool without tests, move-app, studio-app or a .env, and the programs appCopy names", () => {
+  it("the bundle holds Studio's tool without tests, studio-app or a .env, and the programs appCopy names", () => {
     // The commit really holds tool/.env, so that leaving it out is the build's doing.
     assert.equal(w.git("ls-files", "--", "tool/.env"), "tool/.env");
     const listing = tree(plain.app);
     for (const path of listing) {
-      assert.equal(/(^|\/)(tests|move-app|studio-app)(\/|$)/.test(path), false, path);
+      assert.equal(/(^|\/)(tests|studio-app)(\/|$)/.test(path), false, path);
       assert.equal(/(^|\/)\.env(\.|$)/.test(path), false, path);
     }
     const bin = join(plain.app, "Contents", "Resources", "node", "bin");

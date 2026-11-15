@@ -1,6 +1,6 @@
 // Nothing in tool/ starts git, python3, swift, swiftc, xcrun or xcode-select unguarded (Phase 1 of the Mac app: Studio runs without git
-// or Xcode's command line tools). This reads the code: every .js and .mjs under tool/, but tests/, move-app/ (the old installer, retired
-// in Phase 8) and vendor/. It does not read install.sh, which is Phase 4's, nor studio/guard.sh and studio/receipt.sh, which start none of
+// or Xcode's command line tools). This reads the code: every .js and .mjs under tool/, but tests/, vendor/, studio-app/ (the Mac app's
+// build) and node_modules/. It does not read install.sh, which is Phase 4's, nor studio/guard.sh and studio/receipt.sh, which start none of
 // these programs. A line that names one of these programs in quotes must be
 // one of ALLOWED, each with its reason; a helper is never started with swift itself, only through helpers.js helperCommand.
 import { describe, it } from "node:test";
@@ -27,7 +27,7 @@ const ALLOWED = [
 
 /** tool/, the folder this test's folder is in. */
 const TOOL = fileURLToPath(new URL("..", import.meta.url));
-const SKIPPED = new Set(["tests", "move-app", "vendor", "studio-app", "node_modules"]);
+const SKIPPED = new Set(["tests", "vendor", "studio-app", "node_modules"]);
 
 /** Every .js and .mjs under `dir`, but the skipped folders, as paths relative to tool/. */
 function scripts(dir = TOOL) {

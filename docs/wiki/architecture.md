@@ -65,6 +65,8 @@ What `studio.js` writes into `~/BRIMM Video Studio`:
 
 ## The Move to Studio app (`tool/move-app/`)
 
+Retired in Phase 8: `tool/move-app/` is gone, and BRIMM Video Studio.app sets a Mac up now. What follows is kept until `docs/setup/studio-app.md` replaces it.
+
 `build-app.sh --out <folder> [--sign] [--any-commit]` builds "Move to Studio.app" (it refuses uncommitted changes and never notarizes; it prints the steps). `launcher.swift` is the program, `open-in-terminal.zsh` opens Terminal on `move.zsh` (the y/n move for a laptop), `choose-folder.swift` the folder picker. It clones Studio at the commit it was built from. Doc: `docs/setup/move-to-studio-app.md`. The Mac app retires it in Phase 8.
 
 ## The Mac app (BRIMM Video Studio.app)

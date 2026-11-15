@@ -97,7 +97,7 @@ if (( print_only )); then
   say "  $app"
   say "  $zip"
   say "The steps, in a temporary folder:"
-  say "  1. Studio's tool from the commit (git archive), without tests, move-app, studio-app or any .env file."
+  say "  1. Studio's tool from the commit (git archive), without tests, studio-app or any .env file."
   say "  2. build.json, on the $channel channel."
   say "  3. node, ffmpeg, ffprobe and whisper-cli from the vendored programs, with their licences and the line naming $source_name."
   say "  4. Sparkle.framework from the pinned archive, checked again and unpacked, into Contents/Frameworks with its links, and its licence."
@@ -130,7 +130,7 @@ git -C $repo archive --format=tar -o $work/tool.tar $commit tool || stop "The co
 tar -xf $work/tool.tar -C $studio || stop "The commit's tool could not be unpacked."
 rm -f $work/tool.tar || stop "The commit's tool could not be unpacked."
 mv $tool/studio-app $work/studio-app || stop "The commit has no tool/studio-app."
-rm -rf $tool/tests $tool/move-app || stop "The tests and move-app could not be taken out."
+rm -rf $tool/tests || stop "The tests could not be taken out."
 find $tool \( -name .env -o -name '.env.*' \) -prune -exec rm -rf {} + || stop "The .env files could not be taken out."
 from=$work/studio-app
 

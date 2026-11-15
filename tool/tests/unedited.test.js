@@ -1353,6 +1353,8 @@ function episodic({ start = "2026-10-13T10:00:00", local = false, ...script } = 
   // A Mac with a drop folder of its own (Phase 3, L3) watches Drop in its work folder, and its settings hold that dropPath.
   const drop = local ? join(t.home, "BRIMM Video Work", "Drop") : join(root, "Unedited Video", "Mac Studio");
   mkdirSync(drop, { recursive: true });
+  // BRIMM Video's folder is there, as Dropbox keeps it, on a Mac with a drop folder of its own too, with no Episodes in it yet.
+  mkdirSync(root, { recursive: true });
   const clones = [];
   t.deps.settings = { version: 1, machine: "Mac Studio", root, checkout: "/checkout", ...(local ? { drop: "Drop", dropPath: drop } : {}) };
   // A status file is deleted by the next one, so what each held is kept as it was cloned in.
@@ -2956,6 +2958,8 @@ describe("the import is always the light import (Phase 2, F4)", () => {
 describe("an episode filed on a Mac with a drop folder of its own (Phase 3, L3)", () => {
   const FOLDER = "2026-10-13 Talk (Mac Studio)";
   const READY = `Ready: Video of 13 Oct, 10:00 (Mac Studio). In Claude, say "what's waiting?"`;
+  /** The notice for a video that waits because BRIMM Video's folder is gone. */
+  const ROOT_GONE_NOTICE = "BRIMM Video's folder in Dropbox is not where this Mac's settings say it is. Check that Dropbox is open and signed in on this Mac. The video waits in the drop folder. It is taken in the next time a video is put in the drop folder, or when you log in again.";
   const ENDINGS = ALL.map((ending) => `Talk.${ending}`);
   /** The names in a folder, none when it is not there. */
   const namesOf = (folder) => {
@@ -2987,6 +2991,69 @@ describe("an episode filed on a Mac with a drop folder of its own (Phase 3, L3)"
     assert.deepEqual(namesOf(t.drop), []);
     t.done();
   });
+  it("takes nothing in while BRIMM Video's folder is gone, as Dropbox signed out or moved, and makes neither it nor Episodes", async () => {
+    const t = local();
+    rmSync(t.root, { recursive: true, force: true });
+    t.put("Talk.mov", "the whole video");
+    const notices = [];
+    t.deps.notify = (text) => notices.push(text);
+    const [r] = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(r, { ok: false, name: "Talk.mov", arriving: true, message: "BRIMM Video's folder is not where this Mac's settings say" });
+    assert.deepEqual([namesOf(t.drop), statSync(join(t.drop, "Talk.mov")).size], [["Talk.mov"], "the whole video".length]);
+    assert.equal(existsSync(t.root), false, "no BRIMM Video folder is made where Dropbox's was");
+    assert.equal(existsSync(t.episodes), false);
+    assert.equal(existsSync(t.video()), false);
+    assert.deepEqual(readStatusesIn([t.statuses]), []);
+    assert.deepEqual(notices, [ROOT_GONE_NOTICE]);
+    assert.ok(t.logs.includes("A video in the drop folder: BRIMM Video's folder is not where this Mac's settings say, so this video is looked at again later."), t.logs.join("\n"));
+    assert.equal(t.logs.some((line) => line.includes("Talk")), false, t.logs.join("\n"));
+    // A run soon after, with the folder still gone, says it no more, as the banner of a folder macOS refuses; one more than an hour later says it again.
+    const [soon] = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual([soon.arriving, notices.length], [true, 1]);
+    await t.deps.wait(60 * 60 * 1000 + 1);
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(notices, [ROOT_GONE_NOTICE, ROOT_GONE_NOTICE]);
+    assert.equal(existsSync(t.root), false);
+    // Once Dropbox puts the folder back, with no Episodes in it yet, the next run takes the video in, and posts only its Ready.
+    mkdirSync(t.root);
+    const [again] = await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual([again.ok, again.folder, namesOf(t.drop)], [true, FOLDER, []], t.logs.join("\n"));
+    assert.deepEqual(notices, [ROOT_GONE_NOTICE, ROOT_GONE_NOTICE, READY]);
+    // Its going again is said at once.
+    rmSync(t.root, { recursive: true, force: true });
+    t.put("Other.mov", "another video");
+    await uneditedFolder(t.drop, t.deps);
+    assert.deepEqual(notices, [ROOT_GONE_NOTICE, ROOT_GONE_NOTICE, READY, ROOT_GONE_NOTICE]);
+    t.done();
+  });
+  for (const [when, script, removeAt] of [
+    ["while the video is transcribed", {}, "WHISPER"],
+    ["while a video with no sound is read", { probed: probed({ picture: { width: 1080, height: 1920 }, sound: null, duration: "8.000000" }) }, "FFPROBE"]
+  ]) {
+    it(`never makes BRIMM Video's folder when it goes ${when}: the video stays in the drop folder, and the result, the log and one notice say why`, async () => {
+      const t = local(script);
+      t.put("Talk.mov", "the whole video");
+      const notices = [];
+      t.deps.notify = (text) => notices.push(text);
+      const run = t.deps.run;
+      t.deps.run = async (cmd, args, opts) => {
+        const r = await run(cmd, args, opts);
+        if (cmd === removeAt) rmSync(t.root, { recursive: true, force: true });
+        return r;
+      };
+      const [r] = await uneditedFolder(t.drop, t.deps);
+      assert.deepEqual(r, { ok: false, name: "Talk.mov", arriving: true, message: "BRIMM Video's folder is not where this Mac's settings say" }, t.logs.join("\n"));
+      assert.deepEqual([namesOf(t.drop), statSync(join(t.drop, "Talk.mov")).size], [["Talk.mov"], "the whole video".length]);
+      assert.equal(existsSync(t.root), false, "no BRIMM Video folder is made where Dropbox's was");
+      assert.equal(existsSync(t.video()), false);
+      assert.deepEqual(readStatusesIn([t.statuses]), []);
+      assert.deepEqual(existsSync(pendingFolder(t.home)) ? readdirSync(pendingFolder(t.home), { recursive: true }).filter((n) => n.endsWith(".json")) : [], []);
+      assert.deepEqual(notices, [ROOT_GONE_NOTICE]);
+      assert.ok(t.logs.includes("Video of 13 Oct, 10:00 (Mac Studio): BRIMM Video's folder is not where this Mac's settings say, so this video is looked at again later."), t.logs.join("\n"));
+      assert.equal(t.logs.some((line) => line.includes("Talk")), false, t.logs.join("\n"));
+      t.done();
+    });
+  }
   it("posts the Ready banner and takes the drop file away before any wait, and writes no import pending", async () => {
     const t = local();
     t.put("Talk.mov");

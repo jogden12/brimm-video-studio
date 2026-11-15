@@ -5,9 +5,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { episodeMode, episodeKind, fileEpisode, findFolder, commitOf, isGitCheckout, thisCheckout, importEpisodes, clearRuns, clearCrashes, heldBy, dueAt, lateCheckLockOf, takeLateCheckLock, releaseLateCheckLock, LOCK_AGAIN_MS } from "../filing.js";
+import { episodeMode, episodeKind, fileEpisode, fileId, findFolder, finishLate, commitOf, isGitCheckout, thisCheckout, importEpisodes, clearRuns, clearCrashes, heldBy, dueAt, lateCheckLockOf, takeLateCheckLock, releaseLateCheckLock, LOCK_AGAIN_MS } from "../filing.js";
 import { episodeWork } from "../settings.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { newEpisode, recordFile, recordText } from "../episode.js";
@@ -814,5 +814,57 @@ describe("which commit a record names when the episode's checkout is made up", (
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the filing on a Mac with a drop folder of its own, when BRIMM Video's folder is gone", () => {
+  /** A Mac with a drop folder of its own, in a folder of the test's own: BRIMM Video's folder there with no Episodes in it, the home
+      folder, the run's folder and the drop folder with a video in it. `file()` files the video as the import does. */
+  function setup() {
+    const dir = mkdtempSync(join(tmpdir(), "brimm-filing-gone-"));
+    const root = join(dir, "BRIMM Video");
+    const home = join(dir, "home");
+    const work = join(dir, "work");
+    const drop = join(dir, "drop");
+    for (const d of [root, home, work, drop]) mkdirSync(d, { recursive: true });
+    const video = join(drop, "Talk.mov");
+    writeFileSync(video, "a talk");
+    const facts = { duration: 60, width: 1920, height: 1080, fps: "30/1", sound: true };
+    const file = () => fileEpisode({ file: video, made: [], at: (to) => to, facts, printed: "", kind: "episode", read: null, reels: [], work, dropFile: fileId(video), label: "Video of 14 Oct, 10:00 (Mac Studio)", fingerprint: "" }, { episode: { root, machine: "Mac Studio", checkout: "/checkout", home, local: true }, commit: "abc1234", clone: (from, to) => copyFileSync(from, to), sameDisk: () => true, today: () => "2026-10-14", log: () => {} });
+    return { dir, root, home, drop, video, file, done: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  it("never makes BRIMM Video's folder: it stops with ROOT_GONE, and the video stays in the drop folder, with nothing made of it", () => {
+    const t = setup();
+    rmSync(t.root, { recursive: true, force: true });
+    assert.throws(() => t.file(), (e) => e.code === "ROOT_GONE");
+    assert.equal(existsSync(t.root), false, "no BRIMM Video folder is made where Dropbox's was");
+    assert.deepEqual(readdirSync(t.drop), ["Talk.mov"]);
+    assert.equal(existsSync(episodeWork(t.home, "2026-10-14 Talk (Mac Studio)")), false);
+    t.done();
+  });
+  it("makes no late check of a Mac whose drop folder is in Dropbox while the folder is gone, and so never makes it again: the check waits", () => {
+    const t = setup();
+    const folder = join(t.root, "Episodes", "2026-10-14 Talk (Mac Studio)");
+    const copy = join(t.dir, "work", "made", "Talk.srt");
+    mkdirSync(dirname(copy), { recursive: true });
+    writeFileSync(copy, "the captions");
+    const pending = { version: 1, id: "e-20261014-3fa9c1", name: basename(folder), folder, video: "Talk.mov", bytes: 6, seconds: 60, drop: t.video, dropFile: null, importId: "", work: join(t.dir, "work"), entries: [{ from: copy, to: join(folder, "Talk.srt"), bytes: 12 }], lastCopy: 0, root: t.root, machine: "Mac Studio", planTxt: "Talk.cut-plan.txt", label: "Video of 14 Oct, 10:00 (Mac Studio)" };
+    rmSync(t.root, { recursive: true, force: true });
+    const logs = [];
+    const notices = [];
+    const r = finishLate(pending, { episode: { root: t.root, machine: "Mac Studio", home: t.home }, log: (line) => logs.push(line), notify: (text) => notices.push(text) });
+    assert.deepEqual([r.ok, r.problems, r.waits], [false, [], true]);
+    assert.equal(existsSync(t.root), false, "no BRIMM Video folder is made where Dropbox's was");
+    assert.deepEqual([readdirSync(t.drop), notices], [["Talk.mov"], []]);
+    assert.deepEqual(logs, ["Video of 14 Oct, 10:00 (Mac Studio): its late check waits: BRIMM Video's folder is not where this Mac's settings say. It is made at a later run."]);
+    t.done();
+  });
+  it("files as today into a BRIMM Video folder that is there with no Episodes in it yet", () => {
+    const t = setup();
+    const filed = t.file();
+    assert.equal(filed.name, "2026-10-14 Talk (Mac Studio)");
+    assert.deepEqual(readdirSync(join(t.root, "Episodes")), ["2026-10-14 Talk (Mac Studio)"]);
+    assert.deepEqual(readdirSync(t.drop), []);
+    t.done();
   });
 });

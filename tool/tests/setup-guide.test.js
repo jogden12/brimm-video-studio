@@ -78,6 +78,11 @@ describe("the Getting Started guide", () => {
     ]) assert.ok(html.includes(say), say);
   });
 
+  it("the guide says to open the app from Applications, and to trash a copy left in Downloads", () => {
+    const say = "Open BRIMM Video Studio from Applications. If a copy of it, or its zip, is still in Downloads, put it in the Trash.";
+    assert.ok(page().includes(say), say);
+  });
+
   it("the guide names each folder once, in plain words", () => {
     const html = page();
     const d = data();
