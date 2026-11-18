@@ -49,7 +49,7 @@ BRIMM Ops takes Studio's hand-off file. These carry over exactly. Change any of 
 ## HeyGen and the HyperFrames app
 
 - HeyGen is on its lowest paid tier. The Script panel may transcribe videos meant for posting. Share is for invited people only. Never render in the cloud.
-- HeyGen's tools are open, and nothing blocks them on either Mac. Each project's notes warn before an AI avatar, lip-sync, or an AI-generated Sallie, her face or her voice, which The BRIMM doesn't use for now. A session clip's notes keep the old line: no session clip uses HeyGen's features. A stock HeyGen voice is fine, with YouTube's altered or synthetic label.
+- HeyGen's tools are open, and nothing blocks them on either Mac. Each project's notes warn before an AI avatar, lip-sync, or an AI-generated Sallie, her face or her voice, which The BRIMM doesn't use for now. A session clip's notes keep the old line: no session clip uses HeyGen's features. AI-generated voices are allowed for videos where Sallie is not on screen (explainers, tutorials, and similar types); a stock HeyGen voice is fine too. All AI-generated voices carry YouTube's altered or synthetic label.
 - The app's agent is Claude Code with Auto access, never Full.
 - Projects Studio makes live in `~/BRIMM Video Work`, never in Dropbox or a watched folder. The app's own projects folder is in Dropbox and is not watched.
 - HyperFrames telemetry is off. Never `publish`, `cloud`, `lambda` or `cloudrun`.
