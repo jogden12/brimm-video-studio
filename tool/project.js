@@ -700,6 +700,18 @@ const HEYGEN_CUES_RULE = `- **Graphic cues.** Studio's suggested graphics are in
     own and which the voiceover does not move from (the page plays it from the start). */
 const VOICEOVER_CUES_RULE = `${CUES_RULE.replace("on the recording's clock, so add the recording's `data-start` if it has moved", "on the voiceover's clock")}${REFERENCES_SENTENCE}`;
 
+/** The words rule for a pre-recording script (the bridge): the words come with her recording, like HEYGEN_WORDS_RULE but for a recording. */
+const SCRIPT_WORDS_RULE = "- **The words.** There are no words yet: they come with her recording, in the transcript Studio makes of it on this Mac. Never transcribe.";
+
+/** The cues rule for a pre-recording script (the bridge): the cues have no times yet, like HEYGEN_CUES_RULE but placed once the recording arrives. */
+const SCRIPT_CUES_RULE = `- **Graphic cues.** Studio's suggested graphics are in \`brimm/graphic-cues.json\`, each with the words it goes with and no times yet. Once her recording arrives, place each on its words in the transcript, then offer them to her, one at a time or all together, and build only the ones she takes: each short (its \`seconds\`), in the brand, with things and words and never people. Tell her of a cue whose words are not in the transcript, and place it only where she says. Never add a graphic she has not taken.${REFERENCES_SENTENCE}`;
+
+/** The words rule for a pre-voice sallie explainer (the bridge): the words come with her voiceover, like HEYGEN_WORDS_RULE but for a voiceover. */
+const PRE_VOICE_WORDS_RULE = "- **The words.** There are no words yet: they come with her voiceover, in the transcript Studio makes of it on this Mac. Never transcribe.";
+
+/** The cues rule for a pre-voice sallie explainer (the bridge): the cues have no times yet, like HEYGEN_CUES_RULE but placed once the voiceover arrives. */
+const PRE_VOICE_CUES_RULE = `- **Graphic cues.** Studio's suggested graphics are in \`brimm/graphic-cues.json\`, each with the words it goes with and no times yet. Once her voiceover arrives, place each on its words in the transcript, then offer them to her, one at a time or all together, and build only the ones she takes: each short (its \`seconds\`), in the brand, with things and words and never people. Tell her of a cue whose words are not in the transcript, and place it only where she says. Never add a graphic she has not taken.${REFERENCES_SENTENCE}`;
+
 /** A Reel's rule for the same (PR H2): the same line, but that its times are on the Reel's own clock, which starts where the Reel does
     and is never moved, and that the Reel's frame is upright, with the top 14% and the bottom 35% kept clear for its captions. */
 const REEL_GRAPHIC_CUES_RULE = `${CUES_RULE.replace("on the recording's clock, so add the recording's `data-start` if it has moved", "on the Reel's clock")} On this upright Reel, keep graphics and words out of the top 14% and the bottom 35%.${REFERENCES_SENTENCE}`;
@@ -714,10 +726,18 @@ const REEL_GRAPHIC_CUES_RULE = `${CUES_RULE.replace("on the recording's clock, s
     show, and its cue rule is its voice's: in her own voice H1's, with the times on the voiceover's clock; in a HeyGen voice the one that says there
     are no times yet. Right after it come the rule that says what an explainer is (EXPLAINER_RULE) and, for a HeyGen voice, the rule for its voice
     (VOICE_RULE); and a HeyGen explainer's words are none yet (HEYGEN_WORDS_RULE). */
-function brimmRules(kind, short = false, crop = null, footage = false, explainer = null) {
+function brimmRules(kind, short = false, crop = null, footage = false, explainer = null, hasMedia = true) {
   const episode = kind !== "clip";
   const heygen = explainer !== null && explainer.voice === "heygen";
-  const cues = explainer === null ? [GRAPHIC_CUES_RULE, ...(footage ? [FOOTAGE_RULE] : [])] : [heygen ? HEYGEN_CUES_RULE : VOICEOVER_CUES_RULE, EXPLAINER_RULE, ...(heygen ? [VOICE_RULE] : [])];
+  const sallie = explainer !== null && explainer.voice === "sallie";
+  const preMedia = !hasMedia;
+  const cues = explainer === null
+    ? [preMedia ? SCRIPT_CUES_RULE : GRAPHIC_CUES_RULE, ...(footage ? [FOOTAGE_RULE] : [])]
+    : [heygen ? HEYGEN_CUES_RULE : (preMedia ? PRE_VOICE_CUES_RULE : VOICEOVER_CUES_RULE), EXPLAINER_RULE, ...(heygen ? [VOICE_RULE] : [])];
+  const wordsRule = heygen ? HEYGEN_WORDS_RULE
+    : preMedia && sallie ? PRE_VOICE_WORDS_RULE
+    : preMedia && explainer === null ? SCRIPT_WORDS_RULE
+    : "- **The words.** Every word said, with its time and its id, is in `transcript.json`, made on this Mac. Use it, and never transcribe again.";
   return [
     "# The BRIMM: rules for this project",
     "",
@@ -728,7 +748,7 @@ function brimmRules(kind, short = false, crop = null, footage = false, explainer
     "- **Sharing.** If asked to share, say that Sallie shares from the app's Share button, and only with \"Only people you invite\". Never set a link to \"Anyone with the link\".",
     episode ? AI_PEOPLE : NO_GENERATED_PEOPLE,
     `- **Commands never run here.** Never run these HyperFrames commands, however they are spelled (\`npx hyperframes …\`, \`hyperframes …\`): ${inWords(barredList("denied"))}. Never run \`npm run publish\` either. ${inWords(barredList("edit"))} are Studio's to run, never this project's.`,
-    heygen ? HEYGEN_WORDS_RULE : "- **The words.** Every word said, with its time and its id, is in `transcript.json`, made on this Mac. Use it, and never transcribe again.",
+    wordsRule,
     `- **Cutting.** Cut whole phrases at pauses, never in the middle of a word.${kind === "main" ? " When she asks to clean up retakes, propose the cuts in \`brimm/cut-suggestions.json\` first, each from its \`start\` to its \`end\`, the opening first: \`from\` and \`to\` name the words a cut holds, and are null for a silence." : ""}`,
     ...(kind === "main" ? cues : []),
     ...(kind === "reel" ? [REEL_GRAPHIC_CUES_RULE] : []),
@@ -804,24 +824,25 @@ const aboutOf = (kind, path, explainer = false) => (explainer && EXPLAINER_ABOUT
     its clock is the recording's own. A Reel's video is a stretch of the recording (architecture 4.3), so its clock starts where
     the stretch does, at `offset` seconds into the recording, and the words of its transcript.json are on it. An explainer's (PR H6) is its
     voiceover's, which is its own; a HeyGen explainer's voice is not made yet, so nothing is on a clock until it is. */
-function clockLine(kind, offset, explainer = null) {
+function clockLine(kind, offset, explainer = null, hasMedia = true) {
   if (explainer !== null) {
-    return explainer.voice === "heygen"
-      ? "- **Its clock.** There is no voice yet, so no time is on a clock: the times of `transcript.json` and `brimm/` come with the voice, on its own clock."
-      : "- **Its clock.** Every time in `transcript.json` and in `brimm/` is on the clock of `media/voiceover.m4a`, which is the voiceover's own: nothing was cut from it.";
+    if (explainer.voice === "heygen") return "- **Its clock.** There is no voice yet, so no time is on a clock: the times of `transcript.json` and `brimm/` come with the voice, on its own clock.";
+    if (!hasMedia) return "- **Its clock.** There is no voiceover yet, so no time is on a clock: the times of `transcript.json` and `brimm/` come with her voiceover, on its own clock.";
+    return "- **Its clock.** Every time in `transcript.json` and in `brimm/` is on the clock of `media/voiceover.m4a`, which is the voiceover's own: nothing was cut from it.";
   }
+  if (!hasMedia) return "- **Its clock.** There is no recording yet, so no time is on a clock: the times of `transcript.json` and `brimm/` come with her recording, on its own clock.";
   if (kind !== "reel") return "- **Its clock.** Every time in `transcript.json` and in `brimm/` is on the clock of `media/recording.mp4`, which is the recording's own: nothing was cut from it.";
   return `- **Its clock.** Every time in \`transcript.json\` and in \`brimm/\` is on the clock of \`media/recording.mp4\`, which starts at ${clockText(offset)} (${thousandth(offset)} seconds) into the episode's recording: this Reel is that stretch of it, and nothing was cut from the stretch.`;
 }
 
 /** What the project is (5.4, item 2): its kind, its name, its clock and its files. */
-function thisProject({ kind, what, name, offset, files, explainer = null }) {
+function thisProject({ kind, what, name, offset, files, explainer = null, hasMedia = true }) {
   return [
     "# This project",
     "",
     `- **What it is:** ${what}.`,
     `- **Its name:** ${name}. HyperFrames names an export after it.`,
-    clockLine(kind, offset, explainer),
+    clockLine(kind, offset, explainer, hasMedia),
     "- **Its files:**",
     ...files.map((path) => `  - \`${path}\`: ${aboutOf(kind, path, explainer !== null) ?? "a file of this project"}.`)
   ].join("\n");
@@ -829,11 +850,11 @@ function thisProject({ kind, what, name, offset, files, explainer = null }) {
 
 /** The notes for the agent (5.4), the text of both CLAUDE.md and AGENTS.md: a session clip's own rules first, then BRIMM's rules,
     then what the project is, then HyperFrames' own guidance without what conflicts. */
-function notesText({ kind, what, name, offset, files, guidance, short, crop, footage = false, explainer = null }) {
+function notesText({ kind, what, name, offset, files, guidance, short, crop, footage = false, explainer = null, hasMedia = true }) {
   return [
     ...(kind === "clip" ? [CLIP_RULES] : []),
-    brimmRules(kind, short, crop, footage, explainer),
-    thisProject({ kind, what, name, offset, files, explainer }),
+    brimmRules(kind, short, crop, footage, explainer, hasMedia),
+    thisProject({ kind, what, name, offset, files, explainer, hasMedia }),
     "# HyperFrames' own guidance\n\nWhat follows is the guidance the pinned HyperFrames ships, without what the rules above forbid.",
     hyperframesGuidance(guidance).trim()
   ].join("\n\n") + "\n";
@@ -979,7 +1000,7 @@ export function projectFiles(input) {
     ...(kind === "reel" ? { reel: { n: input.part.reel, offset: input.stretch.start } } : {}),
     files: Object.fromEntries(paths.map((path) => [path, aboutOf(kind, path, explainer !== null) ?? ""]))
   }));
-  const notes = notesText({ kind, what, name, offset: kind === "reel" ? input.stretch.start : 0, files: paths, guidance: input.guidance, short: kind === "main" && (input.short === true || explainer !== null), crop, footage: footage !== null, explainer });
+  const notes = notesText({ kind, what, name, offset: kind === "reel" ? input.stretch.start : 0, files: paths, guidance: input.guidance, short: kind === "main" && (input.short === true || explainer !== null), crop, footage: footage !== null, explainer, hasMedia });
   files.set("CLAUDE.md", notes);
   files.set("AGENTS.md", notes);
   return files;

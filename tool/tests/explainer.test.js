@@ -1891,3 +1891,51 @@ describe("app, for a planned script: its project, with no media (bridge PR)", ()
     t.done();
   });
 });
+
+// --- Agent guidance for pre-media projects: the notes must not claim media or words that do not exist yet ---
+
+describe("the notes of a pre-recording script project: no words, no recording, no clock (bridge PR)", () => {
+  const GUIDANCE = readFileSync(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url), "utf8");
+  const CLI = "/Users/sallie/BRIMM Video Work/.toolchain/hyperframes-0.8.208/node_modules/hyperframes/bin/hyperframes.mjs";
+  const preScript = (over = {}) => ({ kind: "main", name: "How to price", id: "2026-11-18-mac-studio-abcd12", spellings: [], plan: null, short: true, guidance: GUIDANCE, cli: CLI, logos: [], createdAt: "2026-11-18T15:00:00.000Z", graphicCues: [{ n: 1, words: "price your offer", kind: "graphic", show: "A price tag.", seconds: 4, style: null }], words: [], facts: { seconds: 30, width: 1920, height: 1080, fps: 30 }, ...over });
+  it("says there are no words yet, not that every word is in transcript.json", () => {
+    const notes = projectFiles(preScript()).get("CLAUDE.md");
+    assert.ok(!notes.includes("Every word said, with its time and its id, is in `transcript.json`"), "must not claim words exist");
+    assert.ok(notes.includes("no words yet") || notes.includes("none yet"), "should say there are no words yet");
+  });
+  it("says there is no clock yet, not that times are on media/recording.mp4", () => {
+    const notes = projectFiles(preScript()).get("CLAUDE.md");
+    assert.ok(!notes.includes("on the clock of `media/recording.mp4`"), "must not claim recording exists");
+    assert.ok(notes.includes("no recording yet") || notes.includes("no clock") || notes.includes("There is no"), "should say there is no clock");
+  });
+  it("says the cues have no times yet, not that they are on the recording's clock", () => {
+    const notes = projectFiles(preScript()).get("CLAUDE.md");
+    assert.ok(!notes.includes("on the recording's clock, so add the recording's `data-start`"), "must not reference recording clock in cues");
+    assert.ok(notes.includes("no times yet"), "should say cues have no times yet");
+  });
+});
+
+describe("the notes of a pre-voice sallie explainer project: no words, no voiceover, no clock (bridge PR)", () => {
+  const GUIDANCE = readFileSync(new URL("./fixtures/hyperframes-0.8.208/init/CLAUDE.md", import.meta.url), "utf8");
+  const CLI = "/Users/sallie/BRIMM Video Work/.toolchain/hyperframes-0.8.208/node_modules/hyperframes/bin/hyperframes.mjs";
+  const preSallie = (over = {}) => ({ kind: "main", name: "Why SKUs sink you", id: "2026-11-18-mac-studio-efgh34", spellings: [["SKU", "SKU"]], plan: null, short: true, guidance: GUIDANCE, cli: CLI, logos: [], createdAt: "2026-11-18T15:00:00.000Z", graphicCues: [{ n: 1, words: "too many SKUs", kind: "graphic", show: "A stack of boxes.", seconds: 4, style: null }], words: [], facts: { seconds: 12, width: 1080, height: 1920, fps: 30 }, explainer: { voice: "sallie", teleprompter: "Too many SKUs.\n" }, ...over });
+  it("says there are no words yet, not that every word is in transcript.json", () => {
+    const notes = projectFiles(preSallie()).get("CLAUDE.md");
+    assert.ok(!notes.includes("Every word said, with its time and its id, is in `transcript.json`"), "must not claim words exist");
+    assert.ok(notes.includes("no words yet") || notes.includes("none yet"), "should say there are no words yet");
+  });
+  it("says there is no clock yet, not that times are on media/voiceover.m4a", () => {
+    const notes = projectFiles(preSallie()).get("CLAUDE.md");
+    assert.ok(!notes.includes("on the clock of `media/voiceover.m4a`"), "must not claim voiceover exists");
+    assert.ok(notes.includes("no voiceover yet") || notes.includes("no clock") || notes.includes("There is no"), "should say there is no clock");
+  });
+  it("says the cues have no times yet, not that they are on the voiceover's clock", () => {
+    const notes = projectFiles(preSallie()).get("CLAUDE.md");
+    assert.ok(!notes.includes("on the voiceover's clock"), "must not reference voiceover clock in cues");
+    assert.ok(notes.includes("no times yet"), "should say cues have no times yet");
+  });
+  it("still says it is an explainer", () => {
+    const notes = projectFiles(preSallie()).get("CLAUDE.md");
+    assert.ok(notes.includes("**This explainer.**"), "should still identify as an explainer");
+  });
+});
