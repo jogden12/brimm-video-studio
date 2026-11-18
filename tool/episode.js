@@ -238,8 +238,8 @@ const isPlannedProject = (p) => isObject(p) && Object.keys(p).length === 4 && is
     never does; when and on which Mac it was planned and when its package was last set (`set`, or null before the first); the
     cues, which graphic-cues.js reads and so are only looked at as objects here; the shots; the teleprompter's lines; `filmed`
     (PR H5): null while there is no footage; `consent` (PR H5a), once a client's agreement is noted for any part: a list of
-    { id, label, at } (isConsent); and `project` (PR H6), once a HeyGen explainer's project is made: { name, madeAt, on, opened }
-    (isPlannedProject), which only an explainer read by a HeyGen voice has. A plan with none of these has none: each key is there only
+    { id, label, at } (isConsent); and `project` (PR H6, bridge PR), once a planned video's project is made: { name, madeAt, on, opened }
+    (isPlannedProject), which any planned video may have. A plan with none of these has none: each key is there only
     once there is something to keep in it. */
 const isPlanned = (p) => isObject(p) && PLANNED_ROUTES.includes(p.route) && isText(p.title)
   && (p.voice === null || (p.route === "explainer" && PLANNED_VOICES.includes(p.voice)))
@@ -248,7 +248,7 @@ const isPlanned = (p) => isObject(p) && PLANNED_ROUTES.includes(p.route) && isTe
   && Array.isArray(p.lines) && p.lines.every((line) => typeof line === "string")
   && (p.filmed === null || isTime(p.filmed) || isObject(p.filmed))
   && (p.consent === undefined || (Array.isArray(p.consent) && p.consent.every(isConsent)))
-  && (p.project === undefined || (p.route === "explainer" && p.voice === "heygen" && isPlannedProject(p.project)));
+  && (p.project === undefined || isPlannedProject(p.project));
 /** The recording as it was on the Mac that holds it, once it is copied into Original files (layout 6, L6): `{ file, bytes, mtimeMs }`, and
     nothing else: its file's name in the episode's own folder there (one name, no folder), its size and its time. */
 const isOriginal = (o) => isObject(o) && Object.keys(o).length === 3 && isText(o.file) && !/[/\\]/.test(o.file) && o.file !== "." && o.file !== ".."
