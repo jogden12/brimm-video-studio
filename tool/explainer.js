@@ -79,20 +79,19 @@ export function voiceSeconds(lines) {
   return Math.max(10, Math.ceil((words * 60) / 150));
 }
 
-/** Why `app` will not open the project of the planned video `record`, in words, or "": every plan but a HeyGen explainer is refused in the gate's own
-    words; a HeyGen explainer whose package is not set has no script to make a project of; a project made on another Mac is that Mac's to open. */
+/** Why `app` will not open the project of the planned video `record`, in words, or "": a plan whose package is not set has no script
+    to make a project of; a project made on another Mac is that Mac's to open. Any planned video with its package set may have a project. */
 export function voiceProjectWhy(ctx, record) {
   const { planned } = record;
-  if (planned.route !== "explainer" || planned.voice !== "heygen") return noFootageWhy(record);
   if (planned.set === null) return `The plan for "${shownName(record)}" isn't made yet: its guide and its teleprompter script come first.`;
   if (planned.project && planned.project.on !== ctx.machine) return `Its HyperFrames project is on ${onMac(planned.project.on)}: open it there.`;
   return "";
 }
 
-/** Open the project of a planned HeyGen explainer in the app, making it first when the plan has none (PR H6): an upright project with no media from the
-    package (explainerHtml with no voice, as long as voiceSeconds says; transcript.json []; every cue with no place), in the plan's work folder, named as a
-    main project. One write gives the plan `planned.project`, and each open adds its time. Nothing is claimed or brought. A project the plan names whose
-    folder is gone is not made again (its voice is made in it), and a folder a run left that the plan does not know is taken as the project it is.
+/** Open the project of a planned video in the app, making it first when the plan has none (PR H6, bridge PR): a project with no media from the
+    package, in the plan's work folder, named as a main project. An explainer's is upright (1080x1920); a script's is landscape (1920x1080).
+    One write gives the plan `planned.project`, and each open adds its time. Nothing is claimed or brought. A project the plan names whose
+    folder is gone is not made again, and a folder a run left that the plan does not know is taken as the project it is.
     `deps`: `cli`, `guidance` (the path of the CLAUDE.md the package ships), `cues` (the plan's graphic cues, plan-project.js), `save(next)` which
     writes the plan's next record and resolves 0 when it has, and `spawn`, `env`, `node`, `chat` as app.js openOnly has them. Resolves the exit code. */
 export async function openVoiceProject(ctx, { found, record }, { cli, guidance, cues, save, spawn, env, node, chat }) {
@@ -105,10 +104,14 @@ export async function openVoiceProject(ctx, { found, record }, { cli, guidance, 
     return 1;
   }
   if (!existsSync(dir)) {
+    const isExplainer = record.planned.route === "explainer";
+    const isLandscape = !isExplainer;
+    const seconds = voiceSeconds(record.planned.lines);
     const input = {
       kind: "main", number: 1, short: true, id: record.id, name: record.name.text, spellings: record.spellings, logos: logosIn(ctx.settings.root),
-      facts: { seconds: voiceSeconds(record.planned.lines), width: 1080, height: 1920, fps: 30 }, words: [], plan: null, graphicCues: cues,
-      cli, guidance: readFileSync(guidance, "utf8"), createdAt: at, explainer: { voice: "heygen", teleprompter: teleprompterText(record.planned.lines) }
+      facts: { seconds, width: isLandscape ? 1920 : 1080, height: isLandscape ? 1080 : 1920, fps: 30 }, words: [], plan: null, graphicCues: cues,
+      cli, guidance: readFileSync(guidance, "utf8"), createdAt: at,
+      ...(isExplainer ? { explainer: { voice: record.planned.voice ?? "heygen", teleprompter: teleprompterText(record.planned.lines) } } : {})
     };
     await withReferences(ctx, refNamesOf(projectCues(input)), (references) => writeProject(dir, projectFiles({ ...input, references })));
   }

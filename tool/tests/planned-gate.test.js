@@ -22,6 +22,7 @@ const WRITER = { commit: "c709b57", on: "Mac Studio" };
 const WAITING = "This video is waiting for its answer: say what it is first.";
 const LEFT = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const NOT_PLANNED_YET = `"${TITLE}" is a planned video, and it isn't made from its footage yet.`;
+const PLAN_NOT_SET = `The plan for "${TITLE}" isn't made yet: its guide and its teleprompter script come first.`;
 const TO_DROP = `To drop a plan, say "drop the plan for ${TITLE}".`;
 
 /** A whole planned record at rev 1, and the video it must not have. */
@@ -247,11 +248,12 @@ describe("a planned episode refused by the gate in a command, in the words of th
     const t = setup();
     try {
       folderWith(t, planned());
-      for (const ask of [["open", TITLE], ["app", TITLE], ["finish", TITLE], ["kind", TITLE, "raw", "--private", "no"], ["show", TITLE, "transcript"], ["free", TITLE], ["reels", TITLE], ["ask", TITLE]]) {
+      for (const ask of [["open", TITLE], ["finish", TITLE], ["kind", TITLE, "raw", "--private", "no"], ["show", TITLE, "transcript"], ["free", TITLE], ["reels", TITLE], ["ask", TITLE]]) {
         const said = [];
         const code = await editMain(ask, { ...t.ctx.deps, say: (line) => said.push(line) });
         assert.deepEqual([code, said], [1, [NOT_PLANNED_YET]], ask.join(" "));
       }
+      { const said = []; assert.deepEqual([await editMain(["app", TITLE], { ...t.ctx.deps, say: (line) => said.push(line) }), said], [1, [PLAN_NOT_SET]], "app"); }
       const said = [];
       assert.equal(await editMain(["leave", TITLE], { ...t.ctx.deps, say: (line) => said.push(line) }), 1);
       assert.deepEqual(said, [TO_DROP]);

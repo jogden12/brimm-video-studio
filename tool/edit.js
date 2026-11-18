@@ -1473,7 +1473,7 @@ export async function app(ctx, rest) {
   if (!got.found) return got.code;
   const { found } = got;
   if (recordKind(got.record) === "finished") return refuse(ctx, finishedHasNoProject(got.record.name.text));
-  // A planned video (PR H6): only a HeyGen explainer has a project before it is a video, and no question or Reel is asked of a plan.
+  // A planned video (PR H6, bridge PR): any planned video with its package set may have a project, and no question or Reel is asked of a plan.
   const isPlan = isPlannedRecord(got.record);
   if (isPlan) {
     const why = question ? noFootageWhy(got.record) : voiceProjectWhy(ctx, got.record);
@@ -1483,7 +1483,8 @@ export async function app(ctx, rest) {
   const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
   if (isPlan) {
     if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
-    const kit = { cues: graphicCuesOf(got.record.planned.cues, { kinds: SHOT_KINDS }).cues };
+    const kinds = got.record.planned.route === "explainer" ? SHOT_KINDS : GRAPHIC_CUE_KINDS;
+    const kit = { cues: graphicCuesOf(got.record.planned.cues, { kinds }).cues };
     return openVoiceProject(ctx, { found, record: got.record }, {
       env: ctx.deps.env, ...ctx.deps.app, cli, guidance: ctx.deps.app?.guidance ?? guidanceOf(ctx.home), cues: kit.cues,
       save: (next) => save(ctx, { ...found, record: got.record }, next, "")
