@@ -605,8 +605,8 @@ describe("planned.project, the HyperFrames project of a HeyGen explainer before 
     assert.equal(episodeFault(withProject({ ...PROJECT, opened: [] })), "", "made, never opened");
     assert.equal(episodeFault(withProject({ ...PROJECT, opened: [AT, "2026-11-04T10:00:00-05:00"] })), "");
   });
-  it("belongs to a HeyGen explainer alone: a script, an explainer in her voice and one with no voice chosen have none", () => {
-    for (const over of [{ route: "script" }, { voice: "sallie" }, { voice: null }]) assert.notEqual(episodeFault(withProject(PROJECT, over)), "", JSON.stringify(over));
+  it("belongs to any planned video: a script, an explainer in her voice and one with no voice chosen may each have one", () => {
+    for (const over of [{ route: "script", voice: null }, { voice: "sallie" }, { voice: null }]) assert.equal(episodeFault(withProject(PROJECT, over)), "", JSON.stringify(over));
   });
   it("is refused when it is another shape: a missing key, one more, a name that leads out of its folder, opened that is no list of times", () => {
     for (const bad of [
@@ -679,10 +679,10 @@ describe("projectFiles, an explainer's project (PR H6)", () => {
     assert.equal(files.get("brimm/teleprompter.txt"), TELEPROMPTER);
     assert.deepEqual(json(files, "brimm/cut-suggestions.json"), { version: 1, clock: "recording", suggestions: [] });
   });
-  it("needs no video of the project for a HeyGen voice, and an absolute path of the voiceover's copy for her own", () => {
+  it("needs no video of the project for a HeyGen voice or a pre-voice sallie, and an absolute path of the voiceover's copy when she has one", () => {
     assert.doesNotThrow(() => projectFiles(heygen({ video: undefined })));
+    assert.doesNotThrow(() => projectFiles(hers({ video: undefined })));
     assert.throws(() => projectFiles(hers({ video: "media/x.m4a" })), /video must be an absolute path/);
-    assert.throws(() => projectFiles(hers({ video: undefined })), /video must be an absolute path/);
   });
   it("puts her words in transcript.json, spelled as she spells them, and places the cues on them; a cue her words do not hold has no place", () => {
     const files = projectFiles(hers());
@@ -1392,18 +1392,16 @@ describe("app, for a planned HeyGen explainer: its project, with no media (PR H6
     assert.deepEqual(planOf(t).planned.project, { name: HEYGEN_PROJECT, madeAt: atOf(t), on: "Mac Studio", opened: [atOf(t)] });
     t.done();
   });
-  it("refuses a script, an explainer in her voice and one with no voice chosen in the gate's words, on a Mac set up for the app or not, and makes and writes nothing", async () => {
+  it("refuses a script, an explainer in her voice and one with no voice chosen on a Mac not set up for the app, in its words", async () => {
     for (const [what, title, make] of [["a script", OTHER, (t) => script(t)], ["her voice", TITLE, (t) => explainer(t, { voice: "sallie" })], ["no voice chosen", TITLE, (t) => explainer(t, { voice: null })]]) {
-      for (const made of [world, setup]) {
-        const t = made();
-        await make(t);
-        const before = treeOf(t);
-        const r = await on(depsOf(t), "app", title);
-        assert.deepEqual([r.code, r.said], [1, [GATE_SAYS(title)]], what);
-        assert.deepEqual(treeOf(t), before, what);
-        assert.deepEqual([t.started, t.opened, t.notices, runsOf(t)], [[], [], [], []], what);
-        t.done();
-      }
+      const t = setup();
+      await make(t);
+      const before = treeOf(t);
+      const r = await on(depsOf(t), "app", title);
+      assert.deepEqual([r.code, r.said], [1, ["This Mac isn't set up for HyperFrames yet: ask Jason."]], what);
+      assert.deepEqual(treeOf(t), before, what);
+      assert.deepEqual([t.started, t.opened, t.notices, runsOf(t)], [[], [], [], []], what);
+      t.done();
     }
   });
   it("refuses a HeyGen explainer whose package is not set yet, in words, and makes nothing", async () => {
@@ -1800,6 +1798,96 @@ describe("H6 fix round 1", () => {
     assert.deepEqual(t.started, []);
     assert.equal((await on(depsOf(t), "join", "--now", nameOf(t), "--voice")).code, 1);
     assert.ok(!existsSync(join(t.root, "Episodes", nameOf(t), "HeyGen voice 1.wav")));
+    t.done();
+  });
+});
+
+// --- Opening a planned video's project before it has media: sallie explainers and scripts (the bridge) ---
+
+describe("voiceProjectWhy, for sallie explainers and scripts with set packages: the bridge lets them through (bridge PR)", () => {
+  it("lets a sallie explainer with a set package through, as a HeyGen one is", async () => {
+    const { voiceProjectWhy } = await import("../explainer.js");
+    const ctx = { machine: "Mac Studio" };
+    const sallie = plan({ route: "explainer", voice: "sallie", title: TITLE });
+    assert.equal(voiceProjectWhy(ctx, sallie), "", "a sallie explainer with its package set should pass");
+  });
+  it("lets a script with a set package through", async () => {
+    const { voiceProjectWhy } = await import("../explainer.js");
+    const ctx = { machine: "Mac Studio" };
+    const scripted = plan({ route: "script", title: OTHER, planned: { shots: [{ n: 1, kind: "talking", what: "Open." }] } });
+    assert.equal(voiceProjectWhy(ctx, scripted), "", "a script with its package set should pass");
+  });
+  it("still refuses a plan whose package is not set", async () => {
+    const { voiceProjectWhy } = await import("../explainer.js");
+    const ctx = { machine: "Mac Studio" };
+    const noSet = plan({ route: "explainer", voice: "sallie", planned: { set: null } });
+    assert.ok(voiceProjectWhy(ctx, noSet) !== "", "unset package should be refused");
+  });
+  it("still refuses a project made on another Mac", async () => {
+    const { voiceProjectWhy } = await import("../explainer.js");
+    const ctx = { machine: "Mac Studio" };
+    const elsewhere = plan({ route: "explainer", voice: "sallie", planned: { project: { name: "P", madeAt: AT, on: "Sallie's laptop", opened: [] } } });
+    assert.ok(voiceProjectWhy(ctx, elsewhere).includes("Sallie's laptop"), "other Mac should be refused");
+  });
+});
+
+describe("isPlanned and episodeFault accept planned.project on sallie explainers and scripts (bridge PR)", () => {
+  it("accepts a sallie explainer with planned.project", () => {
+    const record = plan({ route: "explainer", voice: "sallie", planned: { project: { name: "Proj", madeAt: AT, on: "Mac Studio", opened: [] } } });
+    assert.equal(episodeFault(record), "", `should be whole: ${episodeFault(record)}`);
+    assert.equal(isPlannedRecord(record), true, "should be a planned record");
+  });
+  it("accepts a script with planned.project", () => {
+    const record = plan({ route: "script", voice: null, planned: { shots: [{ n: 1, kind: "talking", what: "Open." }], project: { name: "Proj", madeAt: AT, on: "Mac Studio", opened: [] } } });
+    assert.equal(episodeFault(record), "", `should be whole: ${episodeFault(record)}`);
+    assert.equal(isPlannedRecord(record), true, "should be a planned record");
+  });
+});
+
+describe("app, for a planned sallie explainer: its project, with no media (bridge PR)", () => {
+  it("makes an upright project from the package, with no media, and opens it", async () => {
+    const t = world();
+    await explainer(t, { voice: "sallie" });
+    const r = await on(depsOf(t), "app", TITLE);
+    assert.equal(r.code, 0, r.text);
+    assert.ok(r.said.some((line) => line.includes("open")), "should say it opened");
+    const dir = workOf(t);
+    const projectDirs = readdirSync(dir).filter((n) => statSync(join(dir, n)).isDirectory());
+    assert.ok(projectDirs.length >= 1, "a project folder should exist");
+    const projectDir = join(dir, projectDirs[0]);
+    const html = readFileSync(join(projectDir, "index.html"), "utf8");
+    assert.ok(html.includes("1080"), "page should be 1080 wide (upright)");
+    assert.ok(html.includes("1920"), "page should be 1920 tall (upright)");
+    assert.ok(!html.includes("<video"), "page should have no video element");
+    assert.ok(!html.includes("<audio"), "page should have no audio element (voice not recorded yet)");
+    assert.ok(!existsSync(join(projectDir, "media/recording.mp4")), "no recording");
+    assert.ok(!existsSync(join(projectDir, "media/voiceover.m4a")), "no voiceover yet");
+    const record = planOf(t);
+    assert.ok(record.planned.project, "planned.project should be written");
+    assert.equal(record.planned.project.on, "Mac Studio");
+    t.done();
+  });
+});
+
+describe("app, for a planned script: its project, with no media (bridge PR)", () => {
+  it("makes a landscape project from the package, with no media, and opens it", async () => {
+    const t = world();
+    await script(t);
+    const r = await on(depsOf(t), "app", OTHER);
+    assert.equal(r.code, 0, r.text);
+    assert.ok(r.said.some((line) => line.includes("open")), "should say it opened");
+    const dir = workOf(t, OTHER);
+    const projectDirs = readdirSync(dir).filter((n) => statSync(join(dir, n)).isDirectory());
+    assert.ok(projectDirs.length >= 1, "a project folder should exist");
+    const projectDir = join(dir, projectDirs[0]);
+    const html = readFileSync(join(projectDir, "index.html"), "utf8");
+    assert.ok(html.includes("1920"), "page should be 1920 wide (landscape)");
+    assert.ok(html.includes("1080"), "page should be 1080 tall (landscape)");
+    assert.ok(!html.includes("<video"), "page should have no video element");
+    assert.ok(!existsSync(join(projectDir, "media/recording.mp4")), "no recording yet");
+    const record = planOf(t, OTHER);
+    assert.ok(record.planned.project, "planned.project should be written");
+    assert.equal(record.planned.project.on, "Mac Studio");
     t.done();
   });
 });

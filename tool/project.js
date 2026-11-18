@@ -251,6 +251,64 @@ ${faces.join("\n")}
 `;
 }
 
+/** The page of a planned script before its recording (the bridge): landscape, 1920 by 1080, the brand's mist background, with the brand's
+    typefaces and GSAP from the project's own folders, one paused timeline, and no media. `facts` need `seconds` (the teleprompter's estimated
+    length). The agent builds the video here; the recording goes in later. */
+export function scriptHtml(facts) {
+  const seconds = Number(facts?.seconds);
+  if (!(seconds > 0)) throw new Error("scriptHtml: the facts need the script's seconds");
+  const width = 1920;
+  const height = 1080;
+  const length = secondsText(seconds);
+  const faces = FONTS.map((f) => `      @font-face { font-family: "${f.family}"; src: url("assets/fonts/${f.file}") format("${f.format}"); font-weight: ${f.weight}; font-style: ${f.style}; }`);
+  return `<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=${width}, height=${height}" />
+    <script src="vendor/gsap.min.js"></script>
+    <style>
+${faces.join("\n")}
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: ${width}px;
+        height: ${height}px;
+        overflow: hidden;
+        background: ${MIST};
+      }
+      body {
+        font-family: "Josefin Sans", sans-serif;
+        font-weight: 400;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="${length}"
+      data-width="${width}"
+      data-height="${height}"
+    >
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
+`;
+}
+
 // --- The words, and what Studio suggests by them ---
 
 /** The company's name as it is written, whatever the transcriber wrote: "brim", "Brim" and "BRIM" are BRIMM, so "the Brim" is
@@ -863,8 +921,8 @@ export function projectFiles(input) {
   const { kind } = input ?? {};
   if (!KINDS.includes(kind)) throw new Error(`projectFiles: a project's kind is "main", "reel" or "clip", not ${JSON.stringify(kind)}`);
   const explainer = explainerOf(input);
-  // A HeyGen explainer's project has no media at all: the voice is made in it, by the app's agent, after.
-  for (const key of explainer !== null && explainer.voice === "heygen" ? ["cli"] : ["video", "cli"]) if (!isAbsolute(String(input[key] ?? ""))) throw new Error(`projectFiles: ${key} must be an absolute path`);
+  const hasMedia = input.video !== undefined;
+  for (const key of hasMedia ? ["video", "cli"] : ["cli"]) if (!isAbsolute(String(input[key] ?? ""))) throw new Error(`projectFiles: ${key} must be an absolute path`);
   if (kind === "reel" && !Number.isInteger(input.part?.reel)) throw new Error("projectFiles: a Reel's project needs its part, {reel: n}");
   if (kind === "reel" && !isStretch(input.stretch)) throw new Error("projectFiles: a Reel's project needs its stretch of the recording, { start, end } in seconds, from 0 at the earliest and ending after it starts");
   const episode = kind !== "clip";
@@ -881,7 +939,7 @@ export function projectFiles(input) {
   const footage = footageOf(input);
 
   const files = new Map();
-  files.set("index.html", explainer !== null ? explainerHtml(input.facts, { voiceover: explainer.voice === "sallie" }) : indexHtml(input.facts, crop));
+  files.set("index.html", explainer !== null ? explainerHtml(input.facts, { voiceover: explainer.voice === "sallie" && hasMedia }) : hasMedia ? indexHtml(input.facts, crop) : scriptHtml(input.facts));
   files.set("meta.json", jsonText({ id: name, name, createdAt: input.createdAt }));
   files.set("hyperframes.json", jsonText(HYPERFRAMES_JSON));
   files.set("package.json", jsonText({ name, private: true, type: "module", scripts: SCRIPTS }));
@@ -905,9 +963,11 @@ export function projectFiles(input) {
   // The pictures she chose from the reference folder, to follow and never to copy (the rule's last sentence): each under the name Claude reads it by.
   for (const reference of references) files.set(`brimm/references/${projectNameOf(reference.name)}`, { copy: reference.path });
   files.set("node_modules/.bin/hyperframes", { link: input.cli });
-  // The video is moved in last, as the recording; an explainer's voice is its voiceover, and a HeyGen explainer has none yet (PR H6).
-  if (explainer === null) files.set("media/recording.mp4", { move: input.video });
-  else if (explainer.voice === "sallie") files.set(VOICEOVER, { move: input.video });
+  // The video is moved in last, as the recording; an explainer's voice is its voiceover. A project before its media has none.
+  if (hasMedia) {
+    if (explainer === null) files.set("media/recording.mp4", { move: input.video });
+    else if (explainer.voice === "sallie") files.set(VOICEOVER, { move: input.video });
+  }
   // The copies of a video made from a plan's footage, with no sound, each under the name its cue gives it (PR H5b): moved in as the recording is.
   for (const { path, from } of footage ?? []) files.set(path, { move: from });
 

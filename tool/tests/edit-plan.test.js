@@ -53,6 +53,7 @@ const PLAIN = /\/|--|\bnpx\b|\bnode\b|edit\.js|\bplan (?:new|set)\b/;
 const isPlain = (line) => !PLAIN.test(line);
 
 const NOT_PLANNED_YET = `"${TITLE}" is a planned video, and it isn't made from its footage yet.`;
+const PLAN_NOT_SET = `The plan for "${TITLE}" isn't made yet: its guide and its teleprompter script come first.`;
 const TO_DROP = `To drop a plan, say "drop the plan for ${TITLE}".`;
 const NOT_SAVED = "Nothing was saved.";
 
@@ -694,7 +695,7 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     const before = bytesIn(folder);
     for (const name of names) {
       const r = await on(depsOf(t), name, ...ASKED[name]);
-      const why = name === "leave" ? TO_DROP : NOT_PLANNED_YET;
+      const why = name === "leave" ? TO_DROP : name === "app" ? PLAN_NOT_SET : NOT_PLANNED_YET;
       assert.deepEqual([r.code, r.said], [1, [why]], name);
     }
     assert.deepEqual([t.started, t.calls, t.opened], [[], [], []]);
