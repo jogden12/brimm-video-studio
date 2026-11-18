@@ -55,6 +55,17 @@ BRIMM Ops takes Studio's hand-off file. These carry over exactly. Change any of 
 - HyperFrames telemetry is off. Never `publish`, `cloud`, `lambda` or `cloudrun`.
 - Each project carries BRIMM's rules for the agent (`docs/phase-a0/brief.md`, `settings.json`). The app starts its agent with only the user's own settings, so a project's `.claude/settings.json` has no effect in the app: the notes are what guide the agent there.
 
+## The front door
+
+A session in Studio accepts any input: a full script, an idea with or without notes, or a recording. Determine what the user gave you, ask what you need, and create the right plan.
+
+- **A script** (shot markers like `SHOT 1:`, graphic annotations like `[GRAPHIC: …]` or `[ON SCREEN: …]`, voiceover markers, or several paragraphs of spoken words): parse the cues, shots and lines from it and create the plan in one step with `plan new "<title>" --cue "kind | seconds | words | show" --shot "kind | what" --line "paragraph"`. An explainer script has no shots (`--explainer`).
+- **An idea with notes** (a topic with bullet points or structured notes): ask what kind of video (a script she'll film, or an explainer), then guide her to flesh it out into a script or into cues and lines. Create the plan once she's ready.
+- **A bare idea** (a short thought): ask what kind of video, what it covers, and who it's for, then guide as above.
+- **A recording** (a file dropped in): this is the existing path; `kind` determines the route.
+- Cue string format: `"<kind> | <seconds> | <words> | <show>"` where kind is graphic, words, b-roll or screen. Shot string format: `"<kind> | <what>"` where kind is talking, screen or b-roll. Lines are plain paragraphs.
+- The classifier and parser are in `tool/front-door.js` (classifyText, parseScript, toCueString, toShotString) for reference and tests. A session uses its own reasoning to classify and parse, then calls `plan new` with the right flags.
+
 ## The brand and media
 
 - The brand is The BRIMM's brand guide: its colours (navy, sand, mist and the rest). The typeface is Josefin Sans (Google Fonts) in place of Sweet Sans Pro. Fonts come only from Adobe Fonts or Google Fonts. The script is Allison (Google Fonts) in place of Sinthya (`tool/brand/brand.md`). The name on screen is Sallie Ogden.

@@ -128,7 +128,7 @@ describe("plan new", () => {
   });
   it("is the help, with 2, when it is given no title, and writes nothing", async () => {
     const t = setup();
-    for (const words of [[], ["new"], ["new", ""], ["new", "   "], ["new", "A", "B"], ["new", "A", "--zzz"], ["new", "A", "--cue", "x"], ["new", "A", "--explainer", "--shot", "x"]]) {
+    for (const words of [[], ["new"], ["new", ""], ["new", "   "], ["new", "A", "B"], ["new", "A", "--zzz"], ["new", "A", "--explainer", "--shot", "x"]]) {
       const r = await on(depsOf(t), "plan", ...words);
       assert.equal(r.code, 2, words.join(" "));
       assert.equal(r.said.join("\n"), HELP, words.join(" "));
@@ -232,6 +232,62 @@ describe("plan new", () => {
     const lines = [(await on(depsOf(t), "plan", "new", TITLE)).said, (await on(depsOf(t), "plan", "new", TITLE)).said, (await on(depsOf(t), "plan", "new", "Why", "--explainer")).said, (await on(depsOf(t), "plan", "new", "X", "--voice", "sallie")).said].flat();
     assert.ok(lines.length >= 4);
     for (const line of lines) assert.ok(isPlain(line), line);
+    t.done();
+  });
+});
+
+describe("plan new with an inline package (the front door's path)", () => {
+  it("creates a plan with its package already set, in one command, with its three files in the folder", async () => {
+    const t = setup();
+    const r = await on(depsOf(t), "plan", "new", TITLE, "--line", "Too many SKUs will sink a small shop.", "--line", "Here is why.");
+    assert.equal(r.code, 0, r.text);
+    assert.match(r.text, /is planned/);
+    assert.match(r.text, /saved/);
+    const folder = folderOf(t);
+    assert.ok(existsSync(join(folder, "teleprompter.txt")));
+    assert.ok(existsSync(join(folder, "shot list.md")));
+    assert.ok(existsSync(join(folder, "video guide.md")));
+    const record = readEpisode(folder).record;
+    assert.deepEqual(record.planned.lines, ["Too many SKUs will sink a small shop.", "Here is why."]);
+    assert.notEqual(record.planned.set, null);
+    assert.equal(record.rev, 1);
+    t.done();
+  });
+
+  it("creates a plan with cues, shots and lines in one command", async () => {
+    const t = setup();
+    const r = await on(depsOf(t), "plan", "new", TITLE,
+      "--cue", "graphic | 4 | too many SKUs | A stack of boxes.",
+      "--shot", "talking | Open on the problem.",
+      "--line", "Too many SKUs will sink a small shop.");
+    assert.equal(r.code, 0, r.text);
+    const record = recordOf(t);
+    assert.equal(record.planned.cues.length, 1);
+    assert.equal(record.planned.shots.length, 1);
+    assert.deepEqual(record.planned.lines, ["Too many SKUs will sink a small shop."]);
+    t.done();
+  });
+
+  it("refuses a bad package entry without creating the folder", async () => {
+    const t = setup();
+    const r = await on(depsOf(t), "plan", "new", TITLE, "--cue", "not-a-kind | 4 | words | show");
+    assert.equal(r.code, 1, r.text);
+    assert.deepEqual(existsSync(join(t.root, "Episodes")) ? readdirSync(join(t.root, "Episodes")) : [], []);
+    t.done();
+  });
+
+  it("creates an explainer plan with its package in one command (no shot list)", async () => {
+    const t = setup();
+    const r = await on(depsOf(t), "plan", "new", "Why SKUs", "--explainer",
+      "--cue", "graphic | 4 | why | A chart.",
+      "--line", "Here is why SKUs matter.");
+    assert.equal(r.code, 0, r.text);
+    const folder = folderOf(t, "Why SKUs");
+    const record = readEpisode(folder).record;
+    assert.equal(record.planned.route, "explainer");
+    assert.equal(record.planned.cues.length, 1);
+    assert.deepEqual(record.planned.lines, ["Here is why SKUs matter."]);
+    assert.notEqual(record.planned.set, null);
     t.done();
   });
 });

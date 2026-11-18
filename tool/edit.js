@@ -31,8 +31,10 @@
 //                                         the reference folder (references.js): what is in it; a picture of it copied into her
 //                                         Looking folder for Claude to look at; or copied into an episode's HyperFrames project
 //                                         on this Mac to be followed as a style. Studio only reads the folder
-//   node edit.js plan new "<title>" [--explainer [--voice sallie|heygen]]
-//                                         plan a video before it is shot: an episode with no footage, filed in Episodes (plan.js)
+//   node edit.js plan new "<title>" [--explainer [--voice sallie|heygen]] [--cue "…"]… [--shot "…"]… [--line "…"]…
+//                                         plan a video before it is shot: an episode with no footage, filed in Episodes (plan.js).
+//                                         With --cue, --shot or --line the package is set in the same step (the front door's
+//                                         one-shot path: a session that has a parsed script creates the plan with its package)
 //   node edit.js plan "<planned>" [set … | drop]
 //                                         a planned video's package (its video guide, shot list and teleprompter script): said in
 //                                         plain words, set whole in one record write, or dropped
@@ -321,13 +323,15 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         follow, and say what to say in HyperFrames to have it followed. The gate asks
                                         first, as for app; a finished video has no main project, a short video no Reels,
                                         and a project that is not on this Mac is to be opened first
-  node edit.js plan new "<title>" [--explainer [--voice sallie|heygen]]
+  node edit.js plan new "<title>" [--explainer [--voice sallie|heygen]] [--cue "…"]… [--shot "…"]… [--line "…"]…
                                         plan a video before it is shot, from her script: an episode with no footage yet,
                                         filed in Episodes under the title she gives (at most 80 characters; a title already
                                         planned and not yet filmed is refused). With --explainer it is a video of graphics
                                         and words on screen alone, whose voice is hers or a HeyGen voice she picks in
-                                        HyperFrames (--voice says which). Its guide, shot list and teleprompter script
-                                        are made next, by plan … set
+                                        HyperFrames (--voice says which; --shot is not valid with --explainer). Its guide,
+                                        shot list and teleprompter script are made next, by plan … set, unless --cue,
+                                        --shot or --line are given here: then the package is set in the same step (the
+                                        front door's one-shot path, for a session that has a parsed script)
   node edit.js plan "<planned>" set [--cue "<kind> | <seconds> | <words> | <what to show>[ | <key>: <value>]…"]…
                      [--shot "<kind> | <what>"]… [--line "<paragraph>"]…
                                         replace the whole package of a planned video in one record write: its cues (kind
@@ -7072,10 +7076,12 @@ async function refs(ctx, rest) {
   return useIn(ctx, where, asked.name);
 }
 
-/** `plan new "<title>" [--explainer [--voice sallie|heygen]]` and `plan "<planned>" [set … | drop]`: the planned episode (plan.js; PR H4), edit.js being
-    only the wiring. `plan new` names no episode, so the gate is never asked of it. The others find their episode as every command does, through
-    the gate, which lets a planned episode through `plan` and `name` alone (gate.js PLANNED) and refuses a video not yet answered, a session and
-    a video held beside a session in the gate's own words. */
+/** `plan new "<title>" [--explainer [--voice sallie|heygen]] [--cue "…"]… [--shot "…"]… [--line "…"]…` and `plan "<planned>" [set … | drop]`:
+    the planned episode (plan.js; PR H4), edit.js being only the wiring. `plan new` names no episode, so the gate is never asked of it.
+    With --cue, --shot or --line the package is set in the same step as plan new (the front door's one-shot path: a session that has a
+    parsed script creates the plan and its package together). The others find their episode as every command does, through the gate, which
+    lets a planned episode through `plan` and `name` alone (gate.js PLANNED) and refuses a video not yet answered, a session and a video
+    held beside a session in the gate's own words. */
 async function plan(ctx, rest) {
   const { words, flags } = flagsOf(rest, ["cue", "shot", "line", "voice"]);
   const asked = planAsked(words, flags);
