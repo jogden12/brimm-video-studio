@@ -36,6 +36,8 @@ Keys in this order, and no others: the check refuses any key the contract does n
 
 Beside it, each written `.writing` then renamed: `written.json` (the last record each episode was written at, to see Dropbox undo a write), `seen.json`, `pending/` (late checks owed: the import's own, `record/`, `final/`, `original/`), `importing/` (status files, local Macs), `access.json`, `guide.json` (her guide's done steps, by hand-off), `update-check.json`, `lock-cache.json` (the guard's cached lock check, 30 s), `progress/`, `receipts/`, `held/`. A session's words for one chat: `~/Library/Application Support/BRIMM Video Words/<chatId>/`, cleared after a day. Logs: `~/Library/Logs/brimm-video.log`, `brimm-video-claude-check.log`.
 
+`~/Library/Application Support/BRIMM Video/app-version.json` (`app-version.js`; written whole, temp then rename): `{ version, build, at }`, the HyperFrames app's version last seen (`CFBundleShortVersionString`, `CFBundleVersion` of the first copy, `/Applications` before `~/Applications`). The first one seen is not a change; a later different one is said once.
+
 Environment: `BRIMM_VIDEO_HOME` (Studio's home instead of `HOME`, absolute only; programs it starts get the real `HOME`), `BRIMM_WHISPER_MODEL`; `install.sh` only: `BRIMM_AGENT_PATH`, `BRIMM_HOMEBREW_DIRS`, `BRIMM_CLAUDE`. No code reads `BRIMM_DB`: read the root from settings.json.
 
 ## Folders
