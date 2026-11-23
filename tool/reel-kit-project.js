@@ -186,7 +186,7 @@ const NON_BLOCK = constants.O_NONBLOCK ?? 0;
 
 /** The text of a plain file at `path` of at most `most` bytes, read the safe way: no link followed, no pipe waited on, looked at once it
     is open. null for anything else, or a file that cannot be read whole now. */
-function readCapped(path, most) {
+export function readCapped(path, most) {
   let fd;
   try {
     fd = openSync(path, constants.O_RDONLY | NO_FOLLOW | NON_BLOCK);
