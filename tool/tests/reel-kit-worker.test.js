@@ -17,7 +17,7 @@ import { bashNeeds, bothSpellings, gatedPlaces, realOf as placeReal } from "../p
 import { studioFolder } from "../studio.js";
 import { CLAUDE_MODEL } from "../unedited.js";
 import {
-  JOBS, OWN_NAMES, WORKER_MODEL, WORKER_TOOLS, jobNotesFile, macLock, macWorkerFile, noteOwnFile, ownFile, processStart, queueFile, queuedFor, runJob, settingsFileOf, statusOf, usageLimited,
+  JOBS, OWN_NAMES, WORKER_MODEL, WORKER_TOOLS, enqueue, jobNotesFile, macLock, queuedOf, readWorkerStatus, workerStatusFile as statusFileOf, macWorkerFile, noteOwnFile, ownFile, processStart, queueFile, queuedFor, runJob, settingsFileOf, statusOf, usageLimited,
   workerArgs, workerDecision, workerPrompt, workerSettings, workerStatusFile, workerTmp
 } from "../reel-kit-worker.js";
 import * as own from "../reel-kit-worker-own.js";
@@ -668,8 +668,8 @@ describe("the worker's status", () => {
   it("a dead worker reads as stopped at its step", async () => {
     const w = world();
     writeState(w.project, { ...readState(w.project), state: "working", job: "edit", step: "cut", pid: 4242 });
-    assert.deepEqual(statusOf(w.project, () => true), { state: "working", step: "cut", needs: [], pid: 4242, why: "" });
-    assert.deepEqual(statusOf(w.project, () => false), { state: "stopped", step: "cut", needs: [], pid: 4242, why: "died" });
+    assert.deepEqual(statusOf(w.project, () => true), { state: "working", step: "cut", needs: [], pid: 4242, why: "", minutesLeft: null });
+    assert.deepEqual(statusOf(w.project, () => false), { state: "stopped", step: "cut", needs: [], pid: 4242, why: "died", minutesLeft: null });
     writeState(w.project, { ...readState(w.project), state: "queued", step: "intake", pid: 4242 });
     assert.equal(statusOf(w.project, () => false).state, "stopped", "a queued job whose run died is stopped too");
     assert.equal(statusOf(join(w.home, "no such project")), null);
@@ -682,7 +682,7 @@ describe("the worker's status", () => {
     process.kill(readState(w.project).worker, "SIGKILL");
     const ended = await job;
     assert.equal(ended.state, "stopped");
-    assert.deepEqual(statusOf(w.project), { state: "stopped", step: "cut", needs: [], pid: process.pid, why: "killed" });
+    assert.deepEqual(statusOf(w.project), { state: "stopped", step: "cut", needs: [], pid: process.pid, why: "killed", minutesLeft: null });
     assert.ok(!existsSync(macLock(w.home)));
   });
 
@@ -1242,5 +1242,57 @@ describe("one worker per Mac", () => {
     writeFileSync(join(other, "work", "go-on"), "");
     await Promise.all([firstJob, revise]);
     assert.equal(readState(w.project).state, "storyboard");
+  });
+});
+
+describe("her chat's own marks (plan Task 11)", () => {
+  it("reads the worker's guess of the minutes left, a whole number from 1 to 600, and nothing else as one", () => {
+    const w = world();
+    mkdirSync(join(w.project, "work"), { recursive: true });
+    const say = (status) => writeFileSync(statusFileOf(w.project), JSON.stringify({ step: "cut", needs: [], ...status }));
+    say({ minutesLeft: 12 });
+    assert.deepEqual(readWorkerStatus(w.project, "edit"), { step: "cut", needs: [], minutesLeft: 12 });
+    for (const minutesLeft of [0, -3, 2.5, "12", 601, null]) {
+      say({ minutesLeft });
+      assert.deepEqual(readWorkerStatus(w.project, "edit"), { step: "cut", needs: [] }, String(minutesLeft));
+    }
+    writeState(w.project, { ...readState(w.project), state: "working", step: "cut", pid: 4242, minutesLeft: 12 });
+    assert.equal(statusOf(w.project, () => true).minutesLeft, 12);
+    writeState(w.project, { ...readState(w.project), minutesLeft: "soon" });
+    assert.equal(statusOf(w.project, () => true).minutesLeft, null);
+  });
+
+  it("puts her chat's queue entry in place, by its id, and the run it started takes it for its own", async () => {
+    const w = world();
+    const alive = (pid) => pid === 4242 || pid === process.pid;
+    enqueue(w.home, { id: "q1", episode: "e-1", key: "reel 3", version: null, mode: "lofi", job: "edit", at: "now", pid: 4242 }, alive);
+    enqueue(w.home, { id: "q1", episode: "e-1", key: "reel 3", version: null, mode: "lofi", job: "edit", at: "again", pid: 4242 }, alive);
+    assert.deepEqual(queuedOf(w.home, "e-1", alive).map((j) => [j.id, j.at]), [["q1", "again"]]);
+    assert.equal(queuedFor(w.home, "e-1", "reel 3", alive).id, "q1");
+    assert.throws(() => enqueue(w.home, { id: "q2" }, alive), /an id and a pid/);
+    // The run takes the entry of its id: one entry, its own pid, until its project is made.
+    let seen = null;
+    const third = join(workFolder(w.home), "Pricing", "Pricing, Reel 3 Reel Kit v1");
+    const scaffold = async (ctx, make) => {
+      seen = queuedOf(w.home, "e-1", alive);
+      mkdirSync(join(third, "work"), { recursive: true });
+      writeState(third, { slug: "abc123-reel-3-v1", key: make.key, mode: make.mode, version: 1, title: make.title });
+      return { dir: third, slug: "abc123-reel-3-v1", version: 1, name: "Pricing, Reel 3 Reel Kit v1" };
+    };
+    const ended = await runJob(ctxOf(w), { job: "edit", episode: "e-1", key: "reel 3", version: null, mode: "lofi", queued: "q1", make: { key: "reel 3", mode: "lofi", title: "Reel three" } },
+      depsOf(w, standIn(w), { scaffold, alive }));
+    assert.equal(ended.state, "storyboard");
+    assert.deepEqual(seen.map((j) => [j.id, j.pid]), [["q1", process.pid]]);
+    assert.deepEqual(queuedOf(w.home, "e-1", alive), []);
+  });
+
+  it("takes a project marked queued with its own pid as its own, and leaves one another live run marked", async () => {
+    const w = world();
+    writeState(w.project, { ...readState(w.project), state: "queued", job: "edit", step: "intake", pid: process.pid });
+    const ended = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, standIn(w), { alive: () => true }));
+    assert.equal(ended.state, "storyboard");
+    writeState(w.project, { ...readState(w.project), state: "queued", job: "edit", step: "intake", pid: 4242 });
+    const left = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, standIn(w), { alive: () => true }));
+    assert.deepEqual([left.state, left.why], ["queued", "running"]);
   });
 });

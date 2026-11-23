@@ -560,6 +560,13 @@ describe("the open guard, IV: falling back to today's, and the hook", () => {
       assert.deepEqual(await guard(w, "Bash", { command: `${w.edit} ${words}` }), { decision: "deny", reason: HELD_NARROWED }, words);
     }
     assert.deepEqual(await guard(w, "Bash", { command: w.edit }), { decision: "deny", reason: HELD_NARROWED });
+    // Of Reel Kit, only the words that name no episode (plan Task 11): its setup and her style pack. No edit is started or followed here.
+    for (const words of ["reelkit status", 'reelkit install "/a/download"', "reelkit style"]) {
+      assert.equal((await guard(w, "Bash", { command: `${w.edit} ${words}` })).decision, "allow", words);
+    }
+    for (const words of ['reelkit start "Pricing talk" reel 2 --mode lofi', 'reelkit status "Pricing talk"', 'reelkit note "Pricing talk" 3fa9c1-reel-2-v1 p02 "x"', 'reelkit go "Pricing talk" 3fa9c1-reel-2-v1', 'reelkit revise "Pricing talk" 3fa9c1-reel-2-v1', 'reelkit resume "Pricing talk" 3fa9c1-reel-2-v1', 'reelkit --now "2026-10-14 Pricing talk (Mac Studio)" start "reel 2" lofi q1', "reelkit", '"reelkit" go "Pricing talk" x']) {
+      assert.deepEqual(await guard(w, "Bash", { command: `${w.edit} ${words}` }), { decision: "deny", reason: HELD_NARROWED }, words);
+    }
     w.done();
   });
   it("narrows a held chat the same way whichever spelling today's guard lets through", async () => {

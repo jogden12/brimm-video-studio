@@ -55,7 +55,7 @@ import { refNamesOf, withReferences } from "./references.js";
 import { REELS_FILE, readReels, reelEntries } from "./reel-candidates.js";
 import { episodeWork } from "./settings.js";
 import {
-  changedSince, copyFits, copyIn, factsIn, fromOf, guidanceOf, jsonIn, logosIn, moveIn, noRecording, noWords, notPutBack, notTheSame, notWhole, nothingAt,
+  byReelKit, changedSince, copyFits, copyIn, factsIn, fromOf, guidanceOf, jsonIn, logosIn, moveIn, noRecording, noWords, notPutBack, notTheSame, notWhole, nothingAt,
   openProjectInApp, plainName, readListed, readWords, recordingChanged, statOf, videoBack, videoGoneAndChanged, videoIn, wordsIn, wordsOfText
 } from "./app.js";
 import { reelCopyKey, reelCopyPaths, requestWorkCopy, workCopyLockOf } from "./workcopy.js";
@@ -109,8 +109,9 @@ export function reelAsked(words) {
   return null;
 }
 
-/** Whether the record lists a project for Reel `n`: one `app … reel <n>` made (state whatever it is). */
-export const madeInApp = (record, n) => (record.app?.projects ?? []).some((p) => p.key === `reel ${n}`);
+/** Whether the record lists a project for Reel `n`: one `app … reel <n>` made (state whatever it is), never a Reel Kit edit (app.js
+    byReelKit). */
+export const madeInApp = (record, n) => (record.app?.projects ?? []).some((p) => p.key === `reel ${n}` && !byReelKit(p));
 
 /** Why `app … reel <n>` may not go on for this episode, from the record alone, in her words, or "" when it may. It is asked before
     anything is claimed or brought, so that a Reel that is not there claims nothing:
@@ -373,7 +374,8 @@ export async function openReelInApp(ctx, { found, record, n }, deps = {}) {
   const work = episodeWork(home, found.name);
   const key = `reel ${n}`;
   const projects = record.app?.projects ?? [];
-  const earlier = projects.find((p) => p.key === key);
+  // A Reel Kit edit of the Reel is never this project: it is not adopted, and it stays in the record beside it (app.js byReelKit).
+  const earlier = projects.find((p) => p.key === key && !byReelKit(p));
 
   let project = earlier && plainName(earlier.name) && existsSync(join(work, earlier.name)) ? earlier : null;
   let candidate = null;
@@ -395,5 +397,5 @@ export async function openReelInApp(ctx, { found, record, n }, deps = {}) {
     ({ project, candidate = null } = taken);
     if (taken.stretch) ctx.say(reelMade(taken.stretch, n));
   }
-  return openProjectInApp(ctx, { record, project, dir: join(work, project.name), projects, keeps: (p) => p.key !== key, at, also: picked(n, candidate), restored }, { save, cli, spawn: deps.spawn, env: deps.env, node: deps.node, chat: deps.chat });
+  return openProjectInApp(ctx, { record, project, dir: join(work, project.name), projects, keeps: (p) => p.key !== key || byReelKit(p), at, also: picked(n, candidate), restored }, { save, cli, spawn: deps.spawn, env: deps.env, node: deps.node, chat: deps.chat });
 }

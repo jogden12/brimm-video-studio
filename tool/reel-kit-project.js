@@ -34,6 +34,8 @@ import { syncPack } from "./reel-kit-style.js";
 import { episodeWork } from "./settings.js";
 import { findPrograms } from "./unedited.js";
 import { recordingAt, recordingStat } from "./where.js";
+import { processStart, queuedFor, statusOf } from "./reel-kit-worker.js";
+import { isRunning } from "./run.js";
 import { makeWorkCopy } from "./workcopy.js";
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -243,21 +245,19 @@ const CLIENT_WAITS = "This footage shows a client, and waits for their agreement
 const busy = (part) => `${saidOf(part)} has a Reel Kit edit waiting or being made already.`;
 const inHyperFrames = (part) => `${saidOf(part)} has a HyperFrames project already, so it is edited there.`;
 
-/** Whether the project of a Reel Kit entry is queued or at work, by its studio.json: "queued", or "working" by a worker that is alive
-    (`alive`, given a pid; without it a worker counts as alive). Task 10's statusOf reads the same file. An entry whose folder cannot be
-    named (no episode folder given, or a name that is not one folder's) counts as at work, as a gate errs toward refusing. */
-function atWork(home, folder, entry, alive) {
+/** Whether the project of a Reel Kit entry is queued or at work, as the worker's statusOf reads its studio.json: a job whose run (or whose
+    `claude`) is no longer running reads stopped there, never busy, so a queued job that died blocks nothing (`alive` and `startOf`, given
+    a pid). An entry whose folder cannot be named (no episode folder given, or a name that is not one folder's) counts as at work, as a
+    gate errs toward refusing. */
+function atWork(home, folder, entry, alive, startOf) {
   let dir;
   try {
     dir = projectFolderOf(home, folder, entry.name);
   } catch {
     return true;
   }
-  const state = readState(dir);
-  if (!state) return false;
-  if (state.state === "queued") return true;
-  if (state.state !== "working") return false;
-  return !(typeof alive === "function" && Number.isInteger(state.pid) && !alive(state.pid));
+  const status = statusOf(dir, alive, startOf);
+  return status !== null && (status.state === "queued" || status.state === "working");
 }
 
 /** Why a Reel Kit edit of the part `key` ("main" or "reel <n>") of the episode with `record` may not start, in her words, or "" when it
@@ -275,9 +275,11 @@ function atWork(home, folder, entry, alive) {
     - a title Reel Kit's new.py can't take (titleWhy): a Reel's is its title in the record, the main video's is `title`, as scaffold is
       given it, so that it is refused before anything is queued;
     - a part with a HyperFrames project in use (not KEPT for an earlier kind);
-    - a part with a Reel Kit edit queued or at work (its studio.json, in the episode's folder `folder` under `home`; `alive` says whether
-      a worker's pid runs). An earlier edit that waits for her or is done is no refusal: the next is a new version (versionFor). */
-export function startWhy({ record, key, mode, title, home, folder, held, planned = null, alive = null }) {
+    - a part with a Reel Kit edit queued or at work: one in the queue record whose project is not made yet (the worker's queuedFor, by the
+      record's id and the key), or one whose studio.json says so (statusOf, in the episode's folder `folder` under `home`); `alive` says
+      whether a pid runs (isRunning by default) and `startOf` when it started (the worker's processStart by default). A job whose run
+      died is none. An earlier edit that waits for her or is done is no refusal: the next is a new version (versionFor). */
+export function startWhy({ record, key, mode, title, home, folder, held, planned = null, alive = isRunning, startOf = processStart }) {
   if (typeof held !== "boolean") throw new Error("startWhy: `held` must be said, true or false, so that a video held as a session is never let through by its absence");
   if (!isObject(record)) return "That video can't be read: ask Jason.";
   if (isPart(record)) return mayGoIn({ record }, planned) ? PART_FOOTAGE : CLIENT_WAITS;
@@ -293,7 +295,9 @@ export function startWhy({ record, key, mode, title, home, folder, held, planned
   if (titled) return titled;
   const projects = projectsOf(record).filter((p) => isObject(p) && p.key === key);
   if (projects.some((p) => !isReelKit(p) && p.state !== KEPT)) return inHyperFrames(part);
-  if (projects.some((p) => isReelKit(p) && atWork(home, folder, p, alive))) return busy(part);
+  const runs = typeof alive === "function" ? alive : isRunning;
+  if (typeof home === "string" && queuedFor(home, record.id, key, runs)) return busy(part);
+  if (projects.some((p) => isReelKit(p) && atWork(home, folder, p, runs, startOf))) return busy(part);
   return "";
 }
 

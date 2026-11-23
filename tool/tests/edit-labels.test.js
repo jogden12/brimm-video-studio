@@ -1279,8 +1279,9 @@ describe("the walk: every command, for a video imported lightly from a file name
     plan: [["new", label], ["new", "Why", "--explainer"], [label], [label, "drop"], [label, "set", "--line", "x"], [label, "script"], [label, "agreed", label], [label, "join"], [label, "join", label], ["nothing fits this"], []],
     // Footage for a planned video (PR H5a): no plan is there, so it says so for a video waiting; the gate refuses a session.
     footage: [[label, "Too many SKUs", "talking", "--client", "no"], [label, "Too many SKUs", "b-roll", "--client", "yes", "--shot", "2"], [label, "none"], []],
-    // Reel Kit's setup on this Mac (plan Task 6) names no episode: a label is not where a download is.
-    reelkit: [["status"], ["install", label], []]
+    // Reel Kit's setup on this Mac (plan Task 6) names no episode: a label is not where a download is. Its edits (plan Task 11) name one,
+    // and the gate answers for a video waiting and a session.
+    reelkit: [["status"], ["install", label], [], ["status", label], ["start", label, "reel", "1", "--mode", "lofi"], ["note", label, "x", "p01", "Shorter."], ["go", label, "x"]]
   });
   it("has every command's words, so a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in walkWords(LABEL), `${name}: give it its words in walkWords`);

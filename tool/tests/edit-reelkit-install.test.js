@@ -318,16 +318,17 @@ describe("reelkit and the gate", () => {
   const SESSION = { version: 3, kind: "session", answer: { state: "answered", private: "yes" }, label: "Session", session: { marked: "x", cleared: null } };
   it("lets install and status through as the commands that name no episode do, whatever record is about", () => {
     assert.ok(COMMAND_NAMES.includes("reelkit"));
-    assert.ok(UNSCOPED.includes("reelkit"));
+    // `reelkit` itself names episodes now (plan Task 11): its setup's words are the ones that name none (gate.js namesNoEpisode).
+    assert.ok(!UNSCOPED.includes("reelkit"));
     for (const record of [UNANSWERED, SESSION]) {
       assert.equal(gateFor("reelkit", record, {}, ["install", "/a/download"]), "");
       assert.equal(gateFor("reelkit", record, {}, ["--now", "install", "/a/download"]), "");
       assert.equal(gateFor("reelkit", record, {}, ["status"]), "");
     }
   });
-  it("has no other words yet: anything else is its help, and names no episode", async () => {
+  it("says its help for words it doesn't know, and names no episode", async () => {
     const t = mac();
-    for (const words of [[], ["start", "Video of 20 Oct", "main"], ["status", "Video of 20 Oct"], ["--now"], ["--now", "status"]]) {
+    for (const words of [[], ["--now"], ["--now", "status"], ["begin", "Video of 20 Oct"], ["start", "--mode", "lofi"]]) {
       const r = await reelkit(t, words);
       assert.deepEqual([r.code, r.said], [2, [HELP]], words.join(" "));
     }

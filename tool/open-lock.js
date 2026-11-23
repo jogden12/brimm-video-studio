@@ -57,7 +57,7 @@ import { programHome } from "./home.js";
 import { LOCK_CHANGED, addedWhy, beyondWhy, environmentWhy, lockLoosened, skillFolders } from "./loosened.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, WORD, editStart, guardDecision, openSettingsOf, workshopFolder } from "./studio.js";
 import { TOOLS_WITH_RULES, effectiveLock, factsOf, readSettings, settingsFile, studioAllowOf, studioNodeOf } from "./settings.js";
-import { UNSCOPED, SESSION_TAUGHT } from "./gate.js";
+import { UNSCOPED, SESSION_TAUGHT, namesNoEpisode } from "./gate.js";
 import { argsOf, chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
 
 export const NEVER_REFUSED = "That is never done from this folder: nothing here posts, sends, publishes or shares, or works the screen, the browser or another session. Ask Jason.";
@@ -74,7 +74,8 @@ const LEFT_TO_CLAUDE_CODE = new Set(["AskUserQuestion", "TodoWrite", "TaskCreate
 /** The tools with a rule of their own, which no `tool` entry of the allowlist speaks for (settings.js refuses such an entry too). */
 const OWN_RULES = new Set([...TOOLS_WITH_RULES, ...LEFT_TO_CLAUDE_CODE]);
 
-/** The edit.js commands a chat that holds a session's words may run (R29): those a session runs, but `name` and `read`. */
+/** The edit.js commands a chat that holds a session's words may run (R29): those a session runs, but `name` and `read`; and of `reelkit`,
+    only its words that name no episode (gate.js namesNoEpisode: its setup and her style pack), never one that starts or follows an edit. */
 const HELD_COMMANDS = [...UNSCOPED, ...SESSION_TAUGHT].filter((command) => command !== "name" && command !== "read");
 
 /** The tools step 4 lets through once no path of theirs is in a gated place or the workshop. Write and Edit are not among them:
@@ -191,10 +192,30 @@ function firstWord(command, ctx) {
   return word.startsWith('"') || word.startsWith("'") ? word.slice(1, -1) : word;
 }
 
+/** Every word after edit.js in a command today's guard allows, each with its quotes taken off; null when the command is not edit.js
+    followed only by words one space apart (WORD). */
+function wordsAfter(command, ctx) {
+  const start = editStart(ctx);
+  if (!start) return null;
+  const found = new RegExp(`^${start}((?: ${WORD})*)$`).exec(String(command));
+  if (!found) return null;
+  return (found[1].match(new RegExp(WORD, "g")) ?? []).map((word) => (word.startsWith('"') || word.startsWith("'") ? word.slice(1, -1) : word));
+}
+
+/** Whether a chat that holds a session's words may run the edit.js `command`: one of HELD_COMMANDS, or `reelkit` with words that name no
+    episode. */
+function heldMay(command, ctx) {
+  const first = firstWord(command, ctx);
+  if (HELD_COMMANDS.includes(first)) return true;
+  if (first !== "reelkit") return false;
+  const words = wordsAfter(command, ctx);
+  return words !== null && words[0] === "reelkit" && namesNoEpisode("reelkit", words.slice(1));
+}
+
 /** `answer`, today's guard's, narrowed for a chat that holds a session's words: edit.js only for the commands a session runs. */
 function narrowed(answer, input, ctx) {
   const command = isObject(input) && isObject(input.tool_input) ? input.tool_input.command : undefined;
-  if (answer.decision === "allow" && input.tool_name === "Bash" && !HELD_COMMANDS.includes(firstWord(command, ctx))) return deny(HELD_NARROWED);
+  if (answer.decision === "allow" && input.tool_name === "Bash" && !heldMay(command, ctx)) return deny(HELD_NARROWED);
   return answer;
 }
 

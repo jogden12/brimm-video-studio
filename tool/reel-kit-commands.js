@@ -9,6 +9,27 @@
 //                                          run at once, reads the download again, plans it again and runs it (runInstall), and leaves its
 //                                          result for `reelkit status`. Only Studio starts it: under Claude Code it is refused.
 //
+// And her edits (plan Task 11), each naming an episode, so each goes through the gate (gate.js namesNoEpisode: only `install`, `status`
+// alone and `style` name none) and is refused for every record it holds and every session, cleared or not:
+//
+//   reelkit start "<episode>" main|reel <n> [reel <n> …] --mode <mode>
+//                                          an edit of each part, after startWhy for every one (the mode is always asked when missing, and
+//                                          nothing starts): one detached job per part, each put in the queue record (the worker's enqueue)
+//                                          before this returns, with the pid of the run it started, so that a second ask is refused while
+//                                          the first waits. The project is made inside the queued job (scaffold, under the Mac's worker
+//                                          lock), and the record's entry (entryOf) is written there, once it is made.
+//   reelkit status "<episode>"             each edit's state, its step and the worker's guess of the time left, and Reel Kit's NEEDS in its
+//                                          own words, with the edit's from-you/ folder opened in Finder for them.
+//   reelkit note "<episode>" <slug> <beat> "<text>"
+//                                          her note on a beat (p<digits>) or on all of it, as she said it, at most 4,000 characters, added to
+//                                          Reel Kit's own <project>/storyboard/notes.json as { beat, text, at }, written whole.
+//   reelkit go "<episode>" <slug>          her approval of the storyboard: the note { beat: "all", text: "go" }, `approved` in studio.json,
+//                                          and `finalize` started. Nothing else starts finalize.
+//   reelkit revise "<episode>" <slug>      `revise` started with her notes since the last version.
+//   reelkit resume "<episode>" <slug>      a stopped job started again from its step.
+//   reelkit --now <folder> start|revise|finalize|resume …
+//                                          the detached half of each (in no help), which runs the worker's runJob. Refused under Claude Code.
+//
 // Which Mac is which (plan Decision 10): an installed Mac takes only the Reel Kit Studio pins (PIN.fingerprint). A dev Mac (the Mac Studio)
 // takes any well-formed download; one of another version than PIN.version is installed beside the one in use, from a pin made from its
 // download (newPinOf), which is written to `<work folder>/.toolchain/reel-kit-<version>.pin.json` for Jason's pull request. The version in
@@ -16,8 +37,17 @@
 //
 // Everything she reads is in her words: never a path or a command for her to type. A test gives stand-ins through ctx.deps.reelKit: `pin`
 // (the pin of the version in use), `unzip` (readDrop's), `programs`, `fetch`, `run` and `keepAwake`.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
+import { KEPT, byReelKit } from "./app.js";
+import { localStamp } from "./episode.js";
+import { PIN as HF_PIN } from "./hyperframes.js";
+import { kitDir, venvPython } from "./reel-kit.js";
+import { MODES, entryOf, modeLeans, modeOf as modeNamed, projectFolderOf, readCapped, readState, scaffold, slugOf, startWhy, writeState } from "./reel-kit-project.js";
+import { JOBS, enqueue, processStart, queuedOf, runJob, statusOf, stoppedLine } from "./reel-kit-worker.js";
+import { writeWhole as writeFileWhole } from "./reel-kit-worker-own.js";
+import { episodeWork } from "./settings.js";
 import { PIN, pinFrom } from "./reel-kit.js";
 import { readDrop } from "./reel-kit-drop.js";
 import { installPlan, runInstall, takeAwayScratch } from "./reel-kit-install.js";
@@ -261,12 +291,496 @@ export async function statusCommand(ctx) {
   return 0;
 }
 
-/** `reelkit <words…>`: the subcommand its first word names. `help` is edit.js's HELP, said for words it doesn't know. */
-export async function reelkitCommand(ctx, rest = [], { help = "" } = {}) {
+// --- Her edits (plan Task 11) ---
+
+/** A part as a sentence starts with it, by its key. */
+const partSaid = (key) => (key === "main" ? "The main video" : `Reel ${key.slice(5)}`);
+/** Each mode as she says it. */
+const MODE_SAID = Object.freeze({ hifi: "hi-fi", lofi: "lo-fi", showcase: "showcase" });
+const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+/** A list as a sentence says it: "a, b and c". */
+const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+/** How an edit is named in what she reads: its part, its mode and its version. */
+const editSaid = (key, mode, version) => `${partSaid(key)} (${MODE_SAID[mode] ?? "Reel Kit"}${Number.isInteger(version) ? `, version ${version}` : ""})`;
+/** The phrase she says to follow her edits. */
+const FOLLOW = `Say "how are the Reel Kit edits going?" to follow them.`;
+
+/** What her edit words say, in her words: never a path, a flag or the name of a command. */
+export const EDIT_SAY = Object.freeze({
+  notSetUp: "Reel Kit isn't set up on this Mac yet: ask Jason.",
+  queued: (key, mode) => `${partSaid(key)} is in the queue for a ${MODE_SAID[mode]} Reel Kit edit.`,
+  steps: `This Mac makes one Reel Kit edit at a time. Each goes through ${listed(JOBS.edit)}, then waits for you at its storyboard.`,
+  leans: (lean, mode) => (lean === mode ? `${capital(MODE_SAID[lean])} suits this kind of video.` : `This kind of video leans to ${MODE_SAID[lean]}; this is ${MODE_SAID[mode]}, as you said.`),
+  follow: FOLLOW,
+  none: "This video has no Reel Kit edits yet.",
+  waiting: "waiting for its turn.",
+  working: (step, left) => `being made, at ${step || "its start"}${left ? `: about ${left} minute${left === 1 ? "" : "s"} left, by Reel Kit's own guess` : ""}.`,
+  storyboard: "its storyboard is made.",
+  ready: "it is built and ready to render.",
+  failed: "it couldn't be made: ask Jason.",
+  unread: "what it is at can't be read: ask Jason.",
+  notHere: "its project isn't on this Mac.",
+  didNotStart: (why) => `its Reel Kit edit didn't start. ${why}`,
+  dropIt: "Drop it in the folder that just opened.",
+  noFolder: "The folder for it couldn't be opened: ask Jason.",
+  noSuchEdit: "This video has no such Reel Kit edit.",
+  beat: "A note goes on one beat of the storyboard, or on all of it.",
+  empty: "That note is empty: say it again.",
+  tooLong: "A note can be at most 4,000 characters: say it in two.",
+  notesUnread: "Its notes can't be read, so nothing was added: ask Jason.",
+  noted: (beat) => (beat === "all" ? "Noted, for the whole video." : `Noted, on beat ${beat}.`),
+  afterNote: `When your notes are all in, say "make the changes", or "go" when it's right.`,
+  busy: "It is being made right now: say it again once it waits for you.",
+  noStoryboard: "It has no storyboard waiting for you.",
+  noNotes: "It has no new notes to make changes from: say what to change first.",
+  notStopped: "It hasn't stopped, so there is nothing to carry on.",
+  approved: (said) => `Approved: ${said} is being built to render. ${FOLLOW}`,
+  revising: (said, n) => `${said} is in the queue for its changes, from ${n} note${n === 1 ? "" : "s"}. ${FOLLOW}`,
+  resuming: (said) => `${said} is in the queue to carry on. ${FOLLOW}`,
+  notWritten: "The record of this edit couldn't be written: ask Jason."
+});
+
+/** The most of a note she may say: Reel Kit's own storyboard page (serve.py) takes no more. */
+export const NOTE_MOST = 4000;
+/** The most of storyboard/notes.json read. */
+const NOTES_FILE_MOST = 4 << 20;
+/** A beat her note goes on: one beat of the storyboard (p and its number), or all of it. */
+const BEAT = /^(?:p\d{1,4}|all)$/;
+
+/** Reel Kit's own notes file in a project: [{ beat, text, at }]. */
+export const notesFile = (dir) => join(dir, "storyboard", "notes.json");
+
+/** Her notes in the project `dir`: the list in its notes file ([] when there is none), or null when what is there can't be read whole as
+    a list (not a plain file of its size, not JSON, not a list). Notes are data: each is kept as it is. */
+export function readNotes(dir) {
+  try {
+    lstatSync(notesFile(dir));
+  } catch (e) {
+    return e.code === "ENOENT" ? [] : null;
+  }
+  const text = readCapped(notesFile(dir), NOTES_FILE_MOST);
+  if (text === null) return null;
+  try {
+    const notes = JSON.parse(text);
+    return Array.isArray(notes) ? notes : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Add `note` to the project's notes file, whole (a file of its own beside it, then renamed over it), into storyboard/ only when that is a
+    folder of the project's own and not a link. "" or the line she reads. */
+function addNote(dir, note) {
+  const notes = readNotes(dir);
+  if (notes === null) return EDIT_SAY.notesUnread;
+  const folder = join(dir, "storyboard");
+  try {
+    try {
+      if (!lstatSync(folder).isDirectory()) return EDIT_SAY.notesUnread;
+    } catch (e) {
+      if (e.code !== "ENOENT") return EDIT_SAY.notesUnread;
+      mkdirSync(folder);
+    }
+    writeFileWhole(notesFile(dir), `${JSON.stringify([...notes, note], null, 2)}\n`);
+  } catch {
+    return EDIT_SAY.notesUnread;
+  }
+  return "";
+}
+
+/** Whether a note is one of hers on the storyboard, as the worker is given it: { beat, text, at }, each a string, and not her go. */
+const isChange = (n) => n !== null && typeof n === "object" && typeof n.beat === "string" && typeof n.text === "string" && (n.at === undefined || typeof n.at === "string") && !(n.beat === "all" && n.text === "go");
+
+/** The record's Reel Kit edits, each { entry, key, mode, version, slug, dir }: its entry, its slug (slugOf, from the record) and its folder on
+    this Mac (null when its name can't make one). Kept for an earlier kind, an edit is none. */
+function editsOf(ctx, found, record) {
+  const projects = Array.isArray(record.app?.projects) ? record.app.projects : [];
+  return projects.filter((p) => byReelKit(p) && p.state !== KEPT).map((entry) => {
+    let slug = "";
+    let dir = null;
+    try {
+      slug = slugOf(record, entry.key, entry.version);
+    } catch {
+      slug = "";
+    }
+    try {
+      dir = projectFolderOf(ctx.home, found.name, entry.name);
+    } catch {
+      dir = null;
+    }
+    return { entry, key: entry.key, mode: entry.mode, version: entry.version, slug, dir };
+  });
+}
+
+/** Where an edit is: the worker's statusOf of its folder, or null. */
+const statusFor = (ctx, dir) => (dir === null ? null : statusOf(dir, ctx.alive, kitOf(ctx).startOf ?? processStart));
+/** Whether an edit is queued or at work. */
+const isBusy = (status) => status !== null && (status.state === "queued" || status.state === "working");
+
+/** What a start whose project was never made leaves for `status`: <episode work>/reel-kit-<part>.start.json, { key, why, at }. */
+const startResultFile = (home, folder, key) => join(episodeWork(home, folder), `reel-kit-${key.replace(" ", "-")}.start.json`);
+function startResults(home, folder, record) {
+  const keys = ["main", ...(Array.isArray(record.reels) ? record.reels : []).filter((r) => Number.isInteger(r?.n)).map((r) => `reel ${r.n}`)];
+  return keys.map((key) => {
+    try {
+      const result = JSON.parse(readCapped(startResultFile(home, folder, key), 64 * 1024) ?? "null");
+      return result && result.key === key && typeof result.why === "string" ? result : null;
+    } catch {
+      return null;
+    }
+  }).filter(Boolean);
+}
+const clearStart = (home, folder, key) => rmSync(startResultFile(home, folder, key), { force: true });
+
+/** The words a start names its parts by: "main", or "reel" and a number, as keys ("main", "reel 2"), each once; null for any other word. */
+function keysOf(words) {
+  const keys = [];
+  for (let i = 0; i < words.length; i++) {
+    let key;
+    if (words[i] === "main") key = "main";
+    else if (words[i] === "reel" && /^[1-9]\d*$/.test(words[i + 1] ?? "")) key = `reel ${words[++i]}`;
+    else return null;
+    if (!keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
+/** The words of `start` after its episode: its parts and its mode word (`--mode <word>`, which may be left out: it is asked). */
+function startWords(words) {
+  const at = words.indexOf("--mode");
+  const mode = at < 0 ? undefined : words[at + 1];
+  if (at >= 0 && (mode === undefined || words.indexOf("--mode", at + 1) >= 0)) return null;
+  const keys = keysOf(at < 0 ? words : [...words.slice(0, at), ...words.slice(at + 2)]);
+  return keys && keys.length ? { keys, mode } : null;
+}
+
+/** Whether Reel Kit's kit and its Python are on this Mac. */
+function kitHere(home) {
+  try {
+    return lstatSync(join(kitDir(home), "pipeline", "new.py")).isFile() && lstatSync(venvPython(home)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Start the detached half `reelkit --now <folder> <args…>`: the pid of the run it started, or undefined. */
+const startJob = (ctx, found, args) => startDetached(ctx, { command: "reelkit", folder: found.name, args });
+
+/** Mark the project `dir` queued for `job` by the run `pid` her chat just started, before her chat is answered, so that a second ask is
+    refused while it waits: the run takes the mark for its own (runJob). A pid that is not one marks nothing. */
+function markQueued(ctx, dir, job, pid, step) {
+  if (!Number.isInteger(pid)) return;
+  try {
+    const state = readState(dir) ?? {};
+    writeState(dir, { ...state, state: "queued", job, step: step ?? state.step, pid, why: "", queuedAt: new Date(ctx.now()).toISOString() });
+  } catch {
+    // The run marks it itself as it starts.
+  }
+}
+
+/** `reelkit start "<episode>" main|reel <n> [reel <n> …] --mode <mode>`. */
+async function startCommand(ctx, words, h) {
+  const asked = words.length > 1 && !words[0].startsWith("--") ? startWords(words.slice(1)) : null;
+  if (!asked) {
+    ctx.say(h.help);
+    return 2;
+  }
+  const got = h.episodeFor(ctx, [words[0]], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const { found, record } = got;
+  const mode = modeNamed(asked.mode);
+  const title = typeof record.name?.text === "string" ? record.name.text : "";
+  const whys = asked.keys.map((key) => startWhy({ record, key, mode, title, home: ctx.home, folder: found.name, held: Boolean(found.held), alive: ctx.alive, startOf: kitOf(ctx).startOf ?? processStart }));
+  const refused = [...new Set(whys.filter(Boolean))];
+  if (refused.length) {
+    for (const why of refused) ctx.say(why);
+    return 1;
+  }
+  if (!kitHere(ctx.home)) {
+    ctx.say(EDIT_SAY.notSetUp);
+    return 1;
+  }
+  for (const key of asked.keys) {
+    clearStart(ctx.home, found.name, key);
+    const id = randomUUID();
+    const pid = startJob(ctx, found, ["start", key, mode, id]);
+    try {
+      enqueue(ctx.home, { id, episode: record.id, key, version: null, mode, job: "edit", at: new Date(ctx.now()).toISOString(), pid: Number.isInteger(pid) ? pid : process.pid }, ctx.alive);
+    } catch {
+      // The run puts itself in the queue as it starts.
+    }
+    ctx.say(EDIT_SAY.queued(key, mode));
+  }
+  const lean = modeLeans(record);
+  if (lean) ctx.say(EDIT_SAY.leans(lean, mode));
+  ctx.say(EDIT_SAY.steps);
+  ctx.say(EDIT_SAY.follow);
+  return 0;
+}
+
+/** Open an edit's from-you/ folder in Finder, made first when it is not there: whether it opened. Only a folder of the project's own, never
+    through a link. */
+function openFromYou(ctx, dir) {
+  const folder = join(dir, "from-you");
+  try {
+    if (!lstatSync(dir).isDirectory()) return false;
+    try {
+      if (!lstatSync(folder).isDirectory()) return false;
+    } catch (e) {
+      if (e.code !== "ENOENT") return false;
+      mkdirSync(folder);
+    }
+    ctx.openApp("Finder", folder);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** An edit's line in `status`, by where it is. */
+function stateLine(status) {
+  if (status === null) return EDIT_SAY.notHere;
+  if (status.state === "queued") return EDIT_SAY.waiting;
+  if (status.state === "working") return EDIT_SAY.working(status.step, status.minutesLeft);
+  if (status.state === "stopped") return stoppedLine(status);
+  if (status.state === "storyboard") return EDIT_SAY.storyboard;
+  if (status.state === "ready") return EDIT_SAY.ready;
+  if (status.state === "failed") return EDIT_SAY.failed;
+  return EDIT_SAY.unread;
+}
+
+/** `reelkit status "<episode>"`: each of its edits, those waiting whose project is not made yet first, then each made one, with Reel
+    Kit's NEEDS word for word and its from-you/ folder opened for them. Writes nothing but that folder. */
+async function editStatus(ctx, words, h) {
+  const got = h.episodeFor(ctx, words, { newerEnds: 1 });
+  if (!got.found) return got.code;
+  const { found, record } = got;
+  const waiting = queuedOf(ctx.home, record.id, ctx.alive);
+  const edits = editsOf(ctx, found, record);
+  const unstarted = startResults(ctx.home, found.name, record).filter((r) => !waiting.some((j) => j.key === r.key));
+  if (!waiting.length && !edits.length && !unstarted.length) {
+    ctx.say(EDIT_SAY.none);
+    return 0;
+  }
+  for (const job of waiting) ctx.say(`${editSaid(job.key, job.mode)}: ${EDIT_SAY.waiting}`);
+  for (const result of unstarted) ctx.say(`${partSaid(result.key)}: ${EDIT_SAY.didNotStart(result.why)}`);
+  for (const edit of edits) {
+    const status = statusFor(ctx, edit.dir);
+    ctx.say(`${editSaid(edit.key, edit.mode, edit.version)}: ${stateLine(status)}`);
+    const needs = (status?.needs ?? []).filter((n) => n && typeof n.text === "string" && typeof n.beat === "string");
+    if (!needs.length) continue;
+    for (const need of needs) ctx.say(`  ${need.beat}: ${need.text}`);
+    ctx.say(openFromYou(ctx, edit.dir) ? EDIT_SAY.dropIt : EDIT_SAY.noFolder);
+  }
+  return 0;
+}
+
+/** The episode and the edit `<episode> <slug>` name: { found, record, edit, status }, or { code }, having said why. */
+function editFor(ctx, words, h) {
+  const got = h.episodeFor(ctx, [words[0]], { newerEnds: 1 });
+  if (!got.found) return { code: got.code };
+  const edit = editsOf(ctx, got.found, got.record).find((e) => e.slug !== "" && e.slug === words[1]);
+  if (!edit) {
+    ctx.say(EDIT_SAY.noSuchEdit);
+    return { code: 1 };
+  }
+  return { found: got.found, record: got.record, edit, status: statusFor(ctx, edit.dir) };
+}
+
+/** `reelkit note "<episode>" <slug> <beat> "<text>"`: her note, as she said it, added to Reel Kit's notes file. */
+async function noteCommand(ctx, words, h) {
+  if (words.length !== 4) {
+    ctx.say(h.help);
+    return 2;
+  }
+  const [, , beat, text] = words;
+  const got = editFor(ctx, words, h);
+  if (got.code !== undefined) return got.code;
+  if (got.status === null) return refuse(ctx, EDIT_SAY.notHere);
+  if (!BEAT.test(beat)) return refuse(ctx, EDIT_SAY.beat);
+  if (text.trim() === "") return refuse(ctx, EDIT_SAY.empty);
+  if (text.length > NOTE_MOST) return refuse(ctx, EDIT_SAY.tooLong);
+  const why = addNote(got.edit.dir, { beat, text, at: new Date(ctx.now()).toISOString() });
+  if (why) return refuse(ctx, why);
+  ctx.say(EDIT_SAY.noted(beat));
+  ctx.say(EDIT_SAY.afterNote);
+  return 0;
+}
+
+const refuse = (ctx, why) => {
+  ctx.say(why);
+  return 1;
+};
+
+/** What an edit that is not waiting for her says when she asks of it what only a waiting one does. */
+const notWaiting = (status) => (status === null ? EDIT_SAY.notHere : isBusy(status) ? EDIT_SAY.busy : status.state === "stopped" ? stoppedLine(status) : status.state === "failed" ? EDIT_SAY.failed : EDIT_SAY.noStoryboard);
+
+/** `reelkit go "<episode>" <slug>`: her approval of the storyboard waiting for her, and `finalize` started. The only way finalize starts. */
+async function goCommand(ctx, words, h) {
+  if (words.length !== 2) {
+    ctx.say(h.help);
+    return 2;
+  }
+  const got = editFor(ctx, words, h);
+  if (got.code !== undefined) return got.code;
+  const { found, edit, status } = got;
+  if (status?.state !== "storyboard") return refuse(ctx, notWaiting(status));
+  const at = new Date(ctx.now()).toISOString();
+  const why = addNote(edit.dir, { beat: "all", text: "go", at });
+  if (why) return refuse(ctx, why);
+  try {
+    writeState(edit.dir, { ...(readState(edit.dir) ?? {}), approved: { at } });
+  } catch {
+    return refuse(ctx, EDIT_SAY.notesUnread);
+  }
+  const pid = startJob(ctx, found, ["finalize", edit.slug]);
+  markQueued(ctx, edit.dir, "finalize", pid, JOBS.finalize[0]);
+  ctx.say(EDIT_SAY.approved(editSaid(edit.key, edit.mode, edit.version)));
+  return 0;
+}
+
+/** `reelkit revise "<episode>" <slug>`: `revise` started with her notes since the last version. */
+async function reviseCommand(ctx, words, h) {
+  if (words.length !== 2) {
+    ctx.say(h.help);
+    return 2;
+  }
+  const got = editFor(ctx, words, h);
+  if (got.code !== undefined) return got.code;
+  const { found, edit, status } = got;
+  if (status?.state !== "storyboard" && status?.state !== "ready") return refuse(ctx, notWaiting(status));
+  const notes = readNotes(edit.dir);
+  if (notes === null) return refuse(ctx, EDIT_SAY.notesUnread);
+  const used = readState(edit.dir)?.notesUsed;
+  const since = notes.slice(Number.isInteger(used) && used >= 0 ? used : 0).filter(isChange);
+  if (!since.length) return refuse(ctx, EDIT_SAY.noNotes);
+  const pid = startJob(ctx, found, ["revise", edit.slug]);
+  markQueued(ctx, edit.dir, "revise", pid, JOBS.revise[0]);
+  ctx.say(EDIT_SAY.revising(editSaid(edit.key, edit.mode, edit.version), since.length));
+  return 0;
+}
+
+/** `reelkit resume "<episode>" <slug>`: a stopped job started again from its step. */
+async function resumeCommand(ctx, words, h) {
+  if (words.length !== 2) {
+    ctx.say(h.help);
+    return 2;
+  }
+  const got = editFor(ctx, words, h);
+  if (got.code !== undefined) return got.code;
+  const { found, edit, status } = got;
+  if (status === null) return refuse(ctx, EDIT_SAY.notHere);
+  if (status.state !== "stopped") return refuse(ctx, isBusy(status) ? EDIT_SAY.busy : EDIT_SAY.notStopped);
+  const pid = startJob(ctx, found, ["resume", edit.slug]);
+  markQueued(ctx, edit.dir, readState(edit.dir)?.job, pid);
+  ctx.say(EDIT_SAY.resuming(editSaid(edit.key, edit.mode, edit.version)));
+  return 0;
+}
+
+/** What runJob is given, from a test's stand-ins (ctx.deps.reelKit) where it gives them, and the run's log. */
+function jobDeps(ctx, more = {}) {
+  const kit = kitOf(ctx);
+  const given = Object.fromEntries(["claude", "startOf", "wait", "every", "limit", "grace", "facts", "run", "scaffoldDeps"].filter((k) => kit[k] !== undefined).map((k) => [k, kit[k]]));
+  return { alive: ctx.alive, log: (line) => ctx.say(line), ...given, ...more };
+}
+
+/** The line her `status` says for a start that never made its project: the run's own words when it said a sentence, else to ask Jason. */
+const startWhyOf = (why) => (typeof why === "string" && /[.?!]$/.test(why) ? why : "Ask Jason.");
+
+/** The detached half's `start <key> <mode> <queue id>`: the queued job of a new edit, its project made inside the Mac's worker lock and its
+    entry written into the record there (entryOf, with what the record checks a project by: `from` and `workingCopy`). */
+async function startNow(ctx, { found, record }, [key, mode, id, ...more], h) {
+  if (more.length || !/^(?:main|reel [1-9]\d*)$/.test(String(key)) || !MODES.includes(mode) || typeof id !== "string" || id === "") {
+    ctx.say(h.help);
+    return 2;
+  }
+  const reel = key === "main" ? null : (Array.isArray(record.reels) ? record.reels : []).find((r) => r?.n === Number(key.slice(5)));
+  const title = key === "main" ? record.name?.text : reel?.title;
+  const make = kitOf(ctx).scaffold ?? scaffold;
+  const made = async (c, spec, deps) => {
+    const done = await make(c, spec, deps);
+    if (!done || typeof done.dir !== "string") return done;
+    // The record is read again: another job's entry may have been written while this one waited.
+    const fresh = h.episodeFor(ctx, [found.name], { newerEnds: 1 });
+    if (!fresh.found) return { why: EDIT_SAY.notWritten };
+    const now = fresh.record;
+    const entry = entryOf({ key, name: done.name, mode, version: done.version, at: localStamp(new Date(ctx.now())), machine: ctx.machine, fromSuggestion: reel ? reel.n : null, from: done.from, workingCopy: done.workingCopy });
+    const app = { toolchain: now.app?.toolchain ?? HF_PIN.version, ...now.app, projects: [...(Array.isArray(now.app?.projects) ? now.app.projects : []), entry] };
+    if ((await h.save(ctx, { ...fresh.found, record: now }, { ...now, app }, "")) !== 0) return { why: EDIT_SAY.notWritten };
+    clearStart(ctx.home, found.name, key);
+    return done;
+  };
+  const ended = await runJob(ctx, { job: "edit", episode: record.id, key, version: null, mode, queued: id, make: { found, record, key, mode, title } }, jobDeps(ctx, { scaffold: made }));
+  if (ended.dir === null) {
+    try {
+      writeFileWhole(startResultFile(ctx.home, found.name, key), `${JSON.stringify({ key, why: startWhyOf(ended.why), at: new Date(ctx.now()).toISOString() })}\n`);
+    } catch {
+      // Said in the log alone, then.
+    }
+  }
+  ctx.say(`Reel Kit's edit of ${key} ended ${ended.state}${ended.why ? ` (${ended.why})` : ""}.`);
+  return ended.state === "storyboard" ? 0 : 1;
+}
+
+/** The detached half's `revise|finalize|resume <slug>`: the job of an edit whose project is made. finalize runs only after her go (her
+    approval in studio.json, which `go` writes); a resume of a finalize too. revise takes her notes since the last version. */
+async function editNow(ctx, { found, record }, job, [slug, ...more], h) {
+  const edit = more.length ? null : editsOf(ctx, found, record).find((e) => e.slug !== "" && e.slug === slug);
+  if (!edit || edit.dir === null) {
+    ctx.say(h.help);
+    return 2;
+  }
+  const state = readState(edit.dir) ?? {};
+  const approved = state.approved !== null && typeof state.approved === "object";
+  if ((job === "finalize" || (job === "resume" && state.job === "finalize")) && !approved) {
+    ctx.say(`Reel Kit's ${slug} was not finalized: she has not said go.`);
+    return 1;
+  }
+  let spec;
+  if (job === "revise") {
+    const notes = readNotes(edit.dir) ?? [];
+    const used = Number.isInteger(state.notesUsed) && state.notesUsed >= 0 ? state.notesUsed : 0;
+    const since = notes.slice(used).filter(isChange).map((n) => ({ beat: n.beat, text: n.text, ...(n.at === undefined ? {} : { at: n.at }) }));
+    // Her go was for the storyboard these notes change: the next one waits for hers again.
+    writeState(edit.dir, { ...state, notesUsed: notes.length, approved: undefined });
+    spec = { dir: edit.dir, job: "revise", notes: since };
+  } else spec = job === "resume" ? { dir: edit.dir, resume: true } : { dir: edit.dir, job };
+  const ended = await runJob(ctx, spec, jobDeps(ctx));
+  ctx.say(`Reel Kit's ${job} of ${slug} ended ${ended.state}${ended.why ? ` (${ended.why})` : ""}.`);
+  return ["storyboard", "ready"].includes(ended.state) ? 0 : 1;
+}
+
+/** The jobs the detached half runs. */
+const NOW_JOBS = Object.freeze(["start", "revise", "finalize", "resume"]);
+
+/** `reelkit --now <folder> <job> …`, the detached half of start, go, revise and resume: in no help, and refused under Claude Code. The
+    episode is found by its folder, through the gate, as every detached run's is. */
+async function jobNow(ctx, words, h) {
+  const env = ctx.deps?.env || process.env;
+  const [folder, job, ...rest] = words;
+  if (env.CLAUDECODE === "1" || typeof folder !== "string" || folder === "" || !NOW_JOBS.includes(job)) {
+    ctx.say(h.help);
+    return 2;
+  }
+  const got = h.episodeFor(ctx, [folder], { newerEnds: 1 });
+  if (!got.found) return got.code;
+  return job === "start" ? startNow(ctx, got, rest, h) : editNow(ctx, got, job, rest, h);
+}
+
+/** `reelkit <words…>`: the subcommand its first word names. `help` is edit.js's HELP, said for words it doesn't know. `episodeFor` and
+    `save` are edit.js's own (it gives them; this file never imports it): how a command finds the episode it names, through the gate, and
+    how a record is written. */
+export async function reelkitCommand(ctx, rest = [], { help = "", episodeFor, save } = {}) {
   const [word, ...more] = rest;
+  const h = { help, episodeFor, save };
   if (word === "install") return installCommand(ctx, more, help);
   if (word === "status" && more.length === 0) return statusCommand(ctx);
   if (word === "--now" && more[0] === "install") return installNow(ctx, more.slice(1), help);
+  const episodeWords = { start: startCommand, status: editStatus, note: noteCommand, go: goCommand, revise: reviseCommand, resume: resumeCommand };
+  if (typeof episodeFor === "function" && typeof save === "function") {
+    if (word === "--now") return jobNow(ctx, more, h);
+    if (Object.hasOwn(episodeWords, word) && more.length && !more[0].startsWith("--")) return episodeWords[word](ctx, more, h);
+  }
   ctx.say(help);
   return 2;
 }

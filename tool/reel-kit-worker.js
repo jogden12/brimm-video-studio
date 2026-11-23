@@ -109,7 +109,10 @@ const surely = (pid, start, alive, startOf) => typeof start === "string" && stil
 
 // --- Status ---
 
-/** The worker's status file for `job`, read the safe way: { step, needs } or { fault }, the fault said in a few words; null when there is
+/** The most minutes a worker may say its job has left. */
+const LEFT_MOST = 600;
+
+/** The worker's status file for `job`, read the safe way: { step, needs, minutesLeft? } or { fault }, the fault said in a few words; null when there is
     none. A step that is not the job's, NEEDS not of their shape, or a file not plain or larger than 64 KB is a fault. */
 export function readWorkerStatus(dir, job) {
   const file = workerStatusFile(dir);
@@ -130,10 +133,13 @@ export function readWorkerStatus(dir, job) {
   const needs = status.needs ?? [];
   const fits = (n) => isObject(n) && typeof n.beat === "string" && /^[A-Za-z0-9_-]{1,16}$/.test(n.beat) && typeof n.text === "string" && n.text.length <= NEED_LONGEST;
   if (!Array.isArray(needs) || needs.length > NEEDS_MOST || !needs.every(fits)) return { fault: "its NEEDS are not a list of { beat, text }" };
-  return { step: status.step, needs: needs.map((n) => ({ beat: n.beat, text: n.text })) };
+  // Its guess of the minutes the job has left, when it says one: a whole number from 1 to 600, or nothing.
+  const left = Number.isInteger(status.minutesLeft) && status.minutesLeft >= 1 && status.minutesLeft <= LEFT_MOST ? { minutesLeft: status.minutesLeft } : {};
+  return { step: status.step, needs: needs.map((n) => ({ beat: n.beat, text: n.text })), ...left };
 }
 
-/** What the project in `dir` says of its edit: { state, step, needs, pid, why }, or null when it has no studio.json. `state` is studio.json's
+/** What the project in `dir` says of its edit: { state, step, needs, pid, why, minutesLeft }, or null when it has no studio.json. `minutesLeft`
+    is the worker's own guess while it works (a whole number), or null. `state` is studio.json's
     (`queued`, `working`, `stopped`, `storyboard`, `ready`, `failed`, and later ones), but a `queued` job whose run (`pid`) is not running,
     and a `working` one whose run and whose `claude` (`worker`, with its start) are neither running, read `stopped` at their step,
     `why: "died"`: never working for a dead process, and working while its `claude` still runs. */
@@ -145,7 +151,8 @@ export function statusOf(dir, alive = isRunning, startOf = processStart) {
     step: typeof state.step === "string" ? state.step : "",
     needs: Array.isArray(state.needs) ? state.needs : [],
     pid: Number.isInteger(state.pid) ? state.pid : null,
-    why: typeof state.why === "string" ? state.why : ""
+    why: typeof state.why === "string" ? state.why : "",
+    minutesLeft: Number.isInteger(state.minutesLeft) && state.minutesLeft >= 1 ? state.minutesLeft : null
   };
   const runs = status.pid !== null && alive(status.pid);
   const worker = status.state === "working" && stillRuns(state.worker, state.workerStart, alive, startOf);
@@ -194,6 +201,17 @@ function changeQueue(home, change, alive) {
     releaseEpisodeLock(lock, took.text);
   }
 }
+
+/** Put `entry` ({ id, episode, key, version, mode, job, at, pid }) in the queue record, in place of one with its id: so that her chat's
+    `reelkit start` makes its job visible at once, before it returns, with the pid of the detached run it started, and that run, given the
+    same id (runJob's `queued`), takes the entry for its own. Throws when the queue's lock can't be had. */
+export function enqueue(home, entry, alive = isRunning) {
+  if (!isObject(entry) || typeof entry.id !== "string" || entry.id === "" || !Number.isInteger(entry.pid)) throw new Error("enqueue: an entry has an id and a pid");
+  changeQueue(home, (jobs) => [...jobs.filter((j) => j.id !== entry.id), entry], alive);
+}
+
+/** The queued jobs of the episode `episode` whose projects are not made yet, oldest first: none whose run is no longer running. */
+export const queuedOf = (home, episode, alive = isRunning) => readQueue(home).filter((j) => j.episode === episode && Number.isInteger(j.pid) && alive(j.pid));
 
 /** The queued job for the part `key` of the episode `episode` whose project is not made yet, { episode, key, version, mode, job, at, pid },
     or null: one whose run is no longer running is none. A job whose project is there says so in its studio.json instead (statusOf). */
@@ -363,7 +381,7 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
         }
         fault = "";
         const now = readState(dir) ?? {};
-        if (now.step !== status.step || JSON.stringify(now.needs ?? []) !== JSON.stringify(status.needs)) mark({ step: status.step, needs: status.needs });
+        if (now.step !== status.step || JSON.stringify(now.needs ?? []) !== JSON.stringify(status.needs) || now.minutesLeft !== status.minutesLeft) mark({ step: status.step, needs: status.needs, minutesLeft: status.minutesLeft });
       } catch (e) {
         log(`Reel Kit's worker status for ${slug} could not be copied: ${e.code || e.message}.`);
       }
@@ -448,7 +466,7 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
   if (end.state === "failed" && !unsafe) log(`Reel Kit's worker for ${slug} ended ${code ?? signal}: ${stderr.trim().split("\n").at(-1) ?? ""}`);
   // What it said last, when it ended short of its last step (WORKER.md: a refused command it needed is said there), for Jason.
   if (end.state !== JOB_ENDS[job] && typeof result?.result === "string") log(`Reel Kit's worker for ${slug} stopped at ${at.step ?? from} (${end.why}): ${result.result.slice(0, 300)}`);
-  mark({ ...end, worker: undefined, workerStart: undefined });
+  mark({ ...end, worker: undefined, workerStart: undefined, minutesLeft: undefined });
   try {
     const left = JSON.parse(readCapped(macWorkerFile(home), 64 * 1024) ?? "null");
     if (isObject(left) && left.pid === child.pid) rmSync(macWorkerFile(home), { force: true });
@@ -460,7 +478,8 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
 
 /** Run one job of the Reel Kit worker, start to end; it resolves { state, why, step, dir }, and `made` when it made the project. `spec`:
     - `job`, one of JOBS; `dir`, the project, when it is made; or, for an edit whose project is not made yet, `make` (what scaffold takes:
-      { found, record, key, mode, title, version }) with `episode`, `key`, `version` and `mode` for the queue record;
+      { found, record, key, mode, title, version }) with `episode`, `key`, `version` and `mode` for the queue record, and `queued`, the id
+      of the entry her chat wrote for this run (enqueue), which it takes for its own;
     - `notes`, her notes for a revise ({ beat, text, at }), kept with the job (jobNotesFile, beside its settings, out of its reach); `from`, the step to start from (the
       job's first by default); `resume`, to carry on a stopped job: its job (studio.json's, and a `job` given must be the same, or nothing
       is done: `why: "job"`), from the step studio.json says, in its own session, with a revise's notes again.
@@ -473,7 +492,7 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
     stopHolders: it kills nothing, as a holder may be hers) and the project
     is looked over for Studio's own names (sweepOwn): each that Studio did not note (`noteOwnFile`), or that is no longer the file
     noted, is moved to `asideDir`'s `<slug> set aside/<when>/`, out of the worker's reach, never deleted, and the run is
-    `failed`, `why: "own"`; found before the worker starts, nothing is started. A project whose run is running is left as it is: { state, why: "running" }; one whose run died
+    `failed`, `why: "own"`; found before the worker starts, nothing is started. A project whose run is running is left as it is: { state, why: "running" }, but one marked queued by this very run (by its pid); one whose run died
     but whose `claude` still runs is queued, and that `claude` stopped once this job holds the Mac.
     `deps`: `claude` (the program; findPrograms' by default), `scaffold` and `scaffoldDeps`, `alive`, `startOf` (processStart), `wait` (ms
     to a promise), `every` (how often, in ms, the lock and the status file are looked at), `limit`, `grace`, `facts` (settings.js factsOf of
@@ -504,14 +523,16 @@ export async function runJob(ctx, spec, deps = {}) {
     const status = statusOf(dir, alive, startOf);
     if (status === null) return { state: "failed", why: "no project", step: "", dir };
     if (!hasSlug(before)) return { state: "failed", why: "no slug", step: status.step, dir };
-    const runs = status.pid !== null && alive(status.pid);
+    // A project marked queued by this very run (her chat's first half marks it with the pid of the run it starts) is this job's own.
+    const runs = status.pid !== null && status.pid !== process.pid && alive(status.pid);
     if ((status.state === "working" || status.state === "queued") && runs) return { state: status.state, why: "running", step: status.step, dir };
     if (spec.resume) from = JOBS[job].includes(status.step) ? status.step : JOBS[job][0];
     if (!JOBS[job].includes(from)) throw new Error(`runJob: ${JSON.stringify(from)} is not a step of ${job}`);
     writeState(dir, { ...readState(dir), state: "queued", job, step: from, pid: process.pid, why: "", queuedAt: at });
   } else {
-    entry = { id: randomUUID(), episode: spec.episode, key: spec.key, version: spec.version ?? null, mode: spec.mode, job, at, pid: process.pid };
-    changeQueue(home, (jobs) => [...jobs, entry], alive);
+    // The entry her chat's first half wrote for this run (`queued`, its id) is taken for its own: one entry per job.
+    entry = { id: typeof spec.queued === "string" && spec.queued !== "" ? spec.queued : randomUUID(), episode: spec.episode, key: spec.key, version: spec.version ?? null, mode: spec.mode, job, at, pid: process.pid };
+    changeQueue(home, (jobs) => [...jobs.filter((j) => j.id !== entry.id), entry], alive);
   }
 
   const lock = macLock(home);

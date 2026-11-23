@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { KEPT } from "../app.js";
 import { HELD, NOT_FOR_SESSION } from "../gate.js";
 import { kitDir, reelKitHome, venvPython } from "../reel-kit.js";
+import { enqueue } from "../reel-kit-worker.js";
 import {
   MODES, entryOf, linkProject, modeLeans, modeOf, projectFolderOf, readState, scaffold, slugOf, startWhy, stateFile, titleWhy, versionFor, writeState
 } from "../reel-kit-project.js";
@@ -163,14 +164,24 @@ describe("what Reel Kit refuses", () => {
     mkdirSync(dir, { recursive: true });
     for (const [state, more, line] of [
       ["storyboard", {}, ""],
-      ["queued", {}, "Reel 2 has a Reel Kit edit waiting or being made already."],
+      ["queued", { pid: 4242 }, "Reel 2 has a Reel Kit edit waiting or being made already."],
       ["working", { pid: 4242 }, "Reel 2 has a Reel Kit edit waiting or being made already."]
     ]) {
       writeState(dir, { slug: slugOf(record, "reel 2", 1), state, ...more });
       assert.equal(why(record, { alive: () => true }), line, state);
     }
-    // A worker that died is not at work. An edit whose folder can't be named counts as at work, as a gate errs.
+    // A worker that died is not at work, nor is a queued job whose run died (the worker's statusOf: it reads stopped), with a pid or
+    // none. An edit whose folder can't be named counts as at work, as a gate errs.
     assert.equal(why(record, { alive: () => false }), "");
+    for (const pid of [4242, undefined]) {
+      writeState(dir, { slug: slugOf(record, "reel 2", 1), state: "queued", pid });
+      assert.equal(why(record, { alive: () => false }), "", String(pid));
+    }
+    // A job in the queue record whose project is not made yet, by the record's id and the part, while its run is alive.
+    enqueue(w.t.home, { id: "q1", episode: record.id, key: "reel 2", version: null, mode: "lofi", job: "edit", at: "now", pid: 4242 }, () => true);
+    assert.equal(why(record, { alive: (pid) => pid === 4242 }), "Reel 2 has a Reel Kit edit waiting or being made already.");
+    assert.equal(why(record, { alive: () => false }), "", "its run died");
+    assert.equal(ask({ record, key: "main", mode: "showcase", home: w.t.home, folder: FOLDER, alive: (pid) => pid === 4242, title: "Pricing" }) === "Reel 2 has a Reel Kit edit waiting or being made already.", false, "another part's queue entry is no refusal");
     assert.equal(why(record, { alive: () => false, folder: undefined }), "Reel 2 has a Reel Kit edit waiting or being made already.");
     assert.equal(versionFor(record, "reel 2"), 2);
     assert.equal(versionFor(record, "main"), 1);

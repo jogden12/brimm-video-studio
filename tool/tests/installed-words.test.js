@@ -31,7 +31,8 @@ const ASKED = {
   refs: ["use", FOLDER, "blue carousel"],
   plan: [FOLDER],
   footage: [FOLDER, "Too many SKUs", "talking", "--client", "no"],
-  join: ["--now", FOLDER, "--parts", "e-20261104-a11111"]
+  join: ["--now", FOLDER, "--parts", "e-20261104-a11111"],
+  reelkit: ["status", FOLDER]
 };
 /** The commands that name an episode, each of COMMAND_NAMES but those that name none. */
 const SCOPED = COMMAND_NAMES.filter((name) => !UNSCOPED.includes(name));

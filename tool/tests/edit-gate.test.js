@@ -60,7 +60,10 @@ const ASKED = {
   // walked here is the one that answers (tests/edit-footage.test.js pins its words and its refusals).
   footage: [FOLDER, "Too many SKUs", "talking", "--client", "no"],
   // `join` is a detached run's alone (PR H5b), which `plan … join` starts, as `workcopy` is: the gate lets it run for a plan, and refuses every other record with no kind.
-  join: ["--now", FOLDER, "--parts", "e-20261104-a11111"]
+  join: ["--now", FOLDER, "--parts", "e-20261104-a11111"],
+  // `reelkit` names an episode in every word but `install`, `status` alone and `style` (plan Task 11; gate.js namesNoEpisode): the form walked
+  // here follows its edits (tests/edit-reelkit.test.js pins every word's refusals and its words).
+  reelkit: ["status", FOLDER]
 };
 const NAMES_NO_EPISODE = [];
 /** The commands that name an episode, each of COMMAND_NAMES but those that name none. */
@@ -185,7 +188,9 @@ describe("the gate walks every command that names an episode", () => {
       for (const name of SCOPED) {
         const { t } = episode(record);
         const r = await on(t.ctx.deps, name, ...ASKED[name]);
-        assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${what} ${name}: ${r.text}`);
+        // Reel Kit is refused for every session, cleared or not (plan Decision 9): session clips are not built yet.
+        if (name === "reelkit" && record === CLEARED_RECORD) assert.deepEqual([r.code, r.said], [1, [NOT_FOR_SESSION]], `${what} ${name}`);
+        else assert.ok(!GATE_REFUSALS.some((why) => r.text.includes(why)), `${what} ${name}: ${r.text}`);
         t.done();
       }
     }

@@ -69,6 +69,8 @@ At the start of every step, write `PROJECT/work/worker-status.json` whole, with 
 `step` is one of the job's steps, spelled as the job below spells them. `needs` is every line of `NEEDS` in `edit.py`, each beat
 and text copied word for word, the same list every time you write it (an empty list when there is none). Studio reads this file
 and shows her the step and the NEEDS lines in Reel Kit's own words. When the last step is done, write it once more, with that step.
+You may add `"minutesLeft": <n>`, your honest guess of the whole minutes this job has left (1 to 600); leave it out when you
+can't tell. Studio says it to her as a guess.
 
 ## The steps
 
