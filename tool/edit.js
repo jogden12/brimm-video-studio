@@ -52,7 +52,7 @@
 //   node edit.js reelkit install "<download>" [--yes] | status
 //                                         a Reel Kit download dragged into her chat: the plan of its setup, or with --yes the setup,
 //                                         detached; and how it is going (reel-kit-commands.js)
-//   node edit.js reelkit start | status | note | go | revise | resume | storyboard | published "<episode>" …
+//   node edit.js reelkit start | status | note | go | revise | resume | storyboard "<episode>" …
 //                                         her Reel Kit edits of an episode's parts: started queued, followed, noted, approved, changed,
 //                                         carried on, and their storyboards shown in the side panel through the lock's narrow opening
 //                                         (storyboard-opening.js) or on Reel Kit's local page (reel-kit-commands.js). Their detached half,
@@ -419,9 +419,7 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         an edit that stopped, carried on from its step, detached
   node edit.js reelkit storyboard "<episode>" <edit> [local]
                                         an edit's newest storyboard made ready in her folder, and the exact publish to the
-                                        side panel for her chat to make; with local, Reel Kit's own page on this Mac
-  node edit.js reelkit published "<episode>" <edit> <link>
-                                        the link of a storyboard's first publish, kept once: later versions go to it`;
+                                        side panel for her chat to make; with local, Reel Kit's own page on this Mac`;
 
 /** The home folder commands work from: the one a test gives, else Studio's own (home.js: BRIMM_VIDEO_HOME, else HOME, else the Mac's own word for it). */
 const homeOf = (deps) => deps.home || studioHome();

@@ -487,7 +487,7 @@ const APP_LABEL = "the Claude app's --settings for this chat";
 
 /** The parts of her folder's own open settings that lockBroken can find changed beyond PR #40's four, as the line for Jason names them,
     in the order it names them. */
-const OPEN_PARTS = { sandbox: "the sandbox's settings", permissions: "the allow and deny rules", memory: "memory off", "skill-shell": "skills' shell lines off", receipt: "the card's receipt hook", "other-hooks": "a hook beside the guard and the receipt", other: "settings BRIMM Video Studio does not write there", node: "the node it was written with (this Mac's settings name none)" };
+const OPEN_PARTS = { sandbox: "the sandbox's settings", permissions: "the allow and deny rules", memory: "memory off", "skill-shell": "skills' shell lines off", receipt: "the card's receipt hook", published: "the storyboard link's hook", "other-hooks": "a hook beside the guard, the receipt and the storyboard link's hook", other: "settings BRIMM Video Studio does not write there", node: "the node it was written with (this Mac's settings name none)" };
 
 /** The sandbox's keys, in a settings source, that only narrow it, and so loosen nothing: more places it may not read or write, and
     `credentials.envVars` while every entry of it takes a name away (`mode` "deny"). Every other sandbox key loosens the lock. */

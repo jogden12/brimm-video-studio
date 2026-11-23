@@ -150,7 +150,8 @@ describe("her folder's settings", () => {
   it("guard every tool with the hook, run without a shell so the paths' spaces and apostrophes stay whole, and block a call when the hook cannot run", () => {
     const s = JSON.parse(studioFiles({ checkout: "/Users/o'hara/Claude Code/BRIMM video", node: NODE, folder: "/Users/o'hara/BRIMM Video Studio" })[".claude/settings.json"]);
     assert.deepEqual(s.hooks, {
-      PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: ["/Users/o'hara/Claude Code/BRIMM video/tool/studio/guard.sh", NODE, "/Users/o'hara/BRIMM Video Studio"], onFailure: "block" }] }]
+      PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: ["/Users/o'hara/Claude Code/BRIMM video/tool/studio/guard.sh", NODE, "/Users/o'hara/BRIMM Video Studio"], onFailure: "block" }] }],
+      PostToolUse: [{ matcher: "Artifact", hooks: [{ type: "command", command: "/bin/sh", args: ["/Users/o'hara/Claude Code/BRIMM video/tool/studio/published.sh", NODE, "/Users/o'hara/BRIMM Video Studio"] }] }]
     });
   });
   it("names node in double quotes in the skill and the allow rule for a node whose path has spaces, and gives the hook that path as it is", () => {

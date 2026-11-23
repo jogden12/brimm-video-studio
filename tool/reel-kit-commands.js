@@ -31,8 +31,8 @@
 //                                          (plan Task 12) the edit's newest storyboard staged in her folder (storyboard-opening.js stagePage), and
 //                                          for her chat the exact publish to make, to the URL recorded for it once it has one; with `local`,
 //                                          Reel Kit's own page (KIT/storyboard/serve.py) on 127.0.0.1:8765, one at a time, opened in her browser.
-//   reelkit published "<episode>" <slug> <url>
-//                                          the URL its first publish gave, recorded once: never the kept BRIMM Ops page's, never changed.
+//                                          The URL the first publish gives is recorded by the hook after it (studio/published.sh), from the
+//                                          tool's own result, never from her chat's words.
 //   reelkit --now <folder> start|revise|finalize|resume …
 //                                          the detached half of each (in no help), which runs the worker's runJob. Refused under Claude Code.
 //
@@ -51,9 +51,8 @@ import { KEPT, byReelKit } from "./app.js";
 import { localStamp } from "./episode.js";
 import { PIN as HF_PIN } from "./hyperframes.js";
 import { kitDir, reelKitEnv, venvPython } from "./reel-kit.js";
-import { OPS_PAGE } from "./guide.js";
 import { studioFolder } from "./studio.js";
-import { pageOf, publishInput, recordUrl, stagePage } from "./storyboard-opening.js";
+import { pageOf, publishInput, stagePage } from "./storyboard-opening.js";
 import { MODES, entryOf, modeLeans, modeOf as modeNamed, projectFolderOf, readCapped, readState, scaffold, slugOf, startWhy, writeState } from "./reel-kit-project.js";
 import { JOBS, dequeue, enqueue, processStart, queuedOf, runJob, statusOf, stoppedLine } from "./reel-kit-worker.js";
 import { writeWhole as writeFileWhole } from "./reel-kit-worker-own.js";
@@ -725,16 +724,11 @@ async function resumeCommand(ctx, words, h) {
 
 // --- Her storyboard in the side panel (plan Task 12) ---
 
-/** What `reelkit storyboard` and `reelkit published` say: her lines in her words, and the lines for her chat marked FOR_CLAUDE. */
+/** What `reelkit storyboard` says: her lines in her words, and the lines for her chat marked FOR_CLAUDE. */
 export const STORYBOARD_SAY = Object.freeze({
   first: (said) => `The storyboard of ${said} is ready for the side panel. Leave a note on any beat there, or say "go" when it's right.`,
   again: (said) => `The storyboard of ${said} goes to its same page in the side panel. Leave a note on any beat there, or say "go" when it's right.`,
   notStaged: "The storyboard couldn't be made ready to show: ask Jason.",
-  recorded: "The storyboard's page is kept: each new version goes to it.",
-  url: "That isn't the link of a page in the side panel, so it wasn't kept: give it again as it came.",
-  kept: "That link is another page's, so it wasn't kept: ask Jason.",
-  changed: "This storyboard has its page already, so that link wasn't kept.",
-  none: "This storyboard hasn't been made ready for the side panel yet.",
   unread: "The list of storyboards on this Mac couldn't be read: ask Jason.",
   local: "Your storyboard is open on this Mac.",
   localHow: `Leave a note on any beat there, and press "Looks good: render it" when it's right.`,
@@ -742,9 +736,6 @@ export const STORYBOARD_SAY = Object.freeze({
 });
 /** How a line for her chat, not for her, starts. */
 export const FOR_CLAUDE = "For Claude: ";
-
-/** What `published` says for each of recordUrl's answers. */
-const PUBLISHED_SAY = { "": STORYBOARD_SAY.recorded, same: STORYBOARD_SAY.recorded, url: STORYBOARD_SAY.url, kept: STORYBOARD_SAY.kept, changed: STORYBOARD_SAY.changed, other: STORYBOARD_SAY.kept, none: STORYBOARD_SAY.none, unread: STORYBOARD_SAY.unread };
 
 /** The page's title: the edit's own title, as studio.json keeps it, with ": storyboard" after it. */
 const pageTitle = (state) => (typeof state?.title === "string" && state.title.trim() && state.title.length <= 120 ? `${state.title.trim()}: storyboard` : "Reel Kit storyboard");
@@ -771,23 +762,8 @@ async function storyboardCommand(ctx, words, h) {
   const page = pageOf(ctx.home, edit.slug);
   if (!page) return refuse(ctx, STORYBOARD_SAY.unread);
   ctx.say(`${FOR_CLAUDE}publish it with the Artifact tool exactly as this gives it, after reading its file_path whole: ${JSON.stringify(publishInput(page))}`);
-  if (!page.url) ctx.say(`${FOR_CLAUDE}then give the link the publish gives to reelkit published "${words[0]}" ${edit.slug} <link>, word for word.`);
   ctx.say((page.url ? STORYBOARD_SAY.again : STORYBOARD_SAY.first)(editSaid(edit.key, edit.mode, edit.version)));
   return 0;
-}
-
-/** `reelkit published "<episode>" <slug> <url>`: the URL the storyboard's first publish gave, recorded once (storyboard-opening.js recordUrl).
-    Never the kept BRIMM Ops page's, never another page's, never changed. */
-async function publishedCommand(ctx, words, h) {
-  if (words.length !== 3) {
-    ctx.say(h.help);
-    return 2;
-  }
-  const got = editFor(ctx, words, h);
-  if (got.code !== undefined) return got.code;
-  const why = recordUrl(ctx.home, got.edit.slug, words[2], { refused: [OPS_PAGE] });
-  ctx.say(PUBLISHED_SAY[why] ?? STORYBOARD_SAY.unread);
-  return why === "" || why === "same" ? 0 : 1;
 }
 
 /** The local page's port, address and record: one at a time on this Mac. */
@@ -984,7 +960,7 @@ export async function reelkitCommand(ctx, rest = [], { help = "", episodeFor, sa
   if (word === "install") return installCommand(ctx, more, help);
   if (word === "status" && more.length === 0) return statusCommand(ctx);
   if (word === "--now" && more[0] === "install") return installNow(ctx, more.slice(1), help);
-  const episodeWords = { start: startCommand, status: editStatus, note: noteCommand, go: goCommand, revise: reviseCommand, resume: resumeCommand, storyboard: storyboardCommand, published: publishedCommand };
+  const episodeWords = { start: startCommand, status: editStatus, note: noteCommand, go: goCommand, revise: reviseCommand, resume: resumeCommand, storyboard: storyboardCommand };
   if (typeof episodeFor === "function" && typeof save === "function") {
     if (word === "--now") return jobNow(ctx, more, h);
     if (Object.hasOwn(episodeWords, word) && more.length && !more[0].startsWith("--")) return episodeWords[word](ctx, more, h);

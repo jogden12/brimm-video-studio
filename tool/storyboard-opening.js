@@ -18,6 +18,11 @@
 // both locks). The guard reads it the safe way, and any trouble reading it refuses. At each publish it looks again at every file of the
 // one page named, so a file swapped for a link, edited, or replaced after staging is refused.
 //
+// A page's URL is recorded once, by the PostToolUse hook after an Artifact call (studio/published.sh, recordPublished), from the tool's own
+// result, and only after a publish that is exactly the one printed for a page with none: never from words her chat says. Studio's own
+// pages (STUDIO_PAGES: the kept BRIMM Ops page, her guide, the By-Hand Checks pages) are never one. The registry is written under a lock
+// of its own, on the registry as it is then, so staging and the hook never lose each other's change.
+//
 // The registry's shape: { pages: [{ id, kind: "storyboard"|"style-board", slug, episode, version, stage, file, files: [{ rel, size, dev,
 // ino, sha256 }], title, description, icon, url }] }, one page per id (an edit's slug), its stage the newest version's, its url recorded
 // once (recordUrl) and kept by every later version.
@@ -159,6 +164,64 @@ export function readRegistry(home) {
   }
 }
 
+/** The registry's lock: a file made new beside it, holding the pid of the run that holds it and when it took it. */
+const lockFile = (home) => `${registryFile(home)}.lock`;
+/** How old a lock may be before it is taken for one a run left. */
+const LOCK_STALE_MS = 30000;
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+};
+
+/** Run `change(registry)` on the registry as it is now, under its lock, and write what it gives back whole: so that staging a page and
+    recording a URL, which may run at once (her chat's command and the hook after a publish), never lose each other's change. `change`
+    gives { registry, result }, or { result } to write nothing. A lock a run that is gone left (its pid not running, or older than 30
+    seconds) is taken over; a lock held longer than `waitMs` gives up, writing nothing: { result: "unread" }. A registry that can't be
+    read is never written over: { result: "unread" }. Throws what `change` or the write throws, the lock let go first. */
+function underLock(home, change, waitMs = 2000) {
+  const file = lockFile(home);
+  mkdirSync(join(file, ".."), { recursive: true });
+  const mine = JSON.stringify({ pid: process.pid, at: Date.now(), n: Math.random() });
+  const until = Date.now() + waitMs;
+  for (;;) {
+    try {
+      writeFileSync(file, mine, { flag: "wx", mode: 0o600 });
+      break;
+    } catch (e) {
+      if (e.code !== "EEXIST") return { result: "unread" };
+    }
+    const held = readPlain(file, 4096);
+    let holder = null;
+    try {
+      holder = held ? JSON.parse(held.bytes.toString("utf8")) : null;
+    } catch {
+      holder = null;
+    }
+    const left = !holder || !Number.isInteger(holder.pid) || !alive(holder.pid) || !(Date.now() - Number(holder.at) < LOCK_STALE_MS);
+    if (left) {
+      rmSync(file, { force: true });
+      continue;
+    }
+    if (Date.now() >= until) return { result: "unread" };
+    pause(25);
+  }
+  try {
+    const registry = readRegistry(home);
+    if (registry === null) return { result: "unread" };
+    const done = change(registry);
+    if (done.registry) writeRegistry(home, done.registry);
+    return done;
+  } finally {
+    const held = readPlain(file, 4096);
+    if (held && held.bytes.toString("utf8") === mine) rmSync(file, { force: true });
+  }
+}
+
 /** Write the registry whole: into a file of its own beside it, then renamed over it. Throws when it can't. */
 function writeRegistry(home, registry) {
   const file = registryFile(home);
@@ -187,26 +250,99 @@ export const isArtifactUrl = (url) => typeof url === "string" && ARTIFACT_URL.te
 /** A URL as it is compared: with one slash at its end taken off. */
 const plainUrl = (url) => (typeof url === "string" && url.endsWith("/") ? url.slice(0, -1) : url);
 
-/** Record the URL a page's first publish gave: "" when recorded, or why not: "url" (not an artifact's link), "kept" (one of `refused`, the
-    kept BRIMM Ops page's), "none" (no such page staged), "same" (recorded already), "changed" (it has another: never changed), "other" (another
-    page's), "unread" (the registry can't be read or written). */
-export function recordUrl(home, id, url, { refused = [] } = {}) {
+/** Studio's own pages on claude.ai, by their ids: never a storyboard's, whatever else is said. The kept BRIMM Ops page (guide.js OPS_PAGE),
+    her guide (the BRIMM Ops guide), the Studio and Mac App By-Hand Checks pages, and the other pages Studio's documents name. */
+export const STUDIO_PAGES = Object.freeze([
+  "GCUQPLnSFWZe3VghyaKNtX", "Vu5JmADhftiEsPz4KYN4e4", "TmFpCY7GfR1KWw9hcftzrT", "VQVsatRKKwwYpzKW3GZPdA", "5Z8GNkqKe68PcNctRWNnMv",
+  "Nrv9VMy8AgX9tGG78YyHf1", "WHVePKCjhjUjtBdHvPipgC", "3KkWHoRTibNrSbtUcFEmzx", "05733dad-f4eb-41a9-8fcc-b123615b97cf"
+]);
+/** Whether `url` is one of Studio's own pages: its id, in any letter case, under either shape of link. */
+const studioPage = (url) => {
+  const id = String(plainUrl(url)).split("/").at(-1).toLowerCase();
+  return STUDIO_PAGES.some((page) => page.toLowerCase() === id);
+};
+
+/** Record the URL a page's first publish gave: "" when recorded, or why not: "url" (not an artifact's link), "kept" (one of Studio's own
+    pages, STUDIO_PAGES, or of `refused`), "none" (no such page staged), "same" (recorded already), "changed" (it has another: never changed),
+    "other" (another page's), "unread" (the registry can't be read or written, or its lock is held longer than `lockWaitMs`). Written under
+    the registry's lock, on the registry as it is then. */
+export function recordUrl(home, id, url, { refused = [], lockWaitMs } = {}) {
   if (!isArtifactUrl(url)) return "url";
   const plain = plainUrl(url);
-  if (refused.map(plainUrl).includes(plain)) return "kept";
-  const registry = readRegistry(home);
-  if (registry === null) return "unread";
-  const page = registry.pages.find((p) => p.id === id);
-  if (!page) return "none";
-  if (page.url === plain) return "same";
-  if (page.url !== null) return "changed";
-  if (registry.pages.some((p) => p.url === plain)) return "other";
+  if (studioPage(plain) || refused.map(plainUrl).includes(plain)) return "kept";
   try {
-    writeRegistry(home, { pages: registry.pages.map((p) => (p.id === id ? { ...p, url: plain } : p)) });
+    return underLock(home, (registry) => {
+      const page = registry.pages.find((p) => p.id === id);
+      if (!page) return { result: "none" };
+      if (page.url === plain) return { result: "same" };
+      if (page.url !== null) return { result: "changed" };
+      if (registry.pages.some((p) => p.url === plain)) return { result: "other" };
+      return { registry: { pages: registry.pages.map((p) => (p.id === id ? { ...p, url: plain } : p)) }, result: "" };
+    }, lockWaitMs).result;
   } catch {
     return "unread";
   }
-  return "";
+}
+
+/** How much of a publish's result is looked through for its URL. */
+const RESULT_MOST = 64 * 1024;
+const URL_IN = /https:\/\/claude\.ai\/(?:artifact\/[A-Za-z0-9_-]{1,64}|code\/artifact\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_-])/;
+
+/** The first artifact link in `response`, a tool's result: its strings, at any depth, in order, the first 64 KB of them looked at; null when
+    there is none there. */
+function urlIn(response) {
+  let left = RESULT_MOST;
+  const look = (v, depth) => {
+    if (left <= 0 || depth > 32) return null;
+    if (typeof v === "string") {
+      const seen = v.slice(0, left);
+      left -= seen.length;
+      return seen.match(URL_IN)?.[0] ?? null;
+    }
+    if (Array.isArray(v)) {
+      for (const x of v) {
+        const found = look(x, depth + 1);
+        if (found || left <= 0) return found;
+      }
+      return null;
+    }
+    if (isObject(v)) {
+      for (const x of Object.values(v)) {
+        const found = look(x, depth + 1);
+        if (found || left <= 0) return found;
+      }
+    }
+    return null;
+  };
+  return look(response, 0);
+}
+
+/** What the PostToolUse hook after an Artifact call records (studio/published.sh): the URL a page's first publish gave, taken from the
+    tool's own result, never from her chat. Only for a call whose input is exactly the publish `reelkit storyboard` printed for a page in
+    her folder `folder` that has no URL yet (publishInput, with `action: "publish"` or none); the first artifact link in the result is the
+    page's. Gives "" when recorded, "input" (not such a publish), "no url" (no artifact link in the result), or recordUrl's answer
+    ("kept", "changed", "other", "unread", …). A recorded URL is never changed. */
+export function recordPublished(home, input, { folder } = {}) {
+  if (!isObject(input) || input.hook_event_name !== "PostToolUse" || input.tool_name !== "Artifact" || !isObject(input.tool_input)) return "input";
+  const { action, ...given } = input.tool_input;
+  if (action !== undefined && action !== "publish") return "input";
+  const pages = typeof folder === "string" && isAbsolute(folder) && typeof home === "string" && isAbsolute(home) ? pagesIn(home, folder) : null;
+  const page = (pages ?? []).find((p) => p.url === null && isDeepStrictEqual(given, publishInput(p)));
+  if (!page) return "input";
+  const url = urlIn(input.tool_response);
+  if (url === null) return "no url";
+  return recordUrl(home, page.id, url);
+}
+
+/** A line for the hook's log, beside the registry: what it let go, with no URL in it. Nothing it does can fail the hook. */
+export function logPublished(home, what) {
+  try {
+    const file = join(home, "Library", "Application Support", "BRIMM Video", "storyboards.log");
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, `${new Date().toISOString()} the storyboard link's hook: ${what === "" ? "recorded" : what}\n`, { flag: "a", mode: 0o600 });
+  } catch {
+    // No log line.
+  }
 }
 
 /** The Artifact tool's input for publishing `page`, exactly: what `reelkit storyboard` prints and the guard lets through. */
@@ -276,7 +412,7 @@ function ownFolder(parent, name) {
     staged for it (every file's name and hash) is not staged again: its stage is given back (reused). The version is `version` when given,
     else the next after the page's last. The page keeps the URL recorded for it. Throws, staging nothing, for a name files.json may not
     give, a file that is a link or not there, a Storyboards or slug folder that is not her folder's own, or a registry that can't be read. */
-export function stagePage(home, folder, { from, slug, version, kind = "storyboard", episode = "", title = "" }) {
+export function stagePage(home, folder, { from, slug, version, kind = "storyboard", episode = "", title = "", beforeWrite = () => {} }) {
   if (typeof slug !== "string" || !SLUG.test(slug)) throw new Error(`stagePage: ${JSON.stringify(slug)} is not a slug`);
   if (!KINDS.includes(kind)) throw new Error(`stagePage: ${JSON.stringify(kind)} is not a kind of page`);
   // The folders above the storyboard's are Studio's own (the episode's work folder, the project's); the storyboard folder and all in it
@@ -322,9 +458,14 @@ export function stagePage(home, folder, { from, slug, version, kind = "storyboar
     });
     const page = {
       id: slug, kind, slug, episode: String(episode), version: n, stage, file: join(stage, "index.html"), files,
-      title: typeof title === "string" && title ? title : "Reel Kit storyboard", description: DESCRIPTION, icon: ICON, url: before?.url ?? null
+      title: typeof title === "string" && title ? title : "Reel Kit storyboard", description: DESCRIPTION, icon: ICON, url: null
     };
-    writeRegistry(home, { pages: [...registry.pages.filter((p) => p.id !== slug), page] });
+    beforeWrite();
+    // The registry as it is now, under its lock: a URL the hook recorded while the files were copied is kept.
+    const { result } = underLock(home, (now) => ({
+      registry: { pages: [...now.pages.filter((p) => p.id !== slug), { ...page, url: now.pages.find((p) => p.id === slug)?.url ?? null }] }, result: "written"
+    }));
+    if (result !== "written") throw new Error("stagePage: the registry can't be written now");
     return { stage, file: page.file, files: names, version: n, reused: false };
   } catch (e) {
     rmSync(stage, { recursive: true, force: true });
@@ -406,6 +547,8 @@ function publishOf(page, given) {
   return allow("a storyboard BRIMM Video Studio staged");
 }
 
+/** A thread's or a cursor's id: never words. */
+const COMMENT_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const COMMENT_KEYS = { read: ["action", "url", "thread_id", "cursor"], resolve: ["action", "url", "thread_id"], reply: ["action", "url", "thread_id", "text"] };
 
 /** What the opening answers to a call of Artifact or ArtifactComments, `input` as the PreToolUse hook is given it, for her folder
@@ -422,7 +565,7 @@ export function openingDecision(input, { home, folder }) {
   if (typeof home !== "string" || !isAbsolute(home) || typeof folder !== "string" || !isAbsolute(folder)) return deny();
   const pages = pagesIn(home, folder);
   if (pages === null) return deny();
-  const recorded = (url) => (typeof url === "string" ? pages.find((p) => p.url !== null && p.url === plainUrl(url)) ?? null : null);
+  const recorded = (url) => (typeof url === "string" && !studioPage(url) ? pages.find((p) => p.url !== null && p.url === plainUrl(url)) ?? null : null);
 
   if (name === "Artifact") {
     if (action === undefined || action === "publish") {
@@ -434,7 +577,7 @@ export function openingDecision(input, { home, folder }) {
   }
   // ArtifactComments.
   if (!Object.hasOwn(COMMENT_KEYS, action) || !only(given, COMMENT_KEYS[action]) || !recorded(given.url)) return deny();
-  for (const key of ["thread_id", "cursor"]) if (given[key] !== undefined && (typeof given[key] !== "string" || given[key] === "")) return deny();
+  for (const key of ["thread_id", "cursor"]) if (given[key] !== undefined && !(typeof given[key] === "string" && COMMENT_ID.test(given[key]))) return deny();
   if (action === "resolve" && given.thread_id === undefined) return deny();
   if (action === "reply" && (given.thread_id === undefined || given.text !== REPLY)) return deny();
   return allow(action === "read" ? "her notes on a storyboard" : action === "reply" ? "On it." : "a note on a storyboard, done");

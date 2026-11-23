@@ -65,7 +65,7 @@ const filled = (name, { checkout, node }) => readFileSync(new URL(`./studio/${na
     Code's /feedback command and its transcript-share survey are off (the two variables in `env`, as in each HyperFrames project's
     settings, hyperframes.js settingsFor): a session's words are a client's, and neither may offer them for sharing. Only this
     shape, the strict lock, writes them: the open lock (openSettingsOf) takes any `env` as a change (openBroken, "other"). */
-function settingsOf({ checkout, node, folder }) {
+export function settingsOf({ checkout, node, folder }) {
   return {
     permissions: {
       defaultMode: "default",
@@ -77,7 +77,9 @@ function settingsOf({ checkout, node, folder }) {
     env: { DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1" },
     disableAllHooks: false,
     hooks: {
-      PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/guard.sh`, node, folder], onFailure: "block" }] }]
+      PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/guard.sh`, node, folder], onFailure: "block" }] }],
+      // The storyboard link's hook (storyboard-opening.js recordPublished): a staged storyboard's first URL, from the publish's own result.
+      PostToolUse: [{ matcher: "Artifact", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/published.sh`, node, folder] }] }]
     }
   };
 }
@@ -154,7 +156,7 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
     disableAllHooks: false,
     hooks: {
       PreToolUse: settingsOf({ checkout, node, folder }).hooks.PreToolUse,
-      PostToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/receipt.sh`, node, folder] }] }]
+      PostToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/receipt.sh`, node, folder] }] }, ...settingsOf({ checkout, node, folder }).hooks.PostToolUse]
     }
   };
 }
@@ -190,7 +192,7 @@ export function lockBroken(settings, { checkout, folder, lock = "strict", facts,
     differs is named: "hooks", "guard", "bypass" and "auto" as for the strict lock (the guard's entry compared whole, its node among
     it); "sandbox" (the sandbox's settings, whole); "permissions" (allow, deny, the modes and anything added, such as a folder);
     "memory" (autoMemoryEnabled or autoDreamEnabled not false); "skill-shell" (disableSkillShellExecution not true); "receipt" (no
-    entry with the receipt hook after a card); "other-hooks" (a hook of any other event, such as SessionStart, or any hook beside the
+    entry with the receipt hook after a card); "published" (no entry with the storyboard link's hook after an Artifact call); "other-hooks" (a hook of any other event, such as SessionStart, or any hook beside the
     guard's and the receipt's); and "other" (any other key, such as env, statusLine, enabledPlugins or apiKeyHelper, or
     disableAllHooks not false). ["node"] alone when this Mac's settings name no node, so that nothing can be compared. */
 function openBroken(settings, { checkout, folder, facts, node }) {
@@ -213,11 +215,12 @@ function openBroken(settings, { checkout, folder, facts, node }) {
   if (s.autoMemoryEnabled !== false || s.autoDreamEnabled !== false) broken.push("memory");
   if (s.disableSkillShellExecution !== true) broken.push("skill-shell");
   if (!holds("PostToolUse")) broken.push("receipt");
+  if (!entries("PostToolUse").some((entry) => isDeepStrictEqual(entry, want.hooks.PostToolUse[1]))) broken.push("published");
   // A hook of another event, or more than the one each, is another hook; and so is any other difference in the hooks that the
   // guard's and the receipt's do not already name.
   const otherEvent = Object.keys(hooks).some((event) => !Object.hasOwn(want.hooks, event));
-  const unnamed = !isDeepStrictEqual(s.hooks, want.hooks) && !broken.includes("guard") && !broken.includes("receipt");
-  if (otherEvent || count("PreToolUse") > 1 || count("PostToolUse") > 1 || unnamed) broken.push("other-hooks");
+  const unnamed = !isDeepStrictEqual(s.hooks, want.hooks) && !broken.includes("guard") && !broken.includes("receipt") && !broken.includes("published");
+  if (otherEvent || count("PreToolUse") > 1 || count("PostToolUse") > want.hooks.PostToolUse.length || unnamed) broken.push("other-hooks");
   if (Object.keys(s).some((key) => !Object.hasOwn(want, key)) || (s.disableAllHooks !== false && s.disableAllHooks !== true)) broken.push("other");
   return broken;
 }

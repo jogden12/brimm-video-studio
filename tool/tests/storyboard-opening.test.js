@@ -2,7 +2,7 @@
 // publish a page Studio staged in her folder, and open it, and read and answer its comments, and nothing else with the Artifact and
 // ArtifactComments tools. Every case is asked of both locks: today's strict guard (studio.js guardDecision) and the open guard
 // (open-lock.js openDecision), on a made-up open-lock Mac (open-world.js) whose home holds the registry. The `reelkit storyboard` and
-// `reelkit published` words are run on the made-up episode of phase4.js, with Reel Kit's serve.py stood in for (tests/stand-ins/reel-kit.mjs):
+// URL a publish's own result gives, recorded by the PostToolUse hook (studio/published.sh), are run on the made-up episode of phase4.js, with Reel Kit's serve.py stood in for (tests/stand-ins/reel-kit.mjs):
 // no test runs the real Artifact tools, Reel Kit's Python or a browser.
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -11,8 +11,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CAPABILITIES, NARROW, OPENING_REFUSED, PUBLISH_EXACTLY, STORYBOARDS, isArtifactUrl, openingDecision, pageOf, publishInput, readRegistry,
-  recordUrl, registryFile, stagePage
+  STUDIO_PAGES, recordPublished, recordUrl, registryFile, stagePage
 } from "../storyboard-opening.js";
+import { spawnSync } from "node:child_process";
+import { lockBroken, settingsOf } from "../studio.js";
 import { neverCaught, neverDenyRules } from "../never.js";
 import { guardDecision, openSettingsOf, studioFolder, writeStudio } from "../studio.js";
 import { openDecision } from "../open-lock.js";
@@ -181,6 +183,11 @@ describe("the narrow opening: publishing a staged page, in both locks", () => {
     for (const input of [{ action: "watch", url: URL_1 }, { action: "watch", url: URL_1, on: true }, { action: "watch", url: URL_1, on: false }, { action: "watch" }, { url: URL_1 }, {}]) assert.deepEqual(await w.both("ArtifactComments", input), DENY, JSON.stringify(input));
     for (const input of [{ action: "read", url: URL_1 }, { action: "read", url: `${URL_1}/`, thread_id: "t1" }, { action: "read", url: URL_1, cursor: "c2" }, { action: "resolve", url: URL_1, thread_id: "t1" }, { action: "reply", url: URL_1, thread_id: "t1", text: "On it." }]) assert.deepEqual(await w.both("ArtifactComments", input), ALLOW, JSON.stringify(input));
     for (const input of [{ action: "read", url: URL_1, replies: true }, { action: "resolve", url: URL_1 }, { action: "read", url: URL_1, thread_id: 7 }]) assert.deepEqual(await w.both("ArtifactComments", input), DENY, JSON.stringify(input));
+    // A thread or a cursor is an id, never words.
+    for (const id of ["", "a b", "t1\nmore", "x".repeat(129), "../t", "t1;", "théo"]) {
+      for (const input of [{ action: "read", url: URL_1, thread_id: id }, { action: "read", url: URL_1, cursor: id }, { action: "resolve", url: URL_1, thread_id: id }, { action: "reply", url: URL_1, thread_id: id, text: "On it." }]) assert.deepEqual(await w.both("ArtifactComments", input), DENY, JSON.stringify(input));
+    }
+    assert.deepEqual(await w.both("ArtifactComments", { action: "read", url: URL_1, thread_id: "A-b_9".padEnd(128, "z"), cursor: "c_2-X" }), ALLOW);
   });
   it("refuses a reply that is not exactly On it.", async () => {
     const w = lockWorld();
@@ -382,6 +389,12 @@ describe("a page's URL", () => {
     }
     assert.ok(isArtifactUrl(URL_1) && isArtifactUrl(URL_2) && isArtifactUrl(`${URL_1}/`));
     assert.equal(recordUrl(w.home, SLUG, OPS_PAGE, { refused: [OPS_PAGE] }), "kept");
+    // Studio's own pages are never a storyboard's, whatever `refused` is given: the kept BRIMM Ops page, her guide, the By-Hand pages.
+    assert.ok(STUDIO_PAGES.some((id) => OPS_PAGE.endsWith(`/${id}`)));
+    for (const id of ["GCUQPLnSFWZe3VghyaKNtX", "Vu5JmADhftiEsPz4KYN4e4", "TmFpCY7GfR1KWw9hcftzrT", "VQVsatRKKwwYpzKW3GZPdA"]) {
+      assert.ok(STUDIO_PAGES.includes(id), id);
+      for (const url of [`https://claude.ai/artifact/${id}`, `https://claude.ai/artifact/${id}/`, `https://claude.ai/artifact/${id.toLowerCase()}`]) assert.equal(recordUrl(w.home, SLUG, url), "kept", url);
+    }
     assert.equal(recordUrl(w.home, SLUG, `${URL_1}/`), "");
     assert.equal(pageOf(w.home, SLUG).url, URL_1);
     assert.equal(recordUrl(w.home, SLUG, URL_1), "same");
@@ -398,7 +411,129 @@ describe("a page's URL", () => {
   });
 });
 
-// --- Her words: reelkit storyboard and reelkit published ---
+// --- The URL, from the publish's own result (the PostToolUse hook) ---
+
+/** The PostToolUse hook's input for an Artifact call `input`, its result holding `url` somewhere inside it. */
+const posted = (input, given = {}) => ({
+  session_id: SESSION, hook_event_name: "PostToolUse", tool_name: "Artifact", tool_input: input,
+  tool_response: Object.hasOwn(given, "response") ? given.response : { content: [{ type: "text", text: `Published. Your page is at ${given.url} (private).` }], meta: { other: "https://claude.ai/artifact/LaterOne" } }
+});
+const PUBLISHED_SH = fileURLToPath(new URL("../studio/published.sh", import.meta.url));
+
+describe("the URL a storyboard's first publish gives, recorded by the hook", () => {
+  it("records the URL the result of a publish of a staged page gives, the first one in it", () => {
+    const w = lockWorld();
+    w.stage();
+    assert.equal(recordPublished(w.home, posted(publish(w), { url: URL_1 }), { folder: w.folder }), "");
+    assert.equal(pageOf(w.home, SLUG).url, URL_1);
+    // Also a result that is only a string, or holds the URL deep in a list, with a slash after it.
+    const v = lockWorld();
+    v.stage();
+    assert.equal(recordPublished(v.home, posted(publish(v), { response: [{ a: { b: [`see ${URL_2}/.`] } }] }), { folder: v.folder }), "");
+    assert.equal(pageOf(v.home, SLUG).url, URL_2);
+    const u = lockWorld();
+    u.stage();
+    assert.equal(recordPublished(u.home, posted({ ...publish(u), action: "publish" }, { response: URL_1 }), { folder: u.folder }), "");
+    assert.equal(pageOf(u.home, SLUG).url, URL_1);
+  });
+  it("records nothing for a publish of anything else", () => {
+    const w = lockWorld();
+    w.stage();
+    const p = publish(w);
+    const { title, ...untitled } = p;
+    for (const [what, input] of [
+      ["another title", { ...p, title: "x" }], ["the title left out", untitled], ["the root form", { ...p, root: dirname(p.file_path), files: Object.fromEntries(Object.keys(p.files).map((r) => [r, r])) }],
+      ["another file", { ...p, file_path: join(w.folder, "Pictures", "index.html") }], ["a url given", { ...p, url: URL_2 }], ["another action", { action: "open", url: URL_1 }], ["no input", undefined]
+    ]) assert.equal(recordPublished(w.home, posted(input, { url: URL_1 }), { folder: w.folder }), "input", what);
+    for (const [what, call] of [["another tool", { ...posted(p, { url: URL_1 }), tool_name: "ArtifactComments" }], ["another event", { ...posted(p, { url: URL_1 }), hook_event_name: "PreToolUse" }], ["not an object", "x"]]) {
+      assert.equal(recordPublished(w.home, call, { folder: w.folder }), "input", what);
+    }
+    // Her folder must hold the page.
+    assert.equal(recordPublished(w.home, posted(p, { url: URL_1 }), { folder: join(w.home, "Elsewhere") }), "input");
+    assert.equal(pageOf(w.home, SLUG).url, null);
+  });
+  it("records nothing for a result with no URL of an artifact's shape, or one of Studio's own pages", () => {
+    const w = lockWorld();
+    w.stage();
+    const p = publish(w);
+    for (const response of [{}, "Published.", { url: "https://example.com/artifact/x" }, { url: "https://claude.ai/chat/abc" }, `${" ".repeat(70 * 1024)}${URL_1}`, null, 7]) {
+      assert.equal(recordPublished(w.home, posted(p, { response }), { folder: w.folder }), "no url", JSON.stringify(response)?.slice(0, 60));
+    }
+    assert.equal(recordPublished(w.home, posted(p, { response: { text: OPS_PAGE } }), { folder: w.folder }), "kept");
+    assert.equal(recordPublished(w.home, posted(p, { response: { text: "https://claude.ai/artifact/Vu5JmADhftiEsPz4KYN4e4" } }), { folder: w.folder }), "kept");
+    assert.equal(pageOf(w.home, SLUG).url, null);
+  });
+  it("never changes a URL once recorded: a second publish's result is let go", () => {
+    const w = lockWorld();
+    w.stage();
+    assert.equal(recordPublished(w.home, posted(publish(w), { url: URL_1 }), { folder: w.folder }), "");
+    // The next publish names the URL (publishInput gives it now), so it is no first publish; and one without it is no longer the page's.
+    assert.equal(recordPublished(w.home, posted(publish(w), { url: URL_2 }), { folder: w.folder }), "input");
+    const { url, ...first } = publish(w);
+    assert.equal(recordPublished(w.home, posted(first, { url: URL_2 }), { folder: w.folder }), "input");
+    assert.equal(pageOf(w.home, SLUG).url, URL_1);
+  });
+  it("runs as Claude Code runs it, in exec form, never blocking, and logs what it let go", () => {
+    const w = lockWorld();
+    w.stage();
+    const run = (input, node = process.execPath) => spawnSync("/bin/sh", [PUBLISHED_SH, node, w.folder], { input: typeof input === "string" ? input : JSON.stringify(input), encoding: "utf8" });
+    for (const [input, node] of [["not json", process.execPath], [JSON.stringify(posted(publish(w), { response: {} })), process.execPath], [JSON.stringify(posted(publish(w), { url: URL_1 })), "/nonexistent/node"]]) {
+      const ran = run(input, node);
+      assert.deepEqual([ran.status, ran.stdout], [0, ""], input.slice(0, 40));
+    }
+    assert.equal(pageOf(w.home, SLUG).url, null);
+    assert.match(readFileSync(join(w.home, "Library", "Application Support", "BRIMM Video", "storyboards.log"), "utf8"), /no url/);
+    const ran = run(posted(publish(w), { url: URL_1 }));
+    assert.deepEqual([ran.status, ran.stdout], [0, ""]);
+    assert.equal(pageOf(w.home, SLUG).url, URL_1);
+  });
+  it("is in both locks' settings, after an Artifact call, and the open lock takes it as part of its shape", () => {
+    const w = lockWorld();
+    const hook = { matcher: "Artifact", hooks: [{ type: "command", command: "/bin/sh", args: [`${w.checkout}/tool/studio/published.sh`, w.node, w.folder] }] };
+    assert.deepEqual(settingsOf({ checkout: w.checkout, node: w.node, folder: w.folder }).hooks.PostToolUse, [hook]);
+    const open = openSettingsOf({ checkout: w.checkout, node: w.node, folder: w.folder, facts: w.facts });
+    assert.deepEqual(open.hooks.PostToolUse.map((e) => e.matcher), ["AskUserQuestion", "Artifact"]);
+    assert.deepEqual(open.hooks.PostToolUse[1], hook);
+    const args = { checkout: w.checkout, folder: w.folder, lock: "open", facts: w.facts, node: w.node };
+    assert.deepEqual(lockBroken(JSON.parse(JSON.stringify(open)), args), []);
+    const without = JSON.parse(JSON.stringify(open));
+    without.hooks.PostToolUse.pop();
+    assert.deepEqual(lockBroken(without, args), ["published"]);
+    const twice = JSON.parse(JSON.stringify(open));
+    twice.hooks.PostToolUse.push(hook);
+    assert.ok(lockBroken(twice, args).includes("other-hooks"));
+    // The strict lock's check looks only at the guard: its folder without the hook is only out of date.
+    const strict = settingsOf({ checkout: w.checkout, node: w.node, folder: w.folder });
+    delete strict.hooks.PostToolUse;
+    assert.deepEqual(lockBroken(strict, { checkout: w.checkout, folder: w.folder }), []);
+  });
+  it("loses neither a URL nor a staged version when the two write the registry at once, and waits for the registry's lock", () => {
+    const w = lockWorld();
+    w.stage();
+    const lock = `${registryFile(w.home)}.lock`;
+    // A lock a run that is gone left: taken over.
+    writeFileSync(lock, JSON.stringify({ pid: 999999, at: 0 }));
+    assert.equal(recordUrl(w.home, SLUG, URL_1), "");
+    assert.ok(!existsSync(lock));
+    // A lock a live run holds: the write waits, then gives up, changing nothing.
+    const v = lockWorld();
+    v.stage();
+    writeFileSync(`${registryFile(v.home)}.lock`, JSON.stringify({ pid: process.pid, at: Date.now() }));
+    assert.equal(recordUrl(v.home, SLUG, URL_1, { lockWaitMs: 200 }), "unread");
+    assert.equal(pageOf(v.home, SLUG).url, null);
+    rmSync(`${registryFile(v.home)}.lock`);
+    // A version staged keeps the URL recorded while it was being copied.
+    const x = lockWorld();
+    x.stage();
+    writeFileSync(join(x.from, "frames", "f001.jpg"), "v2");
+    const staged = stagePage(x.home, x.folder, { from: x.from, slug: SLUG, kind: "storyboard", episode: ID, title: "Know your costs: storyboard", beforeWrite: () => assert.equal(recordUrl(x.home, SLUG, URL_2), "") });
+    assert.equal(staged.version, 2);
+    assert.equal(pageOf(x.home, SLUG).url, URL_2);
+    assert.equal(pageOf(x.home, SLUG).version, 2);
+  });
+});
+
+// --- Her words: reelkit storyboard ---
 
 const done = [];
 after(() => {
@@ -440,7 +575,7 @@ async function reelkit(w, words) {
 const hers = (said) => said.filter((line) => !line.startsWith(FOR_CLAUDE));
 const publishOf = (said) => JSON.parse(said.find((line) => line.startsWith(`${FOR_CLAUDE}publish`)).replace(/^[^{]*/, ""));
 
-describe("reelkit storyboard and reelkit published", () => {
+describe("reelkit storyboard", () => {
   it("stages the newest storyboard and prints, for her chat, the exact publish to make; then its URL is recorded once and later versions go to it", async () => {
     const w = edited();
     const r = await reelkit(w, ["storyboard", FOLDER, SLUG]);
@@ -452,21 +587,17 @@ describe("reelkit storyboard and reelkit published", () => {
     assert.deepEqual(input.capabilities, CAPABILITIES);
     assert.deepEqual(hers(r.said), [STORYBOARD_SAY.first("Reel 2 (lo-fi, version 1)")]);
     for (const line of hers(r.said)) assert.doesNotMatch(line, PLAIN, line);
-    assert.ok(r.said.some((line) => line.startsWith(FOR_CLAUDE) && line.includes("reelkit published")));
+    assert.ok(!r.said.some((line) => line.includes("published")), "no word for her chat to record the link: the hook does");
     // Both locks let that very publish through.
     const strict = guardDecision({ tool_name: "Artifact", tool_input: input }, { checkout: "/checkout", node: "/opt/homebrew/bin/node", folder: studioFolder(w.t.home) });
     assert.equal(strict.decision, "allow");
 
-    // The first URL, recorded once: the kept BRIMM Ops page's never.
-    let p = await reelkit(w, ["published", FOLDER, SLUG, OPS_PAGE]);
-    assert.deepEqual([p.code, p.said], [1, [STORYBOARD_SAY.kept]]);
-    p = await reelkit(w, ["published", FOLDER, SLUG, "https://example.com/x"]);
-    assert.deepEqual([p.code, p.said], [1, [STORYBOARD_SAY.url]]);
-    p = await reelkit(w, ["published", FOLDER, SLUG, URL_1]);
-    assert.deepEqual([p.code, p.said], [0, [STORYBOARD_SAY.recorded]]);
-    p = await reelkit(w, ["published", FOLDER, SLUG, URL_2]);
-    assert.deepEqual([p.code, p.said], [1, [STORYBOARD_SAY.changed]]);
-    for (const line of [STORYBOARD_SAY.kept, STORYBOARD_SAY.url, STORYBOARD_SAY.recorded, STORYBOARD_SAY.changed]) assert.doesNotMatch(line, PLAIN, line);
+    // The first URL, recorded by the hook from the publish's own result; her chat has no word for it any more.
+    assert.equal(recordPublished(w.t.home, posted(input, { url: URL_1 }), { folder: studioFolder(w.t.home) }), "");
+    assert.equal(recordPublished(w.t.home, posted(input, { url: URL_2 }), { folder: studioFolder(w.t.home) }), "input", "the page has its URL: no first publish");
+    assert.equal(pageOf(w.t.home, SLUG).url, URL_1);
+    const gone = await reelkit(w, ["published", FOLDER, SLUG, URL_1]);
+    assert.deepEqual([gone.code, gone.said], [2, [HELP]]);
 
     // The next version: staged as v2, published to the same URL.
     writeFileSync(join(w.dir, "storyboard", "frames", "f001.jpg"), "v2's frame");
@@ -476,7 +607,7 @@ describe("reelkit storyboard and reelkit published", () => {
     assert.equal(second.url, URL_1);
     assert.equal(second.file_path, join(realOf(studioFolder(w.t.home)), STORYBOARDS, SLUG, "v2", "index.html"));
     assert.deepEqual(hers(again.said), [STORYBOARD_SAY.again("Reel 2 (lo-fi, version 1)")]);
-    assert.ok(!again.said.some((line) => line.includes("reelkit published")));
+    assert.ok(!again.said.some((line) => line.includes("published")));
   });
   it("shows no storyboard while the edit is being made, and none of an edit it does not know", async () => {
     const w = edited({ state: "working" });
@@ -487,8 +618,6 @@ describe("reelkit storyboard and reelkit published", () => {
     r = await reelkit(w, ["storyboard", FOLDER, "3fa9c1-reel-9-v1"]);
     assert.deepEqual([r.code, r.said], [1, [EDIT_SAY.noSuchEdit]]);
     r = await reelkit(w, ["storyboard", FOLDER]);
-    assert.deepEqual([r.code, r.said], [2, [HELP]]);
-    r = await reelkit(w, ["published", FOLDER, SLUG]);
     assert.deepEqual([r.code, r.said], [2, [HELP]]);
   });
   it("says so in one line when the storyboard can't be made ready, and stages nothing", async () => {

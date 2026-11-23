@@ -145,8 +145,9 @@ describe("behind, with the open lock", () => {
       [(s) => s.permissions.allow.push(`Read(${SECRET})`), "the allow and deny rules"],
       [(s) => (s.autoMemoryEnabled = true), "memory off"],
       [(s) => delete s.disableSkillShellExecution, "skills' shell lines off"],
-      [(s) => delete s.hooks.PostToolUse, "the card's receipt hook"],
-      [(s) => (s.hooks.SessionStart = [{ hooks: [{ type: "command", command: SECRET }] }]), "a hook beside the guard and the receipt"],
+      [(s) => s.hooks.PostToolUse.shift(), "the card's receipt hook"],
+      [(s) => s.hooks.PostToolUse.pop(), "the storyboard link's hook"],
+      [(s) => (s.hooks.SessionStart = [{ hooks: [{ type: "command", command: SECRET }] }]), "a hook beside the guard, the receipt and the storyboard link's hook"],
       [(s) => (s.env = { A: SECRET }), "settings BRIMM Video Studio does not write there"],
       [(s) => { s.env = { A: SECRET }; s.autoDreamEnabled = true; s.sandbox.enabled = false; }, "the sandbox's settings, memory off, settings BRIMM Video Studio does not write there"],
     ];
@@ -583,12 +584,12 @@ describe("behind, with the open lock: plugins, named skills and SessionStart hoo
     w.done();
   });
   it("refuses for any hook in her folder's own settings beyond the guard and the receipt, a SessionStart hook the /hooks menu wrote there among them", async () => {
-    // Task 7's "other-hooks": the line names "a hook beside the guard and the receipt"
+    // Task 7's "other-hooks": the line names "a hook beside the guard, the receipt and the storyboard link's hook"
     const hook = { matcher: "*", hooks: [{ type: "command", command: SECRET }] };
     for (const [what, change] of [["SessionStart", (s) => (s.hooks.SessionStart = [{ hooks: [{ type: "command", command: SECRET }] }])], ["a second PreToolUse", (s) => s.hooks.PreToolUse.push(hook)], ["a second PostToolUse", (s) => s.hooks.PostToolUse.push(hook)], ["Stop", (s) => (s.hooks.Stop = [hook])]]) {
       const w = openWorld();
       changeOwn(w, change);
-      refusedFor(await behindOn(w), ownLine("a hook beside the guard and the receipt"), what);
+      refusedFor(await behindOn(w), ownLine("a hook beside the guard, the receipt and the storyboard link's hook"), what);
       w.done();
     }
   });
