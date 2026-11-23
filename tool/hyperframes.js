@@ -197,7 +197,7 @@ export function denyRules() {
     run_hyperframes, which a test holds to this list). The rule behind them is that nothing is installed on a Mac without Jason's yes:
     a newer version comes by a pull request that moves the pin and then by the installer, and a feature whose optional package is
     missing says so and is not given it (5.3). A new object each time. */
-const quiet = () => ({
+export const quiet = () => ({
   HYPERFRAMES_NO_TELEMETRY: "1", HYPERFRAMES_SKIP_SKILLS: "1", HYPERFRAMES_NO_UPDATE_CHECK: "1", HYPERFRAMES_NO_AUTO_INSTALL: "1", HYPERFRAMES_NO_OPTIONAL_INSTALL: "1"
 });
 

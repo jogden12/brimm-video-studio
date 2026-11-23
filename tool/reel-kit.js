@@ -13,8 +13,10 @@
 // Pure but for reading: its own pin file, and the folder folderFingerprint is given. It writes nothing and runs nothing.
 import { closeSync, lstatSync, openSync, readFileSync, readSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { workFolder } from "./settings.js";
+import { quiet } from "./hyperframes.js";
+import { shellWord } from "./studio.js";
 
 /** A value and everything inside it, frozen. */
 function deepFreeze(value) {
@@ -123,4 +125,41 @@ export function folderFingerprint(dir) {
   files.sort((a, b) => Buffer.compare(Buffer.from(a.rel, "utf8"), Buffer.from(b.rel, "utf8")));
   const manifest = files.map((f) => `${fileSha256(f.path)}  ${f.rel}\n`).join("");
   return `sha256-${createHash("sha256").update(manifest, "utf8").digest("hex")}`;
+}
+
+/** The environment every Reel Kit command Studio starts is run in: a list, not what Studio inherited. `PATH` is Reel Kit's tools/bin
+    (its npx, node, ffmpeg, ffprobe, python3), /usr/bin and /bin; `HOME` and `LANG` come from `base` (LANG en_US.UTF-8 when it has
+    none); REEL_KIT_HOME is always BRIMM Video Work's .reel-kit and HF_HOME sits inside it. After install nothing reaches the network:
+    HF_HUB_OFFLINE, PIP_NO_INDEX, UV_OFFLINE, PYTHONNOUSERSITE, and HyperFrames' own quiet variables (hyperframes.js). Nothing of
+    Anthropic's, no proxy, no session id from the base. `node` must be absolute (Studio's own; the shim and links use it). Throws on
+    a relative or missing HOME or node. A new object each time. */
+export function reelKitEnv(options) {
+  const { home, node, base } = options ?? {};
+  if (!isAbsolute(home ?? "") || !isAbsolute(base?.HOME ?? "")) throw new Error("reelKitEnv: HOME must be an absolute path");
+  if (!isAbsolute(node ?? "")) throw new Error("reelKitEnv: node must be an absolute path");
+  return {
+    PATH: [binDir(home), "/usr/bin", "/bin"].join(":"),
+    HOME: base.HOME,
+    LANG: typeof base.LANG === "string" && base.LANG !== "" ? base.LANG : "en_US.UTF-8",
+    REEL_KIT_HOME: reelKitHome(home),
+    HF_HOME: join(reelKitHome(home), "hf"),
+    HF_HUB_OFFLINE: "1", PIP_NO_INDEX: "1", UV_OFFLINE: "1", PYTHONNOUSERSITE: "1",
+    ...quiet()
+  };
+}
+
+/** The text of the `npx` Studio puts in Reel Kit's tools/bin (a /bin/sh script; Task 5 writes it). Reel Kit's common.py puts that
+    folder first on PATH and asks for `npx -y hyperframes@<version>`: this runs the pinned HyperFrames program by absolute path with
+    Studio's node and never calls the real npx. Only the exact two words `-y` and `hyperframes@<version>` first are served; anything
+    else prints one line on stderr and exits 1. */
+export function npxShim({ node, cli, version }) {
+  return `#!/bin/sh
+# Reel Kit's npx: it serves only the pinned HyperFrames and never reaches the network.
+if [ "$1" = "-y" ] && [ "$2" = ${shellWord(`hyperframes@${version}`)} ]; then
+  shift 2
+  exec ${shellWord(node)} ${shellWord(cli)} "$@"
+fi
+echo "This npx runs only HyperFrames ${version}." >&2
+exit 1
+`;
 }
