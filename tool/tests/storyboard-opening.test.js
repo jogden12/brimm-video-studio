@@ -6,14 +6,14 @@
 // no test runs the real Artifact tools, Reel Kit's Python or a browser.
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, utimesSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CAPABILITIES, NARROW, OPENING_REFUSED, PUBLISH_EXACTLY, STORYBOARDS, isArtifactUrl, openingDecision, pageOf, publishInput, readRegistry,
   STUDIO_PAGES, recordPublished, recordUrl, registryFile, stagePage
 } from "../storyboard-opening.js";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { lockBroken, settingsOf } from "../studio.js";
 import { neverCaught, neverDenyRules } from "../never.js";
 import { guardDecision, openSettingsOf, studioFolder, writeStudio } from "../studio.js";
@@ -416,12 +416,25 @@ describe("a page's URL", () => {
 /** The PostToolUse hook's input for an Artifact call `input`, its result holding `url` somewhere inside it. */
 const posted = (input, given = {}) => ({
   session_id: SESSION, hook_event_name: "PostToolUse", tool_name: "Artifact", tool_input: input,
-  tool_response: Object.hasOwn(given, "response") ? given.response : { content: [{ type: "text", text: `Published. Your page is at ${given.url} (private).` }], meta: { other: "https://claude.ai/artifact/LaterOne" } }
+  tool_response: Object.hasOwn(given, "response") ? given.response : { content: [{ type: "text", text: `Published. Your page is at ${given.url} (private).` }], meta: { again: `${given.url}/` } }
 });
 const PUBLISHED_SH = fileURLToPath(new URL("../studio/published.sh", import.meta.url));
+const OPENING = new URL("../storyboard-opening.js", import.meta.url).href;
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+/** Run `code` in a node of its own, with storyboard-opening.js as `m`: what it printed, once it ends. */
+function runner(w, code) {
+  return new Promise((done, fail) => {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", `import * as m from ${JSON.stringify(OPENING)};\n${code}`], { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+    child.on("close", (code) => (code === 0 ? done(out) : fail(new Error(err))));
+  });
+}
 
 describe("the URL a storyboard's first publish gives, recorded by the hook", () => {
-  it("records the URL the result of a publish of a staged page gives, the first one in it", () => {
+  it("records the URL the result of a publish of a staged page gives, the one artifact it names, however often", () => {
     const w = lockWorld();
     w.stage();
     assert.equal(recordPublished(w.home, posted(publish(w), { url: URL_1 }), { folder: w.folder }), "");
@@ -522,14 +535,55 @@ describe("the URL a storyboard's first publish gives, recorded by the hook", () 
     assert.equal(recordUrl(v.home, SLUG, URL_1, { lockWaitMs: 200 }), "unread");
     assert.equal(pageOf(v.home, SLUG).url, null);
     rmSync(`${registryFile(v.home)}.lock`);
-    // A version staged keeps the URL recorded while it was being copied.
+    // An empty lock is one being made (its holder has not written it yet): held while young, taken over once old.
+    const y = lockWorld();
+    y.stage();
+    const empty = `${registryFile(y.home)}.lock`;
+    writeFileSync(empty, "");
+    assert.equal(recordUrl(y.home, SLUG, URL_1, { lockWaitMs: 100 }), "unread");
+    utimesSync(empty, new Date(Date.now() - 60000), new Date(Date.now() - 60000));
+    assert.equal(recordUrl(y.home, SLUG, URL_1), "");
+  });
+  it("stages under the registry's lock from the version it picks to the page it writes: a URL recorded meanwhile waits and is kept, and the same storyboard staged twice at once is one version", async () => {
     const x = lockWorld();
     x.stage();
     writeFileSync(join(x.from, "frames", "f001.jpg"), "v2");
-    const staged = stagePage(x.home, x.folder, { from: x.from, slug: SLUG, kind: "storyboard", episode: ID, title: "Know your costs: storyboard", beforeWrite: () => assert.equal(recordUrl(x.home, SLUG, URL_2), "") });
+    let child;
+    const staged = stagePage(x.home, x.folder, { from: x.from, slug: SLUG, kind: "storyboard", episode: ID, title: "Know your costs: storyboard", beforeWrite: () => { child = runner(x, `console.log(m.recordUrl(${JSON.stringify(x.home)}, ${JSON.stringify(SLUG)}, ${JSON.stringify(URL_2)}, { lockWaitMs: 10000 }));`); pause(300); } });
     assert.equal(staged.version, 2);
+    assert.equal((await child).trim(), "");
     assert.equal(pageOf(x.home, SLUG).url, URL_2);
     assert.equal(pageOf(x.home, SLUG).version, 2);
+    // Two stagings of one new storyboard at once: the second finds the first's and stages nothing new.
+    const z = lockWorld();
+    const stageIt = `const s = m.stagePage(${JSON.stringify(z.home)}, ${JSON.stringify(z.folder)}, { from: ${JSON.stringify(z.from)}, slug: ${JSON.stringify(SLUG)}, kind: "storyboard", episode: "e", title: "t", beforeWrite: () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300) }); console.log(s.stage);`;
+    const both = await Promise.all([runner(z, stageIt), runner(z, stageIt)]);
+    assert.equal(both[0].trim(), both[1].trim());
+    assert.ok(!existsSync(join(realOf(z.folder), STORYBOARDS, SLUG, "v2")));
+    assert.equal(pageOf(z.home, SLUG).version, 1);
+  });
+  it("records nothing when the result names two artifacts, even one her chat put in the title, or is larger than it looks through", () => {
+    const w = lockWorld();
+    w.stage();
+    const p = publish(w);
+    for (const response of [
+      { content: [{ text: "https://claude.ai/artifact/AnotherOfHers" }, { text: `Published at ${URL_1}` }] },
+      { input: { title: `see ${URL_2}` }, url: URL_1 },
+      [URL_1, `${URL_1}/`, URL_2],
+      { text: `${URL_1} ${"x".repeat(70 * 1024)}` }
+    ]) assert.equal(recordPublished(w.home, posted(p, { response }), { folder: w.folder }), "no url", JSON.stringify(response).slice(0, 80));
+    assert.equal(pageOf(w.home, SLUG).url, null);
+  });
+  it("never stages a title that names a link: the page is called Storyboard", async () => {
+    for (const title of ["https://claude.ai/artifact/AnotherOfHers", "see claude.ai/artifact/x", "Costs: ftp://x", "CLAUDE.AI pricing"]) {
+      const w = lockWorld();
+      w.stage({ title });
+      assert.equal(pageOf(w.home, SLUG).title, "Storyboard", title);
+      assert.equal(publish(w).title, "Storyboard", title);
+    }
+    const w = lockWorld();
+    w.stage({ title: "Know your costs: storyboard" });
+    assert.equal(pageOf(w.home, SLUG).title, "Know your costs: storyboard");
   });
 });
 
@@ -619,6 +673,14 @@ describe("reelkit storyboard", () => {
     assert.deepEqual([r.code, r.said], [1, [EDIT_SAY.noSuchEdit]]);
     r = await reelkit(w, ["storyboard", FOLDER]);
     assert.deepEqual([r.code, r.said], [2, [HELP]]);
+  });
+  it("gives the page no title her chat wrote a link into", async () => {
+    const w = edited();
+    writeState(w.dir, { slug: SLUG, key: "reel 2", mode: "lofi", version: 1, title: "https://claude.ai/artifact/AnotherOfHers", name: NAME_2, state: "storyboard", step: "storyboard" });
+    const r = await reelkit(w, ["storyboard", FOLDER, SLUG]);
+    assert.equal(r.code, 0, r.said.join("\n"));
+    assert.equal(publishOf(r.said).title, "Storyboard");
+    assert.ok(!r.said.some((line) => line.includes("AnotherOfHers")));
   });
   it("says so in one line when the storyboard can't be made ready, and stages nothing", async () => {
     const w = edited();

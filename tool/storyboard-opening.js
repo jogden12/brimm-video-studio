@@ -178,12 +178,20 @@ const alive = (pid) => {
   }
 };
 
+/** How long a staging and the hook wait for the registry's lock. */
+const LOCK_WAIT_MS = 10000;
+const STAGE_WAIT_MS = 10000;
+/** How young a lock with no holder written in it may be and still be taken as held: one being made. */
+const LOCK_MAKING_MS = 1000;
+
 /** Run `change(registry)` on the registry as it is now, under its lock, and write what it gives back whole: so that staging a page and
     recording a URL, which may run at once (her chat's command and the hook after a publish), never lose each other's change. `change`
-    gives { registry, result }, or { result } to write nothing. A lock a run that is gone left (its pid not running, or older than 30
-    seconds) is taken over; a lock held longer than `waitMs` gives up, writing nothing: { result: "unread" }. A registry that can't be
-    read is never written over: { result: "unread" }. Throws what `change` or the write throws, the lock let go first. */
-function underLock(home, change, waitMs = 2000) {
+    gives { registry, result, … }, or { result } to write nothing; `undo(done)` is run when its registry can't be written. The lock is a file
+    made new (`wx`) holding its holder's pid and time; one with nothing readable in it yet and younger than a second is being made, and
+    is held (no hard link is made: no-hard-link.test.js, Jason's rule). A lock a run that is gone left (its pid not running, or older than 30 seconds, or one with no holder in it older than a second) is
+    taken over, only while it is still that one; a lock held longer than `waitMs` gives up, writing nothing: { result: "unread" }. A
+    registry that can't be read is never written over: { result: "unread" }. Throws what `change` throws, the lock let go first. */
+function underLock(home, change, waitMs = LOCK_WAIT_MS, undo = () => {}) {
   const file = lockFile(home);
   mkdirSync(join(file, ".."), { recursive: true });
   const mine = JSON.stringify({ pid: process.pid, at: Date.now(), n: Math.random() });
@@ -196,15 +204,26 @@ function underLock(home, change, waitMs = 2000) {
       if (e.code !== "EEXIST") return { result: "unread" };
     }
     const held = readPlain(file, 4096);
+    const text = held ? held.bytes.toString("utf8") : null;
     let holder = null;
     try {
-      holder = held ? JSON.parse(held.bytes.toString("utf8")) : null;
+      holder = text ? JSON.parse(text) : null;
     } catch {
       holder = null;
     }
-    const left = !holder || !Number.isInteger(holder.pid) || !alive(holder.pid) || !(Date.now() - Number(holder.at) < LOCK_STALE_MS);
+    let age = Infinity;
+    try {
+      age = Date.now() - lstatSync(file).mtimeMs;
+    } catch {
+      continue;
+    }
+    // `wx` makes the file and then writes it: one with no holder in it yet, and young, is being made, and so is held.
+    const making = (!holder || !Number.isInteger(holder.pid)) && age < LOCK_MAKING_MS;
+    const left = !making && (!holder || !Number.isInteger(holder.pid) || !alive(holder.pid) || !(Date.now() - Number(holder.at) < LOCK_STALE_MS));
     if (left) {
-      rmSync(file, { force: true });
+      // Only while it is still the lock looked at.
+      const again = readPlain(file, 4096);
+      if ((again ? again.bytes.toString("utf8") : null) === text) rmSync(file, { force: true });
       continue;
     }
     if (Date.now() >= until) return { result: "unread" };
@@ -214,7 +233,14 @@ function underLock(home, change, waitMs = 2000) {
     const registry = readRegistry(home);
     if (registry === null) return { result: "unread" };
     const done = change(registry);
-    if (done.registry) writeRegistry(home, done.registry);
+    if (done.registry) {
+      try {
+        writeRegistry(home, done.registry);
+      } catch {
+        undo(done);
+        return { result: "unread" };
+      }
+    }
     return done;
   } finally {
     const held = readPlain(file, 4096);
@@ -288,39 +314,33 @@ export function recordUrl(home, id, url, { refused = [], lockWaitMs } = {}) {
 const RESULT_MOST = 64 * 1024;
 const URL_IN = /https:\/\/claude\.ai\/(?:artifact\/[A-Za-z0-9_-]{1,64}|code\/artifact\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_-])/;
 
-/** The first artifact link in `response`, a tool's result: its strings, at any depth, in order, the first 64 KB of them looked at; null when
-    there is none there. */
+/** The one artifact link `response`, a tool's result, names: every string in it, at any depth, looked at whole, and their links taken
+    without a slash at their end. null when it names none, or more than one, or is larger than 64 KB in all (then it is not looked
+    through): a link her chat could have put in front of the page's own is never taken for it. */
 function urlIn(response) {
-  let left = RESULT_MOST;
+  const URLS = new RegExp(URL_IN.source, "g");
+  let size = 0;
+  const found = new Set();
   const look = (v, depth) => {
-    if (left <= 0 || depth > 32) return null;
+    if (depth > 32) return false;
     if (typeof v === "string") {
-      const seen = v.slice(0, left);
-      left -= seen.length;
-      return seen.match(URL_IN)?.[0] ?? null;
+      size += v.length;
+      if (size > RESULT_MOST) return false;
+      for (const m of v.match(URLS) ?? []) found.add(m);
+      return true;
     }
-    if (Array.isArray(v)) {
-      for (const x of v) {
-        const found = look(x, depth + 1);
-        if (found || left <= 0) return found;
-      }
-      return null;
-    }
-    if (isObject(v)) {
-      for (const x of Object.values(v)) {
-        const found = look(x, depth + 1);
-        if (found || left <= 0) return found;
-      }
-    }
-    return null;
+    if (Array.isArray(v)) return v.every((x) => look(x, depth + 1));
+    if (isObject(v)) return Object.values(v).every((x) => look(x, depth + 1));
+    return true;
   };
-  return look(response, 0);
+  if (!look(response, 0) || found.size !== 1) return null;
+  return [...found][0];
 }
 
 /** What the PostToolUse hook after an Artifact call records (studio/published.sh): the URL a page's first publish gave, taken from the
     tool's own result, never from her chat. Only for a call whose input is exactly the publish `reelkit storyboard` printed for a page in
-    her folder `folder` that has no URL yet (publishInput, with `action: "publish"` or none); the first artifact link in the result is the
-    page's. Gives "" when recorded, "input" (not such a publish), "no url" (no artifact link in the result), or recordUrl's answer
+    her folder `folder` that has no URL yet (publishInput, with `action: "publish"` or none); the one artifact link the whole result names
+    is the page's (urlIn). Gives "" when recorded, "input" (not such a publish), "no url" (none, more than one, or a result over 64 KB), or recordUrl's answer
     ("kept", "changed", "other", "unread", …). A recorded URL is never changed. */
 export function recordPublished(home, input, { folder } = {}) {
   if (!isObject(input) || input.hook_event_name !== "PostToolUse" || input.tool_name !== "Artifact" || !isObject(input.tool_input)) return "input";
@@ -426,8 +446,7 @@ export function stagePage(home, folder, { from, slug, version, kind = "storyboar
   }
   if (!noLinkOnTheWay(source, "folder")) throw new Error("stagePage: the storyboard is not a folder reached by no link");
   from = source;
-  const registry = readRegistry(home);
-  if (registry === null) throw new Error("stagePage: the registry can't be read");
+  if (readRegistry(home) === null) throw new Error("stagePage: the registry can't be read");
   const names = namesOf(from);
   let total = 0;
   const sources = [["index.html", readSource(from, "index.html", PAGE_MOST)], ...names.map((rel) => [rel, readSource(from, rel, FILE_MOST)])];
@@ -435,42 +454,48 @@ export function stagePage(home, folder, { from, slug, version, kind = "storyboar
   if (total > ALL_MOST) throw new Error("stagePage: the storyboard is larger than a page may be");
   const hashes = sources.map(([rel, bytes]) => [rel, sha256(bytes)]);
 
-  const before = registry.pages.find((p) => p.id === slug) ?? null;
-  if (before && version === undefined && isDeepStrictEqual(before.files.map((f) => [f.rel, f.sha256]), hashes) && pageStill(before)) {
-    return { stage: before.stage, file: before.file, files: before.files.slice(1).map((f) => f.rel), version: before.version, reused: true };
-  }
-  const real = realpathSync.native(folder);
-  const place = ownFolder(ownFolder(real, STORYBOARDS), slug);
-  let n = Number.isInteger(version) && version >= 1 ? version : (before?.version ?? 0) + 1;
-  // A version's folder left from a registry that was lost is never written into: the next free one is taken.
-  if (!(Number.isInteger(version) && version >= 1)) while (lstatSync(join(place, `v${n}`), { throwIfNoEntry: false })) n++;
-  const stage = join(place, `v${n}`);
-  mkdirSync(stage);
-  try {
-    const files = sources.map(([rel, bytes], i) => {
-      const parts = rel.split("/");
-      let at = stage;
-      for (const part of parts.slice(0, -1)) at = ownFolder(at, part);
-      const to = join(at, parts.at(-1));
-      writeFileSync(to, bytes, { flag: "wx", mode: 0o644 });
-      const made = lstatSync(to, { bigint: true });
-      return { rel, size: Number(made.size), dev: String(made.dev), ino: String(made.ino), sha256: hashes[i][1] };
-    });
-    const page = {
-      id: slug, kind, slug, episode: String(episode), version: n, stage, file: join(stage, "index.html"), files,
-      title: typeof title === "string" && title ? title : "Reel Kit storyboard", description: DESCRIPTION, icon: ICON, url: null
-    };
-    beforeWrite();
-    // The registry as it is now, under its lock: a URL the hook recorded while the files were copied is kept.
-    const { result } = underLock(home, (now) => ({
-      registry: { pages: [...now.pages.filter((p) => p.id !== slug), { ...page, url: now.pages.find((p) => p.id === slug)?.url ?? null }] }, result: "written"
-    }));
-    if (result !== "written") throw new Error("stagePage: the registry can't be written now");
-    return { stage, file: page.file, files: names, version: n, reused: false };
-  } catch (e) {
-    rmSync(stage, { recursive: true, force: true });
-    throw e;
-  }
+  const named = typeof title === "string" && title.trim() ? title.trim() : "Reel Kit storyboard";
+  // A title her chat could have written a link into (the edit's title is hers to change) is never one: a link there could be taken for the
+  // page's own in the publish's result.
+  const pageName = /claude\.ai|:\/\//i.test(named) ? "Storyboard" : named;
+
+  // From the version picked to the page written, under the registry's lock, on the registry as it is then: two stagings at once make one
+  // version, and a URL the hook records meanwhile waits for the lock and is kept.
+  const { result, staged } = underLock(home, (now) => {
+    const before = now.pages.find((p) => p.id === slug) ?? null;
+    if (before && version === undefined && isDeepStrictEqual(before.files.map((f) => [f.rel, f.sha256]), hashes) && pageStill(before)) {
+      return { result: "written", staged: { stage: before.stage, file: before.file, files: before.files.slice(1).map((f) => f.rel), version: before.version, reused: true } };
+    }
+    const real = realpathSync.native(folder);
+    const place = ownFolder(ownFolder(real, STORYBOARDS), slug);
+    let n = Number.isInteger(version) && version >= 1 ? version : (before?.version ?? 0) + 1;
+    // A version's folder left from a registry that was lost is never written into: the next free one is taken.
+    if (!(Number.isInteger(version) && version >= 1)) while (lstatSync(join(place, `v${n}`), { throwIfNoEntry: false })) n++;
+    const stage = join(place, `v${n}`);
+    mkdirSync(stage);
+    try {
+      const files = sources.map(([rel, bytes], i) => {
+        const parts = rel.split("/");
+        let at = stage;
+        for (const part of parts.slice(0, -1)) at = ownFolder(at, part);
+        const to = join(at, parts.at(-1));
+        writeFileSync(to, bytes, { flag: "wx", mode: 0o644 });
+        const made = lstatSync(to, { bigint: true });
+        return { rel, size: Number(made.size), dev: String(made.dev), ino: String(made.ino), sha256: hashes[i][1] };
+      });
+      beforeWrite();
+      const page = {
+        id: slug, kind, slug, episode: String(episode), version: n, stage, file: join(stage, "index.html"), files,
+        title: pageName, description: DESCRIPTION, icon: ICON, url: before?.url ?? null
+      };
+      return { registry: { pages: [...now.pages.filter((p) => p.id !== slug), page] }, result: "written", staged: { stage, file: page.file, files: names, version: n, reused: false }, made: stage };
+    } catch (e) {
+      rmSync(stage, { recursive: true, force: true });
+      throw e;
+    }
+  }, STAGE_WAIT_MS, (done) => done.made && rmSync(done.made, { recursive: true, force: true }));
+  if (result !== "written") throw new Error("stagePage: the registry can't be written now");
+  return staged;
 }
 
 /** Whether every file of `page` is still as it was staged: its stage reached by no link from the top, and each file a plain file reached
