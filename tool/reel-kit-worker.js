@@ -26,7 +26,7 @@ import { WORKER_TOOLS, workerArgs, workerSettings } from "./reel-kit-worker-tool
 import { isRunning } from "./run.js";
 import { findPrograms } from "./unedited.js";
 
-export { WORKER_MODEL, WORKER_TOOLS, workerArgs, workerDecision, workerSettings } from "./reel-kit-worker-tools.js";
+export { OWN_NAMES, WORKER_MODEL, WORKER_TOOLS, workerArgs, workerDecision, workerSettings } from "./reel-kit-worker-tools.js";
 export { JOBS, JOB_ENDS, startFault, usageLimited, workerPrompt } from "./reel-kit-worker-jobs.js";
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -48,14 +48,16 @@ export const macLock = (home) => join(appSupport(home), "reel-kit-worker.lock");
 /** The queue record: { jobs: [{ id, episode, key, version, mode, job, at, pid }] }, the jobs waiting whose project is not made yet. */
 export const queueFile = (home) => join(appSupport(home), "reel-kit-queue.json");
 /** The worker's settings file for the project `slug`, written by Studio outside the project, out of the worker's Write reach. */
-export const settingsFileOf = (home, slug) => {
+const settingsSlug = (slug) => {
   if (typeof slug !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(slug)) throw new Error(`settingsFileOf: ${JSON.stringify(slug)} is not a slug`);
-  return join(appSupport(home), "reel-kit-worker", `${slug}.json`);
+  return slug;
 };
+export const settingsFileOf = (home, slug) => join(appSupport(home), "reel-kit-worker", `${settingsSlug(slug)}.json`);
 /** The worker's own status file in its project: { step, needs: [{ beat, text }] }. */
 export const workerStatusFile = (dir) => join(dir, "work", "worker-status.json");
-/** Her notes for a revise, kept with the job so that a resume sends them again: [{ beat, text, at }]. */
-export const jobNotesFile = (dir) => join(dir, "work", "job-notes.json");
+/** Her notes for a revise, kept with the job so that a resume sends them again: [{ beat, text, at }]. Beside the worker's settings, out of
+    its reach (its sandbox writes only in the project and its temp folder), so that what a resume says are her notes are hers. */
+export const jobNotesFile = (home, slug) => join(appSupport(home), "reel-kit-worker", `${settingsSlug(slug)}.notes.json`);
 /** The record of the worker at work on this Mac, { pid, start, dir, at }: its `claude`, whose process group holds everything it started,
     so that a worker left running by a runner that died is found and stopped before the next one starts. */
 export const macWorkerFile = (home) => join(appSupport(home), "reel-kit-worker.json");
@@ -80,6 +82,8 @@ export function processStart(pid, run = spawnSync) {
 
 /** Whether the process `pid` that started at `start` still runs: alive, and the same process (its start, when one was recorded). */
 const stillRuns = (pid, start, alive, startOf) => Number.isInteger(pid) && alive(pid) && (typeof start !== "string" || startOf(pid) === start);
+/** Whether `pid` is, for sure, the process that started at `start`: only then is it ever killed, as a pid is used again. */
+const surely = (pid, start, alive, startOf) => typeof start === "string" && stillRuns(pid, start, alive, startOf);
 
 /** Write a file whole: under a name of this run's own beside it, then renamed. */
 function writeWhole(file, text) {
@@ -231,7 +235,7 @@ async function stopLeftOver(home, { alive, startOf, grace, wait, log }) {
   } catch {
     left = null;
   }
-  if (isObject(left) && stillRuns(left.pid, left.start, alive, startOf)) {
+  if (isObject(left) && surely(left.pid, left.start, alive, startOf)) {
     log(`A Reel Kit worker left running (process ${left.pid}) was stopped before the next one started.`);
     await killGroup(left.pid, { grace, gone: () => !alive(left.pid), wait });
   }
@@ -249,9 +253,9 @@ function clearStatus(dir) {
 }
 
 /** Her notes kept with a revise (jobNotesFile), as the prompt takes them; none when there are none or they can't be read whole. */
-function keptNotes(dir) {
+function keptNotes(home, slug) {
   try {
-    return notesOf(JSON.parse(readCapped(jobNotesFile(dir), 1 << 20) ?? "[]"));
+    return notesOf(JSON.parse(readCapped(jobNotesFile(home, slug), 1 << 20) ?? "[]"));
   } catch {
     return [];
   }
@@ -274,11 +278,8 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
   if (!isObject(ctx.settings) || typeof ctx.settings.root !== "string") return fail("no settings");
 
   // Her notes go with the job, so that a resume sends them again.
-  const given = resume ? (job === "revise" ? keptNotes(dir) : []) : notesOf(notes);
-  if (!resume) {
-    mkdirSync(join(dir, "work"), { recursive: true });
-    writeWhole(jobNotesFile(dir), `${JSON.stringify(given, null, 2)}\n`);
-  }
+  const given = resume ? (job === "revise" ? keptNotes(home, slug) : []) : notesOf(notes);
+  if (!resume) writeWhole(jobNotesFile(home, slug), `${JSON.stringify(given, null, 2)}\n`);
   const tmp = workerTmp(home, slug);
   freshTmp(tmp);
   const facts = deps.facts ?? factsOf(home, ctx.settings, {});
@@ -302,90 +303,98 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
     child.on("exit", () => (exited = true));
     child.on("close", (c, s) => done({ code: c, signal: s }));
   });
-  const workerStart = child.pid ? processStart(child.pid) : null;
-  if (child.pid) {
-    writeWhole(macWorkerFile(home), `${JSON.stringify({ pid: child.pid, start: workerStart, dir, at: new Date().toISOString() })}\n`);
-    mark({ worker: child.pid, workerStart: workerStart ?? undefined });
-  }
-  child.stdin.on("error", () => {});
-  child.stdin.end(prompt);
-  let stderr = "";
-  child.stderr.on("data", (d) => (stderr = (stderr + d).slice(-4000)));
-
   let init = null;
   let unsafe = false;
   let usage = false;
   let result = null;
   let timedOut = false;
-  let fault = "";
-  const stopAll = () => (child.pid ? killGroup(child.pid, { grace, gone: () => exited, wait }) : Promise.resolve());
-  const copy = () => {
-    if (unsafe) return;
-    try {
-      const status = readWorkerStatus(dir, job);
-      if (status === null) return;
-      if (status.fault) {
-        if (status.fault !== fault) log(`Reel Kit's worker-status.json in ${slug} was ignored: ${status.fault}.`);
-        fault = status.fault;
-        return;
-      }
-      fault = "";
-      const now = readState(dir) ?? {};
-      if (now.step !== status.step || JSON.stringify(now.needs ?? []) !== JSON.stringify(status.needs)) mark({ step: status.step, needs: status.needs });
-    } catch (e) {
-      log(`Reel Kit's worker status for ${slug} could not be copied: ${e.code || e.message}.`);
+  let stderr = "";
+  let poll = null;
+  let clock = null;
+  let code;
+  let signal;
+  // From here on, whatever throws, its process group is stopped before the Mac's lock is let go.
+  try {
+    const workerStart = child.pid ? processStart(child.pid) : null;
+    if (child.pid) {
+      writeWhole(macWorkerFile(home), `${JSON.stringify({ pid: child.pid, start: workerStart, dir, at: new Date().toISOString() })}\n`);
+      mark({ worker: child.pid, workerStart: workerStart ?? undefined });
     }
-  };
-  const stop = (why) => {
-    log(`Reel Kit's worker for ${slug} was stopped: ${why}.`);
-    unsafe = true;
-    void stopAll();
-  };
-  const lines = createInterface({ input: child.stdout });
-  lines.on("line", (line) => {
-    try {
-      let event;
+    child.stdin.on("error", () => {});
+    child.stdin.end(prompt);
+    child.stderr.on("data", (d) => (stderr = (stderr + d).slice(-4000)));
+
+    let fault = "";
+    const stopAll = () => (child.pid ? killGroup(child.pid, { grace, gone: () => exited, wait }) : Promise.resolve());
+    const copy = () => {
+      if (unsafe) return;
       try {
-        event = JSON.parse(line);
-      } catch {
-        return;
-      }
-      if (!isObject(event) || unsafe) return;
-      if (init === null) {
-        if (event.type !== "system" || event.subtype !== "init") return void stop("it did something before it said how it started");
-        init = event;
-        const why = startFault(event);
-        if (why) return void stop(`it did not start as it was told (${why})`);
-        if (typeof event.session_id === "string" && event.session_id !== session) {
-          session = event.session_id;
-          mark({ session });
+        const status = readWorkerStatus(dir, job);
+        if (status === null) return;
+        if (status.fault) {
+          if (status.fault !== fault) log(`Reel Kit's worker-status.json in ${slug} was ignored: ${status.fault}.`);
+          fault = status.fault;
+          return;
         }
-        return;
+        fault = "";
+        const now = readState(dir) ?? {};
+        if (now.step !== status.step || JSON.stringify(now.needs ?? []) !== JSON.stringify(status.needs)) mark({ step: status.step, needs: status.needs });
+      } catch (e) {
+        log(`Reel Kit's worker status for ${slug} could not be copied: ${e.code || e.message}.`);
       }
-      if (usageLimited(event)) usage = true;
-      if (event.type === "result") result = event;
-      copy();
-    } catch (e) {
-      log(`Reel Kit's worker stream for ${slug} could not be read: ${e.code || e.message}.`);
-    }
-  });
-  const poll = setInterval(copy, every);
-  const clock = setTimeout(() => {
-    timedOut = true;
-    void stopAll();
-  }, limit);
-  const { code, signal } = await closed;
-  clearInterval(poll);
-  clearTimeout(clock);
-  // Anything it left running in its group goes with it.
-  if (child.pid) {
-    try {
-      process.kill(-child.pid, "SIGKILL");
-    } catch {
-      // nothing left
+    };
+    const stop = (why) => {
+      log(`Reel Kit's worker for ${slug} was stopped: ${why}.`);
+      unsafe = true;
+      void stopAll();
+    };
+    const lines = createInterface({ input: child.stdout });
+    lines.on("line", (line) => {
+      try {
+        let event;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          return;
+        }
+        if (!isObject(event) || unsafe) return;
+        if (init === null) {
+          if (event.type !== "system" || event.subtype !== "init") return void stop("it did something before it said how it started");
+          init = event;
+          const why = startFault(event);
+          if (why) return void stop(`it did not start as it was told (${why})`);
+          if (typeof event.session_id === "string" && event.session_id !== session) {
+            session = event.session_id;
+            mark({ session });
+          }
+          return;
+        }
+        if (usageLimited(event)) usage = true;
+        if (event.type === "result") result = event;
+        copy();
+      } catch (e) {
+        log(`Reel Kit's worker stream for ${slug} could not be read: ${e.code || e.message}.`);
+      }
+    });
+    poll = setInterval(copy, every);
+    clock = setTimeout(() => {
+      timedOut = true;
+      void stopAll();
+    }, limit);
+    ({ code, signal } = await closed);
+    copy();
+  } finally {
+    clearInterval(poll);
+    clearTimeout(clock);
+    // Anything it left running in its group goes with it.
+    if (child.pid) {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // nothing left
+      }
     }
   }
-  copy();
 
   const at = readState(dir) ?? {};
   const reached = at.step === steps.at(-1);
@@ -413,7 +422,7 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
 /** Run one job of the Reel Kit worker, start to end; it resolves { state, why, step, dir }, and `made` when it made the project. `spec`:
     - `job`, one of JOBS; `dir`, the project, when it is made; or, for an edit whose project is not made yet, `make` (what scaffold takes:
       { found, record, key, mode, title, version }) with `episode`, `key`, `version` and `mode` for the queue record;
-    - `notes`, her notes for a revise ({ beat, text, at }), kept with the job (work/job-notes.json); `from`, the step to start from (the
+    - `notes`, her notes for a revise ({ beat, text, at }), kept with the job (jobNotesFile, beside its settings, out of its reach); `from`, the step to start from (the
       job's first by default); `resume`, to carry on a stopped job: its job (studio.json's, and a `job` given must be the same, or nothing
       is done: `why: "job"`), from the step studio.json says, in its own session, with a revise's notes again.
     In this order: the job is marked queued (its studio.json, or the queue record), before anything waits; it waits for the Mac-wide lock

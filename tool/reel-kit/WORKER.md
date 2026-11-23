@@ -20,13 +20,14 @@ The job below names them, each spelled exactly as you must spell it:
 
 A guard answers every tool call before it runs, yours and your helper agents'. It refuses anything not on this list, and a call it
 refuses is not tried another way. Every command also runs in Claude Code's sandbox: no network at all, writes only in `PROJECT`
-and your temporary folder (`TMPDIR`), and none of Studio's or her private folders readable. (Whether HyperFrames' headless browser
-runs inside this sandbox is checked by hand, RK21, before Studio's first real run.)
+and your temporary folder (`TMPDIR`), never Studio's own files there, and nothing in the home folder readable but `PROJECT`, `KIT`,
+Reel Kit's own tools and HyperFrames. (By hand, RK21, before Studio's first real run: whether HyperFrames' headless browser runs inside
+this sandbox; and a real worker killed mid-step, with `ps -o pid,pgid,command` showing nothing of its process group left.)
 
 - **Files:** Read, Glob and Grep inside `PROJECT` and `KIT`. Write and Edit inside `PROJECT` only. Never write `studio.json`
   (Studio's own), a `CLAUDE.md`, an `AGENTS.md`, a `.mcp.json`, an `.npmrc`, or anything in a `.claude` or `.git` folder. Always give a whole path, never one with `..`.
   A link that leads out of `PROJECT` is refused.
-- **Commands:** one program and its words per command, with every path in double quotes when it has a space in it. No `;`, `&&`,
+- **Commands:** one program and its words per command, in the foreground (never `run_in_background`), with every path in double quotes when it has a space in it. No `;`, `&&`,
   `||`, `|`, redirects (`>`, `<`), `&` at the end, `$`, backticks, `~`, globs (`*`, `?`), single quotes or new lines. The
   programs, spelled exactly:
   - `"PY" "KIT/pipeline/<script>.py" "PROJECT" …`, where `<script>` is one of `words`, `cut`, `storyboard`, `build`, `mix`,

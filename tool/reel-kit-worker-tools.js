@@ -46,6 +46,14 @@ export const PROTOCOLS = Object.freeze(["-protocol_whitelist", "file,pipe"]);
 /** The formats ffmpeg and ffprobe may be told with `-f`: none that reads or writes other files (tee, concat, hls, segment), makes its own
     input (lavfi) or names the network. */
 const FORMATS = new Set(["null", "mp4", "mov", "ipod", "wav", "mp3", "adts", "flac", "aiff", "image2", "mjpeg", "png", "apng", "gif", "webp", "webm", "matroska", "s16le", "f32le", "rawvideo"]);
+/** Studio's own names in a project, which nothing the worker runs may write (studioOwn judges the hook's calls by them; the sandbox's
+    denyWrite and the Edit() deny rules name them for everything else). */
+export const OWN_NAMES = Object.freeze(["studio.json", "CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".claude", ".mcp.json", ".git", ".npmrc"]);
+/** A name as it is, in small letters and in capitals: the Mac's disk takes a name in any case, and a rule names one spelling. */
+const cases = (name) => [...new Set([name, name.toLowerCase(), name.toUpperCase()])];
+/** Deny rules for writing Studio's own names anywhere in the project, by its real path in both spellings: Claude Code holds its own file
+    tools to them and merges an Edit() deny rule into the sandbox's denyWrite, so a sandboxed command is held too (studio.js, C3). */
+const ownEditRules = (project) => bothSpellings(placeOf(project)).flatMap((root) => OWN_NAMES.flatMap((name) => cases(name).map((spelt) => `Edit(/${root}/**/${spelt})`)));
 /** The copy program, by its whole path: one source, one destination, `-R` or no flag. */
 const CP = "/bin/cp";
 /** REEL_KIT_HOME's folders a copy may come from: GSAP, the style, her own effects and cards. */
@@ -94,7 +102,7 @@ export function WORKER_TOOLS({ project, kit, rkHome, bin }) {
     `Bash(cd ${q(project)})`, `Bash(cd ${q(join(project, "public"))})`, `Bash(cd ${q(`${project}/cards/*`)})`, `Bash(cd ${q(`${project}/fx/*`)})`,
     "Agent(general-purpose)"
   ];
-  return { allowed, disallowed: [...NEVER_TOOLS], programs: p };
+  return { allowed, disallowed: [...NEVER_TOOLS, ...ownEditRules(project)], programs: p };
 }
 
 // --- Paths ---
@@ -418,18 +426,27 @@ export function workerDecision(input, ctx) {
 
 // --- How claude is started ---
 
+/** REEL_KIT_HOME's folders the worker's commands may read: its Pythons, tools, models, GSAP, the style, her effects and cards, and the
+    faster-whisper model. Never its trials/ (a key lives there) or another run's tmp/. */
+const HOME_READS = Object.freeze([".venv", ".venv-mp", "tools", "models", "vendor", "style", "fx", "cards", "hf"]);
+
 /** Claude Code's OS sandbox around every command the worker or its helpers run: on, or the run does not start (failIfUnavailable), with no
     command let out of it (allowUnsandboxedCommands false, so `dangerouslyDisableSandbox` does nothing; the hook refuses it too); no
     network at all (every domain denied, and no proxy port, so nothing is let through one); writes only in the project and the run's own
-    temp folder (`tmp`); no reads of the gated places (places.js gatedPlaces, for this Mac's `facts`: settings.js factsOf), the checkout,
-    the worker settings' folder or her folder, each by its real path in both spellings, as her folder's open lock has them (studio.js
-    openSettingsOf); and reads let back in for the kit, REEL_KIT_HOME, Reel Kit's own HyperFrames, the project, the temp folder and the three
-    places Bash itself needs (places.js bashNeeds), since BRIMM Video Work and Claude Code's own folders are among the gated places. */
+    temp folder (`tmp`), and never Studio's own names in the project (OWN_NAMES, at its top and in public/, in both spellings and three
+    cases; the Edit() deny rules hold them deeper). Reads are an allowlist inside the home: the whole home is denied (both spellings, and
+    Claude Code's own home when BRIMM_VIDEO_HOME gives Studio another), with the gated places (places.js gatedPlaces, for this Mac's
+    `facts`: settings.js factsOf), the checkout, the worker settings' folder and her folder, as her folder's open lock has them (studio.js
+    openSettingsOf); and only these are let back in, as the open lock's allowRead carves out of its denyRead: the project, the run's temp
+    folder, the kit, Reel Kit's own HyperFrames, HyperFrames' Chrome (~/.cache/hyperframes), REEL_KIT_HOME's HOME_READS and the three places
+    Bash itself needs (places.js bashNeeds). Whether HyperFrames' headless Chrome runs inside it is the by-hand spike RK21. */
 export function workerSandbox({ checkout, project, kit, rkHome, facts, tmp }) {
   if (!facts || typeof facts.home !== "string" || typeof facts.root !== "string") throw new Error("workerSandbox: this Mac's facts (settings.js factsOf) are needed");
   if (typeof tmp !== "string" || !isAbsolute(tmp)) throw new Error("workerSandbox: tmp must be a whole path");
   const both = (path) => bothSpellings(placeOf(path));
+  const homes = [...new Set([facts.home, facts.claudeHome ?? facts.home])];
   const own = [checkout, join(facts.home, "Library", "Application Support", "BRIMM Video", "reel-kit-worker"), studioFolder(facts.home)];
+  const ownWrites = both(project).flatMap((root) => [root, join(root, "public")].flatMap((dir) => OWN_NAMES.flatMap((name) => cases(name).map((spelt) => join(dir, spelt)))));
   return {
     enabled: true,
     failIfUnavailable: true,
@@ -437,8 +454,12 @@ export function workerSandbox({ checkout, project, kit, rkHome, facts, tmp }) {
     network: { deniedDomains: ["*"] },
     filesystem: {
       allowWrite: [placeOf(project), placeOf(tmp)],
-      denyRead: [...gatedPlaces(facts).flatMap((place) => bothSpellings(place.path)), ...own.flatMap(both)],
-      allowRead: [placeOf(kit), placeOf(rkHome), placeOf(hfDir(facts.home)), placeOf(project), placeOf(tmp), ...bashNeeds({ ...facts, folder: project })]
+      denyWrite: ownWrites,
+      denyRead: [...homes.flatMap(both), ...gatedPlaces(facts).flatMap((place) => bothSpellings(place.path)), ...own.flatMap(both)],
+      allowRead: [
+        placeOf(project), placeOf(tmp), placeOf(kit), placeOf(hfDir(facts.home)), placeOf(join(facts.home, ".cache", "hyperframes")),
+        ...HOME_READS.map((name) => placeOf(join(rkHome, name))), ...bashNeeds({ ...facts, folder: project })
+      ]
     }
   };
 }

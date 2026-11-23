@@ -17,7 +17,7 @@ import { bashNeeds, bothSpellings, gatedPlaces, realOf as placeReal } from "../p
 import { studioFolder } from "../studio.js";
 import { CLAUDE_MODEL } from "../unedited.js";
 import {
-  JOBS, WORKER_MODEL, WORKER_TOOLS, macLock, macWorkerFile, processStart, queueFile, queuedFor, runJob, settingsFileOf, statusOf, usageLimited,
+  JOBS, OWN_NAMES, WORKER_MODEL, WORKER_TOOLS, jobNotesFile, macLock, macWorkerFile, processStart, queueFile, queuedFor, runJob, settingsFileOf, statusOf, usageLimited,
   workerArgs, workerDecision, workerPrompt, workerSettings, workerStatusFile, workerTmp
 } from "../reel-kit-worker.js";
 
@@ -487,6 +487,8 @@ describe("the worker's tools", () => {
     const real = (path) => placeReal(path);
     const both = (path) => bothSpellings(real(path));
     const AS = join(w.home, "Library", "Application Support");
+    const cased = (name) => [...new Set([name, name.toLowerCase(), name.toUpperCase()])];
+    assert.deepEqual(OWN_NAMES, ["studio.json", "CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".claude", ".mcp.json", ".git", ".npmrc"]);
     assert.deepEqual(settings.sandbox, {
       enabled: true,
       failIfUnavailable: true,
@@ -494,10 +496,27 @@ describe("the worker's tools", () => {
       network: { deniedDomains: ["*"] },
       filesystem: {
         allowWrite: [real(w.project), real(tmp)],
-        denyRead: [...gatedPlaces(facts).flatMap((place) => bothSpellings(place.path)), ...[CHECKOUT, join(AS, "BRIMM Video", "reel-kit-worker"), studioFolder(w.home)].flatMap(both)],
-        allowRead: [real(w.kit), real(w.rkHome), real(hfDir(w.home)), real(w.project), real(tmp), ...bashNeeds({ ...facts, folder: w.project })]
+        denyWrite: both(w.project).flatMap((root) => [root, join(root, "public")].flatMap((dir) => OWN_NAMES.flatMap((name) => cased(name).map((spelt) => join(dir, spelt))))),
+        denyRead: [...both(w.home), ...gatedPlaces(facts).flatMap((place) => bothSpellings(place.path)), ...[CHECKOUT, join(AS, "BRIMM Video", "reel-kit-worker"), studioFolder(w.home)].flatMap(both)],
+        allowRead: [
+          real(w.project), real(tmp), real(w.kit), real(hfDir(w.home)), real(join(w.home, ".cache", "hyperframes")),
+          ...[".venv", ".venv-mp", "tools", "models", "vendor", "style", "fx", "cards", "hf"].map((name) => real(join(w.rkHome, name))),
+          ...bashNeeds({ ...facts, folder: w.project })
+        ]
       }
     });
+    // Reads are an allowlist inside the home: never REEL_KIT_HOME whole (its trials/ holds a key), another run's tmp/, or the rest of the home.
+    const allowed = settings.sandbox.filesystem.allowRead;
+    for (const never of [w.rkHome, join(w.rkHome, "trials"), join(w.rkHome, "tmp"), w.home, join(w.home, "Documents")]) assert.ok(!allowed.includes(real(never)), never);
+    for (const spelling of both(w.home)) assert.ok(settings.sandbox.filesystem.denyRead.includes(spelling), spelling);
+    // Studio's own names are held at the project's top and in public/ by the sandbox, and anywhere below by Edit() deny rules, which
+    // Claude Code merges into its denyWrite.
+    for (const spelt of ["studio.json", "STUDIO.JSON", "CLAUDE.md", "claude.md", "AGENTS.md", ".claude", ".mcp.json", ".git", ".npmrc"]) {
+      assert.ok(settings.sandbox.filesystem.denyWrite.includes(join(real(w.project), spelt)), spelt);
+      assert.ok(settings.sandbox.filesystem.denyWrite.includes(join(real(w.project), "public", spelt)), `public/${spelt}`);
+      assert.ok(settings.permissions.deny.includes(`Edit(/${real(w.project)}/**/${spelt})`), `Edit() of ${spelt}`);
+      assert.ok(settings.permissions.deny.includes(`Edit(//System/Volumes/Data${real(w.project)}/**/${spelt})`), `Edit() of ${spelt}, the other spelling`);
+    }
     const denied = settings.sandbox.filesystem.denyRead;
     for (const place of [join(w.home, ".ssh"), join(w.home, "Dropbox", "BRIMM Video"), join(AS, "BRIMM Video"), join(AS, "BRIMM Video Words"), join(w.home, "Library", "Keychains"), CHECKOUT, studioFolder(w.home)]) {
       for (const spelling of both(place)) assert.ok(denied.includes(spelling), spelling);
@@ -654,6 +673,10 @@ describe("the worker's status", () => {
     assert.equal(resumed.state, "storyboard");
     const [run] = again.runs();
     assert.ok(run.prompt.includes("Slower on the price, please."));
+    // Her notes are kept beside the worker's settings, out of its reach, never in the project it writes.
+    assert.ok(!jobNotesFile(w.home, "abc123-reel-2-v1").startsWith(w.project));
+    assert.deepEqual(JSON.parse(readFileSync(jobNotesFile(w.home, "abc123-reel-2-v1"), "utf8")), notes);
+    assert.ok(!existsSync(join(w.project, "work", "job-notes.json")));
     assert.match(run.prompt, /^Your steps, in order: build, sound, storyboard\.$/m);
   });
 
@@ -682,6 +705,14 @@ describe("the worker's status", () => {
     assert.equal(await ended, "SIGTERM");
     assert.deepEqual([statusOf(w.project).state, statusOf(w.project).why], ["stopped", "died"]);
     assert.ok(!existsSync(macWorkerFile(w.home)), "the record of the worker at work goes with it");
+
+    // A record with no start time names no process for sure: nothing is killed on its pid alone.
+    const other2 = spawn("/bin/sleep", ["30"], { detached: true, stdio: "ignore" });
+    writeFileSync(macWorkerFile(w.home), JSON.stringify({ pid: other2.pid, start: null, dir: w.project }));
+    await runJob(ctxOf(w), { dir: other, job: "revise" }, depsOf(w, standIn(w), { grace: 200 }));
+    assert.equal(other2.exitCode, null);
+    assert.equal(other2.signalCode, null);
+    process.kill(other2.pid, "SIGKILL");
   });
 
   it("kills the worker's whole group, with SIGKILL after a grace, when it runs out of time", async () => {
