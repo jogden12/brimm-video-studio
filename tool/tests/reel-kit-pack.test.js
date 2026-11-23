@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { brandColours } from "../reel-kit-style.js";
 
 const BRAND = join(dirname(fileURLToPath(import.meta.url)), "..", "brand");
 const PACK = join(BRAND, "reel-kit");
@@ -15,16 +16,16 @@ const css = read(join(PACK, "brand.css"));
 const md = read(join(PACK, "STYLE.md"));
 const board = read(join(PACK, "board", "index.html"));
 
+/** brand.md's colours, by reel-kit-style.js's reader, which packFault shares. */
+const colours = brandColours(brand);
 /** The hex in brand.md's colour table row for a name. */
 const row = (name) => {
-  const m = brand.match(new RegExp(`^\\| ${name} \\| \`(#[0-9A-Fa-f]{6})\``, "m"));
-  assert.ok(m, `brand.md has no row for ${name}`);
-  return m[1].toUpperCase();
+  assert.ok(colours[name], `brand.md has no row for ${name}`);
+  return colours[name];
 };
 const sandOnLight = () => {
-  const m = brand.match(/Sand on light[^`\n]*`(#[0-9A-Fa-f]{6})`/);
-  assert.ok(m, "brand.md has no 'Sand on light' line");
-  return m[1].toUpperCase();
+  assert.ok(colours["Sand on light"], "brand.md has no 'Sand on light' line");
+  return colours["Sand on light"];
 };
 const files = (dir) =>
   readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? files(join(dir, f)).map((x) => join(f, x)) : [f]));
