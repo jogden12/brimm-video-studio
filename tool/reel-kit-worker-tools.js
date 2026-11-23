@@ -15,12 +15,14 @@
 //   - Bash for one program and its words, nothing a shell would act on (no `;`, `&&`, `||`, `|`, backticks, `$`, redirects, a trailing `&`,
 //     new lines, globs, `~`, single quotes, an assignment before the program): Reel Kit's Python with one of its pipeline scripts and the
 //     project first; Studio's ffmpeg and ffprobe in Reel Kit's tools/bin; the pinned HyperFrames' check, lint and snapshot, through that
-//     folder's npx, run in the project's public/ or a card's or effect's folder; and `cd` into those folders. Each word that names a
+//     folder's npx, run in the project's public/ or a card's or effect's folder, and its render only for a card, in the card's folder and
+//     into it (Studio renders the video itself); `/bin/cp` (or `-R`) of one source from the kit, the project or REEL_KIT_HOME's vendor,
+//     style, fx or cards, into the project, as Reel Kit's card brief starts a card; and `cd` into those folders. Each word that names a
 //     file must be inside the project (ffprobe may read the kit too).
-//   - Agent, for Reel Kit's card and FX builders only: a `general-purpose` agent in the same folder, in the foreground, on the worker's own
-//     model, whose calls come through this same hook.
+//   - Agent, for Reel Kit's card and FX builders only: a `general-purpose` agent in the same folder, in the foreground (said outright:
+//     `run_in_background: false`), on the worker's own model, whose calls come through this same hook.
 // Pure but for looking at the disk (real paths, whether a folder is there).
-import { lstatSync, realpathSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { PIN } from "./reel-kit.js";
 import { CLAUDE_MODEL } from "./unedited.js";
@@ -31,8 +33,15 @@ export const WORKER_MODEL = CLAUDE_MODEL;
 /** The pipeline scripts the worker may run, by name. Never trials (posting), effect (another video's effect, from a link) or render (Studio
     renders, after her go: Task 14). */
 export const WORKER_SCRIPTS = Object.freeze(["words", "cut", "storyboard", "build", "mix", "cutout", "matte", "plate", "plate_finish", "track", "depth", "fxclip", "fxsandbox", "fxlib"]);
-/** What the worker may ask of the pinned HyperFrames. Never render, publish or anything of the cloud. */
+/** What the worker may ask of the pinned HyperFrames anywhere it may run it. Its render is a card's alone (cardRender); never publish or
+    anything of the cloud. */
 export const HF_COMMANDS = Object.freeze(["check", "lint", "snapshot"]);
+/** The copy program, by its whole path: one source, one destination, `-R` or no flag. */
+const CP = "/bin/cp";
+/** REEL_KIT_HOME's folders a copy may come from: GSAP, the style, her own effects and cards. */
+const COPY_HOME = Object.freeze(["vendor", "style", "fx", "cards"]);
+/** What the refusal of an agent not in the foreground says. */
+export const FOREGROUND = "Studio's Reel Kit worker runs its helper agents in the foreground only: pass run_in_background: false.";
 /** The words Reel Kit's npx is asked for (its common.py), which the npx in tools/bin serves alone. */
 const HF_WORDS = ["-y", `hyperframes@${PIN.hyperframes.version}`];
 
@@ -71,6 +80,7 @@ export function WORKER_TOOLS({ project, kit, rkHome, bin }) {
     ...WORKER_SCRIPTS.flatMap((name) => both(`${q(p.python)} ${q(p.script(name))} ${q(project)}`)),
     ...both(q(p.ffmpeg)), ...both(q(p.ffprobe)),
     ...HF_COMMANDS.flatMap((command) => both(`${q(p.npx)} ${HF_WORDS.join(" ")} ${command}`)),
+    `Bash(${q(p.npx)} ${HF_WORDS.join(" ")} render *)`, `Bash(${CP} *)`,
     `Bash(cd ${q(project)})`, `Bash(cd ${q(join(project, "public"))})`, `Bash(cd ${q(`${project}/cards/*`)})`, `Bash(cd ${q(`${project}/fx/*`)})`,
     "Agent(general-purpose)"
   ];
@@ -123,7 +133,9 @@ function studioOwn(projectReal, real) {
 /** The roots a decision is made against, by their real paths. */
 function rootsOf(ctx) {
   const project = realOf(ctx.project);
-  return { project, kit: realOf(ctx.kit), public: project && join(project, "public"), cards: project && join(project, "cards"), fx: project && join(project, "fx") };
+  const kit = realOf(ctx.kit);
+  const home = COPY_HOME.map((name) => realOf(join(String(ctx.rkHome), name)));
+  return { project, kit, public: project && join(project, "public"), cards: project && join(project, "cards"), fx: project && join(project, "fx"), copyFrom: [kit, project, ...home] };
 }
 
 /** A glob pattern that stays where it is looked in: not whole, no `~`, no `..`. */
@@ -201,6 +213,67 @@ const isFolder = (real) => {
   }
 };
 
+/** The names a copy never brings into the project, anywhere in what it copies (a `-R` of a folder, or its contents when spelled with a
+    trailing `/`): Studio's own files (studioOwn). */
+const ownName = (name) => {
+  const n = name.normalize("NFC").toLowerCase();
+  return n === "studio.json" || n.startsWith(".studio.json") || n === ".claude" || ["claude.md", "claude.local.md", "agents.md"].includes(n);
+};
+
+/** Whether the folder at the real path `real`, and everything under it, holds no name ownName refuses: links are looked at, never followed
+    (cp -R copies a link as a link). A tree of more than 20,000 entries is refused. */
+function cleanTree(real) {
+  let seen = 0;
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      if (++seen > 20000 || ownName(name)) return false;
+      const path = join(dir, name);
+      if (lstatSync(path).isDirectory() && !walk(path)) return false;
+    }
+    return true;
+  };
+  try {
+    return !lstatSync(real).isDirectory() || walk(real);
+  } catch {
+    return false;
+  }
+}
+
+/** The hook's answer to `/bin/cp [-R] <source> <destination>` run in `cwd` (real): one source, whose real path is in the kit, the project
+    or REEL_KIT_HOME's vendor, style, fx or cards, one destination, whose real path (its nearest folder that is there) is in the project,
+    no other flag, nothing of Studio's own where it lands or in what it copies. */
+function copyAnswer(words, cwd, roots) {
+  const recursive = words[1] !== undefined && !words[1].quoted && words[1].text === "-R";
+  const paths = words.slice(recursive ? 2 : 1);
+  if (paths.length !== 2 || paths.some((w) => w.text.startsWith("-") || w.text.split("/").includes(".."))) return false;
+  const [from, to] = paths.map((w) => realOf(isAbsolute(w.text) ? w.text : join(cwd, w.text)));
+  if (!roots.copyFrom.some((root) => within(root, from)) || !within(roots.project, to)) return false;
+  const lands = isFolder(to) ? join(to, basename(from)) : to;
+  if (studioOwn(roots.project, to) || studioOwn(roots.project, lands)) return false;
+  return recursive ? cleanTree(from) : !ownName(basename(from));
+}
+
+/** The hook's answer to HyperFrames' render, with its words after `render`: a card's alone, run in a folder under the project's cards/, with
+    one output (`-o` or `--output`) whose real path is inside that same card's folder, and nothing of the cloud. The video itself is
+    Studio's to render (Task 14). */
+function cardRender(args, cwd, roots) {
+  if (!below(roots.cards, cwd)) return false;
+  const card = join(roots.cards, relative(roots.cards, cwd).split(sep)[0]);
+  const outputs = [];
+  const others = [];
+  for (let i = 0; i < args.length; i++) {
+    const { text, quoted } = args[i];
+    if (!quoted && (text === "-o" || text === "--output")) {
+      if (args[i + 1] === undefined) return false;
+      outputs.push(args[++i].text);
+    } else if (!quoted && /^(?:-o|--output)=/.test(text)) outputs.push(text.slice(text.indexOf("=") + 1));
+    else others.push(args[i]);
+  }
+  if (outputs.length !== 1 || outputs[0].split("/").includes("..")) return false;
+  if (others.some((w) => /cloud|lambda|publish|upload|share/i.test(w.text))) return false;
+  return below(card, realOf(isAbsolute(outputs[0]) ? outputs[0] : join(cwd, outputs[0]))) && wordsStayIn(others, cwd, [roots.project], roots.project);
+}
+
 /** The hook's answer to a Bash command run in `cwd`, by the table. */
 function bashAnswer(command, cwd, ctx, roots) {
   const words = commandWords(command);
@@ -214,6 +287,7 @@ function bashAnswer(command, cwd, ctx, roots) {
     const to = realOf(words[1].text);
     return isFolder(to) && (to === roots.project || hfFolder(roots, to));
   }
+  if (spelled(first, CP, false)) return copyAnswer(words, cwdReal, roots);
   if (!first.quoted) return false;
   if (first.text === p.python) {
     const script = words[1];
@@ -223,8 +297,9 @@ function bashAnswer(command, cwd, ctx, roots) {
   if (first.text === p.ffmpeg) return wordsStayIn(words.slice(1), cwdReal, [roots.project], roots.project);
   if (first.text === p.ffprobe) return wordsStayIn(words.slice(1), cwdReal, [roots.project, roots.kit], roots.project);
   if (first.text === p.npx) {
-    return spelled(words[1], HF_WORDS[0], false) && spelled(words[2], HF_WORDS[1], false) && words[3] !== undefined && !words[3].quoted
-      && HF_COMMANDS.includes(words[3].text) && hfFolder(roots, cwdReal) && wordsStayIn(words.slice(4), cwdReal, [roots.project], roots.project);
+    if (!spelled(words[1], HF_WORDS[0], false) || !spelled(words[2], HF_WORDS[1], false) || words[3] === undefined || words[3].quoted) return false;
+    if (words[3].text === "render") return cardRender(words.slice(4), cwdReal, roots);
+    return HF_COMMANDS.includes(words[3].text) && hfFolder(roots, cwdReal) && wordsStayIn(words.slice(4), cwdReal, [roots.project], roots.project);
   }
   return false;
 }
@@ -245,7 +320,8 @@ const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
 const onlyKeys = (tool, input) => Object.keys(input).every((key) => KEYS[tool].includes(key) && input[key] !== undefined);
 
 /** Whether the call `input` (as Claude Code hands it to a PreToolUse hook: `tool_name`, `tool_input`, `cwd`, and for a helper agent's call
-    its `agent_id` and `agent_type`, which change nothing) is one the table allows. */
+    its `agent_id` and `agent_type`, which change nothing) is one the table allows: true, false, or the reason a refusal says when it is
+    not the usual one. */
 function allows(input, ctx) {
   if (!isObject(input) || !isObject(input.tool_input)) return false;
   const tool = input.tool_name;
@@ -274,7 +350,9 @@ function allows(input, ctx) {
       return typeof args.command === "string" && (args.run_in_background === undefined || args.run_in_background === false)
         && bashAnswer(args.command, input.cwd, ctx, roots);
     case "Agent":
-      return args.subagent_type === "general-purpose" && typeof args.prompt === "string" && (args.run_in_background === undefined || args.run_in_background === false);
+      if (args.subagent_type !== "general-purpose" || typeof args.prompt !== "string") return false;
+      // Claude Code runs an agent given no run_in_background in the background: the foreground is said outright.
+      return args.run_in_background === false ? true : FOREGROUND;
     default:
       return false;
   }
@@ -285,7 +363,8 @@ function allows(input, ctx) {
     Anything it cannot judge is refused. */
 export function workerDecision(input, ctx) {
   try {
-    return allows(input, ctx) ? { decision: "pass", reason: "" } : { decision: "deny", reason: REFUSED };
+    const said = allows(input, ctx);
+    return said === true ? { decision: "pass", reason: "" } : { decision: "deny", reason: typeof said === "string" ? said : REFUSED };
   } catch {
     return { decision: "deny", reason: REFUSED };
   }

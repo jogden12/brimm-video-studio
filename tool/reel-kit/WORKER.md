@@ -32,10 +32,15 @@ refuses is not tried another way.
     project), `trials`, `effect` or `render`.
   - `"BIN/ffmpeg" …` and `"BIN/ffprobe" …`, every file they read or write inside `PROJECT` (ffprobe may read `KIT` too).
   - `"BIN/npx" -y hyperframes@0.8.139 check`, `lint` or `snapshot …`, run in `PROJECT/public` or a folder under
-    `PROJECT/cards/` or `PROJECT/fx/`. To get there, `cd "<that folder>"` on its own first. Never `render`, `publish` or anything
-    of the cloud.
-- **Helper agents:** the Agent tool, `subagent_type` `general-purpose` only, in the foreground (`run_in_background: false`), with
-  no `isolation`, no `model` and no `name`. They run on your model, in this folder, under the same guard.
+    `PROJECT/cards/` or `PROJECT/fx/`. To get there, `cd "<that folder>"` on its own first. Never `publish` or anything of the
+    cloud.
+  - `"BIN/npx" -y hyperframes@0.8.139 render … -o <id>.mp4` only for a card: run in its own folder under `PROJECT/cards/`, with one
+    `-o` (or `--output`) inside that same folder. Never a render of the video, in `public/` or anywhere else: Studio renders it.
+  - `/bin/cp "<source>" "<destination>"`, or `/bin/cp -R …` for a folder: one source, from `KIT`, `PROJECT` or `REEL_KIT_HOME`'s
+    `vendor/`, `style/`, `fx/` or `cards/`, one destination inside `PROJECT`, and no other flag. This is how a card's folder is
+    started, as `CARD_BRIEF.md` says.
+- **Helper agents:** the Agent tool, `subagent_type` `general-purpose` only, in the foreground: always pass
+  `run_in_background: false` (an agent without it is refused), with no `isolation`, no `model` and no `name`. They run on your model, in this folder, under the same guard.
 - **Never:** the web (no fetches, no searches, no screenshots from the web), MCP servers or any generator (Higgsfield, ChatCut,
   ElevenLabs, OpenRouter), Artifacts, skills, posting or publishing of any kind, Trials.
 
@@ -96,9 +101,10 @@ As Reel Kit's step 3, with these changes:
   Showcase section) and the library entries named; report frames, SFX, `edit.py` changes and snapshot paths.
 - Give each agent everything Reel Kit's step 4 lists, and these limits, word for word in its prompt: "Work only inside PROJECT.
   Read KIT, never write in it. Every command is one program and its words, spelled exactly as listed here, with no shell operators:
-  `"PY" "KIT/pipeline/<script>.py" "PROJECT" …`, `"BIN/ffmpeg" …`, `"BIN/ffprobe" …`, and `"BIN/npx" -y hyperframes@0.8.139
-  check|lint|snapshot …` after `cd` into your own folder. No web, no generators, no other agents, never render." Give the places
-  spelled as the job below spells them, with no `PATH=` prefix.
+  `"PY" "KIT/pipeline/<script>.py" "PROJECT" …`, `"BIN/ffmpeg" …`, `"BIN/ffprobe" …`, `/bin/cp [-R] "<source>" "<destination>"`
+  (one source, into PROJECT), and `"BIN/npx" -y hyperframes@0.8.139 check|lint|snapshot …` after `cd` into your own folder; a card
+  renders only itself, in its own folder, with `-o <id>.mp4`. No web, no generators, no other agents, never render the video."
+  Give the places spelled as the job below spells them, with no `PATH=` prefix.
 - Review every still at full size; send fixes back to the same agent. With no helper agents, build each yourself from the same brief.
 - Layered effects (the room, tracks, depth) as Reel Kit's step 4, with the room only from the take (`EMPTY`), a clip of it she gave
   (`EMPTY_CLIP`), or her photo (`plate_finish.py --fill`). Never a generated background.
@@ -120,6 +126,7 @@ and effects through their agents), rebuild, and make the next storyboard version
 on its beat and take it out of `NEEDS`. A note you can't apply within these rules: say so on the storyboard.
 
 ### After her go (Reel Kit's step 8, without the render)
-A finalize job: `cards` (the cards' and effects' last phase, as their briefs say), `build` (`build.py "PROJECT"`), `sound`
+A finalize job: `cards` (the cards' and effects' last phase, as their briefs say: each card renders itself, in its own folder,
+`-o <id>.mp4`), `build` (`build.py "PROJECT"`), `sound`
 (`mix.py` again if anything changed), and `ready`: write your status file with `ready` and stop. Never run `render.py`: Studio
 renders the video, checks it, and nothing is ever copied beside the source clip.

@@ -51,6 +51,15 @@ function world() {
   writeState(project, { slug: "abc123-reel-2-v1", key: "reel 2", mode: "hifi", version: 1, title: "Pricing, plainly", name: "Pricing, Reel 2 Reel Kit v1" });
   const outside = join(home, "Outside");
   mkdirSync(outside, { recursive: true });
+  mkdirSync(join(project, "cards", "c2"), { recursive: true });
+  mkdirSync(join(rkHome, "vendor"), { recursive: true });
+  writeFileSync(join(rkHome, "vendor", "gsap.min.js"), "/* GSAP */\n");
+  mkdirSync(join(kit, "cards", "scissors"), { recursive: true });
+  writeFileSync(join(kit, "cards", "scissors", "index.html"), "<html></html>\n");
+  mkdirSync(join(home, ".ssh"), { recursive: true });
+  writeFileSync(join(home, ".ssh", "id_ed25519"), "not a real key\n");
+  mkdirSync(join(home, "Dropbox", "BRIMM Video"), { recursive: true });
+  writeFileSync(join(home, "Dropbox", "BRIMM Video", "notes.txt"), "hers\n");
   const ctx = { project, kit, rkHome, bin };
   return { home, kit, rkHome, bin, project, outside, ctx, py: venvPython(home) };
 }
@@ -204,9 +213,13 @@ describe("the worker's tools", () => {
       assert.ok(!lists.allowed.some((rule) => rule.includes(script)), `no rule names ${name}.py`);
     }
     // The Agent tool is Reel Kit's card and FX builders only, as general-purpose agents in this folder, held to the same limits.
-    const agent = (extra) => call("Agent", { description: "build a card", prompt: "Read KIT/kit/CARD_BRIEF.md", subagent_type: "general-purpose", ...extra }, project);
+    const agent = (extra) => call("Agent", { description: "build a card", prompt: "Read KIT/kit/CARD_BRIEF.md", subagent_type: "general-purpose", run_in_background: false, ...extra }, project);
     assert.equal(answer(w, agent({})), "pass");
-    assert.equal(answer(w, agent({ run_in_background: false })), "pass");
+    // In the foreground only, said outright: with no run_in_background an agent runs in the background, and the refusal says what to pass.
+    const background = workerDecision(call("Agent", { description: "d", prompt: "p", subagent_type: "general-purpose" }, project), w.ctx);
+    assert.equal(background.decision, "deny");
+    assert.match(background.reason, /run_in_background: false/);
+    assert.match(workerDecision(agent({ run_in_background: true }), w.ctx).reason, /run_in_background: false/);
     for (const extra of [{ subagent_type: "reel-kit:card-builder" }, { subagent_type: undefined }, { isolation: "worktree" }, { isolation: "remote" }, { cwd: "/" },
       { run_in_background: true }, { model: "sonnet" }, { mode: "bypassPermissions" }, { name: "helper" }]) {
       assert.equal(answer(w, agent(extra)), "deny", JSON.stringify(extra));
@@ -251,6 +264,61 @@ describe("the worker's tools", () => {
     assert.equal(answer(w, call("Write", { file_path: join(project, "cards", "c1", "index.html"), content: "x" }, join(project, "cards", "c1"), { agent_id: "a1", agent_type: "general-purpose" })), "pass");
   });
 
+  it("lets the worker copy from Reel Kit and the project into the project, and nothing else", () => {
+    const w = world();
+    const { project, kit, rkHome, home } = w;
+    const cp = (words, cwd = project) => answer(w, bash(`/bin/cp ${words}`, cwd));
+    // CARD_BRIEF's start: GSAP, the pack, the kit's own files and a library card, into the card's folder.
+    assert.equal(cp(`${q(`${rkHome}/vendor/gsap.min.js`)} ${q(`${project}/cards/c1/`)}`), "pass", "GSAP into a card");
+    assert.equal(cp(`${q(`${rkHome}/vendor/gsap.min.js`)} cards/c1/vendor.js`), "pass", "a destination from the folder it runs in");
+    assert.equal(cp(`-R ${q(`${kit}/cards/scissors`)} ${q(`${project}/cards/c1/scissors`)}`), "pass", "a library card, whole");
+    assert.equal(cp(`-R ${q(`${project}/style`)} ${q(`${project}/cards/c1/style`)}`), "pass", "from the project itself");
+    assert.equal(cp(`${q(`${kit}/SKILL.md`)} ${q(`${project}/cards/c1/new/deeper/x.md`)}`), "pass", "into folders not made yet");
+    // Never from anywhere else, never out of the project, never more than one source, never another flag.
+    assert.equal(cp(`${q(`${home}/.ssh/id_ed25519`)} ${q(`${project}/work/k`)}`), "deny", "from ~/.ssh");
+    assert.equal(cp(`-R ${q(`${home}/.ssh`)} ${q(`${project}/work/k`)}`), "deny", "~/.ssh whole");
+    assert.equal(cp(`${q(`${home}/Dropbox/BRIMM Video/notes.txt`)} ${q(`${project}/work/n.txt`)}`), "deny", "from her Dropbox");
+    assert.equal(cp(`${q(`${rkHome}/.venv/bin/python`)} ${q(`${project}/work/py`)}`), "deny", "from REEL_KIT_HOME outside vendor, style, fx and cards");
+    assert.equal(cp(`${q(`${rkHome}/vendor/gsap.min.js`)} ${q(`${w.outside}/gsap.min.js`)}`), "deny", "to outside the project");
+    assert.equal(cp(`${q(`${rkHome}/vendor/gsap.min.js`)} ${q(`${kit}/gsap.min.js`)}`), "deny", "into the kit");
+    assert.equal(cp(`${q(`${rkHome}/vendor/gsap.min.js`)} ../x.js`), "deny", "climbing out");
+    assert.equal(cp(`-f ${q(`${rkHome}/vendor/gsap.min.js`)} ${q(`${project}/cards/c1/`)}`), "deny", "cp -f");
+    assert.equal(cp(`-R -f ${q(`${kit}/cards/scissors`)} ${q(`${project}/cards/c1/`)}`), "deny", "cp -R -f");
+    assert.equal(cp(`-RL ${q(`${kit}/cards/scissors`)} ${q(`${project}/cards/c1/`)}`), "deny", "another flag");
+    assert.equal(cp(`${q(`${kit}/SKILL.md`)} ${q(`${rkHome}/vendor/gsap.min.js`)} ${q(`${project}/cards/c1/`)}`), "deny", "two sources");
+    assert.equal(cp(`${q(`${kit}/SKILL.md`)}`), "deny", "no destination");
+    symlinkSync(join(home, ".ssh", "id_ed25519"), join(project, "assets", "key"));
+    assert.equal(cp(`${q(`${project}/assets/key`)} ${q(`${project}/work/k`)}`), "deny", "a link in the project leading out");
+    assert.equal(cp(`${q(`${kit}/SKILL.md`)} ${q(`${project}/studio.json`)}`), "deny", "over Studio's own status");
+    writeFileSync(join(kit, "cards", "studio.json"), "{}");
+    assert.equal(cp(`${q(`${kit}/cards/studio.json`)} ${q(project)}`), "deny", "into the project's top, as studio.json");
+    mkdirSync(join(kit, "cards", "noted"), { recursive: true });
+    writeFileSync(join(kit, "cards", "noted", "CLAUDE.md"), "notes\n");
+    assert.equal(cp(`-R ${q(`${kit}/cards/noted`)} ${q(`${project}/cards/c1/noted`)}`), "deny", "a folder holding a CLAUDE.md");
+    assert.equal(answer(w, bash(`cp ${q(`${kit}/SKILL.md`)} ${q(`${project}/work/x`)}`, project)), "deny", "cp by its bare name");
+  });
+
+  it("lets a card render only into its own folder, never the video", () => {
+    const w = world();
+    const { project, bin } = w;
+    const render = (words, cwd) => answer(w, bash(`${q(`${bin}/npx`)} -y hyperframes@0.8.139 render ${words}`, cwd));
+    const card = join(project, "cards", "c1");
+    assert.equal(render("-q delivery --quiet -o c1.mp4", card), "pass", "CARD_BRIEF's render, in the card's folder");
+    assert.equal(render(`--output ${q(`${card}/c1.mp4`)}`, card), "pass", "its output by a whole path");
+    assert.equal(render("-o c1.mp4", join(project, "public")), "deny", "the video, in public");
+    assert.equal(render("-o c1.mp4", project), "deny", "in the project's top");
+    assert.equal(render("-o x.mp4", join(project, "fx", "f1")), "deny", "an effect's folder");
+    assert.equal(render("-q delivery --quiet", card), "deny", "no output named");
+    assert.equal(render(`-o ${q(`${project}/cards/c2/x.mp4`)}`, card), "deny", "into another card");
+    assert.equal(render("-o ../c2/x.mp4", card), "deny", "climbing out");
+    assert.equal(render(`-o ${q(`${project}/public/x.mp4`)}`, card), "deny", "into public");
+    assert.equal(render(`-o ${q(`${w.outside}/x.mp4`)}`, card), "deny", "outside the project");
+    assert.equal(render("-o c1.mp4 -o c2.mp4", card), "deny", "two outputs");
+    assert.equal(render("-o c1.mp4 --cloud", card), "deny", "anything of the cloud");
+    symlinkSync(w.outside, join(card, "out"));
+    assert.equal(render("-o out/x.mp4", card), "deny", "through a link leading out");
+  });
+
   it("answers by the hook as the permission lists do, from one table", () => {
     const w = world();
     const { project, kit, bin, py } = w;
@@ -270,12 +338,14 @@ describe("the worker's tools", () => {
       bash(`${q(`${bin}/ffmpeg`)} -i source/clip.mp4 -f null -`, project),
       bash(`${q(`${bin}/ffprobe`)} source/clip.mp4`, project),
       bash(`${q(`${bin}/npx`)} -y hyperframes@0.8.139 check`, join(project, "public")),
-      bash(`${q(`${bin}/npx`)} -y hyperframes@0.8.139 render`, join(project, "public")),
+      bash(`${q(`${bin}/npx`)} -y hyperframes@0.8.139 render -q delivery --quiet -o c1.mp4`, join(project, "cards", "c1")),
+      bash(`/bin/cp ${q(`${w.rkHome}/vendor/gsap.min.js`)} ${q(`${project}/cards/c1/gsap.min.js`)}`, project),
+      bash(`/bin/rm -rf ${q(`${project}/cards`)}`, project),
       bash(`${q(`${bin}/ffmpeg`)} -i source/clip.mp4 -f null - ; id`, project),
       bash(`cd ${q(`${project}/public`)}`, project),
       bash("curl https://example.com", project),
-      call("Agent", { description: "d", prompt: "p", subagent_type: "general-purpose" }, project),
-      call("Agent", { description: "d", prompt: "p", subagent_type: "Explore" }, project),
+      call("Agent", { description: "d", prompt: "p", subagent_type: "general-purpose", run_in_background: false }, project),
+      call("Agent", { description: "d", prompt: "p", subagent_type: "Explore", run_in_background: false }, project),
       call("WebFetch", { url: "https://example.com", prompt: "x" }, project),
       call("mcp__x__y", {}, project),
       call("Artifact", { action: "publish" }, project)
@@ -337,8 +407,8 @@ describe("the worker's tools", () => {
     const calls = [
       { tool_name: "Write", tool_input: { file_path: join(w.outside, "x.txt"), content: "x" }, agent_id: "a1", agent_type: "general-purpose" },
       { tool_name: "Write", tool_input: { file_path: join(w.project, "work", "x.txt"), content: "x" } },
-      { tool_name: "Agent", tool_input: { description: "d", prompt: "p", subagent_type: "general-purpose" } },
-      { tool_name: "Agent", tool_input: { description: "d", prompt: "p", subagent_type: "general-purpose", isolation: "worktree" } },
+      { tool_name: "Agent", tool_input: { description: "d", prompt: "p", subagent_type: "general-purpose", run_in_background: false } },
+      { tool_name: "Agent", tool_input: { description: "d", prompt: "p", subagent_type: "general-purpose", run_in_background: false, isolation: "worktree" } },
       { tool_name: "Bash", tool_input: { command: `${q(w.py)} ${q(`${w.kit}/pipeline/trials.py`)} ${q(w.project)} start` } }
     ];
     const claude = standIn(w, "hook", { CLAUDE_WORKER_CALLS: JSON.stringify(calls) });
