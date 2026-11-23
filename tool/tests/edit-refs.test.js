@@ -644,7 +644,9 @@ describe("Studio never writes into the reference folder", () => {
     plan: [["new", "Too many SKUs"], [FOLDER], [FOLDER, "drop"], [FOLDER, "set", "--cue", "graphic | 4 | w | S. | ref: blue carousel", "--line", "x"], [FOLDER, "agreed", FOLDER], [FOLDER, "join"]],
     // Footage for a planned video (PR H5a) reads and writes records and a note on this Mac, and never a reference: the made-up episode is no waiting video, so this
     // world walks its forms.
-    footage: [[FOLDER, "Too many SKUs", "talking", "--client", "no"], [FOLDER, "none"], []]
+    footage: [[FOLDER, "Too many SKUs", "talking", "--client", "no"], [FOLDER, "none"], []],
+    // Reel Kit's setup on this Mac (plan Task 6) never reads the reference folder.
+    reelkit: [["status"], []]
   };
   it("has the words of every command here, so that a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in WALK, `${name}: give it its words in WALK`);

@@ -49,6 +49,9 @@
 //                                         "that's all the footage": the plan's talking parts joined, in the order of its script,
 //                                         into its video (join.js). The detached half, `join --now`, and the working copy's
 //                                         `workcopy --now … --footage`, are runs of its own and in no help
+//   node edit.js reelkit install "<download>" [--yes] | status
+//                                         a Reel Kit download dragged into her chat: the plan of its setup, or with --yes the setup,
+//                                         detached; and how it is going (reel-kit-commands.js)
 //   node edit.js plan "<planned>" voice   "the HeyGen voice is done": the voice the app's agent made in a HeyGen explainer's
 //                                         project taken in as the plan's video (explainer.js). `app` opens that project
 //
@@ -130,6 +133,7 @@ import { HAND_EDITED, scriptHandEdited } from "./plan-script.js";
 import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
+import { reelkitCommand } from "./reel-kit-commands.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
 import { ON_OTHER_MAC, ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, notWholeHere, onOtherMac, recordingAt, recordingStat, roleOf } from "./where.js";
 
@@ -384,7 +388,15 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         its answer again, with its cards
   node edit.js plan "<planned>" agreed "<video>"
                                         for footage that shows a client: notes, on a dialog on this Mac that only her click
-                                        answers, that the client agreed to being shown in it. Who agreed stays on this Mac`;
+                                        answers, that the client agreed to being shown in it. Who agreed stays on this Mac
+  node edit.js reelkit install "<download>" [--yes]
+                                        a Reel Kit download dragged into her chat: each step setting it up would take, and
+                                        that nothing is installed until Jason says yes. With --yes, said once Jason has said
+                                        yes, it is set up, detached, one setup at a time on this Mac. An installed Mac takes
+                                        only the Reel Kit Studio pins; the Mac Studio sets up another version beside the
+                                        one in use, and writes its pin for Jason's pull request (reel-kit-commands.js)
+  node edit.js reelkit status           how Reel Kit's setup on this Mac is going: at which step, done and what it did, or
+                                        why it stopped`;
 
 /** The home folder commands work from: the one a test gives, else Studio's own (home.js: BRIMM_VIDEO_HOME, else HOME, else the Mac's own word for it). */
 const homeOf = (deps) => deps.home || studioHome();
@@ -7203,7 +7215,7 @@ async function joinCommand(ctx, rest) {
 
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and so are `workcopy` (`kind` and `app` start it) and `join` (`plan … join` starts it): all three are in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, bring, status, retry, look, name, title, reel, reels, ask, finish, show, behind: (ctx) => behind(ctx), update: updateCommand, resolve: resolveConflict, free, spell, graphic, teachings: teachingsCommand, principles, ideas, refs, plan, footage };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, bring, status, retry, look, name, title, reel, reels, ask, finish, show, behind: (ctx) => behind(ctx), update: updateCommand, resolve: resolveConflict, free, spell, graphic, teachings: teachingsCommand, principles, ideas, refs, plan, footage, reelkit: (ctx, rest) => reelkitCommand(ctx, rest, { help: HELP }) };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

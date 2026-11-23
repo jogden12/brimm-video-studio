@@ -10,8 +10,10 @@
 // (switch.js), which are given the versions of a video (finish.js linksOf) to ask it with.
 import { isPlannedRecord, kindOf, shownName } from "./episode.js";
 
-/** The commands that name no episode: their output is built from labels alone, and is not gated here. */
-export const UNSCOPED = ["episodes", "status", "behind", "update", "retry", "look", "guide"];
+/** The commands that name no episode: their output is built from labels alone, and is not gated here. `reelkit` is among them while its
+    only words are `install "<download>"` and `status` (plan Task 6), which say how Reel Kit's own setup on this Mac is going and name no
+    episode; once it has words that name one (plan Task 11), only those two (and `style`) pass so, and every other is gated. */
+export const UNSCOPED = ["episodes", "status", "behind", "update", "retry", "look", "guide", "reelkit"];
 /** The commands that run for a video not yet answered: `kind` answers it, `leave` leaves it, `which` says which it is, `show`
     opens a copy of it on this Mac, and `resolve` sorts out its conflicted copies. */
 export const UNANSWERED = ["kind", "leave", "which", "show", "resolve"];
