@@ -1,8 +1,8 @@
-// The guide's steps on the BRIMM Ops page, her note's rules for them, and the Finder words it says; then each video's one next
-// step in her words, and the guide's lists. None of it needs a disk, a program or the page.
+// The guide's steps in BRIMM Ops, her note's rules for them, and the Finder words it says; then each video's one next
+// step in her words, and the guide's lists. None of it needs a disk, a program or BRIMM Ops.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { OPS, OPS_PAGE, NOT_SET_UP, ZOOM_WORDS, dropWords, dropUnreadable, noteKindOf, opsNext, noteAfter, opsText } from "../guide.js";
+import { OPS, OPS_APP, NOT_SET_UP, ZOOM_WORDS, dropWords, dropUnreadable, noteKindOf, opsNext, noteAfter, opsText } from "../guide.js";
 import { AIRDROP, nextFor, ordered, findIn, overviewLines, videoLines, NOTHING_UNDER_WAY, NO_FIT, signatureOf, WAIT_MS, POLL_MS } from "../guide.js";
 import { readyIn, roughIn, READING_STEPS, apart, COMING } from "../guide.js";
 import { APP_NOT_SET_UP, COPY_STEP, copyIn } from "../guide.js";
@@ -15,32 +15,32 @@ const LATER = "2026-10-26T09:00:00-05:00";
 const HANDOFF = (over = {}) => ({ id: "e-20261020-3fa9c1", revision: 1, kind: "finished", emptyAt: null, at: Date.parse("2026-10-20T13:00:00-05:00"), file: "Talk.mp4", ...over });
 const NOTE = (over = {}) => ({ kind: "episode", step: "taken", revision: 1, at: AT, ...over });
 const OPS_TEXTS = {
-  // The first take: when no episode holds the video yet, the page says it is a new episode and has one button, "Add the episode and take the hand-off", or opens an episode and has "Take the hand-off".
-  taken: 'Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.',
-  // A newer revision: the page's button names the revision of the hand-off and the one the page holds, which is the one her note holds.
-  takenAgain: (revision, have) => `Drag the new hand-off onto Episodes, then press "Take revision ${revision} in place of revision ${have}".`,
+  // The first take: the video waits in BRIMM Ops under "Waiting from Studio", with one button for what it needs (BRIMM Ops guide, "Taking it in BRIMM Ops").
+  taken: 'Find the video under "Waiting from Studio" and press its button, such as "Add the episode and take the hand-off". For a video BRIMM Ops already holds, it is "Take the hand-off" or "Take revision N in place of revision M". Dropping the hand-off onto Episodes still works.',
+  // A newer revision: BRIMM Ops' button names the revision of the hand-off and the one BRIMM Ops holds, which is the one her note holds.
+  takenAgain: (revision, have) => `Find the video under "Waiting from Studio" and press "Take revision ${revision} in place of revision ${have}".`,
   // A newer revision of an episode whose note is already at the cascade, the last step: the Reels of a video her editor finished come later, as a newer
-  // revision ("Hand off the Reels"), and no step is left to send her to the page's "Reels" card for them. Revision 2 in place of revision 1, in full.
-  takenAgainLate: 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.',
+  // revision ("Hand off the Reels"), and no step is left to send her to BRIMM Ops' "Reels" card for them. Revision 2 in place of revision 1, in full.
+  takenAgainLate: 'Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.',
   online: ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".',
-  sessionTaken: 'Choose "Principles", drop the hand-off, then press "Take the session".',
-  sessionAgain: 'Choose "Principles", drop the new hand-off, then press "Take the session".',
+  sessionTaken: 'Find the session under "Waiting from Studio", press "Open it in the Principles library", then "Take the session".',
+  sessionAgain: 'Find the new revision under "Waiting from Studio", press "Open it in the Principles library", then "Take the session".',
   kit: 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.',
   posted: 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".',
   live: 'Correct the form to what is live, then press "This is what is live".',
-  // The page's Reels card lists the Reels BRIMM Video Studio handed off ("Reels from BRIMM Video Studio"), each with "Write its post text". OpusClip is no longer used
-  // (Jason, 2 November 2026), and the page (version 10) stops writing "Clip to cut": the step sends her to neither.
+  // BRIMM Ops' Reels card lists the Reels BRIMM Video Studio handed off ("Reels from BRIMM Video Studio"), each with "Write its post text". OpusClip is no longer used
+  // (Jason, 2 November 2026), and BRIMM Ops (since its page's version 10) stops writing "Clip to cut": the step sends her to neither.
   cascade: 'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. If the "Reels" card lists "Reels from BRIMM Video Studio", press "Write its post text" beside each.',
   posttext: 'Press "Write what’s next", and pick the hook and the YouTube Short title. Approve and copy the caption, the Short\'s title and description, and the LinkedIn post.',
   postedShort: "Post it on Instagram, and as a YouTube Short.",
   checked: 'Check each principle marked "Check it", then press "Use in drafts".',
   // "the hand-off", not "the empty session revision": once the session's own hand-off is written, final/ holds that one in its place.
-  withdrawn: 'Choose "Principles", drop the hand-off, and press "Withdraw the words and take the session". Then delete the old backups from "About", and tell Jason.'
+  withdrawn: 'Find the session under "Waiting from Studio", press "Open it in the Principles library", then "Withdraw the words and take the session". Then delete every backup you saved from "About" before now, and tell Jason.'
 };
 
 describe("the guide's constants and Finder words", () => {
   it("are the design's", () => {
-    assert.equal(OPS_PAGE, "https://claude.ai/artifact/GCUQPLnSFWZe3VghyaKNtX");
+    assert.equal(OPS_APP, "BRIMM Ops");
     assert.equal(NOT_SET_UP, "This Mac isn't set up for the guide yet: ask Jason.");
     assert.equal(dropWords({ drop: "Drop" }, "Sallie's laptop", "/Users/s"), "Dropbox › The BRIMM DB › BRIMM Video › Drop › Sallie's laptop");
     assert.equal(dropWords({}, "Sallie's laptop", "/Users/s"), "Dropbox › The BRIMM DB › BRIMM Video › Unedited Video › Sallie's laptop");
@@ -51,7 +51,7 @@ describe("the guide's constants and Finder words", () => {
   });
 });
 
-describe("the BRIMM Ops page's steps", () => {
+describe("BRIMM Ops' steps", () => {
   it("are the design's, by what the hand-off is", () => {
     assert.deepEqual(OPS, { episode: ["taken", "kit", "posted", "live", "cascade"], "short video": ["taken", "posttext", "posted"], session: ["taken", "checked"], withdrawal: ["withdrawn"] });
     assert.deepEqual(["finished", "raw", "short video", "session"].map(noteKindOf), ["episode", "episode", "short video", "session"]);
@@ -99,10 +99,10 @@ describe("the BRIMM Ops page's steps", () => {
     assert.deepEqual(taken, { kind: "session", step: "taken", revision: 3, at: LATER });
     assert.deepEqual(opsNext(own, taken), { step: "checked", again: false });
   });
-  it("says each step in the page's own words", () => {
+  it("says each step in BRIMM Ops' own words", () => {
     const T = OPS_TEXTS;
     // `note` is her note on the hand-off. A hand-off taken again names the revision it holds beside its own: "Take revision 2 in place of revision 1";
-    // and an episode whose note is already at the cascade, the last step, is sent on to the page's "Reels" card (below). A first take reads no note.
+    // and an episode whose note is already at the cascade, the last step, is sent on to BRIMM Ops' "Reels" card (below). A first take reads no note.
     for (const [handoff, step, again, want, note] of [
       [HANDOFF(), "taken", false, T.taken],
       [HANDOFF({ kind: "short video" }), "taken", false, T.taken],
@@ -118,22 +118,22 @@ describe("the BRIMM Ops page's steps", () => {
       // A session's words are the session form's, which is the same button for a new revision and a newer one: they name no revision.
       [HANDOFF({ kind: "session", revision: 2 }), "taken", true, T.sessionAgain, NOTE({ kind: "session", step: "checked" })],
       // A newer revision of an episode whose note is already at the cascade, the last step: the Reels of a video her editor finished come later, as a newer
-      // revision, and no step is left to send her to the page's "Reels" card for them. The take sentence is followed by one for the card, and a raw
+      // revision, and no step is left to send her to BRIMM Ops' "Reels" card for them. The take sentence is followed by one for the card, and a raw
       // episode's online-only sentence still comes last.
-      [HANDOFF({ revision: 2 }), "taken", true, 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.', NOTE({ step: "cascade" })],
-      [HANDOFF({ revision: 4 }), "taken", true, 'Drag the new hand-off onto Episodes, then press "Take revision 4 in place of revision 3". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.', NOTE({ step: "cascade", revision: 3 })],
-      [HANDOFF({ kind: "raw", revision: 2 }), "taken", true, 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it. Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".', NOTE({ step: "cascade" })],
+      [HANDOFF({ revision: 2 }), "taken", true, 'Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.', NOTE({ step: "cascade" })],
+      [HANDOFF({ revision: 4 }), "taken", true, 'Find the video under "Waiting from Studio" and press "Take revision 4 in place of revision 3". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.', NOTE({ step: "cascade", revision: 3 })],
+      [HANDOFF({ kind: "raw", revision: 2 }), "taken", true, 'Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it. Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".', NOTE({ step: "cascade" })],
       // With her note before the cascade nothing changes: the cascade step, still to come, says it.
-      [HANDOFF({ revision: 2 }), "taken", true, 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".', NOTE({ step: "taken" })],
-      [HANDOFF({ revision: 2 }), "taken", true, 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".', NOTE({ step: "kit" })],
-      [HANDOFF({ revision: 2 }), "taken", true, 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".', NOTE({ step: "posted" })],
-      [HANDOFF({ revision: 2 }), "taken", true, 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".', NOTE({ step: "live" })],
-      [HANDOFF({ kind: "raw", revision: 2 }), "taken", true, 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1". Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".', NOTE({ step: "live" })],
+      [HANDOFF({ revision: 2 }), "taken", true, 'Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1".', NOTE({ step: "taken" })],
+      [HANDOFF({ revision: 2 }), "taken", true, 'Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1".', NOTE({ step: "kit" })],
+      [HANDOFF({ revision: 2 }), "taken", true, 'Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1".', NOTE({ step: "posted" })],
+      [HANDOFF({ revision: 2 }), "taken", true, 'Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1".', NOTE({ step: "live" })],
+      [HANDOFF({ kind: "raw", revision: 2 }), "taken", true, 'Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1". Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".', NOTE({ step: "live" })],
       // A short video and a session never have the sentence, whatever step the note holds; nor does a first take.
-      [HANDOFF({ kind: "short video", revision: 2 }), "taken", true, 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".', NOTE({ kind: "short video", step: "posted" })],
-      [HANDOFF({ kind: "short video", revision: 2 }), "taken", true, 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".', NOTE({ kind: "short video", step: "cascade" })],
-      [HANDOFF({ kind: "session", revision: 2 }), "taken", true, 'Choose "Principles", drop the new hand-off, then press "Take the session".', NOTE({ kind: "session", step: "checked" })],
-      [HANDOFF({ kind: "session", revision: 2 }), "taken", true, 'Choose "Principles", drop the new hand-off, then press "Take the session".', NOTE({ kind: "session", step: "cascade" })],
+      [HANDOFF({ kind: "short video", revision: 2 }), "taken", true, 'Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1".', NOTE({ kind: "short video", step: "posted" })],
+      [HANDOFF({ kind: "short video", revision: 2 }), "taken", true, 'Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1".', NOTE({ kind: "short video", step: "cascade" })],
+      [HANDOFF({ kind: "session", revision: 2 }), "taken", true, 'Find the new revision under "Waiting from Studio", press "Open it in the Principles library", then "Take the session".', NOTE({ kind: "session", step: "checked" })],
+      [HANDOFF({ kind: "session", revision: 2 }), "taken", true, 'Find the new revision under "Waiting from Studio", press "Open it in the Principles library", then "Take the session".', NOTE({ kind: "session", step: "cascade" })],
       [HANDOFF({ revision: 2 }), "taken", false, T.taken, NOTE({ step: "cascade" })],
       [HANDOFF(), "kit", false, T.kit],
       [HANDOFF(), "posted", false, T.posted],
@@ -223,7 +223,7 @@ const STAGE_ROWS = [
   [APP({ editedInFinalCut: true, way: "hyperframes" }), "open-app", 'Say "open it in HyperFrames" to edit it there.'],
   [SESSION({ choice: null }), "session-choice", "Choose what you want from it: its teachings, or the transcript only."],
   [SESSION({ choice: null, teachingsOn: false }), "session-off", OFF],
-  [SESSION({ emptyOwed: true }), "session-empty-owed", 'Say "it was a session after all" again: its empty revision for the BRIMM Ops page is still to be written.'],
+  [SESSION({ emptyOwed: true }), "session-empty-owed", 'Say "it was a session after all" again: its empty revision for BRIMM Ops is still to be written.'],
   [{ ...SESSION(), elsewhere: true, mac: "Mac Studio" }, "open-elsewhere", "It is open on the Mac Studio. Carry on there."],
   [{ ...SESSION({ choice: null }), onOtherMac: true, mac: "Mac Studio" }, "on-other-mac", "It is on the Mac Studio. Carry on there."],
   [{ ...SESSION(), reading: "running" }, "session-reading", 'Claude is reading its teachings. A notice comes when it is done; then say "what did Claude find?".'],
@@ -316,7 +316,7 @@ const STAGE_ROWS = [
   [RAW({ gated: true, offersAnswered: false }), "session-mark", MARK],
   [RAW({ gated: true, placeholder: true }), "session-mark", MARK],
   // A finished video whose hand-off is written, with a Reel exported from HyperFrames that the hand-off does not hold (plan PR 16): it comes ahead
-  // of the BRIMM Ops page's steps, names the Reels together, and is a finish at work's when one runs.
+  // of BRIMM Ops' steps, names the Reels together, and is a finish at work's when one runs.
   [{ handoff: HANDOFF(), reelsExported: [2] }, "reels-exported", 'You have exported Reel 2 from HyperFrames. Say "hand off the Reels" to add it to the hand-off.'],
   [{ handoff: HANDOFF(), reelsExported: [1, 3] }, "reels-exported", 'You have exported Reel 1 and Reel 3 from HyperFrames. Say "hand off the Reels" to add them to the hand-off.'],
   [{ handoff: HANDOFF(), reelsExported: [1, 2, 3] }, "reels-exported", 'You have exported Reel 1, Reel 2 and Reel 3 from HyperFrames. Say "hand off the Reels" to add them to the hand-off.'],
@@ -330,7 +330,7 @@ describe("the next step for a video", () => {
   });
   it("is a BRIMM Ops step once its hand-off is written, with the step after it", () => {
     const n = nextFor({ ...BASE, handoff: OPS_HANDOFF }, NONE, NOW);
-    assert.deepEqual(n, { done: false, stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.taken}`, step: "taken", after: OPS_TEXTS.kit });
+    assert.deepEqual(n, { done: false, stage: "ops", text: `In BRIMM Ops: ${OPS_TEXTS.taken}`, step: "taken", after: OPS_TEXTS.kit });
     const last = nextFor({ ...BASE, handoff: OPS_HANDOFF }, { ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind: "episode", step: "live", revision: 1, at: "2026-10-24T09:00:00-05:00" } } }, NOW);
     assert.deepEqual([last.step, last.after], ["cascade", ""]);
     // Not in the plan's test: the page's step is hers on this Mac too, while the video is open on the other one.
@@ -339,18 +339,18 @@ describe("the next step for a video", () => {
   it("is, for a newer revision than her note holds, the page's button for it, which names both revisions", () => {
     const held = (kind, revision) => ({ ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind, step: "kit", revision, at: "2026-10-24T09:00:00-05:00" } } });
     const n = nextFor({ ...BASE, handoff: { ...OPS_HANDOFF, revision: 3 } }, held("episode", 2), NOW);
-    assert.deepEqual(n, { done: false, stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.takenAgain(3, 2)}`, step: "taken", after: OPS_TEXTS.posted });
+    assert.deepEqual(n, { done: false, stage: "ops", text: `In BRIMM Ops: ${OPS_TEXTS.takenAgain(3, 2)}`, step: "taken", after: OPS_TEXTS.posted });
     // A note for another kind of hand-off does not count: it is a first take, whatever revision that note holds.
     const first = nextFor({ ...BASE, handoff: { ...OPS_HANDOFF, revision: 3 } }, held("short video", 2), NOW);
-    assert.deepEqual([first.step, first.text], ["taken", `On the BRIMM Ops page: ${OPS_TEXTS.taken}`]);
+    assert.deepEqual([first.step, first.text], ["taken", `In BRIMM Ops: ${OPS_TEXTS.taken}`]);
   });
   it("is, for a newer revision of an episode whose note is at the cascade, the page's button for it and a sentence for the \"Reels\" card, and leaves nothing under way once it is noted", () => {
     const held = (step, revision, kind = "episode") => ({ ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind, step, revision, at: "2026-10-24T09:00:00-05:00" } } });
     const newer = { ...OPS_HANDOFF, revision: 2 };
-    const LATE = 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.';
+    const LATE = 'Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.';
     // The Reels of a video her editor finished come later, as a newer revision, once every step is noted: the words of the take go on to the card.
     const late = nextFor({ ...BASE, handoff: newer }, held("cascade", 1), NOW);
-    assert.deepEqual(late, { done: false, stage: "ops", text: `On the BRIMM Ops page: ${LATE}`, step: "taken", after: "" });
+    assert.deepEqual(late, { done: false, stage: "ops", text: `In BRIMM Ops: ${LATE}`, step: "taken", after: "" });
     assert.equal(LATE, OPS_TEXTS.takenAgainLate);
     assert.deepEqual(videoLines({ facts: BASE, next: late }), [`${BASE.name}: ${late.text}`, "Then: that is the last step.", "Step: taken"]);
     // Noted as `guide … done taken` notes it, the take is the last step: the note stays at the cascade, at revision 2, and nothing is left under way.
@@ -362,17 +362,17 @@ describe("the next step for a video", () => {
     assert.deepEqual(overviewLines({ drop: "D", items: [listed(taken)], old: 0 }), ["Your drop folder: D", NOTHING_UNDER_WAY]);
     // A raw episode's online-only words still come last.
     const raw = nextFor({ ...BASE, ...RAW(), handoff: { ...newer, kind: "raw" } }, held("cascade", 1), NOW);
-    assert.deepEqual(raw, { done: false, stage: "ops", text: `On the BRIMM Ops page: ${LATE}${OPS_TEXTS.online}`, step: "taken", after: "" });
+    assert.deepEqual(raw, { done: false, stage: "ops", text: `In BRIMM Ops: ${LATE}${OPS_TEXTS.online}`, step: "taken", after: "" });
     // With her note before the cascade it is the page's button alone: the cascade step, still to come, says what to do with the Reels.
     for (const [step, after] of [["taken", OPS_TEXTS.kit], ["kit", OPS_TEXTS.posted], ["posted", OPS_TEXTS.live], ["live", OPS_TEXTS.cascade]]) {
-      assert.deepEqual(nextFor({ ...BASE, handoff: newer }, held(step, 1), NOW), { done: false, stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.takenAgain(2, 1)}`, step: "taken", after }, step);
+      assert.deepEqual(nextFor({ ...BASE, handoff: newer }, held(step, 1), NOW), { done: false, stage: "ops", text: `In BRIMM Ops: ${OPS_TEXTS.takenAgain(2, 1)}`, step: "taken", after }, step);
     }
     assert.ok(OPS_TEXTS.cascade.endsWith('If the "Reels" card lists "Reels from BRIMM Video Studio", press "Write its post text" beside each.'));
     // A short video's and a session's newer revision never has it, though their notes are at their own last step.
     const clip = nextFor({ ...BASE, ...CLIP(), handoff: { ...newer, kind: "short video" } }, held("posted", 1, "short video"), NOW);
-    assert.deepEqual([clip.step, clip.text, clip.after], ["taken", `On the BRIMM Ops page: ${OPS_TEXTS.takenAgain(2, 1)}`, ""]);
+    assert.deepEqual([clip.step, clip.text, clip.after], ["taken", `In BRIMM Ops: ${OPS_TEXTS.takenAgain(2, 1)}`, ""]);
     const session = nextFor({ ...BASE, ...SESSION(), handoff: { ...newer, kind: "session" } }, held("checked", 1, "session"), NOW);
-    assert.deepEqual([session.step, session.text, session.after], ["taken", `On the BRIMM Ops page: ${OPS_TEXTS.sessionAgain}`, ""]);
+    assert.deepEqual([session.step, session.text, session.after], ["taken", `In BRIMM Ops: ${OPS_TEXTS.sessionAgain}`, ""]);
   });
   it("is none for a video that is done: transcript only, finished by her word, every step noted, or a hand-off 60 days old", () => {
     const sixty = OPS_HANDOFF.at + 60 * 86400000;
@@ -387,13 +387,13 @@ describe("the next step for a video", () => {
   it("is a step that nothing noted can skip, though she said the video was finished: a conflict, her answer, a version held as a session, a session's empty revision, its withdrawal", () => {
     const FINISHED = { ...NONE, finished: { [BASE.id]: "2026-10-24T09:00:00-05:00" } };
     const EMPTY = { ...OPS_HANDOFF, revision: 2, kind: "session", emptyAt: 2, file: "" };
-    const WITHDRAW = { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.withdrawn}` };
+    const WITHDRAW = { stage: "ops", text: `In BRIMM Ops: ${OPS_TEXTS.withdrawn}` };
     for (const [over, want] of [
       [{ conflicted: true }, { stage: "conflicted", text: 'Dropbox kept two copies of a change to it. Say "sort out the conflict".' }],
       [{ kind: null, waiting: true }, { stage: "waiting", text: 'It is waiting for your answer. Say "what\'s waiting?" to see its card.' }],
       [{ kind: null, waiting: true, elsewhere: true, mac: "Mac Studio" }, { stage: "answering-elsewhere", text: "It is being answered on the Mac Studio. Carry on there." }],
       [{ heldAsSession: true }, { stage: "held-session", text: 'One of its other versions is a client or group session. Say "it was a session after all" for this one too.' }],
-      [SESSION({ emptyOwed: true }), { stage: "session-empty-owed", text: 'Say "it was a session after all" again: its empty revision for the BRIMM Ops page is still to be written.' }],
+      [SESSION({ emptyOwed: true }), { stage: "session-empty-owed", text: 'Say "it was a session after all" again: its empty revision for BRIMM Ops is still to be written.' }],
       [{ ...SESSION(), handoff: EMPTY }, WITHDRAW],
       [{ ...SESSION({ choice: "transcript only" }), handoff: { ...EMPTY, revision: 3 } }, WITHDRAW]
     ]) assert.deepEqual(shown(nextFor({ ...BASE, ...over }, FINISHED, NOW)), want, JSON.stringify(over));
@@ -407,7 +407,7 @@ describe("the next step for a video", () => {
     const OWN = { ...EMPTY, revision: 3 };
     const noted = (step, revision = 2) => ({ ...NONE, handoffs: { [EMPTY.id]: { kind: "session", step, revision, at: "2026-10-21T09:00:00-05:00" } } });
     const episodeNote = { ...NONE, handoffs: { [EMPTY.id]: { kind: "episode", step: "cascade", revision: 1, at: "2026-10-19T09:00:00-05:00" } } };
-    const WITHDRAW = { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.withdrawn}` };
+    const WITHDRAW = { stage: "ops", text: `In BRIMM Ops: ${OPS_TEXTS.withdrawn}` };
     const CHOOSE = "Choose what you want from it: its teachings, or the transcript only.";
     const sixty = EMPTY.at + 60 * 86400000;
     for (const [over, notes, now, want] of [
@@ -419,8 +419,8 @@ describe("the next step for a video", () => {
       [{ ...SESSION({ undecided: 2 }), handoff: EMPTY }, noted("withdrawn"), NOW, { stage: "session-decide", text: 'Keep, drop or change each of its principles and Reel ideas. Say "show me the principles".' }],
       [{ ...SESSION({ choice: "transcript only" }), handoff: EMPTY }, noted("withdrawn"), NOW, { done: true }],
       [{ ...SESSION(), handoff: OWN }, episodeNote, NOW, WITHDRAW],
-      [{ ...SESSION(), handoff: OWN }, noted("withdrawn"), NOW, { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.sessionAgain}` }],
-      [{ ...SESSION(), handoff: OWN }, noted("withdrawn", 3), NOW, { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.checked}` }]
+      [{ ...SESSION(), handoff: OWN }, noted("withdrawn"), NOW, { stage: "ops", text: `In BRIMM Ops: ${OPS_TEXTS.sessionAgain}` }],
+      [{ ...SESSION(), handoff: OWN }, noted("withdrawn", 3), NOW, { stage: "ops", text: `In BRIMM Ops: ${OPS_TEXTS.checked}` }]
     ]) assert.deepEqual(shown(nextFor({ ...BASE, ...over }, notes, now)), want, JSON.stringify([over, notes, now]));
     // What comes once the withdrawal is noted is the session's own next step, not "the last step".
     assert.equal(nextFor({ ...BASE, ...SESSION({ choice: null }), handoff: EMPTY }, NONE, NOW).after, CHOOSE);
@@ -467,7 +467,7 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
       assert.equal(nextFor({ ...BASE, ...APP({ way: "hyperframes", project: PROJECT({ exportsWords }) }) }, NONE, NOW).text, 'Edit it in HyperFrames. When you are done, export it on This Mac, as MP4, then say "hand it off".');
     }
   });
-  it("shows none of the new stages once a hand-off is written: the BRIMM Ops page's step comes, as it did", () => {
+  it("shows none of the new stages once a hand-off is written: BRIMM Ops' step comes, as it did", () => {
     for (const [over, kind] of [
       [APP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "raw"], [APP({ way: "hyperframes", project: PROJECT() }), "raw"], [APP({ copy: { left: 5, usual: null } }), "raw"],
       [CLIP({ way: "hyperframes", project: PROJECT({ exported: true }) }), "short video"], [CLIP({ copy: { left: 5, usual: null } }), "short video"]
@@ -501,7 +501,7 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
       assert.deepEqual([off.stage, off.text], ["app-off", APP_OFF], JSON.stringify(over));
       assert.doesNotMatch(off.text, /open it in HyperFrames/);
     }
-    // A hand-off written is the BRIMM Ops page's step on either Mac: the page needs no app.
+    // A hand-off written is BRIMM Ops' step on either Mac: the page needs no app.
     const written = nextFor({ ...BASE, ...APP({ way: "hyperframes", app: false }), handoff: handoffOf("raw") }, NONE, NOW);
     assert.deepEqual([written.stage, written.step], ["ops", "taken"]);
   });
@@ -527,7 +527,7 @@ describe("the next step on the HyperFrames way (plan PR 10)", () => {
     assert.equal(nextFor({ ...BASE, ...RAW({ gated: true, conflicted: true }) }, NONE, NOW).stage, "conflicted");
     assert.equal(nextFor({ ...BASE, ...RAW({ gated: true, elsewhere: true, mac: "Mac Studio" }) }, NONE, NOW).stage, "open-elsewhere");
     assert.equal(nextFor({ ...BASE, ...RAW({ gated: true, finishRunning: true }) }, NONE, NOW).stage, "finish-running");
-    // A hand-off written is the BRIMM Ops page's step, as it was.
+    // A hand-off written is BRIMM Ops' step, as it was.
     const written = nextFor({ ...BASE, ...RAW({ gated: true }), handoff: handoffOf("raw") }, NONE, NOW);
     assert.deepEqual([written.stage, written.step], ["ops", "taken"]);
     // A session is a session's: its own steps, not this one.
@@ -566,12 +566,12 @@ describe("the next step for a video or a session kept on another Mac (Phase 3, L
       SESSION({ undecided: 3 }), SESSION(), { ...SESSION(), v2: false }, SESSION({ emptyOwed: true }), { ...SESSION(), elsewhere: true }
     ]) assert.deepEqual(shown(nextFor({ ...BASE, ...over, ...KEPT }, NONE, NOW)), ON_STUDIO, JSON.stringify(over));
   });
-  it("is the BRIMM Ops page's step once a hand-off is written, which she takes on any Mac, and done when nothing is left", () => {
-    assert.deepEqual(shown(nextFor({ ...BASE, ...KEPT, handoff: OPS_HANDOFF }, NONE, NOW)), { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.taken}` });
+  it("is BRIMM Ops' step once a hand-off is written, which she takes on any Mac, and done when nothing is left", () => {
+    assert.deepEqual(shown(nextFor({ ...BASE, ...KEPT, handoff: OPS_HANDOFF }, NONE, NOW)), { stage: "ops", text: `In BRIMM Ops: ${OPS_TEXTS.taken}` });
     assert.equal(nextFor({ ...BASE, ...RAW(), ...KEPT, handoff: { ...OPS_HANDOFF, kind: "raw" } }, NONE, NOW).stage, "ops");
-    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), ...KEPT, handoff: { ...OPS_HANDOFF, kind: "session" } }, NONE, NOW)), { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.sessionTaken}` });
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), ...KEPT, handoff: { ...OPS_HANDOFF, kind: "session" } }, NONE, NOW)), { stage: "ops", text: `In BRIMM Ops: ${OPS_TEXTS.sessionTaken}` });
     const EMPTY = { ...OPS_HANDOFF, revision: 2, kind: "session", emptyAt: 2, file: "" };
-    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), ...KEPT, handoff: EMPTY }, NONE, NOW)), { stage: "ops", text: `On the BRIMM Ops page: ${OPS_TEXTS.withdrawn}` });
+    assert.deepEqual(shown(nextFor({ ...BASE, ...SESSION(), ...KEPT, handoff: EMPTY }, NONE, NOW)), { stage: "ops", text: `In BRIMM Ops: ${OPS_TEXTS.withdrawn}` });
     assert.deepEqual(nextFor({ ...BASE, ...SESSION({ choice: "transcript only" }), ...KEPT }, NONE, NOW), { done: true });
     assert.deepEqual(nextFor({ ...BASE, ...KEPT, handoff: OPS_HANDOFF }, { ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind: "episode", step: "cascade", revision: 1, at: AT } } }, NOW), { done: true });
   });
@@ -588,7 +588,7 @@ describe("the next step for a finished video's Reels (plan PR 16)", () => {
   const noted = (step, revision = 1) => ({ ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind: "episode", step, revision, at: "2026-10-24T09:00:00-05:00" } } });
   /** A finished video with its hand-off written and a Reel exported from HyperFrames that the hand-off does not hold. */
   const waiting = (over = {}) => ({ ...BASE, handoff: OPS_HANDOFF, reelsExported: [2], ...over });
-  it("comes ahead of every step on the BRIMM Ops page, of the step that comes back for a newer revision, and of done", () => {
+  it("comes ahead of every step in BRIMM Ops, of the step that comes back for a newer revision, and of done", () => {
     const sixty = OPS_HANDOFF.at + 60 * 86400000;
     for (const [what, facts, notes, now] of [
       ["no step noted", waiting(), NONE, NOW],
@@ -611,7 +611,7 @@ describe("the next step for a finished video's Reels (plan PR 16)", () => {
       assert.deepEqual([n.stage, n.step], ["ops", "taken"], JSON.stringify(over));
     }
     const again = nextFor(waiting({ reelsExported: [], handoff: { ...OPS_HANDOFF, revision: 2 } }), noted("kit"), NOW);
-    assert.deepEqual([again.stage, again.step, again.text], ["ops", "taken", `On the BRIMM Ops page: ${OPS_TEXTS.takenAgain(2, 1)}`]);
+    assert.deepEqual([again.stage, again.step, again.text], ["ops", "taken", `In BRIMM Ops: ${OPS_TEXTS.takenAgain(2, 1)}`]);
   });
   it("comes after a drop folder, a conflict, her answer and a version held as a session, as every stage of a video does", () => {
     for (const [over, stage] of [[{ conflicted: true }, "conflicted"], [{ kind: null, waiting: true }, "waiting"], [{ heldAsSession: true }, "held-session"]]) {
@@ -666,11 +666,11 @@ describe("the next step for a finished video's Reels (plan PR 16)", () => {
   });
 });
 
-describe("the next step while a finish waits for its late check (the BRIMM Ops page does not wait for it)", () => {
+describe("the next step while a finish waits for its late check (BRIMM Ops does not wait for it)", () => {
   const CHECKING = { due: Date.parse("2026-10-20T15:20:00-05:00"), took: ["Downloads"], at: "15:20" };
   const handoffOf = (kind) => ({ ...OPS_HANDOFF, kind });
   const noted = (step, kind = "episode") => ({ ...NONE, handoffs: { [OPS_HANDOFF.id]: { kind, step, revision: 1, at: "2026-10-24T09:00:00-05:00" } } });
-  it("is the BRIMM Ops page's step for a raw video, as it is once the finish has ended, and not that its finish is running", () => {
+  it("is BRIMM Ops' step for a raw video, as it is once the finish has ended, and not that its finish is running", () => {
     for (const [what, over] of [
       ["on the HyperFrames way", APP({ way: "hyperframes", project: PROJECT({ exported: true }) })],
       ["on the HyperFrames way, whose project is not known to be exported", APP({ way: "hyperframes" })],
@@ -679,14 +679,14 @@ describe("the next step while a finish waits for its late check (the BRIMM Ops p
       const facts = { ...BASE, ...over, handoff: handoffOf("raw"), finishRunning: true, checking: CHECKING };
       const ended = nextFor({ ...facts, finishRunning: false, checking: null }, NONE, NOW);
       const n = nextFor(facts, NONE, NOW);
-      assert.deepEqual([n.stage, n.step, n.text], ["ops", "taken", `On the BRIMM Ops page: ${OPS_TEXTS.taken + OPS_TEXTS.online}`], what);
+      assert.deepEqual([n.stage, n.step, n.text], ["ops", "taken", `In BRIMM Ops: ${OPS_TEXTS.taken + OPS_TEXTS.online}`], what);
       assert.deepEqual(n, ended, what);
     }
   });
-  it("is the BRIMM Ops page's step for an iPhone clip too", () => {
+  it("is BRIMM Ops' step for an iPhone clip too", () => {
     const facts = { ...BASE, ...CLIP({ way: "hyperframes", project: PROJECT({ exported: true }) }), handoff: handoffOf("short video"), finishRunning: true, checking: CHECKING };
     const n = nextFor(facts, NONE, NOW);
-    assert.deepEqual([n.stage, n.step, n.text], ["ops", "taken", `On the BRIMM Ops page: ${OPS_TEXTS.taken}`]);
+    assert.deepEqual([n.stage, n.step, n.text], ["ops", "taken", `In BRIMM Ops: ${OPS_TEXTS.taken}`]);
   });
   it("goes on through the page's steps as she notes them, and is done when she has said the video is finished, as at any other time", () => {
     const facts = { ...BASE, ...APP({ way: "hyperframes" }), handoff: handoffOf("raw"), finishRunning: true, checking: CHECKING };
@@ -742,7 +742,7 @@ describe("what the guide leads with once a late check found a problem after she 
     const n = nextFor(problem(), NONE, NOW);
     assert.deepEqual(n, { ...plain, text: `${LEAD} ${plain.text}` });
     assert.deepEqual([n.stage, n.step], ["ops", "taken"]);
-    assert.ok(n.text.startsWith(`${LEAD} On the BRIMM Ops page: `));
+    assert.ok(n.text.startsWith(`${LEAD} In BRIMM Ops: `));
   });
   it("leads every kind of video with a hand-off: a clip, a finished video, a raw video edited in Final Cut before, and a stage that is not the page's", () => {
     for (const over of [
@@ -760,7 +760,7 @@ describe("what the guide leads with once a late check found a problem after she 
   it("is said by every answer that says the step: the list, the video, and the line `tell` says", () => {
     const facts = problem();
     const item = { facts, next: nextFor(facts, NONE, NOW), folder: null, record: null };
-    assert.ok(overviewLines({ drop: "D", items: [item], old: 0 })[2].startsWith(`  ${facts.name}: ${LEAD} On the BRIMM Ops page: `));
+    assert.ok(overviewLines({ drop: "D", items: [item], old: 0 })[2].startsWith(`  ${facts.name}: ${LEAD} In BRIMM Ops: `));
     assert.equal(videoLines(item)[0], `${facts.name}: ${item.next.text}`);
     assert.equal(told(item, item, item), `${facts.name}: ${item.next.text}`);
     assert.ok(told(item, item, item).startsWith(`${facts.name}: ${LEAD} `));
@@ -843,9 +843,9 @@ describe("the guide's lists", () => {
     assert.ok(!overviewLines({ drop: "D", items: [item("Asked", { at: 0 }, waiting)], old: 0, local: true }).includes(AIRDROP));
   });
   it("say after a video's own lines the lines edit.js adds of its own for it, and none for a video that is done", () => {
-    const ops = { done: false, stage: "ops", text: "On the BRIMM Ops page: K.", step: "kit", after: "P." };
+    const ops = { done: false, stage: "ops", text: "In BRIMM Ops: K.", step: "kit", after: "P." };
     const also = ["Studio checks Dropbox's copies at 15:20. You do not need to wait for it."];
-    assert.deepEqual(videoLines({ ...item("A (aaaaaa)", {}, ops), also }), ["A (aaaaaa): On the BRIMM Ops page: K.", "Then: P.", "Step: kit", ...also]);
+    assert.deepEqual(videoLines({ ...item("A (aaaaaa)", {}, ops), also }), ["A (aaaaaa): In BRIMM Ops: K.", "Then: P.", "Step: kit", ...also]);
     assert.deepEqual(videoLines({ ...item("A (aaaaaa)"), also }), ["A (aaaaaa): T.", ...also]);
     assert.deepEqual(videoLines({ ...item("A (aaaaaa)", {}, { done: true }), also }), ["A (aaaaaa) is done: nothing is left to do for it."]);
     assert.deepEqual(videoLines({ ...item("A (aaaaaa)", {}, ops), also: [] }), videoLines(item("A (aaaaaa)", {}, ops)));
@@ -855,8 +855,8 @@ describe("the guide's lists", () => {
   it("say one video's step, and for a BRIMM Ops step the one after it and its word", () => {
     assert.deepEqual(videoLines(item("A (aaaaaa)")), ["A (aaaaaa): T."]);
     assert.deepEqual(videoLines(item("A (aaaaaa)", {}, { done: true })), ["A (aaaaaa) is done: nothing is left to do for it."]);
-    assert.deepEqual(videoLines(item("A (aaaaaa)", {}, { done: false, stage: "ops", text: "On the BRIMM Ops page: K.", step: "kit", after: "P." })), ["A (aaaaaa): On the BRIMM Ops page: K.", "Then: P.", "Step: kit"]);
-    assert.deepEqual(videoLines(item("A (aaaaaa)", {}, { done: false, stage: "ops", text: "On the BRIMM Ops page: C.", step: "cascade", after: "" })), ["A (aaaaaa): On the BRIMM Ops page: C.", "Then: that is the last step.", "Step: cascade"]);
+    assert.deepEqual(videoLines(item("A (aaaaaa)", {}, { done: false, stage: "ops", text: "In BRIMM Ops: K.", step: "kit", after: "P." })), ["A (aaaaaa): In BRIMM Ops: K.", "Then: P.", "Step: kit"]);
+    assert.deepEqual(videoLines(item("A (aaaaaa)", {}, { done: false, stage: "ops", text: "In BRIMM Ops: C.", step: "cascade", after: "" })), ["A (aaaaaa): In BRIMM Ops: C.", "Then: that is the last step.", "Step: cascade"]);
   });
 });
 
@@ -979,7 +979,7 @@ describe("what guide tell says", () => {
       // Nothing on its way: its next step at once, as the guide says it.
       [waiting, waiting, waiting, 'Video of 20 Oct, 15:00 (Mac Studio) (3fa9c1): It is waiting for your answer. Say "what\'s waiting?" to see its card.'],
       [read, read, read, 'Pricing talk (3fa9c1): Claude has read it. Say "what did Claude find?", then answer the spellings card.'],
-      [ops, ops, ops, `Pricing talk (3fa9c1): On the BRIMM Ops page: ${OPS_TEXTS.taken}`],
+      [ops, ops, ops, `Pricing talk (3fa9c1): In BRIMM Ops: ${OPS_TEXTS.taken}`],
       [retry, retry, retry, 'A video of 5 bytes: Its import did not finish. Say "try it again".'],
       [done, done, done, "Pricing talk (3fa9c1) is done: nothing is left to do for it."]
     ]) assert.equal(told(was, seen, now), want, JSON.stringify([was.next.stage, now && now.next.stage]));
@@ -995,7 +995,7 @@ describe("what guide tell says", () => {
     assert.deepEqual([first, second].map(stage), ["finish-running", "finish-running"]);
     // The hand-off the finish wrote: a revision above the one before, or the first.
     const written = { ...RAW_HANDOFF, revision: 2, at: RAW_HANDOFF.at + 600000 };
-    const READY = (text) => `Pricing talk (3fa9c1): Its hand-off is ready. On the BRIMM Ops page: ${text}`;
+    const READY = (text) => `Pricing talk (3fa9c1): Its hand-off is ready. In BRIMM Ops: ${text}`;
     const TAKE = OPS_TEXTS.taken + OPS_TEXTS.online;
     const FAILED = 'Pricing talk (3fa9c1): Its finish did not write a hand-off. Say "how far is it?" to see why.';
     for (const [was, seen, now, want] of [
@@ -1022,7 +1022,7 @@ describe("what guide tell says", () => {
       // Not under way any more.
       [first, first, null, 'Pricing talk (3fa9c1) is not under way any more. Say "what\'s next?" to see the ones that are.'],
       // A finish she is not waiting for (it was not running when she asked) is its next step at once, as for any video.
-      [at({ ...exported, handoff: RAW_HANDOFF }), at({ ...exported, handoff: RAW_HANDOFF }), at({ ...exported, handoff: RAW_HANDOFF }), `Pricing talk (3fa9c1): On the BRIMM Ops page: ${TAKE}`]
+      [at({ ...exported, handoff: RAW_HANDOFF }), at({ ...exported, handoff: RAW_HANDOFF }), at({ ...exported, handoff: RAW_HANDOFF }), `Pricing talk (3fa9c1): In BRIMM Ops: ${TAKE}`]
     ]) assert.equal(told(was, seen, now), want, JSON.stringify([stage(was), now && stage(now)]));
     // Past an hour a finish still copying is still on its way, with its step, and says where to see how far it is.
     assert.equal(stillLine(first), 'Pricing talk (3fa9c1): It is still on its way after 60 minutes. Its finish is running. The panel shows how far it is.');
@@ -1076,7 +1076,7 @@ describe("the step of a planned video: film it, then what its footage is (PR H4,
       assert.equal(nextFor(plan({ route: "explainer", voice: "heygen", footage }), NOTES, NOW).text, "When the HyperFrames part is ready, you'll choose the HeyGen voice there.");
     }
   });
-  it("comes before the BRIMM Ops page's steps and changes none of them: the stage is not ops, and a hand-off's steps say what they said", () => {
+  it("comes before BRIMM Ops' steps and changes none of them: the stage is not ops, and a hand-off's steps say what they said", () => {
     const next = nextFor(plan({ route: "script", voice: null, footage: "1 talking part" }), NOTES, NOW);
     assert.notEqual(next.stage, "ops");
     assert.equal(next.step, "");
@@ -1110,7 +1110,7 @@ describe("the step of a planned video whose footage is being made into one video
     assert.equal(nextFor(plan({ ...SCRIPT, joining: false, joinFailed: false }), NOTES, NOW).stage, "footage");
     for (const [flags, stage] of [[{ joining: true }, "joining"], [{ joinFailed: true }, "join-failed"]]) assert.equal(nextFor(plan({ route: "explainer", voice: null, ...flags }), NOTES, NOW).stage, stage);
   });
-  it("comes before the BRIMM Ops page's steps and changes none of them", () => {
+  it("comes before BRIMM Ops' steps and changes none of them", () => {
     for (const planned of [{ ...SCRIPT, joining: true }, { ...SCRIPT, joinFailed: true }]) {
       const next = nextFor(plan(planned), NOTES, NOW);
       assert.deepEqual([next.stage === "ops", next.step, next.after], [false, "", ""]);

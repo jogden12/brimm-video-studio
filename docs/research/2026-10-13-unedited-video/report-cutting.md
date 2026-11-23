@@ -1,3 +1,5 @@
+
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
 **Report: what sound and a transcript of raw footage can give, and what each part needs (2026-10-13)**
 
 Checked on this Mac: Mac Studio Mac13,1, M1 Max, 32 GB, macOS 27.0.1. All tests used synthetic speech (the Mac's built-in voice) and synthetic video (an ffmpeg test pattern), piped in memory, so real footage will differ. No file was created in the repo or anywhere else by me; the Swift interpreter may have written its usual compile cache. I did not open the landing page; it was not part of this question.

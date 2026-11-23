@@ -9,7 +9,7 @@ Studio is `tool/`: about 37,000 lines of plain JavaScript (`"type": "module"`, N
 1. A launch agent imports each video dropped in a Mac's drop folder.
 2. Sallie's Claude chat, in her folder `~/BRIMM Video Studio`, runs `edit.js` commands: answer the video's card, read it with Claude, make the HyperFrames project, open it in the app.
 3. She edits and exports in the app.
-4. `finish` takes the exports back, makes the final transcript, files everything in the episode's `final/` folder in Dropbox and writes the hand-off file, which a person drops on the BRIMM Ops page.
+4. `finish` takes the exports back, makes the final transcript, files everything in the episode's `final/` folder in Dropbox and writes the hand-off file, which the BRIMM Ops app shows by itself under "Waiting from Studio" (or a person drops it there). BRIMM Ops is a Mac app since 2026-11-14: brimm-operations' `CLAUDE.md` and `docs/wiki/architecture.md` are its source of truth.
 
 ## Entry points
 
@@ -23,7 +23,7 @@ Studio is `tool/`: about 37,000 lines of plain JavaScript (`"type": "module"`, N
 | `tool/access.js` | CLI | The import's notes on macOS folder access (a node update loses the grant). |
 | `tool/build-helpers.js` | `node build-helpers.js <folder>` | Compiles the Swift helpers as `brimm-<name>`. |
 
-Libraries with no CLI of their own: `studio.js` (her folder: strict lock and open lock), `guide.js` (her one next step per video, as far as the BRIMM Ops page's steps; reached by `edit.js guide`), `run.js`, `build.js` (installed or dev mode), `update-check.js` (reads the Sparkle appcast at most once a day; sends nothing about the Mac).
+Libraries with no CLI of their own: `studio.js` (her folder: strict lock and open lock), `guide.js` (her one next step per video, as far as BRIMM Ops' steps; reached by `edit.js guide`), `run.js`, `build.js` (installed or dev mode), `update-check.js` (reads the Sparkle appcast at most once a day; sends nothing about the Mac).
 
 ## The pipeline
 
@@ -35,7 +35,7 @@ Libraries with no CLI of their own: `studio.js` (her folder: strict lock and ope
 6. **The app.** `app.js` (`edit.js app "<episode>" [reel <n>]`, `app-reel.js`) opens the main video or a Reel in the app. `app-history.js` reads what was done there (`.hyperframes/app-history.jsonl`, read only). `free.js` gives the room back. Planned videos: `plan.js`, `plan-script.js`, `plan-project.js`, `footage.js`, `join.js`, `explainer.js`.
 7. **Exports back.** `exports.js` finds the app's exports (Downloads and the Mac's exports folder) and matches them to projects through `renders/*.meta.json`.
 8. **Finish.** `edit.js finish "<episode>"` asks what it must and writes `finish.asked.json`; the detached `finish.js` then waits for whole exports, runs `final-transcript.js` (whisper again, on the finished video), cuts Stories from long Reels, copies into the episode's `final/` (the hand-off last), shows the hand-off in Finder, and does the late check 15 minutes or more later before deleting matching files from Downloads. `finish … reels` (`finish-reels.js`) makes the hand-off's next revision. `suggestions-in-main.js` places Reel suggestions on the exported video.
-9. **Hand-off.** `handoff-v2.js` (version 2, writes only the keys the contract names) and `handoff.js` (version 1, still read by the page) make `*.brimm-ops.json`. `madeBy` is `brimm-video <commit>` (`filing.js` `commitOf`, from `build.json` in installed mode).
+9. **Hand-off.** `handoff-v2.js` (version 2, writes only the keys the contract names) and `handoff.js` (version 1, still read by BRIMM Ops) make `*.brimm-ops.json`. `madeBy` is `brimm-video <commit>` (`filing.js` `commitOf`, from `build.json` in installed mode).
 10. **Originals.** `originals.js` copies a kept video's recordings into the episode's `Original files/` in Dropbox; the Mac's copy goes only when Dropbox's is whole, the record lists it, and Dropbox reports it uploaded (`uploaded.swift`, `online-only.swift`, `read-through.swift`).
 
 ## Module map (`tool/`)

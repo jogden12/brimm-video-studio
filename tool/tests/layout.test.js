@@ -220,7 +220,7 @@ describe("the record's layout 3", () => {
     ]) {
       assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, ...bad } }), /session/, JSON.stringify(bad));
     }
-    // The empty session revision a video answered again as a session owes the BRIMM Ops page, or the revision it was written as (F9b).
+    // The empty session revision a video answered again as a session owes BRIMM Ops, or the revision it was written as (F9b).
     for (const emptyRevision of ["owed", 1, 4]) assert.equal(episodeFault({ ...made(), kind: "session", session: { ...SESSION, emptyRevision } }), "", String(emptyRevision));
     for (const emptyRevision of [null, "", "yes", 0, -1, 1.5, true]) assert.match(episodeFault({ ...made(), kind: "session", session: { ...SESSION, emptyRevision } }), /session/, JSON.stringify(emptyRevision));
     // A client's agreement to a Reel cut from a session (F8b): the Reel idea's number and the day it was noted, and no other key,

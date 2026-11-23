@@ -227,7 +227,7 @@ describe("her folder's settings", () => {
       "for a video finished by your editor whose Reels she made in HyperFrames and exported there",
       "it adds them to the hand-off the video has already, as its next revision, and changes nothing else in it",
       'Her answers go back to `finish "<episode>" reels` with one flag each and no `--yes`, as in "In HyperFrames, to hand it off" (a part is reel 2); `--yes` comes only after her "Yes" to the question it prints.',
-      "When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page again.",
+      "When it says it showed the hand-off in Finder, tell her it waits in BRIMM Ops again, under \"Waiting from Studio\".",
       'If it says the hand-off is not written yet, tell her to answer the spellings first ("Show me the spellings"); if it says there is nothing new, tell her to export a Reel from HyperFrames first'
     ]) assert.ok(full.includes(words), words);
     // It follows the plain row for handing an episode off, and says nothing a command name or a path would.
@@ -254,7 +254,7 @@ describe("her folder's settings", () => {
       const [bare, ...others] = rowsOf(text);
       assert.deepEqual(others, []);
       const row = withRules(text, bare);
-      assert.ok(row.includes("After a finish it may say the hand-off was made again: tell her to drop it on the BRIMM Ops page again; if it says captions on screen, a Reel's captions or the final transcripts keep the old spelling, tell her what it says to do, in plain words."), row);
+      assert.ok(row.includes("After a finish it may say the hand-off was made again: tell her it waits in BRIMM Ops again, under \"Waiting from Studio\"; if it says captions on screen, a Reel's captions or the final transcripts keep the old spelling, tell her what it says to do, in plain words."), row);
       assert.doesNotMatch(row, /Final Cut|Shared|HyperFrames|Hand off the Reels/);
     }
     assert.deepEqual(rowsOf(open), rowsOf(strict));
@@ -738,19 +738,19 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       assert.doesNotMatch(row, /(it shows|written and shown) in Finder/, start);
     }
   });
-  it("guides her one step at a time, a video waiting for her answer first, and takes her word for the BRIMM Ops page", () => {
+  it("guides her one step at a time, a video waiting for her answer first, and takes her word for BRIMM Ops", () => {
     const guide = sectionOf(skill, "## Guide her");
     assert.ok(guide.trimEnd().split("\n").length <= 30, `${guide.split("\n").length} lines`);
     for (const words of [
       "run `guide`. Say only the one next step it gives, then ask; never read the list out.",
       "A video waiting for her answer comes first, whatever she said",
       'one `AskUserQuestion`: "Is this video a private session with a client or a group?": "Yes", "No", "It is a Zoom download"',
-      "`guide drop zoom`", "`guide drop`", "`guide wait`", "`guide page`", '`guide "<video>"`', '`guide "<video>" show`',
+      "`guide drop zoom`", "`guide drop`", "`guide wait`", "`guide ops`", '`guide "<video>"`', '`guide "<video>" show`',
       "held in her drop folder: `guide drop zoom`",
       '"Done?": "Done", "Not yet", "Something\'s different"', '`guide "<video>" done <step>`', '`guide "<video>" finished`',
       '"I posted it"', '"I\'ve done that"', '"guide me"', '"That one is all done"', '"Forget that one"',
       'tell her to choose "Client or group session" and "Yes"',
-      "Claude cannot see or press anything on the BRIMM Ops page",
+      "Claude cannot see or press anything in BRIMM Ops",
       "isn't set up for the guide yet"
     ]) assert.ok(guide.includes(words), words);
     assert.doesNotMatch(guide, /https?:|claude\.ai/);
@@ -762,7 +762,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     assert.ok(!guide.includes("I'm done with it"), guide);
     assert.ok(!skill.includes(`"Hand it to Jason" / "I'm done with it for now"`), "the release row is gone");
   });
-  it("tells her when a video is ready or read, from a wait run in the background, and opens the page once in this chat", () => {
+  it("tells her when a video is ready or read, from a wait run in the background, and opens BRIMM Ops once in this chat", () => {
     const guide = sectionOf(skill, "## Guide her");
     assert.ok(guide.trimEnd().split("\n").length <= 30, `${guide.split("\n").length} lines`);
     for (const words of [
@@ -772,7 +772,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       "with any time it gives", "offer to tell her here when it's ready",
       "If nothing listed is coming in, being imported or waiting for her answer, ask where she dropped it, then run `guide wait` again.",
       "If it says it is still on its way, offer to wait again.",
-      "`guide page` the first time in this chat"
+      "`guide ops` the first time in this chat (it opens the BRIMM Ops app)"
     ]) assert.ok(guide.includes(words), words);
     assert.ok(!guide.includes("the first time in a session"), guide);
     assert.ok(sectionOf(skill, "## The card").includes('tell her here when Claude has read it, as "Guide her" says for work in the background'));
@@ -792,7 +792,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
       "tell her in plain words how long it takes, as the command says, with its time, and that she can carry on; never send her to the progress panel to watch it",
       'Then, without asking her, run `guide "<video>" tell` in the background (the Bash tool\'s run_in_background), once per video, never Monitor, and say "I\'ll tell you here when it is done."',
       "When it ends, tell her its one line in plain words, and its next step",
-      "For a finish that is that the hand-off is ready, which is shown in Finder, and then the BRIMM Ops page's step",
+      "For a finish that is that the hand-off is ready, which is shown in Finder, and then its step in BRIMM Ops",
       "the finish goes on checking Dropbox's copies for a quarter of an hour, which she need not wait for",
       "If it says the finish wrote no hand-off, or that Claude's reading did not finish, tell her so, and offer to run `status` to see why",
       'Making a Reel ("Make Reel 2") is the exception: the guide does not see a Reel\'s video being made, so tell her what it says, and that "how far is it?" says when it is done'
@@ -806,7 +806,7 @@ describe("her skill, and the card she answers what a video is on (spec 2026-10-2
     assert.ok(rowOf('"Ask Claude again for Reels"').includes('go on as "Guide her" says for work in the background'));
     const step = sectionOf(skill, "## In HyperFrames, to hand it off").split("\n").find((line) => line.startsWith("4. "));
     assert.ok(step.includes('Once `--yes` has started it, tell her what it says of when the hand-off will be ready and that she can carry on, and go on as "Guide her" says for work in the background: `guide "<episode>" tell` tells her here when the hand-off is ready, and the finish goes on checking Dropbox\'s copies a quarter of an hour longer, which she need not wait for'), step);
-    assert.ok(step.includes("When it says it showed the hand-off in Finder, tell her to drop it on the BRIMM Ops page."), "the old sentence stays");
+    assert.ok(step.includes("When it says it showed the hand-off in Finder, tell her it waits in BRIMM Ops."), "the old sentence stays");
   });
   it("tells her what to offer at the guide's HyperFrames steps, that the video for HyperFrames posts no notice, and offers HyperFrames for a raw video edited in Final Cut before (plan PR 10, Phase 2)", () => {
     const guide = sectionOf(skill, "## Guide her");

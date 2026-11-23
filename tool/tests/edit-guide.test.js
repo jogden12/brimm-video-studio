@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { editMain, HELP } from "../edit.js";
 import { readGuideNotes, writeGuideNotes, guideFile } from "../guide-note.js";
-import { NOT_SET_UP, OPS_PAGE, dropUnreadable, AIRDROP } from "../guide.js";
+import { NOT_SET_UP, OPS_APP, dropUnreadable, AIRDROP } from "../guide.js";
 import { watched } from "./watched-fs.js";
 import { localStamp, readEpisode, recordFile, recordText } from "../episode.js";
 import { removeStatusIn, writeStatusIn } from "../importing.js";
@@ -53,13 +53,13 @@ function handedOff(t, { id = "e-20261020-a1a1a1", name = "2026-10-20 Launch talk
   return found;
 }
 const DROP_LINE = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Drop › Mac Studio";
-const TAKE = '  Launch talk (a1a1a1): On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
+const TAKE = '  Launch talk (a1a1a1): In BRIMM Ops: Find the video under "Waiting from Studio" and press its button, such as "Add the episode and take the hand-off". For a video BRIMM Ops already holds, it is "Take the hand-off" or "Take revision N in place of revision M". Dropping the hand-off onto Episodes still works.';
 const NO_FIT = 'No video under way fits that. Say "what\'s next?" to see the ones that are.';
 
 describe("guide on a Mac not on the light import", () => {
   it("says only to ask Jason, for every form, ends with 1, and opens, runs and waits for nothing", async () => {
     const t = setup();
-    for (const words of [[], ["drop"], ["drop", "zoom"], ["page"], ["wait"], ["X"], ["X", "done", "taken"], ["X", "finished"], ["X", "show"], ["X", "tell"]]) {
+    for (const words of [[], ["drop"], ["drop", "zoom"], ["ops"], ["wait"], ["X"], ["X", "done", "taken"], ["X", "finished"], ["X", "show"], ["X", "tell"]]) {
       assert.deepEqual(await on(t.ctx.deps, "guide", ...words), { code: 1, said: [NOT_SET_UP] }, words.join(" "));
     }
     assert.deepEqual([t.opened, t.calls, t.waits], [[], [], []]);
@@ -113,7 +113,7 @@ describe("guide, from the records", () => {
     assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Under way:", TAKE]);
     assert.deepEqual((await on(light(t), "guide", "Launch talk")).said, [TAKE.trim(), 'Then: Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.', "Step: taken"]);
     writeGuideNotes(t.home, { version: 1, handoffs: { [h.record.id]: { kind: "episode", step: "kit", revision: 1, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });
-    assert.equal((await on(light(t), "guide")).said[2], '  Launch talk (a1a1a1): On the BRIMM Ops page: Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".');
+    assert.equal((await on(light(t), "guide")).said[2], '  Launch talk (a1a1a1): In BRIMM Ops: Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".');
     const later = light(t, { now: () => Date.parse("2026-12-20T15:00:00-05:00") });
     assert.deepEqual((await on(later, "guide")).said, [DROP_LINE, "Nothing is under way. To start, put the video in your drop folder."]);
     t.done();
@@ -123,11 +123,11 @@ describe("guide, from the records", () => {
     const first = handedOff(t);
     handedOff(t, { id: "e-20261021-a2a2a2", name: "2026-10-21 Launch talk again (Mac Studio)", text: "Launch talk again", revision: 2, under: first.record.id, at: "2026-10-21T13:00:00-05:00", over: { versionOf: first.record.id } });
     writeGuideNotes(t.home, { version: 1, handoffs: { [first.record.id]: { kind: "episode", step: "kit", revision: 1, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });
-    assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Under way:", '  Launch talk again (a2a2a2): On the BRIMM Ops page: Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".']);
+    assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Under way:", '  Launch talk again (a2a2a2): In BRIMM Ops: Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1".']);
     t.done();
   });
   it("sends her on to the page's Reels card for a newer revision when her note is at the cascade, a raw episode's online-only words last, and leaves nothing under way once it is noted", async () => {
-    const TAKE_AGAIN = 'Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".';
+    const TAKE_AGAIN = 'Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1".';
     const REELS = 'Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.';
     const ONLINE = 'Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".';
     // The Reels of a video her editor finished come later, as a newer revision, after every step is noted; a raw episode's go with its main video.
@@ -137,8 +137,8 @@ describe("guide, from the records", () => {
       handedOff(t, { id: "e-20261021-a2a2a2", name: "2026-10-21 Launch talk again (Mac Studio)", text: "Launch talk again", kind, revision: 2, under: first.record.id, at: "2026-10-21T13:00:00-05:00", over: { versionOf: first.record.id } });
       const noted = (step, revision) => ({ version: 1, handoffs: { [first.record.id]: { kind: "episode", step, revision, at: "2026-10-20T14:00:00-05:00" } }, finished: {} });
       writeGuideNotes(t.home, noted("cascade", 1));
-      assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Under way:", `  Launch talk again (a2a2a2): On the BRIMM Ops page: ${says}`], kind);
-      assert.deepEqual((await on(light(t), "guide", "Launch talk again")).said, [`Launch talk again (a2a2a2): On the BRIMM Ops page: ${says}`, "Then: that is the last step.", "Step: taken"], kind);
+      assert.deepEqual((await on(light(t), "guide")).said, [DROP_LINE, "Under way:", `  Launch talk again (a2a2a2): In BRIMM Ops: ${says}`], kind);
+      assert.deepEqual((await on(light(t), "guide", "Launch talk again")).said, [`Launch talk again (a2a2a2): In BRIMM Ops: ${says}`, "Then: that is the last step.", "Step: taken"], kind);
       // Noted, the take is the last step: the note stays at the cascade, at revision 2, and nothing is left under way.
       assert.deepEqual(await on(light(t), "guide", "Launch talk again", "done", "taken"), { code: 0, said: ["Noted: Launch talk again (a2a2a2), taken.", "Launch talk again (a2a2a2) is done: nothing is left to do for it."] }, kind);
       assert.deepEqual(readGuideNotes(t.home).handoffs, { [first.record.id]: { kind: "episode", step: "cascade", revision: 2, at: localStamp(new Date(t.now())) } }, kind);
@@ -146,7 +146,7 @@ describe("guide, from the records", () => {
       // With her note at the step before it, the take is the page's button alone, and the cascade step, still to come, is what follows.
       writeGuideNotes(t.home, noted("live", 1));
       const live = await on(light(t), "guide", "Launch talk again");
-      assert.equal(live.said[0], `Launch talk again (a2a2a2): On the BRIMM Ops page: ${kind === "raw" ? `${TAKE_AGAIN} ${ONLINE}` : TAKE_AGAIN}`, kind);
+      assert.equal(live.said[0], `Launch talk again (a2a2a2): In BRIMM Ops: ${kind === "raw" ? `${TAKE_AGAIN} ${ONLINE}` : TAKE_AGAIN}`, kind);
       assert.match(live.said[1], /^Then: Press "Write what’s next"\. .* If the "Reels" card lists "Reels from BRIMM Video Studio", press "Write its post text" beside each\.$/, kind);
       t.done();
     }
@@ -163,7 +163,7 @@ describe("guide, from the records", () => {
     const held = `${label} (a1a1a1): One of its other versions is a client or group session. Say "it was a session after all" for this one too.`;
     assert.deepEqual(await on(light(t), "guide"), { code: 0, said: [
       DROP_LINE, "Under way:",
-      '  Session, 2026-10-20 (a2a2a2): On the BRIMM Ops page: Choose "Principles", drop the hand-off, and press "Withdraw the words and take the session". Then delete the old backups from "About", and tell Jason.',
+      '  Session, 2026-10-20 (a2a2a2): In BRIMM Ops: Find the session under "Waiting from Studio", press "Open it in the Principles library", then "Withdraw the words and take the session". Then delete every backup you saved from "About" before now, and tell Jason.',
       `  ${held}`
     ] });
     for (const said of [label, "a1a1a1"]) assert.deepEqual(await on(light(t), "guide", said), { code: 0, said: [held] }, said);
@@ -246,7 +246,7 @@ describe("guide, from the records", () => {
     writeFileSync(join(found.folder, rel), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 2, video: { id: found.record.id, kind: "session", name: "Session, 2026-10-20" } }));
     writeGuideNotes(t.home, { version: 1, handoffs: { [found.record.id]: { kind: "episode", step: "cascade", revision: 1, at: "2026-10-19T14:00:00-05:00" } }, finished: {} });
     assert.deepEqual((await on(light(t), "guide", "Session, 2026-10-20")).said, [
-      'Session, 2026-10-20 (dddddd): On the BRIMM Ops page: Choose "Principles", drop the hand-off, and press "Withdraw the words and take the session". Then delete the old backups from "About", and tell Jason.',
+      'Session, 2026-10-20 (dddddd): In BRIMM Ops: Find the session under "Waiting from Studio", press "Open it in the Principles library", then "Withdraw the words and take the session". Then delete every backup you saved from "About" before now, and tell Jason.',
       "Then: Its teachings cannot be read on this Mac now: ask Jason, or choose the transcript only.",
       "Step: withdrawn"
     ]);
@@ -471,11 +471,11 @@ describe("guide opens a folder, the page, or a file's place in Finder", () => {
     assert.deepEqual(t.opened, [["Finder", zoom]]);
     t.done();
   });
-  it("opens the BRIMM Ops page, a constant, in the default browser, or says to ask Jason", async () => {
+  it("opens the BRIMM Ops app, a constant, or says where to find it", async () => {
     const t = setup();
-    assert.deepEqual(await on(light(t), "guide", "page"), { code: 0, said: ["Opened the BRIMM Ops page in your browser."] });
-    assert.deepEqual(t.calls, [{ cmd: "/usr/bin/open", args: [OPS_PAGE] }]);
-    assert.deepEqual(await on(light(t, { run: async () => ({ code: 1, stderr: "no" }) }), "guide", "page"), { code: 1, said: ["The BRIMM Ops page could not be opened. Say it again. If it says this again, tell Jason."] });
+    assert.deepEqual(await on(light(t), "guide", "ops"), { code: 0, said: ["Opened BRIMM Ops."] });
+    assert.deepEqual(t.calls, [{ cmd: "/usr/bin/open", args: ["-a", OPS_APP] }]);
+    assert.deepEqual(await on(light(t, { run: async () => ({ code: 1, stderr: "no" }) }), "guide", "ops"), { code: 1, said: ["BRIMM Ops could not be opened. Open it from your Applications folder. If it is not there, tell Jason."] });
     t.done();
   });
   it("shows in Finder what the step needs: the hand-off, then the video to post; and nothing for a step of BRIMM Video Studio's", async () => {
@@ -651,7 +651,7 @@ describe("guide tell", () => {
   });
 });
 
-const TAKE_TEXT = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
+const TAKE_TEXT = 'In BRIMM Ops: Find the video under "Waiting from Studio" and press its button, such as "Add the episode and take the hand-off". For a video BRIMM Ops already holds, it is "Take the hand-off" or "Take revision N in place of revision M". Dropping the hand-off onto Episodes still works.';
 describe("guide notes her word", () => {
   it("notes only the step that comes next, then says the next one", async () => {
     const t = setup();
@@ -660,7 +660,7 @@ describe("guide notes her word", () => {
     assert.ok(!existsSync(guideFile(t.home)));
     const r = await on(light(t), "guide", "Launch talk", "done", "taken");
     assert.equal(r.code, 0);
-    assert.deepEqual(r.said.slice(0, 2), ["Noted: Launch talk (a1a1a1), taken.", 'Launch talk (a1a1a1): On the BRIMM Ops page: Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.']);
+    assert.deepEqual(r.said.slice(0, 2), ["Noted: Launch talk (a1a1a1), taken.", 'Launch talk (a1a1a1): In BRIMM Ops: Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.']);
     assert.equal(r.said.at(-1), "Step: kit");
     assert.deepEqual(readGuideNotes(t.home).handoffs, { [h.record.id]: { kind: "episode", step: "taken", revision: 1, at: localStamp(new Date(t.now())) } });
     // Said again, it is not noted twice.
@@ -678,7 +678,7 @@ describe("guide notes her word", () => {
   it("refuses a step for a video whose next step is BRIMM Video Studio's, and a note that cannot be written", async () => {
     const t = setup();
     episodeAs(t, VIDEOS.read);
-    assert.deepEqual(await on(light(t), "guide", "Pricing talk", "done", "taken"), { code: 1, said: ['Not noted: Pricing talk (bbbbbb) has no step on the BRIMM Ops page now. Claude has read it. Say "what did Claude find?", then answer the spellings card.'] });
+    assert.deepEqual(await on(light(t), "guide", "Pricing talk", "done", "taken"), { code: 1, said: ['Not noted: Pricing talk (bbbbbb) has no step in BRIMM Ops now. Claude has read it. Say "what did Claude find?", then answer the spellings card.'] });
     handedOff(t);
     mkdirSync(guideFile(t.home), { recursive: true });
     writeFileSync(join(guideFile(t.home), "x"), "");
@@ -705,7 +705,7 @@ describe("guide notes her word", () => {
     writeFileSync(join(found.folder, rel), JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 2, video: { id: found.record.id, kind: "session", name: "Session, 2026-10-20" } }));
     writeGuideNotes(t.home, { version: 1, handoffs: { [found.record.id]: { kind: "episode", step: "cascade", revision: 1, at: "2026-10-19T14:00:00-05:00" } }, finished: {} });
     const before = readFileSync(guideFile(t.home), "utf8");
-    const WITHDRAW = 'On the BRIMM Ops page: Choose "Principles", drop the hand-off, and press "Withdraw the words and take the session". Then delete the old backups from "About", and tell Jason.';
+    const WITHDRAW = 'In BRIMM Ops: Find the session under "Waiting from Studio", press "Open it in the Principles library", then "Withdraw the words and take the session". Then delete every backup you saved from "About" before now, and tell Jason.';
     assert.deepEqual(await on(light(t), "guide", "Video of 20 Oct, 10:00 (Mac Studio)", "finished"), { code: 1, said: [`Not noted: Session, 2026-10-20 (dddddd) cannot be set aside until this is done. ${WITHDRAW}`] });
     assert.equal(readFileSync(guideFile(t.home), "utf8"), before);
     // Her word noted before it was a session after all: the withdrawal is still under way, and its step still said.

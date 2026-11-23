@@ -1,5 +1,7 @@
 # Review of claude-reel-editor
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 Reviewed 2026-10-13 for Jason Ogden, at commit `a416076` of [nicolapocock/claude-reel-editor](https://github.com/nicolapocock/claude-reel-editor), the newest commit then and still the newest on 2026-10-14. Its text files were read; nothing from it was run or installed. The detail, with file and line for each finding, is in `findings.md`.
 
 **Verdict: do not adopt it; borrow from it.** It is a two-day-old Claude Code skill that turns one upright phone clip into one finished reel, with a person approving each step. It does not replace the BRIMM tool, which runs unattended on long recordings, but four of its ideas are worth taking.

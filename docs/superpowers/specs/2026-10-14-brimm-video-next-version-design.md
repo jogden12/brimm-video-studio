@@ -1,5 +1,7 @@
 # brimm-video, the next version: design
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 > **Superseded in part, 2026-10-22.** Jason's decisions of 2026-10-22 changed the import, the editing session, Final Cut's place, the Reels and the hand-off: see `2026-10-22-brimm-video-light-import-and-fork-design.md`, which says at each place what it replaces. Where it says nothing, this design stands.
 
 Written 2026-10-14 for Jason Ogden, and **revised twice the same day**. First after a review that Jason asked for: four reviewers (fidelity to his decisions, feasibility, Sallie's workflow, risks and phasing) raised 85 findings, a checker confirmed 82 of them in whole or in part, and Jason answered the review's four questions. Then after a second review (`/tmp/brimm-video-design-review-2-2026-10-14.md`), from which Jason asked for five things to be fixed here and the rest to be carried into the phase plans. The sections "What the review changed" and "What the second review changed", at the end, map each finding to where it is answered.

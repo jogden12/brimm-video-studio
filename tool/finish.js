@@ -185,7 +185,7 @@ const handoffsBeside = (finalDir) => [[finalDir, false], [join(dirname(finalDir)
   .filter((h) => h !== null && typeof h === "object");
 /** Is a hand-off one of the video's whose id is `id`: by its `episode.id` (version 1) or its `video.id` (version 2)? */
 const handoffFor = (h, id) => [h.episode, h.video].some((who) => who && who.id === id);
-/** Whether the episode in `folder` has been handed off to the BRIMM Ops page: its record says it was finished, or a hand-off (a
+/** Whether the episode in `folder` has been handed off to BRIMM Ops: its record says it was finished, or a hand-off (a
     .brimm-ops.json) is in its final/ or in its history/, at any depth, where a hand-off set aside is kept. A hand-off is known by
     its file's name alone, even one that cannot be read. And a final/ or a history/ that cannot be read is a doubt, and a doubt
     here is the safe side: it counts as handed off, unless the folder is not there (ENOENT) or is no folder (ENOTDIR). */
@@ -205,7 +205,7 @@ const highestRevision = (handoffs, id) => handoffs.reduce((most, h) => (handoffF
 const numbersOf = (h) => [h.suggestions, h.reels].flatMap((list) => (Array.isArray(list) ? list : [])).map((item) => item && item.n).filter(Number.isInteger);
 /** The highest revision of a hand-off of this video already in final/, or set aside into history/ beside it, at any depth: a
     revision is never used twice, even when the record of the last finish was never written, and one that was replaced or
-    cleared is still one the page holds. A hand-off is the video's when its `episode.id` (version 1) or its `video.id`
+    cleared is still one BRIMM Ops holds. A hand-off is the video's when its `episode.id` (version 1) or its `video.id`
     (version 2) is `id`. */
 export function lastRevision(finalDir, id) {
   return highestRevision(handoffsBeside(finalDir), id);
@@ -311,8 +311,8 @@ const heldSession = (record) => kindOf(record) !== null && gated(record);
       read them (setOf below): every record whose own walk ends at the id, and the folders whose hand-offs are read for it;
     - `throughOf(id)`: every episode, as { folder, record }, in the order of Episodes' folders, whose chain passes through the
       record with that id: its later versions, the episode of that id itself included;
-    - `handedOffThrough(id)`: those of them that were handed off to the BRIMM Ops page (handedOff). A link that is moved changes
-      the id such an episode went to the page under;
+    - `handedOffThrough(id)`: those of them that were handed off to BRIMM Ops (handedOff). A link that is moved changes
+      the id such an episode went to BRIMM Ops under;
     - `holdsSession(one)`: whether an episode, as { folder, record }, is a client or group session whose mark is not cleared, by
       the gate's predicate (a video not yet answered is none), its record or any conflicted copy of its records: the gate holds a
       video by any of them;
@@ -422,7 +422,7 @@ export const writesHandoffV2 = (settings) => Boolean(settings) && settings.hando
 /** Is the next hand-off of this video written as version 2? Yes when this Mac's settings say so, and also when the hand-off its
     last finish wrote (`record.finished.handoff`, a path from the episode's `folder`) is on file and is version 2 already, or any
     hand-off of the folder's own is (in its final/, or set aside in its history/: a correction clears record.finished and sets its
-    hand-off aside, and the page keeps it): a version 1 hand-off is never written over a version 2 one, as with the setting back at
+    hand-off aside, and BRIMM Ops keeps it): a version 1 hand-off is never written over a version 2 one, as with the setting back at
     1 after a rollback, or the two Macs not both switched yet, since a new version's version 1 hand-off would move the BRIMM Ops
     page's id for the video from its first version's to its own. A hand-off that is not there, or cannot be read, is not looked
     at: the setting decides. This only reads. */
@@ -442,7 +442,7 @@ export function handoffIdOf(root, record) {
 }
 
 /** The revision of the next hand-off of this video: one above the highest revision written for the hand-off's id (that of
-    `handoffIdOf`) on this Mac, whichever version of the video wrote it. Revisions only rise: the page refuses a hand-off at or
+    `handoffIdOf`) on this Mac, whichever version of the video wrote it. Revisions only rise: BRIMM Ops refuses a hand-off at or
     below what it holds, so an old version handed off again is above its new version's, and the other way round. That is, the
     highest of `finished.revision` in the record, in every episode it is a version of and in every episode that is a version of
     it, directly or through others (every one whose own chain ends at the id), and of every hand-off for the id in final/ and in
@@ -519,7 +519,7 @@ export function highestNumberOf(root, record, folder, home) {
 
 /** Why a version 2 hand-off cannot be written because it gives a suggestion, a Reel, or a session's principle, recurring
     principle or Reel idea a number again that another version of the video gave already, in a hand-off for the same id (`taken`,
-    as handoffTarget gives it), in plain words; or "" when it gives none. A number is an item's identity on the BRIMM Ops page,
+    as handoffTarget gives it), in plain words; or "" when it gives none. A number is an item's identity in BRIMM Ops,
     and never repeats within a video (spec 2026-10-22, section 8). Until a new version's reading numbers on from the highest ever given (highestNumberOf, Part F), such a
     hand-off is refused, and nothing is written. The video is named as edit.js names it (episode.js shownName). */
 export function numbersTakenWords(record, handoff, taken) {
@@ -527,7 +527,7 @@ export function numbersTakenWords(record, handoff, taken) {
   const again = [
     ...(Array.isArray(handoff.suggestions) ? handoff.suggestions : []).map((s) => [s.n, `suggestion ${s.n}`]),
     ...(Array.isArray(handoff.reels) ? handoff.reels : []).map((r) => [r.n, `Reel ${r.n}`]),
-    // A session's items too: a principle's, a recurring principle's and a Reel idea's number is its identity on the page.
+    // A session's items too: a principle's, a recurring principle's and a Reel idea's number is its identity in BRIMM Ops.
     ...items("principles", "principle"),
     ...items("recurringPrinciples", "recurring principle"),
     ...items("reelsToFilm", "Reel idea")
@@ -561,11 +561,11 @@ const unclearedSession = (record) => record !== null && typeof record === "objec
       - a gap in the chain of the video's versions (chainGapWords);
       - for a video that is not a session, any version of it, earlier or later (every record whose walk ends at the id), that
         is a client or group session whose mark is not cleared, in its record or in a conflicted copy of it (spec 2026-10-22,
-        sections 2 and 8): the page redacts a
+        sections 2 and 8): BRIMM Ops redacts a
         session's words by the id, and this hand-off, under the same id and above the session's revision, would bring them
         back. A session's own hand-off (Part F's empty session revision) is the session's, and is not refused for it. The
         video is named as edit.js names it (episode.js shownName), never by a file's name.
-      - a version 2 hand-off in its own final/ or history/ under another id than the chain's first: the video went to the page
+      - a version 2 hand-off in its own final/ or history/ under another id than the chain's first: the video went to BRIMM Ops
         under that id, which never changes across its revisions (spec 2026-10-22, section 8), and its versions lead elsewhere
         now, as after her answer linked it, or an earlier version of it, to another video since. Both ids are said.
       On a refusal, `id` and `revision` are null and `taken` is empty, since no hand-off is to be written under them. */
@@ -589,7 +589,7 @@ export function handoffTarget({ root, settings }, { folder, record }) {
   const ownFolder = folder || (view.find(record.id) || {}).folder || null;
   const own = ownFolder ? resolve(ownFolder) : null;
   // A version 2 hand-off in its own final/ or history/ under an id other than the one its versions lead to now: the video went
-  // to the page under that id, which never changes (one set aside since, as by a corrected kind, is the page's still).
+  // to BRIMM Ops under that id, which never changes (one set aside since, as by a corrected kind, is BRIMM Ops' still).
   const went = ownFolder ? wentElsewhere(handoffsAt(ownFolder), walked.first) : undefined;
   if (went) return refused(movedWords(record, went.video.id, walked.first));
   const taken = new Set();
@@ -600,17 +600,17 @@ export function handoffTarget({ root, settings }, { folder, record }) {
 /** Is this an id brimm-video gives an episode? Only such an id is ever said of a hand-off: it names no one. */
 const isId = (id) => typeof id === "string" && /^e-\d{8}-[0-9a-f]{6}$/.test(id);
 
-/** The version 2 hand-off among `handoffs` (a folder's own, in its final/ and history/) that went to the BRIMM Ops page under
+/** The version 2 hand-off among `handoffs` (a folder's own, in its final/ and history/) that went to BRIMM Ops under
     another id than `first`, the id the video's versions lead to now; or undefined. */
 const wentElsewhere = (handoffs, first) => handoffs.find((h) => h.version === VERSION_2 && h.video && isId(h.video.id) && h.video.id !== first);
-/** Why a video that went to the BRIMM Ops page under the id `went` is refused while its versions lead to `first`: by its name. */
-const movedWords = (record, went, first) => `${shownName(record)} went to the BRIMM Ops page under ${went}, but its versions now lead to ${first}: ask Jason. Nothing was written.`;
+/** Why a video that went to BRIMM Ops under the id `went` is refused while its versions lead to `first`: by its name. */
+const movedWords = (record, went, first) => `${shownName(record)} went to BRIMM Ops under ${went}, but its versions now lead to ${first}: ask Jason. Nothing was written.`;
 
 /** The hand-offs of the episode in `folder` itself, as they are read: in its final/, and set aside into its history/ at any depth
     (handoffsBeside). One that cannot be read is passed over. This only reads. */
 export const ownHandoffs = (folder) => handoffsBeside(join(folder, "final"));
 
-/** The id a hand-off went to the BRIMM Ops page under: a version 2 one's `video.id`, a version 1 one's `episode.id`; "" when it
+/** The id a hand-off went to BRIMM Ops under: a version 2 one's `video.id`, a version 1 one's `episode.id`; "" when it
     names none that brimm-video gives. */
 export const handoffIdIn = (h) => {
   const id = h && h.version === VERSION_2 ? h.video && h.video.id : h && h.episode && h.episode.id;
@@ -618,7 +618,7 @@ export const handoffIdIn = (h) => {
 };
 
 /** Why the record in the episode `folder` cannot keep the version it is of as it stands, in handoffTarget's words, or "": a version
-    2 hand-off in its own final/ or history/ went to the BRIMM Ops page under another id than the one its versions lead to now
+    2 hand-off in its own final/ or history/ went to BRIMM Ops under another id than the one its versions lead to now
     (its earlier version was linked elsewhere since). `kind … --again`, which keeps the link it has, asks this of it again, as the
     hand-off writers do (handoffTarget). A chain with a gap is not judged here: the writers refuse it in their own words. This
     only reads. */
@@ -1166,7 +1166,7 @@ export async function finishNow(ctx, found, deps = {}) {
     // The writer's hold on the episode's check is let go once its record is written or refused.
     if (step && step.end) step.end({ put: recordWritten });
 
-    // The hand-off, shown in Finder, for her to drop on the BRIMM Ops page: only when the record says it is the finish. On an
+    // The hand-off, shown in Finder, for her to drop in BRIMM Ops: only when the record says it is the finish. On an
     // open-lock Mac a copy of it is shown (reveal.js), and one that cannot be made is not shown, which is said.
     if (written && !(await revealed({ home: ctx.home, settings: ctx.settings, minimum: ctx.deps.minimum, run: my.run, record: nextRecord, label: shownName(nextRecord), path: join(finalDir, handoffName) }))) next.push(cantOpen(shownName(nextRecord)));
 
@@ -1345,7 +1345,7 @@ const saidList = (things) => (things.length < 2 ? things.join("") : `${things.sl
     of reels.json, each a stretch of the video in seconds of its own clock, one stretch, `{ n, start, end, stretches, first,
     last, why, point }`, its first and last words spelled with `spellings`. A candidate the record dropped, and one with no stretch,
     is passed over; one with no first words, last words, reason or point, or whose times are no stretch of a video `seconds`
-    long, is left out, and `left` says so in plain words, since the page needs all of those. { list, left }.
+    long, is left out, and `left` says so in plain words, since BRIMM Ops needs all of those. { list, left }.
     This is not suggestionsOnClock (handoff-v2.js), which maps a raw video's suggestions through its cuts by the words it kept:
     nothing of a finished video is cut, so its clock is the video's own, each suggestion is the one stretch its candidate is
     (already put on whole pictures by the reading), and no word file is needed to give it. */
@@ -1651,7 +1651,7 @@ export async function finishFinished(ctx, found, { record = found.record } = {})
     logTo(ctx.home)(`${shownName(wrote)}: its recording could not be noted to go into Original files (${e.code || "an error"}). The launch agent notes it at its next run.`);
   }
   if (reopened || owed.owed.length) askAgent(ctx, shownName(wrote));
-  // Shown in Finder for her to drop on the BRIMM Ops page, only now that the record says it is the hand-off: on an open-lock Mac a
+  // Shown in Finder for her to drop in BRIMM Ops, only now that the record says it is the hand-off: on an open-lock Mac a
   // copy of it (reveal.js), and `shown` is false when that copy could not be made.
   let shown = true;
   if (!same) {
@@ -1691,7 +1691,7 @@ const sessionNameHolds = (word) => `This session's name holds "${word}", a name 
     - Claude has read its teachings (teachings.js sessionReading), and its teachings file, the files the names it can see are
       read from (seenFrom) and the earlier hand-off it sets aside are whole on this Mac, or { coming: [path…] };
     - every item is decided (sessions.js undecided);
-    - no kept item lacks what the page needs, which the name check took out: approvedSession, given the names brimm-video can see
+    - no kept item lacks what BRIMM Ops needs, which the name check took out: approvedSession, given the names brimm-video can see
       now (sessionSeen), refuses it; and her own words, the session's name (but its label) and what she changed of each item
       written, hold none of them, read as hers (teachings.js herWordsName);
     - handoffTarget gives it an id and a revision (a session's own revision is not refused for being a session);
@@ -1836,10 +1836,10 @@ export async function finishSession(ctx, found, { host } = {}) {
     try {
       rmSync(join(folder, prior), { force: true });
     } catch (e) {
-      // It stays in final/ beside the new one, which is the higher revision, as the page takes it.
+      // It stays in final/ beside the new one, which is the higher revision, as BRIMM Ops takes it.
     }
   }
-  // Shown in Finder for her to drop on the BRIMM Ops page, only now that the record says it is the hand-off: on an open-lock Mac a
+  // Shown in Finder for her to drop in BRIMM Ops, only now that the record says it is the hand-off: on an open-lock Mac a
   // copy of it (reveal.js), and `shown` is false when that copy could not be made.
   let shown = true;
   try {

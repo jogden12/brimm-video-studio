@@ -1,5 +1,7 @@
 # BRIMM Video Studio: the architecture and the workflows
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 - **Date:** begun 2026-10-27, in the evening, and finished after midnight on 2026-10-28.
 - **Status:** a proposal, for Jason's yes. Plan PRs 1 to 4, PR 5 (#13, Reel projects, 4.3), PR 6 (#11, what was done in HyperFrames and its versions), PR 7 (#14, exports and `finish` from HyperFrames), PR 8 (#17, the words on the picture and the suggestions), PR 9 (#16, Reels of a finished video), PR 10 (#15, the guide's HyperFrames stages), PR 11 (#18, release's snapshot and the take-over), PR 15 (#12, free), PR 16 (#19, the guide's "hand off the Reels") and PR 17 (#20, the reviews' leftovers) are merged, with the notes changes (#7), the word-times fix (#8), the HDR working copy (#9) and the by-hand rule (#10); main is 840e0fc. Nothing else in it is built on main, and nothing in it is installed or turned on.
 - **It rests on:**
