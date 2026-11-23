@@ -45,7 +45,7 @@ import { localStamp } from "./episode.js";
 import { PIN as HF_PIN } from "./hyperframes.js";
 import { kitDir, venvPython } from "./reel-kit.js";
 import { MODES, entryOf, modeLeans, modeOf as modeNamed, projectFolderOf, readCapped, readState, scaffold, slugOf, startWhy, writeState } from "./reel-kit-project.js";
-import { JOBS, enqueue, processStart, queuedOf, runJob, statusOf, stoppedLine } from "./reel-kit-worker.js";
+import { JOBS, dequeue, enqueue, processStart, queuedOf, runJob, statusOf, stoppedLine } from "./reel-kit-worker.js";
 import { writeWhole as writeFileWhole } from "./reel-kit-worker-own.js";
 import { episodeWork } from "./settings.js";
 import { PIN, pinFrom } from "./reel-kit.js";
@@ -337,7 +337,10 @@ export const EDIT_SAY = Object.freeze({
   approved: (said) => `Approved: ${said} is being built to render. ${FOLLOW}`,
   revising: (said, n) => `${said} is in the queue for its changes, from ${n} note${n === 1 ? "" : "s"}. ${FOLLOW}`,
   resuming: (said) => `${said} is in the queue to carry on. ${FOLLOW}`,
-  notWritten: "The record of this edit couldn't be written: ask Jason."
+  notWritten: "The record of this edit couldn't be written: ask Jason.",
+  noRun: (key) => `${partSaid(key)} couldn't be started on this Mac: say it again, or ask Jason.`,
+  noQueue: (key) => `${partSaid(key)} couldn't be put in the queue on this Mac, so it wasn't started: say it again, or ask Jason.`,
+  goNote: `Only your go approves it: say "go" when it's right.`
 });
 
 /** The most of a note she may say: Reel Kit's own storyboard page (serve.py) takes no more. */
@@ -500,17 +503,38 @@ async function startCommand(ctx, words, h) {
     ctx.say(EDIT_SAY.notSetUp);
     return 1;
   }
+  // Each part is put in the queue before its run is started (under this run's pid, then the run's own), so that a queue that can't be
+  // changed starts nothing, and a run that could not be started is taken out of it again.
+  let started = 0;
   for (const key of asked.keys) {
     clearStart(ctx.home, found.name, key);
     const id = randomUUID();
-    const pid = startJob(ctx, found, ["start", key, mode, id]);
+    const entry = { id, episode: record.id, key, version: null, mode, job: "edit", at: new Date(ctx.now()).toISOString(), pid: process.pid };
     try {
-      enqueue(ctx.home, { id, episode: record.id, key, version: null, mode, job: "edit", at: new Date(ctx.now()).toISOString(), pid: Number.isInteger(pid) ? pid : process.pid }, ctx.alive);
+      enqueue(ctx.home, entry, ctx.alive);
     } catch {
-      // The run puts itself in the queue as it starts.
+      ctx.say(EDIT_SAY.noQueue(key));
+      continue;
     }
+    const pid = startJob(ctx, found, ["start", key, mode, id]);
+    if (!Number.isInteger(pid)) {
+      try {
+        dequeue(ctx.home, id, ctx.alive);
+      } catch {
+        // Its entry goes with this run, which is not running for long.
+      }
+      ctx.say(EDIT_SAY.noRun(key));
+      continue;
+    }
+    try {
+      enqueue(ctx.home, { ...entry, pid }, ctx.alive);
+    } catch {
+      // The run takes the entry for its own as it starts (runJob, by its id); until then this run's pid holds it.
+    }
+    started++;
     ctx.say(EDIT_SAY.queued(key, mode));
   }
+  if (!started) return 1;
   const lean = modeLeans(record);
   if (lean) ctx.say(EDIT_SAY.leans(lean, mode));
   ctx.say(EDIT_SAY.steps);
@@ -600,6 +624,8 @@ async function noteCommand(ctx, words, h) {
   if (!BEAT.test(beat)) return refuse(ctx, EDIT_SAY.beat);
   if (text.trim() === "") return refuse(ctx, EDIT_SAY.empty);
   if (text.length > NOTE_MOST) return refuse(ctx, EDIT_SAY.tooLong);
+  // Only her go approves an edit (goCommand): a note that says only go is not one.
+  if (beat === "all" && text.trim().toLowerCase() === "go") return refuse(ctx, EDIT_SAY.goNote);
   const why = addNote(got.edit.dir, { beat, text, at: new Date(ctx.now()).toISOString() });
   if (why) return refuse(ctx, why);
   ctx.say(EDIT_SAY.noted(beat));
@@ -698,7 +724,22 @@ async function startNow(ctx, { found, record }, [key, mode, id, ...more], h) {
   const title = key === "main" ? record.name?.text : reel?.title;
   const make = kitOf(ctx).scaffold ?? scaffold;
   const made = async (c, spec, deps) => {
-    const done = await make(c, spec, deps);
+    // Inside the Mac's lock, after however long the job waited: the episode is found again through the gate, and the start judged again
+    // on the record as it is now (its own queue entry left out), so that a video corrected to a session, held as one, or given a
+    // HyperFrames project of the part while it waited is never copied or made. scaffold is given that record.
+    const heard = [];
+    const again = h.episodeFor({ ...ctx, say: (line) => heard.push(line) }, [found.name], { newerEnds: 1 });
+    if (!again.found) {
+      for (const line of heard) ctx.say(line);
+      return { why: heard.at(-1) ?? EDIT_SAY.notWritten };
+    }
+    const reelNow = key === "main" ? null : (Array.isArray(again.record.reels) ? again.record.reels : []).find((r) => r?.n === Number(key.slice(5)));
+    const why = startWhy({
+      record: again.record, key, mode, title: key === "main" ? again.record.name?.text : reelNow?.title, home: ctx.home, folder: again.found.name,
+      held: Boolean(again.found.held), alive: ctx.alive, startOf: kitOf(ctx).startOf ?? processStart, queued: id
+    });
+    if (why) return { why };
+    const done = await make(c, { ...spec, found: again.found, record: again.record, ...(key === "main" ? { title: again.record.name?.text } : { title: reelNow?.title }) }, deps);
     if (!done || typeof done.dir !== "string") return done;
     // The record is read again: another job's entry may have been written while this one waited.
     const fresh = h.episodeFor(ctx, [found.name], { newerEnds: 1 });

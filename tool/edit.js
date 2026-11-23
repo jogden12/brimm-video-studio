@@ -137,6 +137,7 @@ import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
 import { reelkitCommand } from "./reel-kit-commands.js";
+import { queuedFor } from "./reel-kit-worker.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
 import { ON_OTHER_MAC, ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, notWholeHere, onOtherMac, recordingAt, recordingStat, roleOf } from "./where.js";
 
@@ -1455,6 +1456,9 @@ const reelKitEdit = (record, key) => (record.app?.projects ?? []).some((p) => by
 /** What `app` says of a part that is a Reel Kit edit: it leaves through Reel Kit's own way out (plan Task 17), never as a HyperFrames project
     of Studio's own. `of` is "Reel 2 of " for a Reel. */
 const reelKitWay = (name, of = "") => `${of}${name} is a Reel Kit edit: it opens through Reel Kit, not as a HyperFrames project.`;
+/** What `app` says of a part whose Reel Kit job waits in the queue, its project not made yet (reel-kit-worker.js queuedFor): no HyperFrames
+    project is made beside it. */
+const reelKitWaits = (name, of = "") => `${of}${name} has a Reel Kit edit waiting to be made: it opens through Reel Kit, not as a HyperFrames project.`;
 
 /** What she says to open an episode in the app, which is what she is told to say again when the files are not here yet: `open
     <name> in HyperFrames`, the words that run `app`, and not `open <name>`, which runs open. */
@@ -1515,6 +1519,7 @@ export async function app(ctx, rest) {
   const { found } = got;
   if (recordKind(got.record) === "finished") return refuse(ctx, finishedHasNoProject(got.record.name.text));
   if (reelKitEdit(got.record, "main")) return refuse(ctx, reelKitWay(got.record.name.text));
+  if (queuedFor(ctx.home, got.record.id, "main", ctx.alive)) return refuse(ctx, reelKitWaits(got.record.name.text));
   // A planned video (PR H6, bridge PR): any planned video with its package set may have a project, and no question or Reel is asked of a plan.
   const isPlan = isPlannedRecord(got.record);
   if (isPlan) {
@@ -1723,6 +1728,7 @@ async function appReel(ctx, asked) {
   if (isPlannedRecord(got.record)) return refuse(ctx, noFootageWhy(got.record));
   if (recordKind(got.record) === "short video") return refuse(ctx, NO_REELS);
   if (reelKitEdit(got.record, `reel ${n}`)) return refuse(ctx, reelKitWay(name, `Reel ${n} of `));
+  if (queuedFor(ctx.home, got.record.id, `reel ${n}`, ctx.alive)) return refuse(ctx, reelKitWaits(name, `Reel ${n} of `));
   if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
   const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);

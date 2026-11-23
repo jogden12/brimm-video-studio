@@ -210,6 +210,11 @@ export function enqueue(home, entry, alive = isRunning) {
   changeQueue(home, (jobs) => [...jobs.filter((j) => j.id !== entry.id), entry], alive);
 }
 
+/** Take the entry `id` out of the queue record: a start her chat could not finish. Throws when the queue's lock can't be had. */
+export function dequeue(home, id, alive = isRunning) {
+  changeQueue(home, (jobs) => jobs.filter((j) => j.id !== id), alive);
+}
+
 /** The queued jobs of the episode `episode` whose projects are not made yet, oldest first: none whose run is no longer running. */
 export const queuedOf = (home, episode, alive = isRunning) => readQueue(home).filter((j) => j.episode === episode && Number.isInteger(j.pid) && alive(j.pid));
 

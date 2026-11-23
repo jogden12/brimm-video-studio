@@ -34,7 +34,7 @@ import { syncPack } from "./reel-kit-style.js";
 import { episodeWork } from "./settings.js";
 import { findPrograms } from "./unedited.js";
 import { recordingAt, recordingStat } from "./where.js";
-import { processStart, queuedFor, statusOf } from "./reel-kit-worker.js";
+import { processStart, queuedOf, statusOf } from "./reel-kit-worker.js";
 import { isRunning } from "./run.js";
 import { makeWorkCopy } from "./workcopy.js";
 
@@ -278,8 +278,9 @@ function atWork(home, folder, entry, alive, startOf) {
     - a part with a Reel Kit edit queued or at work: one in the queue record whose project is not made yet (the worker's queuedFor, by the
       record's id and the key), or one whose studio.json says so (statusOf, in the episode's folder `folder` under `home`); `alive` says
       whether a pid runs (isRunning by default) and `startOf` when it started (the worker's processStart by default). A job whose run
-      died is none. An earlier edit that waits for her or is done is no refusal: the next is a new version (versionFor). */
-export function startWhy({ record, key, mode, title, home, folder, held, planned = null, alive = isRunning, startOf = processStart }) {
+      died is none, and so is the queue entry `queued` names (its id), the queued job's own, when it asks again inside the Mac's lock. An
+      earlier edit that waits for her or is done is no refusal: the next is a new version (versionFor). */
+export function startWhy({ record, key, mode, title, home, folder, held, planned = null, alive = isRunning, startOf = processStart, queued = null }) {
   if (typeof held !== "boolean") throw new Error("startWhy: `held` must be said, true or false, so that a video held as a session is never let through by its absence");
   if (!isObject(record)) return "That video can't be read: ask Jason.";
   if (isPart(record)) return mayGoIn({ record }, planned) ? PART_FOOTAGE : CLIENT_WAITS;
@@ -296,7 +297,7 @@ export function startWhy({ record, key, mode, title, home, folder, held, planned
   const projects = projectsOf(record).filter((p) => isObject(p) && p.key === key);
   if (projects.some((p) => !isReelKit(p) && p.state !== KEPT)) return inHyperFrames(part);
   const runs = typeof alive === "function" ? alive : isRunning;
-  if (typeof home === "string" && queuedFor(home, record.id, key, runs)) return busy(part);
+  if (typeof home === "string" && queuedOf(home, record.id, runs).some((j) => j.key === key && j.id !== queued)) return busy(part);
   if (projects.some((p) => isReelKit(p) && atWork(home, folder, p, runs, startOf))) return busy(part);
   return "";
 }

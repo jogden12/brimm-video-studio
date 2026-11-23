@@ -17,11 +17,13 @@ import { HELD, NOT_FOR_SESSION, gateFor, heldGateFor, namesNoEpisode } from "../
 import { kitDir, venvPython } from "../reel-kit.js";
 import { EDIT_SAY, NOTE_MOST, notesFile } from "../reel-kit-commands.js";
 import { entryOf, readState, writeState } from "../reel-kit-project.js";
-import { queuedOf } from "../reel-kit-worker.js";
+import { macLock, queueFile, queuedOf } from "../reel-kit-worker.js";
+import { releaseEpisodeLock, takeEpisodeLock } from "../detached.js";
+import { recordFile, recordText } from "../episode.js";
 import { episodeWork } from "../settings.js";
 import { FOLDER, ID, reread } from "./episodes.js";
 import { episode } from "./phase4.js";
-import { ANSWERED, CLEARED, LEFT, RAW, SESSION, UNANSWERED } from "./workcopy-world.js";
+import { ANSWERED, CLEARED, LEFT, RAW, SESSION, SESSION_MARK, UNANSWERED } from "./workcopy-world.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/claude-worker.mjs", import.meta.url));
 const ASK = "Hi-fi, lo-fi or showcase?";
@@ -415,5 +417,88 @@ describe("HyperFrames leaves a Reel Kit edit alone", () => {
     const m = await on(upright, "app", FOLDER);
     assert.deepEqual([m.code, m.said], [1, ["Pricing: what to charge? is a Reel Kit edit: it opens through Reel Kit, not as a HyperFrames project."]]);
     assert.deepEqual([w.t.started, upright.t.started, reread(w.found).app.projects.length], [[], [], 1]);
+  });
+});
+
+describe("fix round 1: the queued job looks at the episode again, inside the Mac's lock", () => {
+  /** Write the episode's next record: what it is now, with `over` laid over it. */
+  const rewrite = (w, over) => {
+    const now = reread(w.found);
+    writeFileSync(recordFile(w.found.folder, now.rev + 1), recordText({ ...now, rev: now.rev + 1, ...over }));
+  };
+  /** A HyperFrames project of Reel 2, as `app … reel 2` writes its entry. */
+  const HF = { key: "reel 2", name: "Pricing- what to charge- reel 2 v1 3fa9c1", madeAt: "2026-11-23T10:05:00-06:00", on: "Mac Studio", from: FROM, workingCopy: COPY, opened: [], handover: false, fromSuggestion: 2, state: "made" };
+
+  for (const [what, over, line] of [
+    ["corrected to a session", { kind: "session", answer: { ...ANSWERED, private: "yes" }, label: "Session, 2026-10-20", session: SESSION_MARK }, NOT_FOR_SESSION],
+    ["given a HyperFrames project of the part", { version: 4, app: { toolchain: "0.8.208", projects: [HF] } }, "Reel 2 has a HyperFrames project already, so it is edited there."]
+  ]) {
+    it(`makes no project when the video was ${what} while its job waited for the Mac`, async () => {
+      const w = world();
+      assert.equal((await reelkit(w, ["start", FOLDER, "reel", "2", "--mode", "lofi"])).code, 0);
+      const [words] = startedWords(w);
+      // Another job holds the Mac: this one waits, its entry in the queue.
+      const held = takeEpisodeLock(macLock(w.t.home), "reelkit edit", () => true);
+      assert.ok(held.taken);
+      const made = [];
+      const scaffold = async (ctx, make) => {
+        made.push(make.key);
+        return { why: "never here" };
+      };
+      const half = reelkit(w, words, { reelKit: { scaffold, claude: claudeOf(w), run, every: 20, wait: (ms) => new Promise((done) => setTimeout(done, Math.min(ms, 20))) } });
+      await until(() => queuedOf(w.t.home, ID, w.t.ctx.deps.alive).some((j) => j.pid === process.pid), "the half waiting in the queue");
+      rewrite(w, over);
+      releaseEpisodeLock(macLock(w.t.home), held.text);
+      const ended = await half;
+      assert.equal(ended.code, 1);
+      assert.deepEqual(made, [], "scaffold is never called");
+      assert.deepEqual(queuedOf(w.t.home, ID, w.t.ctx.deps.alive), []);
+      w.live.clear();
+      const status = await reelkit(w, ["status", FOLDER]);
+      assert.deepEqual(status.said, [line === NOT_FOR_SESSION ? NOT_FOR_SESSION : `Reel 2: its Reel Kit edit didn't start. ${line}`]);
+    });
+  }
+
+  it("refuses to open a part in HyperFrames while a Reel Kit job for it waits, in one line", async () => {
+    const w = world();
+    await reelkit(w, ["start", FOLDER, "reel", "2", "--mode", "lofi"]);
+    const r = await on(w, "app", FOLDER, "reel", "2");
+    assert.deepEqual([r.code, r.said], [1, ["Reel 2 of Pricing: what to charge? has a Reel Kit edit waiting to be made: it opens through Reel Kit, not as a HyperFrames project."]]);
+    w.live.clear();
+    assert.notDeepEqual((await on(w, "app", FOLDER, "reel", "2")).said, r.said, "once that job's run is gone, app goes on");
+  });
+
+  it("takes no note that is a go, and gives her the go phrase instead", async () => {
+    const w = world({ edits: [{ n: 2, state: { state: "storyboard", step: "storyboard" } }] });
+    for (const text of ["go", " GO ", "Go"]) {
+      const r = await reelkit(w, ["note", FOLDER, slugOf(2), "all", text]);
+      assert.deepEqual([r.code, r.said], [1, [`Only your go approves it: say "go" when it's right.`]], JSON.stringify(text));
+    }
+    assert.throws(() => readFileSync(notesFile(w.dirOf(2))), /ENOENT/);
+    assert.equal((await reelkit(w, ["note", FOLDER, slugOf(2), "p02", "go"])).code, 0, "a beat's note may say go");
+    assert.deepEqual(w.t.started, []);
+  });
+
+  it("says plainly a part whose run gave no pid, and queues nothing for it", async () => {
+    const w = world();
+    w.t.ctx.deps.start = (cmd, args) => {
+      w.t.started.push([cmd, args]);
+      return undefined;
+    };
+    const r = await reelkit(w, ["start", FOLDER, "reel", "2", "--mode", "lofi"]);
+    assert.equal(r.code, 1);
+    assert.deepEqual(r.said, ["Reel 2 couldn't be started on this Mac: say it again, or ask Jason."]);
+    assert.deepEqual(queuedOf(w.t.home, ID, () => true), []);
+  });
+
+  it("starts no part it can't put in the queue, and says so", async () => {
+    const w = world();
+    // The queue's own lock, held by a run that runs: the queue can't be changed.
+    mkdirSync(join(queueFile(w.t.home), ".."), { recursive: true });
+    writeFileSync(`${queueFile(w.t.home)}.lock`, JSON.stringify({ pid: process.pid, command: "reelkit queue", nonce: "x" }));
+    const r = await reelkit(w, ["start", FOLDER, "reel", "2", "--mode", "lofi"]);
+    assert.equal(r.code, 1);
+    assert.deepEqual(r.said, ["Reel 2 couldn't be put in the queue on this Mac, so it wasn't started: say it again, or ask Jason."]);
+    assert.deepEqual(w.t.started, []);
   });
 });
