@@ -22,7 +22,7 @@ import { binDir, kitDir, reelKitEnv, reelKitHome } from "./reel-kit.js";
 import { readCapped, readState, scaffold, writeState } from "./reel-kit-project.js";
 import { factsOf } from "./settings.js";
 import { JOBS, JOB_ENDS, notesOf, startFault, usageLimited, workerPrompt } from "./reel-kit-worker-jobs.js";
-import { WORKER_TOOLS, workerArgs, workerSettings } from "./reel-kit-worker-tools.js";
+import { WORKER_TOOLS, ownEntries, workerArgs, workerSettings } from "./reel-kit-worker-tools.js";
 import { isRunning } from "./run.js";
 import { findPrograms } from "./unedited.js";
 
@@ -261,6 +261,9 @@ function keptNotes(home, slug) {
   }
 }
 
+/** Whether a project's studio.json names its slug, which names its settings, notes and temp folder: no two projects share them. */
+const hasSlug = (state) => isObject(state) && typeof state.slug === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(state.slug);
+
 /** Run the worker for `job` in the project `dir`, once it holds the Mac, and resolve how it ended. */
 async function work(ctx, { dir, job, notes, from, resume }, deps) {
   const { claude, log, every, limit, grace, wait } = deps;
@@ -269,7 +272,8 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
   const before = readState(dir) ?? {};
   const mark = (fields) => writeState(dir, { ...(readState(dir) ?? {}), ...fields });
   const tools = { project: dir, kit: kitDir(home), rkHome: reelKitHome(home), bin: binDir(home) };
-  const slug = typeof before.slug === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(before.slug) ? before.slug : job;
+  if (!hasSlug(before)) return { state: "failed", why: "no slug", step: from };
+  const slug = before.slug;
   const fail = (why) => {
     mark({ state: "failed", job, step: from, pid: process.pid, why });
     return { state: "failed", why, step: from };
@@ -285,13 +289,16 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
   const facts = deps.facts ?? factsOf(home, ctx.settings, {});
   const settingsFile = settingsFileOf(home, slug);
   writeWhole(settingsFile, `${JSON.stringify(workerSettings({ checkout: ctx.checkout ?? thisCheckout(), node: ctx.node ?? process.execPath, ...tools, facts, tmp }), null, 2)}\n`);
-  const lists = WORKER_TOOLS(tools);
+  const lists = WORKER_TOOLS({ ...tools, tmp });
   const carryOn = resume && typeof before.session === "string" ? before.session : null;
   let session = carryOn ?? randomUUID();
   const args = workerArgs({ settingsFile, ...lists, ...(carryOn ? { resume: carryOn } : { session }) });
   const prompt = workerPrompt({ job, ...tools, title: typeof before.title === "string" ? before.title : null, notes: given, from, resumed: Boolean(resume) });
 
   clearStatus(dir);
+  // What of Studio's own names is in the project before the run (the app's notes, say): anything else there after it fails the run.
+  const ownBefore = ownEntries(dir);
+  if (ownBefore === null) return fail("own");
   mark({ state: "working", job, step: from, pid: process.pid, why: "", session, needs: resume && Array.isArray(before.needs) ? before.needs : [] });
 
   // Its own process group, so that everything it starts (Python, ffmpeg, HyperFrames' browser) is stopped with it.
@@ -319,6 +326,7 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
     if (child.pid) {
       writeWhole(macWorkerFile(home), `${JSON.stringify({ pid: child.pid, start: workerStart, dir, at: new Date().toISOString() })}\n`);
       mark({ worker: child.pid, workerStart: workerStart ?? undefined });
+      deps.started?.(child.pid);
     }
     child.stdin.on("error", () => {});
     child.stdin.end(prompt);
@@ -396,11 +404,17 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
     }
   }
 
+  // Studio's own names left anywhere in the project (a folder moved in, a link): the run fails, and each is named in the log.
+  const ownAfter = ownEntries(dir);
+  const planted = ownAfter === null ? ["(the project could not be looked over)"] : [...ownAfter].filter(([rel, what]) => ownBefore.get(rel) !== what).map(([rel]) => rel);
+  for (const rel of planted) log(`Reel Kit's worker for ${slug} left one of Studio's own names in its project: ${rel}`);
+
   const at = readState(dir) ?? {};
   const reached = at.step === steps.at(-1);
   const finished = result !== null && result.is_error === false && code === 0;
   let end;
   if (unsafe) end = { state: "failed", why: "unsafe" };
+  else if (planted.length) end = { state: "failed", why: "own" };
   else if (usage && !(finished && reached)) end = { state: "stopped", why: "usage" };
   else if (timedOut) end = { state: "stopped", why: "time" };
   else if (finished) end = reached ? { state: JOB_ENDS[job], why: "" } : { state: "stopped", why: "unfinished" };
@@ -433,7 +447,7 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
     but whose `claude` still runs is queued, and that `claude` stopped once this job holds the Mac.
     `deps`: `claude` (the program; findPrograms' by default), `scaffold` and `scaffoldDeps`, `alive`, `startOf` (processStart), `wait` (ms
     to a promise), `every` (how often, in ms, the lock and the status file are looked at), `limit`, `grace`, `facts` (settings.js factsOf of
-    ctx.settings by default), `log`. `ctx`: `home`, `settings` (this Mac's: BRIMM Video's place for the sandbox), `checkout`, `node`, `base`. */
+    ctx.settings by default), `log`, and `started`, called with the `claude` pid once it runs (a test's, to throw there). `ctx`: `home`, `settings` (this Mac's: BRIMM Video's place for the sandbox), `checkout`, `node`, `base`. */
 export async function runJob(ctx, spec, deps = {}) {
   const {
     claude = findPrograms().claude, scaffold: make = scaffold, scaffoldDeps = {}, alive = isRunning, startOf = processStart,
@@ -459,6 +473,7 @@ export async function runJob(ctx, spec, deps = {}) {
   if (dir !== null) {
     const status = statusOf(dir, alive, startOf);
     if (status === null) return { state: "failed", why: "no project", step: "", dir };
+    if (!hasSlug(before)) return { state: "failed", why: "no slug", step: status.step, dir };
     const runs = status.pid !== null && alive(status.pid);
     if ((status.state === "working" || status.state === "queued") && runs) return { state: status.state, why: "running", step: status.step, dir };
     if (spec.resume) from = JOBS[job].includes(status.step) ? status.step : JOBS[job][0];
@@ -489,7 +504,7 @@ export async function runJob(ctx, spec, deps = {}) {
       if (!isObject(made) || typeof made.dir !== "string") return { state: "failed", why: made?.why ?? "not made", step: "", dir: null };
       dir = made.dir;
     }
-    const ended = await work(ctx, { dir, job, notes: spec.notes ?? [], from, resume: spec.resume }, { claude, log, every, limit, grace, wait, alive, startOf, facts });
+    const ended = await work(ctx, { dir, job, notes: spec.notes ?? [], from, resume: spec.resume }, { claude, log, every, limit, grace, wait, alive, startOf, facts, started: deps.started });
     return { ...ended, dir, ...(made ? { made } : {}) };
   } finally {
     releaseEpisodeLock(lock, took.text);

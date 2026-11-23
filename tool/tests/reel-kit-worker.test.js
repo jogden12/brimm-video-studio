@@ -445,11 +445,12 @@ describe("the worker's tools", () => {
     const w = world();
     const facts = factsOf(w.home, settingsOf(w.home), { uid: process.getuid() });
     const settings = workerSettings({ checkout: CHECKOUT, node: process.execPath, ...w.ctx, facts, tmp: workerTmp(w.home, "abc123-reel-2-v1") });
+    const runTmp = workerTmp(w.home, "abc123-reel-2-v1");
     assert.equal(settings.autoMemoryEnabled, false);
     assert.equal(settings.disableAllHooks, false);
     assert.deepEqual(settings.env, { DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1", CLAUDE_CODE_SUBAGENT_MODEL: "claude-opus-5-5" });
     assert.deepEqual(settings.hooks, { PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [GUARD_SH, process.execPath, w.project, w.kit, w.rkHome, w.bin], onFailure: "block" }] }] });
-    const lists = WORKER_TOOLS(w.ctx);
+    const lists = WORKER_TOOLS({ ...w.ctx, tmp: runTmp });
     assert.equal(settings.permissions.defaultMode, "dontAsk");
     assert.deepEqual(settings.permissions.allow, lists.allowed);
     assert.deepEqual(settings.permissions.deny, lists.disallowed);
@@ -496,10 +497,10 @@ describe("the worker's tools", () => {
       network: { deniedDomains: ["*"] },
       filesystem: {
         allowWrite: [real(w.project), real(tmp)],
-        denyWrite: both(w.project).flatMap((root) => [root, join(root, "public")].flatMap((dir) => OWN_NAMES.flatMap((name) => cased(name).map((spelt) => join(dir, spelt))))),
+        denyWrite: [...both(w.project).flatMap((root) => [root, join(root, "public")]), ...both(tmp)].flatMap((dir) => OWN_NAMES.flatMap((name) => cased(name).map((spelt) => join(dir, spelt)))),
         denyRead: [...both(w.home), ...gatedPlaces(facts).flatMap((place) => bothSpellings(place.path)), ...[CHECKOUT, join(AS, "BRIMM Video", "reel-kit-worker"), studioFolder(w.home)].flatMap(both)],
         allowRead: [
-          real(w.project), real(tmp), real(w.kit), real(hfDir(w.home)), real(join(w.home, ".cache", "hyperframes")),
+          real(w.project), real(tmp), real(w.kit), real(hfDir(w.home)), real(join(w.home, ".cache", "hyperframes", "chrome")),
           ...[".venv", ".venv-mp", "tools", "models", "vendor", "style", "fx", "cards", "hf"].map((name) => real(join(w.rkHome, name))),
           ...bashNeeds({ ...facts, folder: w.project })
         ]
@@ -507,7 +508,12 @@ describe("the worker's tools", () => {
     });
     // Reads are an allowlist inside the home: never REEL_KIT_HOME whole (its trials/ holds a key), another run's tmp/, or the rest of the home.
     const allowed = settings.sandbox.filesystem.allowRead;
-    for (const never of [w.rkHome, join(w.rkHome, "trials"), join(w.rkHome, "tmp"), w.home, join(w.home, "Documents")]) assert.ok(!allowed.includes(real(never)), never);
+    for (const never of [w.rkHome, join(w.rkHome, "trials"), join(w.rkHome, "tmp"), w.home, join(w.home, "Documents"), join(w.home, ".cache", "hyperframes"),
+      join(w.home, ".cache", "hyperframes", "history")]) {
+      assert.ok(!allowed.includes(real(never)), never);
+    }
+    // HyperFrames' history of every project on the Mac is never read back in: only its Chrome.
+    assert.ok(!allowed.some((path) => path.includes(join(".cache", "hyperframes")) && !path.endsWith(join(".cache", "hyperframes", "chrome"))));
     for (const spelling of both(w.home)) assert.ok(settings.sandbox.filesystem.denyRead.includes(spelling), spelling);
     // Studio's own names are held at the project's top and in public/ by the sandbox, and anywhere below by Edit() deny rules, which
     // Claude Code merges into its denyWrite.
@@ -516,6 +522,10 @@ describe("the worker's tools", () => {
       assert.ok(settings.sandbox.filesystem.denyWrite.includes(join(real(w.project), "public", spelt)), `public/${spelt}`);
       assert.ok(settings.permissions.deny.includes(`Edit(/${real(w.project)}/**/${spelt})`), `Edit() of ${spelt}`);
       assert.ok(settings.permissions.deny.includes(`Edit(//System/Volumes/Data${real(w.project)}/**/${spelt})`), `Edit() of ${spelt}, the other spelling`);
+      // The run's temp folder is writable too, so the names can't be made there either, to be moved into the project whole.
+      assert.ok(settings.sandbox.filesystem.denyWrite.includes(join(real(tmp), spelt)), `tmp/${spelt}`);
+      assert.ok(settings.permissions.deny.includes(`Edit(/${real(tmp)}/**/${spelt})`), `Edit() of tmp's ${spelt}`);
+      assert.ok(settings.permissions.deny.includes(`Edit(//System/Volumes/Data${real(tmp)}/**/${spelt})`), `Edit() of tmp's ${spelt}, the other spelling`);
     }
     const denied = settings.sandbox.filesystem.denyRead;
     for (const place of [join(w.home, ".ssh"), join(w.home, "Dropbox", "BRIMM Video"), join(AS, "BRIMM Video"), join(AS, "BRIMM Video Words"), join(w.home, "Library", "Keychains"), CHECKOUT, studioFolder(w.home)]) {
@@ -729,6 +739,52 @@ describe("the worker's status", () => {
         return true;
       }
     }, "the worker's own child gone too");
+  });
+
+  it("fails a run that leaves one of Studio's own names anywhere in the project, a folder moved in from its temp folder among them", async () => {
+    const w = world();
+    // What Studio wrote there itself before the run (the app's notes, say) is no fault.
+    writeFileSync(join(w.project, "public", "CLAUDE.md"), "Studio's notes for the app's agent\n");
+    const clean = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, standIn(w)));
+    assert.equal(clean.state, "storyboard");
+    const lines = [];
+    const planted = await runJob(ctxOf(w), { dir: w.project, job: "revise" }, depsOf(w, standIn(w, "plant"), { log: (line) => lines.push(line) }));
+    assert.deepEqual([planted.state, planted.why], ["failed", "own"]);
+    assert.deepEqual(statusOf(w.project).why, "own");
+    for (const left of ["sub/CLAUDE.md", "cards/c1/.Claude", "fx/f1/agents.MD"]) assert.ok(lines.some((line) => line.includes(left)), `${left}: ${lines.join(" | ")}`);
+    assert.ok(!lines.some((line) => line.includes("public/CLAUDE.md")), "Studio's own, unchanged, is not named");
+  });
+
+  it("refuses a job whose project has no slug, so no two projects share a notes file", async () => {
+    const w = world();
+    const { slug, ...rest } = readState(w.project);
+    assert.equal(slug, "abc123-reel-2-v1");
+    writeFileSync(join(w.project, "studio.json"), JSON.stringify(rest));
+    const claude = standIn(w);
+    const ended = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, claude));
+    assert.deepEqual([ended.state, ended.why], ["failed", "no slug"]);
+    assert.equal(claude.runs().length, 0);
+    assert.equal(readState(w.project).state, undefined, "nothing was marked");
+  });
+
+  it("stops the worker's whole group when anything throws after it started, before the Mac is let go", async () => {
+    const w = world();
+    let pid = 0;
+    const started = (child) => {
+      pid = child;
+      throw new Error("a disk that is full, say");
+    };
+    await assert.rejects(runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, standIn(w, "hang"), { started, grace: 200 })), /a disk that is full/);
+    assert.ok(pid > 0);
+    await until(() => {
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    }, "the worker gone");
+    assert.ok(!existsSync(macLock(w.home)), "the Mac is let go");
   });
 
   it("knows Claude Code's usage-limit result from every other end", () => {

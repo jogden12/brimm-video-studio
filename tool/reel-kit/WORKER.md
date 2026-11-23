@@ -22,7 +22,9 @@ A guard answers every tool call before it runs, yours and your helper agents'. I
 refuses is not tried another way. Every command also runs in Claude Code's sandbox: no network at all, writes only in `PROJECT`
 and your temporary folder (`TMPDIR`), never Studio's own files there, and nothing in the home folder readable but `PROJECT`, `KIT`,
 Reel Kit's own tools and HyperFrames. (By hand, RK21, before Studio's first real run: whether HyperFrames' headless browser runs inside
-this sandbox; and a real worker killed mid-step, with `ps -o pid,pgid,command` showing nothing of its process group left.)
+this sandbox with only its `~/.cache/hyperframes/chrome` readable, or also needs `fonts/` or `background-removal/` there; and a
+real worker killed mid-step, with `ps -o pid,pgid,command` showing nothing of its process group left.) Studio looks over the project
+after every run: one of Studio's own names left anywhere in it, in any case, fails the run.
 
 - **Files:** Read, Glob and Grep inside `PROJECT` and `KIT`. Write and Edit inside `PROJECT` only. Never write `studio.json`
   (Studio's own), a `CLAUDE.md`, an `AGENTS.md`, a `.mcp.json`, an `.npmrc`, or anything in a `.claude` or `.git` folder. Always give a whole path, never one with `..`.

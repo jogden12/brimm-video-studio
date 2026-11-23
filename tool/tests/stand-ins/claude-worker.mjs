@@ -12,7 +12,7 @@
 //     exit 1), "wait" (every step, but the last only once <project>/work/go-on is there), "hang" (two steps, then nothing until it is
 //     killed), "needs" (CLAUDE_WORKER_NEEDS, a JSON list of {beat, text}, written with the "beats" step and after), "bad-status" (its first
 //     step, then a status file far too large, and nothing more), "unsafe-init" (an init in bypassPermissions mode, then its steps),
-//     "stubborn" (its first step, a `sleep` of its own in its process group, its pid in work/grandchild.pid, SIGTERM ignored, then
+//     "plant" (every step, having left three of Studio's own names deep in the project at its first), "stubborn" (its first step, a `sleep` of its own in its process group, its pid in work/grandchild.pid, SIGTERM ignored, then
 //     nothing until it is killed),
 //     "hook" (before its steps, each call of CLAUDE_WORKER_CALLS, a JSON list, handed to the PreToolUse hook its --settings file names, as
 //     Claude Code does: `<command> <args…>` with the call on standard input).
@@ -77,6 +77,13 @@ for (const [i, step] of steps.entries()) {
     logged();
     emit({ type: "result", subtype: "error_during_execution", is_error: true, result: "Claude AI usage limit reached. Your limit resets at 3pm." });
     process.exit(1);
+  }
+  if (scenario === "plant" && i === 0) {
+    // What a worker could leave by making the names in its temp folder and moving the folder in: the moves stood in by writes.
+    for (const rel of ["sub/CLAUDE.md", "cards/c1/.Claude/settings.json", "fx/f1/agents.MD"]) {
+      mkdirSync(join(cwd, rel, ".."), { recursive: true });
+      writeFileSync(join(cwd, rel), "planted\n");
+    }
   }
   if (scenario === "stubborn" && i === 0) {
     process.on("SIGTERM", () => {});

@@ -51,9 +51,13 @@ const FORMATS = new Set(["null", "mp4", "mov", "ipod", "wav", "mp3", "adts", "fl
 export const OWN_NAMES = Object.freeze(["studio.json", "CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".claude", ".mcp.json", ".git", ".npmrc"]);
 /** A name as it is, in small letters and in capitals: the Mac's disk takes a name in any case, and a rule names one spelling. */
 const cases = (name) => [...new Set([name, name.toLowerCase(), name.toUpperCase()])];
-/** Deny rules for writing Studio's own names anywhere in the project, by its real path in both spellings: Claude Code holds its own file
-    tools to them and merges an Edit() deny rule into the sandbox's denyWrite, so a sandboxed command is held too (studio.js, C3). */
-const ownEditRules = (project) => bothSpellings(placeOf(project)).flatMap((root) => OWN_NAMES.flatMap((name) => cases(name).map((spelt) => `Edit(/${root}/**/${spelt})`)));
+/** Deny rules for making Studio's own names anywhere under each place the worker may write (the project and, given, the run's temp
+    folder), by real path in both spellings: Claude Code holds its own file tools to them and merges an Edit() deny rule into the sandbox's
+    denyWrite (studio.js, C3), so a sandboxed command can't make them either. A rename is judged only at its target, never by the names
+    inside a folder moved, so both writable places are covered: nothing can make the names in the temp folder to move them in whole. A
+    link or a move these rules miss is what Studio's look over the project after each run (ownEntries) is for. */
+const ownEditRules = (...roots) => roots.filter(Boolean).flatMap((path) => bothSpellings(placeOf(path)))
+  .flatMap((root) => OWN_NAMES.flatMap((name) => cases(name).map((spelt) => `Edit(/${root}/**/${spelt})`)));
 /** The copy program, by its whole path: one source, one destination, `-R` or no flag. */
 const CP = "/bin/cp";
 /** REEL_KIT_HOME's folders a copy may come from: GSAP, the style, her own effects and cards. */
@@ -83,11 +87,12 @@ function programsOf({ kit, rkHome, bin }) {
   };
 }
 
-/** The worker's tools for the project `project`, the kit `kit`, REEL_KIT_HOME `rkHome` and its tools/bin `bin`: `allowed` and `disallowed`,
+/** The worker's tools for the project `project`, the kit `kit`, REEL_KIT_HOME `rkHome`, its tools/bin `bin` and the run's temp folder `tmp`
+    (when given: its Edit() deny rules), `allowed` and `disallowed`,
     Claude Code's permission rules as --allowedTools and --disallowedTools take them (and as the settings file's allow and deny lists hold
     them), and `programs`, the exact spellings the hook's table checks a command against. One table for both: the hook (workerDecision) is
     built on this, never beside it. Glob and Grep are under the Read rules, as Claude Code judges them. */
-export function WORKER_TOOLS({ project, kit, rkHome, bin }) {
+export function WORKER_TOOLS({ project, kit, rkHome, bin, tmp }) {
   for (const [name, path] of Object.entries({ project, kit, rkHome, bin })) {
     if (typeof path !== "string" || !isAbsolute(path)) throw new Error(`WORKER_TOOLS: ${name} must be a whole path`);
   }
@@ -102,7 +107,7 @@ export function WORKER_TOOLS({ project, kit, rkHome, bin }) {
     `Bash(cd ${q(project)})`, `Bash(cd ${q(join(project, "public"))})`, `Bash(cd ${q(`${project}/cards/*`)})`, `Bash(cd ${q(`${project}/fx/*`)})`,
     "Agent(general-purpose)"
   ];
-  return { allowed, disallowed: [...NEVER_TOOLS, ...ownEditRules(project)], programs: p };
+  return { allowed, disallowed: [...NEVER_TOOLS, ...ownEditRules(project, tmp)], programs: p };
 }
 
 // --- Paths ---
@@ -275,6 +280,32 @@ const ownName = (name) => {
 
 /** Whether the folder at the real path `real`, and everything under it, holds no name ownName refuses: links are looked at, never followed
     (cp -R copies a link as a link). A tree of more than 20,000 entries is refused. */
+/** Every entry under the project `dir` whose name ownName says is Studio's own, in any case, each by its path inside and what it is (device,
+    inode, size, time), links looked at and never followed: but studio.json and its writing files at the top, which Studio writes itself.
+    Before and after a run, so that what was not there before, or changed, fails the run. null for a tree too large to look over (200,000
+    entries) or one that can't be read. */
+export function ownEntries(dir) {
+  const found = new Map();
+  let seen = 0;
+  const walk = (folder, rel) => {
+    for (const name of readdirSync(folder)) {
+      if (++seen > 200000) throw new Error("too many");
+      const path = join(folder, name);
+      const inside = rel ? `${rel}/${name}` : name;
+      const kind = lstatSync(path);
+      const top = rel === "" && (name.toLowerCase() === "studio.json" || name.toLowerCase().startsWith(".studio.json"));
+      if (ownName(name) && !top) found.set(inside, `${kind.dev}:${kind.ino}:${kind.size}:${kind.mtimeMs}`);
+      if (kind.isDirectory()) walk(path, inside);
+    }
+  };
+  try {
+    walk(dir, "");
+    return found;
+  } catch {
+    return null;
+  }
+}
+
 function cleanTree(real) {
   let seen = 0;
   const walk = (dir) => {
@@ -433,12 +464,14 @@ const HOME_READS = Object.freeze([".venv", ".venv-mp", "tools", "models", "vendo
 /** Claude Code's OS sandbox around every command the worker or its helpers run: on, or the run does not start (failIfUnavailable), with no
     command let out of it (allowUnsandboxedCommands false, so `dangerouslyDisableSandbox` does nothing; the hook refuses it too); no
     network at all (every domain denied, and no proxy port, so nothing is let through one); writes only in the project and the run's own
-    temp folder (`tmp`), and never Studio's own names in the project (OWN_NAMES, at its top and in public/, in both spellings and three
-    cases; the Edit() deny rules hold them deeper). Reads are an allowlist inside the home: the whole home is denied (both spellings, and
+    temp folder (`tmp`), and never Studio's own names (OWN_NAMES) at the project's top, in its public/ or at the temp folder's top, in both
+    spellings (the Edit() deny rules hold them at any depth below both writable places; seatbelt matches a name in any case on the
+    Mac's disk). Reads are an allowlist inside the home: the whole home is denied (both spellings, and
     Claude Code's own home when BRIMM_VIDEO_HOME gives Studio another), with the gated places (places.js gatedPlaces, for this Mac's
     `facts`: settings.js factsOf), the checkout, the worker settings' folder and her folder, as her folder's open lock has them (studio.js
     openSettingsOf); and only these are let back in, as the open lock's allowRead carves out of its denyRead: the project, the run's temp
-    folder, the kit, Reel Kit's own HyperFrames, HyperFrames' Chrome (~/.cache/hyperframes), REEL_KIT_HOME's HOME_READS and the three places
+    folder, the kit, Reel Kit's own HyperFrames, HyperFrames' Chrome (~/.cache/hyperframes/chrome alone: its history/ holds every
+    HyperFrames project on the Mac; fonts/ and background-removal/ wait on RK21), REEL_KIT_HOME's HOME_READS and the three places
     Bash itself needs (places.js bashNeeds). Whether HyperFrames' headless Chrome runs inside it is the by-hand spike RK21. */
 export function workerSandbox({ checkout, project, kit, rkHome, facts, tmp }) {
   if (!facts || typeof facts.home !== "string" || typeof facts.root !== "string") throw new Error("workerSandbox: this Mac's facts (settings.js factsOf) are needed");
@@ -446,7 +479,7 @@ export function workerSandbox({ checkout, project, kit, rkHome, facts, tmp }) {
   const both = (path) => bothSpellings(placeOf(path));
   const homes = [...new Set([facts.home, facts.claudeHome ?? facts.home])];
   const own = [checkout, join(facts.home, "Library", "Application Support", "BRIMM Video", "reel-kit-worker"), studioFolder(facts.home)];
-  const ownWrites = both(project).flatMap((root) => [root, join(root, "public")].flatMap((dir) => OWN_NAMES.flatMap((name) => cases(name).map((spelt) => join(dir, spelt)))));
+  const ownWrites = [...both(project).flatMap((root) => [root, join(root, "public")]), ...both(tmp)].flatMap((dir) => OWN_NAMES.flatMap((name) => cases(name).map((spelt) => join(dir, spelt))));
   return {
     enabled: true,
     failIfUnavailable: true,
@@ -457,7 +490,7 @@ export function workerSandbox({ checkout, project, kit, rkHome, facts, tmp }) {
       denyWrite: ownWrites,
       denyRead: [...homes.flatMap(both), ...gatedPlaces(facts).flatMap((place) => bothSpellings(place.path)), ...own.flatMap(both)],
       allowRead: [
-        placeOf(project), placeOf(tmp), placeOf(kit), placeOf(hfDir(facts.home)), placeOf(join(facts.home, ".cache", "hyperframes")),
+        placeOf(project), placeOf(tmp), placeOf(kit), placeOf(hfDir(facts.home)), placeOf(join(facts.home, ".cache", "hyperframes", "chrome")),
         ...HOME_READS.map((name) => placeOf(join(rkHome, name))), ...bashNeeds({ ...facts, folder: project })
       ]
     }
@@ -471,7 +504,7 @@ export function workerSandbox({ checkout, project, kit, rkHome, facts, tmp }) {
     memory, dreams and skills' shell off; hooks said to be on; and every command in Claude Code's sandbox (workerSandbox). Only keys Claude Code knows: in `-p` a settings file that fails its check is
     passed over without a word, and the lists on the command line (workerArgs) still hold then. */
 export function workerSettings({ checkout, node, project, kit, rkHome, bin, facts, tmp }) {
-  const { allowed, disallowed } = WORKER_TOOLS({ project, kit, rkHome, bin });
+  const { allowed, disallowed } = WORKER_TOOLS({ project, kit, rkHome, bin, tmp });
   return {
     sandbox: workerSandbox({ checkout, project, kit, rkHome, facts, tmp }),
     permissions: { defaultMode: "dontAsk", allow: allowed, deny: disallowed, disableBypassPermissionsMode: "disable", disableAutoMode: "disable" },
