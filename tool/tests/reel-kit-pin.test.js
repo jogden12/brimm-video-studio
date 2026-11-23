@@ -174,4 +174,22 @@ describe("the folder's fingerprint", () => {
     symlinkSync(join(dangling, "nowhere"), join(dangling, "gone"));
     assert.throws(() => folderFingerprint(dangling), /link/);
   });
+
+  it("says by its code, not its words, whether it was refused for a link or for something that is not a file or a folder", async () => {
+    const { LINK_INSIDE, ODD_INSIDE } = await import("../reel-kit.js");
+    assert.ok(LINK_INSIDE && ODD_INSIDE && LINK_INSIDE !== ODD_INSIDE);
+    const linked = folder(files);
+    symlinkSync(join(linked, "SKILL.md"), join(linked, "fx", "link.md"));
+    assert.throws(() => folderFingerprint(linked), (e) => e.code === LINK_INSIDE);
+    // A socket stands for anything that is neither a file nor a folder (a pipe too), made with node alone.
+    const socketed = folder(files);
+    const { createServer } = await import("node:net");
+    const server = createServer();
+    await new Promise((done) => server.listen(join(socketed, "fx", "s"), done));
+    try {
+      assert.throws(() => folderFingerprint(socketed), (e) => e.code === ODD_INSIDE);
+    } finally {
+      await new Promise((done) => server.close(done));
+    }
+  });
 });

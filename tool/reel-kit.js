@@ -81,6 +81,10 @@ export const hfDir = (home) => join(workFolder(home), ".toolchain", `hyperframes
 /** Its program, the file node is given to run. */
 export const hfCli = (home) => join(hfDir(home), "node_modules", "hyperframes", "bin", "hyperframes.mjs");
 
+/** The `code` of folderFingerprint's throw for a link inside the folder, and for anything there that is neither a file nor a folder. */
+export const LINK_INSIDE = "REEL_KIT_LINK_INSIDE";
+export const ODD_INSIDE = "REEL_KIT_ODD_INSIDE";
+
 /** Whether a name is Finder's or a copy's leftover, which no fingerprint counts. */
 const leftover = (name) => name === ".DS_Store" || name.startsWith("._");
 
@@ -100,7 +104,7 @@ function fileSha256(path) {
 /** The fingerprint of a folder: every regular file under it, by its path relative to the folder (`/`-joined, NFC), sorted by those
     paths' UTF-8 bytes, `.DS_Store` and `._*` left out. The manifest is one line per file, `<sha256 hex>  <path>\n`, and the fingerprint
     is `sha256-` and the SHA-256 of the manifest. A link anywhere inside, or anything that is neither a file nor a folder, refuses the
-    folder: it throws. */
+    folder: it throws, the error's `code` LINK_INSIDE or ODD_INSIDE, which a caller decides by, never by the message. */
 export function folderFingerprint(dir) {
   const files = [];
   const walk = (abs, rel) => {
@@ -109,10 +113,10 @@ export function folderFingerprint(dir) {
       const path = join(abs, name);
       const relPath = rel === "" ? name : `${rel}/${name}`;
       const kind = lstatSync(path);
-      if (kind.isSymbolicLink()) throw new Error(`a link is inside the folder: ${relPath}`);
+      if (kind.isSymbolicLink()) throw Object.assign(new Error(`a link is inside the folder: ${relPath}`), { code: LINK_INSIDE });
       if (kind.isDirectory()) walk(path, relPath);
       else if (kind.isFile()) files.push({ path, rel: relPath.normalize("NFC") });
-      else throw new Error(`something that is not a file or a folder is inside the folder: ${relPath}`);
+      else throw Object.assign(new Error(`something that is not a file or a folder is inside the folder: ${relPath}`), { code: ODD_INSIDE });
     }
   };
   walk(dir, "");
