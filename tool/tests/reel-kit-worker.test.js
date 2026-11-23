@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { binDir, hfDir, kitDir, reelKitHome, venvPython } from "../reel-kit.js";
-import { readState, writeState } from "../reel-kit-project.js";
+import { compositionFingerprint, readState, writeState } from "../reel-kit-project.js";
 import { factsOf, workFolder } from "../settings.js";
 import { bashNeeds, bothSpellings, gatedPlaces, realOf as placeReal } from "../places.js";
 import { studioFolder } from "../studio.js";
@@ -604,6 +604,27 @@ describe("the worker's jobs", () => {
     assert.deepEqual(JOBS.revise, ["beats", "build", "sound", "storyboard"]);
     assert.deepEqual(JOBS.finalize, ["cards", "build", "sound", "ready"]);
     assert.deepEqual(JOBS.style, ["style", "board"]);
+  });
+
+  it("records the composition's fingerprint when finalize ends ready, and fails one it can't fingerprint", async () => {
+    const w = world();
+    writeFileSync(join(w.project, "public", "index.html"), "<html>the composition</html>\n");
+    writeState(w.project, { ...readState(w.project), lastRender: { at: "2026-11-22T10:00:00.000Z", qa: "failed", why: "qa" } });
+    const ended = await runJob(ctxOf(w), { dir: w.project, job: "finalize" }, depsOf(w, standIn(w)));
+    assert.equal(ended.state, "ready");
+    assert.match(readState(w.project).fingerprint, /^sha256-[0-9a-f]{64}$/);
+    assert.equal(readState(w.project).fingerprint, compositionFingerprint(w.project));
+    assert.equal(readState(w.project).lastRender, undefined, "an earlier render's outcome is of an edit no longer there");
+    // An edit job ends at a storyboard, and records none.
+    const other = world();
+    await runJob(ctxOf(other), { dir: other.project, job: "edit" }, depsOf(other, standIn(other)));
+    assert.equal(readState(other.project).fingerprint, undefined);
+    // A link in the composition: no fingerprint can be made, so finalize fails rather than end ready (fail closed).
+    const linked = world();
+    symlinkSync(linked.outside, join(linked.project, "public", "elsewhere"));
+    const failed = await runJob(ctxOf(linked), { dir: linked.project, job: "finalize" }, depsOf(linked, standIn(linked)));
+    assert.deepEqual([failed.state, failed.why], ["failed", "fingerprint"]);
+    assert.equal(readState(linked.project).fingerprint, undefined);
   });
 
   it("passes her notes as data, never as instructions", () => {

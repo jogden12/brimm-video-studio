@@ -18,7 +18,10 @@
 //     Reel Kit's own progress is in the project's studio.json, never in the record;
 //   - projectFolderOf, slugOf, linkProject, versionFor: the project's places and names;
 //   - stateFile, readState, writeState: studio.json, Studio's own, written whole and read the safe way;
-//   - scaffold: the project made, as a step of the queued job.
+//   - scaffold: the project made, as a step of the queued job;
+//   - compositionFingerprint: what the edit is as Reel Kit built it (Decision 6), recorded when finalize ends ready and after each
+//     render, so that a render refuses an edit changed in HyperFrames since (reel-kit-render.js renderWhy; plan Task 14);
+//   - projectDirOf: where a project's exports are recorded, public/ for a Reel Kit edit (Decision 7).
 //
 // What she reads holds no path, no flag and no name of a command.
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -28,7 +31,8 @@ import { isPart, isPlannedRecord, kindOf, localStamp, shownName } from "./episod
 import { mayGoIn } from "./footage.js";
 import { HELD, NOT_FOR_SESSION, gateFor, gated } from "./gate.js";
 import { projectName } from "./project.js";
-import { kitDir, reelKitEnv, reelKitHome, venvPython } from "./reel-kit.js";
+import { ODD_INSIDE, entryKind, filesUnder, kitDir, manifestFingerprint, reelKitEnv, reelKitHome, venvPython } from "./reel-kit.js";
+import { foldName } from "./reel-kit-worker-tools.js";
 import { runCaptured } from "./reel-kit-install.js";
 import { syncPack } from "./reel-kit-style.js";
 import { episodeWork } from "./settings.js";
@@ -235,6 +239,44 @@ export function writeState(dir, state) {
     throw e;
   }
 }
+
+// --- The composition's fingerprint (Decision 6) ---
+
+/** The folders of a project that, with its edit.py, are the composition Reel Kit renders. */
+const COMPOSITION = Object.freeze(["fx", "cards", "public"]);
+/** What is left out of public/, at its top, by name as the Mac's disk folds it: HyperFrames' snapshots and renders, the app's own
+    folder (its transcripts and history) and the notes for its agent. None of them is the composition. */
+const NOT_COMPOSITION = Object.freeze(["snapshots", "renders", ".hyperframes", "CLAUDE.md", "AGENTS.md"]);
+
+/** The fingerprint of the composition in the project `dir`, "sha256-<hex>": the SHA-256 of the sorted manifest of `(path, sha256)`
+    (reel-kit.js manifestFingerprint, as a dropped Reel Kit's is made) of its edit.py, and every file under fx/, cards/ and public/,
+    leaving out public/'s snapshots/, renders/, .hyperframes/, CLAUDE.md and AGENTS.md (in any spelling the disk takes for them), and
+    `.DS_Store` and `._*` anywhere. A link anywhere it looks (edit.py itself, one of the three folders, or inside them), or anything
+    that is neither a file nor a folder, throws (the error's `code` reel-kit.js LINK_INSIDE or ODD_INSIDE): no fingerprint is made of
+    what a link leads to, so a caller fails closed. A folder that is not there is left out, as is an edit.py that is not. */
+export function compositionFingerprint(dir) {
+  const files = [];
+  const odd = (rel) => Object.assign(new Error(`${rel} is not what a composition holds there`), { code: ODD_INSIDE });
+  const edit = join(dir, "edit.py");
+  const editKind = entryKind(edit, "edit.py");
+  if (editKind === "folder") throw odd("edit.py");
+  if (editKind === "file") files.push({ path: edit, rel: "edit.py" });
+  const notComposition = new Set(NOT_COMPOSITION.map(foldName));
+  for (const top of COMPOSITION) {
+    const at = join(dir, top);
+    const kind = entryKind(at, top);
+    if (kind === "none") continue;
+    if (kind !== "folder") throw odd(top);
+    const skip = top === "public" ? (rel) => rel.split("/").length === 2 && notComposition.has(foldName(rel.slice("public/".length))) : () => false;
+    files.push(...filesUnder(at, { under: top, skip }));
+  }
+  return manifestFingerprint(files);
+}
+
+/** The folder of the project the record's `entry` names in the episode's work folder `work`, where its exports are recorded: a Reel
+    Kit edit's public/ (`maker: "reel-kit"`), where the app writes its own renders/ records and Studio writes a render's (Decision 7),
+    and a HyperFrames project's own folder. */
+export const projectDirOf = (work, entry) => (isReelKit(entry) ? join(work, entry.name, "public") : join(work, entry.name));
 
 // --- Whether an edit may start ---
 

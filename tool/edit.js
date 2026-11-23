@@ -52,9 +52,10 @@
 //   node edit.js reelkit install "<download>" [--yes] | status
 //                                         a Reel Kit download dragged into her chat: the plan of its setup, or with --yes the setup,
 //                                         detached; and how it is going (reel-kit-commands.js)
-//   node edit.js reelkit start | status | note | go | revise | resume "<episode>" …
-//                                         her Reel Kit edits of an episode's parts: started queued, followed, noted, approved, changed
-//                                         and carried on (reel-kit-commands.js). Their detached half, `reelkit --now`, is in no help
+//   node edit.js reelkit start | status | note | go | revise | resume | render "<episode>" …
+//                                         her Reel Kit edits of an episode's parts: started queued, followed, noted, approved, changed,
+//                                         carried on and rendered headless (reel-kit-commands.js, reel-kit-render.js). Their detached
+//                                         half, `reelkit --now`, is in no help
 //   node edit.js plan "<planned>" voice   "the HeyGen voice is done": the voice the app's agent made in a HeyGen explainer's
 //                                         project taken in as the plan's video (explainer.js). `app` opens that project
 //
@@ -414,7 +415,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js reelkit revise "<episode>" <edit>
                                         an edit's next storyboard, made from her notes since the last one, detached
   node edit.js reelkit resume "<episode>" <edit>
-                                        an edit that stopped, carried on from its step, detached`;
+                                        an edit that stopped, carried on from its step, detached
+  node edit.js reelkit render "<episode>" <edit>
+                                        an edit built to render after her go, rendered on this Mac, detached, one job at a
+                                        time; refused once it was changed in HyperFrames, which then exports it`;
 
 /** The home folder commands work from: the one a test gives, else Studio's own (home.js: BRIMM_VIDEO_HOME, else HOME, else the Mac's own word for it). */
 const homeOf = (deps) => deps.home || studioHome();
