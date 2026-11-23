@@ -5,15 +5,16 @@
 // what it was given, then runs the rest), and the Trash is a folder of the test's own.
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, renameSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { metaNameOf, metaOf } from "../exports.js";
 import { hfDir, kitDir, reelKitHome, venvPython } from "../reel-kit.js";
 import { compositionFingerprint, projectDirOf, readState, writeState } from "../reel-kit-project.js";
-import { RENDER_SAY, renderProfile, renderReelKit, renderWhy, sweepCopies, writeMeta } from "../reel-kit-render.js";
-import { macLock } from "../reel-kit-worker.js";
+import { MACH_SERVICES, RENDER_SAY, renderProfile, renderReelKit, renderWhy, sweepCopies, writeMeta } from "../reel-kit-render.js";
+import { asideDir, macLock } from "../reel-kit-worker.js";
 import { workerSandbox } from "../reel-kit-worker-tools.js";
 import { factsOf, workFolder } from "../settings.js";
 
@@ -68,9 +69,21 @@ function world({ scenario = "" } = {}) {
   mkdirSync(outside);
   const entry = { key: "reel 2", name: NAME, maker: "reel-kit", mode: "hifi", version: 1, state: "made" };
   const ctx = { home, checkout: CHECKOUT, node: process.execPath, base: { HOME: home, LANG: "en_US.UTF-8" }, settings: { root: join(home, "Dropbox", "BRIMM Video"), machine: "Mac Studio" }, now: () => Date.UTC(2026, 10, 23, 15, 4, 5) };
-  const deps = { sandboxExec, trash: toTrash, every: 10, wait: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 10))), log: () => {} };
+  // lsof finds what `held(n)` says holds the project open at its n-th look (none by default); ps is the real one.
+  let held = () => [];
+  let looks = 0;
+  const run = (program, args, options) => {
+    if (program !== "/usr/sbin/lsof") return spawnSync(program, args, options);
+    const pids = held(looks++, args);
+    return { status: pids.length ? 0 : 1, stdout: pids.map((pid) => `${pid}\n`).join(""), stderr: "" };
+  };
+  const deps = { sandboxExec, trash: toTrash, run, every: 10, wait: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 10))), log: () => {} };
   const runs = (path) => (existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
-  return { home, kit, dir, work, src, trash, trashed, outside, entry, ctx, deps, reelKitRuns: () => runs(log), sandboxRuns: () => runs(sandboxLog) };
+  const hold = (fn) => {
+    held = fn;
+    looks = 0;
+  };
+  return { home, kit, dir, work, src, trash, trashed, outside, entry, ctx, deps, hold, reelKitRuns: () => runs(log), sandboxRuns: () => runs(sandboxLog) };
 }
 
 const metas = (w) => (existsSync(join(w.dir, "public", "renders")) ? readdirSync(join(w.dir, "public", "renders")).filter((n) => n.endsWith(".meta.json")) : []);
@@ -333,5 +346,130 @@ describe("a project's folder for its exports", () => {
     const work = "/Users/sallie/BRIMM Video Work/Pricing";
     assert.equal(projectDirOf(work, { name: NAME, maker: "reel-kit" }), join(work, NAME, "public"));
     assert.equal(projectDirOf(work, { name: "Pricing- reel 2 3fa9c1" }), join(work, "Pricing- reel 2 3fa9c1"));
+  });
+});
+
+describe("fix round 1: what the render may not take for its own", () => {
+  const CHANGED = `${NAME} was changed in HyperFrames, so Reel Kit won't render it: export it from HyperFrames on This Mac.`;
+  /** Everything set aside for the project, as paths inside each look's folder. */
+  const asideFiles = (w) => {
+    const root = asideDir(w.home, SLUG);
+    const all = [];
+    const walk = (at, rel) => {
+      for (const name of readdirSync(at)) {
+        const path = join(at, name);
+        if (lstatSync(path).isDirectory()) walk(path, rel ? `${rel}/${name}` : name);
+        else all.push(rel ? `${rel}/${name}` : name);
+      }
+    };
+    if (existsSync(root)) walk(root, "");
+    return all.map((p) => p.split("/").slice(1).join("/"));
+  };
+
+  it("refuses to start while anything but Studio holds the project open, in one line", async () => {
+    const w = world();
+    w.hold(() => [4242]);
+    const lines = [];
+    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, { ...w.deps, log: (line) => lines.push(line) });
+    assert.deepEqual(r, { ok: false, file: null, why: RENDER_SAY.open });
+    assert.doesNotMatch(r.why, /\/|--|\.py\b|\.json\b/);
+    assert.deepEqual(w.reelKitRuns(), []);
+    assert.ok(lines.some((line) => line.includes("process 4242")), "the holder is named in the log");
+    assert.equal(readState(w.dir).rendering, undefined);
+    assert.equal(readState(w.dir).state, "ready");
+    // One that can't be asked of lsof fails closed.
+    const unasked = world();
+    const r2 = await renderReelKit(unasked.ctx, { dir: unasked.dir, entry: unasked.entry }, { ...unasked.deps, run: (p, a, o) => (p === "/usr/sbin/lsof" ? { status: 1, stdout: "", stderr: "usage: lsof" } : spawnSync(p, a, o)) });
+    assert.equal(r2.why, RENDER_SAY.unchecked);
+    assert.deepEqual(unasked.reelKitRuns(), []);
+  });
+
+  it("keeps the fingerprint it had when the app changed the project during a render", async () => {
+    // The app edits public/ while Reel Kit renders (it holds the project open at the look after the run), and QA fails.
+    const w = world({ scenario: "qa-fail app-edit" });
+    const before = readState(w.dir).fingerprint;
+    w.hold((n) => (n === 0 ? [] : [4242]));
+    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
+    assert.equal(r.why, RENDER_SAY.qaFailed);
+    assert.equal(readState(w.dir).fingerprint, before, "her edits are not taken for Reel Kit's");
+    assert.equal(renderWhy(w.dir, readState(w.dir)), CHANGED);
+    w.hold(() => []);
+    assert.equal((await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps)).why, CHANGED);
+    assert.equal(w.reelKitRuns().filter((run) => run.script === "render.py").length, 1, "the next render is refused before Reel Kit's build could write over her edits");
+    // A render that passes while the app holds it: rendered, and the fingerprint is still the one from before.
+    const passed = world({ scenario: "app-edit" });
+    const was = readState(passed.dir).fingerprint;
+    passed.hold((n) => (n === 0 ? [] : [4242]));
+    assert.equal((await renderReelKit(passed.ctx, { dir: passed.dir, entry: passed.entry }, passed.deps)).ok, true);
+    assert.equal(readState(passed.dir).fingerprint, was);
+  });
+
+  it("lets no LaunchServices nor the window server be asked from inside the render", () => {
+    for (const service of ["com.apple.coreservices.launchservicesd", "com.apple.lsd.mapdb", "com.apple.windowserver.active", "com.apple.CoreServices.coreservicesd"]) {
+      assert.ok(!MACH_SERVICES.includes(service), service);
+    }
+    const facts = factsOf("/Users/sallie", { root: "/Users/sallie/Dropbox/BRIMM Video", machine: "Mac Studio" }, { tmp: "/private/tmp", uid: 501, env: {} });
+    const text = renderProfile({ checkout: "/Users/sallie/Studio", project: `/Users/sallie/BRIMM Video Work/Pricing/${NAME}`, kit: kitDir("/Users/sallie"), rkHome: reelKitHome("/Users/sallie"), facts, tmp: `/Users/sallie/BRIMM Video Work/.reel-kit/tmp/${SLUG}.render` });
+    assert.doesNotMatch(text, /launchservicesd|lsd\.mapdb|windowserver|coreservicesd/);
+  });
+
+  it("denies Studio's own names at any depth, in any spelling of case, under the project and its temp folder", async () => {
+    const facts = factsOf("/Users/sallie", { root: "/Users/sallie/Dropbox/BRIMM Video", machine: "Mac Studio" }, { tmp: "/private/tmp", uid: 501, env: {} });
+    const project = `/Users/sallie/BRIMM Video Work/Pricing/${NAME}`;
+    const tmp = `/Users/sallie/BRIMM Video Work/.reel-kit/tmp/${SLUG}.render`;
+    const text = renderProfile({ checkout: "/Users/sallie/Studio", project, kit: kitDir("/Users/sallie"), rkHome: reelKitHome("/Users/sallie"), facts, tmp });
+    const rule = text.split("\n").find((line) => line.startsWith("(deny file-write* (regex"));
+    assert.ok(rule, "a regex rule");
+    assert.ok(text.indexOf(rule) > text.lastIndexOf("(allow file-write*"), "after the writes it holds back");
+    for (const root of [project, tmp]) assert.ok(rule.includes(`(regex "^${root.replace(/[.*+?^${}()|[\]\\]/g, "\\\\$&")}/(.*/)?`), root);
+    for (const spelt of ["[cC][lL][aA][uU][dD][eE]\\\\.[mM][dD]", "\\\\.[cC][lL][aA][uU][dD][eE]", "[sS][tT][uU][dD][iI][oO]\\\\.[jJ][sS][oO][nN]", "[aA][gG][eE][nN][tT][sS]\\\\.[mM][dD]"]) assert.ok(rule.includes(spelt), spelt);
+    // And what the render leaves under one of them is set aside after it, and fails it, as the worker's run is failed.
+    const w = world({ scenario: "plant" });
+    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
+    assert.deepEqual(r, { ok: false, file: null, why: RENDER_SAY.own });
+    assert.ok(!existsSync(join(w.dir, "cards", "c1", "Claude.md")));
+    assert.ok(asideFiles(w).includes("cards/c1/Claude.md"));
+    assert.deepEqual(metas(w), []);
+    assert.deepEqual([readState(w.dir).state, readState(w.dir).why], ["failed", "own"]);
+  });
+
+  it("writes the meta record only for a render in the project's own renders folder, and keeps no record it did not write", async () => {
+    const w = world({ scenario: "renders-link" });
+    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
+    assert.deepEqual(r, { ok: false, file: null, why: RENDER_SAY.odd });
+    assert.deepEqual(metas(w), []);
+    assert.throws(() => writeMeta(w.dir, { name: NAME, file: join(w.outside, "x.mp4"), at: new Date() }), /renders/);
+    assert.throws(() => writeMeta(w.dir, { name: NAME, file: join(w.dir, "renders", "..", "edit.py"), at: new Date() }), /renders/);
+    // A record the render wrote into public/renders/ itself is set aside: only Studio's own is kept.
+    const cli = world({ scenario: "cli-meta" });
+    const c = await renderReelKit(cli.ctx, { dir: cli.dir, entry: cli.entry }, cli.deps);
+    assert.equal(c.ok, true, c.why);
+    assert.equal(metas(cli).length, 1);
+    assert.equal(metaOf(readFileSync(join(cli.dir, "public", "renders", metas(cli)[0]), "utf8")).exportedTo, c.file);
+    assert.ok(asideFiles(cli).some((p) => p.startsWith("public/renders/") && p.endsWith(".meta.json")));
+  });
+
+  it("fails closed, keeping nothing, when the render leaves a link in its composition", async () => {
+    const w = world({ scenario: "link" });
+    const before = readState(w.dir).fingerprint;
+    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
+    assert.deepEqual(r, { ok: false, file: null, why: RENDER_SAY.odd });
+    assert.deepEqual(metas(w), []);
+    assert.equal(readState(w.dir).fingerprint, before);
+    assert.notEqual(readState(w.dir).state, "rendered");
+  });
+
+  it("keeps nothing as an export when the edit was taken out of ready while it rendered", async () => {
+    const w = world({ scenario: "restate" });
+    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
+    assert.deepEqual(r, { ok: false, file: null, why: RENDER_SAY.moved });
+    assert.deepEqual(metas(w), []);
+    assert.equal(readState(w.dir).state, "queued", "the job that took it is left its own state");
+  });
+
+  it("says the render finished, but its record couldn't be written", () => {
+    assert.match(RENDER_SAY.unrecorded, /render(ed)? (finished|was made)/i);
+    assert.match(RENDER_SAY.unrecorded, /nothing was kept as an export/);
+    for (const line of Object.values(RENDER_SAY)) if (typeof line === "string" && /nothing was kept/.test(line)) assert.match(line, /nothing was kept as an export/, line);
   });
 });

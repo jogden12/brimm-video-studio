@@ -19,10 +19,14 @@
 // Kit in an environment of its own that carries no variable of a test's:
 //   - REEL_KIT_STANDIN_LOG: a file each run appends a JSON line to: the script's name, its arguments, and the Reel Kit and offline
 //     variables it was given;
-//   - REEL_KIT_STANDIN: the scenario. `fail` (the script prints a line on stderr and ends 1) and `qa-fail` (qa.py fails, so render.py
-//     does); later tasks add theirs (no-ready, usage-limit).
+//   - REEL_KIT_STANDIN: the scenario, one or more words: `fail` (the script prints a line on stderr and ends 1) and `qa-fail` (qa.py
+//     fails, so render.py does); and for render.py what a run might leave that is not its own (Task 14, fix round 1): `app-edit` (public/
+//     changed as the HyperFrames app would, while it renders), `plant` (cards/c1/Claude.md, one of Studio's own names), `renders-link`
+//     (renders/ made a link out of the project before it renders into it), `cli-meta` (a record of its own in public/renders/), `link` (a
+//     link in public/media/) and `restate` (studio.json taken to `queued`, as a job that took the edit would); later tasks add theirs
+//     (no-ready, usage-limit).
 import { spawnSync } from "node:child_process";
-import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -40,7 +44,8 @@ const stop = (line, code = 1) => {
   process.stderr.write(`${line}\n`);
   process.exit(code);
 };
-if (process.env.REEL_KIT_STANDIN === "fail") stop(`${name}: failed, as the test asked`);
+const scenes = new Set(String(process.env.REEL_KIT_STANDIN ?? "").split(/\s+/).filter(Boolean));
+if (scenes.has("fail")) stop(`${name}: failed, as the test asked`);
 
 /** The value after a flag, and the arguments with the flag and its value taken out. */
 function flagged(list, flags) {
@@ -93,6 +98,24 @@ const SCRIPTS = {
     mkdirSync(pub, { recursive: true });
     writeFileSync(join(pub, "build.json"), `${JSON.stringify({ built: "by build.py", title: said("TITLE") })}\n`);
     process.stdout.write("hyperframes check: ok\n");
+    // What the scenario says the run leaves that is not its own.
+    if (scenes.has("app-edit")) writeFileSync(join(pub, "index.html"), "<html>changed in the app while it rendered</html>\n");
+    if (scenes.has("plant")) writeFileSync(join(project, "cards", "c1", "Claude.md"), "planted\n");
+    if (scenes.has("link")) symlinkSync(dirname(project), join(pub, "elsewhere"));
+    if (scenes.has("restate")) {
+      const state = JSON.parse(readFileSync(join(project, "studio.json"), "utf8"));
+      writeFileSync(join(project, "studio.json"), `${JSON.stringify({ ...state, state: "queued", job: "revise" })}\n`);
+    }
+    if (scenes.has("renders-link")) {
+      const out = join(dirname(project), "renders elsewhere");
+      mkdirSync(out, { recursive: true });
+      rmSync(join(project, "renders"), { recursive: true, force: true });
+      symlinkSync(out, join(project, "renders"));
+    }
+    if (scenes.has("cli-meta")) {
+      mkdirSync(join(pub, "renders"), { recursive: true });
+      writeFileSync(join(pub, "renders", `${basename(project)}_2026-01-02_03-04-05.meta.json`), `${JSON.stringify({ status: "complete", exportedTo: join(project, "renders", `${name}.mp4`) })}\n`);
+    }
     mkdirSync(join(project, "renders"), { recursive: true });
     mkdirSync(join(pub, "snapshots"), { recursive: true });
     writeFileSync(join(pub, "snapshots", "frame.png"), "PNG");
@@ -121,7 +144,7 @@ const SCRIPTS = {
     mkdirSync(join(project, "work", "qa"), { recursive: true });
     writeFileSync(join(project, "work", "qa", "cuts_1.jpg"), "JPG");
     process.stdout.write("cuts: work/qa/cuts_1.jpg\nloudness: -14.0 LUFS, peak -1.2 dBFS\n");
-    if (process.env.REEL_KIT_STANDIN === "qa-fail") {
+    if (scenes.has("qa-fail")) {
       process.stdout.write("QA FAIL\n");
       process.exit(1);
     }

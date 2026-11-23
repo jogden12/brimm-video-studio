@@ -248,8 +248,8 @@ export function sweepOwn({ file, dir, aside, said, log = () => {}, entries = own
 
 /** The processes that hold one of `dirs` open, as `lsof -t +D <dir>` lists them (a working folder there, or any open file under it):
     their pids, or null when lsof could not be run or did not take the folder. A folder that is not there, or is not a folder, holds
-    none. */
-function holdersOf(dirs, run) {
+    none. Exported for the render (reel-kit-render.js), which refuses to start while anything holds the project open. */
+export function holdersOf(dirs, run = spawnSync) {
   const pids = new Set();
   for (const dir of dirs) {
     let real;

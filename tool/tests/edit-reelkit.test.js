@@ -250,6 +250,9 @@ describe("following an edit", () => {
 
   it("says each state in her words, a stopped one with the phrase that carries it on", async () => {
     const w = world({ edits: [{ n: 1, state: { state: "working", step: "cut", pid: 4242 } }, { n: 2, state: { state: "ready" } }] });
+    // Ready as finalize leaves it: its edit.py, and its fingerprint recorded (Task 14: status says why a render would refuse it).
+    writeFileSync(join(w.dirOf(2), "edit.py"), `TITLE = "Know your costs"\n`);
+    writeState(w.dirOf(2), { ...readState(w.dirOf(2)), fingerprint: compositionFingerprint(w.dirOf(2)) });
     const r = await reelkit(w, ["status", FOLDER]);
     assert.deepEqual(r.said, [
       `Reel 1 (lo-fi, version 1): This edit stopped at cut before it was done. Say "carry on" and it picks up from there.`,
@@ -568,5 +571,33 @@ describe("her render (plan Task 14)", () => {
     assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${EDIT_SAY.rendered}`]);
     writeState(dir, { ...readState(dir), state: "ready", lastRender: { at: "2026-11-23T10:00:00.000Z", qa: "failed" } });
     assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${EDIT_SAY.renderFailed}`]);
+  });
+
+  it("fix round 1: refuses a revise while it renders, and knows a render's run by its start too", async () => {
+    const w = world({ edits: [{ n: 2 }] });
+    const dir = finalized(w);
+    await reelkit(w, ["note", FOLDER, slugOf(2), "p02", "Shorter."]);
+    assert.equal((await reelkit(w, ["render", FOLDER, slugOf(2)])).code, 0);
+    const r = await reelkit(w, ["revise", FOLDER, slugOf(2)]);
+    assert.deepEqual([r.code, r.said], [1, [EDIT_SAY.renderBusy]]);
+    assert.deepEqual(startedWords(w).map((s) => s[2]), ["render"]);
+    // The mark names its run by pid and start: a pid used again by another process is no render.
+    writeState(dir, { ...readState(dir), rendering: { pid: 50000, start: "Mon Nov 23 10:00:00 2026", at: "2026-11-23T10:00:00.000Z" } });
+    const later = { reelKit: { startOf: () => "Tue Nov 24 09:00:00 2026" } };
+    assert.deepEqual((await reelkit(w, ["status", FOLDER], later)).said, [`${SAID}: ${EDIT_SAY.ready}`]);
+    const same = { reelKit: { startOf: () => "Mon Nov 23 10:00:00 2026" } };
+    assert.deepEqual((await reelkit(w, ["status", FOLDER], same)).said, [`${SAID}: ${EDIT_SAY.renderingNow}`]);
+  });
+
+  it("fix round 1: says why a ready edit won't render, and the lines of a render that left nothing", async () => {
+    const w = world({ edits: [{ n: 2 }] });
+    const dir = finalized(w);
+    writeFileSync(join(dir, "public", "index.html"), "<html>changed in the app</html>\n");
+    assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${nameOf(2)} was changed in HyperFrames, so Reel Kit won't render it: export it from HyperFrames on This Mac.`]);
+    writeFileSync(join(dir, "public", "index.html"), "<html>the composition</html>\n");
+    writeState(dir, { ...readState(dir), lastRender: { at: "2026-11-23T10:00:00.000Z", qa: "passed", why: "record" } });
+    assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${EDIT_SAY.renderUnrecorded}`]);
+    for (const line of [EDIT_SAY.renderFailed, EDIT_SAY.renderBroke, EDIT_SAY.renderUnrecorded]) assert.match(line, /nothing was kept as an export/, line);
+    assert.match(EDIT_SAY.renderUnrecorded, /render(ed)? (finished|was made)/i);
   });
 });

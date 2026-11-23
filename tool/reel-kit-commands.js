@@ -51,7 +51,7 @@ import { PIN as HF_PIN } from "./hyperframes.js";
 import { kitDir, venvPython } from "./reel-kit.js";
 import { MODES, entryOf, modeLeans, modeOf as modeNamed, projectFolderOf, readCapped, readState, scaffold, slugOf, startWhy, writeState } from "./reel-kit-project.js";
 import { JOBS, dequeue, enqueue, processStart, queuedOf, runJob, statusOf, stoppedLine } from "./reel-kit-worker.js";
-import { renderReelKit, renderWhy } from "./reel-kit-render.js";
+import { renderReelKit, renderWhy, renderingBy } from "./reel-kit-render.js";
 import { writeWhole as writeFileWhole } from "./reel-kit-worker-own.js";
 import { episodeWork } from "./settings.js";
 import { PIN, pinFrom } from "./reel-kit.js";
@@ -352,8 +352,9 @@ export const EDIT_SAY = Object.freeze({
   renderNoRun: "Its render couldn't be started on this Mac: say it again, or ask Jason.",
   renderingNow: "it is being rendered, or waiting for its turn to render.",
   rendered: "it is rendered.",
-  renderFailed: "it is built, but its last render didn't pass Reel Kit's own checks, so nothing was kept: ask Jason.",
-  renderBroke: "it is built, but its last render didn't finish, so nothing was kept: ask Jason."
+  renderFailed: "it is built, but its last render didn't pass Reel Kit's own checks, so nothing was kept as an export: ask Jason.",
+  renderBroke: "it is built, but its last render didn't finish, so nothing was kept as an export: ask Jason.",
+  renderUnrecorded: "it is built, and its last render finished, but its record couldn't be written, so nothing was kept as an export: ask Jason."
 });
 
 /** The most of a note she may say: Reel Kit's own storyboard page (serve.py) takes no more. */
@@ -574,19 +575,24 @@ function openFromYou(ctx, dir) {
   }
 }
 
-/** Whether the edit whose studio.json says `state` is marked rendering by a run that still runs (her chat's mark, or the render's own). */
-const renderingNow = (ctx, state) => Number.isInteger(state?.rendering?.pid) && Boolean(ctx.alive?.(state.rendering.pid));
+/** Whether the edit whose studio.json says `state` is marked rendering by a run that still runs (her chat's mark, or the render's own), by
+    its pid and, when recorded, its start (reel-kit-render.js renderingBy). */
+const renderingNow = (ctx, state) => renderingBy(state, (pid) => Boolean(ctx.alive?.(pid)), kitOf(ctx).startOf ?? processStart);
 
-/** An edit's line in `status`, by where it is: its state, and for a ready one, its render, at work or not passed (studio.json `state`). */
-function stateLine(status, state = null) {
+/** An edit's line in `status`, by where it is: its state, and for a ready one, why a render would refuse it (renderWhy) or its last
+    render's outcome (studio.json `state`, in the project `dir`). */
+function stateLine(status, state = null, dir = null) {
   if (status === null) return EDIT_SAY.notHere;
   if (status.state === "queued") return EDIT_SAY.waiting;
   if (status.state === "working") return EDIT_SAY.working(status.step, status.minutesLeft);
   if (status.state === "stopped") return stoppedLine(status);
   if (status.state === "storyboard") return EDIT_SAY.storyboard;
   if (status.state === "ready") {
+    const refused = dir === null ? "" : renderWhy(dir, state);
+    if (refused) return refused;
     const last = state?.lastRender;
     if (last?.qa === "failed") return EDIT_SAY.renderFailed;
+    if (last?.why === "record") return EDIT_SAY.renderUnrecorded;
     return last && typeof last.why === "string" && last.why !== "" ? EDIT_SAY.renderBroke : EDIT_SAY.ready;
   }
   if (status.state === "rendered") return EDIT_SAY.rendered;
@@ -612,7 +618,7 @@ async function editStatus(ctx, words, h) {
   for (const edit of edits) {
     const status = statusFor(ctx, edit.dir);
     const state = edit.dir === null ? null : readState(edit.dir);
-    ctx.say(`${editSaid(edit.key, edit.mode, edit.version)}: ${renderingNow(ctx, state) ? EDIT_SAY.renderingNow : stateLine(status, state)}`);
+    ctx.say(`${editSaid(edit.key, edit.mode, edit.version)}: ${renderingNow(ctx, state) ? EDIT_SAY.renderingNow : stateLine(status, state, edit.dir)}`);
     const needs = (status?.needs ?? []).filter((n) => n && typeof n.text === "string" && typeof n.beat === "string");
     if (!needs.length) continue;
     for (const need of needs) ctx.say(`  ${need.beat}: ${need.text}`);
@@ -696,6 +702,8 @@ async function reviseCommand(ctx, words, h) {
   const got = editFor(ctx, words, h);
   if (got.code !== undefined) return got.code;
   const { found, edit, status } = got;
+  // Its render is building from this very edit: a revise now would be taken for the render's, or the render's for it.
+  if (renderingNow(ctx, readState(edit.dir))) return refuse(ctx, EDIT_SAY.renderBusy);
   if (status?.state !== "storyboard" && status?.state !== "ready") return refuse(ctx, notWaiting(status));
   const notes = readNotes(edit.dir);
   if (notes === null) return refuse(ctx, EDIT_SAY.notesUnread);
@@ -747,7 +755,8 @@ async function renderCommand(ctx, words, h) {
   const pid = startJob(ctx, found, ["render", edit.slug]);
   if (!Number.isInteger(pid)) return refuse(ctx, EDIT_SAY.renderNoRun);
   try {
-    writeState(edit.dir, { ...(readState(edit.dir) ?? {}), rendering: { pid, at: new Date(ctx.now()).toISOString() } });
+    const start = (kitOf(ctx).startOf ?? processStart)(pid);
+    writeState(edit.dir, { ...(readState(edit.dir) ?? {}), rendering: { pid, ...(typeof start === "string" ? { start } : {}), at: new Date(ctx.now()).toISOString() } });
   } catch {
     // The run marks it itself as it starts.
   }
@@ -765,7 +774,7 @@ async function renderNow(ctx, { found, record }, [slug, ...more], h) {
   }
   const kit = kitOf(ctx);
   const render = kit.render ?? renderReelKit;
-  const given = Object.fromEntries(["sandboxExec", "trash", "startOf", "wait", "every", "limit", "grace", "facts"].filter((k) => kit[k] !== undefined).map((k) => [k, kit[k]]));
+  const given = Object.fromEntries(["sandboxExec", "trash", "run", "startOf", "wait", "every", "limit", "grace", "facts"].filter((k) => kit[k] !== undefined).map((k) => [k, kit[k]]));
   const ended = await render(ctx, { dir: edit.dir, entry: edit.entry }, { alive: ctx.alive, log: (line) => ctx.say(line), ...given });
   ctx.say(`Reel Kit's render of ${slug} ${ended.ok ? "is done" : "made nothing to keep"}.${ended.why ? ` ${ended.why}` : ""}`);
   return ended.ok ? 0 : 1;
