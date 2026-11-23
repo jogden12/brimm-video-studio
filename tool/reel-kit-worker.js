@@ -13,8 +13,9 @@
 // at its step, with `why: "usage"`, and a resume carries on that session (`--resume`) from that step, never from the start.
 //
 // Studio's own names in a project (a CLAUDE.md, a .claude folder: reel-kit-worker-tools.js OWN_NAMES) are Studio's alone: it keeps the list
-// of the ones it wrote out of the worker's reach (`ownFile`, `noteOwnFile`), and before and after every run sets aside, out of the
-// project, every one that is not on it (reel-kit-worker-own.js). Either fails the run, `why: "own"`.
+// of the ones it wrote out of the worker's reach (`ownFile`, `noteOwnFile`), and before and after every run, once whatever still holds
+// the project open is stopped, sets aside in its own place (`asideDir`) every one that is not on it (reel-kit-worker-own.js; what
+// Task 17's `reelkit app` owes it is said there). Either fails the run, `why: "own"`.
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, rmSync } from "node:fs";
@@ -26,7 +27,7 @@ import { binDir, kitDir, reelKitEnv, reelKitHome } from "./reel-kit.js";
 import { readCapped, readState, scaffold, writeState } from "./reel-kit-project.js";
 import { factsOf } from "./settings.js";
 import { JOBS, JOB_ENDS, notesOf, startFault, usageLimited, workerPrompt } from "./reel-kit-worker-jobs.js";
-import { noteOwn, sweepOwn, writeWhole } from "./reel-kit-worker-own.js";
+import { noteOwn, stopHolders, sweepOwn, writeWhole } from "./reel-kit-worker-own.js";
 import { WORKER_TOOLS, workerArgs, workerSettings } from "./reel-kit-worker-tools.js";
 import { isRunning } from "./run.js";
 import { findPrograms } from "./unedited.js";
@@ -71,6 +72,14 @@ export const ownFile = (home, slug) => join(appSupport(home), "reel-kit-worker",
     names, as it is now, so that the look over the project leaves it alone while it stays that file: after every write of it, and never
     while a worker runs. It gives the entry noted, and throws for anything but a plain file (reel-kit-worker-own.js noteOwn). */
 export const noteOwnFile = (home, slug, projectDir, rel) => noteOwn(ownFile(home, slug), projectDir, rel);
+/** Where what the look finds is set aside for the project `slug`, `<slug> set aside/<when>/<its path in the project>`: Studio's own place,
+    beside the worker's settings, which its sandbox lets it neither read nor write. A move there is a rename; were it on another disk
+    than the project, nothing would be moved (never a copy and a delete). */
+export const asideDir = (home, slug) => join(appSupport(home), "reel-kit-worker", `${settingsSlug(slug)} set aside`);
+/** Look the project `projectDir` over for Studio's own names and set aside what Studio did not note (reel-kit-worker-own.js sweepOwn, with
+    this project's list and set-aside place): { planted, left }. `said` starts each line of `log`. For a run of the worker, and for
+    Task 17's `reelkit app`, immediately before it opens the app. */
+export const sweepProject = (home, slug, projectDir, { said, log } = {}) => sweepOwn({ file: ownFile(home, slug), dir: projectDir, aside: asideDir(home, slug), said, log });
 /** The record of the worker at work on this Mac, { pid, start, dir, at }: its `claude`, whose process group holds everything it started,
     so that a worker left running by a runner that died is found and stopped before the next one starts. */
 export const macWorkerFile = (home) => join(appSupport(home), "reel-kit-worker.json");
@@ -283,8 +292,12 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
 
   // Studio's own names in the project that Studio did not write (ownFile is its list) are set aside, out of the project, before the run
   // and after it. What is found before it (left by a run whose runner died, say) refuses this run: nothing is started.
-  const look = (said) => sweepOwn({ file: ownFile(home, slug), dir, said, log }).planted;
-  if (look(`One of Studio's own names was in the Reel Kit project ${slug} before its worker started, and is not Studio's`).length) return fail("own");
+  // Before each look, whatever still holds the project or the temp folder open is stopped, so that nothing changes it under the look.
+  const look = async (said) => {
+    await stopHolders({ dirs: [dir, workerTmp(home, slug)], said, run: deps.run, startOf: (pid) => deps.startOf(pid, deps.run), alive: deps.alive, wait, grace, log });
+    return sweepProject(home, slug, dir, { said, log }).planted;
+  };
+  if ((await look(`Before the Reel Kit worker for ${slug} started`)).length) return fail("own");
 
   // Her notes go with the job, so that a resume sends them again.
   const given = resume ? (job === "revise" ? keptNotes(home, slug) : []) : notesOf(notes);
@@ -411,7 +424,7 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
     }
     // Studio's own names left anywhere in the project (a folder moved in, a link): each is set aside and named in the log, and the run
     // fails, also when something threw (the throw goes on its way after).
-    planted = look(`Reel Kit's worker for ${slug} left one of Studio's own names in its project`);
+    planted = await look(`After the Reel Kit worker for ${slug} ended`);
     if (planted.length && !through) {
       try {
         mark({ state: "failed", why: "own", worker: undefined, workerStart: undefined });
@@ -455,18 +468,19 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
     while another job holds it; inside the lock, a worker an earlier runner left running is stopped (macWorkerFile), then, for `make`, its
     project is made (scaffold: her pack synced, the folder, the copy, new.py) and its queue record taken away; then the worker runs, in its
     own process group, which is stopped whole (SIGTERM, then SIGKILL after `grace`) when it runs out of time or does not start as told, and
-    the lock is let go whatever happened. Before the worker is started, and after it has ended (also when something threw), the project
-    is looked over for Studio's own names (reel-kit-worker-own.js sweepOwn): each that Studio did not note (`noteOwnFile`), or that is
-    no longer the file noted, is moved to `<project folder> set aside/<when>/` beside the project, never deleted, and the run is
+    the lock is let go whatever happened. Before the worker is started, and after it has ended (also when something threw), every
+    process that still holds the project or the run's temp folder open is killed (reel-kit-worker-own.js stopHolders) and the project
+    is looked over for Studio's own names (sweepOwn): each that Studio did not note (`noteOwnFile`), or that is no longer the file
+    noted, is moved to `asideDir`'s `<slug> set aside/<when>/`, out of the worker's reach, never deleted, and the run is
     `failed`, `why: "own"`; found before the worker starts, nothing is started. A project whose run is running is left as it is: { state, why: "running" }; one whose run died
     but whose `claude` still runs is queued, and that `claude` stopped once this job holds the Mac.
     `deps`: `claude` (the program; findPrograms' by default), `scaffold` and `scaffoldDeps`, `alive`, `startOf` (processStart), `wait` (ms
     to a promise), `every` (how often, in ms, the lock and the status file are looked at), `limit`, `grace`, `facts` (settings.js factsOf of
-    ctx.settings by default), `log`, and `started`, called with the `claude` pid once it runs (a test's, to throw there). `ctx`: `home`, `settings` (this Mac's: BRIMM Video's place for the sandbox), `checkout`, `node`, `base`. */
+    ctx.settings by default), `log`, `run` (spawnSync: `lsof` and `ps`, for what holds the project open), and `started`, called with the `claude` pid once it runs (a test's, to throw there). `ctx`: `home`, `settings` (this Mac's: BRIMM Video's place for the sandbox), `checkout`, `node`, `base`. */
 export async function runJob(ctx, spec, deps = {}) {
   const {
     claude = findPrograms().claude, scaffold: make = scaffold, scaffoldDeps = {}, alive = isRunning, startOf = processStart,
-    wait = (ms) => new Promise((r) => setTimeout(r, ms)), every = 2000, limit = WORKER_MS, grace = 5000, facts, log = () => {}
+    wait = (ms) => new Promise((r) => setTimeout(r, ms)), every = 2000, limit = WORKER_MS, grace = 5000, facts, log = () => {}, run = spawnSync
   } = deps;
   const home = ctx.home;
   let dir = spec.dir ?? null;
@@ -519,7 +533,7 @@ export async function runJob(ctx, spec, deps = {}) {
       if (!isObject(made) || typeof made.dir !== "string") return { state: "failed", why: made?.why ?? "not made", step: "", dir: null };
       dir = made.dir;
     }
-    const ended = await work(ctx, { dir, job, notes: spec.notes ?? [], from, resume: spec.resume }, { claude, log, every, limit, grace, wait, alive, startOf, facts, started: deps.started });
+    const ended = await work(ctx, { dir, job, notes: spec.notes ?? [], from, resume: spec.resume }, { claude, log, every, limit, grace, wait, alive, startOf, facts, run, started: deps.started });
     return { ...ended, dir, ...(made ? { made } : {}) };
   } finally {
     releaseEpisodeLock(lock, took.text);

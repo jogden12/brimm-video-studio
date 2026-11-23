@@ -12,7 +12,8 @@
 //
 // What it allows, and nothing else:
 //   - Read, Glob and Grep inside the project folder and the kit (KIT, read only); Write and Edit inside the project, but never Studio's own
-//     files there (studio.json, the notes for the app's agent, any .claude folder). Every path is judged by its real path: a link inside the
+//     files there (studio.json, the notes for the app's agent, any .claude folder; by name as the Mac's disk folds it, ownName, and by
+//     what the disk itself says the entry is, ownOnDisk). Every path is judged by its real path: a link inside the
 //     project that leads out is refused, a dangling one too, and a path with `..` in it is refused whole, as the system follows a link
 //     before it climbs.
 //   - Bash for one program and its words, nothing a shell would act on (no `;`, `&&`, `||`, `|`, backticks, `$`, redirects, a trailing `&`,
@@ -55,8 +56,9 @@ const cases = (name) => [...new Set([name, name.toLowerCase(), name.toUpperCase(
     folder), by real path in both spellings: Claude Code holds its own file tools to them and merges an Edit() deny rule into the sandbox's
     denyWrite (studio.js, C3), so a sandboxed command can't make them either. A rename is judged only at its target, never by the names
     inside a folder moved, so both writable places are covered: nothing can make the names in the temp folder to move them in whole. A
-    link or a move these rules miss is what Studio's look over the project before and after each run is for (reel-kit-worker-own.js
-    sweepOwn: what Studio did not write under these names is set aside, out of the project). */
+    link or a move these rules miss, and a name spelled in letters the Mac's disk folds into one of these (foldName: the rules name
+    three spellings of each, never every one), is what Studio's look over the project before and after each run is for
+    (reel-kit-worker-own.js sweepOwn: what Studio did not write under these names is set aside, out of the project). */
 const ownEditRules = (...roots) => roots.filter(Boolean).flatMap((path) => bothSpellings(placeOf(path)))
   .flatMap((root) => OWN_NAMES.flatMap((name) => cases(name).map((spelt) => `Edit(/${root}/**/${spelt})`)));
 /** The copy program, by its whole path: one source, one destination, `-R` or no flag. */
@@ -145,13 +147,18 @@ const within = (root, real) => root !== null && real !== null && (real === root 
 const below = (root, real) => root !== null && real !== null && real.startsWith(`${root}${sep}`);
 
 /** Whether a path inside the project (real) is one of Studio's own there, which the worker never writes: studio.json and the files Studio
-    writes it through, the notes for the app's agent (CLAUDE.md, AGENTS.md), and what a later Claude Code or npm would take as settings (any
-    .claude or .git folder, a .mcp.json, an .npmrc). By name in any case, as the Mac's disk takes a name in any case. */
+    writes it through, the notes for the app's agent (CLAUDE.md, AGENTS.md), and what a later Claude Code or npm would take as settings (a
+    .claude or .git folder, a .mcp.json, an .npmrc), as any part of the path. By name as the Mac's disk folds one (ownName: a path not
+    made yet has only its name), and, for each part that is there, by what the disk says it is (ownOnDisk). */
 function studioOwn(projectReal, real) {
-  const parts = relative(projectReal, real).split(sep).map((part) => part.normalize("NFC").toLowerCase());
-  if (parts[0] === "studio.json" || parts[0].startsWith(".studio.json")) return true;
-  if (parts.includes(".claude") || parts.includes(".git")) return true;
-  return ["claude.md", "claude.local.md", "agents.md", ".mcp.json", ".npmrc"].includes(parts.at(-1));
+  const parts = relative(projectReal, real).split(sep);
+  if (parts.some(ownName)) return true;
+  let at = projectReal;
+  for (const part of parts) {
+    if (ownOnDisk(at, part)) return true;
+    at = join(at, part);
+  }
+  return false;
 }
 
 /** The roots a decision is made against, by their real paths. */
@@ -272,49 +279,61 @@ const isFolder = (real) => {
   }
 };
 
-/** Whether a name is one of Studio's own, in any case: the names a copy never brings into the project, anywhere in what it copies (a `-R`
-    of a folder, or its contents when spelled with a trailing `/`), and the ones Studio looks the project over for (ownEntries). */
+/** A name folded as the Mac's disk folds one, near enough: APFS takes two names for one when they are equal under Unicode's full case
+    folding, so `AGENT\u017F.md` (a long s) opens AGENTS.md and `\uFB06udio.json` (an st ligature) opens studio.json, which a plain
+    toLowerCase misses. Compatibility composition, then capitals, then small letters: the long s, the ligatures and the Kelvin sign come
+    out as s, st and k. It takes a few names for Studio's that the disk would not (a dotless i), never the other way for these names;
+    a zero-width joiner or a Cyrillic letter stays what it is. */
+export const foldName = (name) => name.normalize("NFKC").toUpperCase().toLowerCase();
+const OWN_FOLDED = Object.freeze(OWN_NAMES.map(foldName));
+
+/** Whether a name is one of Studio's own, as the Mac's disk would fold it (foldName): the names a copy never brings into the project,
+    anywhere in what it copies (a `-R` of a folder, or its contents when spelled with a trailing `/`), the ones the hook refuses a write
+    to, and the ones Studio looks the project over for (reel-kit-worker-own.js ownEntries). The only test there is for a name not on the
+    disk yet; for one that is, ownIds asks the disk too. */
 export const ownName = (name) => {
-  const n = name.normalize("NFC").toLowerCase();
-  return n === "studio.json" || n.startsWith(".studio.json") || [".claude", ".git", "claude.md", "claude.local.md", "agents.md", ".mcp.json", ".npmrc"].includes(n);
+  const n = foldName(name);
+  return n.startsWith(".studio.json") || OWN_FOLDED.includes(n);
 };
 
-/** Every entry under the project `dir` whose name ownName says is Studio's own, in any case, each by its path inside (parted by `/`) and
-    what it is (`kind`: "file", "folder", "link" or "other"), links looked at and never followed, and a folder under one of the names
-    looked into as any other: but studio.json and its writing files at the top, which Studio writes itself. Whether each is one Studio
-    wrote is reel-kit-worker-own.js's to say (sweepOwn), before and after every run. null for a tree too large to look over (200,000
-    entries) or one that can't be read. */
-export function ownEntries(dir) {
-  const found = new Map();
-  let seen = 0;
-  const walk = (folder, rel) => {
-    for (const name of readdirSync(folder)) {
-      if (++seen > 200000) throw new Error("too many");
-      const path = join(folder, name);
-      const inside = rel ? `${rel}/${name}` : name;
-      const kind = lstatSync(path);
-      const top = rel === "" && (name.toLowerCase() === "studio.json" || name.toLowerCase().startsWith(".studio.json"));
-      if (ownName(name) && !top) found.set(inside, { kind: kind.isSymbolicLink() ? "link" : kind.isDirectory() ? "folder" : kind.isFile() ? "file" : "other" });
-      if (kind.isDirectory()) walk(path, inside);
+/** One file on the disk, by its device and inode. */
+export const idOf = (stat) => `${stat.dev}:${stat.ino}`;
+/** What Studio's own names, spelled plainly, are in `folder` on the disk now: the ids (idOf) of those that are there, no link followed.
+    An entry of the folder with one of these ids is one of Studio's names whatever letters spell it, since the disk opened it by the
+    plain spelling: the disk's own answer, which no folding of ours has to match. */
+export function ownIds(folder) {
+  const ids = new Set();
+  for (const name of OWN_NAMES) {
+    try {
+      ids.add(idOf(lstatSync(join(folder, name))));
+    } catch {
+      // not there
     }
-  };
+  }
+  return ids;
+}
+/** Whether the entry `name` of `folder` is there and is, on the disk, one of Studio's own names spelled plainly (ownIds). */
+function ownOnDisk(folder, name) {
   try {
-    walk(dir, "");
-    return found;
+    return ownIds(folder).has(idOf(lstatSync(join(folder, name))));
   } catch {
-    return null;
+    return false;
   }
 }
 
-/** Whether the folder at the real path `real`, and everything under it, holds no name ownName refuses: links are looked at, never followed
-    (cp -R copies a link as a link). A tree of more than 20,000 entries is refused. */
+/** Whether the folder at the real path `real`, and everything under it, holds none of Studio's own names, by name (ownName) or by what
+    the disk says an entry is (ownIds): links are looked at, never followed (cp -R copies a link as a link). A tree of more than 20,000
+    entries is refused. */
 function cleanTree(real) {
   let seen = 0;
   const walk = (dir) => {
+    const ids = ownIds(dir);
     for (const name of readdirSync(dir)) {
       if (++seen > 20000 || ownName(name)) return false;
       const path = join(dir, name);
-      if (lstatSync(path).isDirectory() && !walk(path)) return false;
+      const entry = lstatSync(path);
+      if (ids.has(idOf(entry))) return false;
+      if (entry.isDirectory() && !walk(path)) return false;
     }
     return true;
   };
@@ -336,7 +355,7 @@ function copyAnswer(words, cwd, roots) {
   if (!roots.copyFrom.some((root) => within(root, from)) || !within(roots.project, to)) return false;
   const lands = isFolder(to) ? realOf(join(to, basename(from))) : to;
   if (!within(roots.project, lands) || studioOwn(roots.project, to) || studioOwn(roots.project, lands)) return false;
-  return recursive ? cleanTree(from) : !ownName(basename(from));
+  return recursive ? cleanTree(from) : !ownName(basename(from)) && !ownOnDisk(dirname(from), basename(from));
 }
 
 /** The hook's answer to HyperFrames' render, with its words after `render`: a card's alone, run in a folder under the project's cards/, with

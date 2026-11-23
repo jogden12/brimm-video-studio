@@ -2,24 +2,42 @@
 //
 // A CLAUDE.md, an AGENTS.md, a .claude folder and the rest of OWN_NAMES are what a later Claude Code (the HyperFrames app's agent, in the
 // project's public/) takes as its instructions and settings, so none may be the worker's. The sandbox and the hook keep the worker from
-// making them; this is what holds when one gets in anyway (a folder moved in whole, a link). The project itself can't say which of them
-// are Studio's, since the worker writes there, so Studio keeps the list of the ones it wrote outside the project, beside the worker's
-// settings (reel-kit-worker.js ownFile): each by its path, what file it is (device, inode, size, change time) and its SHA-256
-// (`noteOwn`). `sweepOwn` looks the project over, before every run and after it: every entry under one of the names that is not on the
-// list, or is not the file noted, is moved out of the project, into `<project folder> set aside/<when>/<its path>` beside it, by
-// renaming (a link is moved as itself; nothing is ever deleted or written over), and named in the log. The run it was found at fails.
+// making them; this is what holds when one gets in anyway (a folder moved in whole, a link, a name in letters the disk folds into one
+// of them). The project itself can't say which of them are Studio's, since the worker writes there, so Studio keeps the list of the
+// ones it wrote outside the project, beside the worker's settings (reel-kit-worker.js ownFile): each by its path, what file it is
+// (device, inode, size, change time) and its SHA-256 (`noteOwn`). `sweepOwn` looks the project over, before every run and after it:
+// every entry under one of the names that is not on the list, or is not the file noted, is moved out of the project, into Studio's own
+// place beside that list (reel-kit-worker.js asideDir: `<slug> set aside/<when>/<its path>`, where the worker can neither read nor
+// write), by renaming (a link is moved as itself; nothing is ever copied, deleted or written over), and named in the log. The run it
+// was found at fails.
+//
+// The look is not sandboxed, so it must not be steered: by then nothing of the worker's should run (`stopHolders`, before each look,
+// kills what still holds the project or its temp folder open), and each step is checked against the one before it. The walk
+// (`ownEntries`) goes into a folder only when its real path is where the walk is and it is the folder it looked at (device and inode),
+// before and after reading it; each move is made only when, just before it, the entry's folder is still at its real path inside the
+// project and the entry is still the one the walk saw. Anything else is refused: the entry is left, said in the log, and the run
+// fails. A SMALL WINDOW STAYS: Node has no openat or renameat, so between that last check and the rename itself a process that got
+// away (one holding nothing open in the project, which `stopHolders` can't find) could still swap a folder for a link. What was moved
+// is looked at once more where it landed, and said loudly when it is not what was found.
+//
+// For Task 17 (`reelkit app`, which opens the HyperFrames app on a project's public/): run the look (reel-kit-worker.js sweepProject)
+// immediately before opening the app, and open nothing when it finds anything; call `noteOwnFile` after each write of
+// public/CLAUDE.md and public/AGENTS.md (a write changes the file's inode or change time, so one not noted again is set aside at the
+// next look); and decide how the app's own writes under public/.claude/ are treated, since as it stands the next look sets that
+// folder aside whole and fails that run (Studio did not write it).
+import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { readCapped } from "./reel-kit-project.js";
-import { ownEntries, ownName } from "./reel-kit-worker-tools.js";
+import { foldName, idOf, ownIds, ownName } from "./reel-kit-worker-tools.js";
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 /** The most of a noted file read for its SHA-256: notes for an agent are a few KB, and anything larger is not Studio's. */
 const OWN_MOST = 8 << 20;
 /** What a noted file is known by. */
 const FACTS = Object.freeze(["dev", "ino", "size", "ctimeMs", "sha256"]);
-/** What stands for a project that could not be looked over, where a path would be. */
+/** What stands for a project that could not be looked over, where a path would be: its line in the log is its own. */
 export const UNSEEN = "(the project could not be looked over)";
 
 /** Write a file whole: under a name of this run's own beside it, then renamed. */
@@ -95,19 +113,63 @@ export function noteOwn(file, dir, rel) {
   return entry;
 }
 
-/** A new folder for one look's finds, `<project folder> set aside/<when>` beside the project (real path `real`), made by this call alone:
-    its whole path. Throws when it can't be made, or when what is at `<project folder> set aside` is not a folder. */
-function asideFor(real) {
-  const root = join(dirname(real), `${basename(real)} set aside`);
+/** Two paths that are one on the Mac's disk whichever way an accent is written. */
+const samePath = (a, b) => a.normalize("NFC") === b.normalize("NFC");
+const coded = (code, message) => Object.assign(new Error(message), { code });
+
+/** Every entry under the project `dir` that is one of Studio's own names, each by its path inside (parted by `/`) and what it is,
+    { kind, dev, ino } (`kind`: "file", "folder", "link" or "other"): by name as the Mac's disk folds one (ownName), or because the disk
+    says it is the entry one of the names spelled plainly opens (ownIds: asked in every folder walked). But studio.json and its writing
+    files at the top, which Studio writes itself. Links are looked at and never followed, and a folder under one of the names is looked
+    into as any other. A folder is gone into only when its real path is where the walk is, inside the project, and it is still the
+    folder the walk looked at once it has been read (device and inode): a folder swapped for a link meanwhile gives up the whole look.
+    Whether each entry is one Studio wrote is sweepOwn's to say. null for a tree too large to look over (200,000 entries), one that
+    can't be read, or one that changed under the walk. `read` is readdirSync (a test's, to change the tree under it). */
+export function ownEntries(dir, { read = readdirSync } = {}) {
+  const found = new Map();
+  let seen = 0;
+  let root;
+  const walk = (folder, rel, was) => {
+    if (!samePath(realpathSync.native(folder), folder)) throw coded("ELOOP", "a folder is not where it was");
+    const names = read(folder);
+    const now = lstatSync(folder);
+    if (!now.isDirectory() || idOf(now) !== idOf(was)) throw coded("ELOOP", "a folder is not the one looked at");
+    const ids = ownIds(folder);
+    for (const name of names) {
+      if (++seen > 200000) throw coded("E2BIG", "too many");
+      const path = join(folder, name);
+      const inside = rel ? `${rel}/${name}` : name;
+      const entry = lstatSync(path);
+      const folded = foldName(name);
+      const top = rel === "" && (folded === "studio.json" || folded.startsWith(".studio.json"));
+      if ((ownName(name) || ids.has(idOf(entry))) && !top) {
+        found.set(inside, { kind: entry.isSymbolicLink() ? "link" : entry.isDirectory() ? "folder" : entry.isFile() ? "file" : "other", dev: entry.dev, ino: entry.ino });
+      }
+      if (entry.isDirectory()) walk(path, inside, entry);
+    }
+  };
   try {
-    mkdirSync(root);
+    root = realpathSync.native(dir);
+    walk(root, "", lstatSync(root));
+    return found;
+  } catch {
+    return null;
+  }
+}
+
+/** A new folder for one look's finds, `<aside>/<when>`, made by this call alone: its whole path. `aside` is Studio's own place for the
+    project (reel-kit-worker.js asideDir). Throws when it can't be made, or when what is at `aside` is not a folder. */
+function asideFor(aside) {
+  mkdirSync(dirname(aside), { recursive: true });
+  try {
+    mkdirSync(aside);
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
   }
-  if (!lstatSync(root).isDirectory()) throw Object.assign(new Error("set aside: not a folder"), { code: "ENOTDIR" });
+  if (!lstatSync(aside).isDirectory()) throw coded("ENOTDIR", "set aside: not a folder");
   const when = new Date().toISOString().replace(/[:.]/g, "-");
   for (let n = 1; ; n++) {
-    const place = join(root, n === 1 ? when : `${when} ${n}`);
+    const place = join(aside, n === 1 ? when : `${when} ${n}`);
     try {
       mkdirSync(place);
       return place;
@@ -117,49 +179,130 @@ function asideFor(real) {
   }
 }
 
-/** Look the project `dir` over for Studio's own names (reel-kit-worker-tools.js ownEntries: any case, no link followed, the top's
-    studio.json and its writing files left out) and set aside every one that Studio did not write: not on the list in the record `file`
-    by its path, or on it but not the file noted (any of device, inode, size, change time or SHA-256 differs, or it is no longer a plain
-    file). Each is moved by renaming, as it is (a link as a link, a folder whole, what is under it going with it), to
-    `<project folder> set aside/<when>/<its path>`, and named in a line of `log` that starts with `said`. Gives { planted, left }: the
-    paths found, and those of them still in the project because they could not be moved (said in the log too). A project that can't be
-    looked over gives UNSEEN in both. Never throws, never deletes, never writes over anything. */
-export function sweepOwn({ file, dir, said, log = () => {} }) {
+/** Why an entry could not be set aside, in a few words. */
+const whyLeft = (e) => (e.code === "EXDEV" ? "Studio's set-aside folder is on another disk, and nothing is ever copied there" : e.code === "ESTALE" ? e.message : e.code || e.message);
+
+/** Look the project `dir` over for Studio's own names (ownEntries) and set aside every one that Studio did not write: not on the list in
+    the record `file` by its path, or on it but not the file noted (any of device, inode, size, change time or SHA-256 differs from the
+    note or from what the walk saw, or it is no longer a plain file). Each is moved by renaming, as it is (a link as a link, a folder
+    whole, what is under it going with it), to `<aside>/<when>/<its path>`, and named in a line of `log` that starts with `said` and
+    says it "is not the file Studio noted". Just before each move the entry's folder must still be at its real path inside the
+    project, and the entry the one the walk saw (device and inode); if not, or the rename fails (EXDEV, when `aside` is on another
+    disk: never a copy and a delete), it is left where it is and said to be still in the project. What landed is looked at again, and
+    said loudly when it is not what was found. Gives { planted, left }: the paths found, and those of them not moved. A project that
+    can't be looked over gives UNSEEN in both, with a line of its own. Never throws, never copies, deletes or writes over anything.
+    `entries` and `rename` are ownEntries and renameSync (a test's, to change the tree between the steps). */
+export function sweepOwn({ file, dir, aside, said, log = () => {}, entries = ownEntries, rename = renameSync }) {
   try {
-    const found = ownEntries(dir);
+    const real = realpathSync.native(dir);
+    const found = entries(real);
     if (found === null) {
-      log(`${said}: ${UNSEEN}`);
+      log(`${said}, the project could not be looked over.`);
       return { planted: [UNSEEN], left: [UNSEEN] };
     }
     const noted = new Map(readOwn(file).map((entry) => [entry.path, entry]));
     const studios = (rel) => {
       const entry = noted.get(rel);
-      if (!entry) return false;
-      const facts = factsOf(join(dir, rel));
-      return facts !== null && FACTS.every((key) => facts[key] === entry[key]);
+      const saw = found.get(rel);
+      if (!entry || saw.kind !== "file") return false;
+      const facts = factsOf(join(real, rel));
+      return facts !== null && FACTS.every((key) => facts[key] === entry[key]) && facts.dev === saw.dev && facts.ino === saw.ino;
     };
     const planted = [...found.keys()].filter((rel) => !studios(rel)).sort();
     // What is under a folder that is itself moved goes with it.
     const tops = planted.filter((rel) => !planted.some((other) => rel.startsWith(`${other}/`)));
     const left = [];
-    let real = null;
     let place = null;
     for (const rel of tops) {
+      const what = `${said}, ${rel} in the project is under one of Studio's own names and is not the file Studio noted`;
       try {
-        real ??= realpathSync(dir);
-        place ??= asideFor(real);
+        const saw = found.get(rel);
+        const from = join(real, rel);
+        place ??= asideFor(aside);
         const to = join(place, rel);
         mkdirSync(dirname(to), { recursive: true });
-        renameSync(join(real, rel), to);
-        log(`${said}: ${rel} (set aside in "${basename(dirname(place))}/${basename(place)}", beside the project)`);
+        // The last look before the move: its folder is where it was, by real path, and it is the entry the walk saw.
+        if (!samePath(realpathSync.native(dirname(from)), dirname(from))) throw coded("ESTALE", "its folder is no longer where it was");
+        const now = lstatSync(from);
+        if (now.dev !== saw.dev || now.ino !== saw.ino) throw coded("ESTALE", "it is no longer the entry that was looked at");
+        rename(from, to);
+        const landed = lstatSync(to);
+        if (landed.dev !== saw.dev || landed.ino !== saw.ino) {
+          left.push(rel);
+          log(`${what}: WHAT WAS MOVED IS NOT WHAT WAS FOUND (the project changed under the move). It is in "${basename(aside)}/${basename(place)}/${rel}", in Studio's place for the worker: look at it by hand.`);
+          continue;
+        }
+        log(`${what}: it was set aside in "${basename(aside)}/${basename(place)}", in Studio's place for the worker.`);
       } catch (e) {
         left.push(rel);
-        log(`${said}: ${rel} (it could not be set aside, ${e.code || e.message}: it is still in the project)`);
+        log(`${what}: it could not be set aside (${whyLeft(e)}), and is still in the project.`);
       }
     }
     return { planted, left };
   } catch (e) {
-    log(`${said}: ${UNSEEN} (${e.code || e.message})`);
+    log(`${said}, the project could not be looked over (${e.code || e.message}).`);
     return { planted: [UNSEEN], left: [UNSEEN] };
+  }
+}
+
+/** The processes that hold one of `dirs` open, as `lsof -t +D <dir>` lists them (a working folder there, or any open file under it):
+    their pids, or null when lsof could not be run or did not take the folder. A folder that is not there, or is not a folder, holds
+    none. */
+function holdersOf(dirs, run) {
+  const pids = new Set();
+  for (const dir of dirs) {
+    let real;
+    try {
+      if (!lstatSync(dir).isDirectory()) continue;
+      real = realpathSync.native(dir);
+    } catch {
+      continue;
+    }
+    let ran;
+    try {
+      ran = run("/usr/sbin/lsof", ["-t", "+D", real], { encoding: "utf8", timeout: 120000, env: { LC_ALL: "C" } });
+    } catch {
+      return null;
+    }
+    // lsof ends 1 when no one holds it; its usage text is how it says it could not look.
+    if (!ran || ran.error || !Number.isInteger(ran.status) || (ran.status !== 0 && /usage:/.test(String(ran.stderr ?? "")))) return null;
+    for (const line of String(ran.stdout ?? "").split("\n")) if (/^\d+$/.test(line.trim())) pids.add(Number(line.trim()));
+  }
+  return [...pids];
+}
+
+/** Stop what still runs with the project or the run's temp folder open, before the project is looked over: a process the worker
+    started that left its process group (a new session from the edit.py it wrote, say) is not stopped with the group, and could change
+    the project under the look. Every process whose working folder or any open file is inside one of `dirs` (holdersOf), but this one
+    and the one that started it (`spare`), is killed with SIGKILL, once `startOf(pid)` has said when it started: a pid whose start can't
+    be read is never killed (it is gone, or not ours to name), and is said to be left running. Then it waits, up to `grace` ms, for
+    them to be gone, and asks again, three times at most. Each is a line of `log` starting with `said`. It kills ANY process of this
+    user that holds the project open, a Terminal left in it and the HyperFrames app's agent in its public/ among them: Task 17 must
+    not start a worker on a project the app has open. A process holding nothing open there is not found: the checks of each step
+    (ownEntries, sweepOwn) are what is left for that. Never throws. */
+export async function stopHolders({ dirs, said, run = spawnSync, startOf, alive, wait, grace = 5000, log = () => {}, spare = [process.pid, process.ppid], kill = process.kill.bind(process) }) {
+  try {
+    for (let round = 0; round < 3; round++) {
+      const pids = holdersOf(dirs, run);
+      if (pids === null) return void log(`${said}, what still holds the project open could not be asked of lsof: nothing was stopped.`);
+      const killed = [];
+      for (const pid of pids.filter((p) => !spare.includes(p))) {
+        if (startOf(pid) === null) {
+          log(`${said}, process ${pid} holds the project or its temp folder open, but when it started could not be read: it was left running.`);
+          continue;
+        }
+        try {
+          kill(pid, "SIGKILL");
+          killed.push(pid);
+          log(`${said}, process ${pid} still held the project or its temp folder open, and was stopped.`);
+        } catch (e) {
+          log(`${said}, process ${pid} holds the project or its temp folder open and could not be stopped (${e.code || e.message}).`);
+        }
+      }
+      if (!killed.length) return;
+      for (let waited = 0; waited < grace && killed.some((pid) => alive(pid)); waited += 25) await wait(25);
+    }
+  } catch (e) {
+    log(`${said}, what still holds the project open could not be stopped (${e.code || e.message}).`);
   }
 }

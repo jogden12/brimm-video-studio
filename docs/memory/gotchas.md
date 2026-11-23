@@ -121,6 +121,12 @@ Lessons from the repo's review notes, the 5 Nov team review, the Mac app reviews
 - **Lesson:** Open any file another program or Dropbox writes the safe way: refuse links and named pipes, open non-blocking, `fstat` type and size before reading.
   - **Why:** Pipes or swapped-in links in a project, Downloads or history hung `guide`, `finish` and the words reader, or read past caps. Fixed with one shared helper.
   - **Source:** build-plan ledger, PRs 8, 10, 11, 15, 16 (2026-10-29). **Times:** 5.
+- **Lesson:** Match a file name the way the Mac's disk does, not with `toLowerCase`: fold with `normalize("NFKC").toUpperCase().toLowerCase()` for a name not made yet, and for one on the disk compare device and inode with the plain spelling's `lstat`.
+  - **Why:** APFS folds by Unicode's full case folding: `AGENTſ.md` (long s) opens `AGENTS.md` and `ﬆudio.json` opens `studio.json`, so the Reel Kit worker's guard and the look over its project both missed them.
+  - **Source:** Reel Kit in Studio, Task 10, fix round 6 (2026-11-23). **Times:** 1.
+- **Lesson:** Code that moves or deletes outside a sandbox, in a folder sandboxed code wrote, checks each step against the last (real path, device, inode) just before it acts, and first stops whatever still holds the folder open.
+  - **Why:** A process that left the worker's process group could swap a project folder for a link between the walk and the `rename`, and steer the move to a folder in the home. Node has no `renameat`, so a small window stays.
+  - **Source:** Reel Kit in Studio, Task 10, fix round 6 (2026-11-23). **Times:** 1.
 - **Lesson:** Before deleting her files, re-check the path at the delete, compare by device and inode, recurse only into real folders, and refuse when the folder may hold the only copy.
   - **Why:** On the case-insensitive disk a folder named two ways lost a session clip's media; a project swapped for a link led `rm` into a decoy.
   - **Source:** build-plan ledger, PR 15 (2026-10-29). **Times:** 3.

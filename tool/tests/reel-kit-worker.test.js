@@ -6,7 +6,7 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,8 @@ import {
   JOBS, OWN_NAMES, WORKER_MODEL, WORKER_TOOLS, jobNotesFile, macLock, macWorkerFile, noteOwnFile, ownFile, processStart, queueFile, queuedFor, runJob, settingsFileOf, statusOf, usageLimited,
   workerArgs, workerDecision, workerPrompt, workerSettings, workerStatusFile, workerTmp
 } from "../reel-kit-worker.js";
+import * as own from "../reel-kit-worker-own.js";
+import * as tools from "../reel-kit-worker-tools.js";
 
 const CHECKOUT = fileURLToPath(new URL("../../", import.meta.url)).replace(/\/$/, "");
 const STAND_IN = fileURLToPath(new URL("./stand-ins/claude-worker.mjs", import.meta.url));
@@ -89,7 +91,14 @@ function standIn(w, scenario = "", extra = {}) {
 
 /** What runJob is given on this made-up Mac. */
 const ctxOf = (w) => ({ home: w.home, checkout: CHECKOUT, node: process.execPath, base: { HOME: w.home, LANG: "en_US.UTF-8" }, settings: settingsOf(w.home) });
-const depsOf = (w, claude, more = {}) => ({ claude: claude.program, every: 20, wait: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 20))), log: () => {}, ...more });
+/** What stands in for the programs runJob runs to find what holds a project open: `lsof` finds `held()` (pids; none by default), and
+    `ps` is the real one. */
+const runOf = (held = () => []) => (program, args, options) => {
+  if (program !== "/usr/sbin/lsof") return spawnSync(program, args, options);
+  const pids = held(args);
+  return { status: pids.length ? 0 : 1, stdout: pids.map((pid) => `${pid}\n`).join(""), stderr: "" };
+};
+const depsOf = (w, claude, more = {}) => ({ claude: claude.program, every: 20, wait: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 20))), log: () => {}, run: runOf(), ...more });
 
 /** Wait until `test()` holds, or fail after a few seconds. */
 async function until(test, what) {
@@ -100,11 +109,11 @@ async function until(test, what) {
   assert.fail(`waited too long for ${what}`);
 }
 
-/** Where Studio sets aside what it did not write under its own names: beside the project, one folder per look over it. */
-const asideOf = (w) => join(dirname(w.project), `${basename(w.project)} set aside`);
+const SLUG = "abc123-reel-2-v1";
+/** Where Studio sets aside what it did not write under its own names: beside the worker's settings, out of its reach, one folder per look. */
+const asideOf = (w) => join(w.home, "Library", "Application Support", "BRIMM Video", "reel-kit-worker", `${SLUG} set aside`);
 /** The folders of what was set aside, oldest first, each a whole path. */
 const asides = (w) => (existsSync(asideOf(w)) ? readdirSync(asideOf(w)).sort().map((name) => join(asideOf(w), name)) : []);
-const SLUG = "abc123-reel-2-v1";
 const PLANTS = ["sub/CLAUDE.md", "cards/c1/.Claude/settings.json", "fx/f1/agents.MD"];
 
 // A made-up permission matcher, as Claude Code reads its allow and deny rules, enough for the calls below: a bare tool name, a path rule
@@ -277,6 +286,33 @@ describe("the worker's tools", () => {
     // A helper agent's call is judged by the same decision: its Write outside is refused as the worker's is.
     assert.equal(answer(w, call("Write", { file_path: join(outside, "x.txt"), content: "x" }, project, { agent_id: "a1", agent_type: "general-purpose" })), "deny");
     assert.equal(answer(w, call("Write", { file_path: join(project, "cards", "c1", "index.html"), content: "x" }, join(project, "cards", "c1"), { agent_id: "a1", agent_type: "general-purpose" })), "pass");
+  });
+
+  it("knows Studio's own names as the Mac's disk does, whatever letters spell them", () => {
+    const w = world();
+    // The long s, the st ligature and the Kelvin sign fold to s, st and k, as APFS folds them (none of the names holds a k).
+    assert.equal(tools.foldName("AGENT\u017F.md"), "agents.md");
+    assert.equal(tools.foldName("\uFB06udio.json"), "studio.json");
+    assert.equal(tools.foldName("\u212A"), "k");
+    const write = (rel) => answer(w, call("Write", { file_path: join(w.project, rel), content: "x" }, w.project));
+    const edit = (rel) => answer(w, call("Edit", { file_path: join(w.project, rel), old_string: "a", new_string: "b" }, w.project));
+    const copy = (rel) => answer(w, bash(`/bin/cp ${q(join(w.kit, "SKILL.md"))} ${q(join(w.project, rel))}`, w.project));
+    for (const rel of ["public/AGENT\u017F.md", "public/.mcp.j\u017Fon", "\uFB06udio.json", "cards/c1/AGENT\u017F.MD", "sub/.MCP.J\u017FON", "public/\uFB05udio.json"]) {
+      assert.equal(write(rel), "deny", `Write ${rel}`);
+      assert.equal(edit(rel), "deny", `Edit ${rel}`);
+      assert.equal(copy(rel), "deny", `cp to ${rel}`);
+    }
+    // A name that only looks like one of them is not one: a zero-width joiner inside, a Cyrillic letter.
+    for (const rel of ["public/CLAUDE\u200D.md", "public/\u0421LAUDE.md", "public/agent\u0455.md"]) {
+      assert.equal(write(rel), "pass", `Write ${rel}`);
+      assert.equal(copy(rel), "pass", `cp to ${rel}`);
+    }
+    // And a file that is, on the disk, the one under Studio's name is refused under any other name.
+    writeFileSync(join(w.project, "public", "CLAUDE.md"), "Studio's\n");
+    linkSync(join(w.project, "public", "CLAUDE.md"), join(w.project, "public", "notes.md"));
+    assert.equal(write("public/notes.md"), "deny");
+    assert.equal(answer(w, bash(`/bin/cp ${q(join(w.project, "public", "notes.md"))} ${q(join(w.project, "cards", "c1", "notes.md"))}`, w.project)), "deny");
+    assert.equal(write("public/other.md"), "pass");
   });
 
   it("lets the worker copy from Reel Kit and the project into the project, and nothing else", () => {
@@ -916,6 +952,7 @@ describe("the worker's status", () => {
   it("keeps a run failed, and says so, when what was left can't be set aside", async () => {
     const w = world();
     // Where it would be set aside is taken by a file: nothing can be moved there, and nothing is deleted.
+    mkdirSync(dirname(asideOf(w)), { recursive: true });
     writeFileSync(asideOf(w), "in the way\n");
     const lines = [];
     const ended = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, standIn(w, "plant"), { log: (line) => lines.push(line) }));
@@ -927,6 +964,162 @@ describe("the worker's status", () => {
     const again = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, next));
     assert.deepEqual([again.state, again.why], ["failed", "own"]);
     assert.equal(next.runs().length, 0);
+  });
+
+  it("sets aside a name the Mac's disk takes for one of Studio's, whatever letters spell it, and leaves a look-alike", async () => {
+    const w = world();
+    const odd = ["sub/AGENT\u017F.md", "cards/c1/.mcp.j\u017Fon", "fx/f1/\uFB06udio.json"];
+    const alike = ["sub/CLAUDE\u200D.md", "sub/\u0421LAUDE.md"];
+    for (const rel of [...odd, ...alike]) {
+      mkdirSync(dirname(join(w.project, rel)), { recursive: true });
+      writeFileSync(join(w.project, rel), "planted\n");
+    }
+    // The same file on the disk as one of the names spelled plainly is one of them, under any name.
+    writeFileSync(join(w.project, "cards", "c2", "CLAUDE.md"), "planted\n");
+    linkSync(join(w.project, "cards", "c2", "CLAUDE.md"), join(w.project, "cards", "c2", "zzz.md"));
+    const found = own.ownEntries(w.project);
+    assert.deepEqual([...found.keys()].sort(), [...odd, "cards/c2/CLAUDE.md", "cards/c2/zzz.md"].sort());
+    for (const entry of found.values()) assert.deepEqual(Object.keys(entry).sort(), ["dev", "ino", "kind"]);
+
+    const lines = [];
+    const claude = standIn(w);
+    const ended = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, claude, { log: (line) => lines.push(line) }));
+    assert.deepEqual([ended.state, ended.why], ["failed", "own"]);
+    assert.equal(claude.runs().length, 0);
+    const [aside] = asides(w);
+    for (const rel of odd) {
+      assert.ok(!readdirSync(dirname(join(w.project, rel))).includes(basename(rel)), `${rel} is out of the project`);
+      assert.equal(readFileSync(join(aside, rel), "utf8"), "planted\n");
+      assert.ok(lines.some((line) => line.includes(rel) && line.includes("is not the file Studio noted")), rel);
+    }
+    for (const rel of alike) assert.equal(readFileSync(join(w.project, rel), "utf8"), "planted\n", `${rel} is left`);
+    // What is set aside is out of the project's folder and the episode's: beside the worker's settings.
+    assert.equal(dirname(aside), join(dirname(settingsFileOf(w.home, SLUG)), `${SLUG} set aside`));
+    assert.deepEqual(readdirSync(dirname(w.project)), [basename(w.project)]);
+    assert.equal((await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, claude))).state, "storyboard");
+  });
+
+  it("moves nothing when a folder is swapped for a link between the look and the move, and says the entry is still there", () => {
+    const w = world();
+    mkdirSync(join(w.project, "sub"));
+    writeFileSync(join(w.project, "sub", "CLAUDE.md"), "planted\n");
+    writeFileSync(join(w.project, "AGENTS.md"), "planted too\n");
+    writeFileSync(join(w.outside, "CLAUDE.md"), "hers, outside the project\n");
+    const lines = [];
+    // A process that got away swaps the folder for a link to a folder outside, once the project has been looked over.
+    const entries = (dir, deps) => {
+      const found = own.ownEntries(dir, deps);
+      renameSync(join(w.project, "sub"), join(w.project, "sub was"));
+      symlinkSync(w.outside, join(w.project, "sub"));
+      return found;
+    };
+    const swept = own.sweepOwn({ file: ownFile(w.home, SLUG), dir: w.project, aside: asideOf(w), said: "In a test", log: (line) => lines.push(line), entries });
+    assert.deepEqual(swept.planted, ["AGENTS.md", "sub/CLAUDE.md"]);
+    assert.deepEqual(swept.left, ["sub/CLAUDE.md"]);
+    assert.equal(readFileSync(join(w.outside, "CLAUDE.md"), "utf8"), "hers, outside the project\n");
+    assert.ok(lines.some((line) => line.includes("sub/CLAUDE.md") && /could not be set aside/.test(line) && /still in the project/.test(line)), lines.join(" | "));
+    const [aside] = asides(w);
+    assert.equal(readFileSync(join(aside, "AGENTS.md"), "utf8"), "planted too\n", "the one that was where it was found is moved");
+    assert.ok(!existsSync(join(aside, "sub", "CLAUDE.md")), "and nothing else");
+
+    // The entry itself swapped for another file of the same name: not the one looked at, so it is left, and said.
+    const again = (dir, deps) => {
+      const found = own.ownEntries(dir, deps);
+      renameSync(join(w.project, "sub was", "CLAUDE.md"), join(w.project, "sub was", "old.md"));
+      writeFileSync(join(w.project, "sub was", "CLAUDE.md"), "another\n");
+      return found;
+    };
+    const second = own.sweepOwn({ file: ownFile(w.home, SLUG), dir: w.project, aside: asideOf(w), said: "In a test", log: (line) => lines.push(line), entries: again });
+    assert.ok(second.left.includes("sub was/CLAUDE.md"), JSON.stringify(second));
+    assert.equal(readFileSync(join(w.project, "sub was", "CLAUDE.md"), "utf8"), "another\n");
+  });
+
+  it("gives up the look, in a line of its own, when a folder is swapped for a link while it is read", () => {
+    const w = world();
+    mkdirSync(join(w.project, "sub"));
+    writeFileSync(join(w.outside, "CLAUDE.md"), "hers, outside the project\n");
+    const read = (folder) => {
+      const names = readdirSync(folder);
+      if (basename(folder) === "sub") {
+        renameSync(join(w.project, "sub"), join(w.project, "sub was"));
+        symlinkSync(w.outside, join(w.project, "sub"));
+      }
+      return names;
+    };
+    assert.equal(own.ownEntries(w.project, { read }), null);
+    // A link where a folder was is looked at, never into.
+    assert.deepEqual([...own.ownEntries(w.project).keys()], []);
+    const lines = [];
+    const swept = own.sweepOwn({ file: ownFile(w.home, SLUG), dir: join(w.project, "none such"), aside: asideOf(w), said: "In a test", log: (line) => lines.push(line) });
+    assert.deepEqual(swept, { planted: [own.UNSEEN], left: [own.UNSEEN] });
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /the project could not be looked over/);
+    assert.doesNotMatch(lines[0], /is not the file Studio noted/);
+    assert.equal(readFileSync(join(w.outside, "CLAUDE.md"), "utf8"), "hers, outside the project\n");
+  });
+
+  it("never copies what it can't rename: a set-aside folder on another disk leaves the entry where it is", () => {
+    const w = world();
+    mkdirSync(join(w.project, "sub"));
+    writeFileSync(join(w.project, "sub", "CLAUDE.md"), "planted\n");
+    const lines = [];
+    const rename = () => {
+      throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" });
+    };
+    const swept = own.sweepOwn({ file: ownFile(w.home, SLUG), dir: w.project, aside: asideOf(w), said: "In a test", log: (line) => lines.push(line), rename });
+    assert.deepEqual(swept, { planted: ["sub/CLAUDE.md"], left: ["sub/CLAUDE.md"] });
+    assert.equal(readFileSync(join(w.project, "sub", "CLAUDE.md"), "utf8"), "planted\n");
+    assert.ok(lines.some((line) => /another disk/.test(line) && /still in the project/.test(line)), lines.join(" | "));
+    for (const place of asides(w)) assert.ok(!existsSync(join(place, "sub", "CLAUDE.md")), "nothing was copied");
+  });
+
+  it("stops what still holds the project or its temp folder open before each look, and only a process it could name", async () => {
+    const w = world();
+    mkdirSync(join(w.project, "sub"));
+    writeFileSync(join(w.project, "sub", "CLAUDE.md"), "planted\n");
+    // A process that left the worker's group: its own session, its working folder in the project.
+    const sleeper = () => {
+      const child = spawn("/bin/sleep", ["30"], { cwd: w.project, detached: true, stdio: "ignore" });
+      const gone = new Promise((done) => child.on("exit", (code, signal) => done(signal)));
+      return { child, gone };
+    };
+    const first = sleeper();
+    const asked = [];
+    let calls = 0;
+    // lsof's stand-in: the survivor (and this test itself, which is never killed) the first time it is asked, then no one.
+    const held = (args) => {
+      asked.push({ args, planted: existsSync(join(w.project, "sub", "CLAUDE.md")) });
+      return calls++ === 0 ? [first.child.pid, process.pid] : [];
+    };
+    const lines = [];
+    const claude = standIn(w);
+    const ended = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, claude, { run: runOf(held), log: (line) => lines.push(line) }));
+    assert.equal(await first.gone, "SIGKILL");
+    assert.deepEqual([ended.state, ended.why], ["failed", "own"]);
+    // It was asked of the project (the temp folder is not made yet) before the project was looked over.
+    assert.deepEqual(asked[0], { args: ["-t", "+D", realpathSync(w.project)], planted: true });
+    assert.ok(lines.some((line) => line.includes(`process ${first.child.pid}`) && /was stopped/.test(line)), lines.join(" | "));
+    assert.ok(!lines.some((line) => line.includes(`process ${process.pid}`)));
+
+    // After a run too, in the project and the run's temp folder; a process whose start can't be read is never killed.
+    const second = sleeper();
+    asked.length = 0;
+    let afterRun = false;
+    const run = (program, args, options) => {
+      if (program === "/bin/ps") return { status: 1, stdout: "", stderr: "" };
+      if (claude.runs().length === 1) afterRun = true;
+      asked.push(args);
+      return { status: 0, stdout: afterRun ? `${second.child.pid}\n` : "", stderr: "" };
+    };
+    const next = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, claude, { run, log: (line) => lines.push(line) }));
+    assert.equal(next.state, "storyboard");
+    assert.ok(asked.some((args) => args.at(-1) === realpathSync(workerTmp(w.home, SLUG))), JSON.stringify(asked));
+    assert.ok(afterRun);
+    assert.equal(second.child.exitCode, null);
+    assert.equal(second.child.signalCode, null, "it still runs");
+    assert.ok(lines.some((line) => line.includes(`process ${second.child.pid}`) && /left running/.test(line)), lines.join(" | "));
+    second.child.kill("SIGKILL");
+    await second.gone;
   });
 
   it("refuses a job whose project has no slug, so no two projects share a notes file", async () => {
