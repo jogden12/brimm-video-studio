@@ -55,7 +55,8 @@ const cases = (name) => [...new Set([name, name.toLowerCase(), name.toUpperCase(
     folder), by real path in both spellings: Claude Code holds its own file tools to them and merges an Edit() deny rule into the sandbox's
     denyWrite (studio.js, C3), so a sandboxed command can't make them either. A rename is judged only at its target, never by the names
     inside a folder moved, so both writable places are covered: nothing can make the names in the temp folder to move them in whole. A
-    link or a move these rules miss is what Studio's look over the project after each run (ownEntries) is for. */
+    link or a move these rules miss is what Studio's look over the project before and after each run is for (reel-kit-worker-own.js
+    sweepOwn: what Studio did not write under these names is set aside, out of the project). */
 const ownEditRules = (...roots) => roots.filter(Boolean).flatMap((path) => bothSpellings(placeOf(path)))
   .flatMap((root) => OWN_NAMES.flatMap((name) => cases(name).map((spelt) => `Edit(/${root}/**/${spelt})`)));
 /** The copy program, by its whole path: one source, one destination, `-R` or no flag. */
@@ -271,18 +272,17 @@ const isFolder = (real) => {
   }
 };
 
-/** The names a copy never brings into the project, anywhere in what it copies (a `-R` of a folder, or its contents when spelled with a
-    trailing `/`): Studio's own files (studioOwn). */
-const ownName = (name) => {
+/** Whether a name is one of Studio's own, in any case: the names a copy never brings into the project, anywhere in what it copies (a `-R`
+    of a folder, or its contents when spelled with a trailing `/`), and the ones Studio looks the project over for (ownEntries). */
+export const ownName = (name) => {
   const n = name.normalize("NFC").toLowerCase();
   return n === "studio.json" || n.startsWith(".studio.json") || [".claude", ".git", "claude.md", "claude.local.md", "agents.md", ".mcp.json", ".npmrc"].includes(n);
 };
 
-/** Whether the folder at the real path `real`, and everything under it, holds no name ownName refuses: links are looked at, never followed
-    (cp -R copies a link as a link). A tree of more than 20,000 entries is refused. */
-/** Every entry under the project `dir` whose name ownName says is Studio's own, in any case, each by its path inside and what it is (device,
-    inode, size, time), links looked at and never followed: but studio.json and its writing files at the top, which Studio writes itself.
-    Before and after a run, so that what was not there before, or changed, fails the run. null for a tree too large to look over (200,000
+/** Every entry under the project `dir` whose name ownName says is Studio's own, in any case, each by its path inside (parted by `/`) and
+    what it is (`kind`: "file", "folder", "link" or "other"), links looked at and never followed, and a folder under one of the names
+    looked into as any other: but studio.json and its writing files at the top, which Studio writes itself. Whether each is one Studio
+    wrote is reel-kit-worker-own.js's to say (sweepOwn), before and after every run. null for a tree too large to look over (200,000
     entries) or one that can't be read. */
 export function ownEntries(dir) {
   const found = new Map();
@@ -294,7 +294,7 @@ export function ownEntries(dir) {
       const inside = rel ? `${rel}/${name}` : name;
       const kind = lstatSync(path);
       const top = rel === "" && (name.toLowerCase() === "studio.json" || name.toLowerCase().startsWith(".studio.json"));
-      if (ownName(name) && !top) found.set(inside, `${kind.dev}:${kind.ino}:${kind.size}:${kind.mtimeMs}`);
+      if (ownName(name) && !top) found.set(inside, { kind: kind.isSymbolicLink() ? "link" : kind.isDirectory() ? "folder" : kind.isFile() ? "file" : "other" });
       if (kind.isDirectory()) walk(path, inside);
     }
   };
@@ -306,6 +306,8 @@ export function ownEntries(dir) {
   }
 }
 
+/** Whether the folder at the real path `real`, and everything under it, holds no name ownName refuses: links are looked at, never followed
+    (cp -R copies a link as a link). A tree of more than 20,000 entries is refused. */
 function cleanTree(real) {
   let seen = 0;
   const walk = (dir) => {

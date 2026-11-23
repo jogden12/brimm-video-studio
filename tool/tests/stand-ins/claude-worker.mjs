@@ -12,13 +12,15 @@
 //     exit 1), "wait" (every step, but the last only once <project>/work/go-on is there), "hang" (two steps, then nothing until it is
 //     killed), "needs" (CLAUDE_WORKER_NEEDS, a JSON list of {beat, text}, written with the "beats" step and after), "bad-status" (its first
 //     step, then a status file far too large, and nothing more), "unsafe-init" (an init in bypassPermissions mode, then its steps),
-//     "plant" (every step, having left three of Studio's own names deep in the project at its first), "stubborn" (its first step, a `sleep` of its own in its process group, its pid in work/grandchild.pid, SIGTERM ignored, then
+//     "plant" (every step, having left three of Studio's own names deep in the project at its first, and a link for each entry of
+//     CLAUDE_WORKER_LINKS, a JSON object of where in the project to what it leads to),
+//     "stubborn" (its first step, a `sleep` of its own in its process group, its pid in work/grandchild.pid, SIGTERM ignored, then
 //     nothing until it is killed),
 //     "hook" (before its steps, each call of CLAUDE_WORKER_CALLS, a JSON list, handed to the PreToolUse hook its --settings file names, as
 //     Claude Code does: `<command> <args…>` with the call on standard input).
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const args = process.argv.slice(2);
@@ -83,6 +85,11 @@ for (const [i, step] of steps.entries()) {
     for (const rel of ["sub/CLAUDE.md", "cards/c1/.Claude/settings.json", "fx/f1/agents.MD"]) {
       mkdirSync(join(cwd, rel, ".."), { recursive: true });
       writeFileSync(join(cwd, rel), "planted\n");
+    }
+    // And links under those names (CLAUDE_WORKER_LINKS, a JSON object: where in the project to what).
+    for (const [rel, to] of Object.entries(JSON.parse(process.env.CLAUDE_WORKER_LINKS ?? "{}"))) {
+      mkdirSync(join(cwd, rel, ".."), { recursive: true });
+      symlinkSync(to, join(cwd, rel));
     }
   }
   if (scenario === "stubborn" && i === 0) {

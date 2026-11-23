@@ -6,9 +6,9 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { binDir, hfDir, kitDir, reelKitHome, venvPython } from "../reel-kit.js";
 import { readState, writeState } from "../reel-kit-project.js";
@@ -17,7 +17,7 @@ import { bashNeeds, bothSpellings, gatedPlaces, realOf as placeReal } from "../p
 import { studioFolder } from "../studio.js";
 import { CLAUDE_MODEL } from "../unedited.js";
 import {
-  JOBS, OWN_NAMES, WORKER_MODEL, WORKER_TOOLS, jobNotesFile, macLock, macWorkerFile, processStart, queueFile, queuedFor, runJob, settingsFileOf, statusOf, usageLimited,
+  JOBS, OWN_NAMES, WORKER_MODEL, WORKER_TOOLS, jobNotesFile, macLock, macWorkerFile, noteOwnFile, ownFile, processStart, queueFile, queuedFor, runJob, settingsFileOf, statusOf, usageLimited,
   workerArgs, workerDecision, workerPrompt, workerSettings, workerStatusFile, workerTmp
 } from "../reel-kit-worker.js";
 
@@ -99,6 +99,13 @@ async function until(test, what) {
   }
   assert.fail(`waited too long for ${what}`);
 }
+
+/** Where Studio sets aside what it did not write under its own names: beside the project, one folder per look over it. */
+const asideOf = (w) => join(dirname(w.project), `${basename(w.project)} set aside`);
+/** The folders of what was set aside, oldest first, each a whole path. */
+const asides = (w) => (existsSync(asideOf(w)) ? readdirSync(asideOf(w)).sort().map((name) => join(asideOf(w), name)) : []);
+const SLUG = "abc123-reel-2-v1";
+const PLANTS = ["sub/CLAUDE.md", "cards/c1/.Claude/settings.json", "fx/f1/agents.MD"];
 
 // A made-up permission matcher, as Claude Code reads its allow and deny rules, enough for the calls below: a bare tool name, a path rule
 // (`//` an absolute path, `**` anything below it; Glob and Grep are judged by the Read rules), a Bash rule (the command spelled as the rule,
@@ -743,16 +750,183 @@ describe("the worker's status", () => {
 
   it("fails a run that leaves one of Studio's own names anywhere in the project, a folder moved in from its temp folder among them", async () => {
     const w = world();
-    // What Studio wrote there itself before the run (the app's notes, say) is no fault.
+    // What Studio wrote there itself and noted (the app's notes, say) is no fault.
     writeFileSync(join(w.project, "public", "CLAUDE.md"), "Studio's notes for the app's agent\n");
+    noteOwnFile(w.home, SLUG, w.project, "public/CLAUDE.md");
     const clean = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, standIn(w)));
     assert.equal(clean.state, "storyboard");
+    assert.deepEqual(asides(w), []);
     const lines = [];
     const planted = await runJob(ctxOf(w), { dir: w.project, job: "revise" }, depsOf(w, standIn(w, "plant"), { log: (line) => lines.push(line) }));
     assert.deepEqual([planted.state, planted.why], ["failed", "own"]);
     assert.deepEqual(statusOf(w.project).why, "own");
     for (const left of ["sub/CLAUDE.md", "cards/c1/.Claude", "fx/f1/agents.MD"]) assert.ok(lines.some((line) => line.includes(left)), `${left}: ${lines.join(" | ")}`);
     assert.ok(!lines.some((line) => line.includes("public/CLAUDE.md")), "Studio's own, unchanged, is not named");
+
+    // Each is set aside, outside the project, at its own path, and nothing of it is deleted.
+    const [aside, ...more] = asides(w);
+    assert.deepEqual(more, []);
+    for (const rel of PLANTS) {
+      assert.ok(!existsSync(join(w.project, rel)), `${rel} is out of the project`);
+      assert.equal(readFileSync(join(aside, rel), "utf8"), "planted\n", `${rel} is kept`);
+    }
+    assert.ok(!existsSync(join(w.project, "cards", "c1", ".Claude")));
+    assert.equal(readFileSync(join(w.project, "public", "CLAUDE.md"), "utf8"), "Studio's notes for the app's agent\n");
+
+    // The next run has nothing of it to excuse: it runs on a project without them, and they stay set aside.
+    const next = standIn(w);
+    const again = await runJob(ctxOf(w), { dir: w.project, job: "revise" }, depsOf(w, next));
+    assert.deepEqual([again.state, again.why], ["storyboard", ""]);
+    assert.equal(next.runs().length, 1);
+    for (const rel of PLANTS) assert.ok(!existsSync(join(w.project, rel)) && existsSync(join(aside, rel)), rel);
+    assert.deepEqual(asides(w), [aside]);
+  });
+
+  it("sets aside, at the start of the next run, what a run whose runner died left, and starts nothing", async () => {
+    const w = world();
+    // A worker that planted and whose runner died before it looked the project over: the stand-in, run with no runner.
+    const dead = standIn(w, "plant");
+    const ran = spawnSync(dead.program, [], { cwd: w.project, input: "Your steps, in order: beats, build.\n", encoding: "utf8" });
+    assert.equal(ran.status, 0, ran.stderr);
+    for (const rel of PLANTS) assert.ok(existsSync(join(w.project, rel)));
+    writeState(w.project, { ...readState(w.project), state: "working", job: "revise", step: "build", pid: spawnSync("/usr/bin/true").pid });
+    assert.deepEqual([statusOf(w.project).state, statusOf(w.project).why], ["stopped", "died"]);
+
+    const lines = [];
+    const claude = standIn(w);
+    const ended = await runJob(ctxOf(w), { dir: w.project, resume: true }, depsOf(w, claude, { log: (line) => lines.push(line) }));
+    assert.deepEqual([ended.state, ended.why], ["failed", "own"]);
+    assert.equal(claude.runs().length, 0, "nothing was started");
+    assert.deepEqual([readState(w.project).state, readState(w.project).why], ["failed", "own"]);
+    const [aside] = asides(w);
+    for (const rel of PLANTS) {
+      assert.ok(!existsSync(join(w.project, rel)), rel);
+      assert.equal(readFileSync(join(aside, rel), "utf8"), "planted\n");
+    }
+    for (const left of ["sub/CLAUDE.md", "cards/c1/.Claude", "fx/f1/agents.MD"]) assert.ok(lines.some((line) => line.includes(left)), left);
+    assert.ok(!existsSync(macLock(w.home)), "the Mac is let go");
+
+    // And the run after that is on a project without them.
+    const after = await runJob(ctxOf(w), { dir: w.project, job: "revise" }, depsOf(w, claude));
+    assert.equal(after.state, "storyboard");
+    assert.equal(claude.runs().length, 1);
+  });
+
+  it("looks the project over and sets aside what was left even when something throws after the worker started", async () => {
+    const w = world();
+    const started = () => {
+      // What the worker left in the moment before the throw.
+      mkdirSync(join(w.project, "sub"), { recursive: true });
+      writeFileSync(join(w.project, "sub", "CLAUDE.md"), "planted\n");
+      throw new Error("a disk that is full, say");
+    };
+    const lines = [];
+    await assert.rejects(runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, standIn(w, "hang"), { started, grace: 200, log: (line) => lines.push(line) })), /a disk that is full/);
+    assert.ok(!existsSync(join(w.project, "sub", "CLAUDE.md")));
+    const [aside] = asides(w);
+    assert.equal(readFileSync(join(aside, "sub", "CLAUDE.md"), "utf8"), "planted\n");
+    assert.ok(lines.some((line) => line.includes("sub/CLAUDE.md")));
+    assert.deepEqual([readState(w.project).state, readState(w.project).why], ["failed", "own"]);
+    assert.deepEqual([statusOf(w.project).state, statusOf(w.project).why], ["failed", "own"]);
+    assert.ok(!existsSync(macLock(w.home)), "the Mac is let go");
+  });
+
+  it("leaves alone a file Studio noted as its own, and sets it aside once it is changed or was never noted", async () => {
+    const w = world();
+    const notes = join(w.project, "public", "CLAUDE.md");
+    writeFileSync(notes, "Studio's notes for the app's agent\n");
+    writeFileSync(join(w.project, "public", "AGENTS.md"), "Studio's notes, for another agent\n");
+    const noted = noteOwnFile(w.home, SLUG, w.project, "public/CLAUDE.md");
+    noteOwnFile(w.home, SLUG, w.project, "public/AGENTS.md");
+    assert.deepEqual(Object.keys(noted).sort(), ["ctimeMs", "dev", "ino", "path", "sha256", "size"]);
+    assert.equal(noted.path, "public/CLAUDE.md");
+    assert.match(noted.sha256, /^[0-9a-f]{64}$/);
+    // The list is Studio's, beside the worker's settings and her notes, out of the worker's reach.
+    assert.equal(ownFile(w.home, SLUG), join(dirname(settingsFileOf(w.home, SLUG)), `${SLUG}.own.json`));
+    assert.deepEqual(JSON.parse(readFileSync(ownFile(w.home, SLUG), "utf8")).files.map((f) => f.path), ["public/CLAUDE.md", "public/AGENTS.md"]);
+    // Noting it again takes the place of the earlier note.
+    noteOwnFile(w.home, SLUG, w.project, "public/CLAUDE.md");
+    assert.equal(JSON.parse(readFileSync(ownFile(w.home, SLUG), "utf8")).files.length, 2);
+    // Only a plain file under one of Studio's names inside the project is noted: never a link, a folder, or a path that leaves it.
+    symlinkSync(join(w.outside, "x"), join(w.project, "public", ".mcp.json"));
+    assert.throws(() => noteOwnFile(w.home, SLUG, w.project, "public/.mcp.json"));
+    rmSync(join(w.project, "public", ".mcp.json"));
+    assert.throws(() => noteOwnFile(w.home, SLUG, w.project, "../Outside/CLAUDE.md"));
+    assert.throws(() => noteOwnFile(w.home, SLUG, w.project, "edit.py"));
+    assert.throws(() => noteOwnFile(w.home, "../x", w.project, "public/CLAUDE.md"));
+
+    const first = standIn(w);
+    assert.equal((await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, first))).state, "storyboard");
+    assert.equal(first.runs().length, 1);
+    assert.deepEqual(asides(w), []);
+
+    // Changed afterwards, in a way its size does not show: refused, nothing started, and it is set aside as it was found.
+    writeFileSync(notes, "Studio's notes for the app's agenT\n");
+    const second = standIn(w);
+    const lines = [];
+    const refused = await runJob(ctxOf(w), { dir: w.project, job: "revise" }, depsOf(w, second, { log: (line) => lines.push(line) }));
+    assert.deepEqual([refused.state, refused.why], ["failed", "own"]);
+    assert.equal(second.runs().length, 0);
+    assert.ok(!existsSync(notes));
+    assert.equal(readFileSync(join(asides(w)[0], "public", "CLAUDE.md"), "utf8"), "Studio's notes for the app's agenT\n");
+    assert.ok(lines.some((line) => line.includes("public/CLAUDE.md")));
+    assert.ok(existsSync(join(w.project, "public", "AGENTS.md")), "the one not changed stays");
+
+    // The same bytes in another file (a copy put in its place) are not the file Studio wrote.
+    const agents = join(w.project, "public", "AGENTS.md");
+    const text = readFileSync(agents);
+    rmSync(agents);
+    writeFileSync(agents, text);
+    const third = await runJob(ctxOf(w), { dir: w.project, job: "revise" }, depsOf(w, second));
+    assert.deepEqual([third.state, third.why], ["failed", "own"]);
+    assert.ok(!existsSync(agents));
+    assert.equal(asides(w).length, 2);
+
+    // One of Studio's names that Studio never noted is set aside too, whoever wrote it.
+    writeFileSync(join(w.project, "AGENTS.md"), "not noted\n");
+    const fourth = await runJob(ctxOf(w), { dir: w.project, job: "revise" }, depsOf(w, second));
+    assert.deepEqual([fourth.state, fourth.why], ["failed", "own"]);
+    assert.equal(readFileSync(join(asides(w)[2], "AGENTS.md"), "utf8"), "not noted\n");
+    assert.equal(second.runs().length, 0);
+    // Studio's studio.json at the top is never one of them.
+    assert.ok(existsSync(join(w.project, "studio.json")));
+    assert.equal((await runJob(ctxOf(w), { dir: w.project, job: "revise" }, depsOf(w, second))).state, "storyboard");
+  });
+
+  it("moves a planted link itself, never what it leads to", async () => {
+    const w = world();
+    const target = join(w.outside, "hers.md");
+    writeFileSync(target, "hers, outside the project\n");
+    mkdirSync(join(w.outside, "folder"));
+    writeFileSync(join(w.outside, "folder", "kept.txt"), "kept\n");
+    const claude = standIn(w, "plant", { CLAUDE_WORKER_LINKS: JSON.stringify({ "cards/c2/CLAUDE.local.md": target, "fx/f1/.claude": join(w.outside, "folder") }) });
+    const ended = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, claude));
+    assert.deepEqual([ended.state, ended.why], ["failed", "own"]);
+    const [aside] = asides(w);
+    for (const [rel, to] of [["cards/c2/CLAUDE.local.md", target], ["fx/f1/.claude", join(w.outside, "folder")]]) {
+      assert.throws(() => lstatSync(join(w.project, rel)), { code: "ENOENT" }, rel);
+      assert.ok(lstatSync(join(aside, rel)).isSymbolicLink(), `${rel} is still a link`);
+      assert.equal(readlinkSync(join(aside, rel)), to);
+    }
+    assert.equal(readFileSync(target, "utf8"), "hers, outside the project\n");
+    assert.ok(lstatSync(target).isFile());
+    assert.equal(readFileSync(join(w.outside, "folder", "kept.txt"), "utf8"), "kept\n");
+  });
+
+  it("keeps a run failed, and says so, when what was left can't be set aside", async () => {
+    const w = world();
+    // Where it would be set aside is taken by a file: nothing can be moved there, and nothing is deleted.
+    writeFileSync(asideOf(w), "in the way\n");
+    const lines = [];
+    const ended = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, standIn(w, "plant"), { log: (line) => lines.push(line) }));
+    assert.deepEqual([ended.state, ended.why], ["failed", "own"]);
+    for (const rel of PLANTS) assert.equal(readFileSync(join(w.project, rel), "utf8"), "planted\n", `${rel} is still there`);
+    assert.ok(lines.some((line) => /could not be set aside/.test(line) && line.includes("sub/CLAUDE.md")), lines.join(" | "));
+    // And it is not excused by the next run either.
+    const next = standIn(w);
+    const again = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, next));
+    assert.deepEqual([again.state, again.why], ["failed", "own"]);
+    assert.equal(next.runs().length, 0);
   });
 
   it("refuses a job whose project has no slug, so no two projects share a notes file", async () => {

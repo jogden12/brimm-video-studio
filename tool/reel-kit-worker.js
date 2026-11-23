@@ -11,9 +11,13 @@
 // or oversize one is ignored with a line in the log. `statusOf` reads studio.json: a job whose run is no longer running reads as stopped
 // at its step, never as working (Review Focus 4). When her usage runs out (usageLimited, Claude Code's result event) the job ends stopped
 // at its step, with `why: "usage"`, and a resume carries on that session (`--resume`) from that step, never from the start.
+//
+// Studio's own names in a project (a CLAUDE.md, a .claude folder: reel-kit-worker-tools.js OWN_NAMES) are Studio's alone: it keeps the list
+// of the ones it wrote out of the worker's reach (`ownFile`, `noteOwnFile`), and before and after every run sets aside, out of the
+// project, every one that is not on it (reel-kit-worker-own.js). Either fails the run, `why: "own"`.
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstatSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { releaseEpisodeLock, takeEpisodeLock } from "./detached.js";
@@ -22,7 +26,8 @@ import { binDir, kitDir, reelKitEnv, reelKitHome } from "./reel-kit.js";
 import { readCapped, readState, scaffold, writeState } from "./reel-kit-project.js";
 import { factsOf } from "./settings.js";
 import { JOBS, JOB_ENDS, notesOf, startFault, usageLimited, workerPrompt } from "./reel-kit-worker-jobs.js";
-import { WORKER_TOOLS, ownEntries, workerArgs, workerSettings } from "./reel-kit-worker-tools.js";
+import { noteOwn, sweepOwn, writeWhole } from "./reel-kit-worker-own.js";
+import { WORKER_TOOLS, workerArgs, workerSettings } from "./reel-kit-worker-tools.js";
 import { isRunning } from "./run.js";
 import { findPrograms } from "./unedited.js";
 
@@ -58,6 +63,14 @@ export const workerStatusFile = (dir) => join(dir, "work", "worker-status.json")
 /** Her notes for a revise, kept with the job so that a resume sends them again: [{ beat, text, at }]. Beside the worker's settings, out of
     its reach (its sandbox writes only in the project and its temp folder), so that what a resume says are her notes are hers. */
 export const jobNotesFile = (home, slug) => join(appSupport(home), "reel-kit-worker", `${settingsSlug(slug)}.notes.json`);
+/** The list of Studio's own names Studio itself wrote in the project `slug` (reel-kit-worker-own.js), { files: [{ path, dev, ino, size,
+    ctimeMs, sha256 }] }, written whole: beside the worker's settings and her notes, out of its reach, so that the worker can add nothing
+    to it. Anything under one of those names in the project that is not on it, as noted, is set aside. */
+export const ownFile = (home, slug) => join(appSupport(home), "reel-kit-worker", `${settingsSlug(slug)}.own.json`);
+/** Note that Studio wrote `rel` (a path inside the project `projectDir`, parted by `/`: `public/CLAUDE.md`, say) under one of its own
+    names, as it is now, so that the look over the project leaves it alone while it stays that file: after every write of it, and never
+    while a worker runs. It gives the entry noted, and throws for anything but a plain file (reel-kit-worker-own.js noteOwn). */
+export const noteOwnFile = (home, slug, projectDir, rel) => noteOwn(ownFile(home, slug), projectDir, rel);
 /** The record of the worker at work on this Mac, { pid, start, dir, at }: its `claude`, whose process group holds everything it started,
     so that a worker left running by a runner that died is found and stopped before the next one starts. */
 export const macWorkerFile = (home) => join(appSupport(home), "reel-kit-worker.json");
@@ -84,19 +97,6 @@ export function processStart(pid, run = spawnSync) {
 const stillRuns = (pid, start, alive, startOf) => Number.isInteger(pid) && alive(pid) && (typeof start !== "string" || startOf(pid) === start);
 /** Whether `pid` is, for sure, the process that started at `start`: only then is it ever killed, as a pid is used again. */
 const surely = (pid, start, alive, startOf) => typeof start === "string" && stillRuns(pid, start, alive, startOf);
-
-/** Write a file whole: under a name of this run's own beside it, then renamed. */
-function writeWhole(file, text) {
-  mkdirSync(dirname(file), { recursive: true });
-  const writing = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.writing`;
-  try {
-    writeFileSync(writing, text, { flag: "wx" });
-    renameSync(writing, file);
-  } catch (e) {
-    rmSync(writing, { force: true });
-    throw e;
-  }
-}
 
 // --- Status ---
 
@@ -281,6 +281,11 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
   if (!claude) return fail("no claude");
   if (!isObject(ctx.settings) || typeof ctx.settings.root !== "string") return fail("no settings");
 
+  // Studio's own names in the project that Studio did not write (ownFile is its list) are set aside, out of the project, before the run
+  // and after it. What is found before it (left by a run whose runner died, say) refuses this run: nothing is started.
+  const look = (said) => sweepOwn({ file: ownFile(home, slug), dir, said, log }).planted;
+  if (look(`One of Studio's own names was in the Reel Kit project ${slug} before its worker started, and is not Studio's`).length) return fail("own");
+
   // Her notes go with the job, so that a resume sends them again.
   const given = resume ? (job === "revise" ? keptNotes(home, slug) : []) : notesOf(notes);
   if (!resume) writeWhole(jobNotesFile(home, slug), `${JSON.stringify(given, null, 2)}\n`);
@@ -296,9 +301,6 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
   const prompt = workerPrompt({ job, ...tools, title: typeof before.title === "string" ? before.title : null, notes: given, from, resumed: Boolean(resume) });
 
   clearStatus(dir);
-  // What of Studio's own names is in the project before the run (the app's notes, say): anything else there after it fails the run.
-  const ownBefore = ownEntries(dir);
-  if (ownBefore === null) return fail("own");
   mark({ state: "working", job, step: from, pid: process.pid, why: "", session, needs: resume && Array.isArray(before.needs) ? before.needs : [] });
 
   // Its own process group, so that everything it starts (Python, ffmpeg, HyperFrames' browser) is stopped with it.
@@ -320,7 +322,9 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
   let clock = null;
   let code;
   let signal;
-  // From here on, whatever throws, its process group is stopped before the Mac's lock is let go.
+  let planted = [];
+  let through = false;
+  // From here on, whatever throws, its process group is stopped, and the project looked over, before the Mac's lock is let go.
   try {
     const workerStart = child.pid ? processStart(child.pid) : null;
     if (child.pid) {
@@ -391,6 +395,7 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
     }, limit);
     ({ code, signal } = await closed);
     copy();
+    through = true;
   } finally {
     clearInterval(poll);
     clearTimeout(clock);
@@ -401,13 +406,20 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
       } catch {
         // nothing left
       }
+      // Its `claude` is gone before the project is looked over (it is, but when something threw).
+      for (let waited = 0; waited < grace && !exited; waited += 25) await wait(25);
+    }
+    // Studio's own names left anywhere in the project (a folder moved in, a link): each is set aside and named in the log, and the run
+    // fails, also when something threw (the throw goes on its way after).
+    planted = look(`Reel Kit's worker for ${slug} left one of Studio's own names in its project`);
+    if (planted.length && !through) {
+      try {
+        mark({ state: "failed", why: "own", worker: undefined, workerStart: undefined });
+      } catch (e) {
+        log(`Reel Kit's worker for ${slug} left Studio's own names in its project, and its studio.json could not say so: ${e.code || e.message}.`);
+      }
     }
   }
-
-  // Studio's own names left anywhere in the project (a folder moved in, a link): the run fails, and each is named in the log.
-  const ownAfter = ownEntries(dir);
-  const planted = ownAfter === null ? ["(the project could not be looked over)"] : [...ownAfter].filter(([rel, what]) => ownBefore.get(rel) !== what).map(([rel]) => rel);
-  for (const rel of planted) log(`Reel Kit's worker for ${slug} left one of Studio's own names in its project: ${rel}`);
 
   const at = readState(dir) ?? {};
   const reached = at.step === steps.at(-1);
@@ -443,7 +455,10 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
     while another job holds it; inside the lock, a worker an earlier runner left running is stopped (macWorkerFile), then, for `make`, its
     project is made (scaffold: her pack synced, the folder, the copy, new.py) and its queue record taken away; then the worker runs, in its
     own process group, which is stopped whole (SIGTERM, then SIGKILL after `grace`) when it runs out of time or does not start as told, and
-    the lock is let go whatever happened. A project whose run is running is left as it is: { state, why: "running" }; one whose run died
+    the lock is let go whatever happened. Before the worker is started, and after it has ended (also when something threw), the project
+    is looked over for Studio's own names (reel-kit-worker-own.js sweepOwn): each that Studio did not note (`noteOwnFile`), or that is
+    no longer the file noted, is moved to `<project folder> set aside/<when>/` beside the project, never deleted, and the run is
+    `failed`, `why: "own"`; found before the worker starts, nothing is started. A project whose run is running is left as it is: { state, why: "running" }; one whose run died
     but whose `claude` still runs is queued, and that `claude` stopped once this job holds the Mac.
     `deps`: `claude` (the program; findPrograms' by default), `scaffold` and `scaffoldDeps`, `alive`, `startOf` (processStart), `wait` (ms
     to a promise), `every` (how often, in ms, the lock and the status file are looked at), `limit`, `grace`, `facts` (settings.js factsOf of
