@@ -53,7 +53,7 @@ Environment: `BRIMM_VIDEO_HOME` (Studio's home instead of `HOME`, absolute only;
 - `Drop/`: the default local drop folder.
 - `.runs/`: run scratch; the import lock `brimm-transcribe-<hash>.lock`.
 - `.toolchain/hyperframes-<version>/`: the pinned HyperFrames CLI.
-- `<episode folder>/`: `video/` (on a local Mac, the episode's own files: the recording, its `.srt`, `.words.json`, `.cut-plan.json`, `reels.json`; `.import.json`, `.put.json`, `history/`), `working copy/<bytes>-<mtimeMs>.mp4` with a facts `.json` (Reels, footage and voice have their own names), one folder per HyperFrames project, `renders/`, `put back/`, and the locks and markers below.
+- `<episode folder>/`: `video/` (on a local Mac, the episode's own files: the recording, its `.srt`, `.words.json`, `.cut-plan.json`, `reels.json`; `.import.json`, `.put.json`, `history/`), `working copy/<bytes>-<mtimeMs>.mp4` with a facts `.json` (Reels, footage and voice have their own names; a Reel Kit edit's copy of 4K is `<key>-4k.mp4` for the main video and `reel-<n>-<key>-4k.mp4` for a Reel, which replaces only that Reel's other copies of 4K), one folder per HyperFrames project and per Reel Kit edit, `renders/`, `put back/`, and the locks and markers below.
 - `Saved test recordings/`: test originals kept by hand; no code uses it.
 
 ## The episode record
@@ -64,7 +64,7 @@ Environment: `BRIMM_VIDEO_HOME` (Studio's home instead of `HOME`, absolute only;
 - **Layouts** (`version`): 1 base; 2 layers; 3 the switch (kinds, answer, reading, session); 4 `app`; 5 `planned`, `partOf`; 6 `local`. A Mac on older code reads a newer layout as `newer` and never writes it.
 - **Base:** `id`, `rev` (the file's number), `writer {commit, on}`, `kind` (`episode`, `short video`, `finished`, `raw`, `session`, or `null` while unanswered, a part or a plan), `video {file, bytes, seconds, recorded, recordedFrom, sound?}`, `imported`, `name {text, placeholder}`, `title {text, from, approved}`, `editing`, `released`, `archived`, `files`, `spellings` (`[heard, meant]` pairs), `main {cuts, texts, graphics, …}`, `brand`, `reels [{n, status: candidate|picked|dropped|finished, from, to, title, …}]`, `finished {revision, at, on}`.
 - **Layout 3:** `answer {state: needs your answer|answered|not for brimm-video|part|planned, guess, came: camera|phone|zoom|sound, by, on, at, private}`, `label`, `fingerprint`, `versionOf`, `session {marked, teachings, cleared, decided, edits, agreed: [{n, at}], …}`, `reading {kind, model, at, on, account, outcome, …}`, `offers {spellings, answered}`, `principles` (the teachings file's name).
-- **Layout 4:** `app {toolchain, projects: [{key: main|reel N|clip N, name, madeAt, on, from, workingCopy, opened, handover, fromSuggestion, state: made|opened|exported|finished|kept for an earlier kind}]}`.
+- **Layout 4:** `app {toolchain, projects: [{key: main|reel N|clip N, name, madeAt, on, from, workingCopy, opened, handover, fromSuggestion, state: made|opened|exported|finished|kept for an earlier kind}]}`. A Reel Kit edit's entry (`reel-kit-project.js` `entryOf`) has the same shape, with `maker: "reel-kit"`, `mode` (`hifi`, `lofi` or `showcase`) and `version` (from 1, Decision 11), `from` the recording and `workingCopy` its copy of 4K; its own progress is in its project's `studio.json`, never in the record. A HyperFrames project has no `maker`.
 - **Layout 5:** `planned {route: script|explainer, title, voice: sallie|heygen|null, cues, shots, lines, filmed, consent, project}` (a plan has `video: null`); `partOf {id, as: talking|screen|b-roll|voiceover, shot, client}`.
 - **Layout 6:** `local {on: <Mac>, original}`. Only `record/`, `final/`, `history/`, `Original files/` and a plan's three files are in Dropbox; everything else stays on the Mac named in `on` (`where.js filePlace`).
 - **Kinds** (`kinds.js`): the import guesses `clip`, `raw` or `finished`; it came from `zoom`, `sound`, `phone` or `camera`. Upright, square or under 90 seconds is a `short video`.
@@ -92,6 +92,16 @@ What the app writes and Studio reads back:
 - `.hyperframes/transcripts/`: the app's own cloud transcripts (Studio does not use them).
 - `renders/<project>_<YYYY-MM-DD>_<HH-MM-SS>.meta.json` (with `exportedTo`) beside each export; the exports themselves land in Downloads or the Mac's exports folder (`mp4`, `mov`, `m4v` taken).
 - `index.html`: where the recording sits on the timeline (`data-start`, `data-duration`, `data-playback-start`/`data-media-start`, `data-playback-rate`; `on-timeline.js`).
+
+## A Reel Kit project Studio makes
+
+`~/BRIMM Video Work/<episode folder>/<projectName of the part> Reel Kit v<n>/` (`reel-kit-project.js` `scaffold`, a step of the queued job, under the Mac-wide worker lock), beside the episode's HyperFrames projects, never in Dropbox or a drop folder. A later version of the same part is a new folder; the earlier one stays as it is.
+
+- `source/clip.mp4`: a symbolic link (never a hard link) to the part's copy of 4K in `working copy/` (`workcopy.js` `makeWorkCopy` with `fourK`, and a Reel's own times from the record, `reels[].from`/`to`: Decision 3).
+- `studio.json` (`stateFile`; written whole by Studio, a file of its own beside it then renamed, never by the worker; read by `readState` with no link followed, no pipe waited on and at most 1 MB): `{slug, key, mode, version, title, name, madeAt}`, and the job's own state (`state`: `queued`, `working` with `pid`, `stopped`, `storyboard`, `ready`, `failed`, then `rendered`; plan Task 10), which `scaffold` keeps.
+- What Reel Kit's `new.py` makes there (through the link below): `assets/`, `audio/`, `cards/`, `fx/`, `public/cards/`, `public/media/`, `renders/`, `storyboard/`, `work/`, `style/` (copied from `.reel-kit/style/`, which `syncPack` builds from her pack first), and `edit.py` (`TITLE` her Reel's title word for word, `STYLE` the mode, `SRC` the path of `source/clip.mp4`). A title with a double quote, a backslash or a control character is refused first, as `edit.py` holds it between double quotes.
+- `~/BRIMM Video Work/.reel-kit/projects/<slug>` (`linkProject`, Decision 2): a symbolic link to the project folder, `<episode id's last 6>-<main|reel-n>-v<n>` (`slugOf`), where Reel Kit looks for it. It is never made over anything else (a folder, a file, a link elsewhere).
+- The tests' stand-in for Reel Kit's scripts is `tool/tests/stand-ins/reel-kit.mjs` (Decision 8), its starter `edit.py` `tool/tests/fixtures/reel-kit-1.2.0/project/edit.py`.
 
 ## Locks, receipts and markers (all on the Mac's disk)
 
