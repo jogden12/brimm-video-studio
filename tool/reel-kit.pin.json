@@ -19,8 +19,8 @@
   },
   "python": "3.12.14",
   "locks": {
-    "main": { "file": "reel-kit/requirements-1.2.0.lock", "sha256": "0000000000000000000000000000000000000000000000000000000000000000" },
-    "mp": { "file": "reel-kit/requirements-mp-1.2.0.lock", "sha256": "0000000000000000000000000000000000000000000000000000000000000000" }
+    "main": { "file": "reel-kit/requirements-1.2.0.lock", "sha256": "69011fb8b5dde51c311dc74b38522421c0acb86a119351f35a3e9071b8b3d697" },
+    "mp": { "file": "reel-kit/requirements-mp-1.2.0.lock", "sha256": "9ec48577c9859eeb40d3b0f8ecf5d713c0c85d315fc3f7c903ff89bd778d1101" }
   },
   "models": [
     {
