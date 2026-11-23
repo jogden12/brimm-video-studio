@@ -108,28 +108,61 @@ function fileSha256(path) {
   return hash.digest("hex");
 }
 
-/** The fingerprint of a folder: every regular file under it, by its path relative to the folder (`/`-joined, NFC), sorted by those
-    paths' UTF-8 bytes, `.DS_Store` and `._*` left out. The manifest is one line per file, `<sha256 hex>  <path>\n`, and the fingerprint
-    is `sha256-` and the SHA-256 of the manifest. A link anywhere inside, or anything that is neither a file nor a folder, refuses the
-    folder: it throws, the error's `code` LINK_INSIDE or ODD_INSIDE, which a caller decides by, never by the message. */
-export function folderFingerprint(dir) {
+/** The throw for a link inside a folder a fingerprint is made of, and for anything there that is neither a file nor a folder. */
+const linkInside = (rel) => Object.assign(new Error(`a link is inside the folder: ${rel}`), { code: LINK_INSIDE });
+const oddInside = (rel) => Object.assign(new Error(`something that is not a file or a folder is inside the folder: ${rel}`), { code: ODD_INSIDE });
+
+/** Every regular file under the folder `dir`, as { path, rel }: `rel` its path from `dir` (`/`-joined, NFC), after `under` and a `/` when
+    `under` is given. `.DS_Store` and `._*` are left out, and so is any entry `skip(rel)` says to leave out (never looked at, nor gone
+    into). A link anywhere inside, or anything that is neither a file nor a folder, throws, the error's `code` LINK_INSIDE or ODD_INSIDE. */
+export function filesUnder(dir, { under = "", skip = () => false } = {}) {
   const files = [];
   const walk = (abs, rel) => {
     for (const name of readdirSync(abs)) {
       if (leftover(name)) continue;
       const path = join(abs, name);
       const relPath = rel === "" ? name : `${rel}/${name}`;
+      if (skip(relPath)) continue;
       const kind = lstatSync(path);
-      if (kind.isSymbolicLink()) throw Object.assign(new Error(`a link is inside the folder: ${relPath}`), { code: LINK_INSIDE });
+      if (kind.isSymbolicLink()) throw linkInside(relPath);
       if (kind.isDirectory()) walk(path, relPath);
       else if (kind.isFile()) files.push({ path, rel: relPath.normalize("NFC") });
-      else throw Object.assign(new Error(`something that is not a file or a folder is inside the folder: ${relPath}`), { code: ODD_INSIDE });
+      else throw oddInside(relPath);
     }
   };
-  walk(dir, "");
-  files.sort((a, b) => Buffer.compare(Buffer.from(a.rel, "utf8"), Buffer.from(b.rel, "utf8")));
-  const manifest = files.map((f) => `${fileSha256(f.path)}  ${f.rel}\n`).join("");
+  walk(dir, under);
+  return files;
+}
+
+/** The fingerprint of files ({ path, rel }): sorted by their `rel`'s UTF-8 bytes, one manifest line per file, `<sha256 hex>  <rel>\n`,
+    and `sha256-` and the SHA-256 of the manifest. */
+export function manifestFingerprint(files) {
+  const sorted = [...files].sort((a, b) => Buffer.compare(Buffer.from(a.rel, "utf8"), Buffer.from(b.rel, "utf8")));
+  const manifest = sorted.map((f) => `${fileSha256(f.path)}  ${f.rel}\n`).join("");
   return `sha256-${createHash("sha256").update(manifest, "utf8").digest("hex")}`;
+}
+
+/** The fingerprint of a folder: every regular file under it (filesUnder), by its path relative to the folder, as manifestFingerprint
+    makes it. A link anywhere inside, or anything that is neither a file nor a folder, refuses the folder: it throws, the error's `code`
+    LINK_INSIDE or ODD_INSIDE, which a caller decides by, never by the message. */
+export function folderFingerprint(dir) {
+  return manifestFingerprint(filesUnder(dir));
+}
+
+/** The one entry `path` as a fingerprint takes it: "file", "folder" or "none" (not there); a link, or anything else, throws as filesUnder
+    does, `rel` naming it. */
+export function entryKind(path, rel) {
+  let kind;
+  try {
+    kind = lstatSync(path);
+  } catch (e) {
+    if (e.code === "ENOENT") return "none";
+    throw e;
+  }
+  if (kind.isSymbolicLink()) throw linkInside(rel);
+  if (kind.isDirectory()) return "folder";
+  if (kind.isFile()) return "file";
+  throw oddInside(rel);
 }
 
 /** The environment every Reel Kit command Studio starts is run in: a list, not what Studio inherited. `PATH` is Reel Kit's tools/bin

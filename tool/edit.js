@@ -52,11 +52,11 @@
 //   node edit.js reelkit install "<download>" [--yes] | status
 //                                         a Reel Kit download dragged into her chat: the plan of its setup, or with --yes the setup,
 //                                         detached; and how it is going (reel-kit-commands.js)
-//   node edit.js reelkit start | status | note | go | revise | resume | storyboard "<episode>" …
+//   node edit.js reelkit start | status | note | go | revise | resume | render | storyboard "<episode>" …
 //                                         her Reel Kit edits of an episode's parts: started queued, followed, noted, approved, changed,
-//                                         carried on, and their storyboards shown in the side panel through the lock's narrow opening
-//                                         (storyboard-opening.js) or on Reel Kit's local page (reel-kit-commands.js). Their detached half,
-//                                         `reelkit --now`, is in no help
+//                                         carried on, rendered headless (reel-kit-render.js), and their storyboards shown in the side
+//                                         panel through the lock's narrow opening (storyboard-opening.js) or on Reel Kit's local page
+//                                         (reel-kit-commands.js). Their detached half, `reelkit --now`, is in no help
 //   node edit.js reelkit style show | change "<what she asked>" | yes | back ["<copy>"] | diff | carry [yes] | resume
 //                                         her Reel Kit style pack: shown in the side panel, changed by the worker's style job on a working
 //                                         copy and kept on her yes, gone back to, compared, carried onto a new starting style
@@ -421,6 +421,9 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         an edit's next storyboard, made from her notes since the last one, detached
   node edit.js reelkit resume "<episode>" <edit>
                                         an edit that stopped, carried on from its step, detached
+  node edit.js reelkit render "<episode>" <edit>
+                                        an edit built to render after her go, rendered on this Mac, detached, one job at a
+                                        time; refused once it was changed in HyperFrames, which then exports it
   node edit.js reelkit storyboard "<episode>" <edit> [local]
                                         an edit's newest storyboard made ready in her folder, and the exact publish to the
                                         side panel for her chat to make; with local, Reel Kit's own page on this Mac

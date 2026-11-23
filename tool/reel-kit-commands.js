@@ -37,8 +37,12 @@
 //                                          (plan Task 13) her style pack, shown, changed by the worker's style job on a working copy, kept on
 //                                          her yes, gone back to, compared and carried onto a new starting style: reel-kit-style-chat.js, with
 //                                          its detached half `reelkit --now style change|resume <stamp>`. It names no episode (gate.js).
-//   reelkit --now <folder> start|revise|finalize|resume …
-//                                          the detached half of each (in no help), which runs the worker's runJob. Refused under Claude Code.
+//   reelkit render "<episode>" <slug>      the render of an edit finalize left ready (plan Task 14): reel-kit-render.js renderWhy first (one
+//                                          changed in HyperFrames since is hers to export from the app), then detached, marked `rendering`
+//                                          with the pid of the run it started before her chat is answered.
+//   reelkit --now <folder> start|revise|finalize|resume|render …
+//                                          the detached half of each (in no help), which runs the worker's runJob, or the render's
+//                                          renderReelKit under the same Mac-wide worker lock. Refused under Claude Code.
 //
 // Which Mac is which (plan Decision 10): an installed Mac takes only the Reel Kit Studio pins (PIN.fingerprint). A dev Mac (the Mac Studio)
 // takes any well-formed download; one of another version than PIN.version is installed beside the one in use, from a pin made from its
@@ -46,7 +50,8 @@
 // use stays PIN.version until that pin is merged.
 //
 // Everything she reads is in her words: never a path or a command for her to type. A test gives stand-ins through ctx.deps.reelKit: `pin`
-// (the pin of the version in use), `unzip` (readDrop's), `programs`, `fetch`, `run` and `keepAwake`.
+// (the pin of the version in use), `unzip` (readDrop's), `programs`, `fetch`, `run` and `keepAwake`; and for a render, `render` (in place
+// of renderReelKit) or renderReelKit's own `sandboxExec` and `trash`.
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -60,6 +65,7 @@ import { pageOf, publishInput, stagePage } from "./storyboard-opening.js";
 import { styleCommand, styleNow } from "./reel-kit-style-chat.js";
 import { MODES, entryOf, modeLeans, modeOf as modeNamed, projectFolderOf, readCapped, readState, scaffold, slugOf, startWhy, writeState } from "./reel-kit-project.js";
 import { JOBS, dequeue, enqueue, processStart, queuedOf, runJob, statusOf, stoppedLine } from "./reel-kit-worker.js";
+import { renderReelKit, renderWhy, renderingBy } from "./reel-kit-render.js";
 import { writeWhole as writeFileWhole } from "./reel-kit-worker-own.js";
 import { episodeWork } from "./settings.js";
 import { PIN, pinFrom } from "./reel-kit.js";
@@ -355,7 +361,16 @@ export const EDIT_SAY = Object.freeze({
   notWritten: "The record of this edit couldn't be written: ask Jason.",
   noRun: (key) => `${partSaid(key)} couldn't be started on this Mac: say it again, or ask Jason.`,
   noQueue: (key) => `${partSaid(key)} couldn't be put in the queue on this Mac, so it wasn't started: say it again, or ask Jason.`,
-  goNote: `Only your go approves it: say "go" when it's right.`
+  goNote: `Only your go approves it: say "go" when it's right.`,
+  rendering: (said) => `${said} is in the queue to render on this Mac. Say "how are the Reel Kit edits going?" to follow it.`,
+  renderBusy: `It is in the queue to render already. Say "how are the Reel Kit edits going?" to follow it.`,
+  renderNoRun: "Its render couldn't be started on this Mac: say it again, or ask Jason.",
+  renderingNow: "it is being rendered, or waiting for its turn to render.",
+  rendered: "it is rendered.",
+  renderFailed: "it is built, but its last render didn't pass Reel Kit's own checks, so nothing was kept as an export: ask Jason.",
+  renderBroke: "it is built, but its last render didn't finish, so nothing was kept as an export: ask Jason.",
+  renderUnrecorded: "it is built, and its last render finished, but its record couldn't be written, so nothing was kept as an export: ask Jason.",
+  renderOdd: "it is built, but its last render didn't come out as Reel Kit makes one, so nothing was kept as an export: ask Jason."
 });
 
 /** The most of a note she may say: Reel Kit's own storyboard page (serve.py) takes no more. */
@@ -585,14 +600,28 @@ function openFromYou(ctx, dir) {
   }
 }
 
-/** An edit's line in `status`, by where it is. */
-function stateLine(status) {
+/** Whether the edit whose studio.json says `state` is marked rendering by a run that still runs (her chat's mark, or the render's own), by
+    its pid and, when recorded, its start (reel-kit-render.js renderingBy). */
+const renderingNow = (ctx, state) => renderingBy(state, (pid) => Boolean(ctx.alive?.(pid)), kitOf(ctx).startOf ?? processStart);
+
+/** An edit's line in `status`, by where it is: its state, and for a ready one, why a render would refuse it (renderWhy) or its last
+    render's outcome (studio.json `state`, in the project `dir`). */
+function stateLine(status, state = null, dir = null) {
   if (status === null) return EDIT_SAY.notHere;
   if (status.state === "queued") return EDIT_SAY.waiting;
   if (status.state === "working") return EDIT_SAY.working(status.step, status.minutesLeft);
   if (status.state === "stopped") return stoppedLine(status);
   if (status.state === "storyboard") return status.pageGo ? EDIT_SAY.pageGo : EDIT_SAY.storyboard;
-  if (status.state === "ready") return EDIT_SAY.ready;
+  if (status.state === "ready") {
+    const refused = dir === null ? "" : renderWhy(dir, state);
+    if (refused) return refused;
+    const last = state?.lastRender;
+    if (last?.qa === "failed") return EDIT_SAY.renderFailed;
+    if (last?.why === "record") return EDIT_SAY.renderUnrecorded;
+    if (last?.why === "odd") return EDIT_SAY.renderOdd;
+    return last && typeof last.why === "string" && last.why !== "" ? EDIT_SAY.renderBroke : EDIT_SAY.ready;
+  }
+  if (status.state === "rendered") return EDIT_SAY.rendered;
   if (status.state === "failed") return EDIT_SAY.failed;
   return EDIT_SAY.unread;
 }
@@ -614,7 +643,9 @@ async function editStatus(ctx, words, h) {
   for (const result of unstarted) ctx.say(`${partSaid(result.key)}: ${EDIT_SAY.didNotStart(result.why)}`);
   for (const edit of edits) {
     const status = statusFor(ctx, edit.dir);
-    ctx.say(`${editSaid(edit.key, edit.mode, edit.version)}: ${stateLine(status && status.state === "storyboard" ? { ...status, pageGo: wentAhead(edit.dir) } : status)}`);
+    const state = edit.dir === null ? null : readState(edit.dir);
+    const shown = status && status.state === "storyboard" ? { ...status, pageGo: wentAhead(edit.dir) } : status;
+    ctx.say(`${editSaid(edit.key, edit.mode, edit.version)}: ${renderingNow(ctx, state) ? EDIT_SAY.renderingNow : stateLine(shown, state, edit.dir)}`);
     const needs = (status?.needs ?? []).filter((n) => n && typeof n.text === "string" && typeof n.beat === "string");
     if (!needs.length) continue;
     for (const need of needs) ctx.say(`  ${need.beat}: ${need.text}`);
@@ -698,6 +729,8 @@ async function reviseCommand(ctx, words, h) {
   const got = editFor(ctx, words, h);
   if (got.code !== undefined) return got.code;
   const { found, edit, status } = got;
+  // Its render is building from this very edit: a revise now would be taken for the render's, or the render's for it.
+  if (renderingNow(ctx, readState(edit.dir))) return refuse(ctx, EDIT_SAY.renderBusy);
   if (status?.state !== "storyboard" && status?.state !== "ready") return refuse(ctx, notWaiting(status));
   const notes = readNotes(edit.dir);
   if (notes === null) return refuse(ctx, EDIT_SAY.notesUnread);
@@ -854,6 +887,53 @@ function stopLocal(ctx, startOf) {
   }
 }
 
+/** `reelkit render "<episode>" <slug>`: the render of an edit finalize left ready, started detached, after renderWhy (an edit changed in
+    HyperFrames since is refused in her words: hers to export from the app). Marked `rendering` with the pid of the run it started, before
+    her chat is answered, so that a second ask waits; the run takes the mark for its own. */
+async function renderCommand(ctx, words, h) {
+  if (words.length !== 2) {
+    ctx.say(h.help);
+    return 2;
+  }
+  const got = editFor(ctx, words, h);
+  if (got.code !== undefined) return got.code;
+  const { found, edit, status } = got;
+  if (status === null) return refuse(ctx, EDIT_SAY.notHere);
+  const state = readState(edit.dir);
+  if (renderingNow(ctx, state)) return refuse(ctx, EDIT_SAY.renderBusy);
+  if (isBusy(status)) return refuse(ctx, EDIT_SAY.busy);
+  if (status.state === "stopped") return refuse(ctx, stoppedLine(status));
+  if (status.state === "failed") return refuse(ctx, EDIT_SAY.failed);
+  const why = renderWhy(edit.dir, state);
+  if (why) return refuse(ctx, why);
+  const pid = startJob(ctx, found, ["render", edit.slug]);
+  if (!Number.isInteger(pid)) return refuse(ctx, EDIT_SAY.renderNoRun);
+  try {
+    const start = (kitOf(ctx).startOf ?? processStart)(pid);
+    writeState(edit.dir, { ...(readState(edit.dir) ?? {}), rendering: { pid, ...(typeof start === "string" ? { start } : {}), at: new Date(ctx.now()).toISOString() } });
+  } catch {
+    // The run marks it itself as it starts.
+  }
+  ctx.say(EDIT_SAY.rendering(editSaid(edit.key, edit.mode, edit.version)));
+  return 0;
+}
+
+/** The detached half's `render <slug>`: renderReelKit (or a test's `render`), which waits for the Mac's worker lock and asks renderWhy again
+    inside it. */
+async function renderNow(ctx, { found, record }, [slug, ...more], h) {
+  const edit = more.length ? null : editsOf(ctx, found, record).find((e) => e.slug !== "" && e.slug === slug);
+  if (!edit || edit.dir === null) {
+    ctx.say(h.help);
+    return 2;
+  }
+  const kit = kitOf(ctx);
+  const render = kit.render ?? renderReelKit;
+  const given = Object.fromEntries(["sandboxExec", "trash", "run", "startOf", "wait", "every", "limit", "grace", "facts"].filter((k) => kit[k] !== undefined).map((k) => [k, kit[k]]));
+  const ended = await render(ctx, { dir: edit.dir, entry: edit.entry }, { alive: ctx.alive, log: (line) => ctx.say(line), ...given });
+  ctx.say(`Reel Kit's render of ${slug} ${ended.ok ? "is done" : "made nothing to keep"}.${ended.why ? ` ${ended.why}` : ""}`);
+  return ended.ok ? 0 : 1;
+}
+
 /** What runJob is given, from a test's stand-ins (ctx.deps.reelKit) where it gives them, and the run's log. */
 function jobDeps(ctx, more = {}) {
   const kit = kitOf(ctx);
@@ -943,7 +1023,7 @@ async function editNow(ctx, { found, record }, job, [slug, ...more], h) {
 }
 
 /** The jobs the detached half runs. */
-const NOW_JOBS = Object.freeze(["start", "revise", "finalize", "resume"]);
+const NOW_JOBS = Object.freeze(["start", "revise", "finalize", "resume", "render"]);
 
 /** `reelkit --now <folder> <job> …`, the detached half of start, go, revise and resume: in no help, and refused under Claude Code. The
     episode is found by its folder, through the gate, as every detached run's is. */
@@ -956,6 +1036,7 @@ async function jobNow(ctx, words, h) {
   }
   const got = h.episodeFor(ctx, [folder], { newerEnds: 1 });
   if (!got.found) return got.code;
+  if (job === "render") return renderNow(ctx, got, rest, h);
   return job === "start" ? startNow(ctx, got, rest, h) : editNow(ctx, got, job, rest, h);
 }
 
@@ -972,7 +1053,7 @@ export async function reelkitCommand(ctx, rest = [], { help = "", episodeFor, sa
   if (word === "install") return installCommand(ctx, more, help);
   if (word === "status" && more.length === 0) return statusCommand(ctx);
   if (word === "--now" && more[0] === "install") return installNow(ctx, more.slice(1), help);
-  const episodeWords = { start: startCommand, status: editStatus, note: noteCommand, go: goCommand, revise: reviseCommand, resume: resumeCommand, storyboard: storyboardCommand };
+  const episodeWords = { start: startCommand, status: editStatus, note: noteCommand, go: goCommand, revise: reviseCommand, resume: resumeCommand, render: renderCommand, storyboard: storyboardCommand };
   if (typeof episodeFor === "function" && typeof save === "function") {
     if (word === "--now") return jobNow(ctx, more, h);
     if (Object.hasOwn(episodeWords, word) && more.length && !more[0].startsWith("--")) return episodeWords[word](ctx, more, h);

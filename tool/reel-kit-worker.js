@@ -24,7 +24,7 @@ import { createInterface } from "node:readline";
 import { releaseEpisodeLock, takeEpisodeLock } from "./detached.js";
 import { thisCheckout } from "./filing.js";
 import { binDir, kitDir, reelKitEnv, reelKitHome } from "./reel-kit.js";
-import { readCapped, readState, scaffold, writeState } from "./reel-kit-project.js";
+import { compositionFingerprint, readCapped, readState, scaffold, writeState } from "./reel-kit-project.js";
 import { factsOf } from "./settings.js";
 import { JOBS, JOB_ENDS, notesOf, startFault, usageLimited, workerPrompt } from "./reel-kit-worker-jobs.js";
 import { noteOwn, stopHolders, sweepOwn, writeWhole } from "./reel-kit-worker-own.js";
@@ -234,7 +234,7 @@ function workerEnv({ home, node, base, tmp }) {
 }
 
 /** Make the run's temporary folder fresh: what an earlier run left there taken away (a link in its place taken away as a link). */
-function freshTmp(tmp) {
+export function freshTmp(tmp) {
   try {
     const there = lstatSync(tmp);
     rmSync(tmp, { recursive: there.isDirectory(), force: true });
@@ -245,7 +245,7 @@ function freshTmp(tmp) {
 }
 
 /** Stop the process group `pid` leads, everything a worker started: SIGTERM, then SIGKILL once `gone()` or `grace` ms have passed. */
-async function killGroup(pid, { grace, gone, wait }) {
+export async function killGroup(pid, { grace, gone, wait }) {
   const signal = (sig) => {
     try {
       process.kill(-pid, sig);
@@ -259,8 +259,9 @@ async function killGroup(pid, { grace, gone, wait }) {
 }
 
 /** Stop a worker an earlier runner left running (macWorkerFile), before this one starts: it is the Mac's one worker. Its own project's
-    studio.json then reads stopped at its step (statusOf). */
-async function stopLeftOver(home, { alive, startOf, grace, wait, log }) {
+    studio.json then reads stopped at its step (statusOf). A render (reel-kit-render.js) records its own process group there too, and
+    stops one left running before it starts. */
+export async function stopLeftOver(home, { alive, startOf, grace, wait, log }) {
   let left = null;
   try {
     left = JSON.parse(readCapped(macWorkerFile(home), 64 * 1024) ?? "null");
@@ -468,10 +469,22 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
   else if (finished) end = reached ? { state: JOB_ENDS[job], why: "" } : { state: "stopped", why: "unfinished" };
   else if (signal) end = { state: "stopped", why: "killed" };
   else end = { state: "failed", why: "error" };
-  if (end.state === "failed" && !unsafe) log(`Reel Kit's worker for ${slug} ended ${code ?? signal}: ${stderr.trim().split("\n").at(-1) ?? ""}`);
+  // An edit built to render records what it is (Task 14, Decision 6): its render refuses it once it was changed in HyperFrames. One that
+  // can't be fingerprinted (a link in it) is not ready: it fails, as a render of what a link leads to is never made. An earlier render's
+  // outcome is of an edit no longer there.
+  let recorded = {};
+  if (end.state === "ready") {
+    try {
+      recorded = { fingerprint: compositionFingerprint(dir), lastRender: undefined };
+    } catch (e) {
+      log(`Reel Kit's ${slug} could not be fingerprinted, so it is not ready to render: ${e.code || e.message}.`);
+      end = { state: "failed", why: "fingerprint" };
+    }
+  }
+  if (end.state === "failed" && !unsafe && end.why !== "fingerprint") log(`Reel Kit's worker for ${slug} ended ${code ?? signal}: ${stderr.trim().split("\n").at(-1) ?? ""}`);
   // What it said last, when it ended short of its last step (WORKER.md: a refused command it needed is said there), for Jason.
   if (end.state !== JOB_ENDS[job] && typeof result?.result === "string") log(`Reel Kit's worker for ${slug} stopped at ${at.step ?? from} (${end.why}): ${result.result.slice(0, 300)}`);
-  mark({ ...end, worker: undefined, workerStart: undefined, minutesLeft: undefined });
+  mark({ ...end, ...recorded, worker: undefined, workerStart: undefined, minutesLeft: undefined });
   try {
     const left = JSON.parse(readCapped(macWorkerFile(home), 64 * 1024) ?? "null");
     if (isObject(left) && left.pid === child.pid) rmSync(macWorkerFile(home), { force: true });

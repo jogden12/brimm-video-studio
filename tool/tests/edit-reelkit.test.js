@@ -16,7 +16,8 @@ import { madeInApp } from "../app-reel.js";
 import { HELD, NOT_FOR_SESSION, gateFor, heldGateFor, namesNoEpisode } from "../gate.js";
 import { kitDir, venvPython } from "../reel-kit.js";
 import { EDIT_SAY, NOTE_MOST, notesFile } from "../reel-kit-commands.js";
-import { entryOf, readState, writeState } from "../reel-kit-project.js";
+import { compositionFingerprint, entryOf, readState, writeState } from "../reel-kit-project.js";
+import { RENDER_SAY } from "../reel-kit-render.js";
 import { macLock, queueFile, queuedOf } from "../reel-kit-worker.js";
 import { releaseEpisodeLock, takeEpisodeLock } from "../detached.js";
 import { recordFile, recordText } from "../episode.js";
@@ -249,6 +250,9 @@ describe("following an edit", () => {
 
   it("says each state in her words, a stopped one with the phrase that carries it on", async () => {
     const w = world({ edits: [{ n: 1, state: { state: "working", step: "cut", pid: 4242 } }, { n: 2, state: { state: "ready" } }] });
+    // Ready as finalize leaves it: its edit.py, and its fingerprint recorded (Task 14: status says why a render would refuse it).
+    writeFileSync(join(w.dirOf(2), "edit.py"), `TITLE = "Know your costs"\n`);
+    writeState(w.dirOf(2), { ...readState(w.dirOf(2)), fingerprint: compositionFingerprint(w.dirOf(2)) });
     const r = await reelkit(w, ["status", FOLDER]);
     assert.deepEqual(r.said, [
       `Reel 1 (lo-fi, version 1): This edit stopped at cut before it was done. Say "carry on" and it picks up from there.`,
@@ -294,7 +298,8 @@ describe("her notes", () => {
 describe("the gate", () => {
   const WORDS = [
     ["start", FOLDER, "reel", "2", "--mode", "lofi"], ["status", FOLDER], ["note", FOLDER, slugOf(2), "p01", "x"], ["go", FOLDER, slugOf(2)],
-    ["revise", FOLDER, slugOf(2)], ["resume", FOLDER, slugOf(2)], ["--now", FOLDER, "start", "reel 2", "lofi", "q1"], ["--now", FOLDER, "finalize", slugOf(2)]
+    ["revise", FOLDER, slugOf(2)], ["resume", FOLDER, slugOf(2)], ["--now", FOLDER, "start", "reel 2", "lofi", "q1"], ["--now", FOLDER, "finalize", slugOf(2)],
+    ["render", FOLDER, slugOf(2)], ["--now", FOLDER, "render", slugOf(2)]
   ];
   it("refuses every reelkit word for a session and an unanswered video", async () => {
     const cleared = { ...SESSION, session: { ...SESSION.session, cleared: CLEARED } };
@@ -500,5 +505,103 @@ describe("fix round 1: the queued job looks at the episode again, inside the Mac
     assert.equal(r.code, 1);
     assert.deepEqual(r.said, ["Reel 2 couldn't be put in the queue on this Mac, so it wasn't started: say it again, or ask Jason."]);
     assert.deepEqual(w.t.started, []);
+  });
+});
+
+describe("her render (plan Task 14)", () => {
+  /** Edit `n` as the worker leaves it after her go: its composition, ready, with its fingerprint recorded. */
+  function finalized(w, n = 2, more = {}) {
+    const dir = w.dirOf(n);
+    writeFileSync(join(dir, "edit.py"), `TITLE = "Know your costs"\n`);
+    mkdirSync(join(dir, "public"), { recursive: true });
+    writeFileSync(join(dir, "public", "index.html"), "<html>the composition</html>\n");
+    writeState(dir, { ...readState(dir), state: "ready", job: "finalize", step: "ready", approved: { at: "2026-11-23T10:00:00.000Z" }, fingerprint: compositionFingerprint(dir), ...more });
+    return dir;
+  }
+  const SAID = "Reel 2 (lo-fi, version 1)";
+
+  it("starts the render of a finalized edit detached, and says so in her words", async () => {
+    const w = world({ edits: [{ n: 2 }] });
+    const dir = finalized(w);
+    const r = await reelkit(w, ["render", FOLDER, slugOf(2)]);
+    assert.deepEqual([r.code, r.said], [0, [EDIT_SAY.rendering(SAID)]]);
+    for (const line of r.said) assert.doesNotMatch(line, PLAIN, line);
+    assert.deepEqual(startedWords(w), [["--now", FOLDER, "render", slugOf(2)]]);
+    assert.equal(readState(dir).rendering.pid, 50000);
+    assert.equal(readState(dir).state, "ready");
+    // A second render waits for the first, and status says where it is.
+    assert.deepEqual((await reelkit(w, ["render", FOLDER, slugOf(2)])).said, [EDIT_SAY.renderBusy]);
+    assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${EDIT_SAY.renderingNow}`]);
+    assert.equal(startedWords(w).length, 1);
+  });
+
+  it("refuses an edit changed in HyperFrames, or not built to render, and starts nothing", async () => {
+    const w = world({ edits: [{ n: 2 }] });
+    const dir = finalized(w);
+    writeFileSync(join(dir, "public", "index.html"), "<html>changed in the app</html>\n");
+    const r = await reelkit(w, ["render", FOLDER, slugOf(2)]);
+    assert.deepEqual([r.code, r.said], [1, [`${nameOf(2)} was changed in HyperFrames, so Reel Kit won't render it: export it from HyperFrames on This Mac.`]]);
+    writeState(dir, { ...readState(dir), state: "storyboard" });
+    assert.deepEqual((await reelkit(w, ["render", FOLDER, slugOf(2)])).said, [RENDER_SAY.notBuilt]);
+    writeState(dir, { ...readState(dir), state: "rendered" });
+    assert.deepEqual((await reelkit(w, ["render", FOLDER, slugOf(2)])).said, [RENDER_SAY.rendered]);
+    assert.deepEqual((await reelkit(w, ["render", FOLDER, "abc123-reel-9-v1"])).said, [EDIT_SAY.noSuchEdit]);
+    assert.deepEqual(w.t.started, []);
+  });
+
+  it("renders in its detached half, under the Mac's lock, and says how it ended", async () => {
+    const w = world({ edits: [{ n: 2 }] });
+    const dir = finalized(w, 2, { rendering: { pid: 50000, at: "2026-11-23T10:00:00.000Z" } });
+    const seen = [];
+    const render = async (ctx, given) => {
+      seen.push(given);
+      return { ok: true, file: join(given.dir, "renders", `${slugOf(2)}-v1.mp4`), why: "" };
+    };
+    const r = await reelkit(w, ["--now", FOLDER, "render", slugOf(2)], { reelKit: { render } });
+    assert.equal(r.code, 0, r.said.join("\n"));
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].dir, dir);
+    assert.equal(seen[0].entry.name, nameOf(2));
+    // Refused under Claude Code, where her chat could type it.
+    const again = await reelkit(w, ["--now", FOLDER, "render", slugOf(2)], { reelKit: { render }, env: { CLAUDECODE: "1" } });
+    assert.deepEqual([again.code, again.said], [2, [HELP]]);
+    assert.equal(seen.length, 1);
+    // What status says once it is rendered, and after a render whose checks failed.
+    writeState(dir, { ...readState(dir), state: "rendered", rendering: undefined });
+    assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${EDIT_SAY.rendered}`]);
+    writeState(dir, { ...readState(dir), state: "ready", lastRender: { at: "2026-11-23T10:00:00.000Z", qa: "failed" } });
+    assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${EDIT_SAY.renderFailed}`]);
+  });
+
+  it("fix round 1: refuses a revise while it renders, and knows a render's run by its start too", async () => {
+    const w = world({ edits: [{ n: 2 }] });
+    const dir = finalized(w);
+    await reelkit(w, ["note", FOLDER, slugOf(2), "p02", "Shorter."]);
+    assert.equal((await reelkit(w, ["render", FOLDER, slugOf(2)])).code, 0);
+    const r = await reelkit(w, ["revise", FOLDER, slugOf(2)]);
+    assert.deepEqual([r.code, r.said], [1, [EDIT_SAY.renderBusy]]);
+    assert.deepEqual(startedWords(w).map((s) => s[2]), ["render"]);
+    // The mark names its run by pid and start: a pid used again by another process is no render.
+    writeState(dir, { ...readState(dir), rendering: { pid: 50000, start: "Mon Nov 23 10:00:00 2026", at: "2026-11-23T10:00:00.000Z" } });
+    const later = { reelKit: { startOf: () => "Tue Nov 24 09:00:00 2026" } };
+    assert.deepEqual((await reelkit(w, ["status", FOLDER], later)).said, [`${SAID}: ${EDIT_SAY.ready}`]);
+    const same = { reelKit: { startOf: () => "Mon Nov 23 10:00:00 2026" } };
+    assert.deepEqual((await reelkit(w, ["status", FOLDER], same)).said, [`${SAID}: ${EDIT_SAY.renderingNow}`]);
+  });
+
+  it("fix round 1: says why a ready edit won't render, and the lines of a render that left nothing", async () => {
+    const w = world({ edits: [{ n: 2 }] });
+    const dir = finalized(w);
+    writeFileSync(join(dir, "public", "index.html"), "<html>changed in the app</html>\n");
+    assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${nameOf(2)} was changed in HyperFrames, so Reel Kit won't render it: export it from HyperFrames on This Mac.`]);
+    writeFileSync(join(dir, "public", "index.html"), "<html>the composition</html>\n");
+    writeState(dir, { ...readState(dir), lastRender: { at: "2026-11-23T10:00:00.000Z", qa: "passed", why: "record" } });
+    assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${EDIT_SAY.renderUnrecorded}`]);
+    // A render that came out not as Reel Kit makes one has its own line (fix round 2, M5).
+    writeState(dir, { ...readState(dir), lastRender: { at: "2026-11-23T10:00:00.000Z", qa: "passed", why: "odd" } });
+    assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${EDIT_SAY.renderOdd}`]);
+    assert.notEqual(EDIT_SAY.renderOdd, EDIT_SAY.renderBroke);
+    for (const line of [EDIT_SAY.renderFailed, EDIT_SAY.renderBroke, EDIT_SAY.renderUnrecorded, EDIT_SAY.renderOdd]) assert.match(line, /nothing was kept as an export/, line);
+    assert.match(EDIT_SAY.renderUnrecorded, /render(ed)? (finished|was made)/i);
   });
 });
