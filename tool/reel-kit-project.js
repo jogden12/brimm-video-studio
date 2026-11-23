@@ -5,7 +5,8 @@
 // they are (project.js projectName) with ` Reel Kit v<n>` after it: never in Dropbox, never in a drop folder. Reel Kit wants every
 // project at REEL_KIT_HOME/projects/<slug>, so that is a symbolic link to the folder (Decision 2), and Reel Kit's new.py makes its
 // folders through it. Its source is a copy of 4K of the part, made by the working copy's own code (workcopy.js makeWorkCopy) and
-// linked into the project as source/clip.mp4 (Decision 3): a Reel's is cut to its own times, so Reel Kit's KEEP works inside them.
+// moved into the project as source/clip.mp4 (Decision 3), so nothing in the working copy folder can take it from an edit: a Reel's is
+// cut to its own times, so Reel Kit's KEEP works inside them.
 //
 // What is here:
 //   - MODES, modeOf: Reel Kit's three modes, and the words she may say for each;
@@ -144,13 +145,23 @@ const PLACE_TAKEN = "Reel Kit's place for this edit on this Mac holds something 
 
 /** Make REEL_KIT_HOME/projects/<slug> a symbolic link to the project folder `dir` (Decision 2): "" when it is made, or is that link
     already; the one line she reads when anything else is there (a folder, a file, a link to elsewhere), which is left as it is, or when
-    `projects` itself is not a folder of its own. Throws for a slug slugOf could not make, or a `dir` that is not a whole path. */
+    `projects` itself is not a folder of its own (a file, or a link, dangling or not). Throws for a slug slugOf could not make, or a `dir` that is not a whole path. */
 export function linkProject(home, slug, dir) {
   if (typeof slug !== "string" || !SLUG.test(slug)) throw new Error(`linkProject: ${JSON.stringify(slug)} is not a slug`);
   if (typeof dir !== "string" || !isAbsolute(dir)) throw new Error("linkProject: the project's folder must be a whole path");
   const projects = join(reelKitHome(home), "projects");
-  mkdirSync(projects, { recursive: true });
-  const kind = lstatSync(projects);
+  let kind;
+  try {
+    kind = lstatSync(projects);
+  } catch (e) {
+    if (e.code !== "ENOENT") return PLACE_TAKEN;
+    try {
+      mkdirSync(projects, { recursive: true });
+      kind = lstatSync(projects);
+    } catch {
+      return PLACE_TAKEN;
+    }
+  }
   if (kind.isSymbolicLink() || !kind.isDirectory()) return PLACE_TAKEN;
   const at = join(projects, slug);
   let there;
@@ -253,17 +264,21 @@ function atWork(home, folder, entry, alive) {
     may. In this order:
     - a part of a planned video (footage.js): one that shows a client, until her plan (`planned`) holds their agreement (mayGoIn), and any
       part, since Reel Kit edits the video it goes into;
-    - a video held as a session (`held`: one of its other versions is a session not cleared), in the gate's words (HELD);
+    - a video held as a session (`held`, which must be given, true or false: one of its other versions is a session not cleared), in the
+      gate's words (HELD);
     - any record the gate holds (gate.js gated: not answered, left alone, a session not cleared) and a planned video, in the gate's words;
     - any session, cleared or not (Decision 9): session clips are not built yet;
     - a Reel the record does not list;
     - no mode, or one that is not Reel Kit's (MODE_ASK): she picks it;
     - the main video of a recording the import did not see upright (WIDE_MAIN): Reel Kit makes upright videos only, and a Reel of a wide
       one is cropped upright;
+    - a title Reel Kit's new.py can't take (titleWhy): a Reel's is its title in the record, the main video's is `title`, as scaffold is
+      given it, so that it is refused before anything is queued;
     - a part with a HyperFrames project in use (not KEPT for an earlier kind);
     - a part with a Reel Kit edit queued or at work (its studio.json, in the episode's folder `folder` under `home`; `alive` says whether
       a worker's pid runs). An earlier edit that waits for her or is done is no refusal: the next is a new version (versionFor). */
-export function startWhy({ record, key, mode, home, folder, held = false, planned = null, alive = null }) {
+export function startWhy({ record, key, mode, title, home, folder, held, planned = null, alive = null }) {
+  if (typeof held !== "boolean") throw new Error("startWhy: `held` must be said, true or false, so that a video held as a session is never let through by its absence");
   if (!isObject(record)) return "That video can't be read: ask Jason.";
   if (isPart(record)) return mayGoIn({ record }, planned) ? PART_FOOTAGE : CLIENT_WAITS;
   if (held) return HELD;
@@ -274,6 +289,8 @@ export function startWhy({ record, key, mode, home, folder, held = false, planne
   if (part !== "main" && !reelOf(record, part.reel)) return noSuchReel(part.reel, (Array.isArray(record.reels) ? record.reels : []).map((r) => r.n));
   if (!MODES.includes(mode)) return MODE_ASK;
   if (part === "main" && seenUpright(record) !== true) return WIDE_MAIN;
+  const titled = titleWhy(part === "main" ? title : reelOf(record, part.reel).title);
+  if (titled) return titled;
   const projects = projectsOf(record).filter((p) => isObject(p) && p.key === key);
   if (projects.some((p) => !isReelKit(p) && p.state !== KEPT)) return inHyperFrames(part);
   if (projects.some((p) => isReelKit(p) && atWork(home, folder, p, alive))) return busy(part);
@@ -290,7 +307,7 @@ const NO_TITLE = "The Reel needs a title for Reel Kit.";
 
 /** Why a title cannot go to Reel Kit as it is, or "": Reel Kit's new.py writes it into edit.py between double quotes, word for word, so a
     title with a double quote, a backslash or a control character in it would make edit.py one it cannot read. */
-function titleWhy(title) {
+export function titleWhy(title) {
   if (typeof title !== "string" || title.trim() === "") return NO_TITLE;
   return /["\\\p{Cc}]/u.test(title) ? BAD_TITLE : "";
 }
@@ -307,24 +324,43 @@ function versionsOnDisk(work, base) {
   return names.filter((n) => n.startsWith(prefix) && /^[1-9]\d*$/.test(n.slice(prefix.length))).map((n) => Number(n.slice(prefix.length)));
 }
 
-/** Make the source/clip.mp4 of the project in `dir` a symbolic link to `copy`, the copy of 4K: "" when it is made or is that link; a
-    link of Studio's to another copy is made again; anything else there is left, and the line says so. Never a hard link. */
-function linkSource(dir, copy) {
-  mkdirSync(join(dir, "source"), { recursive: true });
-  const at = join(dir, "source", "clip.mp4");
-  let there;
+const SOURCE_NOT_IN = "The video for Reel Kit could not be put into its project: ask Jason.";
+
+/** What is at the project's source/clip.mp4: "file" (the copy, moved in by an earlier run), "none", or "other" (a link, a folder, anything
+    else), which is never written over. */
+function sourceAt(dir) {
   try {
-    there = lstatSync(at);
+    return lstatSync(join(dir, "source", "clip.mp4")).isFile() ? "file" : "other";
   } catch (e) {
-    if (e.code !== "ENOENT") return SOURCE_TAKEN;
+    return e.code === "ENOENT" ? "none" : "other";
   }
-  if (there) {
-    if (!there.isSymbolicLink()) return SOURCE_TAKEN;
-    if (readlinkSync(at) === copy) return "";
-    rmSync(at);
+}
+
+/** Move the copy of 4K that makeWorkCopy made (`paths`: its video and its facts, in the episode's working copy folder) into the project in
+    `dir`, as source/clip.mp4 and source/clip.json, by renaming (the two folders are on one disk, both in the episode's work folder), as
+    a HyperFrames project takes its working copy in (app.js moveIn). So the source is the project's own: a later copy of 1080 of the
+    main video, which replaces the copies of other keys in the working copy folder, and `free`, which takes that folder away, never take
+    it from an edit. The facts go first and the video last; a video that can't be moved puts the facts back. "" or the line she reads. */
+function moveSource(dir, paths) {
+  const source = join(dir, "source");
+  const facts = join(source, "clip.json");
+  try {
+    mkdirSync(source, { recursive: true });
+    renameSync(paths.facts, facts);
+  } catch {
+    return SOURCE_NOT_IN;
   }
-  symlinkSync(copy, at);
-  return "";
+  try {
+    renameSync(paths.video, join(source, "clip.mp4"));
+    return "";
+  } catch {
+    try {
+      renameSync(facts, paths.facts);
+    } catch {
+      // The copy is made again by the next run: its facts alone are no copy.
+    }
+    return SOURCE_NOT_IN;
+  }
 }
 
 /** A JSON file of the copy's facts, read as makeWorkCopy wrote it, or null. */
@@ -345,9 +381,10 @@ function factsAt(path) {
       folder `<project.js projectName> Reel Kit v<n>` in the episode's work folder; an earlier version's folder is left as it is;
     - Reel Kit's kit and Python must be on this Mac;
     - her pack is copied in (reel-kit-style.js syncPack), so that new.py copies it into the project; a pack that can't be used stops it;
+    - REEL_KIT_HOME/projects/<slug> is made a link to the folder (linkProject), before the folder is made;
     - the copy of 4K is made (workcopy.js makeWorkCopy, `fourK`, and a Reel's own times from the record: Decision 3), in BRIMM Video Work,
-      and linked as the project's source/clip.mp4;
-    - REEL_KIT_HOME/projects/<slug> is made a link to the folder (linkProject);
+      and moved into the project as source/clip.mp4, with its facts as source/clip.json (moveSource): the project's own, which nothing
+      in the working copy folder can take away. A copy an earlier run of the same edit moved in is kept;
     - Reel Kit's new.py is run (`PY <kit>/pipeline/new.py <slug> "<clip>" "<title>" --mode <mode>`, the title word for word) in Reel
       Kit's own environment (reel-kit.js reelKitEnv);
     - studio.json is written whole with what the edit is, keeping what the job wrote there before (its state).
@@ -382,21 +419,26 @@ export async function scaffold(ctx, { found, record, key, mode, title, version: 
 
   const packed = sync({ settings: ctx.settings, home, log, ...(ctx.build ? { build: ctx.build } : {}) });
   if (packed) return { why: packed };
-
-  const video = recordingAt(ctx, { folder: found.folder, record });
-  const rawStat = recordingStat(ctx, { folder: found.folder, record });
-  const stretch = reel ? { n: reel.n, start: reel.from, end: reel.to } : null;
-  const made = await makeCopy({
-    home, folder: found.name, video, name: `${shownName(record)}${reel ? `, Reel ${reel.n}` : ""}, for Reel Kit`, fourK: true, reel: stretch,
-    ...(rawStat ? { rawStat } : {})
-  }, { log, ...copy, tools: copy.tools ?? findPrograms() });
-  if (!made.ok) return { why: made.words };
-
-  mkdirSync(dir, { recursive: true });
-  const sourced = linkSource(dir, made.paths.video);
-  if (sourced) return { why: sourced };
+  // Reel Kit's place for the edit is claimed before its folder is made, so that a place that holds something else makes nothing.
   const linked = linkProject(home, slug, dir);
   if (linked) return { why: linked };
+
+  const rawStat = recordingStat(ctx, { folder: found.folder, record });
+  const there = sourceAt(dir);
+  if (there === "other") return { why: SOURCE_TAKEN };
+  if (there === "none") {
+    // The copy of an earlier run of this very edit, moved in already, is kept; otherwise it is made and moved in.
+    const video = recordingAt(ctx, { folder: found.folder, record });
+    const stretch = reel ? { n: reel.n, start: reel.from, end: reel.to } : null;
+    const made = await makeCopy({
+      home, folder: found.name, video, name: `${shownName(record)}${reel ? `, Reel ${reel.n}` : ""}, for Reel Kit`, fourK: true, reel: stretch,
+      ...(rawStat ? { rawStat } : {})
+    }, { log, ...copy, tools: copy.tools ?? findPrograms() });
+    if (!made.ok) return { why: made.words };
+    mkdirSync(dir, { recursive: true });
+    const moved = moveSource(dir, made.paths);
+    if (moved) return { why: moved };
+  }
 
   const clip = join(dir, "source", "clip.mp4");
   const env = reelKitEnv({ home, node, base });
@@ -408,5 +450,5 @@ export async function scaffold(ctx, { found, record, key, mode, title, version: 
 
   const raw = rawStat ?? { size: 0, mtimeMs: 0 };
   writeState(dir, { ...(readState(dir) ?? {}), slug, key, mode, version, title, name, madeAt: localStamp(new Date(ctx.now ? ctx.now() : Date.now())) });
-  return { dir, slug, name, version, from: fromOf(record, raw), workingCopy: copyOf(factsAt(made.paths.facts)) };
+  return { dir, slug, name, version, from: fromOf(record, raw), workingCopy: copyOf(factsAt(join(dir, "source", "clip.json"))) };
 }

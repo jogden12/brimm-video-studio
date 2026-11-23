@@ -53,7 +53,7 @@ Environment: `BRIMM_VIDEO_HOME` (Studio's home instead of `HOME`, absolute only;
 - `Drop/`: the default local drop folder.
 - `.runs/`: run scratch; the import lock `brimm-transcribe-<hash>.lock`.
 - `.toolchain/hyperframes-<version>/`: the pinned HyperFrames CLI.
-- `<episode folder>/`: `video/` (on a local Mac, the episode's own files: the recording, its `.srt`, `.words.json`, `.cut-plan.json`, `reels.json`; `.import.json`, `.put.json`, `history/`), `working copy/<bytes>-<mtimeMs>.mp4` with a facts `.json` (Reels, footage and voice have their own names; a Reel Kit edit's copy of 4K is `<key>-4k.mp4` for the main video and `reel-<n>-<key>-4k.mp4` for a Reel, which replaces only that Reel's other copies of 4K), one folder per HyperFrames project and per Reel Kit edit, `renders/`, `put back/`, and the locks and markers below.
+- `<episode folder>/`: `video/` (on a local Mac, the episode's own files: the recording, its `.srt`, `.words.json`, `.cut-plan.json`, `reels.json`; `.import.json`, `.put.json`, `history/`), `working copy/<bytes>-<mtimeMs>.mp4` with a facts `.json` (Reels, footage and voice have their own names; a Reel Kit edit's copy of 4K is made as `<key>-4k.mp4` for the main video and `reel-<n>-<key>-4k.mp4` for a Reel, which replaces only that Reel's other copies of 4K, and is then moved into its project), one folder per HyperFrames project and per Reel Kit edit, `renders/`, `put back/`, and the locks and markers below.
 - `Saved test recordings/`: test originals kept by hand; no code uses it.
 
 ## The episode record
@@ -95,12 +95,12 @@ What the app writes and Studio reads back:
 
 ## A Reel Kit project Studio makes
 
-`~/BRIMM Video Work/<episode folder>/<projectName of the part> Reel Kit v<n>/` (`reel-kit-project.js` `scaffold`, a step of the queued job, under the Mac-wide worker lock), beside the episode's HyperFrames projects, never in Dropbox or a drop folder. A later version of the same part is a new folder; the earlier one stays as it is.
+`~/BRIMM Video Work/<episode folder>/<projectName of the part> Reel Kit v<n>/` (`reel-kit-project.js` `scaffold`, a step of the queued job, under the Mac-wide worker lock; `startWhy`, before it is queued, refuses a title `new.py` can't take and needs `held` said), beside the episode's HyperFrames projects, never in Dropbox or a drop folder. A later version of the same part is a new folder; the earlier one stays as it is.
 
-- `source/clip.mp4`: a symbolic link (never a hard link) to the part's copy of 4K in `working copy/` (`workcopy.js` `makeWorkCopy` with `fourK`, and a Reel's own times from the record, `reels[].from`/`to`: Decision 3).
+- `source/clip.mp4` and `source/clip.json` (its facts): the part's copy of 4K, made in `working copy/` (`workcopy.js` `makeWorkCopy` with `fourK`, and a Reel's own times from the record, `reels[].from`/`to`: Decision 3) and moved in by renaming (facts first, video last), as a HyperFrames project takes its working copy in. It is the project's own: a later copy of 1080 and `free` take only what is in `working copy/`. A copy an earlier run of the same edit moved in is kept; anything else at `clip.mp4` is never written over.
 - `studio.json` (`stateFile`; written whole by Studio, a file of its own beside it then renamed, never by the worker; read by `readState` with no link followed, no pipe waited on and at most 1 MB): `{slug, key, mode, version, title, name, madeAt}`, and the job's own state (`state`: `queued`, `working` with `pid`, `stopped`, `storyboard`, `ready`, `failed`, then `rendered`; plan Task 10), which `scaffold` keeps.
 - What Reel Kit's `new.py` makes there (through the link below): `assets/`, `audio/`, `cards/`, `fx/`, `public/cards/`, `public/media/`, `renders/`, `storyboard/`, `work/`, `style/` (copied from `.reel-kit/style/`, which `syncPack` builds from her pack first), and `edit.py` (`TITLE` her Reel's title word for word, `STYLE` the mode, `SRC` the path of `source/clip.mp4`). A title with a double quote, a backslash or a control character is refused first, as `edit.py` holds it between double quotes.
-- `~/BRIMM Video Work/.reel-kit/projects/<slug>` (`linkProject`, Decision 2): a symbolic link to the project folder, `<episode id's last 6>-<main|reel-n>-v<n>` (`slugOf`), where Reel Kit looks for it. It is never made over anything else (a folder, a file, a link elsewhere).
+- `~/BRIMM Video Work/.reel-kit/projects/<slug>` (`linkProject`, Decision 2, made before the project folder): a symbolic link to the project folder, `<episode id's last 6>-<main|reel-n>-v<n>` (`slugOf`), where Reel Kit looks for it. It is never made over anything else (a folder, a file, a link elsewhere), nor when `projects` itself is a file or a link.
 - The tests' stand-in for Reel Kit's scripts is `tool/tests/stand-ins/reel-kit.mjs` (Decision 8), its starter `edit.py` `tool/tests/fixtures/reel-kit-1.2.0/project/edit.py`.
 
 ## Locks, receipts and markers (all on the Mac's disk)

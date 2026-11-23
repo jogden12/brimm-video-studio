@@ -12,11 +12,12 @@ import { KEPT } from "../app.js";
 import { HELD, NOT_FOR_SESSION } from "../gate.js";
 import { kitDir, reelKitHome, venvPython } from "../reel-kit.js";
 import {
-  MODES, entryOf, linkProject, modeLeans, modeOf, projectFolderOf, readState, scaffold, slugOf, startWhy, stateFile, versionFor, writeState
+  MODES, entryOf, linkProject, modeLeans, modeOf, projectFolderOf, readState, scaffold, slugOf, startWhy, stateFile, titleWhy, versionFor, writeState
 } from "../reel-kit-project.js";
 import { ensureHerPack, herPack } from "../reel-kit-style.js";
 import { dropFolderOf, episodeWork, workFolder } from "../settings.js";
-import { workCopyDir } from "../workcopy.js";
+import { freeEpisode } from "../free.js";
+import { makeWorkCopy, workCopyDir } from "../workcopy.js";
 import { FOLDER, ID, listAll } from "./episodes.js";
 import { probed } from "./fixtures.js";
 import { EPISODE, episode } from "./phase4.js";
@@ -27,6 +28,8 @@ const ASK = "Hi-fi, lo-fi or showcase?";
 const WIDE = "Reel Kit makes upright videos only: choose a Reel of it.";
 /** The rate of the made-up recording and of what is made of it: 30 pictures a second. */
 const RATE = { r_frame_rate: "30/1", avg_frame_rate: "30/1" };
+/** startWhy as her chat asks it: not held as a session, and the main video titled, unless a test says otherwise. */
+const ask = (asked) => startWhy({ held: false, title: "Pricing", home: "/nowhere", folder: FOLDER, ...asked });
 const quote = (text) => `'${String(text).replace(/'/g, "'\\''")}'`;
 
 /** Reel 2 of the made-up episode, as its record lists it: its own times in seconds of the recording. */
@@ -72,7 +75,7 @@ function world({ record = {}, raw = { width: 3840, height: 2160 } } = {}) {
   };
   const runs = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []);
   const make = (asked, more = {}) => scaffold(t.ctx, { found, record: found.record, ...asked }, { copy, ...more });
-  return { t, found, video, guarded, runs, make, after };
+  return { t, found, video, guarded, runs, make, after, copy };
 }
 
 /** A part of a planned video (footage.js): no kind, the answer "part", and what it is footage for. */
@@ -98,10 +101,10 @@ describe("the mode of a Reel Kit edit", () => {
     assert.equal(modeLeans({ ...RAW, answer: { ...ANSWERED, seen: "wide, 12:00" } }), "hifi");
     assert.equal(modeLeans({ ...RAW, kind: "finished" }), "");
     for (const mode of [undefined, null, "", "medium", "Hi-fi"]) {
-      assert.equal(startWhy({ record: clip, key: "main", mode, home: "/nowhere", folder: FOLDER }), ASK, String(mode));
-      assert.equal(startWhy({ record: { ...RAW, reels: REELS }, key: "reel 2", mode, home: "/nowhere", folder: FOLDER }), ASK, String(mode));
+      assert.equal(ask({ record: clip, key: "main", mode, home: "/nowhere", folder: FOLDER }), ASK, String(mode));
+      assert.equal(ask({ record: { ...RAW, reels: REELS }, key: "reel 2", mode, home: "/nowhere", folder: FOLDER }), ASK, String(mode));
     }
-    assert.equal(startWhy({ record: clip, key: "main", mode: "lofi", home: "/nowhere", folder: FOLDER }), "");
+    assert.equal(ask({ record: clip, key: "main", mode: "lofi", home: "/nowhere", folder: FOLDER }), "");
 
     // The scaffold asks too: nothing is copied and Reel Kit is not run.
     const w = world();
@@ -112,12 +115,14 @@ describe("the mode of a Reel Kit edit", () => {
 
 describe("what Reel Kit refuses", () => {
   it("refuses a session, an unanswered video and a client's part without agreement", () => {
-    const why = (record, more = {}) => startWhy({ record, key: "main", mode: "lofi", home: "/nowhere", folder: FOLDER, ...more });
+    const why = (record, more = {}) => ask({ record, key: "main", mode: "lofi", home: "/nowhere", folder: FOLDER, ...more });
     assert.equal(why(UNANSWERED), "This video is waiting for its answer: say what it is first.");
     assert.equal(why(LEFT), "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.");
     assert.equal(why(SESSION), NOT_FOR_SESSION);
     // Any session, whether its mark is cleared or not (Decision 9): session clips are not built yet.
     assert.equal(why({ ...SESSION, session: { ...SESSION.session, cleared: CLEARED } }), NOT_FOR_SESSION);
+    // Whether it is held as a session must be said: left out, it can't let one through.
+    for (const held of [undefined, null, "no", 0]) assert.throws(() => startWhy({ record: RAW, key: "main", mode: "lofi", title: "Pricing", home: "/nowhere", folder: FOLDER, held }), /held/, String(held));
     // A video held as a session: one of its other versions is a session not cleared.
     assert.equal(why({ ...RAW, answer: { ...ANSWERED, seen: "upright, 0:40" } }, { held: true }), HELD);
     // A part that shows a client goes into no edit until her plan holds their agreement; a part is never edited on its own either.
@@ -128,24 +133,24 @@ describe("what Reel Kit refuses", () => {
       assert.equal(line, "This is footage for a planned video: Reel Kit edits the video it goes into, not its footage.");
     }
     // A Reel the record does not list.
-    assert.equal(startWhy({ record: { ...RAW, reels: REELS }, key: "reel 9", mode: "lofi", home: "/nowhere", folder: FOLDER }), `There is no Reel 9. The Reels are ${REELS.map((r) => r.n).join(", ")}.`);
+    assert.equal(ask({ record: { ...RAW, reels: REELS }, key: "reel 9", mode: "lofi", home: "/nowhere", folder: FOLDER }), `There is no Reel 9. The Reels are ${REELS.map((r) => r.n).join(", ")}.`);
   });
 
   it("refuses the main video of a wide recording", () => {
     const wide = { ...RAW, reels: REELS, answer: { ...ANSWERED, seen: "wide, 0:23, no retakes" } };
-    assert.equal(startWhy({ record: wide, key: "main", mode: "hifi", home: "/nowhere", folder: FOLDER }), WIDE);
+    assert.equal(ask({ record: wide, key: "main", mode: "hifi", home: "/nowhere", folder: FOLDER }), WIDE);
     // A Reel of it is cropped upright by Reel Kit.
-    assert.equal(startWhy({ record: wide, key: "reel 2", mode: "hifi", home: "/nowhere", folder: FOLDER }), "");
+    assert.equal(ask({ record: wide, key: "reel 2", mode: "hifi", home: "/nowhere", folder: FOLDER }), "");
     // An upright recording's main video is made; one whose shape the record does not say is refused, as a gate errs.
-    assert.equal(startWhy({ record: { ...RAW, answer: { ...ANSWERED, seen: "upright, 0:40" } }, key: "main", mode: "hifi", home: "/nowhere", folder: FOLDER }), "");
-    assert.equal(startWhy({ record: RAW, key: "main", mode: "hifi", home: "/nowhere", folder: FOLDER }), WIDE);
+    assert.equal(ask({ record: { ...RAW, answer: { ...ANSWERED, seen: "upright, 0:40" } }, key: "main", mode: "hifi", home: "/nowhere", folder: FOLDER }), "");
+    assert.equal(ask({ record: RAW, key: "main", mode: "hifi", home: "/nowhere", folder: FOLDER }), WIDE);
   });
 
   it("refuses a part that has a HyperFrames project", () => {
     const w = world();
     const project = { key: "reel 2", name: "Pricing- what to charge- reel 2 3fa9c1", madeAt: "2026-10-20T15:00:00-05:00", on: "Mac Studio", opened: [], handover: false, fromSuggestion: 2, state: "made" };
     const base = { ...w.found.record, app: { toolchain: "0.8.208", projects: [project] } };
-    const why = (record, more = {}) => startWhy({ record, key: "reel 2", mode: "showcase", home: w.t.home, folder: FOLDER, ...more });
+    const why = (record, more = {}) => ask({ record, key: "reel 2", mode: "showcase", home: w.t.home, folder: FOLDER, ...more });
     assert.equal(why(base), "Reel 2 has a HyperFrames project already, so it is edited there.");
     // One kept for an earlier kind is not in use.
     assert.equal(why({ ...base, app: { ...base.app, projects: [{ ...project, state: KEPT }] } }), "");
@@ -188,10 +193,11 @@ describe("the Reel Kit project", () => {
     assert.ok(lstatSync(made.dir).isDirectory() && !lstatSync(made.dir).isSymbolicLink());
     for (const d of ["assets", "audio", "cards", "fx", "public/cards", "public/media", "renders", "storyboard", "work", "style"]) assert.ok(existsSync(join(made.dir, d)), d);
     assert.match(readFileSync(join(made.dir, "edit.py"), "utf8"), /^STYLE = "lofi"$/m);
-    // Its source is a link to the copy of 4K, beside the working copies, never a hard link.
+    // Its source is the copy of 4K itself, moved in from the working copies with its facts: none of it is left there.
     const clip = join(made.dir, "source", "clip.mp4");
-    assert.ok(lstatSync(clip).isSymbolicLink());
-    assert.equal(readlinkSync(clip).startsWith(`${workCopyDir(w.t.home, FOLDER)}/reel-2-`), true);
+    assert.ok(lstatSync(clip).isFile());
+    assert.equal(JSON.parse(readFileSync(join(made.dir, "source", "clip.json"), "utf8")).width, 3840);
+    assert.deepEqual(readdirSync(workCopyDir(w.t.home, FOLDER)).filter((f) => f.startsWith("reel-2-")), []);
     assert.equal(readFileSync(clip, "utf8"), "THE 4K COPY");
     assert.match(readFileSync(join(made.dir, "edit.py"), "utf8"), new RegExp(`^SRC = "${clip.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"$`, "m"));
     // studio.json is Studio's, written whole, and says which edit it is.
@@ -224,9 +230,51 @@ describe("the Reel Kit project", () => {
     for (const slug of ["3fa9c1-reel-3-v1", "3fa9c1-main-v1", "3fa9c1-reel-4-v1"]) assert.equal(linkProject(w.t.home, slug, dir), taken, slug);
     assert.ok(lstatSync(join(projects, "3fa9c1-reel-3-v1")).isDirectory());
     assert.equal(readlinkSync(join(projects, "3fa9c1-reel-4-v1")), join(w.t.dir, "elsewhere"));
+    // Reel Kit's projects folder that is a file, or a link (dangling or not), is no place of Studio's: nothing is made in it.
+    for (const odd of [(at) => writeFileSync(at, "a file"), (at) => symlinkSync(join(w.t.dir, "gone"), at), (at) => symlinkSync(w.t.dir, at)]) {
+      const v = world();
+      const at = join(reelKitHome(v.t.home), "projects");
+      mkdirSync(reelKitHome(v.t.home), { recursive: true });
+      odd(at);
+      assert.equal(linkProject(v.t.home, "3fa9c1-reel-2-v1", dir), taken);
+    }
     for (const slug of ["../x", "3fa9c1-reel-2", "3fa9c1-reel-0-v1", "3fa9c1-main-v0", ""]) assert.throws(() => linkProject(w.t.home, slug, dir), /slug/, slug);
     assert.deepEqual([slugOf({ id: ID }, "main", 3), slugOf({ id: ID }, "reel 12", 1)], ["3fa9c1-main-v3", "3fa9c1-reel-12-v1"]);
     for (const [key, version] of [["reel 0", 1], ["clip 1", 1], ["main", 0], ["main", 1.5]]) assert.throws(() => slugOf({ id: ID }, key, version), JSON.stringify([key, version]));
+  });
+
+  it("keeps the source in the project when a later copy of 1080 is made and free takes the working copies away", async () => {
+    const w = world({ record: { answer: { ...ANSWERED, seen: "upright, 0:23" } }, raw: { width: 2160, height: 3840 } });
+    const made = await w.make({ key: "main", mode: "lofi", title: "Pricing" });
+    assert.equal(made.why, undefined, made.why);
+    const clip = join(made.dir, "source", "clip.mp4");
+    // HyperFrames' copy of 1080 of the main video replaces every main copy of another key in the working copy folder: not this one.
+    const later = await makeWorkCopy({ home: w.t.home, folder: FOLDER, video: w.video, name: "Pricing talk" }, w.copy);
+    assert.equal(later.ok, true, later.words);
+    assert.ok(existsSync(later.paths.video));
+    assert.equal(readFileSync(clip, "utf8"), "THE 4K COPY");
+    // `free` takes the working copy folder away: the edit's source stays.
+    const said = [];
+    assert.equal(await freeEpisode({ ...w.t.ctx, say: (line) => said.push(line) }, { found: w.found, record: w.found.record }, { running: () => false }), 0, said.join("\n"));
+    assert.ok(!existsSync(later.paths.video), said.join("\n"));
+    assert.ok(lstatSync(clip).isFile());
+    assert.equal(readFileSync(clip, "utf8"), "THE 4K COPY");
+    // A later run of the same edit keeps the copy it moved in, and makes no other.
+    const ffmpeg = w.guarded.length;
+    const again = await w.make({ key: "main", mode: "lofi", title: "Pricing", version: 1 });
+    assert.equal(again.why, "Reel Kit could not start this edit: ask Jason.");
+    assert.equal(w.guarded.length, ffmpeg);
+    assert.equal(readFileSync(clip, "utf8"), "THE 4K COPY");
+  });
+
+  it("claims Reel Kit's place for the edit before its folder is made, and makes nothing when it is taken", async () => {
+    const w = world();
+    const projects = join(reelKitHome(w.t.home), "projects");
+    mkdirSync(join(projects, "3fa9c1-reel-2-v1"), { recursive: true });
+    const refused = await w.make({ key: "reel 2", mode: "lofi", title: "Know your costs" });
+    assert.equal(refused.why, "Reel Kit's place for this edit on this Mac holds something else, so nothing was changed: ask Jason.");
+    assert.deepEqual([w.guarded, w.runs()], [[], []]);
+    assert.ok(!existsSync(projectFolderOf(w.t.home, FOLDER, "Pricing- what to charge- reel 2 3fa9c1 Reel Kit v1")));
   });
 
   it("reads studio.json only as a plain file of its size, and writes it whole", () => {
@@ -273,7 +321,7 @@ describe("the Reel Kit project", () => {
     assert.equal(limits.most, 8 * 1024 ** 3);
     // Made in BRIMM Video Work alone: nothing in the drop folder, nothing new in the episode's folder in Dropbox.
     assert.ok(args.at(-1).startsWith(`${workFolder(w.t.home)}/`), args.at(-1));
-    assert.ok(readlinkSync(join(made.dir, "source", "clip.mp4")).startsWith(`${workFolder(w.t.home)}/`));
+    assert.ok(made.dir.startsWith(`${workFolder(w.t.home)}/`) && lstatSync(join(made.dir, "source", "clip.mp4")).isFile());
     assert.ok(!existsSync(drop) || readdirSync(drop).length === 0);
     assert.deepEqual(listAll(w.found.folder), episodeBefore);
 
@@ -298,7 +346,17 @@ describe("the Reel Kit project", () => {
     assert.deepEqual([ran.env.HF_HUB_OFFLINE, ran.env.PIP_NO_INDEX, ran.env.UV_OFFLINE], ["1", "1", "1"]);
     assert.ok(readFileSync(join(made.dir, "edit.py"), "utf8").includes(`TITLE = "${title}"\n`));
 
-    // A title Reel Kit's edit.py can't hold is refused before anything is made.
+    // A title Reel Kit's edit.py can't hold is refused before anything is queued (startWhy: the main video's as scaffold is given it, a
+    // Reel's from the record), and before anything is made (scaffold).
+    const BAD = "The Reel's title can't hold a double quote, a backslash or a new line for Reel Kit: say it again without them.";
+    assert.deepEqual([titleWhy(title), titleWhy('Say "no"'), titleWhy("")], ["", BAD, "The Reel needs a title for Reel Kit."]);
+    const upright = { ...RAW, reels: REELS, answer: { ...ANSWERED, seen: "upright, 0:40" } };
+    assert.equal(ask({ record: upright, key: "main", mode: "lofi", title: 'Say "no"' }), BAD);
+    assert.equal(ask({ record: upright, key: "main", mode: "lofi", title }), "");
+    const quoted = { ...upright, reels: REELS.map((r) => (r.n === 2 ? { ...r, title: 'Know your "costs"' } : r)) };
+    assert.equal(ask({ record: quoted, key: "reel 2", mode: "lofi" }), BAD);
+    assert.equal(ask({ record: { ...upright, reels: REELS.map((r) => (r.n === 2 ? { ...r, title: "" } : r)) }, key: "reel 2", mode: "lofi" }), "The Reel needs a title for Reel Kit.");
+    assert.equal(ask({ record: upright, key: "reel 2", mode: "lofi" }), "");
     for (const bad of ['Say "no" to discounts', "Back\\slash", "Two\nlines", "", "   "]) {
       const v = world();
       const refused = await v.make({ key: "reel 2", mode: "lofi", title: bad });
