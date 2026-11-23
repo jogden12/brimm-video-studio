@@ -1,11 +1,14 @@
 // What the Reel Kit worker may do (spec 2026-11-23 Reel Kit in Studio, section 4; plan Task 10, Decision 4).
 //
-// The worker is Studio's first headless Claude Code run with tools, so it is held three ways, each on its own (gotchas, "Claude Code's
+// The worker is Studio's first headless Claude Code run with tools, so it is held four ways, each on its own (gotchas, "Claude Code's
 // sandbox is not a secret store: test each layer"): the permission lists it is started with (`--allowedTools`, `--disallowedTools`, and
-// the same lists in its settings file), the mode that refuses anything not on them without asking (`dontAsk`), and a PreToolUse hook,
-// tool/reel-kit/worker-guard.mjs, that answers every call by `workerDecision`. The lists and the hook's table both come from WORKER_TOOLS,
-// so they cannot drift; the hook is the stricter of the two, as it judges every path by its real path. It never says "allow": a call it
-// lets pass is still the lists' to allow, so both must say yes.
+// the same lists in its settings file), the mode that refuses anything not on them without asking (`dontAsk`), a PreToolUse hook,
+// tool/reel-kit/worker-guard.mjs, that answers every call by `workerDecision`, and Claude Code's own OS sandbox around every command
+// (workerSandbox): no network, writes only in the project and the run's temp folder, no reads of the gated places. The sandbox is the
+// real limit: every pipeline script runs the project's edit.py, which the worker writes, so a script the hook lets run can do whatever
+// Python can. The hook is a guardrail on top. Whether HyperFrames' headless Chrome works inside this sandbox is the by-hand spike RK21,
+// before any real run. The lists and the hook's table both come from WORKER_TOOLS, so they cannot drift; the hook is the stricter of
+// the two, as it judges every path by its real path. It never says "allow": a call it lets pass is still the lists' to allow.
 //
 // What it allows, and nothing else:
 //   - Read, Glob and Grep inside the project folder and the kit (KIT, read only); Write and Edit inside the project, but never Studio's own
@@ -24,7 +27,9 @@
 // Pure but for looking at the disk (real paths, whether a folder is there).
 import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { PIN } from "./reel-kit.js";
+import { PIN, hfDir } from "./reel-kit.js";
+import { bashNeeds, bothSpellings, gatedPlaces, realOf as placeOf } from "./places.js";
+import { studioFolder } from "./studio.js";
 import { CLAUDE_MODEL } from "./unedited.js";
 
 /** The model of the worker and of its card and FX helpers: Studio's pinned model. */
@@ -36,6 +41,11 @@ export const WORKER_SCRIPTS = Object.freeze(["words", "cut", "storyboard", "buil
 /** What the worker may ask of the pinned HyperFrames anywhere it may run it. Its render is a card's alone (cardRender); never publish or
     anything of the cloud. */
 export const HF_COMMANDS = Object.freeze(["check", "lint", "snapshot"]);
+/** What every ffmpeg and ffprobe call starts with, and every ffmpeg input is given: files and pipes only, never the network. */
+export const PROTOCOLS = Object.freeze(["-protocol_whitelist", "file,pipe"]);
+/** The formats ffmpeg and ffprobe may be told with `-f`: none that reads or writes other files (tee, concat, hls, segment), makes its own
+    input (lavfi) or names the network. */
+const FORMATS = new Set(["null", "mp4", "mov", "ipod", "wav", "mp3", "adts", "flac", "aiff", "image2", "mjpeg", "png", "apng", "gif", "webp", "webm", "matroska", "s16le", "f32le", "rawvideo"]);
 /** The copy program, by its whole path: one source, one destination, `-R` or no flag. */
 const CP = "/bin/cp";
 /** REEL_KIT_HOME's folders a copy may come from: GSAP, the style, her own effects and cards. */
@@ -78,7 +88,7 @@ export function WORKER_TOOLS({ project, kit, rkHome, bin }) {
   const allowed = [
     `Read(/${project}/**)`, `Read(/${kit}/**)`, `Edit(/${project}/**)`, `Write(/${project}/**)`,
     ...WORKER_SCRIPTS.flatMap((name) => both(`${q(p.python)} ${q(p.script(name))} ${q(project)}`)),
-    ...both(q(p.ffmpeg)), ...both(q(p.ffprobe)),
+    `Bash(${q(p.ffmpeg)} ${PROTOCOLS.join(" ")} *)`, `Bash(${q(p.ffprobe)} ${PROTOCOLS.join(" ")} *)`,
     ...HF_COMMANDS.flatMap((command) => both(`${q(p.npx)} ${HF_WORDS.join(" ")} ${command}`)),
     `Bash(${q(p.npx)} ${HF_WORDS.join(" ")} render *)`, `Bash(${CP} *)`,
     `Bash(cd ${q(project)})`, `Bash(cd ${q(join(project, "public"))})`, `Bash(cd ${q(`${project}/cards/*`)})`, `Bash(cd ${q(`${project}/fx/*`)})`,
@@ -121,13 +131,13 @@ const within = (root, real) => root !== null && real !== null && (real === root 
 const below = (root, real) => root !== null && real !== null && real.startsWith(`${root}${sep}`);
 
 /** Whether a path inside the project (real) is one of Studio's own there, which the worker never writes: studio.json and the files Studio
-    writes it through, the notes for the app's agent (CLAUDE.md, AGENTS.md), and any .claude folder. By name in any case, as the Mac's disk
-    takes a name in any case. */
+    writes it through, the notes for the app's agent (CLAUDE.md, AGENTS.md), and what a later Claude Code or npm would take as settings (any
+    .claude or .git folder, a .mcp.json, an .npmrc). By name in any case, as the Mac's disk takes a name in any case. */
 function studioOwn(projectReal, real) {
   const parts = relative(projectReal, real).split(sep).map((part) => part.normalize("NFC").toLowerCase());
   if (parts[0] === "studio.json" || parts[0].startsWith(".studio.json")) return true;
-  if (parts.includes(".claude")) return true;
-  return ["claude.md", "claude.local.md", "agents.md"].includes(parts.at(-1));
+  if (parts.includes(".claude") || parts.includes(".git")) return true;
+  return ["claude.md", "claude.local.md", "agents.md", ".mcp.json", ".npmrc"].includes(parts.at(-1));
 }
 
 /** The roots a decision is made against, by their real paths. */
@@ -187,12 +197,47 @@ export function commandWords(command) {
 function wordsStayIn(words, cwd, roots, projectReal) {
   const fits = (real) => roots.some((root) => within(root, real)) && !(within(projectReal, real) && studioOwn(projectReal, real));
   for (const { text } of words) {
-    // A whole path is taken whole (a folder's name may hold a comma), when it stays in.
+    // A whole path is taken whole (a folder's name may hold a comma or an apostrophe), when it stays in.
     if (text.startsWith("/") && fits(realOf(text))) continue;
+    // Anything else holds nothing ffmpeg or HyperFrames reads as more than one thing (a list, a quote, a stream specifier, a glob), and
+    // names no protocol (`http:`, `tcp:`, `concat:`, `file:`), at its start or after a flag's `=`.
+    if (/[|'[\];<>*]/.test(text) || SCHEME.test(text) || (text.startsWith("-") && SCHEME.test(text.slice(text.indexOf("=") + 1)))) return false;
     for (const piece of text.split(/[=:,]/)) {
       if (piece === "" || piece.startsWith("-")) continue;
       if (piece.split("/").includes("..")) return false;
       if (!fits(realOf(isAbsolute(piece) ? piece : join(cwd, piece)))) return false;
+    }
+  }
+  return true;
+}
+
+/** A protocol's name at the start of a word: letters, then `:`. */
+const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+
+/** Whether the words after ffmpeg's or ffprobe's program keep it to files and pipes: they start with the whitelist (PROTOCOLS); for ffmpeg
+    every `-i` has the whitelist among its own options (since the input before it); no other whitelist or blacklist, no `-safe`, no option
+    read from a file (`-/…`, any `*_script`), and `-f` only of FORMATS. */
+function protocolsKept(args, ffmpeg) {
+  if (!spelled(args[0], PROTOCOLS[0], false) || !spelled(args[1], PROTOCOLS[1], false)) return false;
+  let given = false;
+  for (let i = 0; i < args.length; i++) {
+    const { text } = args[i];
+    if (text === PROTOCOLS[0]) {
+      if (!spelled(args[i + 1], PROTOCOLS[1], false) || given) return false;
+      given = true;
+      i++;
+      continue;
+    }
+    if (text.startsWith("-protocol") || text === "-safe" || text.startsWith("-/") || text.includes("_script")) return false;
+    if (text === "-f" || text.startsWith("-f:")) {
+      if (!FORMATS.has(args[i + 1]?.text)) return false;
+      i++;
+      continue;
+    }
+    if (text === "-i" && ffmpeg) {
+      if (!given) return false;
+      given = false;
+      i++;
     }
   }
   return true;
@@ -217,7 +262,7 @@ const isFolder = (real) => {
     trailing `/`): Studio's own files (studioOwn). */
 const ownName = (name) => {
   const n = name.normalize("NFC").toLowerCase();
-  return n === "studio.json" || n.startsWith(".studio.json") || n === ".claude" || ["claude.md", "claude.local.md", "agents.md"].includes(n);
+  return n === "studio.json" || n.startsWith(".studio.json") || [".claude", ".git", "claude.md", "claude.local.md", "agents.md", ".mcp.json", ".npmrc"].includes(n);
 };
 
 /** Whether the folder at the real path `real`, and everything under it, holds no name ownName refuses: links are looked at, never followed
@@ -248,8 +293,8 @@ function copyAnswer(words, cwd, roots) {
   if (paths.length !== 2 || paths.some((w) => w.text.startsWith("-") || w.text.split("/").includes(".."))) return false;
   const [from, to] = paths.map((w) => realOf(isAbsolute(w.text) ? w.text : join(cwd, w.text)));
   if (!roots.copyFrom.some((root) => within(root, from)) || !within(roots.project, to)) return false;
-  const lands = isFolder(to) ? join(to, basename(from)) : to;
-  if (studioOwn(roots.project, to) || studioOwn(roots.project, lands)) return false;
+  const lands = isFolder(to) ? realOf(join(to, basename(from))) : to;
+  if (!within(roots.project, lands) || studioOwn(roots.project, to) || studioOwn(roots.project, lands)) return false;
   return recursive ? cleanTree(from) : !ownName(basename(from));
 }
 
@@ -269,7 +314,7 @@ function cardRender(args, cwd, roots) {
     } else if (!quoted && /^(?:-o|--output)=/.test(text)) outputs.push(text.slice(text.indexOf("=") + 1));
     else others.push(args[i]);
   }
-  if (outputs.length !== 1 || outputs[0].split("/").includes("..")) return false;
+  if (outputs.length !== 1 || outputs[0].split("/").includes("..") || SCHEME.test(outputs[0]) || /[|'[\];<>*]/.test(outputs[0])) return false;
   if (others.some((w) => /cloud|lambda|publish|upload|share/i.test(w.text))) return false;
   return below(card, realOf(isAbsolute(outputs[0]) ? outputs[0] : join(cwd, outputs[0]))) && wordsStayIn(others, cwd, [roots.project], roots.project);
 }
@@ -294,10 +339,11 @@ function bashAnswer(command, cwd, ctx, roots) {
     const name = script && script.quoted ? WORKER_SCRIPTS.find((n) => p.script(n) === script.text) : undefined;
     return name !== undefined && spelled(words[2], ctx.project, true) && wordsStayIn(words.slice(3), cwdReal, [roots.project], roots.project);
   }
-  if (first.text === p.ffmpeg) return wordsStayIn(words.slice(1), cwdReal, [roots.project], roots.project);
-  if (first.text === p.ffprobe) return wordsStayIn(words.slice(1), cwdReal, [roots.project, roots.kit], roots.project);
+  if (first.text === p.ffmpeg) return protocolsKept(words.slice(1), true) && wordsStayIn(words.slice(1), cwdReal, [roots.project], roots.project);
+  if (first.text === p.ffprobe) return protocolsKept(words.slice(1), false) && wordsStayIn(words.slice(1), cwdReal, [roots.project, roots.kit], roots.project);
   if (first.text === p.npx) {
     if (!spelled(words[1], HF_WORDS[0], false) || !spelled(words[2], HF_WORDS[1], false) || words[3] === undefined || words[3].quoted) return false;
+    if (words.slice(4).some((w) => w.text === "--url" || w.text.startsWith("--url="))) return false;
     if (words[3].text === "render") return cardRender(words.slice(4), cwdReal, roots);
     return HF_COMMANDS.includes(words[3].text) && hfFolder(roots, cwdReal) && wordsStayIn(words.slice(4), cwdReal, [roots.project], roots.project);
   }
@@ -372,15 +418,41 @@ export function workerDecision(input, ctx) {
 
 // --- How claude is started ---
 
+/** Claude Code's OS sandbox around every command the worker or its helpers run: on, or the run does not start (failIfUnavailable), with no
+    command let out of it (allowUnsandboxedCommands false, so `dangerouslyDisableSandbox` does nothing; the hook refuses it too); no
+    network at all (every domain denied, and no proxy port, so nothing is let through one); writes only in the project and the run's own
+    temp folder (`tmp`); no reads of the gated places (places.js gatedPlaces, for this Mac's `facts`: settings.js factsOf), the checkout,
+    the worker settings' folder or her folder, each by its real path in both spellings, as her folder's open lock has them (studio.js
+    openSettingsOf); and reads let back in for the kit, REEL_KIT_HOME, Reel Kit's own HyperFrames, the project, the temp folder and the three
+    places Bash itself needs (places.js bashNeeds), since BRIMM Video Work and Claude Code's own folders are among the gated places. */
+export function workerSandbox({ checkout, project, kit, rkHome, facts, tmp }) {
+  if (!facts || typeof facts.home !== "string" || typeof facts.root !== "string") throw new Error("workerSandbox: this Mac's facts (settings.js factsOf) are needed");
+  if (typeof tmp !== "string" || !isAbsolute(tmp)) throw new Error("workerSandbox: tmp must be a whole path");
+  const both = (path) => bothSpellings(placeOf(path));
+  const own = [checkout, join(facts.home, "Library", "Application Support", "BRIMM Video", "reel-kit-worker"), studioFolder(facts.home)];
+  return {
+    enabled: true,
+    failIfUnavailable: true,
+    allowUnsandboxedCommands: false,
+    network: { deniedDomains: ["*"] },
+    filesystem: {
+      allowWrite: [placeOf(project), placeOf(tmp)],
+      denyRead: [...gatedPlaces(facts).flatMap((place) => bothSpellings(place.path)), ...own.flatMap(both)],
+      allowRead: [placeOf(kit), placeOf(rkHome), placeOf(hfDir(facts.home)), placeOf(project), placeOf(tmp), ...bashNeeds({ ...facts, folder: project })]
+    }
+  };
+}
+
 /** The worker's settings file, as Studio writes it outside the project (reel-kit-worker.js settingsFileOf), where the worker cannot rewrite
     it: the PreToolUse hook in exec form (no shell: each path one argument as it is), blocking the call when it cannot run (onFailure, as her
     folder's guard: studio.js settingsOf); the permission lists of WORKER_TOOLS in the mode that refuses anything not on them without asking;
     the bypass and auto modes off; Claude Code's /feedback and its transcript-share survey off; the helper agents on the worker's model;
-    memory, dreams and skills' shell off; hooks said to be on. Only keys Claude Code knows: in `-p` a settings file that fails its check is
+    memory, dreams and skills' shell off; hooks said to be on; and every command in Claude Code's sandbox (workerSandbox). Only keys Claude Code knows: in `-p` a settings file that fails its check is
     passed over without a word, and the lists on the command line (workerArgs) still hold then. */
-export function workerSettings({ checkout, node, project, kit, rkHome, bin }) {
+export function workerSettings({ checkout, node, project, kit, rkHome, bin, facts, tmp }) {
   const { allowed, disallowed } = WORKER_TOOLS({ project, kit, rkHome, bin });
   return {
+    sandbox: workerSandbox({ checkout, project, kit, rkHome, facts, tmp }),
     permissions: { defaultMode: "dontAsk", allow: allowed, deny: disallowed, disableBypassPermissionsMode: "disable", disableAutoMode: "disable" },
     env: { DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1", CLAUDE_CODE_SUBAGENT_MODEL: WORKER_MODEL },
     autoMemoryEnabled: false,

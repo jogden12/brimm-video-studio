@@ -19,10 +19,12 @@ The job below names them, each spelled exactly as you must spell it:
 ## What you may do, and nothing else
 
 A guard answers every tool call before it runs, yours and your helper agents'. It refuses anything not on this list, and a call it
-refuses is not tried another way.
+refuses is not tried another way. Every command also runs in Claude Code's sandbox: no network at all, writes only in `PROJECT`
+and your temporary folder (`TMPDIR`), and none of Studio's or her private folders readable. (Whether HyperFrames' headless browser
+runs inside this sandbox is checked by hand, RK21, before Studio's first real run.)
 
 - **Files:** Read, Glob and Grep inside `PROJECT` and `KIT`. Write and Edit inside `PROJECT` only. Never write `studio.json`
-  (Studio's own), a `CLAUDE.md`, an `AGENTS.md` or anything in a `.claude` folder. Always give a whole path, never one with `..`.
+  (Studio's own), a `CLAUDE.md`, an `AGENTS.md`, a `.mcp.json`, an `.npmrc`, or anything in a `.claude` or `.git` folder. Always give a whole path, never one with `..`.
   A link that leads out of `PROJECT` is refused.
 - **Commands:** one program and its words per command, with every path in double quotes when it has a space in it. No `;`, `&&`,
   `||`, `|`, redirects (`>`, `<`), `&` at the end, `$`, backticks, `~`, globs (`*`, `?`), single quotes or new lines. The
@@ -30,10 +32,14 @@ refuses is not tried another way.
   - `"PY" "KIT/pipeline/<script>.py" "PROJECT" …`, where `<script>` is one of `words`, `cut`, `storyboard`, `build`, `mix`,
     `cutout`, `matte`, `plate`, `plate_finish`, `track`, `depth`, `fxclip`, `fxsandbox`, `fxlib`. Never `new` (Studio made the
     project), `trials`, `effect` or `render`.
-  - `"BIN/ffmpeg" …` and `"BIN/ffprobe" …`, every file they read or write inside `PROJECT` (ffprobe may read `KIT` too).
+  - `"BIN/ffmpeg" -protocol_whitelist file,pipe …` and `"BIN/ffprobe" -protocol_whitelist file,pipe …`: the whitelist always
+    first, and for ffmpeg given again before every further `-i`. Every file they read or write inside `PROJECT` (ffprobe may read
+    `KIT` too), named plainly: no protocol (`http:`, `concat:`, `file:`, `pipe:`), no `|`, `'`, `[`, `]`, `;` or `*` in any word,
+    no option read from a file (`-/…`, `*_script`), no `-safe`, and `-f` only for a plain format (`null`, `mp4`, `mov`, `wav`,
+    `mp3`, `image2`, `png` and the like; never `tee`, `concat`, `hls`, `segment` or `lavfi`).
   - `"BIN/npx" -y hyperframes@0.8.139 check`, `lint` or `snapshot …`, run in `PROJECT/public` or a folder under
-    `PROJECT/cards/` or `PROJECT/fx/`. To get there, `cd "<that folder>"` on its own first. Never `publish` or anything of the
-    cloud.
+    `PROJECT/cards/` or `PROJECT/fx/`. To get there, `cd "<that folder>"` on its own first. Never `--url`, `publish` or anything of
+    the cloud.
   - `"BIN/npx" -y hyperframes@0.8.139 render … -o <id>.mp4` only for a card: run in its own folder under `PROJECT/cards/`, with one
     `-o` (or `--output`) inside that same folder. Never a render of the video, in `public/` or anywhere else: Studio renders it.
   - `/bin/cp "<source>" "<destination>"`, or `/bin/cp -R …` for a folder: one source, from `KIT`, `PROJECT` or `REEL_KIT_HOME`'s
@@ -74,9 +80,9 @@ Read Reel Kit's mode file (`KIT/modes/HIFI.md`, `LOFI.md` or `SHOWCASE.md`, by `
   `PROJECT/work/`, then read the pictures.
 
 ### cut (Reel Kit's step 2)
-As Reel Kit's step 2: the first transcript (`words.py`), the pauses (`"BIN/ffmpeg" -i "PROJECT/source/clip.mp4" -af
-silencedetect=noise=-35dB:d=0.25 -f null -`), `KEEP`, `FRAMES`, `SHOTS`, `HOLD`, `PROMPT` and `FIXES`, then `cut.py --plan`,
-`cut.py` and `words.py` again. Copy `assets/aroll.mp4` to `public/clean.mp4` with `"BIN/ffmpeg" -y -i … -c copy …`. Run the
+As Reel Kit's step 2: the first transcript (`words.py`), the pauses (`"BIN/ffmpeg" -protocol_whitelist file,pipe -i "PROJECT/source/clip.mp4" -af
+silencedetect=noise=-35dB:d=0.25 -f null -`, with the whitelist first), `KEEP`, `FRAMES`, `SHOTS`, `HOLD`, `PROMPT` and `FIXES`,
+then `cut.py --plan`, `cut.py` and `words.py` again. Copy `assets/aroll.mp4` to `public/clean.mp4` with `/bin/cp`. Run the
 cutout (`cutout.py`) in the foreground when anything goes behind the head.
 
 ### beats (Reel Kit's step 3)
@@ -101,7 +107,8 @@ As Reel Kit's step 3, with these changes:
   Showcase section) and the library entries named; report frames, SFX, `edit.py` changes and snapshot paths.
 - Give each agent everything Reel Kit's step 4 lists, and these limits, word for word in its prompt: "Work only inside PROJECT.
   Read KIT, never write in it. Every command is one program and its words, spelled exactly as listed here, with no shell operators:
-  `"PY" "KIT/pipeline/<script>.py" "PROJECT" …`, `"BIN/ffmpeg" …`, `"BIN/ffprobe" …`, `/bin/cp [-R] "<source>" "<destination>"`
+  `"PY" "KIT/pipeline/<script>.py" "PROJECT" …`, `"BIN/ffmpeg" -protocol_whitelist file,pipe …` (again before every further
+  `-i`), `"BIN/ffprobe" -protocol_whitelist file,pipe …`, `/bin/cp [-R] "<source>" "<destination>"`
   (one source, into PROJECT), and `"BIN/npx" -y hyperframes@0.8.139 check|lint|snapshot …` after `cd` into your own folder; a card
   renders only itself, in its own folder, with `-o <id>.mp4`. No web, no generators, no other agents, never render the video."
   Give the places spelled as the job below spells them, with no `PATH=` prefix.

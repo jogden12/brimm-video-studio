@@ -12,9 +12,11 @@
 //     exit 1), "wait" (every step, but the last only once <project>/work/go-on is there), "hang" (two steps, then nothing until it is
 //     killed), "needs" (CLAUDE_WORKER_NEEDS, a JSON list of {beat, text}, written with the "beats" step and after), "bad-status" (its first
 //     step, then a status file far too large, and nothing more), "unsafe-init" (an init in bypassPermissions mode, then its steps),
+//     "stubborn" (its first step, a `sleep` of its own in its process group, its pid in work/grandchild.pid, SIGTERM ignored, then
+//     nothing until it is killed),
 //     "hook" (before its steps, each call of CLAUDE_WORKER_CALLS, a JSON list, handed to the PreToolUse hook its --settings file names, as
 //     Claude Code does: `<command> <args…>` with the call on standard input).
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -38,7 +40,7 @@ const status = (value) => {
   writeFileSync(`${file}.tmp`, typeof value === "string" ? value : JSON.stringify(value));
   renameSync(`${file}.tmp`, file);
 };
-const seen = ["REEL_KIT_HOME", "HF_HUB_OFFLINE", "PIP_NO_INDEX", "UV_OFFLINE", "HOME", "PATH"];
+const seen = ["REEL_KIT_HOME", "HF_HUB_OFFLINE", "PIP_NO_INDEX", "UV_OFFLINE", "HOME", "PATH", "TMPDIR", "CLAUDE_CODE_TMPDIR"];
 function logged(extra = {}) {
   const env = Object.fromEntries(Object.keys(process.env).filter((k) => !k.startsWith("CLAUDE_WORKER_") && k !== "__CF_USER_TEXT_ENCODING").map((k) => [k, seen.includes(k) ? process.env[k] : "set"]));
   if (process.env.CLAUDE_WORKER_LOG) appendFileSync(process.env.CLAUDE_WORKER_LOG, `${JSON.stringify({ args, cwd, prompt, env, stepsRun: ran, hook, ...extra })}\n`);
@@ -75,6 +77,13 @@ for (const [i, step] of steps.entries()) {
     logged();
     emit({ type: "result", subtype: "error_during_execution", is_error: true, result: "Claude AI usage limit reached. Your limit resets at 3pm." });
     process.exit(1);
+  }
+  if (scenario === "stubborn" && i === 0) {
+    process.on("SIGTERM", () => {});
+    const child = spawn("/bin/sleep", ["30"], { stdio: "ignore" });
+    writeFileSync(join(cwd, "work", "grandchild.pid"), String(child.pid));
+    logged();
+    for (;;) await pause(1000);
   }
   if (scenario === "hang" && i === 1) {
     logged();
