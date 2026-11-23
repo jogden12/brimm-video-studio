@@ -1,4 +1,4 @@
-# A/B tests: a section for the BRIMM Ops page
+# A/B tests: a section for the BRIMM Ops app
 
 For a BRIMM Ops session. Written in BRIMM Video Studio on 2026-11-23. It describes a feature Jason wants in BRIMM Ops, and the one piece both repos must change together. Nothing of it is built in either repo.
 
@@ -45,16 +45,16 @@ Until then, Studio sends the versions as ordinary Reels of the episode.
 
 ## Links to local files
 
-Jason wants "a link to the local video (or folder)". The BRIMM Ops page is a claude.ai artifact, and links from an artifact to a file on the Mac (`file://`) don't open. Ways around it, for BRIMM Ops to choose from:
+Jason wants "a link to the local video (or folder)". BRIMM Ops is a Mac app since 2026-11-14, so its window can do this directly: two buttons per version, **Play** (opens the video in QuickTime or the default player) and **Show in Finder** (reveals the file in its folder). Both go through the Swift window, since the web view alone can't open files on the Mac.
 
-- Show the path as text with a Copy button, to paste into Finder's Go to Folder (⇧⌘G).
-- A line in Sallie's BRIMM Ops chat ("show me version B") that reveals the file in Finder.
-- Both.
+Where the files are: `finish` copies each finished video into the episode's `final/` folder in Dropbox, next to the hand-off, in the `BRIMM Video` folder the app already watches for "Waiting from Studio". So the app reaches them on either Mac. A video that Dropbox has made online-only opens once Dropbox brings it down. The app can say "Downloading from Dropbox…" instead of failing.
+
+The kept page (Version 12, read-only) gets none of this.
 
 ## Open for BRIMM Ops (and Jason)
 
-1. Where tests live on the page: inside each episode, a section of their own, or both.
+1. Where tests live in the app: inside each episode, a section of their own, or both.
 2. The hand-off key for a test (above), agreed with Studio before either repo changes.
 3. How results get in: typed by hand first, and later from what posts the trials.
 4. Which posting route trial versions use, and whether Instagram Trial Reels are reachable through it.
-5. How the page gets Sallie to the local file (above).
+5. Whether a test record needs a `LAYOUT_VERSION` raise and a backup first (BRIMM Ops' own rule for any change to the records' layout).
