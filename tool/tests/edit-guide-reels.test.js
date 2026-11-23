@@ -30,10 +30,10 @@ const says = (text) => `${NAMED}: ${text}`;
 /** What the guide says of Reels exported and not in the hand-off: `names` are the Reels, said together, and `them` is true for more than one. */
 const reelLine = (names, them = false) => `You have exported ${names} from HyperFrames. Say "hand off the Reels" to add ${them ? "them" : "it"} to the hand-off.`;
 const REEL_2 = reelLine("Reel 2");
-const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
-const TAKE_AGAIN = 'On the BRIMM Ops page: Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1".';
+const TAKE = 'In BRIMM Ops: Find the video under "Waiting from Studio" and press its button, such as "Add the episode and take the hand-off". For a video BRIMM Ops already holds, it is "Take the hand-off" or "Take revision N in place of revision M". Dropping the hand-off onto Episodes still works.';
+const TAKE_AGAIN = 'In BRIMM Ops: Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1".';
 /** The same, when her note is already at the cascade, the last step: the Reels came after it, and the words go on to the page's "Reels" card. */
-const TAKE_AGAIN_LATE = 'On the BRIMM Ops page: Drag the new hand-off onto Episodes, then press "Take revision 2 in place of revision 1". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.';
+const TAKE_AGAIN_LATE = 'In BRIMM Ops: Find the video under "Waiting from Studio" and press "Take revision 2 in place of revision 1". Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
 const HANDOFF_OWED = 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.';
 const AT = "2026-10-20T15:00:00-05:00";
@@ -610,7 +610,7 @@ describe("B8. the other forms of the guide, at this stage", () => {
     const w = await W();
     exportOf(w, "reel 2");
     const done = await on(depsOf(w), "guide", "3fa9c1", "done", "taken");
-    assert.deepEqual([done.code, done.said], [1, [`Not noted: ${NAMED} has no step on the BRIMM Ops page now. ${REEL_2}`]]);
+    assert.deepEqual([done.code, done.said], [1, [`Not noted: ${NAMED} has no step in BRIMM Ops now. ${REEL_2}`]]);
     const shown = await on(depsOf(w), "guide", "3fa9c1", "show");
     assert.deepEqual([shown.code, shown.said], [1, [`There is nothing to show in Finder for ${NAMED} now.`]]);
     assert.equal(w.t.opened.length, 0);

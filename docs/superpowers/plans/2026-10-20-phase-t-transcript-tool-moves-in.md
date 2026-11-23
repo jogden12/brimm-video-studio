@@ -1,5 +1,7 @@
 # Phase T: the transcript tool moves into brimm-video, and each shared file gets one owner. Implementation Plan
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** brimm-operations' transcript tool runs from brimm-video on the Mac Studio, with Jason's MacBook as a standby, doing what it does today until brimm-video's import takes over its work and it retires; the fix for Dropbox placeholders exists once, in brimm-video; and every file the two repos share has one owner, with the spec's contract fixtures keeping the page and the tools agreeing. BRIMM Ops is then the page only.

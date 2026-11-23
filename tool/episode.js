@@ -189,7 +189,7 @@ const isAgreement = (a) => isObject(a) && Object.keys(a).every((k) => k === "n" 
     what she decided of each item Claude read (`decided`, "kept" or "dropped", by list and number) and what she changed of one
     (`edits`), which only her command writes (spec 2026-10-22, section 8); and the Reel ideas a client's agreement to cutting a
     Reel from the session was noted for, by number and day (`agreed`). A video read as another kind and answered again as a
-    session owes the BRIMM Ops page an empty session revision (`emptyRevision`): "owed" until it is written, then the revision it
+    session owes BRIMM Ops an empty session revision (`emptyRevision`): "owed" until it is written, then the revision it
     was written as (edit.js, `kind … session --again`). */
 const isSession = (x) => isObject(x) && isTime(x.marked) && isText(x.on) && (x.teachings === null || ["asked", "transcript only"].includes(x.teachings))
   && (x.cleared === null || (isObject(x.cleared) && isTime(x.cleared.at) && isText(x.cleared.on) && isText(x.cleared.to) && x.cleared.confirmed === "dialog"))

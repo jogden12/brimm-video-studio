@@ -15,7 +15,7 @@ const isTime = (v) => typeof v === "string" && Number.isFinite(Date.parse(v));
 const isId = (v) => /^e-\d{8}-[0-9a-f]{6}$/.test(v);
 /** Every step a note may hold, of any kind of hand-off, the withdrawal among them. */
 const STEPS = Object.values(OPS).flat();
-/** Her note on one hand-off (Note): what it is kept as, a step the BRIMM Ops page has, the revision she took, and when. */
+/** Her note on one hand-off (Note): what it is kept as, a step BRIMM Ops has, the revision she took, and when. */
 const isNote = (n) =>
   isObject(n) && ["episode", "short video", "session"].includes(n.kind) && STEPS.includes(n.step) && Number.isInteger(n.revision) && n.revision >= 1 && isTime(n.at);
 

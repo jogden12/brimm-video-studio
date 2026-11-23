@@ -1,5 +1,7 @@
 # Presets for Sallie's video: a job, a caption style and a look
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 Written 2026-10-13 for Jason Ogden, and corrected the same evening after a fourth check, against the tool on `main` at commit c9f5ff6. Brought to the brand guide later that night, on Jason's decision, and corrected once more after two checks of that version. Research only: no code was changed, and nothing was published or installed. Final Cut Pro, Motion and Compressor were not opened.
 
 Jason's question: "can you research popular video editing styles and settings that could be grouped into different Presets?"

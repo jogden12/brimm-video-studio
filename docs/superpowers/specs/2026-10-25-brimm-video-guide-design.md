@@ -1,5 +1,7 @@
 # brimm-video: a guide in her Claude folder (design)
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 Written 2026-10-25 for Jason Ogden, from his answers that day. **Design only: nothing in it is built.** It adds to the 2026-10-22 design (`2026-10-22-brimm-video-light-import-and-fork-design.md`) and changes nothing it says about the import, the card, the reading, sessions or the hand-off.
 
 ## Why

@@ -1,5 +1,7 @@
 # Full handoff for a new session: BRIMM Video Studio, and what the late-check work leaves
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 - **Date:** 2026-10-27, evening.
 - **From:** the session "The shorter wait: reading during the late check (D3)", which built D3 as far as Task 9 of 16 and was then told to stop for the redesign. It works from the worktree `/Users/jasonogden/Claude Code/BRIMM video/.claude/worktrees/late-check-overlap-build-7f23d3`.
 - **For:** the new session that continues, whether it starts BRIMM Video Studio or picks up brimm-video's open work.

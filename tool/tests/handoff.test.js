@@ -208,7 +208,7 @@ describe("the contract with BRIMM Ops (fixtures/handoff-v1.json, copied to brimm
     assert.equal(handoffFault(sent), "");
     assert.equal(handoffFault(JSON.parse(fixture("handoff-v1-short-video.json"))), "");
   });
-  it("has captions that the BRIMM Ops page's own reader turns into timed lines, every one", () => {
+  it("has captions that BRIMM Ops' own reader turns into timed lines, every one", () => {
     for (const name of ["handoff-v1.json", "handoff-v1-short-video.json"]) {
       const h = JSON.parse(fixture(name));
       for (const srt of [h.main.srt, ...h.reels.map((r) => r.srt)]) {

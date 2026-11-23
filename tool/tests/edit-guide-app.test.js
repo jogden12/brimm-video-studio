@@ -36,7 +36,7 @@ const EXPORTED = 'You have exported it. Say "hand it off" and I will check what 
 const edit = (last = "") => `Edit it in HyperFrames.${last ? ` Your last request there was ${last}.` : ""} When you are done, export it on This Mac, as MP4, then say "hand it off".`;
 /** The one line her words keep of Final Cut: for an episode edited there before (allow-listed, F8). */
 const FROM_FINAL_CUT = 'It was edited in Final Cut before. Studio doesn\'t use Final Cut now: say "open it in HyperFrames" to edit it there, from the recording.';
-const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
+const TAKE = 'In BRIMM Ops: Find the video under "Waiting from Studio" and press its button, such as "Add the episode and take the hand-off". For a video BRIMM Ops already holds, it is "Take the hand-off" or "Take revision N in place of revision M". Dropping the hand-off onto Episodes still works.';
 const CLIP_NEXT = 'Open it in HyperFrames to edit it, then export it on this Mac and say "hand it off". Or say "hand it off" to hand it off as it is.';
 const FINISH_RUNNING = "Its finish is running. The panel shows how far it is.";
 const REEL_2 = 'You have exported Reel 2 from HyperFrames. Say "hand off the Reels" to add it to the hand-off.';
@@ -461,7 +461,7 @@ describe("the guide once a video is exported from HyperFrames", () => {
     const written = guideWorld({ over: { finished: FINISHED } });
     handOff(written);
     exportOf(written, "main");
-    assert.match(await line(written, { readdir }), /On the BRIMM Ops page: Drag the hand-off onto Episodes/);
+    assert.match(await line(written, { readdir }), /In BRIMM Ops: Find the video under "Waiting from Studio"/);
     assert.deepEqual(looked, []);
     app.t.done();
     none.t.done();
@@ -558,10 +558,10 @@ describe("the guide for a video the gate holds as a session, though its kind is 
     none.t.done();
     editing.t.done();
   });
-  it("says the BRIMM Ops page's step once its hand-off is written, as it did, and a video held beside a session is held and nothing of it is read", async () => {
+  it("says BRIMM Ops' step once its hand-off is written, as it did, and a video held beside a session is held and nothing of it is read", async () => {
     const written = guideWorld({ over: { session: MARKED, finished: FINISHED } });
     handOff(written);
-    assert.match(await line(written), /On the BRIMM Ops page: Drag the hand-off onto Episodes/);
+    assert.match(await line(written), /In BRIMM Ops: Find the video under "Waiting from Studio"/);
     // A session that is a version of the video: the video is held beside it, and is not a session itself.
     const w = guideWorld();
     exportOf(w, "main");
@@ -639,7 +639,7 @@ describe("what says the guide's new states: the help and the README (the skills'
       "and once it is exported, to hand it off", "A raw video that was edited in Final Cut before is told so, and to open it in HyperFrames, from the recording",
       "being imported, being read or having its video for HyperFrames made", "its video for HyperFrames made, its finish's hand-off written, or an import, a reading or a finish that did not finish",
       // While a finish waits for its late check: the page's step, and a line of when Studio checks Dropbox's copies.
-      "Once its finish has written the hand-off it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's copies (a spelling and handing it off again wait until then), though the finish goes on checking them for a quarter of an hour",
+      "Once its finish has written the hand-off it gives BRIMM Ops' step, with a line of when Studio checks Dropbox's copies (a spelling and handing it off again wait until then), though the finish goes on checking them for a quarter of an hour",
       // For a video kept on this Mac (Phase 3, L5): no such line, and nothing she does waits for the check.
       "for a video kept on this Mac it gives no such line: the finish ends at the hand-off, Studio checks Dropbox's copies by itself about 15 minutes later, and nothing she does waits for it"
     ]) assert.ok(guide.replace(/\n {40}/g, " ").includes(words), words);

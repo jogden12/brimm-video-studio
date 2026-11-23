@@ -4,7 +4,7 @@ Every file and record Studio reads or writes, from the code on `main` (6636327, 
 
 ## The hand-off file (the contract with BRIMM Ops)
 
-`*.brimm-ops.json`, written last into the episode's `final/` folder and dropped by hand on the BRIMM Ops page. JSON indented by two spaces, a line break at the end (`handoffText`). `format` is always `"brimm-video hand-off"`. brimm-operations keeps copies of the fixtures in `tool/tests/fixtures/`; `contract.test.js` pins their hashes. Change the writer, its check or a fixture only together with brimm-operations.
+`*.brimm-ops.json`, written last into the episode's `final/` folder, where the BRIMM Ops app finds it and shows it under "Waiting from Studio" (dropping it by hand still works; brimm-operations' README, "From brimm-video"). JSON indented by two spaces, a line break at the end (`handoffText`). `format` is always `"brimm-video hand-off"`. brimm-operations keeps copies of the fixtures in `tool/tests/fixtures/`; `contract.test.js` pins their hashes. Change the writer, its check or a fixture only together with brimm-operations.
 
 ### Version 2 (`tool/handoff-v2.js`: `buildHandoffV2`, checked by `handoffFaultV2`)
 
@@ -21,7 +21,7 @@ Keys in this order, and no others: the check refuses any key the contract does n
 | `reels` | not for a short video. `[{ n, title, file, seconds, inMain?, srt, fromSuggestion }]`; `title` may be empty but must be there; `fromSuggestion` is the suggestion's number (and then equals `n`) or `null` for a Reel from times she gave (a fresh number). A session's Reel has no `inMain` and carries `clientAgreed` (the day the client's agreement was noted, never who), and its `fromSuggestion` is `null`. |
 | `session` | `null` unless a session. A session: `{ principles, recurringPrinciples, reelsToFilm }`, only what Sallie approved. Principle: `{ n, name, category?, description?, steps?, red_flags?, green_flags?, decision_criteria?, example_application?, verbatim_key_phrases? }`; fields the name check took out are left out; `source_context` is never written. Recurring: `{ n, text }`. Reel idea: `{ n, idea, words?, why?, principle }` (`principle` a principle's number or `null`). A session's hand-off has no `main` and no transcript. |
 
-### Version 1 (`tool/handoff.js`: `buildHandoff`, `handoffFault`; still read by the page)
+### Version 1 (`tool/handoff.js`: `buildHandoff`, `handoffFault`; still read by BRIMM Ops)
 
 `{ format, version: 1, revision, made, madeOn, madeBy, episode: { id, kind: "episode"|"short video", name, recorded, recordedFrom, title }, main: { file, seconds, srt }, reels: [{ n, title, file, seconds, inMain?, srt }] }`. An episode needs its approved title; a short video has no Reels. `inMain` is where a Reel's words fall in the main video (90 in 100 of them found in order, within 1.5 times the Reel's length).
 
@@ -116,4 +116,4 @@ Written by `studio.js` (`node settings.js studio --node <node>`): `CLAUDE.md`, `
 
 ## Her guide (`tool/guide.js`)
 
-One next step per video: `{done: true}` or `{done: false, stage, text, step, after}`. Stages run from `arriving` and `importing` through the card, the reading, `spellings`, the copy, `in-app`, `exported` and `finish-running` to `ops`, the BRIMM Ops page's steps (`OPS`): a finished or raw video `taken, kit, posted, live, cascade`; a short video `taken, posttext, posted`; a session `taken, checked`. A hand-off with steps left stays under way for 60 days. `guide.js` is part of the contract: a new stage lands in step with the BRIMM Ops session.
+One next step per video: `{done: true}` or `{done: false, stage, text, step, after}`. Stages run from `arriving` and `importing` through the card, the reading, `spellings`, the copy, `in-app`, `exported` and `finish-running` to `ops`, BRIMM Ops' steps (`OPS`): a finished or raw video `taken, kit, posted, live, cascade`; a short video `taken, posttext, posted`; a session `taken, checked`. A hand-off with steps left stays under way for 60 days. `guide.js` is part of the contract: a new stage lands in step with the BRIMM Ops session.

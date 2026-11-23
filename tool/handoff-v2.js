@@ -1,9 +1,9 @@
 // The hand-off file, version 2: what brimm-video gives BRIMM Ops for a finished video, a raw video, a session or an iPhone clip,
-// in one file that a person drops on the BRIMM Ops page (spec section 8, agreed with the page's own session). Its tests, and the
+// in one file that BRIMM Ops takes in: it shows there under "Waiting from Studio", or a person drops it there (spec section 8, agreed with BRIMM Ops' own session). Its tests, and the
 // five fixtures in tests/fixtures that brimm-operations keeps a copy of (one for each kind, and handoff-v2-session-replacing,
-// a session that replaces a finished video's id), are the contract between the two: change neither without changing both. The page refuses a session's hand-off for any key it does not know, so the writer writes only the
+// a session that replaces a finished video's id), are the contract between the two: change neither without changing both. BRIMM Ops refuses a session's hand-off for any key it does not know, so the writer writes only the
 // keys the contract names, and the check refuses any other.
-// Version 1, in handoff.js, is unchanged and still read by the page.
+// Version 1, in handoff.js, is unchanged and still read by BRIMM Ops.
 // Nothing here touches a disk or runs a program.
 import { FORMAT } from "./handoff.js";
 import { kindOf, isDay } from "./episode.js";
@@ -65,7 +65,7 @@ const reelOf = (given, inSession) => {
 /** A session's items, as they are given: the caller gives only what Sallie approved, and none of it is changed here, but only
     the contract's keys of each are written. Lists not given are empty: a session revision may hold nothing yet. A field not
     given is left out, never made up: a principle's fields other than its number and name, and a Reel idea's words and why,
-    are left out where the name check took them out (spec 2026-10-22, section 8), and the page reads a missing text as "". A
+    are left out where the name check took them out (spec 2026-10-22, section 8), and BRIMM Ops reads a missing text as "". A
     Reel idea's principle is always written, null when not given. */
 const sessionOf = (given) => {
   const s = given || {};
@@ -86,7 +86,7 @@ const sessionOf = (given) => {
     - `reels` are the Reels made here: a finished or raw video's, or a session's Reels with `clientAgreed`; a short video has
       no `reels` key.
     - `session` is a session's approved principles, recurring principles and Reel ideas, and null for any other kind.
-    There is no title: titles live on the page. */
+    There is no title: titles live in BRIMM Ops. */
 export function buildHandoffV2({ record, revision, made, madeOn, commit, id, main = {}, onPicture, suggestions, reels = [], session }) {
   const kind = kindOf(record);
   const inSession = kind === "session";
@@ -143,7 +143,7 @@ export const hundredths = (t) => Math.round(t * 100 + 1e-6) / 100;
     - Its `start` and `end` are those of its first and last kept words, and its `first` and `last` are those words, as many as
       the suggestion's own held (four when it held none): what it opens and closes with now.
     - Its `stretches` are its runs of kept words, and only a word of its own that the clock cuts breaks a run, so that no kept
-      word lies between two of its stretches, as the page was told.
+      word lies between two of its stretches, as BRIMM Ops was told.
     - Times are to the hundredth of a second and kept within the main video, as inMain's are. One that would not then be a
       stretch of the video, a suggestion or a stretch of it with no length, leaves the suggestion out: the hand-off's check
       (handoffFaultV2) refuses it.
@@ -188,7 +188,7 @@ const number = (v) => typeof v === "number" && Number.isFinite(v);
 const seconds = (v) => number(v) && v > 0;
 const whole = (v) => Number.isInteger(v) && v >= 1;
 const strings = (v) => Array.isArray(v) && v.every((s) => typeof s === "string");
-/** Captions the BRIMM Ops page can read: tidyTranscript, the page's own reader, makes lines of them. */
+/** Captions BRIMM Ops can read: tidyTranscript, BRIMM Ops' own reader, makes lines of them. */
 const captions = (srt) => text(srt) && /-->/.test(srt) && tidyTranscript(srt).startsWith("[");
 /** The first key `o` holds that the contract does not name, as words, or "". */
 const unknown = (who, o, keys) => {
@@ -197,7 +197,7 @@ const unknown = (who, o, keys) => {
 };
 
 /** What is wrong with a hand-off, in plain words, or "" when nothing is. The first fault found is the one given. A session's
-    hand-off may hold no key that the contract does not name, since the page refuses it for one; the other kinds' are held to
+    hand-off may hold no key that the contract does not name, since BRIMM Ops refuses it for one; the other kinds' are held to
     the same, since only this writer makes them. */
 export function handoffFaultV2(h) {
   if (!isObject(h) || h.format !== FORMAT) return `It is not a ${FORMAT}.`;
@@ -210,7 +210,7 @@ export function handoffFaultV2(h) {
   if (!isObject(v)) return "It has no video.";
   if (!/^e-\d{8}-[0-9a-f]{6}$/.test(String(v.id))) return "The video's id is not an id brimm-video gives.";
   if (!KINDS.includes(v.kind)) return "The video's kind is none of finished, raw, session or short video.";
-  if (has(v, "title")) return "A video has no title in it: titles live on the BRIMM Ops page.";
+  if (has(v, "title")) return "A video has no title in it: titles live in BRIMM Ops.";
   if (!text(v.name)) return "The video has no name.";
   if (!isDay(v.recorded) || !["video", "import"].includes(v.recordedFrom)) return "The day it was recorded, or where that day was read from, is missing.";
   const fault = unknown("The video", v, VIDEO);
@@ -235,7 +235,7 @@ export function handoffFaultV2(h) {
     if (!text(m.file) || !seconds(m.seconds)) return "The main video has no file or no length.";
     if (!captions(m.srt)) return "The main video's captions cannot be read.";
     if (has(m, "onPicture")) {
-      if (kind === "finished") return "A finished video's main video has no words on its picture (onPicture): the page refuses them.";
+      if (kind === "finished") return "A finished video's main video has no words on its picture (onPicture): BRIMM Ops refuses them.";
       if (Array.isArray(m.onPicture) && m.onPicture.length === 0) return "The main video's onPicture is an empty list: it is left out when no words are drawn on the picture.";
       if (!Array.isArray(m.onPicture) || !m.onPicture.every(text)) return "The main video's onPicture is not a list of the words drawn on its picture.";
     }
@@ -243,7 +243,7 @@ export function handoffFaultV2(h) {
     if (extra) return extra;
     length = m.seconds;
   }
-  /** Is this a stretch of the main video? A suggestion's times are held to what the page agreed (spec section 8, "Suggestion
+  /** Is this a stretch of the main video? A suggestion's times are held to what BRIMM Ops agreed (spec section 8, "Suggestion
       times"): 0 <= start < end <= main.seconds + 0.01, and its stretches in order, none over another, the first starting
       where it starts and the last ending where it ends, which puts each inside start and end. */
   const within = (start, end) => number(start) && number(end) && start >= 0 && end > start && end <= length + 0.01;
@@ -327,7 +327,7 @@ export function handoffFaultV2(h) {
     if (has(p, "source_context")) return `${which} holds "source_context", which stays out of the hand-off: it describes the session, for her eyes only.`;
     if (!text(p.name)) return `${which} has no name.`;
     // Any field but its number and name is left out of the file when the name check took it out (spec 2026-10-22, section 8),
-    // and the page reads a missing text as "": each is held to its kind only when it is there.
+    // and BRIMM Ops reads a missing text as "": each is held to its kind only when it is there.
     for (const key of ["category", "description", "example_application"]) if (has(p, key) && typeof p[key] !== "string") return `${which}'s ${key} is not text.`;
     for (const key of LISTS) if (has(p, key) && !strings(p[key])) return `${which}'s ${key} is not a list of text.`;
     const more = unknown(which, p, PRINCIPLE);

@@ -1,5 +1,7 @@
 # The switch: the light import, the fork, the readings and hand-off v2. Implementation plan
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A video dropped on either Mac is imported lightly (transcript, cut log, rough cut's transcript, a guess and a match; no Claude, no render), Sallie says what it is in one card in her chat, and brimm-video's one Claude call reads it for that kind: a finished video ends in a hand-off version 2 with no Final Cut, a session in approved principles with no transcript, a raw video in its rough cut rendered as version 0.

@@ -1,5 +1,5 @@
 // The hand-off file, version 1: what brimm-video gives BRIMM Ops at the end of an edit, in one file that a person drops on
-// the BRIMM Ops page. It holds the episode's final transcript, and each finished Reel with its transcript and its on-screen
+// BRIMM Ops. It holds the episode's final transcript, and each finished Reel with its transcript and its on-screen
 // title (spec section 5). Its tests, and the fixture in tests/fixtures that brimm-operations keeps a copy of, are the
 // contract between the two: change neither without changing both.
 // Nothing here touches a disk or runs a program.
@@ -39,7 +39,7 @@ export const handoffText = (handoff) => JSON.stringify(handoff, null, 2) + "\n";
 
 const text = (v) => typeof v === "string" && v.trim() !== "";
 const seconds = (v) => typeof v === "number" && Number.isFinite(v) && v > 0;
-/** Captions the BRIMM Ops page can read: tidyTranscript, the page's own reader, makes lines of them. */
+/** Captions BRIMM Ops can read: tidyTranscript, BRIMM Ops' own reader, makes lines of them. */
 const captions = (srt) => text(srt) && /-->/.test(srt) && tidyTranscript(srt).startsWith("[");
 
 /** What is wrong with a hand-off, in plain words, or "" when nothing is. The first fault found is the one given. */

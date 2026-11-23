@@ -1139,7 +1139,7 @@ describe("linksOf: a video's links, from one reading of Episodes", () => {
   });
 });
 
-describe("handedOff: a video that went to the BRIMM Ops page", () => {
+describe("handedOff: a video that went to BRIMM Ops", () => {
   it("is one whose record says it was finished, or that has a hand-off in its final/ or at any depth in its history/", () => {
     const t = setup();
     const found = original(t);
@@ -1245,7 +1245,7 @@ describe("finish, with hand-off version 2", () => {
         assert.equal(handoff.version, 2);
         assert.deepEqual(handoff.video, { id: ID, kind: "raw", name: NAME, recorded: "2026-10-14", recordedFrom: "video" });
         assert.equal("episode" in handoff, false);
-        assert.doesNotMatch(JSON.stringify(handoff), /Price like you mean it/, "titles live on the BRIMM Ops page");
+        assert.doesNotMatch(JSON.stringify(handoff), /Price like you mean it/, "titles live in BRIMM Ops");
         assert.deepEqual(handoff.main, { file: `${PROJECT.main}.mp4`, seconds: 11.878, srt: SRT.main });
         assert.deepEqual(handoff.reels.map((r) => [r.n, r.title, r.file, r.seconds, r.fromSuggestion]), [[1, "Know your costs", `${PROJECT["reel 1"]}.mov`, 7.7, 1], [2, "Say it again, better", `${PROJECT["reel 2"]}.mov`, 75, 2]]);
         assert.deepEqual(handoff.reels[0].inMain, { start: 4.1, end: 11.8 });
@@ -1596,7 +1596,7 @@ describe("the hand-off version a finish writes for a video", () => {
     t.done();
   });
   it("is 2 with the setting at 1 or none when a hand-off of the folder's own, in final/ or set aside in history/, is version 2, though no finish of the record names it (final fix 10)", () => {
-    // A correction (`kind … --again`) clears record.finished and sets the hand-off aside in history/: the BRIMM Ops page holds the
+    // A correction (`kind … --again`) clears record.finished and sets the hand-off aside in history/: BRIMM Ops holds the
     // video's version 2 hand-offs all the same, and a version 1 one would move its id.
     for (const where of ["final/a.brimm-ops.json", "history/2026-10-20T15-30-00-05-00 a.brimm-ops.json", "history/older/a.brimm-ops.json"]) {
       const { t, folder } = named(null);
@@ -1628,7 +1628,7 @@ describe("spell, after a finish with hand-off version 2", () => {
     lay(first.folder, "history/2026-10-21 09.00/final/Pricing talk, first cut.brimm-ops.json", firstHandoff(1, 6));
     const r = await command(t, "spell", FOLDER, "add", "Sallie", "Sally");
     assert.equal(r.code, 0, r.text);
-    assert.match(r.text, /the hand-off is made again as revision 7: drop it on the BRIMM Ops page again\./);
+    assert.match(r.text, /the hand-off is made again as revision 7: it waits in BRIMM Ops again, under "Waiting from Studio"\./);
     const handoff = handoffIn(found);
     assert.deepEqual([handoff.version, handoff.video.id, handoff.revision, handoffFaultV2(handoff)], [2, FIRST, 7, ""]);
     assert.match(handoff.main.srt, /Thank you so much, Sally\./);
@@ -2017,12 +2017,12 @@ describe("the highest number ever given to a suggestion or a Reel of a video", (
   });
 });
 
-// A video's id on the BRIMM Ops page never changes across its revisions (spec 2026-10-22, section 8), and a session's words are
+// A video's id in BRIMM Ops never changes across its revisions (spec 2026-10-22, section 8), and a session's words are
 // redacted by it. When a video handed off as version 2 under one id is linked since to an earlier version, its versions lead to
 // another id: a hand-off under that one would start the video afresh on the page. That is refused, naming the video as edit.js
 // names it.
 describe("a hand-off of a video whose versions now lead to another id than the one it went to the page under", () => {
-  const moved = (from, to) => `${SHOWN} went to the BRIMM Ops page under ${from}, but its versions now lead to ${to}: ask Jason. Nothing was written.`;
+  const moved = (from, to) => `${SHOWN} went to BRIMM Ops under ${from}, but its versions now lead to ${to}: ask Jason. Nothing was written.`;
   it("is refused by spell, by the quick part of finish at once, and by its detached part, and nothing is written", async () => {
     const t = setup();
     handoffVersion(t, 2);
@@ -2344,7 +2344,7 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
     assert.deepEqual(t.inFinal(found), []);
     t.done();
   });
-  it("refuses a video with no captions of the import, and captions the BRIMM Ops page cannot read, writing nothing", async () => {
+  it("refuses a video with no captions of the import, and captions BRIMM Ops cannot read, writing nothing", async () => {
     for (const [captions, why] of [[null, `${SHOT} has no captions from the import to hand off. Nothing was written.`], ["", `The hand-off could not be written: The main video's captions cannot be read. Nothing was written.`]]) {
       const t = setup();
       handoffVersion(t, 2);
@@ -2524,7 +2524,7 @@ describe("finishFinished: the hand-off of a finished video or an iPhone clip who
   });
 });
 
-const LEGACY_ADD = '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If the main video shows captions on screen, they keep the old spelling. Say "open it in HyperFrames" to edit it there, from the recording.';
+const LEGACY_ADD = '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: it waits in BRIMM Ops again, under \"Waiting from Studio\". If the main video shows captions on screen, they keep the old spelling. Say "open it in HyperFrames" to edit it there, from the recording.';
 // A short video as today's import makes one, whose record is from the Final Cut days (its finished parts name no project): its spell says
 // the HyperFrames words, as every video's does now, and nothing of Final Cut.
 describe("spell, after a finish, for a short video as today's import makes one", () => {
