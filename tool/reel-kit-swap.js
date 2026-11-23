@@ -3,9 +3,9 @@
 // A stage never changes the thing in use in place (gotchas, "Data and records": build beside then swap, never delete then copy). It
 // builds under `<target>.new` (fresh), and swapIn sets the thing in use aside under `<target>.old` and renames the new one in, noting
 // both in the run's journal. Once the whole install has passed its check, commit takes the set-aside ones away; until then rollBack
-// can put every one back, newest first. recover tidies what a run that ended halfway left. Everything it takes away is Studio's own,
+// can put every one back, newest first. recoverAll tidies what a run that ended halfway left, by the commit marker. Everything it takes away is Studio's own,
 // inside the work folder, and a link is taken away itself, never what it leads to.
-import { lstatSync, mkdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
+import { lstatSync, mkdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 /** What is at a path, without following a link: "folder", "file", "link", "other" or "". */
@@ -67,16 +67,42 @@ export function rollBack(ctx) {
   return whole;
 }
 
-/** Takes away what the journal set aside: the install is whole. */
+/** Takes away what the journal set aside: the install is whole. First the marker `paths.committed` is written, so that a run killed
+    while it takes them away is known, at the next run, to have been whole (recover then takes the rest away rather than putting
+    them back); it is removed once every `.old` is gone. A `.old` that can't be taken away doesn't undo a whole install: it is given
+    back in the list (and the marker stays, so the next run takes it away). */
 export function commit(ctx) {
-  for (const { aside } of ctx.journal.splice(0)) if (aside) takeAway(ctx, aside);
+  const asides = ctx.journal.map(({ aside }) => aside).filter(Boolean);
+  mkdirSync(dirname(ctx.paths.committed), { recursive: true });
+  writeFileSync(ctx.paths.committed, "committed\n");
+  ctx.journal.splice(0);
+  const left = [];
+  for (const aside of asides) {
+    try {
+      takeAway(ctx, aside);
+    } catch {
+      left.push(aside);
+    }
+  }
+  if (left.length === 0) takeAway(ctx, ctx.paths.committed);
+  return left;
 }
 
-/** Before a run: a `.old` whose target is missing (a run that ended halfway through a swap) is put back, any other `.old` and every
-    `.new` are taken away. */
-export function recover(ctx, target) {
-  const aside = `${target}.old`;
-  if (there(aside) && !there(target)) renameSync(aside, target);
-  takeAway(ctx, aside);
-  takeAway(ctx, `${target}.new`);
+/** Before a run, for every target a stage makes: what a run that ended halfway left. A `.old` is the thing that was in use: without
+    the commit marker that run never passed its check, so whatever is at the target is taken away and the `.old` is put back; with
+    the marker that run was whole and only the `.old` is taken away. Every `.new` is taken away. The marker goes last. */
+export function recoverAll(ctx, targets) {
+  const whole = there(ctx.paths.committed);
+  for (const target of targets) {
+    const aside = `${target}.old`;
+    if (there(aside)) {
+      if (whole) takeAway(ctx, aside);
+      else {
+        takeAway(ctx, target);
+        renameSync(aside, target);
+      }
+    }
+    takeAway(ctx, `${target}.new`);
+  }
+  takeAway(ctx, ctx.paths.committed);
 }

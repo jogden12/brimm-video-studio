@@ -78,10 +78,15 @@ export const reelKitHome = (home) => join(workFolder(home), ".reel-kit");
 export const binDir = (home) => join(reelKitHome(home), "tools", "bin");
 /** The Python of Reel Kit's main environment. */
 export const venvPython = (home) => join(reelKitHome(home), ".venv", "bin", "python");
-/** Reel Kit's own HyperFrames, kept beside Studio's and installed the same way, never fetched by npx. */
-export const hfDir = (home) => join(workFolder(home), ".toolchain", `hyperframes-${PIN.hyperframes.version}`);
+/** Reel Kit's own HyperFrames, kept beside Studio's and installed the same way, never fetched by npx: a folder for each version (the
+    pin's by default), so a Reel Kit installed beside the one in use never writes into the other's. Throws on a version that is not
+    x.y.z, since it goes into a folder's name. */
+export const hfDir = (home, version = PIN.hyperframes.version) => {
+  if (!VERSION.test(String(version))) throw new Error(`hfDir: ${version} is not a version like 0.8.139`);
+  return join(workFolder(home), ".toolchain", `hyperframes-${version}`);
+};
 /** Its program, the file node is given to run. */
-export const hfCli = (home) => join(hfDir(home), "node_modules", "hyperframes", "bin", "hyperframes.mjs");
+export const hfCli = (home, version = PIN.hyperframes.version) => join(hfDir(home, version), "node_modules", "hyperframes", "bin", "hyperframes.mjs");
 
 /** The `code` of folderFingerprint's throw for a link inside the folder, and for anything there that is neither a file nor a folder. */
 export const LINK_INSIDE = "REEL_KIT_LINK_INSIDE";

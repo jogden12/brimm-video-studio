@@ -4,7 +4,7 @@
 // whose SHA-256 the test's own pin holds. Only the test's node and /bin/sh run.
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -36,29 +36,32 @@ function standIn(dir, name, source) {
 
 /** Reel Kit's setup.sh as a stand-in: it writes how it was run to the log in HOME, answers only --check, runs its "render test"
     through the npx it finds on PATH (Studio's, in tools/bin), and ends READY unless HOME holds setup-not-ready. */
-const SETUP_SH = `#!/bin/sh
+const setupSh = (hfVersion) => `#!/bin/sh
 echo "$*" >> "$HOME/setup-stand-in.log"
 [ "$1" = "--check" ] || { echo "setup stand-in: run without --check"; exit 3; }
-v=$(npx -y hyperframes@${PIN.hyperframes.version} --version) || { echo "NOT READY: npx did not run HyperFrames"; exit 1; }
+v=$(npx -y hyperframes@${hfVersion} --version) || { echo "NOT READY: npx did not run HyperFrames"; exit 1; }
 echo "STATUS hyperfrm  OK      hyperframes $v"
 if [ -f "$HOME/setup-not-ready" ]; then echo "STATUS venv      MISSING"; echo "NOT READY: apply the fixes above, then run setup again"; exit 1; fi
 echo "${CREDIT}"
 echo "READY"
 `;
 
-/** Pinned HyperFrames as a stand-in, put in place by the npm stand-in: --version and browser ensure, each written to HOME's log. */
-const HF_SOURCE = `import { appendFileSync } from "node:fs";
+/** A pinned HyperFrames as a stand-in, put in place by the npm stand-in: --version (its own, from the folder npm put it in) and
+    browser ensure, each written to HOME's log with the program's own path. */
+const HF_SOURCE = `import { appendFileSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 const args = process.argv.slice(2);
-appendFileSync(process.env.HOME + "/hf-stand-in.log", JSON.stringify({ args, offline: ["HF_HUB_OFFLINE", "PIP_NO_INDEX", "UV_OFFLINE"].filter((k) => k in process.env) }) + "\\n");
-if (args[0] === "--version") { console.log(${JSON.stringify(PIN.hyperframes.version)}); process.exit(0); }
+const cli = fileURLToPath(import.meta.url);
+appendFileSync(process.env.HOME + "/hf-stand-in.log", JSON.stringify({ args, cli, offline: ["HF_HUB_OFFLINE", "PIP_NO_INDEX", "UV_OFFLINE"].filter((k) => k in process.env) }) + "\\n");
+if (args[0] === "--version") { console.log(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version); process.exit(0); }
 if (args[0] === "browser" && args[1] === "ensure") process.exit(0);
 process.exit(2);
 `;
 
 /** A Mac's world for one install: a home, a dropped kit (the fixture kit with a stand-in setup.sh, and its LICENSE beside it), a
     pin whose every download is one `fetch` serves, and the stand-in programs. */
-function world({ vp9 = true, gsapVersion = PIN.gsap.version, integrity = PIN.hyperframes.integrity, bad = {} } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "rk-install-"));
+function world({ vp9 = true, gsapVersion = PIN.gsap.version, integrity = PIN.hyperframes.integrity, hfVersion = PIN.hyperframes.version, bad = {} } = {}) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "rk-install-")));
   roots.push(root);
   const home = join(root, "home");
   mkdirSync(home);
@@ -69,16 +72,19 @@ function world({ vp9 = true, gsapVersion = PIN.gsap.version, integrity = PIN.hyp
   const download = join(root, "download");
   const kit = join(download, "skills", "reel-kit");
   cpSync(FIXTURE_KIT, kit, { recursive: true });
-  writeFileSync(join(kit, "setup", "setup.sh"), SETUP_SH);
+  writeFileSync(join(kit, "setup", "setup.sh"), setupSh(hfVersion));
   writeFileSync(join(download, "LICENSE"), "A made-up licence.\n");
-  const drop = { ok: true, kit, version: "1.2.0", fingerprint: folderFingerprint(kit), hyperframes: PIN.hyperframes.version, gsap: gsapVersion, requirementsSha: "0".repeat(64), license: join(download, "LICENSE") };
+  const drop = { ok: true, kit, version: "1.2.0", fingerprint: folderFingerprint(kit), hyperframes: hfVersion, gsap: gsapVersion, requirementsSha: "0".repeat(64), license: join(download, "LICENSE") };
 
   const served = new Map();
   const serve = (url, text) => {
     served.set(url, Buffer.from(text));
     return sha(Buffer.from(text));
   };
+  // The test's pin of the version in use: the made-up kit is the pinned one, and every download is one fetch serves.
   const pin = JSON.parse(JSON.stringify(PIN));
+  pin.fingerprint = drop.fingerprint;
+  pin.hyperframes.version = hfVersion;
   pin.uv.sha256 = serve(pin.uv.url, "a made-up uv tarball");
   pin.gsap = gsapVersion === HF_PIN.gsap.version
     ? { ...pin.gsap, version: gsapVersion }
@@ -109,7 +115,7 @@ appendFileSync(${JSON.stringify(join(bin, "npm.log"))}, JSON.stringify(args) + "
 const prefix = args[args.indexOf("--prefix") + 1];
 const pkg = join(prefix, "node_modules", "hyperframes");
 mkdirSync(join(pkg, "bin"), { recursive: true });
-writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "hyperframes", version: ${JSON.stringify(PIN.hyperframes.version)} }));
+writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "hyperframes", version: args.at(-1).replace("hyperframes@", "") }));
 writeFileSync(join(prefix, "package-lock.json"), JSON.stringify({ packages: { "node_modules/hyperframes": { integrity: ${JSON.stringify(integrity)} } } }));
 writeFileSync(join(pkg, "bin", "hyperframes.mjs"), ${JSON.stringify(HF_SOURCE)});
 `),
@@ -146,6 +152,25 @@ writeFileSync(args[args.indexOf("-o") + 1], "curl got " + args.at(-1));
     scenario: (value) => writeFileSync(join(bin, "uv-stand-in.json"), JSON.stringify(value)),
     install: (plan, more = {}) => runInstall({ home, drop, plan: plan ?? installPlan({ home, drop, pin, mode: "dev" }), programs, fetch, ...more })
   };
+}
+
+/** Everything under a folder, by its relative path: a file's SHA-256, a link's target, or "folder". */
+function snapshot(dir) {
+  const seen = {};
+  const walk = (at, rel) => {
+    for (const name of readdirSync(at).sort()) {
+      const path = join(at, name);
+      const relPath = rel ? `${rel}/${name}` : name;
+      const kind = lstatSync(path);
+      if (kind.isSymbolicLink()) seen[relPath] = `-> ${readlinkSync(path)}`;
+      else if (kind.isDirectory()) {
+        seen[relPath] = "folder";
+        walk(path, relPath);
+      } else seen[relPath] = sha(readFileSync(path));
+    }
+  };
+  walk(dir, "");
+  return seen;
 }
 
 /** Every name under a folder, relative, that ends .new or .old: what a stage left half made. */
@@ -209,6 +234,15 @@ describe("installPlan", () => {
     assert.deepEqual(plan.steps, []);
     assert.equal(installPlan({ home: w.home, drop: { ok: false, why: "That isn't Reel Kit." }, pin: w.pin, mode: "dev" }).refused, "That isn't Reel Kit.");
     assert.throws(() => installPlan({ home: w.home, drop: w.drop, pin: w.pin, mode: "other" }), /mode/);
+    assert.equal(installPlan({ home: w.home, drop: undefined, pin: w.pin, mode: "dev" }).refused, INSTALL_WHY.noDrop);
+  });
+
+  it("refuses a dev drop of the version in use that isn't the pinned one", () => {
+    const w = world();
+    const plan = installPlan({ home: w.home, drop: { ...w.drop, fingerprint: `sha256-${"2".repeat(64)}` }, pin: w.pin, mode: "dev" });
+    assert.equal(plan.refused, INSTALL_WHY.sameVersion("1.2.0"));
+    assert.equal(plan.refused, "That Reel Kit says it is 1.2.0, the version in use, but it isn't the same as the one Studio pins, so it wasn't taken in: ask Jason.");
+    assert.deepEqual(plan.steps, []);
   });
 
   it("refuses a Reel Kit whose HyperFrames or GSAP the pin doesn't hold", () => {
@@ -264,9 +298,9 @@ describe("runInstall", () => {
     // npm installed 0.8.139 beside Studio's own, with none of its scripts run; Chrome was fetched with the network on.
     assert.deepEqual(JSON.parse(w.npmRuns()[0]), ["install", "--prefix", `${hfDir(w.home)}.new`, "--ignore-scripts", "--no-fund", "--no-audit", "--save-exact", `hyperframes@${PIN.hyperframes.version}`]);
     const hf = readFileSync(join(w.home, "hf-stand-in.log"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-    assert.deepEqual(hf[0], { args: ["browser", "ensure"], offline: [] });
+    assert.deepEqual(hf[0], { args: ["browser", "ensure"], cli: hfCli(w.home), offline: [] });
     // The render test of setup --check ran HyperFrames through Studio's npx, with the network off.
-    assert.deepEqual(hf[1], { args: ["--version"], offline: ["HF_HUB_OFFLINE", "PIP_NO_INDEX", "UV_OFFLINE"] });
+    assert.deepEqual(hf[1], { args: ["--version"], cli: hfCli(w.home), offline: ["HF_HUB_OFFLINE", "PIP_NO_INDEX", "UV_OFFLINE"] });
 
     // Every fetch was of the pin, and nothing was left half made.
     const pinned = new Set([w.pin.uv.url, ...w.pin.models.flatMap((m) => m.sources.map((s) => s.url)), ...w.pin.whisper.files.map((f) => `https://huggingface.co/${w.pin.whisper.repo}/resolve/${w.pin.whisper.revision}/${f.path}`), w.pin.gsap.url]);
@@ -464,6 +498,113 @@ describe("runInstall", () => {
     assert.equal(done.ok, false);
     assert.ok(done.lines.includes(INSTALL_WHY.stopped), done.lines.join("\n"));
     assert.ok(!existsSync(kitDir(w.home, "1.2.0")));
+  });
+});
+
+describe("beside the version in use, and after a killed run", () => {
+  it("installs a dev pin's own HyperFrames in a folder of its own, and serves it through npx", async () => {
+    const w = world({ hfVersion: "0.8.150" });
+    const done = await w.install();
+    assert.equal(done.ok, true, done.lines.join("\n"));
+    assert.ok(statSync(hfCli(w.home, "0.8.150")).isFile());
+    assert.ok(!existsSync(hfDir(w.home)), "nothing written into the hyperframes-0.8.139 folder");
+    assert.deepEqual(JSON.parse(w.npmRuns()[0]).slice(2, 3), [`${hfDir(w.home, "0.8.150")}.new`]);
+    assert.equal(readFileSync(join(binDir(w.home), "npx"), "utf8"), npxShim({ node: NODE, cli: hfCli(w.home, "0.8.150"), version: "0.8.150" }));
+    const hf = readFileSync(join(w.home, "hf-stand-in.log"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.deepEqual(hf.map((r) => [r.args[0], r.cli]), [["browser", hfCli(w.home, "0.8.150")], ["--version", hfCli(w.home, "0.8.150")]]);
+  });
+
+  it("installs another version beside the one in use, leaving the shared world and 1.2.0 as they were, and runs no check", async () => {
+    const w = world();
+    assert.equal((await w.install()).ok, true);
+    const rkh = reelKitHome(w.home);
+    const shared = snapshot(rkh);
+    const kit120 = folderFingerprint(kitDir(w.home, "1.2.0"));
+    const hf139 = snapshot(hfDir(w.home));
+    const counts = { setup: w.setupRuns().length, fetched: w.fetched.length, uv: w.uvRuns().length };
+
+    // A 1.2.1 download, with the pin written from it (a newer HyperFrames among its values).
+    const download = join(w.root, "download-1.2.1");
+    const kit = join(download, "skills", "reel-kit");
+    cpSync(w.drop.kit, kit, { recursive: true });
+    writeFileSync(join(kit, "VERSION"), "1.2.1\n");
+    writeFileSync(join(download, "LICENSE"), "A made-up licence, 1.2.1.\n");
+    const drop = { ...w.drop, kit, version: "1.2.1", fingerprint: folderFingerprint(kit), hyperframes: "0.8.150", license: join(download, "LICENSE") };
+    const next = { ...w.pin, version: "1.2.1", fingerprint: drop.fingerprint, hyperframes: { ...w.pin.hyperframes, version: "0.8.150" } };
+    assert.equal(installPlan({ home: w.home, drop, pin: w.pin, mode: "dev" }).refused, INSTALL_WHY.noPinYet);
+
+    const plan = installPlan({ home: w.home, drop, pin: w.pin, next, mode: "dev" });
+    assert.equal(plan.refused, "");
+    assert.equal(plan.beside, true);
+    assert.deepEqual(plan.steps.filter((s) => s.needed).map((s) => s.id), ["kit", "hyperframes"]);
+    assert.equal(plan.steps.find((s) => s.id === "python").words, "Python 3.12 for Reel Kit: kept for the version in use until this one is pinned");
+    assert.equal(plan.steps.find((s) => s.id === "check").words, INSTALL_WHY.kept("Reel Kit's own check"));
+
+    const done = await runInstall({ home: w.home, drop, plan, programs: w.programs, fetch: w.fetch });
+    assert.equal(done.ok, true, done.lines.join("\n"));
+    assert.ok(done.lines.includes("Reel Kit's Python packages: kept for the version in use until this one is pinned."), done.lines.join("\n"));
+    assert.equal(done.credit, "");
+    assert.equal(folderFingerprint(kitDir(w.home, "1.2.1")), drop.fingerprint);
+    assert.equal(readFileSync(join(workFolder(w.home), ".toolchain", "reel-kit-1.2.1.LICENSE"), "utf8"), "A made-up licence, 1.2.1.\n");
+    assert.ok(statSync(hfCli(w.home, "0.8.150")).isFile());
+    // The version in use, its HyperFrames and everything shared are as they were; nothing was fetched, and no check ran.
+    assert.deepEqual(snapshot(rkh), shared);
+    assert.equal(readFileSync(join(rkh, ".setup-version"), "utf8"), "1.2.0\n");
+    assert.equal(folderFingerprint(kitDir(w.home, "1.2.0")), kit120);
+    assert.deepEqual(snapshot(hfDir(w.home)), hf139);
+    assert.deepEqual({ setup: w.setupRuns().length, fetched: w.fetched.length, uv: w.uvRuns().length }, counts);
+    assert.deepEqual(leftovers(workFolder(w.home)), []);
+  });
+
+  /** What a run killed after two swaps leaves: the new .venv and .setup-version in place, the ones in use set aside, a .new half made. */
+  const killed = (w) => {
+    const rkh = reelKitHome(w.home);
+    mkdirSync(join(rkh, ".venv.old"), { recursive: true });
+    writeFileSync(join(rkh, ".venv.old", "made-by"), "in use\n");
+    mkdirSync(join(rkh, ".venv"));
+    writeFileSync(join(rkh, ".venv", "made-by"), "the killed run\n");
+    writeFileSync(join(rkh, ".setup-version.old"), "1.1.0\n");
+    writeFileSync(join(rkh, ".setup-version"), "1.2.0\n");
+    mkdirSync(join(rkh, "tools", "uv.new"), { recursive: true });
+    return rkh;
+  };
+
+  it("puts back what a killed run set aside when it never committed", async () => {
+    const w = world({ bad: { [PIN.uv.url]: "stops the run at Python" } });
+    const rkh = killed(w);
+    const done = await w.install();
+    assert.equal(done.ok, false);
+    assert.equal(readFileSync(join(rkh, ".venv", "made-by"), "utf8"), "in use\n");
+    assert.equal(readFileSync(join(rkh, ".setup-version"), "utf8"), "1.1.0\n");
+    assert.deepEqual(leftovers(workFolder(w.home)), []);
+  });
+
+  it("keeps what a killed run swapped in once it had committed, and takes its marker away", async () => {
+    const w = world({ bad: { [PIN.uv.url]: "stops the run at Python" } });
+    const rkh = killed(w);
+    const marker = join(workFolder(w.home), ".toolchain", "reel-kit-install.committed");
+    mkdirSync(dirname(marker), { recursive: true });
+    writeFileSync(marker, "committed\n");
+    const done = await w.install();
+    assert.equal(done.ok, false);
+    assert.equal(readFileSync(join(rkh, ".venv", "made-by"), "utf8"), "the killed run\n");
+    assert.equal(readFileSync(join(rkh, ".setup-version"), "utf8"), "1.2.0\n");
+    assert.ok(!existsSync(marker));
+    assert.deepEqual(leftovers(workFolder(w.home)), []);
+  });
+
+  it("leaves no commit marker after a whole install", async () => {
+    const w = world();
+    const done = await w.install();
+    assert.equal(done.ok, true, done.lines.join("\n"));
+    assert.deepEqual(done.leftOver, []);
+    assert.ok(!existsSync(join(workFolder(w.home), ".toolchain", "reel-kit-install.committed")));
+  });
+
+  it("says plainly that there's nothing to set up when it is given no drop or plan", async () => {
+    const w = world();
+    const done = await runInstall({ home: w.home, drop: w.drop, plan: undefined, programs: w.programs, fetch: w.fetch });
+    assert.deepEqual(done.lines, [INSTALL_WHY.noDrop]);
   });
 });
 

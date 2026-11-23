@@ -33,7 +33,11 @@ const STAMP = ".studio-pin.json";
 
 /** Why a step stopped, one line each, in her words: never a path or a command for her to type. */
 export const INSTALL_WHY = Object.freeze({
+  noDrop: "There's no Reel Kit here to set up. Drag it into this chat again.",
   untested: "This Reel Kit hasn't been tested yet: ask Jason.",
+  sameVersion: (version) => `That Reel Kit says it is ${version}, the version in use, but it isn't the same as the one Studio pins, so it wasn't taken in: ask Jason.`,
+  noPinYet: "That Reel Kit is a version Studio has no pin for yet: ask Jason.",
+  kept: (words) => `${words}: kept for the version in use until this one is pinned`,
   hyperframes: "That Reel Kit renders with a HyperFrames Studio has no pin for yet: ask Jason.",
   gsap: "That Reel Kit animates with a GSAP Studio has no pin for yet: ask Jason.",
   notPinned: (what) => `What came down for ${what} isn't what Studio expects, so it wasn't kept.`,
@@ -67,7 +71,8 @@ export function pathsOf(home, pin, version) {
     pythonDir: join(tools, "python"),
     venv: join(rkh, ".venv"),
     mp: join(rkh, ".venv-mp"),
-    hf: hfDir(home),
+    hf: hfDir(home, pin.hyperframes.version),
+    committed: join(workFolder(home), ".toolchain", "reel-kit-install.committed"),
     gsap: join(rkh, "vendor", "gsap.min.js"),
     models: join(rkh, "models"),
     whisper: join(rkh, "hf", "hub", `models--${pin.whisper.repo.replace("/", "--")}`),
@@ -297,7 +302,7 @@ const chrome = {
   here: () => false,
   async make(ctx) {
     const env = withNetwork(ctx, ["HF_HUB_OFFLINE", "PIP_NO_INDEX", "UV_OFFLINE"]);
-    const got = await run(ctx, ctx.programs.node, [hfCli(ctx.home), "browser", "ensure"], env);
+    const got = await run(ctx, ctx.programs.node, [hfCli(ctx.home, ctx.pin.hyperframes.version), "browser", "ensure"], env);
     if (got.code !== 0) throw fault(INSTALL_WHY.failed(this.words()));
   },
 };
@@ -411,7 +416,7 @@ const whisper = {
 /** The names tools/bin holds: links to programs, and the npx file. */
 const LINKS = ["node", "ffmpeg", "ffprobe", "python3"];
 const ffmpegWant = (pin) => ({ ffmpeg: pin.ffmpeg.ffmpeg.sha256, ffprobe: pin.ffmpeg.ffprobe.sha256 });
-const npxText = (ctx, node) => npxShim({ node, cli: hfCli(ctx.home), version: ctx.pin.hyperframes.version });
+const npxText = (ctx, node) => npxShim({ node, cli: hfCli(ctx.home, ctx.pin.hyperframes.version), version: ctx.pin.hyperframes.version });
 /** Whether tools/bin holds exactly `want` (name -> link target) and the npx for `node`. */
 function binHolds(ctx, want, node) {
   const npx = join(ctx.paths.bin, "npx");
