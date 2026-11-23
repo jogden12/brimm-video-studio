@@ -313,7 +313,7 @@ export function itemsOf(teachings, session) {
 /** The line her chat and the teachings files say above what Claude read (spec 2026-10-22, section 3). */
 export const CHECK_NAMES = "BRIMM Video Studio took out the names it could see. Check these for anything about the client.";
 /** What marks a principle's source_context, which describes the session: for her eyes only, never in the hand-off (spec 3). */
-const FOR_HER = "(for you only: not sent to the page)";
+const FOR_HER = "(for you only: not sent to BRIMM Ops)";
 /** What stands for a text the name check took out. */
 const TAKEN = "(taken out)";
 const textOr = (v) => (typeof v === "string" && v.trim() !== "" ? v.trim() : TAKEN);

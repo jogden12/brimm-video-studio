@@ -1,5 +1,7 @@
 # Unedited-video workflow: can we recreate Claude Creator Studio ourselves?
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 Source tags: [page] https://paid.tenfoldmarketing.com/claude-creator-studio · [terms] https://paid.tenfoldmarketing.com/claude-creator-studio/terms.html · [checkout] https://paid.tenfoldmarketing.com/claude-creator-studio/checkout.html · [plugin repo] https://github.com/tenfoldmarc/studio-plugin · [free repo] https://github.com/tenfoldmarc/video-edit-skill · [tested here] = measured read-only on the Mac Studio with synthetic speech and test-pattern video, not her footage · file references are in the BRIMM Ops repo.
 
 ## 1. Can it be recreated?

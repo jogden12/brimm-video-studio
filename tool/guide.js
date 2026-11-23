@@ -1,5 +1,5 @@
-// The guide in her Claude folder (spec 2026-10-25): where a video has got, from her drop folder to the BRIMM Ops page's cascade,
-// and the one next step for it, in her own words. brimm-video cannot see the BRIMM Ops page, so her note on this Mac keeps the
+// The guide in her Claude folder (spec 2026-10-25): where a video has got, from her drop folder to BRIMM Ops' cascade,
+// and the one next step for it, in her own words. brimm-video cannot see BRIMM Ops, so her note on this Mac keeps the
 // steps she has done there, by the hand-off's id.
 // Everything here is pure but dropWords, which says a folder in Finder's words through settings.js folderWords (it looks at the folder's real
 // path); the export step's folder words are a fact edit.js computes (project.exportsWords). edit.js gives it all else it read.
@@ -7,8 +7,9 @@ import { spokenMac } from "./kinds.js";
 import { aboutLeft } from "./progress.js";
 import { folderWords, isLocal } from "./settings.js";
 
-/** The BRIMM Ops page, which `guide page` opens in her browser. */
-export const OPS_PAGE = "https://claude.ai/artifact/GCUQPLnSFWZe3VghyaKNtX";
+/** The BRIMM Ops app, which `guide ops` opens. BRIMM Ops is a Mac app since 2026-11-14; its old claude.ai page is kept read-only and
+    cannot save, so nothing here sends her to it. What it shows is brimm-operations' own guide (docs/guide/brimm-ops-guide.html). */
+export const OPS_APP = "BRIMM Ops";
 
 /** All that every form of `guide` says, and does, on a Mac still on the old import. There Claude reads every video as it lands,
     a session's whole words too, so the guide never sends her to that drop folder. */
@@ -32,9 +33,9 @@ export const dropUnreadable = (words) => `This Mac does not let BRIMM Video Stud
 /** Where a Zoom download goes, in Finder words: Zoom Video Transfer, in BRIMM VIDEO Transfer, beside BRIMM Video. */
 export const ZOOM_WORDS = finderWords("Dropbox", "The BRIMM DB", "BRIMM VIDEO Transfer", "Zoom Video Transfer");
 
-/** The BRIMM Ops page's steps, in order, by what the hand-off is: a finished or raw episode, an iPhone clip (a short video), or a
+/** BRIMM Ops' steps, in order, by what the hand-off is: a finished or raw episode, an iPhone clip (a short video), or a
     session. The withdrawal is the one step of a video that was a session after all: its empty session revision dropped on
-    Principles, to withdraw the words the page had, then the old backups deleted. It comes before the session's own steps, and
+    Principles, to withdraw the words BRIMM Ops had, then the old backups deleted. It comes before the session's own steps, and
     its list is here so that a step her note holds can be checked against it. */
 export const OPS = {
   episode: ["taken", "kit", "posted", "live", "cascade"],
@@ -60,7 +61,7 @@ const withdrawn = (handoff, note) =>
   Boolean(note) && note.kind === "session" && ((note.step === "withdrawn" && note.revision >= handoff.emptyAt) || note.revision > handoff.emptyAt);
 
 /** The step her note holds, as the hand-off's steps count it, or null when the note does not count. It counts only for the same
-    kind of hand-off, with one of that kind's steps. A noted withdrawal counts as the session taken at its revision: the page's
+    kind of hand-off, with one of that kind's steps. A noted withdrawal counts as the session taken at its revision: BRIMM Ops'
     "Withdraw the words and take the session" takes the session it was dropped with. */
 function notedStep(handoff, note) {
   const family = noteKindOf(handoff.kind);
@@ -69,10 +70,10 @@ function notedStep(handoff, note) {
   return family === "session" && note.step === "withdrawn" ? "taken" : null;
 }
 
-/** The BRIMM Ops page's next step for a hand-off, from her note on it: { step, again }, `again` when it is taken again for a
+/** BRIMM Ops' next step for a hand-off, from her note on it: { step, again }, `again` when it is taken again for a
     newer revision. Null when every step is noted.
     A session after all has its withdrawal first, whatever is noted and whatever revision the hand-off is at, until it is noted;
-    at its empty revision itself there is nothing more for the page, as the session's own steps are brimm-video's until its own
+    at its empty revision itself there is nothing more for BRIMM Ops, as the session's own steps are brimm-video's until its own
     hand-off is written. Otherwise a note that does not count (none, or one of another kind of hand-off) starts the steps again at
     the first; a revision newer than the one noted brings back "taken", again; and after that comes the step after the one
     noted. With the note at an episode's last step, the cascade, none comes after "taken", again: its words (opsText) say what
@@ -106,49 +107,49 @@ export function noteAfter(handoff, note, step, at) {
 const ONLINE_ONLY = ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".';
 
 /** What follows taking a newer revision of an episode whose note is already at the cascade, the last step. The Reels of a video her
-    editor finished usually come later, through "Hand off the Reels", which writes a newer revision of the hand-off. The page's "Reels"
+    editor finished usually come later, through "Hand off the Reels", which writes a newer revision of the hand-off. BRIMM Ops' "Reels"
     card lists them ("Reels from BRIMM Video Studio"), each with a "Write its post text" button, or "Open its short video" once its post text
     exists. The cascade step says so, but she has done it, and no step comes after "taken" to say it again. With the note before the
     cascade that step is still to come, and it says it. A short video's page has no "Reels" card, and a session's words are the
     session form's. */
 const LATE_REELS = ' Then, on the "Reels" card, press "Write its post text" beside any Reel that has it.';
 
-/** Each step in the page's own words, by what the hand-off is (noteKindOf) where it matters. The labels are the page's own
+/** Each step in BRIMM Ops' own words, by what the hand-off is (noteKindOf) where it matters. The labels are BRIMM Ops' own
     buttons and cards. A step is given whether it is taken `again` for a newer revision, the hand-off's `revision`, and `note`, her
-    note on it: the revision the note holds is the one the page holds, which the page's button for a newer revision names beside the
+    note on it: the revision the note holds is the one BRIMM Ops holds, which BRIMM Ops' button for a newer revision names beside the
     hand-off's, and the step it holds is how far she has got (an episode's, at the cascade, is sent on to the "Reels" card:
     LATE_REELS). A first take reads no note. A hand-off dropped on Episodes opens the episode that holds its video; when none does,
-    the page says it is a new episode and has one button, "Add the episode and take the hand-off" (a hand-off with no name keeps
+    BRIMM Ops says it is a new episode and has one button, "Add the episode and take the hand-off" (a hand-off with no name keeps
     "Add it as a new episode"); the file goes into that episode's transcript. A session's form has one button, "Take the session", for a new revision and a newer one. */
 const SAYS = {
   taken: (family, again, revision, note) =>
     family === "session"
-      ? `Choose "Principles", drop the ${again ? "new " : ""}hand-off, then press "Take the session".`
+      ? `Find the ${again ? "new revision" : "session"} under "Waiting from Studio", press "Open it in the Principles library", then "Take the session".`
       : again
-        ? `Drag the new hand-off onto Episodes, then press "Take revision ${revision} in place of revision ${note.revision}".${family === "episode" && note.step === "cascade" ? LATE_REELS : ""}`
-        : 'Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.',
+        ? `Find the video under "Waiting from Studio" and press "Take revision ${revision} in place of revision ${note.revision}".${family === "episode" && note.step === "cascade" ? LATE_REELS : ""}`
+        : 'Find the video under "Waiting from Studio" and press its button, such as "Add the episode and take the hand-off". For a video BRIMM Ops already holds, it is "Take the hand-off" or "Take revision N in place of revision M". Dropping the hand-off onto Episodes still works.',
   kit: () => 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.',
   posted: (family) =>
     family === "short video"
       ? "Post it on Instagram, and as a YouTube Short."
       : 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".',
   live: () => 'Correct the form to what is live, then press "This is what is live".',
-  // The page's "Reels" card lists the Reels BRIMM Video Studio handed off ("Reels from BRIMM Video Studio"), each with "Write its post text".
-  // The step names no "Clip to cut": the page (version 10) stops writing them. OpusClip is no longer used (Jason, 2 November 2026).
+  // BRIMM Ops' "Reels" card lists the Reels BRIMM Video Studio handed off ("Reels from BRIMM Video Studio"), each with "Write its post text".
+  // The step names no "Clip to cut": BRIMM Ops (since its page's version 10) stops writing them. OpusClip is no longer used (Jason, 2 November 2026).
   cascade: () =>
     'Press "Write what’s next". Approve and copy the newsletter section, then the Instagram pieces, then the LinkedIn posts. The ideas for YouTube are suggestions for YouTube Studio. If the "Reels" card lists "Reels from BRIMM Video Studio", press "Write its post text" beside each.',
   posttext: () => 'Press "Write what’s next", and pick the hook and the YouTube Short title. Approve and copy the caption, the Short\'s title and description, and the LinkedIn post.',
   checked: () => 'Check each principle marked "Check it", then press "Use in drafts".',
   // "the hand-off", not "the empty session revision": once the session's own hand-off is written, final/ holds that one in its place.
-  withdrawn: () => 'Choose "Principles", drop the hand-off, and press "Withdraw the words and take the session". Then delete the old backups from "About", and tell Jason.'
+  withdrawn: () => 'Find the session under "Waiting from Studio", press "Open it in the Principles library", then "Withdraw the words and take the session". Then delete every backup you saved from "About" before now, and tell Jason.'
 };
 
-/** A BRIMM Ops step for a hand-off, in the page's own words: `again` when it is taken again for a newer revision, and then `note`,
-    her note on it, which says the revision she last took on the page and how far she got with it (a first take reads no note). It
+/** A BRIMM Ops step for a hand-off, in BRIMM Ops' own words: `again` when it is taken again for a newer revision, and then `note`,
+    her note on it, which says the revision she last took in BRIMM Ops and how far she got with it (a first take reads no note). It
     is the note that counts, as opsNext has it: the same kind of hand-off, with one of its steps. Taking an episode again when her
     note is at the cascade, the last step, ends by sending her on to the "Reels" card (LATE_REELS). Taking a raw episode ends with
     freeing its space in Dropbox, after that: for an episode filed before the Mac's switch, whose recording is in Dropbox. An episode kept on
-    its Mac (`local`; Phase 3, L8) has no recording in Dropbox to free, so its words stop at the page's. */
+    its Mac (`local`; Phase 3, L8) has no recording in Dropbox to free, so its words stop at BRIMM Ops'. */
 export function opsText(handoff, step, again, note, local = false) {
   const family = noteKindOf(handoff.kind);
   const text = SAYS[step](family, again, handoff.revision, note);
@@ -200,11 +201,11 @@ export function opsText(handoff, step, again, note, local = false) {
     - For a finished video whose hand-off is written (plan PR 16): `reelsExported`, the numbers of its Reels, in order, that were exported from
       HyperFrames and are not in that hand-off, as `finish … reels` would take them (edit.js guideReels); [] when there are none, when that
       command would go no further, or when she has said the video is finished, which is read for nothing of its Reels. It is said ahead of the
-      BRIMM Ops page's steps, and below her note that the video is finished.
+      BRIMM Ops' steps, and below her note that the video is finished.
     - `planned`, for a planned episode (PR H4) and absent for anything else: { route, voice, footage, joining, joinFailed }. `route` is "script" or
       "explainer", `voice` an explainer's: "sallie", "heygen" or null, and `footage` (PR H5a), for a script, the parts it has counted in words ("2
       talking parts, 1 screen recording and 2 b-roll clips"), "" while it has none. Its one step is `film` while no footage has come, and `footage`
-      once some has; both come before the reading's branch of videoNext and before every step of the BRIMM Ops page, and change none of them. A
+      once some has; both come before the reading's branch of videoNext and before every step of BRIMM Ops, and change none of them. A
       script whose footage is being made into one video (PR H5b) has `joining`, true while the run that does it (join.js) is at work, and its
       step is `joining`; and `joinFailed`, true when that run's last end was a failure and the plan is still a plan, and its step is `join-failed`.
       Once the run has made the plan its video, it is no planned episode: it has the stages of a raw or a short video.
@@ -282,7 +283,7 @@ export function copyIn(rates, seconds) {
     where it would send her to open a video there: nothing on such a Mac opens a project (plan PR 17; the review of PR 10, M2). */
 export const APP_NOT_SET_UP = "This Mac isn't set up for HyperFrames yet: ask Jason.";
 
-/** A step that is brimm-video's, or hers, and not the BRIMM Ops page's. */
+/** A step that is brimm-video's, or hers, and not BRIMM Ops'. */
 const toDo = (stage, text) => ({ done: false, stage, text, step: "", after: "" });
 
 /** A step as the panel says it ("Writing the transcript"), put in the middle of a sentence: its first letter in lower case, unless
@@ -306,9 +307,9 @@ function dropNext(drop, mac) {
   return toDo("zoom", drop.here ? `It is a Zoom download, and those go in ${ZOOM_WORDS}. Move it there in Finder.` : `It is a Zoom download${on}. Those go in ${ZOOM_WORDS}. Move it there in Finder${there}.`);
 }
 
-/** The BRIMM Ops page's next step for a video's hand-off, in the page's words, with what comes once it is noted. Null when every
+/** BRIMM Ops' next step for a video's hand-off, in BRIMM Ops' words, with what comes once it is noted. Null when every
     step is noted. Done when the hand-off was written more than OLD_DAYS ago, except for a withdrawal, which stays under way until
-    it is noted: until then the page keeps a session's words. Once the withdrawal is noted at the empty revision, what comes is
+    it is noted: until then BRIMM Ops keeps a session's words. Once the withdrawal is noted at the empty revision, what comes is
     the session's own next step, which is brimm-video's. */
 function opsStep(facts, notes, now) {
   const handoff = facts.handoff;
@@ -321,19 +322,19 @@ function opsStep(facts, notes, now) {
   const own = !then && handoff.revision === handoff.emptyAt ? nextFor(facts, noted, now) : null;
   // Only a hand-off taken again reads her note (opsText), and that is one for a revision newer than the note's.
   const after = then ? opsText(handoff, then.step, then.again, noted.handoffs[handoff.id], facts.local === true) : own && !own.done ? own.text : "";
-  return { done: false, stage: "ops", text: `On the BRIMM Ops page: ${opsText(handoff, next.step, next.again, note, facts.local === true)}`, step: next.step, after };
+  return { done: false, stage: "ops", text: `In BRIMM Ops: ${opsText(handoff, next.step, next.again, note, facts.local === true)}`, step: next.step, after };
 }
 
 /** The next step for a session. Its hand-off's BRIMM Ops steps come first, so that the withdrawal of a session after all comes
     before anything else of it, transcript only included. At its empty revision, once the withdrawal is noted, its own steps
     follow, until its own hand-off is written. A session kept on another Mac (`onOtherMac`, Phase 3 L2) is on that Mac for every step
-    of its own, its empty revision included: only its hand-off's steps on the BRIMM Ops page, and transcript only, are said here as they are, but for a session with a conflict or held
+    of its own, its empty revision included: only its hand-off's steps in BRIMM Ops, and transcript only, are said here as they are, but for a session with a conflict or held
     beside a session (`keeperFirst`), whose step stays that Mac's even after a hand-off. */
 function sessionNext(facts, notes, now) {
   const session = facts.session;
   const there = facts.onOtherMac ? toDo("on-other-mac", `It is on ${spokenMac(facts.mac)}. Carry on there.`) : null;
   if (there && facts.keeperFirst) return there;
-  if (session.emptyOwed) return there || toDo("session-empty-owed", 'Say "it was a session after all" again: its empty revision for the BRIMM Ops page is still to be written.');
+  if (session.emptyOwed) return there || toDo("session-empty-owed", 'Say "it was a session after all" again: its empty revision for BRIMM Ops is still to be written.');
   if (facts.handoff) {
     const ops = opsStep(facts, notes, now);
     if (ops) return ops;
@@ -424,7 +425,7 @@ const HEYGEN_VOICE = 'In HyperFrames, have a HeyGen voice read the teleprompter 
 /** The step of a planned episode (PR H4), whose footage is still to come: `film`; and, once a script has some (PR H5a), `footage`, which says
     what it has and that she says when it is all in; and (PR H5b), once she has said so, `joining` while the run that makes its video is at
     work and `join-failed` when that run's last end was a failure. They come before the reading's branch of videoNext, and before every step on
-    the BRIMM Ops page (opsStep), none of which they change: a planned episode has no video, no reading and no hand-off.
+    BRIMM Ops (opsStep), none of which they change: a planned episode has no video, no reading and no hand-off.
     A script is filmed to its shot list, and its files dropped in the drop folder. An explainer's voice is hers, recorded from the teleprompter
     script and dropped as sound alone, unless it is a HeyGen voice, which she chooses in HyperFrames (a voice chosen is dropped as sound too,
     PR H6 builds the rest of that route). With no voice chosen yet it is hers: a voice made from hers is never the default. */
@@ -448,7 +449,7 @@ function filmStep({ route, voice, footage = "", joining = false, joinFailed = fa
 /** The next step for a finished episode, a raw one or a short video: Claude's reading, the spellings, a raw video's edit and
     finish, then its hand-off's BRIMM Ops steps. A raw video and an iPhone clip are edited in HyperFrames (appStep). A planned episode
     is told to film (filmStep) before anything else. A video or a plan kept on another Mac (`onOtherMac`, Phase 3 L2) is changed only there:
-    until its hand-off is written its step is on that Mac, before anything else; its hand-off's steps on the BRIMM Ops page are hers on any Mac,
+    until its hand-off is written its step is on that Mac, before anything else; its hand-off's steps in BRIMM Ops are hers on any Mac,
     but not while it has a conflict or is held beside a session (`keeperFirst`): then it stays "Carry on there." after a hand-off too.
     `onOtherMac` is the fact edit.js gives when its record says it is kept on another Mac (its `local`), with that Mac in `mac`, and is absent or
     false otherwise; edit.js says such a video is waiting for her answer, in a conflict or held as a session on that Mac alone. sessionNext
@@ -460,10 +461,10 @@ function videoNext(facts, notes, now) {
   const clip = facts.kind === "short video";
   if (facts.elsewhere && !facts.handoff) return toDo("open-elsewhere", `It is open on ${spokenMac(facts.mac)}. Carry on there.`);
   // A finish that has written its hand-off and only waits for its late check (`checking`) is not at work as far as she is concerned: the
-  // hand-off is ready, and the page's step is hers to do.
+  // hand-off is ready, and BRIMM Ops' step is hers to do.
   if ((raw || clip) && facts.finishRunning && !facts.checking) return toDo("finish-running", FINISH_RUNNING);
   if (facts.handoff) {
-    // A finished video's Reels exported from HyperFrames and not in its hand-off (plan PR 16) come ahead of the page's steps. Her note that the video is
+    // A finished video's Reels exported from HyperFrames and not in its hand-off (plan PR 16) come ahead of BRIMM Ops' steps. Her note that the video is
     // finished (nextFor) is above them: her word stands. While a finish copies, `finish … reels` refuses another, so the stage is that finish's. Once it
     // only waits for its late check (`checking`) it is no finish at work as far as she is concerned: the stage is the Reels', said for after the check,
     // which that command is stopped until.
@@ -506,8 +507,8 @@ function clipStep(facts) {
   return facts.v2 ? toDo("clip-next", 'Say "hand it off" to hand it off as it is.') : toDo("waits-v2", WAITS_V2);
 }
 
-/** Whether a session after all still owes the BRIMM Ops page its withdrawal: its empty revision is still to be written, or its
-    hand-off's next step is the withdrawal. Until then the page keeps the session's words. */
+/** Whether a session after all still owes BRIMM Ops its withdrawal: its empty revision is still to be written, or its
+    hand-off's next step is the withdrawal. Until then BRIMM Ops keeps the session's words. */
 const withdrawalOwed = (facts, notes) => {
   if (facts.session && facts.session.emptyOwed) return true;
   const handoff = facts.handoff;

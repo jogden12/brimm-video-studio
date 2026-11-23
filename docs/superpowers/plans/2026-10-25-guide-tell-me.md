@@ -1,5 +1,7 @@
 # brimm-video: the guide's times, "tell me when", and its review's four fixes Implementation Plan
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task, in this session (no subagents). Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Sallie's notes of 25 Oct, 1 and 2, on top of the guide (`claude/guide-mode`, 8504bb4). The guide gives clock times while a video is imported or waits for Claude. `guide "<video>" tell` waits in the background, up to 60 minutes, for that video's next point and says it in one line. Also the guide's whole-branch review's four minor findings.

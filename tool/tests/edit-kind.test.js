@@ -289,7 +289,7 @@ describe("kind: a session whose mark she cleared", () => {
     const r = await on(t.ctx.deps, "kind", "Talk with a friend", "session", "--private", "yes", "--again");
     assert.equal(r.code, 0, r.text);
     const record = reread(found);
-    // Its words may have gone to Claude while its mark was cleared: an empty session revision is owed the BRIMM Ops page, which this
+    // Its words may have gone to Claude while its mark was cleared: an empty session revision is owed to BRIMM Ops, which this
     // Mac, handing off version 1, does not write yet (F9b).
     assert.deepEqual(record.session, { marked: AFTER_CLAIM, on: "Mac Studio", teachings: null, cleared: null, emptyRevision: "owed" });
     assert.equal(record.name.text, sessionLabel(record.video.recorded));
@@ -1233,7 +1233,7 @@ describe("kind --version-of", () => {
       const third = "e-20261011-bbbbbb";
       addEpisode(t, { folder: "2026-10-11 Older (Mac Studio)", id: third, file: "Older.mov", over: { kind: "finished", answer: ANSWERED, label: "Video of 11 Oct, 09:00 (Mac Studio)" } });
       const r = await again(t, "--version-of", third);
-      assert.deepEqual([r.code, r.said], [1, [`Coaching call has already gone to the BRIMM Ops page as a version of ${NAME}: ask Jason.`]]);
+      assert.deepEqual([r.code, r.said], [1, [`Coaching call has already gone to BRIMM Ops as a version of ${NAME}: ask Jason.`]]);
       assert.deepEqual([readEpisode(added.folder).record.rev, readEpisode(added.folder).record.versionOf, t.started, t.waits], [2, ID, [], []]);
       t.done();
     });
@@ -1241,7 +1241,7 @@ describe("kind --version-of", () => {
       const t = setup();
       const added = handedOff(t, { versionOf: null });
       const r = await again(t, "--version-of", ID);
-      assert.deepEqual([r.code, r.said], [1, [`Coaching call has already gone to the BRIMM Ops page as a video of its own: ask Jason.`]]);
+      assert.deepEqual([r.code, r.said], [1, [`Coaching call has already gone to BRIMM Ops as a video of its own: ask Jason.`]]);
       assert.equal(readEpisode(added.folder).record.rev, 2);
       t.done();
     });
@@ -1251,7 +1251,7 @@ describe("kind --version-of", () => {
         const added = handedOff(t, { versionOf: null, finished: null, files: { [path]: "{}" } });
         const r = await again(t, "--version-of", ID);
         assert.equal(r.code, 1, path);
-        assert.match(r.text, /has already gone to the BRIMM Ops page as a video of its own: ask Jason\.$/, path);
+        assert.match(r.text, /has already gone to BRIMM Ops as a video of its own: ask Jason\.$/, path);
         assert.equal(readEpisode(added.folder).record.rev, 2);
         t.done();
       }
@@ -1762,7 +1762,7 @@ describe("kind --version-of, and the links around it (F3b)", () => {
   const LOOP = (label, name) => `${label} cannot be a version of ${name}: ${name} is already a version of it.`;
   /** The words of rule (d): the video that was handed off, the later one, is named first; the video being answered is what it is a
       version of. */
-  const GONE = (handed, name) => `${handed} has already gone to the BRIMM Ops page as a version of ${name}: ask Jason.`;
+  const GONE = (handed, name) => `${handed} has already gone to BRIMM Ops as a version of ${name}: ask Jason.`;
   /** The words of rule (e). */
   const SESSION_SET = (label) => `${label} would be a version of a client or group session: answer it as a session, or ask Jason. Nothing was written.`;
   /** The words for a video held as a session already, one of whose versions is a session not cleared (final fix 1): found by its
@@ -1947,7 +1947,7 @@ describe("kind --version-of, and the links around it (F3b)", () => {
       const t = setup();
       const { r } = chain(t, { rOver: { finished: FINISHED } });
       const refused = await again(t, "--version-of", ELSEWHERE);
-      assert.deepEqual([refused.code, refused.said], [1, [`Coaching call has already gone to the BRIMM Ops page as a version of ${NAME}: ask Jason.`]]);
+      assert.deepEqual([refused.code, refused.said], [1, [`Coaching call has already gone to BRIMM Ops as a version of ${NAME}: ask Jason.`]]);
       writesNothing(t, r);
       t.done();
     });

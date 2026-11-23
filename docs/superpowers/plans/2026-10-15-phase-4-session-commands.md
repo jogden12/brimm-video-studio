@@ -1,5 +1,7 @@
 # Phase 4, the session's commands: implementation plan
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Sallie says what she wants on a timeline and the next push shows it: the episode's spellings, the logo, a Reel's captions and its title on screen, a name over a role, a picture from her Pictures folder, a preset (job, caption style, look), and a stretch kept or taken out at a pause. A time or words she gives are read on the timeline she watched.

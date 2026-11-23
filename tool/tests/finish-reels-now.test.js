@@ -301,7 +301,7 @@ describe("M2. a Reel the hand-off holds is not read by a finish that adds anothe
     const reached = await watched(() => on(w.t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally"));
     assert.equal(reached.result.code, 0, reached.result.said.join("\n"));
     // The hand-off holds Reel 1, which this finish added, and Reel 2: the spelling reaches both.
-    assert.deepEqual(reached.result.said, ['"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 4: drop it on the BRIMM Ops page again. If Reel 1 and Reel 2 show captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export each again and say "hand off the Reels".']);
+    assert.deepEqual(reached.result.said, ['"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 4: it waits in BRIMM Ops again, under \"Waiting from Studio\". If Reel 1 and Reel 2 show captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export each again and say "hand off the Reels".']);
     for (const file of [srt, words]) assert.ok(reached.calls.some((call) => call.name === "readFileSync" && call.path === file), `${file} is read`);
     assert.match(handoffIn(found).reels[1].srt, /Thank you so much, Sally\./);
     // Another spelling, with Reel 2's files refused to a read: what it says for word times that cannot be read.
@@ -466,7 +466,7 @@ describe("I1. a spelling after the Reels reaches the Reels the hand-off holds (t
     const mainSrt = text(found, "final/Pricing talk.srt");
     const r = await on(w.t.ctx.deps, "spell", FOLDER, "add", "Cynthia", "Allison");
     assert.equal(r.code, 0, r.said.join("\n"));
-    assert.deepEqual(r.said, ['"Cynthia" is spelled "Allison" now. The final transcripts are spelled so too, and the hand-off is made again as revision 3: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels".']);
+    assert.deepEqual(r.said, ['"Cynthia" is spelled "Allison" now. The final transcripts are spelled so too, and the hand-off is made again as revision 3: it waits in BRIMM Ops again, under \"Waiting from Studio\". If Reel 2 shows captions on screen, they keep the old spelling. Ask the assistant in HyperFrames to fix them, then export it again and say "hand off the Reels".']);
     const three = handoffIn(found);
     assert.equal(three.revision, 3);
     assert.deepEqual(three.main, two.main, "main is as it was, byte for byte");

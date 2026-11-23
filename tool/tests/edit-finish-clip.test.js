@@ -42,7 +42,7 @@ const MADE_APP = (n) => `${MADE(n)} To hand off an edited version, open it in Hy
 /** The made-up episode of exports-world.js is named "Pricing: what to charge?", and its hand-off is named for it. */
 const WORLD_NAME = "Pricing: what to charge?";
 const WORLD_HANDOFF = "Pricing- what to charge-.brimm-ops.json";
-const WRITTEN = (n) => `The hand-off is written as revision ${n} and shown in Finder: drop it on the BRIMM Ops page.`;
+const WRITTEN = (n) => `The hand-off is written as revision ${n} and shown in Finder. It waits in BRIMM Ops, under "Waiting from Studio".`;
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/handoff-v2-${name}.json`, import.meta.url), "utf8"));
 const handoffIn = (found, file = HANDOFF) => JSON.parse(readFileSync(join(found.folder, "final", file), "utf8"));
 

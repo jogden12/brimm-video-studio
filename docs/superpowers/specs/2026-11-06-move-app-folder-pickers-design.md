@@ -1,5 +1,7 @@
 # The Move to Studio app picks the drop folder and the exports folder (design)
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 6 November 2026. Jason answered its questions on 7 November (below). Nothing is built until he approves the build. Branch `claude/studio-move-app-folders`, from main 673f770.
 
 It needs Phase 3's installer options, so it is built and merged after Phase 3. Those options are L1 (af3d75a) and L1b (c125ae7) on `claude/studio-local-folder`, reviewed and not merged. L1c (f690ed9) is merged into that branch, and its lines are folded in here (7 November). Phase 3 was reviewed on 7 November, and its session sent the lines the app reads or shows that the rest of Phase 3 changes: L5's Downloads delete and the Swift line are folded in below; every other line the app reads keeps its words. Phase 3's plan is `docs/superpowers/plans/2026-11-06-local-working-folder-plan.md` on that branch. Its rulings D4, D7, D8, D10, D11 and D12 are cited here by number.

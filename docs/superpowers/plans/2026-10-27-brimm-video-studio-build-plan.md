@@ -1,5 +1,7 @@
 # BRIMM Video Studio: the build plan
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build BRIMM Video Studio from brimm-video as it stood at c666508 (the tag `brimm-video-v1` and the late-check groundwork merged after it): the HyperFrames project maker (B1), the finish from the app's exports (B2), the guide's new states, the two-Mac snapshot, the session reading and clips (S1, S2), and then the retirement of what the app does. Each step is a pull request that Jason merges, test first.

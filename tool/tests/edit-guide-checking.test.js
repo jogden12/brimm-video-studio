@@ -1,4 +1,4 @@
-// The guide while a finish waits for its late check (finish.js, finish-check.js): the BRIMM Ops page does not wait for the check. The
+// The guide while a finish waits for its late check (finish.js, finish-check.js): BRIMM Ops does not wait for the check. The
 // finish is run as the command line runs it, holding the episode's lock, and the guide is asked while it waits; the lock is this
 // process's, so the guide is told that this process is the finish run at work. The worlds are guide-world.js's (exports-world.js's
 // episode, read by Claude and its spellings answered), reels-world.js's for the Reels of a finished video, and episodes.js's for the
@@ -13,7 +13,7 @@ import { finishNow } from "../finish.js";
 import { LATE_CHECK_MS } from "../dropbox.js";
 import { lockOf, takeEpisodeLock } from "../detached.js";
 import { CHECKING_FILE, markChecking } from "../finish-check.js";
-import { OPS_PAGE } from "../guide.js";
+import { OPS_APP } from "../guide.js";
 import { episodeWork } from "../settings.js";
 import { clockAt } from "../unedited.js";
 import { EDITED, FOLDER, PROJECT, episodeFor, reread, setup } from "./episodes.js";
@@ -22,7 +22,7 @@ import { OFFERS, READ } from "./guide-world.js";
 import { finishedWorld } from "./reels-world.js";
 import { HANDOFF, NAMED, atWait, check, exported, on, seeing, whileChecking } from "./checking-world.js";
 
-const TAKEN = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
+const TAKEN = 'In BRIMM Ops: Find the video under "Waiting from Studio" and press its button, such as "Add the episode and take the hand-off". For a video BRIMM Ops already holds, it is "Take the hand-off" or "Take revision N in place of revision M". Dropping the hand-off onto Episodes still works.';
 const ONLINE = ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".';
 const KIT = 'Press "Write what’s next" and read the "Brief". In "Before posting", pick a title, a thumbnail idea and a subject line. Approve and copy each piece.';
 const POSTED = 'Upload it to YouTube Studio with the title, description and chapters. Then tick "Not posted yet" so it says "Posted".';
@@ -33,14 +33,14 @@ const DROP = "Your drop folder: Dropbox › The BRIMM DB › BRIMM Video › Dro
 const REEL_AFTER = (n, due) => `You have exported Reel ${n} from HyperFrames. Say "hand off the Reels" after ${clockAt(due)} to add it to the hand-off.`;
 
 describe("the guide while a raw video's finish waits for its late check", () => {
-  it("gives the BRIMM Ops page's step, and after its lines the line of when Studio checks Dropbox's copies and then takes the export out of Downloads", async () => {
+  it("gives BRIMM Ops' step, and after its lines the line of when Studio checks Dropbox's copies and then takes the export out of Downloads", async () => {
     const w = await exported();
     const heard = await whileChecking(w, { next: ["guide", "3fa9c1"] });
     assert.equal(heard.next.code, 0, heard.next.text);
     assert.deepEqual(heard.next.said, [`${NAMED}: ${TAKEN}${ONLINE}`, `Then: ${KIT}`, "Step: taken", check(heard.due)]);
     w.t.done();
   });
-  it("lists the video among those under way with the BRIMM Ops page's step, and the line under it", async () => {
+  it("lists the video among those under way with BRIMM Ops' step, and the line under it", async () => {
     const w = await exported();
     const heard = await whileChecking(w, { all: ["guide"] });
     assert.deepEqual(heard.all.said, [
@@ -48,15 +48,15 @@ describe("the guide while a raw video's finish waits for its late check", () => 
     ]);
     w.t.done();
   });
-  it("shows the hand-off in Finder, and opens the BRIMM Ops page, as at any other time", async () => {
+  it("shows the hand-off in Finder, and opens BRIMM Ops, as at any other time", async () => {
     const w = await exported();
     const before = w.t.calls.filter((c) => c.cmd === "/usr/bin/open").length;
-    const heard = await whileChecking(w, { show: ["guide", "3fa9c1", "show"], page: ["guide", "page"] });
+    const heard = await whileChecking(w, { show: ["guide", "3fa9c1", "show"], ops: ["guide", "ops"] });
     assert.deepEqual([heard.show.code, heard.show.said], [0, [`Shown in Finder: the hand-off of ${NAMED}.`]]);
-    assert.deepEqual([heard.page.code, heard.page.said], [0, ["Opened the BRIMM Ops page in your browser."]]);
-    // The finish showed the hand-off itself (the first call), then `show` did, then `page` opened the page.
+    assert.deepEqual([heard.ops.code, heard.ops.said], [0, ["Opened BRIMM Ops."]]);
+    // The finish showed the hand-off itself (the first call), then `show` did, then `ops` opened BRIMM Ops.
     const opened = w.t.calls.filter((c) => c.cmd === "/usr/bin/open").map((c) => c.args);
-    assert.deepEqual(opened.slice(before), [["-R", join(w.found.folder, "final", HANDOFF)], ["-R", join(w.found.folder, "final", HANDOFF)], [OPS_PAGE]]);
+    assert.deepEqual(opened.slice(before), [["-R", join(w.found.folder, "final", HANDOFF)], ["-R", join(w.found.folder, "final", HANDOFF)], ["-a", OPS_APP]]);
     w.t.done();
   });
   it("answers `tell` at once with the page's step, and waits for nothing", async () => {
@@ -70,7 +70,7 @@ describe("the guide while a raw video's finish waits for its late check", () => 
   it("notes the page's steps as she does them, and says the next step each time with the line after it", async () => {
     const w = await exported();
     const heard = await whileChecking(w, { done: ["guide", "3fa9c1", "done", "taken"] });
-    assert.deepEqual(heard.done.said, [`Noted: ${NAMED}, taken.`, `${NAMED}: On the BRIMM Ops page: ${KIT}`, `Then: ${POSTED}`, "Step: kit", check(heard.due)]);
+    assert.deepEqual(heard.done.said, [`Noted: ${NAMED}, taken.`, `${NAMED}: In BRIMM Ops: ${KIT}`, `Then: ${POSTED}`, "Step: kit", check(heard.due)]);
     w.t.done();
   });
   it("is the step of a finish that has ended, without the line, once the run is over", async () => {
@@ -112,7 +112,7 @@ describe("the guide while a raw video's finish waits for its late check", () => 
 });
 
 describe("the guide while an iPhone clip's finish waits for its late check", () => {
-  it("gives the BRIMM Ops page's step for a clip, and the line", async () => {
+  it("gives BRIMM Ops' step for a clip, and the line", async () => {
     const w = await exported("short video");
     const heard = await whileChecking(w, { next: ["guide", "3fa9c1"] });
     assert.deepEqual(heard.next.said, [`${NAMED}: ${TAKEN}`, `Then: ${POST_TEXT}`, "Step: taken", check(heard.due)]);
@@ -121,7 +121,7 @@ describe("the guide while an iPhone clip's finish waits for its late check", () 
 });
 
 describe("the guide while the Reels of a finished video are handed off, and the finish waits for its late check", () => {
-  it("gives the BRIMM Ops page's step for the new revision, and the line", async () => {
+  it("gives BRIMM Ops' step for the new revision, and the line", async () => {
     const w = await finishedWorld();
     exportOf(w, "reel 2");
     assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: reread(w.found) }, { reels: true, yes: true }), 0, w.t.said());
@@ -209,7 +209,7 @@ describe("the guide after a late check found a problem that she had been told sh
     assert.deepEqual((await on(seeing(w), "guide", "3fa9c1", "show")).said, [`Shown in Finder: the hand-off of ${NAMED}.`]);
     const done = await on(seeing(w), "guide", "3fa9c1", "done", "taken");
     assert.equal(done.said[0], `Noted: ${NAMED}, taken.`);
-    assert.ok(done.said[1].startsWith(`${NAMED}: ${LEAD} On the BRIMM Ops page: ${KIT}`), done.said[1]);
+    assert.ok(done.said[1].startsWith(`${NAMED}: ${LEAD} In BRIMM Ops: ${KIT}`), done.said[1]);
     w.t.done();
   });
   it("goes when a later finish ends well, and stays when one fails before its hand-off is written", async () => {

@@ -1,5 +1,7 @@
 # BRIMM Video Studio: the HyperFrames-led path, the build plan
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Studio suggests short graphics for every video it reads, places them on her words in the HyperFrames project, and builds only those she takes. It turns her script into a video guide, a shot list and a teleprompter script before she films. It plans explainers made only of graphics. It uses a reference folder of post styles she names.
