@@ -45,13 +45,14 @@ Libraries with no CLI of their own: `studio.js` (her folder: strict lock and ope
 - **Reading:** `reading.js`, `readings.js`, `notes.js`, `reel-candidates.js`, `reframe.js`, `graphic-cues.js`, `spelling.js`, `sentences.js`.
 - **Sessions and the lock:** `sessions.js`, `teachings.js`, `gate.js`, `held.js`, `dialog.js` (a dialog only her click answers), `scan.js`, `chain.js` (the process chain, Claude Code's flags), `loosened.js`, `open-lock.js`, `never.js`, `places.js`, `fetchable.js`, `receipts.js`, `reveal.js`, `sandboxed.js` (edit.js is not inside Claude Code's sandbox).
 - **Project and HyperFrames:** `hyperframes.js`, `project.js`, `workcopy.js`, `app.js`, `app-reel.js`, `app-history.js`, `exports.js`, `on-screen.js`, `on-timeline.js`, `references.js` (the Dropbox References folder, read only), `free.js`.
+- **Reel Kit:** `reel-kit.js` (the pin, `reel-kit.pin.json`; where KIT, `REEL_KIT_HOME`, its `tools/bin`, `.venv` and its own HyperFrames 0.8.139 live, all in `~/BRIMM Video Work`; `folderFingerprint`, which says whether a dropped Reel Kit is the pinned one).
 - **Planned videos:** `plan.js`, `plan-script.js`, `plan-project.js`, `footage.js`, `join.js`, `explainer.js`.
 - **Finish and hand-off:** `finish.js`, `finish-check.js`, `finish-ended.js`, `finish-reels.js`, `finish-time.js`, `final-transcript.js`, `suggestions-in-main.js`, `handoff.js`, `handoff-v2.js`, `originals.js`.
 - **Guide:** `guide.js`, `guide-note.js` (her done-steps note). Part of the BRIMM Ops contract.
 - **Mac app support:** `build.js`, `build-helpers.js`, `helpers.js` (`HELPERS`: faces, progress, uploaded, online-only, read-through), `update-check.js`, `busy.js`.
 - **Swift helpers** (compiled as `brimm-<name>` in installed mode; run with `swift` in dev): `faces.swift`, `progress.swift`, `uploaded.swift`, `online-only.swift`, `read-through.swift`.
 - **Copies from brimm-operations** (each names its source in its first line; kept in step by hand): `lib.js` (from `transcribe/lib.js`), `run.js` (from `transcribe/transcribe.js`: the program runner and lock), `shared/answers.js`, `shared/transcript.js`, `shared/show.js`, `shared/text.js` (from its `app/src/`).
-- **Other:** `brand/` (brand.md, fonts), `vendor/gsap.min.js`, `hyperframes.pin.json`, `whisper-model.pin.json`.
+- **Other:** `brand/` (brand.md, fonts), `vendor/gsap.min.js`, `hyperframes.pin.json`, `whisper-model.pin.json`, `reel-kit.pin.json`.
 
 ## Her folder (`tool/studio/`)
 

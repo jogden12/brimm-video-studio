@@ -105,6 +105,16 @@ What the app writes and Studio reads back:
 
 - `tool/hyperframes.pin.json`: `{version, integrity, gsap: {version, integrity}}` (0.8.208, GSAP 3.14.2).
 - `tool/whisper-model.pin.json`: `{url, sha256}` for `ggml-large-v3-turbo.bin`, kept in `~/Library/Application Support/BRIMM Transcribe/`.
+- `tool/reel-kit.pin.json` (read by `reel-kit.js` `pinFrom`, which refuses any key missing or misshaped): Reel Kit 1.2.0.
+  - `version`, and `fingerprint` (`sha256-<64 hex>`): the SHA-256 of a manifest of every regular file in the skill folder (`skills/reel-kit/` of the plugin download), one line `<sha256>  <path>\n` per file, paths relative, `/`-joined, NFC, sorted by their UTF-8 bytes, `.DS_Store` and `._*` left out. A link inside refuses the folder.
+  - `required`: the files and folders (ending `/`) Studio relies on in it (`REQUIRED_PATHS`).
+  - `hyperframes` `{version, integrity}`: Reel Kit's own HyperFrames (0.8.139, npm integrity), kept in `~/BRIMM Video Work/.toolchain/hyperframes-0.8.139`, beside Studio's 0.8.208.
+  - `gsap`, `uv` (darwin-arm64) `{version, url, sha256}`; `python`: the exact 3.12 patch the pinned uv installs.
+  - `locks` `{main, mp}`, each `{file, sha256}`: the hash-locked requirements files (in `tool/reel-kit/`; their hashes are filled by plan Task 2).
+  - `models`: the four of Reel Kit's `pipeline/models.py`, each `{name, bytes, url, sha256}` (its first source).
+  - `whisper` `{repo, revision, files: [{path, sha256}]}`: faster-whisper medium at a pinned commit.
+  - `ffmpeg` `{version, ffmpeg: {url, sha256}, ffprobe: {url, sha256}}`: the static macos-arm64 9.0.2 zips of Reel Kit's `setup.py`, used only when Studio's ffmpeg has no `libvpx-vp9`.
+  - Where it lives: KIT in `~/BRIMM Video Work/.toolchain/reel-kit-<version>/` (read only), `REEL_KIT_HOME` in `~/BRIMM Video Work/.reel-kit/` (`tools/bin`, `.venv`). Never `~/reel-kit`.
 
 ## Her folder (`~/BRIMM Video Studio`)
 
