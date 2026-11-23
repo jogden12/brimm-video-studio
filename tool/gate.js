@@ -15,7 +15,8 @@ import { isPlannedRecord, kindOf, shownName } from "./episode.js";
 export const UNSCOPED = ["episodes", "status", "behind", "update", "retry", "look", "guide"];
 /** The words of `reelkit` that name no episode (plan Tasks 6, 11 and 13): `install "<download>"` (and its detached half, `--now install`),
     `status` with nothing after it, which says how Reel Kit's own setup on this Mac is going, and `style`, her style pack. Every other word
-    of it (`start`, `status "<episode>"`, `note`, `go`, `revise`, `resume`, and the detached half `--now <folder> …`) names an episode. */
+    of it (`start`, `status "<episode>"`, `note`, `go`, `revise`, `resume`, `storyboard`, `published`, and the detached half `--now <folder> …`)
+    names an episode. */
 export const REELKIT_UNSCOPED = ["install", "status", "style"];
 
 /** Whether `command` with `words` names no episode, and so is not gated: a command of UNSCOPED, whatever its words, and `reelkit` with

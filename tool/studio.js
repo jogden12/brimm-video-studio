@@ -30,6 +30,7 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { neverDenyRules } from "./never.js";
+import { NARROW, openingDecision } from "./storyboard-opening.js";
 import { bothSpellings, gatedPlaces, readAllowed, realOf } from "./places.js";
 
 /** Her folder for Claude, in the home folder. */
@@ -372,10 +373,14 @@ export function editStart({ checkout, node }, { quotedOnly = false } = {}) {
 /** What the guard answers to a tool call Claude Code is about to make, `input` as the PreToolUse hook is given it:
     { decision, reason }. "allow" for brimm-video's edit.js run from the checkout, followed only by words one space apart (WORD),
     and for her skill. The node may be spelled three ways (editStart): this Mac's node in double quotes, the word node, or a plain
-    path to node bare. "pass" for a tool left to Claude Code's own rules, which gives no answer, and for a read inside her
+    path to node bare. Artifact and ArtifactComments are the narrow opening's (storyboard-opening.js openingDecision), asked first, its
+    answer taken. "pass" for a tool left to Claude Code's own rules, which gives no answer, and for a read inside her
     folder, `folder`; and "deny" for everything else, any other read, any other skill and any tool added later among them. */
-export function guardDecision(input, { checkout, node, folder = "", tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp", uid = process.getuid() }) {
+export function guardDecision(input, { checkout, node, folder = "", home, tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp", uid = process.getuid() }) {
   const name = input && input.tool_name;
+  // The narrow opening answers first for its two tools (storyboard-opening.js): a storyboard Studio staged in her folder, its page and its
+  // comments, and nothing else. The home is the folder above hers, as for the open guard (R25).
+  if (NARROW.includes(name)) return openingDecision(input, { home: home ?? (folder ? dirname(folder) : ""), folder });
   if (LEFT_TO_CLAUDE_CODE.has(name)) return { decision: "pass", reason: "" };
   if (name === "Read") return readable(input, folder, tmp, uid) ? { decision: "pass", reason: "" } : { decision: "deny", reason: REFUSED };
   if (name === "Skill" && input.tool_input && input.tool_input.skill === SKILL) return { decision: "allow", reason: "her skill" };

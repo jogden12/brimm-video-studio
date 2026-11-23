@@ -27,6 +27,12 @@
 //                                          and `finalize` started. Nothing else starts finalize.
 //   reelkit revise "<episode>" <slug>      `revise` started with her notes since the last version.
 //   reelkit resume "<episode>" <slug>      a stopped job started again from its step.
+//   reelkit storyboard "<episode>" <slug> [local]
+//                                          (plan Task 12) the edit's newest storyboard staged in her folder (storyboard-opening.js stagePage), and
+//                                          for her chat the exact publish to make, to the URL recorded for it once it has one; with `local`,
+//                                          Reel Kit's own page (KIT/storyboard/serve.py) on 127.0.0.1:8765, one at a time, opened in her browser.
+//   reelkit published "<episode>" <slug> <url>
+//                                          the URL its first publish gave, recorded once: never the kept BRIMM Ops page's, never changed.
 //   reelkit --now <folder> start|revise|finalize|resume …
 //                                          the detached half of each (in no help), which runs the worker's runJob. Refused under Claude Code.
 //
@@ -37,13 +43,17 @@
 //
 // Everything she reads is in her words: never a path or a command for her to type. A test gives stand-ins through ctx.deps.reelKit: `pin`
 // (the pin of the version in use), `unzip` (readDrop's), `programs`, `fetch`, `run` and `keepAwake`.
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { KEPT, byReelKit } from "./app.js";
 import { localStamp } from "./episode.js";
 import { PIN as HF_PIN } from "./hyperframes.js";
-import { kitDir, venvPython } from "./reel-kit.js";
+import { kitDir, reelKitEnv, venvPython } from "./reel-kit.js";
+import { OPS_PAGE } from "./guide.js";
+import { studioFolder } from "./studio.js";
+import { pageOf, publishInput, recordUrl, stagePage } from "./storyboard-opening.js";
 import { MODES, entryOf, modeLeans, modeOf as modeNamed, projectFolderOf, readCapped, readState, scaffold, slugOf, startWhy, writeState } from "./reel-kit-project.js";
 import { JOBS, dequeue, enqueue, processStart, queuedOf, runJob, statusOf, stoppedLine } from "./reel-kit-worker.js";
 import { writeWhole as writeFileWhole } from "./reel-kit-worker-own.js";
@@ -316,6 +326,7 @@ export const EDIT_SAY = Object.freeze({
   waiting: "waiting for its turn.",
   working: (step, left) => `being made, at ${step || "its start"}${left ? `: about ${left} minute${left === 1 ? "" : "s"} left, by Reel Kit's own guess` : ""}.`,
   storyboard: "its storyboard is made.",
+  pageGo: `its storyboard is made, and you said go on its page: say "go" to have it built.`,
   ready: "it is built and ready to render.",
   failed: "it couldn't be made: ask Jason.",
   unread: "what it is at can't be read: ask Jason.",
@@ -393,6 +404,15 @@ function addNote(dir, note) {
 
 /** Whether a note is one of hers on the storyboard, as the worker is given it: { beat, text, at }, each a string, and not her go. */
 const isChange = (n) => n !== null && typeof n === "object" && typeof n.beat === "string" && typeof n.text === "string" && (n.at === undefined || typeof n.at === "string") && !(n.beat === "all" && n.text === "go");
+
+/** Whether her notes since the storyboard's last version hold her go: the note Reel Kit's local page writes for "Looks good: render it", the
+    same `reelkit go` writes. It approves nothing by itself: only `reelkit go` starts the build. */
+function wentAhead(dir) {
+  const notes = readNotes(dir);
+  if (notes === null) return false;
+  const used = readState(dir)?.notesUsed;
+  return notes.slice(Number.isInteger(used) && used >= 0 ? used : 0).some((n) => n !== null && typeof n === "object" && n.beat === "all" && n.text === "go");
+}
 
 /** The record's Reel Kit edits, each { entry, key, mode, version, slug, dir }: its entry, its slug (slugOf, from the record) and its folder on
     this Mac (null when its name can't make one). Kept for an earlier kind, an edit is none. */
@@ -567,7 +587,7 @@ function stateLine(status) {
   if (status.state === "queued") return EDIT_SAY.waiting;
   if (status.state === "working") return EDIT_SAY.working(status.step, status.minutesLeft);
   if (status.state === "stopped") return stoppedLine(status);
-  if (status.state === "storyboard") return EDIT_SAY.storyboard;
+  if (status.state === "storyboard") return status.pageGo ? EDIT_SAY.pageGo : EDIT_SAY.storyboard;
   if (status.state === "ready") return EDIT_SAY.ready;
   if (status.state === "failed") return EDIT_SAY.failed;
   return EDIT_SAY.unread;
@@ -590,7 +610,7 @@ async function editStatus(ctx, words, h) {
   for (const result of unstarted) ctx.say(`${partSaid(result.key)}: ${EDIT_SAY.didNotStart(result.why)}`);
   for (const edit of edits) {
     const status = statusFor(ctx, edit.dir);
-    ctx.say(`${editSaid(edit.key, edit.mode, edit.version)}: ${stateLine(status)}`);
+    ctx.say(`${editSaid(edit.key, edit.mode, edit.version)}: ${stateLine(status && status.state === "storyboard" ? { ...status, pageGo: wentAhead(edit.dir) } : status)}`);
     const needs = (status?.needs ?? []).filter((n) => n && typeof n.text === "string" && typeof n.beat === "string");
     if (!needs.length) continue;
     for (const need of needs) ctx.say(`  ${need.beat}: ${need.text}`);
@@ -701,6 +721,153 @@ async function resumeCommand(ctx, words, h) {
   markQueued(ctx, edit.dir, readState(edit.dir)?.job, pid);
   ctx.say(EDIT_SAY.resuming(editSaid(edit.key, edit.mode, edit.version)));
   return 0;
+}
+
+// --- Her storyboard in the side panel (plan Task 12) ---
+
+/** What `reelkit storyboard` and `reelkit published` say: her lines in her words, and the lines for her chat marked FOR_CLAUDE. */
+export const STORYBOARD_SAY = Object.freeze({
+  first: (said) => `The storyboard of ${said} is ready for the side panel. Leave a note on any beat there, or say "go" when it's right.`,
+  again: (said) => `The storyboard of ${said} goes to its same page in the side panel. Leave a note on any beat there, or say "go" when it's right.`,
+  notStaged: "The storyboard couldn't be made ready to show: ask Jason.",
+  recorded: "The storyboard's page is kept: each new version goes to it.",
+  url: "That isn't the link of a page in the side panel, so it wasn't kept: give it again as it came.",
+  kept: "That link is another page's, so it wasn't kept: ask Jason.",
+  changed: "This storyboard has its page already, so that link wasn't kept.",
+  none: "This storyboard hasn't been made ready for the side panel yet.",
+  unread: "The list of storyboards on this Mac couldn't be read: ask Jason.",
+  local: "Your storyboard is open on this Mac.",
+  localHow: `Leave a note on any beat there, and press "Looks good: render it" when it's right.`,
+  localFailed: "Your storyboard couldn't be opened on this Mac: ask Jason.",
+});
+/** How a line for her chat, not for her, starts. */
+export const FOR_CLAUDE = "For Claude: ";
+
+/** What `published` says for each of recordUrl's answers. */
+const PUBLISHED_SAY = { "": STORYBOARD_SAY.recorded, same: STORYBOARD_SAY.recorded, url: STORYBOARD_SAY.url, kept: STORYBOARD_SAY.kept, changed: STORYBOARD_SAY.changed, other: STORYBOARD_SAY.kept, none: STORYBOARD_SAY.none, unread: STORYBOARD_SAY.unread };
+
+/** The page's title: the edit's own title, as studio.json keeps it, with ": storyboard" after it. */
+const pageTitle = (state) => (typeof state?.title === "string" && state.title.trim() && state.title.length <= 120 ? `${state.title.trim()}: storyboard` : "Reel Kit storyboard");
+
+/** `reelkit storyboard "<episode>" <slug> [local]`: the edit's newest storyboard staged in her folder (storyboard-opening.js stagePage), and,
+    for her chat, the exact publish to make (publishInput); or, with `local`, Reel Kit's own local page started. Only for a storyboard that
+    waits for her (or an edit built and ready): never while it is being made. */
+async function storyboardCommand(ctx, words, h) {
+  const local = words.length === 3 && words[2] === "local";
+  if (words.length !== 2 && !local) {
+    ctx.say(h.help);
+    return 2;
+  }
+  const got = editFor(ctx, words, h);
+  if (got.code !== undefined) return got.code;
+  const { record, edit, status } = got;
+  if (status?.state !== "storyboard" && status?.state !== "ready") return refuse(ctx, notWaiting(status));
+  if (local) return localPage(ctx, edit);
+  try {
+    stagePage(ctx.home, studioFolder(ctx.home), { from: join(edit.dir, "storyboard"), slug: edit.slug, kind: "storyboard", episode: record.id, title: pageTitle(readState(edit.dir)) });
+  } catch {
+    return refuse(ctx, STORYBOARD_SAY.notStaged);
+  }
+  const page = pageOf(ctx.home, edit.slug);
+  if (!page) return refuse(ctx, STORYBOARD_SAY.unread);
+  ctx.say(`${FOR_CLAUDE}publish it with the Artifact tool exactly as this gives it, after reading its file_path whole: ${JSON.stringify(publishInput(page))}`);
+  if (!page.url) ctx.say(`${FOR_CLAUDE}then give the link the publish gives to reelkit published "${words[0]}" ${edit.slug} <link>, word for word.`);
+  ctx.say((page.url ? STORYBOARD_SAY.again : STORYBOARD_SAY.first)(editSaid(edit.key, edit.mode, edit.version)));
+  return 0;
+}
+
+/** `reelkit published "<episode>" <slug> <url>`: the URL the storyboard's first publish gave, recorded once (storyboard-opening.js recordUrl).
+    Never the kept BRIMM Ops page's, never another page's, never changed. */
+async function publishedCommand(ctx, words, h) {
+  if (words.length !== 3) {
+    ctx.say(h.help);
+    return 2;
+  }
+  const got = editFor(ctx, words, h);
+  if (got.code !== undefined) return got.code;
+  const why = recordUrl(ctx.home, got.edit.slug, words[2], { refused: [OPS_PAGE] });
+  ctx.say(PUBLISHED_SAY[why] ?? STORYBOARD_SAY.unread);
+  return why === "" || why === "same" ? 0 : 1;
+}
+
+/** The local page's port, address and record: one at a time on this Mac. */
+const LOCAL_PORT = 8765;
+const LOCAL_URL = `http://127.0.0.1:${LOCAL_PORT}/`;
+const localFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "storyboard-local.json");
+const localLog = (home) => join(home, "Library", "Application Support", "BRIMM Video", "storyboard-local.log");
+
+/** Start Reel Kit's own local page (KIT/storyboard/serve.py) for the edit, detached, in Reel Kit's environment, on 127.0.0.1:8765 alone
+    (serve.py serves no other address), the one running before it stopped first; open it in her browser once it says it is up. Her notes on
+    it land in Reel Kit's notes file, as `reelkit note` writes them. Used wherever a publish isn't possible. */
+async function localPage(ctx, edit) {
+  const kit = kitOf(ctx);
+  const python = venvPython(ctx.home);
+  const serve = join(kitDir(ctx.home), "storyboard", "serve.py");
+  try {
+    if (!lstatSync(python).isFile() || !lstatSync(serve).isFile()) return refuse(ctx, EDIT_SAY.notSetUp);
+  } catch {
+    return refuse(ctx, EDIT_SAY.notSetUp);
+  }
+  const startOf = kit.startOf ?? processStart;
+  stopLocal(ctx, startOf);
+  let pid;
+  let out;
+  try {
+    mkdirSync(dirname(localLog(ctx.home)), { recursive: true });
+    out = openSync(localLog(ctx.home), "w", 0o600);
+    const env = reelKitEnv({ home: ctx.home, node: process.execPath, base: { HOME: ctx.home, LANG: process.env.LANG } });
+    const child = spawn(python, ["-I", serve, edit.dir, "--port", String(LOCAL_PORT)], { detached: true, stdio: ["ignore", out, out], env, cwd: "/" });
+    child.on("error", () => {});
+    child.unref();
+    pid = child.pid;
+  } catch {
+    pid = undefined;
+  } finally {
+    if (out !== undefined) closeSync(out);
+  }
+  if (!Number.isInteger(pid)) return refuse(ctx, STORYBOARD_SAY.localFailed);
+  try {
+    writeWhole(localFile(ctx.home), `${JSON.stringify({ pid, start: startOf(pid), dir: edit.dir, at: new Date(ctx.now()).toISOString() })}\n`);
+  } catch {
+    // The page runs; a second start can't stop it, and says so no differently.
+  }
+  const up = `Storyboard: ${LOCAL_URL}`;
+  const until = Date.now() + (kit.serveWaitMs ?? 5000);
+  while (Date.now() < until) {
+    let text = "";
+    try {
+      text = readCapped(localLog(ctx.home), 1 << 20) ?? "";
+    } catch {
+      text = "";
+    }
+    if (text.split("\n").some((line) => line.startsWith(up))) {
+      (kit.open ?? ((url) => spawnSync("/usr/bin/open", [url], { encoding: "utf8", timeout: 10000 })))(LOCAL_URL);
+      ctx.say(STORYBOARD_SAY.local);
+      ctx.say(STORYBOARD_SAY.localHow);
+      return 0;
+    }
+    if (!ctx.alive(pid)) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  stopLocal(ctx, startOf);
+  return refuse(ctx, STORYBOARD_SAY.localFailed);
+}
+
+/** Stop the local page this Mac started last, when it is surely that process still (its pid and its start): nothing else is ever stopped. */
+function stopLocal(ctx, startOf) {
+  let left;
+  try {
+    left = JSON.parse(readCapped(localFile(ctx.home), 64 * 1024) ?? "null");
+  } catch {
+    left = null;
+  }
+  if (!left || !Number.isInteger(left.pid) || typeof left.start !== "string") return;
+  if (!ctx.alive(left.pid) || startOf(left.pid) !== left.start) return;
+  try {
+    process.kill(left.pid, "SIGTERM");
+  } catch {
+    // Gone already.
+  }
 }
 
 /** What runJob is given, from a test's stand-ins (ctx.deps.reelKit) where it gives them, and the run's log. */
@@ -817,7 +984,7 @@ export async function reelkitCommand(ctx, rest = [], { help = "", episodeFor, sa
   if (word === "install") return installCommand(ctx, more, help);
   if (word === "status" && more.length === 0) return statusCommand(ctx);
   if (word === "--now" && more[0] === "install") return installNow(ctx, more.slice(1), help);
-  const episodeWords = { start: startCommand, status: editStatus, note: noteCommand, go: goCommand, revise: reviseCommand, resume: resumeCommand };
+  const episodeWords = { start: startCommand, status: editStatus, note: noteCommand, go: goCommand, revise: reviseCommand, resume: resumeCommand, storyboard: storyboardCommand, published: publishedCommand };
   if (typeof episodeFor === "function" && typeof save === "function") {
     if (word === "--now") return jobNow(ctx, more, h);
     if (Object.hasOwn(episodeWords, word) && more.length && !more[0].startsWith("--")) return episodeWords[word](ctx, more, h);

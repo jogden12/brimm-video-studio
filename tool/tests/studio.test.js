@@ -9,6 +9,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { studioFiles, writeStudio, guardDecision, studioFolder } from "../studio.js";
+import { OPENING_REFUSED } from "../storyboard-opening.js";
 import { COMMAND_NAMES, HELP, LOCK_CHANGED, editMain, wordsLine } from "../edit.js";
 import { HELD_NARROWED, HELD_REFUSED } from "../held.js";
 import { UNTRUSTED } from "../loosened.js";
@@ -946,6 +947,17 @@ describe("the guard", () => {
     for (const t of ["Glob", "Grep", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Monitor", "Artifact", "Workflow", "RemoteTrigger", "SendMessage", "Agent", "LSP",
       "mcp__gmail__send_message", "mcp__terminal__run_in_terminal", "mcp__ccd_directory__change_directory", "mcp__computer-use__app_click", "SomethingNew", undefined]) assert.equal(tool(t), "deny", t);
     assert.equal(guardDecision({ tool_name: "Write", tool_input: {} }, { checkout: CHECKOUT, node: NODE }).reason, "In this folder Claude runs only BRIMM Video Studio's own commands. Ask Jason for anything else.");
+  });
+});
+
+describe("the guard and the narrow opening (storyboard-opening.js)", () => {
+  it("asks the opening first for Artifact and ArtifactComments, and refuses them in plain words where no page is staged", () => {
+    for (const [name, input] of [["Artifact", {}], ["Artifact", { action: "list" }], ["Artifact", { file_path: `${FOLDER}/Storyboards/x/v1/index.html` }], ["ArtifactComments", { action: "read", url: "https://claude.ai/artifact/x" }]]) {
+      assert.deepEqual(guardDecision({ tool_name: name, tool_input: input }, { checkout: CHECKOUT, node: NODE, folder: FOLDER }), { decision: "deny", reason: OPENING_REFUSED }, name);
+      assert.deepEqual(guardDecision({ tool_name: name, tool_input: input }, { checkout: CHECKOUT, node: NODE }), { decision: "deny", reason: OPENING_REFUSED }, `${name}, no folder`);
+    }
+    assert.equal(guardDecision({ tool_name: "Artifact", tool_input: { action: "quickstart", intent: "other", design_systems: false } }, { checkout: CHECKOUT, node: NODE, folder: FOLDER }).decision, "allow");
+    assert.deepEqual(guardDecision({ tool_name: "ArtifactData", tool_input: { action: "list" } }, { checkout: CHECKOUT, node: NODE, folder: FOLDER }), NOT_OWN);
   });
 });
 

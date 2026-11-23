@@ -2,6 +2,8 @@
 // the open lock, answered before Claude Code asks anyone, in whatever mode the chat is in. Its steps, in order:
 //   1. the lock loosened on this Mac: today's guard (guardDecision), saying the lock is changed;
 //   2. a chat that holds a session's words: today's guard, with Read of its own words folder, and only a session's commands;
+//   2b. Artifact and ArtifactComments: the narrow opening (storyboard-opening.js), its answer taken; refused in a held chat, and today's
+//      guard (which asks the opening too) while the lock is loosened;
 //   3. the never list (never.js): deny;
 //   4. Write and Edit: deny, always; then every path in the tool's input, by what it is (places.js): a gated place, or the
 //      workshop (Claude's own file tools do not act there): deny;
@@ -49,6 +51,7 @@ import { userInfo } from "node:os";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isConnector, neverCaught } from "./never.js";
+import { NARROW, openingDecision } from "./storyboard-opening.js";
 import { fetchWhy } from "./fetchable.js";
 import { claudeDirName, fold, gatedIndex, gatedPlaces, pathsIn, realOf, searchRoot } from "./places.js";
 import { SESSION_ID } from "./scan.js";
@@ -167,7 +170,7 @@ function bashDecision(command, background, cwd, ctx) {
 
 /** Today's guard's answer (studio.js guardDecision) to `input`, each refusal saying `reason`. */
 function todays(input, ctx, reason) {
-  const answer = guardDecision(input, { checkout: ctx.checkout, node: ctx.node, folder: ctx.folder, tmp: ctx.tmp, uid: ctx.uid });
+  const answer = guardDecision(input, { checkout: ctx.checkout, node: ctx.node, folder: ctx.folder, home: ctx.home, tmp: ctx.tmp, uid: ctx.uid });
   return answer.decision === "deny" ? deny(reason) : answer;
 }
 
@@ -241,6 +244,13 @@ export async function openDecision(input, ctx) {
   const given = isObject(input) && isObject(input.tool_input) ? input.tool_input : {};
   const named = (type, what) => Array.isArray(ctx.allow) && ctx.allow.some((entry) => isObject(entry) && entry.type === type && entry.name === what);
 
+  // The narrow opening (storyboard-opening.js), before anything else for its two tools: never for a chat that holds a session's words (a
+  // session's frames never go to claude.ai: Decision 9), today's guard while the lock is loosened (which asks the opening too), else its answer.
+  if (NARROW.includes(name)) {
+    if (ctx.held) return deny(ctx.loosened ? LOCK_CHANGED : HELD_REFUSED);
+    if (ctx.loosened) return todays(input, ctx, LOCK_CHANGED);
+    return openingDecision(input, { home: ctx.home, folder: ctx.folder });
+  }
   if (ctx.loosened) return ctx.held ? narrowed(todays(input, ctx, LOCK_CHANGED), input, ctx) : todays(input, ctx, LOCK_CHANGED);
   if (!ctx.workshop) ctx = { ...ctx, workshop: workshopIndex(ctx.home) };
   if (ctx.held) return heldDecision(input, ctx);

@@ -13,6 +13,7 @@ import { processTable } from "../chain.js";
 import { settingsFile, settingsMain, writeSettings, dropFolderFault } from "../settings.js";
 import { heldFolder } from "../scan.js";
 import { DRAWING, neverCaught } from "../never.js";
+import { NARROW, OPENING_REFUSED } from "../storyboard-opening.js";
 import { LOCAL_ADDRESS, NUMERIC_ADDRESS } from "../fetchable.js";
 import { claudeDirName, gatedIndex, gatedPlaces, realOf } from "../places.js";
 import { gatedReadRules, guardDecision, openSettingsOf } from "../studio.js";
@@ -43,9 +44,19 @@ describe("the open guard, I: what is never, named or left to Claude Code", () =>
     const { tools } = JSON.parse(readFileSync(new URL("./fixtures/code-tab-tools.json", import.meta.url), "utf8"));
     const never = tools.filter((n) => neverCaught(n));
     assert.ok(never.length > 50);
-    for (const name of never) assert.deepEqual(await decide(name, {}), { decision: "deny", reason: NEVER_REFUSED }, name);
+    // The two tools of the narrow opening (storyboard-opening.js) are caught too, and answered by the opening, which refuses an empty call.
+    for (const name of never) assert.deepEqual(await decide(name, {}), { decision: "deny", reason: NARROW.includes(name) ? OPENING_REFUSED : NEVER_REFUSED }, name);
+    assert.ok(NARROW.every((name) => never.includes(name)));
     assert.deepEqual(await decide("Bash", { command: "date", dangerouslyDisableSandbox: true }), { decision: "deny", reason: NEVER_REFUSED });
     assert.deepEqual(await decide("Agent", { prompt: "x", isolation: "worktree" }), { decision: "deny", reason: NEVER_REFUSED });
+  });
+  it("asks the narrow opening first for Artifact and ArtifactComments, and keeps ArtifactData never", async () => {
+    // No page is staged on this Mac: every call of the two tools is the opening's refusal, a publish and a quickstart's read among them.
+    for (const [name, input] of [["Artifact", { action: "list" }], ["Artifact", { file_path: join(w.folder, "Storyboards", "x", "v1", "index.html") }], ["ArtifactComments", { action: "read", url: "https://claude.ai/artifact/x" }]]) {
+      assert.deepEqual(await decide(name, input), { decision: "deny", reason: OPENING_REFUSED }, name);
+    }
+    assert.deepEqual(await decide("Artifact", { action: "quickstart", intent: "other", design_systems: false }), { decision: "allow", reason: "the read-only start of a page" });
+    assert.deepEqual(await decide("ArtifactData", { action: "list" }), { decision: "deny", reason: NEVER_REFUSED });
   });
   it("leaves the card, the task list and ToolSearch to Claude Code; the subagent tool named Task is not among them", async () => {
     for (const name of ["AskUserQuestion", "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch"]) assert.deepEqual(await decide(name, {}), { decision: "pass", reason: "" }, name);

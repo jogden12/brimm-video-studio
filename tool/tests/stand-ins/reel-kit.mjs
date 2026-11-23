@@ -12,19 +12,22 @@
 // Kit in an environment of its own that carries no variable of a test's:
 //   - REEL_KIT_STANDIN_LOG: a file each run appends a JSON line to: the script's name, its arguments, and the Reel Kit and offline
 //     variables it was given;
+//   - storyboard/serve.py <project> --port <n>: says the address it would serve, and runs until stopped (see SCRIPTS["serve.py"]).
 //   - REEL_KIT_STANDIN: the scenario. Today `fail` (the script prints a line on stderr and ends 1); later tasks add theirs
 //     (qa-fail, no-ready, usage-limit).
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 const FIXTURES = new URL("../fixtures/reel-kit-1.2.0/", import.meta.url);
-const [script, ...args] = process.argv.slice(2);
+// Python's -I (isolated), which Studio gives serve.py, comes before the script.
+const isolated = process.argv[2] === "-I";
+const [script, ...args] = process.argv.slice(isolated ? 3 : 2);
 const name = basename(String(script ?? ""));
 const SEEN = ["REEL_KIT_HOME", "HF_HOME", "HF_HUB_OFFLINE", "PIP_NO_INDEX", "UV_OFFLINE", "PYTHONNOUSERSITE", "PATH", "HOME"];
 const log = process.env.REEL_KIT_STANDIN_LOG;
 if (log) {
   const env = Object.fromEntries(SEEN.filter((v) => v in process.env).map((v) => [v, process.env[v]]));
-  appendFileSync(log, `${JSON.stringify({ script: name, folder: basename(dirname(String(script ?? ""))), args, env })}\n`);
+  appendFileSync(log, `${JSON.stringify({ script: name, folder: basename(dirname(String(script ?? ""))), args, env, ...(isolated ? { isolated } : {}) })}\n`);
 }
 
 const stop = (line, code = 1) => {
@@ -70,6 +73,24 @@ const SCRIPTS = {
     writeFileSync(join(project, "edit.py"), starter.replace(/\{\{(TITLE|MODE|VERSION|SRC)\}\}/g, (_, key) => filled[key]));
     process.stdout.write(`${project}\n`);
   }
+};
+
+// KIT/storyboard/serve.py <project> --port <n> (plan Task 12): as Reel Kit's own, it says the address it serves, on 127.0.0.1 alone, and
+// keeps running until it is stopped (here at most 20 seconds). It listens on nothing: no test takes a port. With the scenario `go`, it
+// writes what the page's "Looks good: render it" would: { beat: "all", text: "go", at } added to <project>/storyboard/notes.json.
+SCRIPTS["serve.py"] = (argv) => {
+  const { value: port, rest } = flagged(argv, ["--port"]);
+  const [project] = rest;
+  const sb = join(resolve(String(project ?? "")), "storyboard");
+  if (!existsSync(join(sb, "index.html"))) stop(`nothing to review yet: ${sb}/index.html doesn't exist (build the storyboard or the style board first)`);
+  const notes = join(sb, "notes.json");
+  process.stdout.write(`Storyboard: http://127.0.0.1:${port ?? 8765}/   (notes -> ${notes})\n`);
+  if (process.env.REEL_KIT_STANDIN === "go") {
+    const kept = existsSync(notes) ? JSON.parse(readFileSync(notes, "utf8")) : [];
+    writeFileSync(notes, JSON.stringify([...kept, { beat: "all", text: "go", at: new Date().toISOString().slice(0, 19) }], null, 1));
+  }
+  setTimeout(() => process.exit(0), 20000);
+  process.on("SIGTERM", () => process.exit(0));
 };
 
 if (!Object.hasOwn(SCRIPTS, name)) stop(`reel-kit stand-in: no stand-in for ${name || "a script"}`, 2);

@@ -1,7 +1,8 @@
 // The never list (design 2026-10-26, section 1, "The never list"): the tools her chat may never use under the open lock, whatever
 // a setting or a per-Mac entry says. It is in code, not in her folder's settings, so that nothing written there changes it.
 //
-// A tool is on it by name (studio/never.json's `tools`: the tools that read an MCP server's resources, since the server they name
+// A tool is on it by name (studio/never.json's `tools`, and its `narrow`: Artifact and ArtifactComments, which only the narrow opening
+// of storyboard-opening.js lets through, and which the settings therefore do not deny; `tools` holds the tools that read an MCP server's resources, since the server they name
 // may be a local extension's, and Workflow, which runs scripts whose agents' options, their kind and where they run, the guard
 // cannot see, so that it gets around the limits put on the subagent tool), by kind (every local extension's MCP tool, which runs
 // outside the sandbox, and every tool of the app's own, `mcp__ccd_*`), or by word: any MCP tool whose own name (after
@@ -20,6 +21,10 @@ const NEVER = JSON.parse(readFileSync(new URL("./studio/never.json", import.meta
 
 /** The words that, in an MCP tool's own name, mark a tool that posts, publishes, sends, shares, schedules, uploads or deletes, or
     deploys, submits, comments or responds. Stricter is closed: "comment" takes a tool that reads comments too. */
+/** The tools the lock opens narrowly (studio/never.json's `narrow`): Artifact and ArtifactComments, which only the narrow opening
+    (storyboard-opening.js) lets through, for a storyboard Studio staged. The never list still catches them, so nothing else lets them
+    through; the settings do not deny them, so that the guard alone decides. */
+export const NARROW = Object.freeze([...NEVER.narrow]);
 export const NEVER_WORDS = ["send", "post", "publish", "share", "schedule", "upload", "forward", "reply", "invite", "delete", "trash", "remove", "deploy", "submit", "comment", "respond"];
 /** Claude Code's built-in agents, the only ones the subagent tool may be given (R15). */
 export const BUILT_IN_AGENTS = ["general-purpose", "Explore", "Plan"];
@@ -51,7 +56,7 @@ const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
 export function neverCaught(name, input = {}) {
   if (typeof name !== "string") return true;
   const given = isObject(input) ? input : {};
-  if (NEVER.tools.includes(name)) return true;
+  if (NEVER.tools.includes(name) || NEVER.narrow.includes(name)) return true;
   if (name.startsWith("mcp__")) {
     if (!MCP.test(name)) return true;
     return isLocalExtension(name) || caughtByWord(name);
@@ -64,7 +69,7 @@ export function neverCaught(name, input = {}) {
   return false;
 }
 
-/** The settings' deny entries for the never list: its tools by name, each local MCP server of the Code tab's tool list whole, each
+/** The settings' deny entries for the never list: its tools by name (not the `narrow` two, which the guard alone decides), each local MCP server of the Code tab's tool list whole, each
     connector tool its words catch by its exact name, and the Cron tools unless `allowed` names them as a `tool`. */
 export function neverDenyRules(allowed = []) {
   const named = (tool) => Array.isArray(allowed) && allowed.some((a) => isObject(a) && a.type === "tool" && a.name === tool);
