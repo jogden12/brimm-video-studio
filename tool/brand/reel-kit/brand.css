@@ -1,0 +1,23 @@
+/* Generated from style.json by pipeline/style.py. Edit style.json, not this file. */
+@font-face { font-family:'Josefin Sans'; src:url('fonts/JosefinSans-normal-400.ttf') format('truetype'); font-style:normal; font-weight:400; font-display:block; }
+@font-face { font-family:'Josefin Sans'; src:url('fonts/JosefinSans-normal-500.ttf') format('truetype'); font-style:normal; font-weight:500; font-display:block; }
+@font-face { font-family:'Josefin Sans'; src:url('fonts/JosefinSans-normal-600.ttf') format('truetype'); font-style:normal; font-weight:600; font-display:block; }
+@font-face { font-family:'Josefin Sans'; src:url('fonts/JosefinSans-normal-700.ttf') format('truetype'); font-style:normal; font-weight:700; font-display:block; }
+:root {
+  --font-display: 'Josefin Sans', serif; --display-style: normal; --display-weight: 500;
+  --font-text: 'Josefin Sans', sans-serif; --text-weight: 400;
+  --font-mono: 'Josefin Sans', monospace;
+  --font-caption: 'Josefin Sans', sans-serif; --caption-style: normal; --caption-weight: 500;
+  --c-light: #F8F7F5; --c-dark: #1F2D42; --c-ink: #1F2D42;
+  --c-muted-light: #5C6D7E; --c-muted-dark: #9EA9B2;
+  --c-hair-light: #CEBEAC; --c-hair-dark: #2C3A4E;
+  --c-accent: #C1AD97; --c-accent-light: #8A7358;
+  --c-neg: #7FA0C4; --c-neg-light: #3F5F86;
+  --c-pos: #FFFFFF; --c-pos-light: #1F2D42;
+  --c-s1: #C1AD97; --c-s2: #7FA0C4; --c-s3: #FFFFFF;
+  --c-box: rgba(31,45,66,.92); --c-box-ink: #F8F7F5; --c-box-dim: rgba(248,247,245,.45);
+  --c-tb-bg: #F8F7F5; --c-tb-ink: #1F2D42;
+  --radius: 16px;
+}
+.ground-light { background-color: var(--c-light); color: var(--c-ink);  }
+.ground-dark { background-color: var(--c-dark); color: var(--c-light);  }

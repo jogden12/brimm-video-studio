@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Style Board</title>
+<style>
+@font-face { font-family:'Josefin Sans'; src:url('fonts/JosefinSans-normal-400.ttf') format('truetype'); font-style:normal; font-weight:400; font-display:block; }
+@font-face { font-family:'Josefin Sans'; src:url('fonts/JosefinSans-normal-500.ttf') format('truetype'); font-style:normal; font-weight:500; font-display:block; }
+@font-face { font-family:'Josefin Sans'; src:url('fonts/JosefinSans-normal-600.ttf') format('truetype'); font-style:normal; font-weight:600; font-display:block; }
+@font-face { font-family:'Josefin Sans'; src:url('fonts/JosefinSans-normal-700.ttf') format('truetype'); font-style:normal; font-weight:700; font-display:block; }
+:root { --font-display: 'Josefin Sans', Georgia, serif; --display-style: normal; --display-weight: 500; --font-text: 'Josefin Sans', system-ui, sans-serif; --font-mono: 'Josefin Sans', ui-monospace, monospace; --paper: #F8F7F5; --sheet: color-mix(in srgb, #F8F7F5 80%, #ffffff); --ink: #1F2D42; --muted: #5C6D7E; --hair: #CEBEAC; --accent: #8A7358; --accent-line: #8A7358; --seg-foot: #5C6D7E; --seg-light: color-mix(in srgb, #F8F7F5 86%, #1F2D42); --seg-dark: #1F2D42; --focus: #8A7358; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper: #1F2D42; --sheet: color-mix(in srgb, #1F2D42 88%, #F8F7F5); --ink: #F8F7F5; --muted: #9EA9B2; --hair: #2C3A4E; --accent: #C1AD97; --accent-line: #C1AD97; --seg-foot: #9EA9B2; --seg-light: #F8F7F5; --seg-dark: color-mix(in srgb, #1F2D42 65%, #F8F7F5); --focus: #C1AD97; color-scheme: dark; } }
+:root[data-theme="dark"] { --paper: #1F2D42; --sheet: color-mix(in srgb, #1F2D42 88%, #F8F7F5); --ink: #F8F7F5; --muted: #9EA9B2; --hair: #2C3A4E; --accent: #C1AD97; --accent-line: #C1AD97; --seg-foot: #9EA9B2; --seg-light: #F8F7F5; --seg-dark: color-mix(in srgb, #1F2D42 65%, #F8F7F5); --focus: #C1AD97; color-scheme: dark; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--paper); color: var(--ink); font-family: var(--font-text); -webkit-font-smoothing: antialiased; }
+main { max-width: 1120px; margin: 0 auto; padding: 48px 16px 96px; }
+header { padding-bottom: 28px; border-bottom: 1px solid var(--hair); }
+.eyebrow, h2 { font: 500 13px/1 var(--font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+h1 { margin-top: 14px; font-family: var(--font-display); font-style: var(--display-style); font-weight: var(--display-weight);
+      font-size: clamp(40px, 7vw, 72px); line-height: 1; letter-spacing: -.02em; }
+.lede { margin-top: 16px; max-width: 62ch; font-size: 17px; line-height: 1.5; color: var(--muted); }
+section { padding: 36px 0; border-bottom: 1px solid var(--hair); }
+h2 { margin-bottom: 22px; }
+.spec { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 16px; align-items: baseline; padding: 12px 0; }
+.spec + .spec { border-top: 1px solid var(--hair); }
+.spec .k { font: 500 12px/1.5 var(--font-mono); color: var(--muted); }
+.spec .v { overflow-wrap: anywhere; }
+.d { font-family: var(--font-display); font-style: var(--display-style); font-weight: var(--display-weight); font-size: clamp(36px, 6vw, 60px); line-height: 1.05; }
+.t { font-size: 22px; line-height: 1.35; font-weight: 600; }
+.m { font-family: var(--font-mono); font-size: 20px; }
+.sw { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.chip { border: 1px solid var(--hair); border-radius: 6px; overflow: hidden; background: var(--sheet); }
+.chip i { display: block; height: 72px; border-bottom: 1px solid var(--hair); }
+.chip b { display: block; padding: 10px 12px 3px; font-weight: 600; font-size: 14px; }
+.chip span { display: block; padding: 0 12px 12px; font: 400 12px/1.45 var(--font-mono); color: var(--muted); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; }
+figure img { display: block; width: 100%; height: auto; aspect-ratio: 9 / 16; border-radius: 6px; border: 1px solid var(--hair); }
+figcaption { margin-top: 9px; font-size: 14px; line-height: 1.45; color: var(--muted); }
+figcaption b { color: var(--ink); font-weight: 600; }
+.note { margin-top: -8px; margin-bottom: 20px; font-size: 15px; color: var(--muted); }
+footer { padding-top: 32px; font-size: 16px; line-height: 1.55; max-width: 62ch; }
+@media (max-width: 560px) { .spec { grid-template-columns: 1fr; gap: 6px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Sallie Ogden · style board</p>
+    <h1>Your style</h1>
+    <p class="lede">Calm, premium and warm: light grounds, navy words, soft shapes, thin lines and a lot of room. Videos are for women founders with established businesses who want more sales, better profit and an easier-to-run business. Direct, unhurried, real numbers, one clear next move. Never a generic tech startup: no gradients, neon, glass, emoji, hype or hustle language. The name on screen is Sallie Ogden; the company is The BRIMM.</p>
+  </header>
+  <section>
+    <h2>Type</h2>
+    <div class="spec"><div class="k">Display · Josefin Sans</div><div class="v d">The big idea</div></div>
+    <div class="spec"><div class="k">Text · Josefin Sans</div><div class="v t">Captions and labels read like this</div></div>
+    <div class="spec"><div class="k">Mono · Josefin Sans</div><div class="v m">2026 · 15% · $1.4M · −10%</div></div>
+  </section>
+  <section>
+    <h2>Colour</h2>
+    <div class="sw"><div class="chip"><i style="background:#C1AD97"></i><b>Accent</b><span>#C1AD97<br />emphasis, the thing to look at</span></div><div class="chip"><i style="background:#8A7358"></i><b>Accent on light</b><span>#8A7358<br />the same, on a light ground</span></div><div class="chip"><i style="background:#7FA0C4"></i><b>Negative</b><span>#7FA0C4<br />losses, down, no</span></div><div class="chip"><i style="background:#FFFFFF"></i><b>Positive</b><span>#FFFFFF<br />gains, up, yes</span></div><div class="chip"><i style="background:#F8F7F5"></i><b>Light</b><span>#F8F7F5<br />light ground, text on dark</span></div><div class="chip"><i style="background:#1F2D42"></i><b>Dark</b><span>#1F2D42<br />dark ground</span></div><div class="chip"><i style="background:#1F2D42"></i><b>Ink</b><span>#1F2D42<br />text on light</span></div><div class="chip"><i style="background:rgba(31,45,66,.92)"></i><b>Caption box</b><span>rgba(31,45,66,.92)<br />behind captions on footage</span></div></div>
+  </section>
+  <section>
+    <h2>Your three modes</h2>
+    <p class="note">How each mode looks for you, on a plain ground (run the board with --clip to see it on your footage).</p>
+    <div class="grid">
+      <figure><img src="img/hifi.jpg" alt="Hi-fi hook and caption" /><figcaption><b>Hi-fi</b> produced: two-line hook, captions in phrases, cards, camera settle</figcaption></figure>
+      <figure><img src="img/lofi.jpg" alt="Lo-fi text box and caption" /><figcaption><b>Lo-fi</b> selfie: captions phrase, text boxes</figcaption></figure>
+      <figure><img src="img/showcase.jpg" alt="Showcase emphatic word" /><figcaption><b>Showcase</b> show-off: a big word lands with a stamp; transitions push, reveal</figcaption></figure>
+    </div>
+  </section>
+  <section>
+    <h2>Cards</h2>
+    <div class="grid"><figure><img src="img/card-scissors.jpg" alt="The scissors card in your style" /><figcaption><b>scissors</b> two lines from one origin: one rises (accent), one falls (negative), the gap fills with hatching; end labels roll to their values</figcaption></figure><figure><img src="img/card-counter-loupe.jpg" alt="The counter-loupe card in your style" /><figcaption><b>counter-loupe</b> a figure rolls up, a bar fills, a loupe glides in to show how small the change is</figcaption></figure><figure><img src="img/card-task-grid.jpg" alt="The task-grid card in your style" /><figcaption><b>task-grid</b> a 10x10 grid flips tile by tile to &quot;automated&quot;, a few stay; a row of new-task slots</figcaption></figure></div>
+  </section>
+  <footer>Anything here can change: fonts, colours, captions, pace. Say what feels off and the board comes back with it fixed.</footer>
+</main>
+</body>
+</html>

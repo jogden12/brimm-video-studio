@@ -1,0 +1,113 @@
+{
+  "creator": {
+    "name": "Sallie Ogden",
+    "handle": "",
+    "site": "growwiththebrimm.com"
+  },
+  "fonts": {
+    "display": {
+      "family": "Josefin Sans",
+      "italic": false,
+      "weight": 500
+    },
+    "text": {
+      "family": "Josefin Sans",
+      "italic": false,
+      "weight": 400
+    },
+    "mono": {
+      "family": "Josefin Sans",
+      "italic": false,
+      "weight": 500
+    },
+    "caption": {
+      "family": "Josefin Sans",
+      "italic": false,
+      "weight": 500
+    }
+  },
+  "colors": {
+    "light": "#F8F7F5",
+    "dark": "#1F2D42",
+    "ink": "#1F2D42",
+    "muted_light": "#5C6D7E",
+    "muted_dark": "#9EA9B2",
+    "hair_light": "#CEBEAC",
+    "hair_dark": "#2C3A4E",
+    "accent": "#C1AD97",
+    "accent_on_light": "#8A7358",
+    "negative": "#7FA0C4",
+    "negative_on_light": "#3F5F86",
+    "positive": "#FFFFFF",
+    "positive_on_light": "#1F2D42",
+    "series": [
+      "#C1AD97",
+      "#7FA0C4",
+      "#FFFFFF"
+    ],
+    "caption_box": "rgba(31,45,66,.92)",
+    "caption_ink": "#F8F7F5",
+    "caption_dim": "rgba(248,247,245,.45)",
+    "textbox_bg": "#F8F7F5",
+    "textbox_ink": "#1F2D42"
+  },
+  "grounds": {
+    "grid": false,
+    "radius": 16
+  },
+  "captions": {
+    "hifi": {
+      "box": true,
+      "uppercase": false,
+      "size": 54,
+      "y": 1320
+    },
+    "lofi": {
+      "box": true,
+      "size": 64,
+      "y": 1318
+    }
+  },
+  "grade": "saturate(.94) contrast(1.03) sepia(.04)",
+  "motion": "calm",
+  "sound": {
+    "sfx": "light",
+    "music": "none"
+  },
+  "modes": {
+    "hifi": {
+      "hook": "two-line",
+      "captions": "phrases",
+      "emphasis": [
+        "thesis",
+        "big"
+      ],
+      "behind_head": "sometimes",
+      "cards": "sometimes",
+      "camera": "settle",
+      "bw": false,
+      "j_lead": 0.3
+    },
+    "lofi": {
+      "captions": "phrase",
+      "max_words": 3,
+      "max_chars": 22,
+      "text_boxes": true,
+      "overlays": "sometimes",
+      "backdrops": "sometimes",
+      "zooms": false,
+      "bw": false,
+      "j_lead": 0.3
+    },
+    "showcase": {
+      "emphasis_word": "stamp",
+      "transitions": [
+        "push",
+        "reveal"
+      ],
+      "density": "medium",
+      "motif": "",
+      "j_lead": 0.3
+    }
+  }
+}

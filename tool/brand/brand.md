@@ -27,6 +27,8 @@ The guide's secondary palette (blush, rose, forest, moss and sage) belongs to ph
 
 ### Words on colour
 
+- **Sand on light grounds (the Reel Kit style pack):** words and marks in sand use `#8A7358` on smoke, because `#C1AD97` fails there.
+
 Small words need a contrast of at least 4.5 to 1 (the WCAG formula).
 
 - **Yes:** navy on smoke (13.0), mist (10.9), dew (9.2), dune (7.7), sand (6.4) or light gray (5.8). White (13.9), mist (10.9), dune (7.7) or sand (6.4) on navy. Fog on smoke (5.0) or white (5.3), for secondary words.
