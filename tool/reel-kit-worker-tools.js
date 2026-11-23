@@ -23,6 +23,9 @@
 //     into it (Studio renders the video itself); `/bin/cp` (or `-R`) of one source from the kit, the project or REEL_KIT_HOME's vendor,
 //     style, fx or cards, into the project, as Reel Kit's card brief starts a card; and `cd` into those folders. Each word that names a
 //     file must be inside the project (ffprobe may read the kit too).
+//   - In a style job alone (its project a working copy of her pack, under REEL_KIT_HOME's style-work/: styleJob), Reel Kit's own
+//     pipeline/style.py on the copy's style.json and onboarding/board.py with `--pack` the copy's style/, each in the shape its own help
+//     gives, and none of the edit's pipeline scripts; never onboarding/refs.py, which fetches links (yt-dlp).
 //   - Agent, for Reel Kit's card and FX builders only: a `general-purpose` agent in the same folder, in the foreground (said outright:
 //     `run_in_background: false`), on the worker's own model, whose calls come through this same hook.
 // Pure but for looking at the disk (real paths, whether a folder is there).
@@ -39,6 +42,12 @@ export const WORKER_MODEL = CLAUDE_MODEL;
 /** The pipeline scripts the worker may run, by name. Never trials (posting), effect (another video's effect, from a link) or render (Studio
     renders, after her go: Task 14). */
 export const WORKER_SCRIPTS = Object.freeze(["words", "cut", "storyboard", "build", "mix", "cutout", "matte", "plate", "plate_finish", "track", "depth", "fxclip", "fxsandbox", "fxlib"]);
+/** The folder of REEL_KIT_HOME the working copies of her style changes are in (reel-kit-style-chat.js): a project there is a style job's. */
+export const STYLE_WORK = "style-work";
+/** Whether the project `project` is a style job's working copy: a folder of its own directly under REEL_KIT_HOME's style-work/, as the
+    words spell them (the hook asks it again by real paths). */
+const styleProject = (project, rkHome) => typeof project === "string" && typeof rkHome === "string" && dirname(project) === join(rkHome, STYLE_WORK);
+
 /** What the worker may ask of the pinned HyperFrames anywhere it may run it. Its render is a card's alone (cardRender); never publish or
     anything of the cloud. */
 export const HF_COMMANDS = Object.freeze(["check", "lint", "snapshot"]);
@@ -84,6 +93,8 @@ function programsOf({ kit, rkHome, bin }) {
   return {
     python: join(rkHome, ".venv", "bin", "python"),
     script: (name) => join(kit, "pipeline", `${name}.py`),
+    style: join(kit, "pipeline", "style.py"),
+    board: join(kit, "onboarding", "board.py"),
     ffmpeg: join(bin, "ffmpeg"),
     ffprobe: join(bin, "ffprobe"),
     npx: join(bin, "npx")
@@ -101,9 +112,14 @@ export function WORKER_TOOLS({ project, kit, rkHome, bin, tmp }) {
   }
   const p = programsOf({ kit, rkHome, bin });
   const both = (command) => [`Bash(${command})`, `Bash(${command} *)`];
+  // A style job runs Reel Kit's onboarding steps 4 and 5 on the copy's style/, each script in its own help's shape and with no more words;
+  // an edit runs the pipeline's scripts on its project.
+  const scripts = styleProject(project, rkHome)
+    ? [`Bash(${q(p.python)} ${q(p.style)} ${q(join(project, "style", "style.json"))})`, `Bash(${q(p.python)} ${q(p.board)} --pack ${q(join(project, "style"))})`]
+    : WORKER_SCRIPTS.flatMap((name) => both(`${q(p.python)} ${q(p.script(name))} ${q(project)}`));
   const allowed = [
     `Read(/${project}/**)`, `Read(/${kit}/**)`, `Edit(/${project}/**)`, `Write(/${project}/**)`,
-    ...WORKER_SCRIPTS.flatMap((name) => both(`${q(p.python)} ${q(p.script(name))} ${q(project)}`)),
+    ...scripts,
     `Bash(${q(p.ffmpeg)} ${PROTOCOLS.join(" ")} *)`, `Bash(${q(p.ffprobe)} ${PROTOCOLS.join(" ")} *)`,
     ...HF_COMMANDS.flatMap((command) => both(`${q(p.npx)} ${HF_WORDS.join(" ")} ${command}`)),
     `Bash(${q(p.npx)} ${HF_WORDS.join(" ")} render *)`, `Bash(${CP} *)`,
@@ -166,7 +182,10 @@ function rootsOf(ctx) {
   const project = realOf(ctx.project);
   const kit = realOf(ctx.kit);
   const home = COPY_HOME.map((name) => realOf(join(String(ctx.rkHome), name)));
-  return { project, kit, public: project && join(project, "public"), cards: project && join(project, "cards"), fx: project && join(project, "fx"), copyFrom: [kit, project, ...home] };
+  const styleWork = realOf(join(String(ctx.rkHome), STYLE_WORK));
+  // A style job's project is a folder directly under REEL_KIT_HOME's style-work/, by its real path.
+  const style = project !== null && styleWork !== null && dirname(project) === styleWork;
+  return { project, kit, style, public: project && join(project, "public"), cards: project && join(project, "cards"), fx: project && join(project, "fx"), copyFrom: [kit, project, ...home] };
 }
 
 /** A glob pattern that stays where it is looked in: not whole, no `~`, no `..`. */
@@ -394,6 +413,14 @@ function bashAnswer(command, cwd, ctx, roots) {
   }
   if (spelled(first, CP, false)) return copyAnswer(words, cwdReal, roots);
   if (!first.quoted) return false;
+  if (first.text === p.python && roots.style) {
+    // A style job: style.py on the copy's style.json, or board.py with --pack the copy's style/, exactly, and nothing else.
+    const pack = join(ctx.project, "style");
+    if (!below(roots.project, realOf(pack))) return false;
+    if (spelled(words[1], p.style, true)) return words.length === 3 && spelled(words[2], join(pack, "style.json"), true);
+    if (spelled(words[1], p.board, true)) return words.length === 4 && spelled(words[2], "--pack", false) && spelled(words[3], pack, true);
+    return false;
+  }
   if (first.text === p.python) {
     const script = words[1];
     const name = script && script.quoted ? WORKER_SCRIPTS.find((n) => p.script(n) === script.text) : undefined;

@@ -57,6 +57,10 @@
 //                                         carried on, and their storyboards shown in the side panel through the lock's narrow opening
 //                                         (storyboard-opening.js) or on Reel Kit's local page (reel-kit-commands.js). Their detached half,
 //                                         `reelkit --now`, is in no help
+//   node edit.js reelkit style show | change "<what she asked>" | yes | back ["<copy>"] | diff | carry [yes] | resume
+//                                         her Reel Kit style pack: shown in the side panel, changed by the worker's style job on a working
+//                                         copy and kept on her yes, gone back to, compared, carried onto a new starting style
+//                                         (reel-kit-style-chat.js). It names no episode
 //   node edit.js plan "<planned>" voice   "the HeyGen voice is done": the voice the app's agent made in a HeyGen explainer's
 //                                         project taken in as the plan's video (explainer.js). `app` opens that project
 //
@@ -419,7 +423,20 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         an edit that stopped, carried on from its step, detached
   node edit.js reelkit storyboard "<episode>" <edit> [local]
                                         an edit's newest storyboard made ready in her folder, and the exact publish to the
-                                        side panel for her chat to make; with local, Reel Kit's own page on this Mac`;
+                                        side panel for her chat to make; with local, Reel Kit's own page on this Mac
+  node edit.js reelkit style show       her Reel Kit style's main lines and its board made ready for the side panel; while a
+                                        change is made, how far it has got, and once made, its new board instead
+  node edit.js reelkit style change "<what she asked>"
+                                        a change to her style, as she said it: a copy of her style kept first, then Reel Kit
+                                        changes a copy of it and makes its new board, detached. Nothing is kept without her yes
+  node edit.js reelkit style yes        the change she has seen becomes her style; edits made before keep theirs
+  node edit.js reelkit style back ["<copy>"]
+                                        her earlier styles by name, or her style put back to one (how it was is kept first)
+  node edit.js reelkit style diff       how her style differs from the starting style
+  node edit.js reelkit style carry [yes]
+                                        once Jason ships a new starting style: what carrying hers onto it would add, and with
+                                        yes, it done
+  node edit.js reelkit style resume     a style change that stopped, carried on from its step`;
 
 /** The home folder commands work from: the one a test gives, else Studio's own (home.js: BRIMM_VIDEO_HOME, else HOME, else the Mac's own word for it). */
 const homeOf = (deps) => deps.home || studioHome();

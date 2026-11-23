@@ -370,7 +370,7 @@ function readable(path) {
     A chat that is not found is held, and has no id here: she has no folder for Claude on this Mac, the id is not a chat's, or
     its transcript is not there or is not a file that can be read. handoverAllowed then says "no chat", and she is told that the
     chat could not be found, which is what is true of it; "held" is for a chat that is found and holds a session's words. */
-function chatOf(home, env) {
+export function chatOf(home, env) {
   const sessionId = typeof env.CLAUDE_CODE_SESSION_ID === "string" ? env.CLAUDE_CODE_SESSION_ID : "";
   const notFound = { sessionId: "", held: true };
   let transcriptPath;

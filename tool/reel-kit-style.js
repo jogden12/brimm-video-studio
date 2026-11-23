@@ -572,3 +572,206 @@ export function shippedMoved({ settings, shipped = SHIPPED_PACK } = {}) {
   if (!from) return false;
   return folderFingerprint(shipped) !== from;
 }
+
+// --- Her style changed in her chat (plan Task 13: reel-kit-style-chat.js) ---
+
+/** What of a working copy of her pack is never put into Dropbox: the font files (the pack points at tool/brand/fonts, which syncPack copies
+    in), the board's own fonts and board.py's scratch folder, and `.made-from`, which says the base her own pack was made from. */
+const notHers = (rel) => rel === MADE_FROM || ["fonts", "board/fonts", "board/_work"].some((d) => rel === d || rel.startsWith(`${d}/`));
+
+/** Make the working copy of her pack that a style change runs on, at `to` (a folder of this Mac's own disk, not there yet): every file of her
+    pack (never its `before …` copies), or of `from`, a change still waiting for her yes, each read the safe way; refused when it breaks a
+    brand rule (packFault) as it is; then tool/brand/fonts' files that it names into its `fonts/`, where Reel Kit's style.py and board.py
+    look for them. Gives "" or the one line she reads; with a line, nothing is left at `to`. */
+export function makeWorkingCopy({ settings, to, from = null, fonts = BRAND_FONTS, log = () => {} }) {
+  const source = from ?? herPack(settings);
+  if (from === null && rootGone(settings.root)) return NO_ROOT;
+  if (kindOf(source) !== "folder") return from === null ? NOT_FOLDER : "The change your style was to build on is no longer on this Mac: say what you'd like changed again.";
+  try {
+    const { files } = walkPack(source);
+    mkdirSync(to, { recursive: true });
+    copyLocal(source, to, files);
+    const fault = packFault(to, { fonts });
+    if (fault) throw new Refused(fault);
+    mkdirSync(join(to, "fonts"), { recursive: true });
+    for (const f of fontsWanted(to, fonts)) writeFileSync(join(to, "fonts", f), readFileSync(join(fonts, f)));
+    return "";
+  } catch (e) {
+    rmSync(to, { recursive: true, force: true });
+    return lineOf(e, log, from === null ? settings.root : undefined);
+  }
+}
+
+/** A refusal of adoptPack's, in her words, and how many files it had put into her pack before it stopped (`wrote`). */
+class NotAdopted extends Error {
+  constructor(message, wrote) {
+    super(message);
+    this.wrote = wrote;
+  }
+}
+
+/** Make the working copy `from` her pack: it is read again whole onto this Mac's own disk, checked there (packFault: what is checked is
+    what is written), and its files put into her pack by dropbox.js's rule, each cloned in (a file of hers replaced, by replaceIn), the
+    folders made one by one, `style.json` last, with BRIMM Video's folder and her pack looked at again before each write. Never its font
+    files or `.made-from` (notHers). Files of hers it does not hold stay. Throws a NotAdopted in her words: `wrote` says how many files went
+    in before it stopped (0: her pack is as it was). The backup of how it was is the caller's, made first. */
+export function adoptPack({ settings, home = homedir(), from, fonts = BRAND_FONTS, dropbox = {}, log = () => {} }) {
+  const her = herPack(settings);
+  if (rootGone(settings.root)) throw new NotAdopted(NO_ROOT, 0);
+  if (kindOf(her) !== "folder") throw new NotAdopted(NOT_FOLDER, 0);
+  const work = workOf(home);
+  const put = { dirs: [], files: [] };
+  try {
+    const { dirs, files } = walkPack(from);
+    const wanted = files.filter((f) => !notHers(f));
+    copyLocal(from, work, wanted);
+    const fault = packFault(work, { fonts });
+    if (fault) throw new Refused(fault);
+    const order = [...wanted.filter((f) => f !== "style.json"), ...wanted.filter((f) => f === "style.json")];
+    const guard = rootGuard(settings.root, () => {
+      if (kindOf(her) !== "folder") throw new Refused(NOT_FOLDER);
+    });
+    putIn({ work, dest: her, dirs: dirs.filter((d) => !notHers(d)), files: order, guard, put, makeDest: false, replace: true, dropbox });
+  } catch (e) {
+    throw new NotAdopted(lineOf(e, log, settings.root), put.files.length);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+/** The `before …` copies of her pack, by name, newest first; none when there are none or her pack can't be read. */
+export function backupsOf(settings) {
+  try {
+    return readdirSync(herPack(settings)).filter((name) => BACKUP.test(name) && kindOf(join(herPack(settings), name)) === "folder").sort().reverse();
+  } catch {
+    return [];
+  }
+}
+
+/** Her pack's main lines, as she reads them: its type, its colours (by the brand's names where they are the brand's), its captions, its
+    motion and its sound. None for a style.json that does not read: packFault says why first. */
+export function packLines(dir) {
+  let style;
+  try {
+    style = JSON.parse(textOf(join(dir, "style.json")));
+  } catch {
+    return [];
+  }
+  if (!style || typeof style !== "object") return [];
+  const named = Object.fromEntries(Object.entries(brandColours()).filter(([name]) => name !== "Sand on light").map(([name, hex]) => [hex, name]));
+  const colour = (v) => (typeof v === "string" ? (named[v.trim().toUpperCase()] ? `${named[v.trim().toUpperCase()]} ${v}` : v) : "none");
+  const font = (role, said) => {
+    const f = style.fonts?.[role];
+    return f && typeof f.family === "string" ? `${said} ${f.family}${Number.isInteger(f.weight) ? ` ${f.weight}` : ""}${f.italic === true ? " italic" : ""}` : null;
+  };
+  const c = style.colors ?? {};
+  const cap = (k) => {
+    const x = style.captions?.[k] ?? {};
+    return `size ${Number.isFinite(x.size) ? x.size : "as Reel Kit's"}${x.box ? " in a box" : ""}${x.uppercase ? ", in capitals" : ""}`;
+  };
+  const sfx = typeof style.sound?.sfx === "string" ? `${style.sound.sfx} effects` : "effects as Reel Kit's";
+  const music = style.sound?.music === "none" || style.sound?.music === undefined ? "no music" : "music";
+  return [
+    `Type: ${[font("display", "display"), font("text", "text"), font("caption", "captions")].filter(Boolean).join(", ") || "as Reel Kit's"}.`,
+    `Colours: light ${colour(c.light)}, dark ${colour(c.dark)}, accent ${colour(c.accent)}${typeof c.accent_on_light === "string" ? ` (${c.accent_on_light} on light)` : ""}.`,
+    `Captions: hi-fi ${cap("hifi")}; lo-fi ${cap("lofi")}.`,
+    `Motion: ${typeof style.motion === "string" ? style.motion : "as Reel Kit's"}. Sound: ${sfx}, ${music}.`
+  ];
+}
+
+/** Her pack's board, made whole on this Mac's own disk for the side panel, and `use(folder)` given it: the board's files (never its own
+    fonts) read the safe way, and tool/brand/fonts' files its files.json names into its `fonts/`, as syncPack puts them. Gives what `use`
+    gives, and throws what it throws; throws, in her words, when there is no board or a file can't be read. The folder is taken away after. */
+export function withHerBoard({ settings, home = homedir(), fonts = BRAND_FONTS }, use) {
+  const board = join(herPack(settings), "board");
+  if (rootGone(settings.root)) throw new Error(NO_ROOT);
+  if (kindOf(join(board, "index.html")) !== "file") throw new Error("Your Reel Kit style has no board to show: ask Jason.");
+  const work = workOf(home);
+  try {
+    const { files } = walkPack(board);
+    copyLocal(board, work, files.filter((f) => f !== "fonts" && !f.startsWith("fonts/")));
+    let list = [];
+    try {
+      list = JSON.parse(textOf(join(work, "files.json")) ?? "[]");
+    } catch {
+      list = [];
+    }
+    const held = new Set(readdirSync(fonts));
+    for (const f of Array.isArray(list) ? list : []) {
+      if (typeof f !== "string" || !f.startsWith("fonts/")) continue;
+      const name = f.slice(6);
+      if (name.includes("/") || !held.has(name)) throw new Refused(`Reel Kit style's board uses the font file ${basename(name)}, which is not one of the brand's Google Fonts files: ask Jason.`);
+      mkdirSync(join(work, "fonts"), { recursive: true });
+      writeFileSync(join(work, "fonts", name), readFileSync(join(fonts, name)));
+    }
+  } catch (e) {
+    rmSync(work, { recursive: true, force: true });
+    throw new Error(e instanceof Refused ? e.message : lineOf(e, () => {}, settings.root));
+  }
+  try {
+    return use(work);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+/** A base's style.json with hers over it: an object is gone into key by key, and anything else (a value, a list) is hers wherever she has
+    it. `adds` gets each key of the base hers does not have, as a line: its dotted path and the value it brings. */
+function carried(base, hers, at, adds) {
+  const isPlain = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  if (!isPlain(base) || !isPlain(hers)) return hers;
+  const out = { ...hers };
+  for (const [k, v] of Object.entries(base)) {
+    const path = at ? `${at}.${k}` : k;
+    if (!Object.hasOwn(hers, k)) {
+      out[k] = v;
+      adds.push(`${path}: ${shown(v)}`);
+    } else out[k] = carried(v, hers[k], path, adds);
+  }
+  return out;
+}
+
+/** What carrying her pack onto a new base shipped since it was made (shippedMoved) would do: { adds, style }, the lines of the base's keys
+    hers does not have yet, and her style.json with them added, her own values kept everywhere she has one. Her pack was made from a base
+    whose files are not kept, only its fingerprint (`.made-from`), so a value of hers can't be told from the old base's: every value she has
+    is kept. Throws, in her words, for a style.json of hers that does not read. */
+export function carryPlan({ settings, shipped = SHIPPED_PACK }) {
+  let hers;
+  try {
+    hers = JSON.parse(textOf(join(herPack(settings), "style.json")));
+  } catch {
+    hers = null;
+  }
+  if (!hers || typeof hers !== "object" || Array.isArray(hers)) throw new Error("Your style.json in Reel Kit style does not read (Dropbox may still be bringing it over), so nothing was carried over.");
+  const adds = [];
+  const style = carried(JSON.parse(readFileSync(join(shipped, "style.json"), "utf8")), hers, "", adds);
+  return { adds, style };
+}
+
+/** Carry her pack onto the base shipped now (carryPlan), on her yes: a copy of her pack kept first (backupPack), then her style.json with
+    the base's new keys, then `.made-from` the base's fingerprint, each put in by dropbox.js's rule. style.json goes in before `.made-from`,
+    so a carry cut short is carried again. Gives the name of the copy kept; throws in her words. */
+export function carryPack({ settings, home = homedir(), shipped = SHIPPED_PACK, now = new Date(), dropbox = {}, log = () => {} }) {
+  const { style } = carryPlan({ settings, shipped });
+  const kept = backupPack({ settings, home, now, dropbox, log });
+  const her = herPack(settings);
+  const work = workOf(home);
+  try {
+    // What is checked is her pack as it will be: her other files beside the new style.json.
+    const { files } = walkPack(her);
+    copyLocal(her, work, files.filter((f) => f !== "style.json" && f !== MADE_FROM && !notHers(f)));
+    writeFileSync(join(work, "style.json"), `${JSON.stringify(style, null, 2)}\n`);
+    writeFileSync(join(work, MADE_FROM), `${folderFingerprint(shipped)}\n`);
+    const fault = packFault(work);
+    if (fault) throw new Refused(fault);
+    const guard = rootGuard(settings.root, () => {
+      if (kindOf(her) !== "folder") throw new Refused(NOT_FOLDER);
+    });
+    putIn({ work, dest: her, dirs: [], files: ["style.json", MADE_FROM], guard, put: { dirs: [], files: [] }, makeDest: false, replace: true, dropbox });
+    return kept;
+  } catch (e) {
+    throw new Error(`${lineOf(e, log, settings.root)} How it was is kept as ${kept}.`);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}

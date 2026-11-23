@@ -46,9 +46,9 @@ export const OPENING_REFUSED = "That is not something this folder does with page
 export const PUBLISH_EXACTLY = "Publish the storyboard exactly as BRIMM Video Studio printed it, with nothing changed or added.";
 /** The one reply her chat may leave on a comment. */
 export const REPLY = "On it.";
-/** What a staged page is published as, beside its title. */
-const DESCRIPTION = "A Reel Kit storyboard for The BRIMM.";
-const ICON = "film";
+/** What a staged page is published as, beside its title, by its kind: a style board with Reel Kit's own icon for one ("palette"). */
+const DESCRIPTION = Object.freeze({ storyboard: "A Reel Kit storyboard for The BRIMM.", "style-board": "The BRIMM's Reel Kit style board." });
+const ICON = Object.freeze({ storyboard: "film", "style-board": "palette" });
 
 const KINDS = ["storyboard", "style-board"];
 const SLUG = /^[0-9a-z][0-9a-z-]{0,62}$/;
@@ -486,7 +486,7 @@ export function stagePage(home, folder, { from, slug, version, kind = "storyboar
       beforeWrite();
       const page = {
         id: slug, kind, slug, episode: String(episode), version: n, stage, file: join(stage, "index.html"), files,
-        title: pageName, description: DESCRIPTION, icon: ICON, url: before?.url ?? null
+        title: pageName, description: DESCRIPTION[kind], icon: ICON[kind], url: before?.url ?? null
       };
       return { registry: { pages: [...now.pages.filter((p) => p.id !== slug), page] }, result: "written", staged: { stage, file: page.file, files: names, version: n, reused: false }, made: stage };
     } catch (e) {

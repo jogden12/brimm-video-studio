@@ -17,10 +17,12 @@
 //     "stubborn" (its first step, a `sleep` of its own in its process group, its pid in work/grandchild.pid, SIGTERM ignored, then
 //     nothing until it is killed),
 //     "hook" (before its steps, each call of CLAUDE_WORKER_CALLS, a JSON list, handed to the PreToolUse hook its --settings file names, as
-//     Claude Code does: `<command> <args…>` with the call on standard input).
+//     Claude Code does: `<command> <args…>` with the call on standard input),
+//     "style" (a style job's steps as the worker would do them: at "style", CLAUDE_WORKER_STYLE, a JSON object, merged into
+//     <project>/style/style.json; at "board", a new board in <project>/style/board, as Reel Kit's board.py writes one).
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const args = process.argv.slice(2);
@@ -58,6 +60,29 @@ function askHook(call) {
   return said;
 }
 
+/** A style job's step, as the worker would do it (the "style" scenario). */
+function styleStep(step) {
+  const pack = join(cwd, "style");
+  if (step === "style") {
+    const file = join(pack, "style.json");
+    const merge = (a, b) => {
+      for (const [k, v] of Object.entries(b)) a[k] = v && typeof v === "object" && !Array.isArray(v) && a[k] && typeof a[k] === "object" ? merge(a[k], v) : v;
+      return a;
+    };
+    writeFileSync(file, JSON.stringify(merge(JSON.parse(readFileSync(file, "utf8")), JSON.parse(process.env.CLAUDE_WORKER_STYLE ?? "{}")), null, 2));
+  }
+  if (step === "board") {
+    const board = join(pack, "board");
+    rmSync(board, { recursive: true, force: true });
+    mkdirSync(join(board, "img"), { recursive: true });
+    mkdirSync(join(board, "fonts"), { recursive: true });
+    copyFileSync(join(pack, "fonts", "JosefinSans-normal-400.ttf"), join(board, "fonts", "JosefinSans-normal-400.ttf"));
+    writeFileSync(join(board, "img", "hifi.jpg"), "a new board frame");
+    writeFileSync(join(board, "index.html"), "<!doctype html><title>Your style</title>\n");
+    writeFileSync(join(board, "files.json"), JSON.stringify(["fonts/JosefinSans-normal-400.ttf", "img/hifi.jpg"]));
+  }
+}
+
 emit({ type: "system", subtype: "init", cwd, model: after("--model"), permissionMode: scenario === "unsafe-init" ? "bypassPermissions" : after("--permission-mode"),
   tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent"], mcp_servers: [] });
 if (scenario === "hook") for (const call of JSON.parse(process.env.CLAUDE_WORKER_CALLS ?? "[]")) hook.push({ call: call.tool_name, decision: askHook(call) });
@@ -65,6 +90,7 @@ if (scenario === "hook") for (const call of JSON.parse(process.env.CLAUDE_WORKER
 for (const [i, step] of steps.entries()) {
   if (scenario === "wait" && i === steps.length - 1) while (!existsSync(join(cwd, "work", "go-on"))) await pause(10);
   status({ step, needs: steps.indexOf("beats") !== -1 && i >= steps.indexOf("beats") ? needs : [] });
+  if (scenario === "style") styleStep(step);
   ran.push(step);
   emit({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: `At ${step}.` }] } });
   await pause(40);

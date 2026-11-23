@@ -284,7 +284,7 @@ function clearStatus(dir) {
   }
 }
 
-/** Her notes kept with a revise (jobNotesFile), as the prompt takes them; none when there are none or they can't be read whole. */
+/** Her notes kept with a revise, or her ask with a style job (jobNotesFile), as the prompt takes them; none when there are none or they can't be read whole. */
 function keptNotes(home, slug) {
   try {
     return notesOf(JSON.parse(readCapped(jobNotesFile(home, slug), 1 << 20) ?? "[]"));
@@ -322,8 +322,8 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
   };
   if ((await look(`Before the Reel Kit worker for ${slug} started`)).length) return fail("own");
 
-  // Her notes go with the job, so that a resume sends them again.
-  const given = resume ? (job === "revise" ? keptNotes(home, slug) : []) : notesOf(notes);
+  // Her notes (a style job's: her ask) go with the job, so that a resume sends them again.
+  const given = resume ? (job === "revise" || job === "style" ? keptNotes(home, slug) : []) : notesOf(notes);
   if (!resume) writeWhole(jobNotesFile(home, slug), `${JSON.stringify(given, null, 2)}\n`);
   const tmp = workerTmp(home, slug);
   freshTmp(tmp);

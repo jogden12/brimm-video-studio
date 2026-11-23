@@ -33,6 +33,10 @@
 //                                          Reel Kit's own page (KIT/storyboard/serve.py) on 127.0.0.1:8765, one at a time, opened in her browser.
 //                                          The URL the first publish gives is recorded by the hook after it (studio/published.sh), from the
 //                                          tool's own result, never from her chat's words.
+//   reelkit style show|change "<what she asked>"|yes|back ["<copy>"]|diff|carry [yes]|resume
+//                                          (plan Task 13) her style pack, shown, changed by the worker's style job on a working copy, kept on
+//                                          her yes, gone back to, compared and carried onto a new starting style: reel-kit-style-chat.js, with
+//                                          its detached half `reelkit --now style change|resume <stamp>`. It names no episode (gate.js).
 //   reelkit --now <folder> start|revise|finalize|resume …
 //                                          the detached half of each (in no help), which runs the worker's runJob. Refused under Claude Code.
 //
@@ -53,6 +57,7 @@ import { PIN as HF_PIN } from "./hyperframes.js";
 import { kitDir, reelKitEnv, venvPython } from "./reel-kit.js";
 import { studioFolder } from "./studio.js";
 import { pageOf, publishInput, stagePage } from "./storyboard-opening.js";
+import { styleCommand, styleNow } from "./reel-kit-style-chat.js";
 import { MODES, entryOf, modeLeans, modeOf as modeNamed, projectFolderOf, readCapped, readState, scaffold, slugOf, startWhy, writeState } from "./reel-kit-project.js";
 import { JOBS, dequeue, enqueue, processStart, queuedOf, runJob, statusOf, stoppedLine } from "./reel-kit-worker.js";
 import { writeWhole as writeFileWhole } from "./reel-kit-worker-own.js";
@@ -737,6 +742,9 @@ export const STORYBOARD_SAY = Object.freeze({
 /** How a line for her chat, not for her, starts. */
 export const FOR_CLAUDE = "For Claude: ";
 
+/** The line for her chat that says the exact publish of a staged page (storyboard-opening.js publishInput), after reading its file whole. */
+const publishLine = (page) => `${FOR_CLAUDE}publish it with the Artifact tool exactly as this gives it, after reading its file_path whole: ${JSON.stringify(publishInput(page))}`;
+
 /** The page's title: the edit's own title, as studio.json keeps it, with ": storyboard" after it. */
 const pageTitle = (state) => (typeof state?.title === "string" && state.title.trim() && state.title.length <= 120 ? `${state.title.trim()}: storyboard` : "Reel Kit storyboard");
 
@@ -761,7 +769,7 @@ async function storyboardCommand(ctx, words, h) {
   }
   const page = pageOf(ctx.home, edit.slug);
   if (!page) return refuse(ctx, STORYBOARD_SAY.unread);
-  ctx.say(`${FOR_CLAUDE}publish it with the Artifact tool exactly as this gives it, after reading its file_path whole: ${JSON.stringify(publishInput(page))}`);
+  ctx.say(publishLine(page));
   ctx.say((page.url ? STORYBOARD_SAY.again : STORYBOARD_SAY.first)(editSaid(edit.key, edit.mode, edit.version)));
   return 0;
 }
@@ -957,6 +965,10 @@ async function jobNow(ctx, words, h) {
 export async function reelkitCommand(ctx, rest = [], { help = "", episodeFor, save } = {}) {
   const [word, ...more] = rest;
   const h = { help, episodeFor, save };
+  // Her style names no episode: what reel-kit-style-chat.js needs of this file is given to it.
+  const style = { help, publishLine, notReady: () => (kitHere(ctx.home) ? "" : EDIT_SAY.notSetUp), jobDeps: () => jobDeps(ctx) };
+  if (word === "style") return styleCommand(ctx, more, style);
+  if (word === "--now" && more[0] === "style") return styleNow(ctx, more.slice(1), style);
   if (word === "install") return installCommand(ctx, more, help);
   if (word === "status" && more.length === 0) return statusCommand(ctx);
   if (word === "--now" && more[0] === "install") return installNow(ctx, more.slice(1), help);
