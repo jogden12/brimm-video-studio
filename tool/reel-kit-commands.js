@@ -354,7 +354,8 @@ export const EDIT_SAY = Object.freeze({
   rendered: "it is rendered.",
   renderFailed: "it is built, but its last render didn't pass Reel Kit's own checks, so nothing was kept as an export: ask Jason.",
   renderBroke: "it is built, but its last render didn't finish, so nothing was kept as an export: ask Jason.",
-  renderUnrecorded: "it is built, and its last render finished, but its record couldn't be written, so nothing was kept as an export: ask Jason."
+  renderUnrecorded: "it is built, and its last render finished, but its record couldn't be written, so nothing was kept as an export: ask Jason.",
+  renderOdd: "it is built, but its last render didn't come out as Reel Kit makes one, so nothing was kept as an export: ask Jason."
 });
 
 /** The most of a note she may say: Reel Kit's own storyboard page (serve.py) takes no more. */
@@ -593,6 +594,7 @@ function stateLine(status, state = null, dir = null) {
     const last = state?.lastRender;
     if (last?.qa === "failed") return EDIT_SAY.renderFailed;
     if (last?.why === "record") return EDIT_SAY.renderUnrecorded;
+    if (last?.why === "odd") return EDIT_SAY.renderOdd;
     return last && typeof last.why === "string" && last.why !== "" ? EDIT_SAY.renderBroke : EDIT_SAY.ready;
   }
   if (status.state === "rendered") return EDIT_SAY.rendered;

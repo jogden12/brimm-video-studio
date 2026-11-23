@@ -6,7 +6,7 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, renameSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,7 @@ import { metaNameOf, metaOf } from "../exports.js";
 import { hfDir, kitDir, reelKitHome, venvPython } from "../reel-kit.js";
 import { compositionFingerprint, projectDirOf, readState, writeState } from "../reel-kit-project.js";
 import { MACH_SERVICES, RENDER_SAY, renderProfile, renderReelKit, renderWhy, sweepCopies, writeMeta } from "../reel-kit-render.js";
-import { asideDir, macLock } from "../reel-kit-worker.js";
+import { asideDir, macLock, noteOwnFile } from "../reel-kit-worker.js";
 import { workerSandbox } from "../reel-kit-worker-tools.js";
 import { factsOf, workFolder } from "../settings.js";
 
@@ -86,6 +86,8 @@ function world({ scenario = "" } = {}) {
   return { home, kit, dir, work, src, trash, trashed, outside, entry, ctx, deps, hold, reelKitRuns: () => runs(log), sandboxRuns: () => runs(sandboxLog) };
 }
 
+/** The copy of the project a render runs in: in the render's own temp folder. */
+const cloneOf = (w) => join(reelKitHome(w.home), "tmp", `${SLUG}.render`, "project");
 const metas = (w) => (existsSync(join(w.dir, "public", "renders")) ? readdirSync(join(w.dir, "public", "renders")).filter((n) => n.endsWith(".meta.json")) : []);
 
 describe("the headless render", () => {
@@ -136,7 +138,7 @@ describe("the headless render", () => {
     assert.equal(r.ok, true, r.why);
     const render = w.reelKitRuns().filter((run) => run.script === "render.py");
     assert.equal(render.length, 1);
-    assert.deepEqual(render[0].args, [w.dir, `${SLUG}-v1`, "--no-deliver"]);
+    assert.deepEqual(render[0].args, [cloneOf(w), `${SLUG}-v1`, "--no-deliver"], "it renders the project's copy, never the project");
     assert.equal(render[0].folder, "pipeline");
     assert.equal(render[0].env.REEL_KIT_HOME, reelKitHome(w.home));
     assert.equal(render[0].env.HF_HUB_OFFLINE, "1");
@@ -147,7 +149,7 @@ describe("the headless render", () => {
     assert.ok(!profile.startsWith(`${w.dir}/`), "the profile is out of the project's reach");
     assert.match(box.profile, /^\(version 1\)/);
     assert.match(box.profile, /\(deny default\)/);
-    assert.deepEqual(box.args.slice(2), [venvPython(w.home), join(w.kit, "pipeline", "render.py"), w.dir, `${SLUG}-v1`, "--no-deliver"]);
+    assert.deepEqual(box.args.slice(2), [venvPython(w.home), join(w.kit, "pipeline", "render.py"), cloneOf(w), `${SLUG}-v1`, "--no-deliver"]);
     assert.equal(r.file, join(w.dir, "renders", `${SLUG}-v1.mp4`));
     // A second render (after a revise and a new go) never writes over the first.
     writeState(w.dir, { ...readState(w.dir), state: "ready", fingerprint: compositionFingerprint(w.dir) });
@@ -201,11 +203,11 @@ describe("the headless render", () => {
     const told = metaOf(readFileSync(join(w.dir, "public", "renders", meta), "utf8"));
     assert.deepEqual(told, { complete: true, exportedTo: join(w.dir, "renders", `${SLUG}-v1.mp4`), format: "mp4", resolution: "1080x1920" });
     assert.ok(existsSync(told.exportedTo));
-    // Reel Kit's own build ran, so the fingerprint is recorded again after it, and the edit is rendered.
+    // The render ran in a copy, so the project is as finalize left it: its fingerprint the one recorded then.
     const state = readState(w.dir);
     assert.equal(state.state, "rendered");
-    assert.equal(state.fingerprint, compositionFingerprint(w.dir));
-    assert.notEqual(state.fingerprint, before);
+    assert.equal(state.fingerprint, before);
+    assert.equal(compositionFingerprint(w.dir), before);
     assert.equal(state.rendering, undefined);
     // writeMeta alone, and a renders folder that is a link is never written through.
     const other = join(w.home, "other project");
@@ -226,7 +228,7 @@ describe("the headless render", () => {
     assert.equal(state.state, "ready", "it can be rendered again");
     assert.equal(state.lastRender?.qa, "failed");
     assert.equal(state.rendering, undefined);
-    // Reel Kit's own build ran, so its fingerprint is the one recorded: a render again is not refused as changed in HyperFrames.
+    // The render ran in a copy, so the project is unchanged: a render again is not refused as changed in HyperFrames.
     assert.equal(renderWhy(w.dir, state), "");
     // A render that fails for another reason says so in its own line.
     const broken = world({ scenario: "fail" });
@@ -377,30 +379,54 @@ describe("fix round 1: what the render may not take for its own", () => {
     assert.ok(lines.some((line) => line.includes("process 4242")), "the holder is named in the log");
     assert.equal(readState(w.dir).rendering, undefined);
     assert.equal(readState(w.dir).state, "ready");
-    // One that can't be asked of lsof fails closed.
+    // The look is a courtesy, not the guard (the render runs in a copy): one that can't be asked of lsof renders all the same.
     const unasked = world();
     const r2 = await renderReelKit(unasked.ctx, { dir: unasked.dir, entry: unasked.entry }, { ...unasked.deps, run: (p, a, o) => (p === "/usr/sbin/lsof" ? { status: 1, stdout: "", stderr: "usage: lsof" } : spawnSync(p, a, o)) });
-    assert.equal(r2.why, RENDER_SAY.unchecked);
-    assert.deepEqual(unasked.reelKitRuns(), []);
+    assert.equal(r2.ok, true, r2.why);
   });
 
-  it("keeps the fingerprint it had when the app changed the project during a render", async () => {
-    // The app edits public/ while Reel Kit renders (it holds the project open at the look after the run), and QA fails.
+  it("fix round 2: renders in a copy, so the project's own files and fingerprint are never written", async () => {
+    const w = world();
+    const before = readState(w.dir).fingerprint;
+    const files = () => ["edit.py", "public/index.html", "cards/c1/index.html", "fx/f1/fx.js"].map((p) => readFileSync(join(w.dir, p), "utf8"));
+    const was = files();
+    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
+    assert.equal(r.ok, true, r.why);
+    // The stand-in's build wrote public/build.json into the project it was given: the copy, never the project.
+    assert.ok(!existsSync(join(w.dir, "public", "build.json")));
+    assert.deepEqual(files(), was);
+    assert.equal(compositionFingerprint(w.dir), before);
+    assert.equal(readState(w.dir).fingerprint, before);
+    // The render and its phone copy arrive in the project's own renders/, as plain files, and the record points at the render.
+    assert.equal(r.file, join(w.dir, "renders", `${SLUG}-v1.mp4`));
+    assert.ok(lstatSync(r.file).isFile());
+    assert.ok(lstatSync(join(w.dir, "renders", `${SLUG}-v1-phone.mp4`)).isFile());
+    assert.equal(metaOf(readFileSync(join(w.dir, "public", "renders", metas(w)[0]), "utf8")).exportedTo, r.file);
+    // The copy is gone afterwards.
+    assert.ok(!existsSync(cloneOf(w)));
+    // The profile writes only the copy and the temp folder: the project itself is read, never written.
+    const [box] = w.sandboxRuns();
+    const writes = box.profile.split("\n").filter((line) => line.startsWith("(allow file-write*"));
+    assert.ok(writes.length && writes.every((line) => !line.includes(`"${w.dir}"`) && !line.includes(`"${realpathSync(w.dir)}"`)), "no write rule names the project");
+    assert.ok(box.profile.includes(`(subpath "${realpathSync(w.dir)}")`), "the project is read");
+  });
+
+  it("fix round 2: keeps an edit she makes in the app while it renders, and refuses the next render as changed", async () => {
+    // The app saves an edit to the project's public/ while Reel Kit renders the copy (no file held open), and QA fails.
     const w = world({ scenario: "qa-fail app-edit" });
     const before = readState(w.dir).fingerprint;
-    w.hold((n) => (n === 0 ? [] : [4242]));
     const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
     assert.equal(r.why, RENDER_SAY.qaFailed);
-    assert.equal(readState(w.dir).fingerprint, before, "her edits are not taken for Reel Kit's");
+    assert.equal(readFileSync(join(w.dir, "public", "index.html"), "utf8"), "<html>changed in the app while it rendered</html>\n", "her edit is kept");
+    assert.equal(readState(w.dir).fingerprint, before, "her edit is never taken for Reel Kit's");
     assert.equal(renderWhy(w.dir, readState(w.dir)), CHANGED);
-    w.hold(() => []);
     assert.equal((await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps)).why, CHANGED);
-    assert.equal(w.reelKitRuns().filter((run) => run.script === "render.py").length, 1, "the next render is refused before Reel Kit's build could write over her edits");
-    // A render that passes while the app holds it: rendered, and the fingerprint is still the one from before.
+    assert.equal(w.reelKitRuns().filter((run) => run.script === "render.py").length, 1, "the next render is refused before Reel Kit's build could run over her edit");
+    // One that passes keeps her edit too, and its fingerprint is still finalize's.
     const passed = world({ scenario: "app-edit" });
     const was = readState(passed.dir).fingerprint;
-    passed.hold((n) => (n === 0 ? [] : [4242]));
     assert.equal((await renderReelKit(passed.ctx, { dir: passed.dir, entry: passed.entry }, passed.deps)).ok, true);
+    assert.equal(readFileSync(join(passed.dir, "public", "index.html"), "utf8"), "<html>changed in the app while it rendered</html>\n");
     assert.equal(readState(passed.dir).fingerprint, was);
   });
 
@@ -431,32 +457,45 @@ describe("fix round 1: what the render may not take for its own", () => {
     assert.ok(asideFiles(w).includes("cards/c1/Claude.md"));
     assert.deepEqual(metas(w), []);
     assert.deepEqual([readState(w.dir).state, readState(w.dir).why], ["failed", "own"]);
+    assert.ok(!existsSync(cloneOf(w)));
+  });
+
+  it("fix round 2: copies none of Studio's own names into the copy, so its notes for the app never fail a render", async () => {
+    const w = world();
+    writeFileSync(join(w.dir, "public", "CLAUDE.md"), "Studio's notes for the app's agent\n");
+    noteOwnFile(w.home, SLUG, w.dir, "public/CLAUDE.md");
+    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
+    assert.equal(r.ok, true, r.why);
+    assert.equal(readFileSync(join(w.dir, "public", "CLAUDE.md"), "utf8"), "Studio's notes for the app's agent\n");
+    assert.deepEqual(asideFiles(w), []);
   });
 
   it("writes the meta record only for a render in the project's own renders folder, and keeps no record it did not write", async () => {
     const w = world({ scenario: "renders-link" });
     const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
-    assert.deepEqual(r, { ok: false, file: null, why: RENDER_SAY.odd });
+    assert.deepEqual(r, { ok: false, file: null, why: RENDER_SAY.oddRender });
+    assert.match(RENDER_SAY.oddRender, /nothing was kept as an export/);
     assert.deepEqual(metas(w), []);
+    assert.deepEqual(readdirSync(join(w.dir, "renders")), [], "nothing was brought into the project");
     assert.throws(() => writeMeta(w.dir, { name: NAME, file: join(w.outside, "x.mp4"), at: new Date() }), /renders/);
     assert.throws(() => writeMeta(w.dir, { name: NAME, file: join(w.dir, "renders", "..", "edit.py"), at: new Date() }), /renders/);
-    // A record the render wrote into public/renders/ itself is set aside: only Studio's own is kept.
+    // A record the render wrote into public/renders/ itself stays in its copy, and goes with it: only Studio's own is in the project.
     const cli = world({ scenario: "cli-meta" });
     const c = await renderReelKit(cli.ctx, { dir: cli.dir, entry: cli.entry }, cli.deps);
     assert.equal(c.ok, true, c.why);
     assert.equal(metas(cli).length, 1);
     assert.equal(metaOf(readFileSync(join(cli.dir, "public", "renders", metas(cli)[0]), "utf8")).exportedTo, c.file);
-    assert.ok(asideFiles(cli).some((p) => p.startsWith("public/renders/") && p.endsWith(".meta.json")));
+    assert.ok(!existsSync(cloneOf(cli)));
   });
 
-  it("fails closed, keeping nothing, when the render leaves a link in its composition", async () => {
+  it("leaves a link the render makes in its copy, never in the project", async () => {
     const w = world({ scenario: "link" });
     const before = readState(w.dir).fingerprint;
     const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
-    assert.deepEqual(r, { ok: false, file: null, why: RENDER_SAY.odd });
-    assert.deepEqual(metas(w), []);
-    assert.equal(readState(w.dir).fingerprint, before);
-    assert.notEqual(readState(w.dir).state, "rendered");
+    assert.equal(r.ok, true, r.why);
+    assert.ok(!existsSync(join(w.dir, "public", "elsewhere")));
+    assert.equal(compositionFingerprint(w.dir), before);
+    assert.ok(!existsSync(cloneOf(w)));
   });
 
   it("keeps nothing as an export when the edit was taken out of ready while it rendered", async () => {

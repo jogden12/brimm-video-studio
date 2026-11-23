@@ -4,9 +4,12 @@
 // pipeline/render.py, which runs its build.py (importing the project's edit.py, which the worker wrote), then HyperFrames' check and
 // render, ffmpeg and qa.py. So render.py runs model-written code, and Studio runs it under an OS limit as the worker is held:
 // `/usr/bin/sandbox-exec -f <profile>`, with a profile Studio writes from the very rules of the worker's sandbox (reel-kit-worker-tools.js
-// workerSandbox): no network; writes only in the project and a fresh temp folder of its own, never Studio's own names there; reads only
-// the system and, in the home, the project, that temp folder, KIT, Reel Kit's HyperFrames, HyperFrames' Chrome (~/.cache/hyperframes/chrome
-// alone) and REEL_KIT_HOME's .venv, .venv-mp, tools, models, vendor, style, fx, cards and hf. Whether HyperFrames' headless Chrome renders
+// workerSandbox): no network; writes only in a copy of the project (an APFS clone, in a fresh temp folder of its own) and that temp folder,
+// never Studio's own names there; reads only the system and, in the home, the copy, the temp folder, the project itself (never written: its
+// source clip is what edit.py names), KIT, Reel Kit's HyperFrames, HyperFrames' Chrome (~/.cache/hyperframes/chrome alone) and
+// REEL_KIT_HOME's .venv, .venv-mp, tools, models, vendor, style, fx, cards and hf. The render never writes the project, so an edit she
+// saves in the app while it renders is never built over, and the fingerprint finalize recorded stays what a render is judged by. Only the
+// render and its phone copy come back into the project's renders/. Whether HyperFrames' headless Chrome renders
 // inside it (its Mach services, its GPU, a loopback port) is RK21's, a by-hand spike before any real render: the profile is written as if
 // it does, and MACH_SERVICES and the network line are the places RK21 may change.
 //
@@ -15,24 +18,24 @@
 //     recorded (reel-kit-project.js compositionFingerprint); one changed in HyperFrames since is hers to export from the app;
 //   - renderProfile: the sandbox-exec profile's text;
 //   - renderReelKit: the render, the detached half's job, under the Mac-wide worker lock (reel-kit-worker.js macLock), so that a render and
-//     a worker never run at once: `PY <kit>/pipeline/render.py <project> <slug>-v<n> --no-deliver`, never without --no-deliver; then the
-//     copies Reel Kit's deliver would leave beside the source clip swept to the Trash (sweepCopies), and, when QA passed, the meta record
-//     exports.js reads (writeMeta), the fingerprint recorded again (Reel Kit's own build ran) and the state `rendered`. A QA that failed
-//     keeps nothing as an export, and says so;
+//     a worker never run at once: `PY <kit>/pipeline/render.py <the copy> <slug>-v<n> --no-deliver`, never without --no-deliver; then the
+//     copies Reel Kit's deliver would leave beside the source clip swept to the Trash (sweepCopies), and, when QA passed, the render
+//     brought into the project's renders/, the meta record exports.js reads (writeMeta) and the state `rendered`. A QA that failed keeps
+//     nothing as an export, and says so. The copy is taken away;
 //   - sweepCopies: `<Title> v<n>.mp4` and `<Title> v<n> (phone).mp4` beside the source moved to the Trash, never deleted, refusing links;
 //   - writeMeta: `<project>/public/renders/<entry name>_<YYYY-MM-DD>_<HH-MM-SS>.meta.json` (Decision 7).
 //
 // What she reads holds no path, no flag and no name of a command.
 import { spawn, spawnSync } from "node:child_process";
-import { lstatSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync } from "node:fs";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { constants, cpSync, lstatSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { plainName } from "./app.js";
 import { releaseEpisodeLock, takeEpisodeLock } from "./detached.js";
 import { thisCheckout } from "./filing.js";
 import { bashNeeds, bothSpellings, realOf as placeOf } from "./places.js";
 import { binDir, kitDir, reelKitEnv, reelKitHome, venvPython } from "./reel-kit.js";
 import { compositionFingerprint, readCapped, readState, writeState } from "./reel-kit-project.js";
-import { asideDir, freshTmp, killGroup, macLock, macWorkerFile, processStart, settingsFileOf, stopLeftOver, sweepProject, workerTmp } from "./reel-kit-worker.js";
+import { freshTmp, killGroup, macLock, macWorkerFile, processStart, settingsFileOf, stopLeftOver, sweepProject, workerTmp } from "./reel-kit-worker.js";
 import { holdersOf, stopHolders, writeWhole } from "./reel-kit-worker-own.js";
 import { OWN_NAMES, foldName, workerSandbox } from "./reel-kit-worker-tools.js";
 import { isRunning } from "./run.js";
@@ -63,8 +66,8 @@ export const RENDER_SAY = Object.freeze({
   qaFailed: "Reel Kit's own checks of the render didn't pass, so nothing was kept as an export: ask Jason.",
   failed: "The render didn't finish, so nothing was kept as an export: ask Jason.",
   open: "It is open in HyperFrames or another app on this Mac, so it wasn't rendered: close it there first, then say it again.",
-  unchecked: "Whether it is open in another app on this Mac couldn't be checked, so it wasn't rendered: ask Jason.",
   own: "The render left something in its project that isn't Reel Kit's, so nothing was kept as an export: ask Jason.",
+  oddRender: "The render didn't come out as Reel Kit makes one, so nothing was kept as an export: ask Jason.",
   moved: "It was changed while it rendered, so nothing was kept as an export.",
   unrecorded: "The render finished, but its record couldn't be written, so nothing was kept as an export: ask Jason."
 });
@@ -106,7 +109,7 @@ export function renderWhy(dir, state) {
 
 /** The system places a render reads: its programs, libraries, frameworks and fonts, Homebrew's programs (Studio's node and ffmpeg on the
     Mac Studio), the system's settings, time zones and shared caches, and its devices. */
-const SYSTEM_READS = Object.freeze(["/System", "/usr", "/bin", "/sbin", "/Library", "/opt/homebrew", "/private/etc", "/private/var/db/timezone", "/private/var/db/dyld", "/dev"]);
+const SYSTEM_READS = Object.freeze(["/System", "/usr", "/bin", "/sbin", "/Library", "/opt/homebrew", "/private/etc", "/private/var/db/timezone", "/private/var/db/dyld", "/private/var/select", "/dev"]);
 /** The names of the system's own links and folders above those, which a program looks at to find its way. */
 const SYSTEM_LOOKS = Object.freeze(["/", "/etc", "/tmp", "/var", "/private", "/private/var", "/private/var/db"]);
 /** The system's devices a render may write to. */
@@ -150,9 +153,10 @@ function above(path) {
   }
 }
 
-/** The text of the sandbox-exec profile a render runs in, for the project `project` and its fresh temp folder `tmp`, from the inputs of
-    the worker's sandbox (workerSandbox: `checkout`, `kit`, `rkHome`, this Mac's `facts`, settings.js factsOf) and its very lists, in
-    this order, the last rule that matches being the one that holds:
+/** The text of the sandbox-exec profile a render runs in, for the project it may write, `project` (the render's copy of the edit, inside
+    its fresh temp folder `tmp`), and the folders it may only read, `readOnly` (the edit's own project, whose source clip edit.py names),
+    from the inputs of the worker's sandbox (workerSandbox: `checkout`, `kit`, `rkHome`, this Mac's `facts`, settings.js factsOf) and its
+    very lists, in this order, the last rule that matches being the one that holds:
     - nothing at all (deny default); then the processes, signals and system lookups a program needs, and the Mach services of MACH_SERVICES;
     - reads of the system (SYSTEM_READS) and of each program in `programs` (real paths: Studio's node, the programs Reel Kit's tools/bin
       links to), by the folder it is installed in unless that is the home or above it, then by itself;
@@ -160,16 +164,16 @@ function above(path) {
       and her folder) denied;
     - the folders above each place read back in looked at (their names only, never their contents), and the places the worker's sandbox
       reads back in, but for the three of Claude Code's own (places.js bashNeeds), which no render needs: the project, `tmp`, KIT, Reel
-      Kit's HyperFrames, HyperFrames' Chrome and REEL_KIT_HOME's own folders;
+      Kit's HyperFrames, HyperFrames' Chrome and REEL_KIT_HOME's own folders; and `readOnly`, read and never written;
     - writes of the project and `tmp` (the worker's allowWrite) and a few devices; then Studio's own names in both (the worker's
       denyWrite) denied, and again at any depth under either, in either case, by a regular expression (the worker's Edit() rules do
       that in its sandbox; the look over the project after the render, sweepProject, is for the spellings the disk folds that no
       expression names);
     - the network denied, last. */
-export function renderProfile({ checkout, project, kit, rkHome, facts, tmp, programs = [] }) {
+export function renderProfile({ checkout, project, kit, rkHome, facts, tmp, programs = [], readOnly = [] }) {
   const box = workerSandbox({ checkout, project, kit, rkHome, facts, tmp }).filesystem;
   const claudeOwn = new Set(bashNeeds({ ...facts, folder: project }));
-  const reads = unique(box.allowRead.filter((path) => !claudeOwn.has(path)).flatMap(bothSpellings));
+  const reads = unique([...box.allowRead.filter((path) => !claudeOwn.has(path)), ...readOnly.map(placeOf)].flatMap(bothSpellings));
   const writes = unique(box.allowWrite.flatMap(bothSpellings));
   const homes = unique([facts.home, facts.claudeHome ?? facts.home]);
   const installed = programs.filter((p) => typeof p === "string" && isAbsolute(p)).map((program) => {
@@ -416,35 +420,60 @@ async function runRender({ home, dir, name, profile, env, sandboxExec, limit, gr
   }
 }
 
-/** The records in the project's public/renders/ now: their names, or none when there is no such folder. */
-function recordsNow(dir) {
-  try {
-    return readdirSync(join(dir, "public", "renders")).filter((name) => name.endsWith(".meta.json"));
-  } catch {
-    return [];
-  }
+/** Copy the project `dir` into `clone` for a render, by APFS cloning (copy-on-write, so the 4K source costs nothing; a plain copy where
+    the disk can't clone), links copied as links (a link in the composition is refused by its fingerprint before this), and with none
+    of Studio's own names (OWN_NAMES, as the Mac's disk folds a name, at any depth: studio.json, the notes for the app's agent, a
+    .claude folder): the copy is the render's, and anything under one of those names found in it afterwards was put there by the render.
+    The project's renders/ is not copied (an empty one is made): the render's file is all that comes back from it. */
+function copyProject(dir, clone) {
+  const own = new Set(OWN_NAMES.map(foldName));
+  cpSync(dir, clone, {
+    recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false, mode: constants.COPYFILE_FICLONE,
+    filter: (source) => {
+      const rel = relative(dir, source);
+      if (rel === "") return true;
+      if (rel === "renders") return false;
+      return !rel.split(sep).some((part) => own.has(foldName(part)));
+    }
+  });
+  mkdirSync(join(clone, "renders"));
 }
 
-/** Set aside every record in public/renders/ that was not there before the render (`before`, the names) and that Studio did not write: one
-    a program the render ran wrote for itself (HyperFrames' own render may), or one the model-written edit.py did, is no export of hers.
-    Each is moved (renamed, a link as a link) into the worker's set-aside place, `<slug> set aside/<when>/public/renders/`, never deleted
-    or copied. { left }: the names that could not be moved (another disk, say), each said in the log. */
-function setAsideRecords(home, slug, dir, before, log) {
-  const fresh = recordsNow(dir).filter((name) => !before.includes(name));
-  const left = [];
-  if (!fresh.length) return { left };
-  const into = join(asideDir(home, slug), `${new Date().toISOString().replace(/[:.]/g, "-")} records`, "public", "renders");
-  for (const name of fresh) {
-    try {
-      mkdirSync(into, { recursive: true });
-      renameSync(join(dir, "public", "renders", name), join(into, name));
-      log(`Reel Kit's render of ${slug} left a record of its own in its project, which was set aside: ${name}.`);
-    } catch (e) {
-      log(`Reel Kit's render of ${slug} left a record of its own in its project, which could not be set aside (${e.code || e.message}): ${name}.`);
-      left.push(name);
-    }
+/** Bring the render `name` (and its phone copy, when it made one) from the copy's renders/ into the project's own, by renaming: only a
+    plain file straight in the copy's own renders/ (renderInProject of the copy), into the project's renders/, a folder of its own and not
+    a link (made when it is not there), never over a file there. The render's whole path in the project, or null when it can't come back
+    (said in the log); a phone copy that can't is left in the copy and goes with it. */
+function bringBack(clone, dir, name, log) {
+  const from = join(clone, "renders", `${name}.mp4`);
+  if (!renderInProject(clone, from)) {
+    log(`Reel Kit's render ${name} is not a file in its copy's own renders folder, so it was not kept.`);
+    return null;
   }
-  return { left };
+  const into = join(dir, "renders");
+  const moveIn = (source, target) => {
+    try {
+      lstatSync(target);
+      return false;
+    } catch (e) {
+      if (e.code !== "ENOENT") return false;
+    }
+    renameSync(source, target);
+    return true;
+  };
+  try {
+    ownFolder(into);
+    const final = join(into, `${name}.mp4`);
+    if (!moveIn(from, final) || !renderInProject(dir, final)) {
+      log(`Reel Kit's render ${name} could not be brought into its project's renders folder.`);
+      return null;
+    }
+    const phone = join(clone, "renders", `${name}-phone.mp4`);
+    if (renderInProject(clone, phone) && !moveIn(phone, join(into, `${name}-phone.mp4`))) log(`Reel Kit's phone copy of ${name} could not be brought into its project.`);
+    return final;
+  } catch (e) {
+    log(`Reel Kit's render ${name} could not be brought into its project's renders folder: ${e.code || e.message}.`);
+    return null;
+  }
 }
 
 /** The processes other than this run (and the one that started it) that hold the project `dir` open (the worker's holdersOf, by lsof), or
@@ -455,28 +484,32 @@ function othersHolding(dir, run) {
 }
 
 /** Render the Reel Kit edit in the project `dir`, the record's `entry`, headless: the detached half's job of `reelkit render`. { ok, file,
-    why }: `file` the render's whole path, `why` the line she reads when it wasn't rendered. In this order:
+    why }: `file` the render's whole path, `why` the line she reads when it wasn't rendered. The render runs in a copy of the project, so
+    the project itself is never written by it: what holds is that the edit she approved, as finalize recorded it (`state.fingerprint`), is
+    what renders, and that nothing she does in the app meanwhile is written over or taken for Reel Kit's. In this order:
     - renderWhy, before anything waits: an edit not `ready`, or changed in HyperFrames, renders nothing; nor one another live run renders
       (renderingBy, by its pid and start);
     - the project is marked `rendering` ({ pid, start, at }) by this run, which takes a mark her chat made with its pid for its own;
     - it waits for the Mac-wide worker lock (macLock), so that a render and a worker never run at once; inside it, a worker or render an
       earlier runner left running is stopped (the worker's stopLeftOver), and renderWhy is asked again, as what she did meanwhile counts;
-    - anything but this run that holds the project open (lsof: the HyperFrames app, a Terminal, QuickTime) refuses it, RENDER_SAY.open,
-      each holder named in the log and left running (stopHolders); one that can't be asked refuses it too; and the project is looked
-      over for Studio's own names (the worker's sweepProject), any found set aside, failing it as the worker's run fails;
-    - its profile (renderProfile) is written beside the worker's settings and its temp folder made fresh (the worker's workerTmp of
-      `<slug>.render`), and Reel Kit's render.py run through sandbox-exec in Reel Kit's own environment (reel-kit.js reelKitEnv, TMPDIR
-      its temp folder) as `<slug>-v<n>`, n the next render's number, always with --no-deliver;
-    - after it, whatever it ended with: the project looked over for Studio's own names again (any found fails it, `state: "failed"`,
-      `why: "own"`, RENDER_SAY.own); a record in public/renders/ it wrote for itself set aside; the copies beside the source swept to the
-      Trash (sweepCopies); and whether anything held the project open asked again. The composition's fingerprint is recorded again only
-      when it matched the recorded one just before the render and nothing held the project during it, so that only Reel Kit's own build
-      is taken for Reel Kit's: an edit she made in the app while it rendered keeps the old fingerprint, and her next render is refused as
-      changed in HyperFrames, never built over her edit. A link left in the composition fails it closed (RENDER_SAY.odd);
-    - a render that ended 0 with its file in the project's own renders/ (renderInProject), and an edit still `ready`: the meta record
-      (writeMeta), then `state: "rendered"`, `lastRender` and the render added to `renders`; any other: nothing kept as an export,
-      `lastRender` says why (`qa` when Reel Kit's QA failed, `error`, `time`, `odd`, `record`), the state left as it is, and she reads
-      its line. The mark comes off, and the lock is let go, whatever happened.
+    - as a courtesy, not a guard, a project that something else holds open (lsof: the HyperFrames app, a Terminal, QuickTime) is not
+      rendered, RENDER_SAY.open, each holder named in the log and left running (stopHolders): the app may read files into memory and hold
+      none, so the copy is the guard;
+    - the project is copied into the render's fresh temp folder (the worker's workerTmp of `<slug>.render`, as `project/`; copyProject:
+      APFS clones, without Studio's own names), the copy looked over for Studio's own names (sweepProject: a find fails it), its profile
+      (renderProfile: the copy and the temp folder written, the project only read, for edit.py's source clip) written beside the worker's
+      settings, and Reel Kit's render.py run on the copy through sandbox-exec in Reel Kit's own environment (reel-kit.js reelKitEnv, TMPDIR
+      the temp folder) as `<slug>-v<n>`, n the next render's number, always with --no-deliver;
+    - after it, whatever it ended with: the copy looked over again for Studio's own names (any found set aside, and the render failed,
+      `state: "failed"`, `why: "own"`, RENDER_SAY.own, as the worker's run fails), the copies beside the project's source swept to the
+      Trash (sweepCopies), and only the render and its phone copy brought back into the project's renders/ (bringBack); what else the
+      render made (its own records in public/renders/, a link) stays in the copy, which is then taken away. `state.fingerprint` is never
+      recorded again: it stays as finalize recorded it, so an edit she made in the app while it rendered is refused at her next render as
+      changed in HyperFrames;
+    - a render that ended 0 and came back, and an edit still `ready`: the meta record (writeMeta), then `state: "rendered"`, `lastRender`
+      and the render added to `renders`; any other: nothing kept as an export, `lastRender` says why (`qa` when Reel Kit's QA failed,
+      `error`, `time`, `odd`, `record`, `own`), the state left as it is, and she reads its line. The mark comes off, the copy is taken
+      away and the lock is let go, whatever happened.
     `deps`: `sandboxExec` (SANDBOX_EXEC), `trash` (sweepCopies'), `run` (spawnSync: lsof and ps), `alive`, `startOf`, `wait`, `every` (ms
     between looks at the lock), `limit`, `grace`, `facts` (settings.js factsOf of ctx.settings by default), `node` (Studio's), `log`.
     `ctx`: `home`, `settings`, `checkout`, `node`, `base`, `now`. */
@@ -519,7 +552,8 @@ export async function renderReelKit(ctx, { dir, entry }, deps = {}) {
     if (took.taken) break;
     await wait(every);
   }
-  const nameHolders = (said) => stopHolders({ dirs: [dir], said, run, startOf: (pid) => startOf(pid), log });
+  const tmp = workerTmp(home, `${slug}.render`);
+  const clone = join(tmp, "project");
   try {
     await stopLeftOver(home, { alive, startOf, grace, wait, log });
     const state = readState(dir);
@@ -528,81 +562,61 @@ export async function renderReelKit(ctx, { dir, entry }, deps = {}) {
       mark({ rendering: undefined });
       return refuse(again);
     }
-    // Nothing but this run may hold the project while Reel Kit's build writes its public/: her edits in the app would be lost.
+    // A courtesy: she is told to close the app first. The copy, not this look, keeps her edits from Reel Kit's build.
     const holding = othersHolding(dir, run);
-    if (holding === null || holding.length) {
-      if (holding?.length) await nameHolders(`Before Reel Kit's render of ${slug}`);
+    if (holding?.length) {
+      await stopHolders({ dirs: [dir], said: `Before Reel Kit's render of ${slug}`, run, startOf: (pid) => startOf(pid), log });
       mark({ rendering: undefined });
-      return refuse(holding === null ? RENDER_SAY.unchecked : RENDER_SAY.open);
+      return refuse(RENDER_SAY.open);
     }
-    if (sweepProject(home, slug, dir, { said: `Before Reel Kit's render of ${slug}`, log }).planted.length) {
-      mark({ state: "failed", why: "own", rendering: undefined });
-      return refuse(RENDER_SAY.odd);
-    }
-    const before = compositionFingerprint(dir);
-    const records = recordsNow(dir);
     const name = `${slug}-v${nextRender(dir, slug, state)}`;
     const began = new Date(ctx.now ? ctx.now() : Date.now());
-    const tmp = workerTmp(home, `${slug}.render`);
     freshTmp(tmp);
+    copyProject(dir, clone);
+    if (sweepProject(home, slug, clone, { said: `Before Reel Kit's render of ${slug}`, log }).planted.length) {
+      mark({ rendering: undefined, lastRender: { at: began.toISOString(), name, qa: "", why: "odd" } });
+      return refuse(RENDER_SAY.odd);
+    }
     const profile = renderProfileFile(home, slug);
     writeWhole(profile, renderProfile({
-      checkout: ctx.checkout ?? thisCheckout(), project: dir, kit: kitDir(home), rkHome: reelKitHome(home), facts: facts ?? factsOf(home, ctx.settings, {}), tmp,
-      programs: programsOf(home, node)
+      checkout: ctx.checkout ?? thisCheckout(), project: clone, readOnly: [dir], kit: kitDir(home), rkHome: reelKitHome(home),
+      facts: facts ?? factsOf(home, ctx.settings, {}), tmp, programs: programsOf(home, node)
     }));
     const env = { ...reelKitEnv({ home, node, base: ctx.base ?? { HOME: home } }), TMPDIR: tmp };
-    const ran = await runRender({ home, dir, name, profile, env, sandboxExec, limit, grace, wait });
+    const ran = await runRender({ home, dir: clone, name, profile, env, sandboxExec, limit, grace, wait });
 
-    // What the run left that is not its own, whatever it ended with.
-    const planted = sweepProject(home, slug, dir, { said: `After Reel Kit's render of ${slug}`, log }).planted;
-    const strays = setAsideRecords(home, slug, dir, records, log);
+    // What the render left: Studio's own names in its copy fail it; the copies beside the project's source go to the Trash.
+    const planted = sweepProject(home, slug, clone, { said: `After Reel Kit's render of ${slug}`, log }).planted;
     const swept = sweepCopies(join(dir, "source"), state.title, { ...(trash ? { trash } : {}), log });
     if (swept.left.length || swept.refused) log(`Reel Kit's render of ${slug} left copies beside its source that couldn't be moved to the Trash.`);
-    const heldAfter = othersHolding(dir, run);
-    if (heldAfter?.length) await nameHolders(`After Reel Kit's render of ${slug}`);
-    let after = null;
-    try {
-      after = compositionFingerprint(dir);
-    } catch (e) {
-      log(`Reel Kit's ${slug} could not be fingerprinted after its render: ${e.code || e.message}.`);
-    }
-    // Only Reel Kit's own build is taken for Reel Kit's: with anything else at the project during the run, the old fingerprint stays.
-    const ours = before === state.fingerprint && Array.isArray(heldAfter) && heldAfter.length === 0 && after !== null;
-    if (!ours && after !== null) log(`Reel Kit's ${slug} was held or changed by something else while it rendered, so its fingerprint is kept as it was.`);
-    const printed = ours ? { fingerprint: after } : {};
-    const final = join(dir, "renders", `${name}.mp4`);
     const last = { at: began.toISOString(), name };
     const leave = (fields, said) => {
       mark({ rendering: undefined, ...fields });
       return refuse(said);
     };
     if (planted.length) return leave({ state: "failed", why: "own", lastRender: { ...last, qa: "", why: "own" } }, RENDER_SAY.own);
-    if (after === null) return leave({ lastRender: { ...last, qa: "", why: "odd" } }, RENDER_SAY.odd);
-    if (ran.code !== 0 || !plainFile(final)) {
+    if (ran.code !== 0 || !plainFile(join(clone, "renders", `${name}.mp4`))) {
       const qa = /QA failed/.test(ran.out);
       const failed = qa ? "qa" : ran.timedOut ? "time" : "error";
       log(`Reel Kit's render of ${slug} ended ${ran.code ?? ran.signal} (${failed}): ${ran.out.trim().split("\n").slice(-3).join(" | ")}`);
-      return leave({ ...printed, lastRender: { ...last, qa: qa ? "failed" : "", why: failed } }, qa ? RENDER_SAY.qaFailed : RENDER_SAY.failed);
+      return leave({ lastRender: { ...last, qa: qa ? "failed" : "", why: failed } }, qa ? RENDER_SAY.qaFailed : RENDER_SAY.failed);
     }
-    if (!renderInProject(dir, final)) {
-      log(`Reel Kit's render of ${slug} is not a file in its project's own renders folder, so it was not kept as an export.`);
-      return leave({ ...printed, lastRender: { ...last, qa: "passed", why: "odd" } }, RENDER_SAY.odd);
-    }
-    if (strays.left.length) return leave({ ...printed, lastRender: { ...last, qa: "passed", why: "odd" } }, RENDER_SAY.odd);
     // A job that took the edit while it rendered (its state no longer ready) is left its own: this render is of an edit no longer there.
     if (readState(dir)?.state !== "ready") {
       log(`Reel Kit's ${slug} was taken out of ready while it rendered, so its render was not kept as an export.`);
       return leave({}, RENDER_SAY.moved);
     }
+    const final = bringBack(clone, dir, name, log);
+    if (final === null) return leave({ lastRender: { ...last, qa: "passed", why: "odd" } }, RENDER_SAY.oddRender);
     try {
       writeMeta(dir, { name: entry.name, file: final, at: began });
     } catch (e) {
       log(`Reel Kit's render of ${slug} is made, but its record could not be written: ${e.code || e.message}.`);
-      return leave({ ...printed, lastRender: { ...last, qa: "passed", why: "record" } }, RENDER_SAY.unrecorded);
+      return leave({ lastRender: { ...last, qa: "passed", why: "record" } }, RENDER_SAY.unrecorded);
     }
     const phone = join(dir, "renders", `${name}-phone.mp4`);
     const renders = [...(Array.isArray(state.renders) ? state.renders : []), { name, file: `renders/${name}.mp4`, phone: plainFile(phone) ? `renders/${name}-phone.mp4` : null, at: last.at }];
-    mark({ state: "rendered", ...printed, rendering: undefined, lastRender: { ...last, qa: "passed", why: "" }, renders });
+    mark({ state: "rendered", rendering: undefined, lastRender: { ...last, qa: "passed", why: "" }, renders });
     return { ok: true, file: final, why: "" };
   } catch (e) {
     log(`Reel Kit's render of ${slug} could not be done: ${e.code || e.message}.`);
@@ -613,6 +627,12 @@ export async function renderReelKit(ctx, { dir, entry }, deps = {}) {
     }
     return refuse(RENDER_SAY.failed);
   } finally {
+    // The copy is the render's own, made by this run in its temp folder: taken away whole, a link in it as a link.
+    try {
+      rmSync(clone, { recursive: true, force: true });
+    } catch (e) {
+      log(`Reel Kit's copy of ${slug} for its render could not be taken away: ${e.code || e.message}.`);
+    }
     releaseEpisodeLock(lock, took.text);
   }
 }

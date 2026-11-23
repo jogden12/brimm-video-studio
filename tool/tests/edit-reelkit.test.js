@@ -597,7 +597,11 @@ describe("her render (plan Task 14)", () => {
     writeFileSync(join(dir, "public", "index.html"), "<html>the composition</html>\n");
     writeState(dir, { ...readState(dir), lastRender: { at: "2026-11-23T10:00:00.000Z", qa: "passed", why: "record" } });
     assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${EDIT_SAY.renderUnrecorded}`]);
-    for (const line of [EDIT_SAY.renderFailed, EDIT_SAY.renderBroke, EDIT_SAY.renderUnrecorded]) assert.match(line, /nothing was kept as an export/, line);
+    // A render that came out not as Reel Kit makes one has its own line (fix round 2, M5).
+    writeState(dir, { ...readState(dir), lastRender: { at: "2026-11-23T10:00:00.000Z", qa: "passed", why: "odd" } });
+    assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${EDIT_SAY.renderOdd}`]);
+    assert.notEqual(EDIT_SAY.renderOdd, EDIT_SAY.renderBroke);
+    for (const line of [EDIT_SAY.renderFailed, EDIT_SAY.renderBroke, EDIT_SAY.renderUnrecorded, EDIT_SAY.renderOdd]) assert.match(line, /nothing was kept as an export/, line);
     assert.match(EDIT_SAY.renderUnrecorded, /render(ed)? (finished|was made)/i);
   });
 });

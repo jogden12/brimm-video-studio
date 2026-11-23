@@ -21,9 +21,9 @@
 //     variables it was given;
 //   - REEL_KIT_STANDIN: the scenario, one or more words: `fail` (the script prints a line on stderr and ends 1) and `qa-fail` (qa.py
 //     fails, so render.py does); and for render.py what a run might leave that is not its own (Task 14, fix round 1): `app-edit` (public/
-//     changed as the HyperFrames app would, while it renders), `plant` (cards/c1/Claude.md, one of Studio's own names), `renders-link`
+//     of the project itself, edit.py's SRC's, changed as the HyperFrames app would, while it renders), `plant` (cards/c1/Claude.md, one of Studio's own names), `renders-link`
 //     (renders/ made a link out of the project before it renders into it), `cli-meta` (a record of its own in public/renders/), `link` (a
-//     link in public/media/) and `restate` (studio.json taken to `queued`, as a job that took the edit would); later tasks add theirs
+//     link in public/) and `restate` (the project's own studio.json taken to `queued`, as a job that took the edit would); later tasks add theirs
 //     (no-ready, usage-limit).
 import { spawnSync } from "node:child_process";
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -99,12 +99,14 @@ const SCRIPTS = {
     writeFileSync(join(pub, "build.json"), `${JSON.stringify({ built: "by build.py", title: said("TITLE") })}\n`);
     process.stdout.write("hyperframes check: ok\n");
     // What the scenario says the run leaves that is not its own.
-    if (scenes.has("app-edit")) writeFileSync(join(pub, "index.html"), "<html>changed in the app while it rendered</html>\n");
+    // The project itself, as the app and Studio see it: edit.py's SRC is its source/clip.mp4 (the copy it renders is elsewhere).
+    const real = dirname(dirname(resolve(said("SRC"))));
+    if (scenes.has("app-edit")) writeFileSync(join(real, "public", "index.html"), "<html>changed in the app while it rendered</html>\n");
     if (scenes.has("plant")) writeFileSync(join(project, "cards", "c1", "Claude.md"), "planted\n");
     if (scenes.has("link")) symlinkSync(dirname(project), join(pub, "elsewhere"));
     if (scenes.has("restate")) {
-      const state = JSON.parse(readFileSync(join(project, "studio.json"), "utf8"));
-      writeFileSync(join(project, "studio.json"), `${JSON.stringify({ ...state, state: "queued", job: "revise" })}\n`);
+      const state = JSON.parse(readFileSync(join(real, "studio.json"), "utf8"));
+      writeFileSync(join(real, "studio.json"), `${JSON.stringify({ ...state, state: "queued", job: "revise" })}\n`);
     }
     if (scenes.has("renders-link")) {
       const out = join(dirname(project), "renders elsewhere");
