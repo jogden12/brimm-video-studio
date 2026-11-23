@@ -14,13 +14,14 @@ const hex = (c) => c.repeat(64);
 const good = () => ({
   version: "1.2.0",
   fingerprint: `sha256-${hex("a")}`,
-  required: ["SKILL.md", "VERSION", "LICENSE", "pipeline/", "setup/", "kit/", "fx/LIBRARY.md", "cards/LIBRARY.md"],
+  required: ["SKILL.md", "VERSION", "pipeline/", "setup/", "kit/", "fx/LIBRARY.md", "cards/LIBRARY.md"],
+  license: "LICENSE",
   hyperframes: { version: "0.8.139", integrity: `sha512-${"A".repeat(86)}==` },
   gsap: { version: "3.15.0", url: "https://cdn.example/gsap.min.js", sha256: hex("b") },
   uv: { version: "0.12.8", url: "https://example/uv.tar.gz", sha256: hex("c") },
   python: "3.12.9",
   locks: { main: { file: "reel-kit/requirements-1.2.0.lock", sha256: hex("0") }, mp: { file: "reel-kit/requirements-mp-1.2.0.lock", sha256: hex("0") } },
-  models: [{ name: "m.onnx", bytes: 10, url: "https://example/m.onnx", sha256: hex("d") }],
+  models: [{ name: "m.onnx", bytes: 10, sources: [{ url: "https://example/m.onnx", sha256: hex("d") }, { url: "https://example/m1.onnx", sha256: hex("8") }] }],
   whisper: { repo: "Systran/faster-whisper-medium", revision: "1".repeat(40), files: [{ path: "model.bin", sha256: hex("e") }] },
   ffmpeg: { version: "9.0.2", ffmpeg: { url: "https://example/ffmpeg.zip", sha256: hex("f") }, ffprobe: { url: "https://example/ffprobe.zip", sha256: hex("9") } },
 });
@@ -44,7 +45,7 @@ describe("the pin", () => {
   it("takes a pin of the right shape, frozen all the way down", () => {
     const pin = pinFrom(JSON.stringify(good()));
     assert.deepEqual(pin, good());
-    assert.ok(Object.isFrozen(pin) && Object.isFrozen(pin.models[0]) && Object.isFrozen(pin.locks.main) && Object.isFrozen(pin.required));
+    assert.ok(Object.isFrozen(pin) && Object.isFrozen(pin.models[0]) && Object.isFrozen(pin.models[0].sources[1]) && Object.isFrozen(pin.locks.main) && Object.isFrozen(pin.required));
   });
 
   it("refuses a pin whose version is not x.y.z or whose fingerprint is not sha256-<64 hex>", () => {
@@ -54,14 +55,18 @@ describe("the pin", () => {
     assert.throws(() => pinFrom("{"), SyntaxError);
   });
 
-  it("refuses a pin missing any of the keys above, or any model without url and sha256", () => {
+  it("refuses a pin missing any of the keys above, or any model without a source with a url and sha256", () => {
     for (const key of Object.keys(good())) {
       const pin = good();
       delete pin[key];
       refused(pin, `without ${key}`);
     }
     const withModel = (change) => ({ ...good(), models: [{ ...good().models[0], ...change }] });
-    for (const change of [{ url: undefined }, { sha256: undefined }, { sha256: "abc" }, { url: "http://example/m" }, { url: "" }, { name: "../m" }, { name: "" }, { bytes: 0 }, { bytes: 1.5 }]) refused(withModel(change));
+    for (const change of [{ name: "../m" }, { name: "" }, { bytes: 0 }, { bytes: 1.5 }, { sources: undefined }, { sources: [] }, { sources: "https://example/m" }]) refused(withModel(change));
+    const withSource = (change) => withModel({ sources: [good().models[0].sources[0], { ...good().models[0].sources[1], ...change }] });
+    for (const change of [{ url: undefined }, { sha256: undefined }, { sha256: "abc" }, { sha256: hex("D") }, { url: "http://example/m" }, { url: "" }]) refused(withSource(change));
+    refused(withModel({ url: "https://example/m.onnx", sha256: hex("d"), sources: undefined }), "the old one-url shape");
+    for (const license of ["", "/LICENSE", "../LICENSE", "a/LICENSE", "LICENSE/", 5]) refused({ ...good(), license });
     refused({ ...good(), models: [] });
     const at = (key, value) => ({ ...good(), [key]: value });
     refused(at("required", []));
@@ -84,10 +89,13 @@ describe("the pin", () => {
     refused(at("ffmpeg", { ...good().ffmpeg, ffmpeg: { url: "https://example/ffmpeg.zip" } }));
   });
 
-  it("holds Reel Kit 1.2.0, its four models and the files it relies on", () => {
+  it("holds Reel Kit 1.2.0, its four models with every source models.py lists, its licence and the files it relies on", () => {
     assert.equal(PIN.version, "1.2.0");
     assert.deepEqual(PIN.models.map((m) => m.name), ["depth_anything_v2_small.onnx", "face_landmarker.task", "hand_landmarker.task", "pose_landmarker_full.task"]);
-    assert.deepEqual(REQUIRED_PATHS, ["SKILL.md", "VERSION", "LICENSE", "pipeline/", "setup/", "kit/", "fx/LIBRARY.md", "cards/LIBRARY.md"]);
+    assert.deepEqual(PIN.models.map((m) => m.sources.length), [1, 1, 1, 2]);
+    assert.deepEqual(PIN.models[3].sources.map((s) => s.url.split("/").at(-2)), ["latest", "1"]);
+    assert.deepEqual(REQUIRED_PATHS, ["SKILL.md", "VERSION", "pipeline/", "setup/", "kit/", "fx/LIBRARY.md", "cards/LIBRARY.md"]);
+    assert.equal(PIN.license, "LICENSE");
     assert.equal(REQUIRED_PATHS, PIN.required);
     assert.deepEqual([PIN.gsap.version, PIN.uv.version, PIN.ffmpeg.version, PIN.whisper.repo], ["3.15.0", "0.12.8", "9.0.2", "Systran/faster-whisper-medium"]);
     assert.match(PIN.python, /^3\.12\.\d+$/);

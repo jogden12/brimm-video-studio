@@ -1,7 +1,8 @@
 {
   "version": "1.2.0",
   "fingerprint": "sha256-a5327602a0ba74542c57d04ddc064673dcef5e4406fc48a99d55b236c4beb9bf",
-  "required": ["SKILL.md", "VERSION", "LICENSE", "pipeline/", "setup/", "kit/", "fx/LIBRARY.md", "cards/LIBRARY.md"],
+  "required": ["SKILL.md", "VERSION", "pipeline/", "setup/", "kit/", "fx/LIBRARY.md", "cards/LIBRARY.md"],
+  "license": "LICENSE",
   "hyperframes": {
     "version": "0.8.139",
     "integrity": "sha512-6OQIBRa+ouCtI17mGuTwbq/x588nf0sygwsfxHGeKGF+axXSpwtzaJ8y5MD28zcvIK7Vr4Hh7gbfrZNRno91Gw=="
@@ -25,26 +26,31 @@
     {
       "name": "depth_anything_v2_small.onnx",
       "bytes": 99060839,
-      "url": "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/4472b7362082ad9968fee890ca0f1e5aca36b93d/onnx/model.onnx",
-      "sha256": "afb6a5c28f3b6bf1618c6e43f02073ef9dfdc70e937502d51603e57b0a1df10c"
+      "sources": [
+        { "url": "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/4472b7362082ad9968fee890ca0f1e5aca36b93d/onnx/model.onnx", "sha256": "afb6a5c28f3b6bf1618c6e43f02073ef9dfdc70e937502d51603e57b0a1df10c" }
+      ]
     },
     {
       "name": "face_landmarker.task",
       "bytes": 3758596,
-      "url": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-      "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+      "sources": [
+        { "url": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff" }
+      ]
     },
     {
       "name": "hand_landmarker.task",
       "bytes": 7819105,
-      "url": "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-      "sha256": "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
+      "sources": [
+        { "url": "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", "sha256": "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1" }
+      ]
     },
     {
       "name": "pose_landmarker_full.task",
       "bytes": 9398198,
-      "url": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task",
-      "sha256": "4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdcec4ad"
+      "sources": [
+        { "url": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task", "sha256": "4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdcec4ad" },
+        { "url": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task", "sha256": "5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1" }
+      ]
     }
   ],
   "whisper": {

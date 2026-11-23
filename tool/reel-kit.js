@@ -1,9 +1,11 @@
 // Reel Kit's pin, and where Reel Kit lives on a Mac (spec 2026-11-23 Reel Kit in Studio, sections 1 and 2).
 //
 // Studio pins one Reel Kit version and installs it itself, as it pins its own HyperFrames (hyperframes.js). This file is:
-//   - the pin (reel-kit.pin.json): the version, one fingerprint of its whole skill folder, the files Studio relies on in it, and
-//     everything it fetches at setup, each by URL and SHA-256 (or npm integrity, or a hash-locked requirements file): its own
-//     HyperFrames, GSAP, uv, the Python uv installs, the two lock files, its four models, the faster-whisper model and ffmpeg;
+//   - the pin (reel-kit.pin.json): the version, one fingerprint of its whole skill folder, the files Studio relies on in it, the
+//     name of its licence (which stays with it: in the skill folder or the plugin folder above it), and everything it fetches at
+//     setup, each by URL and SHA-256 (or npm integrity, or a hash-locked requirements file): its own HyperFrames, GSAP, uv, the
+//     Python uv installs, the two lock files, its four models (each with every source models.py lists, in its order), the
+//     faster-whisper model and ffmpeg;
 //   - where everything is kept: the kit (KIT) in the toolchain folder, read only, and REEL_KIT_HOME, both in the work folder, which
 //     is on the Mac's own disk and never in Dropbox. Nothing of Studio's uses ~/reel-kit;
 //   - the folder fingerprint, which says whether a dropped Reel Kit is the pinned one.
@@ -36,12 +38,14 @@ const SHAPE = {
   version: (v) => typeof v === "string" && VERSION.test(v),
   fingerprint: (v) => typeof v === "string" && /^sha256-[0-9a-f]{64}$/.test(v),
   required: (v) => Array.isArray(v) && v.length > 0 && v.every(inside),
+  license: plainName,
   hyperframes: (v) => object(v) && VERSION.test(v.version) && /^sha512-[A-Za-z0-9+/]{86}==$/.test(v.integrity),
   gsap: (v) => object(v) && VERSION.test(v.version) && fetched(v),
   uv: (v) => object(v) && VERSION.test(v.version) && fetched(v),
   python: (v) => typeof v === "string" && /^3\.12\.\d+$/.test(v),
   locks: (v) => object(v) && locked(v.main) && locked(v.mp),
-  models: (v) => Array.isArray(v) && v.length > 0 && v.every((m) => object(m) && plainName(m.name) && Number.isInteger(m.bytes) && m.bytes > 0 && fetched(m)),
+  models: (v) => Array.isArray(v) && v.length > 0 && v.every((m) => object(m) && plainName(m.name) && Number.isInteger(m.bytes) && m.bytes > 0
+    && Array.isArray(m.sources) && m.sources.length > 0 && m.sources.every(fetched)),
   whisper: (v) => object(v) && typeof v.repo === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(v.repo) && !v.repo.split("/").some((p) => p === "." || p === "..")
     && /^[0-9a-f]{40}$/.test(v.revision) && Array.isArray(v.files) && v.files.length > 0 && v.files.every((f) => object(f) && inside(f.path) && SHA256.test(f.sha256)),
   ffmpeg: (v) => object(v) && VERSION.test(v.version) && fetched(v.ffmpeg) && fetched(v.ffprobe),
