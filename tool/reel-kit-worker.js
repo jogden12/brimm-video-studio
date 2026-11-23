@@ -14,7 +14,7 @@
 //
 // Studio's own names in a project (a CLAUDE.md, a .claude folder: reel-kit-worker-tools.js OWN_NAMES) are Studio's alone: it keeps the list
 // of the ones it wrote out of the worker's reach (`ownFile`, `noteOwnFile`), and before and after every run, once whatever still holds
-// the project open is stopped, sets aside in its own place (`asideDir`) every one that is not on it (reel-kit-worker-own.js; what
+// the project open is named in the log (and left running), sets aside in its own place (`asideDir`) every one that is not on it (reel-kit-worker-own.js; what
 // Task 17's `reelkit app` owes it is said there). Either fails the run, `why: "own"`.
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -292,9 +292,9 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
 
   // Studio's own names in the project that Studio did not write (ownFile is its list) are set aside, out of the project, before the run
   // and after it. What is found before it (left by a run whose runner died, say) refuses this run: nothing is started.
-  // Before each look, whatever still holds the project or the temp folder open is stopped, so that nothing changes it under the look.
+  // Before each look, whatever still holds the project or the temp folder open is named in the log, and left running: it may be hers.
   const look = async (said) => {
-    await stopHolders({ dirs: [dir, workerTmp(home, slug)], said, run: deps.run, startOf: (pid) => deps.startOf(pid, deps.run), alive: deps.alive, wait, grace, log });
+    await stopHolders({ dirs: [dir, workerTmp(home, slug)], said, run: deps.run, startOf: (pid) => deps.startOf(pid, deps.run), log });
     return sweepProject(home, slug, dir, { said, log }).planted;
   };
   if ((await look(`Before the Reel Kit worker for ${slug} started`)).length) return fail("own");
@@ -469,7 +469,8 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
     project is made (scaffold: her pack synced, the folder, the copy, new.py) and its queue record taken away; then the worker runs, in its
     own process group, which is stopped whole (SIGTERM, then SIGKILL after `grace`) when it runs out of time or does not start as told, and
     the lock is let go whatever happened. Before the worker is started, and after it has ended (also when something threw), every
-    process that still holds the project or the run's temp folder open is killed (reel-kit-worker-own.js stopHolders) and the project
+    process that still holds the project or the run's temp folder open is named in the log and left running (reel-kit-worker-own.js
+    stopHolders: it kills nothing, as a holder may be hers) and the project
     is looked over for Studio's own names (sweepOwn): each that Studio did not note (`noteOwnFile`), or that is no longer the file
     noted, is moved to `asideDir`'s `<slug> set aside/<when>/`, out of the worker's reach, never deleted, and the run is
     `failed`, `why: "own"`; found before the worker starts, nothing is started. A project whose run is running is left as it is: { state, why: "running" }; one whose run died

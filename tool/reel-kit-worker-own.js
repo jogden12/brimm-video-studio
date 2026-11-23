@@ -12,12 +12,13 @@
 // was found at fails.
 //
 // The look is not sandboxed, so it must not be steered: by then nothing of the worker's should run (`stopHolders`, before each look,
-// kills what still holds the project or its temp folder open), and each step is checked against the one before it. The walk
+// names in the log what still holds the project or its temp folder open, and stops none of it, as a holder may be hers), and each step
+// is checked against the one before it. The walk
 // (`ownEntries`) goes into a folder only when its real path is where the walk is and it is the folder it looked at (device and inode),
 // before and after reading it; each move is made only when, just before it, the entry's folder is still at its real path inside the
 // project and the entry is still the one the walk saw. Anything else is refused: the entry is left, said in the log, and the run
-// fails. A SMALL WINDOW STAYS: Node has no openat or renameat, so between that last check and the rename itself a process that got
-// away (one holding nothing open in the project, which `stopHolders` can't find) could still swap a folder for a link. What was moved
+// fails. A SMALL WINDOW STAYS: Node has no openat or renameat, so between that last check and the rename itself a process still
+// running (`stopHolders` names what holds the project open and stops none of it) could still swap a folder for a link. What was moved
 // is looked at once more where it landed, and said loudly when it is not what was found.
 //
 // For Task 17 (`reelkit app`, which opens the HyperFrames app on a project's public/): run the look (reel-kit-worker.js sweepProject)
@@ -271,38 +272,35 @@ function holdersOf(dirs, run) {
   return [...pids];
 }
 
-/** Stop what still runs with the project or the run's temp folder open, before the project is looked over: a process the worker
-    started that left its process group (a new session from the edit.py it wrote, say) is not stopped with the group, and could change
-    the project under the look. Every process whose working folder or any open file is inside one of `dirs` (holdersOf), but this one
-    and the one that started it (`spare`), is killed with SIGKILL, once `startOf(pid)` has said when it started: a pid whose start can't
-    be read is never killed (it is gone, or not ours to name), and is said to be left running. Then it waits, up to `grace` ms, for
-    them to be gone, and asks again, three times at most. Each is a line of `log` starting with `said`. It kills ANY process of this
-    user that holds the project open, a Terminal left in it and the HyperFrames app's agent in its public/ among them: Task 17 must
-    not start a worker on a project the app has open. A process holding nothing open there is not found: the checks of each step
-    (ownEntries, sweepOwn) are what is left for that. Never throws. */
-export async function stopHolders({ dirs, said, run = spawnSync, startOf, alive, wait, grace = 5000, log = () => {}, spare = [process.pid, process.ppid], kill = process.kill.bind(process) }) {
+/** The command line of the process `pid`, as `ps -o command=` says it with LC_ALL=C, or "" when it is not running or `ps` can't say. */
+function commandOf(pid, run) {
   try {
-    for (let round = 0; round < 3; round++) {
-      const pids = holdersOf(dirs, run);
-      if (pids === null) return void log(`${said}, what still holds the project open could not be asked of lsof: nothing was stopped.`);
-      const killed = [];
-      for (const pid of pids.filter((p) => !spare.includes(p))) {
-        if (startOf(pid) === null) {
-          log(`${said}, process ${pid} holds the project or its temp folder open, but when it started could not be read: it was left running.`);
-          continue;
-        }
-        try {
-          kill(pid, "SIGKILL");
-          killed.push(pid);
-          log(`${said}, process ${pid} still held the project or its temp folder open, and was stopped.`);
-        } catch (e) {
-          log(`${said}, process ${pid} holds the project or its temp folder open and could not be stopped (${e.code || e.message}).`);
-        }
-      }
-      if (!killed.length) return;
-      for (let waited = 0; waited < grace && killed.some((pid) => alive(pid)); waited += 25) await wait(25);
+    const ran = run("/bin/ps", ["-o", "command=", "-p", String(pid)], { env: { LC_ALL: "C" }, encoding: "utf8", timeout: 5000 });
+    return ran && ran.status === 0 ? String(ran.stdout ?? "").trim().replace(/\s+/g, " ").slice(0, 300) : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Name what still runs with the project or the run's temp folder open, before the project is looked over, and stop none of it. Every
+    process whose working folder or any open file is inside one of `dirs` (holdersOf), but this one and the one that started it
+    (`spare`), is a line of `log` starting with `said`: its pid, when it started (`startOf(pid)`) and its command (`ps`), and that it
+    was left running. It kills nothing: a holder may be hers (the HyperFrames app's agent in the project's public/, a Terminal left in
+    it, QuickTime playing a render), and stopping it could lose her work. A later fix narrows a stop to processes that started at or
+    after the worker's recorded start. Until then a process the worker started that left its process group can still change the
+    project under the look: the checks of each step (ownEntries, sweepOwn) are what is left for that, as for a process holding
+    nothing open there. Never throws. */
+export async function stopHolders({ dirs, said, run = spawnSync, startOf, spare = [process.pid, process.ppid], log = () => {} }) {
+  try {
+    const pids = holdersOf(dirs, run);
+    if (pids === null) return void log(`${said}, what still holds the project open could not be asked of lsof.`);
+    for (const pid of pids.filter((p) => !spare.includes(p))) {
+      const start = startOf(pid);
+      const command = commandOf(pid, run);
+      const what = [start === null ? "when it started could not be read" : `started ${start}`, command ? `running ${command}` : "its command could not be read"].join(", ");
+      log(`${said}, process ${pid} (${what}) holds the project or its temp folder open: it was left running.`);
     }
   } catch (e) {
-    log(`${said}, what still holds the project open could not be stopped (${e.code || e.message}).`);
+    log(`${said}, what still holds the project open could not be named (${e.code || e.message}).`);
   }
 }

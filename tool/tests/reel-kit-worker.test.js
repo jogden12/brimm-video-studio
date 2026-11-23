@@ -1073,7 +1073,7 @@ describe("the worker's status", () => {
     for (const place of asides(w)) assert.ok(!existsSync(join(place, "sub", "CLAUDE.md")), "nothing was copied");
   });
 
-  it("stops what still holds the project or its temp folder open before each look, and only a process it could name", async () => {
+  it("names what still holds the project or its temp folder open before each look, and stops none of it", async () => {
     const w = world();
     mkdirSync(join(w.project, "sub"));
     writeFileSync(join(w.project, "sub", "CLAUDE.md"), "planted\n");
@@ -1094,12 +1094,22 @@ describe("the worker's status", () => {
     const lines = [];
     const claude = standIn(w);
     const ended = await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, claude, { run: runOf(held), log: (line) => lines.push(line) }));
-    assert.equal(await first.gone, "SIGKILL");
     assert.deepEqual([ended.state, ended.why], ["failed", "own"]);
     // It was asked of the project (the temp folder is not made yet) before the project was looked over.
     assert.deepEqual(asked[0], { args: ["-t", "+D", realpathSync(w.project)], planted: true });
-    assert.ok(lines.some((line) => line.includes(`process ${first.child.pid}`) && /was stopped/.test(line)), lines.join(" | "));
+    // A holder may be hers (the HyperFrames app's agent, a Terminal, QuickTime): it is named in the log, with when it started and its
+    // command, and left running.
+    assert.equal(first.child.exitCode, null);
+    assert.equal(first.child.signalCode, null, "it still runs");
+    const named = lines.find((line) => line.includes(`process ${first.child.pid}`));
+    assert.ok(named, lines.join(" | "));
+    assert.match(named, /left running/);
+    assert.doesNotMatch(named, /was stopped/);
+    assert.match(named, /started \w{3} \w{3} [ \d]\d \d\d:\d\d:\d\d \d{4}/, named);
+    assert.match(named, /\/bin\/sleep 30/, named);
     assert.ok(!lines.some((line) => line.includes(`process ${process.pid}`)));
+    first.child.kill("SIGKILL");
+    await first.gone;
 
     // After a run too, in the project and the run's temp folder; a process whose start can't be read is never killed.
     const second = sleeper();
