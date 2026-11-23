@@ -297,8 +297,12 @@ export function planAsked(words, flags) {
   const only = (...allowed) => Object.keys(flags).every((flag) => allowed.includes(flag));
   const said = (word) => typeof word === "string" && word.trim() !== "";
   if (first === "new") {
-    if (!said(second) || more.length || !only("explainer", "voice")) return null;
-    return { form: "new", title: second, explainer: flags.explainer === true, voice: flags.voice === undefined ? null : flags.voice[flags.voice.length - 1] };
+    if (!said(second) || more.length || !only("explainer", "voice", "cue", "shot", "line")) return null;
+    const cues = flags.cue ?? [];
+    const shots = flags.shot ?? [];
+    const lines = flags.line ?? [];
+    if (flags.explainer === true && shots.length) return null;
+    return { form: "new", title: second, explainer: flags.explainer === true, voice: flags.voice === undefined ? null : flags.voice[flags.voice.length - 1], cues, shots, lines };
   }
   if (said(first) && second === "agreed") return more.length === 1 && said(more[0]) && only() ? { form: "agreed", episode: first, video: more[0] } : null;
   if (said(first) && second === "join") return more.every(said) && only() ? { form: "join", episode: first, videos: more } : null;
@@ -355,13 +359,28 @@ function plannedWith(ctx, title) {
     rule for a folder's name (names.js episodeFolderName), with only its first record. Ends with 0, or with 1, having said why and written
     nothing: a voice without --explainer, a voice that is neither, a title over 80 characters, or a title already planned and not yet
     filmed. The title's escapes are turned (textArg), so a title can hold a dollar sign or a quote. */
-export function newPlan(ctx, { title: given, explainer, voice }) {
+export function newPlan(ctx, { title: given, explainer, voice, cues = [], shots = [], lines = [] }) {
   const title = oneLine(textArg(given));
   if (voice !== null && !explainer) return refuse(ctx, "A voice is only for an explainer.");
   if (voice !== null && !["sallie", "heygen"].includes(voice)) return refuse(ctx, `A voice is Sallie's own ("sallie") or a HeyGen voice ("heygen").`);
   if (length(title) > MOST.title) return refuse(ctx, `A title is at most ${MOST.title} characters, and that is ${length(title)}.`);
   const same = plannedWith(ctx, title);
   if (same) return refuse(ctx, `There's a planned video called "${same}" already. Say "show me the plan for ${same}".`);
+
+  const hasPackage = cues.length + shots.length + lines.length > 0;
+  let plan, texts;
+  if (hasPackage) {
+    const refFolder = referencesFolder(ctx.root);
+    const validated = packageOf({ cues, shots, lines }, { explainer, ref: (said) => pictureIn(refFolder, said) });
+    if (validated.problems.length) {
+      for (const problem of validated.problems) ctx.say(problem);
+      ctx.say("Nothing was saved.");
+      return 1;
+    }
+    plan = validated.plan;
+    texts = packageFiles(title, plan, { explainer });
+  }
+
   const now = new Date(ctx.now());
   const day = ctx.deps.today ? ctx.deps.today() : localDay(now);
   let names = [];
@@ -372,6 +391,13 @@ export function newPlan(ctx, { title: given, explainer, voice }) {
   }
   const folder = join(ctx.episodes, episodeFolderName(names, day, title, ctx.machine));
   const record = newPlannedEpisode({ id: newId(day, ctx.deps.rand), machine: ctx.machine, at: localStamp(now), title, route: explainer ? "explainer" : "script", voice, writer: writerOf(ctx) });
+
+  if (hasPackage) {
+    const sizes = Object.fromEntries(Object.entries(texts).map(([name, text]) => [name, Buffer.byteLength(text)]));
+    Object.assign(record.planned, { set: localStamp(now), ...plan });
+    Object.assign(record.files, sizes);
+  }
+
   // The folder is made here, and a name already taken is never used: making it without `recursive` fails on one.
   try {
     mkdirSync(ctx.episodes, { recursive: true });
@@ -381,6 +407,10 @@ export function newPlan(ctx, { title: given, explainer, voice }) {
   }
   const work = workOf(ctx);
   try {
+    if (hasPackage) {
+      const put = textWriter({ work: join(work, "pkg"), ...ruleOpts(ctx) });
+      for (const [name, text] of Object.entries(texts)) put(join(folder, name), text, { replace: false });
+    }
     writeEpisode(folder, record, { expectRev: 0, writeText: textWriter({ work, ...ruleOpts(ctx) }), writer: writerOf(ctx), home: ctx.home });
   } catch (e) {
     // The folder this command made, with no record in it, is no plan: it is taken away, so that nothing is left that looks like an import that stopped.
@@ -389,7 +419,11 @@ export function newPlan(ctx, { title: given, explainer, voice }) {
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
-  ctx.say(`"${title}" is planned. Next: ${madeOf(explainer)}.`);
+  if (hasPackage) {
+    ctx.say(`"${title}" is planned. ${savedLine(title, plan, { explainer })}`);
+  } else {
+    ctx.say(`"${title}" is planned. Next: ${madeOf(explainer)}.`);
+  }
   return 0;
 }
 
