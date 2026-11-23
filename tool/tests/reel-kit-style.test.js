@@ -3,13 +3,13 @@
 // The shipped pack is copied into the test's own folder wherever a test changes it, so tool/brand/reel-kit is never written.
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cloneFile } from "../dropbox.js";
 import { folderFingerprint, reelKitHome } from "../reel-kit.js";
 import {
-  SHIPPED_PACK, backupPack, ensureHerPack, herPack, packDiff, packFault, restorePack, shippedMoved, syncPack
+  NOT_YET, SHIPPED_PACK, backupPack, ensureHerPack, herPack, packDiff, packFault, restorePack, shippedMoved, swapMarker, syncPack
 } from "../reel-kit-style.js";
 
 const made = [];
@@ -243,6 +243,14 @@ describe("her Reel Kit style pack in Dropbox", () => {
     assert.ok(!lines.some((l) => /brand\.css/.test(l)), "brand.css is the same, and a backup is not her pack");
     assert.ok(!lines.some((l) => l.startsWith("motion:")), "an unchanged key is said");
     for (const l of lines) assert.doesNotMatch(l, /\/Users|\n/);
+
+    // Dropbox signed out: it says so, and nothing untrue about her pack.
+    rmSync(w.root, { recursive: true });
+    const gone = packDiff({ settings: w.settings, shipped: w.shipped });
+    assert.equal(gone.length, 1);
+    assert.match(gone[0], /BRIMM Video's folder/);
+    mkdirSync(w.root);
+    assert.match(packDiff({ settings: w.settings, shipped: w.shipped })[0], /no Reel Kit style folder/);
   });
 
   it("refuses a font from neither Google Fonts nor Adobe Fonts", () => {
@@ -291,6 +299,9 @@ describe("her Reel Kit style pack in Dropbox", () => {
     writeFileSync(join(her, "STYLE.md"), `${md}\nHosted by Sallie Holder.\n`);
     assert.match(packFault(her), /Sallie Holder/);
     assert.match(packFault(her), /Sallie Ogden/);
+    // "no " inside a word is not a line saying never to use it.
+    writeFileSync(join(her, "STYLE.md"), `${md}\nPiano by Sallie Holder.\n`);
+    assert.match(packFault(her), /Sallie Holder/);
     writeFileSync(join(her, "STYLE.md"), md);
 
     // A colour she changed on purpose is hers.
@@ -300,5 +311,83 @@ describe("her Reel Kit style pack in Dropbox", () => {
     assert.match(packFault(her), /accent/);
     editJson(join(her, "style.json"), (s) => { s.colors.accent = "#C1AD97"; delete s.colors.dark; });
     assert.match(packFault(her), /dark/);
+  });
+  it("puts the style back when a run was killed in the middle of its swap", () => {
+    const w = world();
+    assert.equal(syncPack({ settings: w.settings, home: w.home, shipped: w.shipped }), "");
+    const style = styleOf(w.home);
+    const was = filesOf(style);
+    // Killed between setting the style aside and renaming the new one in: no style, only style.old (and a style.new).
+    renameSync(style, `${style}.old`);
+    mkdirSync(`${style}.new`);
+    // And this run refuses: the style must still come back.
+    const her = herPack(w.settings);
+    const text = readFileSync(join(her, "style.json"), "utf8");
+    writeFileSync(join(her, "style.json"), "{");
+    assert.match(syncPack({ settings: w.settings, home: w.home, shipped: w.shipped }), /style\.json/);
+    assert.deepEqual(filesOf(style), was, "the style was not put back");
+    assert.ok(!existsSync(`${style}.old`) && !existsSync(`${style}.new`));
+
+    // Killed again, and this run succeeds: the old style is put back, then replaced, never just deleted.
+    writeFileSync(join(her, "style.json"), text.replace('"size": 54', '"size": 56'));
+    renameSync(style, `${style}.old`);
+    assert.equal(syncPack({ settings: w.settings, home: w.home, shipped: w.shipped }), "");
+    assert.equal(readJson(join(style, "style.json")).captions.hifi.size, 56);
+    assert.ok(!existsSync(`${style}.old`));
+
+    // Killed while the old one was being taken away, after the swap was whole: the new style stays.
+    const now = filesOf(style);
+    cpSync(style, `${style}.old`, { recursive: true });
+    writeFileSync(join(`${style}.old`, "style.json"), "older");
+    writeFileSync(swapMarker(w.home), "committed\n");
+    writeFileSync(join(her, "style.json"), "{");
+    assert.match(syncPack({ settings: w.settings, home: w.home, shipped: w.shipped }), /style\.json/);
+    assert.deepEqual(filesOf(style), now);
+    assert.ok(!existsSync(`${style}.old`) && !existsSync(swapMarker(w.home)));
+  });
+
+  it("names a file in the board by its name, never by a path", () => {
+    const w = world();
+    ensureHerPack({ settings: w.settings, home: w.home, shipped: w.shipped });
+    const her = herPack(w.settings);
+    writeFileSync(join(her, "board", "notes.md"), "Made by Sallie Holder.\n");
+    const named = packFault(her);
+    assert.match(named, /notes\.md in Reel Kit style's board/);
+    assert.doesNotMatch(named, /\//);
+    rmSync(join(her, "board", "notes.md"));
+
+    symlinkSync(join(w.base, "elsewhere.jpg"), join(her, "board", "img", "extra.jpg"));
+    const linked = syncPack({ settings: w.settings, home: w.home, shipped: w.shipped });
+    assert.match(linked, /extra\.jpg in Reel Kit style's board is a link/);
+    assert.doesNotMatch(linked, /\//);
+    rmSync(join(her, "board", "img", "extra.jpg"));
+
+    const css = readFileSync(join(her, "brand.css"), "utf8");
+    for (const odd of ["fonts/../../elsewhere/Odd.ttf", "https://fonts.example.com/css/Odd.woff2?v=2"]) {
+      writeFileSync(join(her, "brand.css"), css.replace("fonts/JosefinSans-normal-400.ttf", odd));
+      const line = packFault(her);
+      assert.match(line, /Odd\.(ttf|woff2)/);
+      assert.doesNotMatch(line, /\//, line);
+    }
+    writeFileSync(join(her, "brand.css"), css);
+    assert.equal(packFault(her), "");
+  });
+
+  it("makes her pack only on the Mac Studio; an installed Mac waits for Dropbox to bring it", () => {
+    const w = world();
+    const installed = { mode: "installed" };
+    const laptop = join(w.base, "laptop home");
+    mkdirSync(laptop);
+    assert.deepEqual(ensureHerPack({ settings: w.settings, home: laptop, shipped: w.shipped, build: installed }), { made: false, why: NOT_YET });
+    assert.equal(syncPack({ settings: w.settings, home: laptop, shipped: w.shipped, build: installed }), NOT_YET);
+    assert.ok(!existsSync(herPack(w.settings)), "an installed Mac made her pack");
+    assert.ok(!existsSync(styleOf(laptop)));
+    assert.ok(!existsSync(join(reelKitHome(laptop), "style-made.json")), "an installed Mac recorded a pack it has not seen");
+
+    // The Mac Studio (dev mode) makes it; then the installed Mac takes it as it is.
+    assert.equal(ensureHerPack({ settings: w.settings, home: w.home, shipped: w.shipped, build: { mode: "dev" } }).made, true);
+    assert.equal(syncPack({ settings: w.settings, home: laptop, shipped: w.shipped, build: installed }), "");
+    assert.equal(readJson(join(reelKitHome(laptop), "style-made.json")).from, folderFingerprint(w.shipped));
+    assert.ok(existsSync(join(styleOf(laptop), "style.json")));
   });
 });

@@ -12,10 +12,12 @@
 // again at the moment of each write. Nothing here makes a folder with `recursive`, so nothing can make BRIMM Video's folder.
 import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, renameSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildOf, isInstalled } from "./build.js";
 import { cloneIn, replaceIn } from "./dropbox.js";
 import { folderFingerprint, reelKitHome } from "./reel-kit.js";
+import { commit, fresh, recoverAll, rollBack, swapIn } from "./reel-kit-swap.js";
 import { rootGone } from "./settings.js";
 
 const TOOL = dirname(fileURLToPath(import.meta.url));
@@ -24,6 +26,8 @@ export const SHIPPED_PACK = join(TOOL, "brand", "reel-kit");
 /** The brand's font files (Google Fonts TTFs, Allison and the OFL texts): copied into the style Reel Kit reads, never into Dropbox. */
 export const BRAND_FONTS = join(TOOL, "brand", "fonts");
 const BRAND_MD = join(TOOL, "brand", "brand.md");
+/** This checkout's build (build.js): whether this is a dev Mac (the Mac Studio, which makes her pack) or an installed one. */
+const thisBuild = () => buildOf(dirname(TOOL));
 
 /** Her pack's folder's name, in BRIMM Video. */
 export const PACK_NAME = "Reel Kit style";
@@ -35,6 +39,8 @@ export const herPack = (settings) => join(settings.root, PACK_NAME);
 export const styleDir = (home) => join(reelKitHome(home), "style");
 /** This Mac's record that her pack was made, or seen, in Dropbox: `{ madeAt, from }` (and `foundAt` when another Mac made it). */
 export const madeRecord = (home) => join(reelKitHome(home), "style-made.json");
+/** The marker reel-kit-swap.js's commit writes while the old style is taken away, so a run killed then is known to have been whole. */
+export const swapMarker = (home) => join(reelKitHome(home), "style-swap.committed");
 
 /** The text files of her pack that Reel Kit reads, at its top. */
 const TOP = ["STYLE.md", "style.json", "brand.css"];
@@ -57,6 +63,12 @@ const NO_ROOT = "BRIMM Video's folder in Dropbox is not here (Dropbox may be sig
 const GONE = "Your Reel Kit style folder is no longer in BRIMM Video in Dropbox. It was there before, so Studio will not edit with its starting style in its place: bring the folder back from Dropbox's deleted files, or ask Jason.";
 const NOT_FOLDER = "Reel Kit style in BRIMM Video is not a folder, so Reel Kit's style was left as it was: ask Jason.";
 const NO_PACK = "There is no Reel Kit style folder in BRIMM Video yet, so there is nothing to keep a copy of.";
+/** An installed Mac never makes her pack: the Mac Studio does, and Dropbox brings it over. */
+export const NOT_YET = "Your Reel Kit style isn't on this Mac yet: Dropbox may still be bringing it over. Try again in a few minutes, or ask Jason.";
+const NO_PACK_TO_COMPARE = "There is no Reel Kit style folder in BRIMM Video yet, so there is nothing to compare with the starting style.";
+
+/** A file of her pack as she finds it in Finder, never a path: its own name, and "Reel Kit style's board" when it sits in board/. */
+const nameIn = (rel) => `${basename(rel)} in Reel Kit style${rel.startsWith("board/") ? "'s board" : ""}`;
 
 /** A refusal in her words: thrown inside this module and given back as its line. */
 class Refused extends Error {}
@@ -132,12 +144,12 @@ function walkPack(dir) {
       if (leftover(name) || (rel === "" && isBackup(name))) continue;
       const r = rel ? `${rel}/${name}` : name;
       const kind = lstatSync(join(abs, name));
-      if (kind.isSymbolicLink()) throw new Refused(`${r} in Reel Kit style is a link, and Studio copies only plain files and folders, so Reel Kit's style was left as it was.`);
+      if (kind.isSymbolicLink()) throw new Refused(`${nameIn(r)} is a link, and Studio copies only plain files and folders, so Reel Kit's style was left as it was.`);
       if (kind.isDirectory()) {
         dirs.push(r);
         walk(join(abs, name), r);
       } else if (kind.isFile()) files.push(r);
-      else throw new Refused(`${r} in Reel Kit style is not a file or a folder, so Reel Kit's style was left as it was.`);
+      else throw new Refused(`${nameIn(r)} is not a file or a folder, so Reel Kit's style was left as it was.`);
     }
   };
   walk(dir, "");
@@ -148,7 +160,7 @@ function walkPack(dir) {
 function copyLocal(from, to, files) {
   for (const f of files) {
     const bytes = readSafe(join(from, f));
-    if (bytes === null) throw new Refused(`${f} in Reel Kit style could not be read (Dropbox may still be bringing it over), so Reel Kit's style was left as it was.`);
+    if (bytes === null) throw new Refused(`${nameIn(f)} could not be read (Dropbox may still be bringing it over), so Reel Kit's style was left as it was.`);
     mkdirSync(dirname(join(to, f)), { recursive: true });
     writeFileSync(join(to, f), bytes);
   }
@@ -227,8 +239,9 @@ const madeFromOf = (pack) => {
     "" or the one line she reads, and nothing is made with it. A pack found there that this Mac has no record of is recorded as seen
     (`foundAt`), so this Mac too refuses once it has gone. Made, it holds the shipped pack's files and `.made-from` (its fingerprint);
     `style.json` goes in last, so a pack cut short never reads as whole, and what this run put in is taken back on a failure.
-    `shipped`, `now` and `dropbox` (cloneIn's options) are a test's to give. */
-export function ensureHerPack({ settings, home = homedir(), shipped = SHIPPED_PACK, now = Date.now(), dropbox = {}, log = () => {} } = {}) {
+    Only a dev Mac makes it (`build`, build.js's, this checkout's by default: the Mac Studio, which runs Reel Kit first); an installed
+    Mac that finds no pack makes nothing and says NOT_YET. `shipped`, `now` and `dropbox` (cloneIn's options) are a test's to give. */
+export function ensureHerPack({ settings, home = homedir(), shipped = SHIPPED_PACK, now = Date.now(), dropbox = {}, log = () => {}, build = thisBuild() } = {}) {
   const her = herPack(settings);
   if (rootGone(settings.root)) return { made: false, why: NO_ROOT };
   const record = readRecord(home);
@@ -245,6 +258,7 @@ export function ensureHerPack({ settings, home = homedir(), shipped = SHIPPED_PA
     return { made: false, why: "" };
   }
   if (record) return { made: false, why: GONE };
+  if (isInstalled(build)) return { made: false, why: NOT_YET };
 
   const work = workOf(home);
   const pack = join(work, "pack");
@@ -301,7 +315,7 @@ const fontFilesInCss = (css) =>
   [...css.matchAll(/@font-face\s*\{([^}]*)\}/gi)].flatMap((m) => [...m[1].matchAll(/url\(\s*['"]?([^'")]+?)['"]?\s*\)/gi)].map((u) => u[1]));
 
 /** Whether a "Sallie Holder" in `text` at `index` is a line saying never to use it (Task 7's pack test's form). */
-const toldNever = (text, index) => /["“]$|Never |no /i.test(text.slice(Math.max(0, index - 20), index));
+const toldNever = (text, index) => /["“]$|\bNever |\bno /i.test(text.slice(Math.max(0, index - 20), index));
 
 /** What is wrong with the pack at `dir`, as one plain line, or "" when nothing is. In order: style.json reads as JSON (a half-synced
     file fails here), and STYLE.md and brand.css read; every font family style.json or brand.css names is Josefin Sans or Allison,
@@ -349,7 +363,7 @@ export function packFault(dir, { fonts = BRAND_FONTS } = {}) {
   }
   for (const file of files) {
     const name = file.startsWith("fonts/") ? file.slice(6) : "";
-    if (!name || name.includes("/") || !held.has(name)) return `Reel Kit style uses the font file ${file.replace(/^fonts\//, "")}, which is not one of the brand's Google Fonts files, so Reel Kit's style was left as it was.`;
+    if (!name || name.includes("/") || !held.has(name)) return `Reel Kit style uses the font file ${basename(file.split(/[?#]/)[0]) || "with no name"}, which is not one of the brand's Google Fonts files, so Reel Kit's style was left as it was.`;
   }
 
   let all;
@@ -362,7 +376,7 @@ export function packFault(dir, { fonts = BRAND_FONTS } = {}) {
     const t = textOf(join(dir, f));
     if (t === null) continue;
     for (const m of t.matchAll(/Sallie Holder/g)) {
-      if (!toldNever(t, m.index)) return `${f} in Reel Kit style uses the name Sallie Holder: the name on screen is Sallie Ogden, so Reel Kit's style was left as it was.`;
+      if (!toldNever(t, m.index)) return `${nameIn(f)} uses the name Sallie Holder: the name on screen is Sallie Ogden, so Reel Kit's style was left as it was.`;
     }
   }
 
@@ -396,19 +410,25 @@ function fontsWanted(dir, fonts) {
     Allison and the OFL texts), built whole in `style.new` beside it and swapped in for `style`. Makes her pack first, the first time
     (ensureHerPack). Gives "" or the one line she reads; with a line nothing is copied and `style` is as it was. Her pack is never
     written into, and the shipped pack never read while she has her own. */
-export function syncPack({ settings, home = homedir(), shipped = SHIPPED_PACK, now = Date.now(), dropbox = {}, fonts = BRAND_FONTS, log = () => {} } = {}) {
-  const ensured = ensureHerPack({ settings, home, shipped, now, dropbox, log });
-  if (ensured.why) return ensured.why;
-  const her = herPack(settings);
+export function syncPack({ settings, home = homedir(), shipped = SHIPPED_PACK, now = Date.now(), dropbox = {}, fonts = BRAND_FONTS, log = () => {}, build = thisBuild() } = {}) {
   const style = styleDir(home);
-  const next = `${style}.new`;
-  const old = `${style}.old`;
+  // The swap is reel-kit-swap.js's, in REEL_KIT_HOME (all of it this Mac's own): a run killed in the middle of one is put right
+  // first, before anything can refuse, so `style` is never left missing with only `style.old` holding it.
+  const ctx = { paths: { work: reelKitHome(home), committed: swapMarker(home) }, journal: [] };
   try {
     mkdirSync(reelKitHome(home), { recursive: true });
-    rmSync(next, { recursive: true, force: true });
+    recoverAll(ctx, [style]);
+  } catch (e) {
+    return lineOf(e, log);
+  }
+  const ensured = ensureHerPack({ settings, home, shipped, now, dropbox, log, build });
+  if (ensured.why) return ensured.why;
+  const her = herPack(settings);
+  let next = "";
+  try {
+    next = fresh(ctx, style);
     const { files } = walkPack(her);
     const wanted = files.filter((f) => TOP.includes(f) || /^headshot\.[^/]+$/i.test(f) || (f.startsWith("board/") && !f.startsWith("board/fonts/")));
-    mkdirSync(next);
     copyLocal(her, next, wanted);
     // What is checked is the copy Reel Kit will read, so a change she makes meanwhile is never half taken.
     const fault = packFault(next, { fonts });
@@ -418,19 +438,17 @@ export function syncPack({ settings, home = homedir(), shipped = SHIPPED_PACK, n
       mkdirSync(join(next, into), { recursive: true });
       for (const f of names) writeFileSync(join(next, into, f), readFileSync(join(fonts, f)));
     }
-    rmSync(old, { recursive: true, force: true });
-    const had = existsSync(style);
-    if (had) renameSync(style, old);
-    try {
-      renameSync(next, style);
-    } catch (e) {
-      if (had) renameSync(old, style);
-      throw e;
-    }
-    rmSync(old, { recursive: true, force: true });
+    swapIn(ctx, next, style);
+    const left = commit(ctx);
+    if (left.length) log(`Reel Kit style: the old style could not be taken away yet; the next run takes it away.`);
     return "";
   } catch (e) {
-    rmSync(next, { recursive: true, force: true });
+    try {
+      rollBack(ctx);
+      if (next) rmSync(next, { recursive: true, force: true });
+    } catch {
+      // What is left is put right by the next run's recoverAll.
+    }
     return lineOf(e, log, settings.root);
   }
 }
@@ -518,6 +536,8 @@ const shown = (v) => (typeof v === "string" ? `"${v}"` : JSON.stringify(v));
     brand.css are not the same. None when they are the same. `before …` folders are not hers. */
 export function packDiff({ settings, shipped = SHIPPED_PACK } = {}) {
   const her = herPack(settings);
+  if (rootGone(settings.root)) return [NO_ROOT];
+  if (kindOf(her) !== "folder") return [NO_PACK_TO_COMPARE];
   const lines = [];
   let hers;
   try {
