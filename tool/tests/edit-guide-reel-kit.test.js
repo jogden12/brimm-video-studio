@@ -87,6 +87,12 @@ describe("the guide on a raw video whose main video has a Reel Kit edit", () => 
     assert.equal(await line(w), says(STEPS.rendered));
   });
 
+  it("says to export a rendered edit from HyperFrames once it was changed there after its render (final review C2)", async () => {
+    const { w, dir } = rkWorld({ state: "rendered", entry: { state: "opened", opened: ["2026-10-20 14:10"] } });
+    writeFileSync(join(dir, "public", "index.html"), "<html>changed in the app after its render</html>\n");
+    assert.equal(await line(w), says(STEPS.opened));
+  });
+
   it("says the wait for version 2, not the hand-off, on a Mac that hands off version 1 only, once it is rendered", async () => {
     const { w } = rkWorld({ state: "rendered", handoffVersion: 1 });
     assert.equal(await line(w, { settings: { ...w.t.ctx.settings, import: "light", drop: "Drop", handoffVersion: 1 } }), says(WAITS_V2));

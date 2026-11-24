@@ -314,7 +314,11 @@ export function lookForExports(input, answers = {}) {
       if (rk) {
         // A Reel Kit edit is rendered by Studio, after her go: told to render it, and, when its render is of an edit no longer there, why
         // that render is not taken.
-        const said = part.here && (part.stale || []).length ? `${Cap}'s Reel Kit edit changed after it was rendered, so that render is not taken. ${RENDER_AGAIN}` : `${Cap} has no Reel Kit render yet. ${RENDER_IT}`;
+        // A rendered edit changed in the app since is the app's: it is exported there, never rendered again.
+        const inApp = part.here && part.changedInApp === true;
+        const said = inApp
+          ? `${Cap}'s Reel Kit edit was changed in HyperFrames after it was rendered, so that render is not taken. Export it from HyperFrames on This Mac, as MP4`
+          : part.here && (part.stale || []).length ? `${Cap}'s Reel Kit edit changed after it was rendered, so that render is not taken. ${RENDER_AGAIN}` : `${Cap} has no Reel Kit render yet. ${RENDER_IT}`;
         if (!part.here) stops.push(`${Cap}'s Reel Kit edit is on ${part.mac}, so its render is there. Finish it on that Mac.`);
         else if (key !== "main") asks.push(`${said}, or say to leave it out of this hand-off.`);
         else stops.push(`${said}, then say "hand it off" again.`);
@@ -565,6 +569,8 @@ export function exportsFound({ home, exports = null, name, record, zone = LOCAL_
     const edit = here && byReelKit(project) ? readEdit(work, project) : null;
     return {
       key, label, ...(reel ? { reel } : {}), project: project.name, ...(byReelKit(project) ? { maker: project.maker } : {}), ...(here ? { dir } : {}), fromSuggestion: project.fromSuggestion ?? null, here, mac: project.on,
+      // A rendered edit whose composition is no longer the one finalize recorded: changed in the app after its render.
+      ...(edit ? { changedInApp: edit.state?.state === "rendered" && typeof edit.state.fingerprint === "string" && edit.now !== null && edit.now !== edit.state.fingerprint } : {}),
       changed: here ? (edit ? editChange(edit.dir) : projectChange(dir)) : null, ...(here ? recordsIn(dir, downloads, zone, picked, edit) : { recorded: [], renders: [], ...(byReelKit(project) ? { stale: [] } : {}) })
     };
   });

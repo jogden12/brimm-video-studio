@@ -74,7 +74,7 @@ import { pageOf, publishInput, stagePage } from "./storyboard-opening.js";
 import { styleCommand, styleNow } from "./reel-kit-style-chat.js";
 import { MODES, appWhy, changedInApp, entryOf, modeLeans, modeOf as modeNamed, projectFolderOf, readCapped, readState, reelKitNotes, scaffold, slugOf, startWhy, writeState } from "./reel-kit-project.js";
 import { JOBS, dequeue, enqueue, macLock, markOpened, noteOwnFile, processStart, queuedOf, runJob, statusOf, stoppedLine, sweepProject, wasOpened } from "./reel-kit-worker.js";
-import { RENDER_SAY, renderReelKit, renderWhy, renderingBy } from "./reel-kit-render.js";
+import { RENDER_SAY, renderReelKit, renderWhy, renderedChanged, renderingBy } from "./reel-kit-render.js";
 import { writeWhole as writeFileWhole } from "./reel-kit-worker-own.js";
 import { appOf, episodeWork, exportsWords } from "./settings.js";
 import { PIN, pinFrom } from "./reel-kit.js";
@@ -657,7 +657,7 @@ function stateLine(status, state = null, dir = null) {
     if (last?.why === "planted") return EDIT_SAY.renderPlanted;
     return last && typeof last.why === "string" && last.why !== "" ? EDIT_SAY.renderBroke : EDIT_SAY.ready;
   }
-  if (status.state === "rendered") return EDIT_SAY.rendered;
+  if (status.state === "rendered") return (dir === null ? "" : renderedChanged(dir, state)) || EDIT_SAY.rendered;
   if (status.state === "failed") return EDIT_SAY.failed;
   return EDIT_SAY.unread;
 }

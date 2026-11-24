@@ -146,7 +146,7 @@ import { afterJoin, joinRun } from "./join.js";
 import { reelkitCommand } from "./reel-kit-commands.js";
 import { processStart, queuedFor, queuedOf, statusOf, wasOpened } from "./reel-kit-worker.js";
 import { projectFolderOf, readState, slugOf } from "./reel-kit-project.js";
-import { renderWhy, renderingBy } from "./reel-kit-render.js";
+import { renderWhy, renderedChanged, renderingBy } from "./reel-kit-render.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
 import { ON_OTHER_MAC, ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, notWholeHere, onOtherMac, recordingAt, recordingStat, roleOf } from "./where.js";
 
@@ -6804,7 +6804,7 @@ function guideReelKit(ctx, e, r) {
       const dir = projectFolderOf(ctx.home, e.name, entry.name);
       const state = readState(dir);
       const status = statusOf(dir, ctx.alive, startOf);
-      return { status, state, rendering: renderingBy(state, ctx.alive, startOf), refused: status?.state === "ready" ? renderWhy(dir, state) : "", opened: wasOpened(ctx.home, slugOf(r, entry.key, entry.version)) };
+      return { status, state, rendering: renderingBy(state, ctx.alive, startOf), refused: status?.state === "ready" ? renderWhy(dir, state) : status?.state === "rendered" ? renderedChanged(dir, state) : "", opened: wasOpened(ctx.home, slugOf(r, entry.key, entry.version)) };
     } catch {
       return null;
     }

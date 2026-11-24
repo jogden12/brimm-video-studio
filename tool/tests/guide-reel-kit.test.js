@@ -264,6 +264,9 @@ describe("what the guide reads of a video's Reel Kit edits (reelKitEdits)", () =
     assert.deepEqual(one(seen("ready", { refused: "changed" }), { opened: ["2026-11-20T10:00:00Z"] }), EDIT("main", "opened"));
     assert.deepEqual(one(seen("opened")), EDIT("main", "opened"));
     assert.deepEqual(one(seen("rendered"), { state: "opened" }), EDIT("main", "rendered"));
+    // Rendered, then changed in the app (final review C2): it is the app's, to export there and hand off, not rendered again.
+    assert.deepEqual(one(seen("rendered", { refused: "This edit was changed in HyperFrames, so Reel Kit won't render it: export it from HyperFrames on This Mac." }), { state: "opened" }), EDIT("main", "opened"));
+    assert.deepEqual(one(seen("rendered", { refused: "changed" })), EDIT("main", "opened"));
     // Studio's own mark that it opened the project in the app (reel-kit-worker.js wasOpened), when the record's entry was not written after the open.
     assert.deepEqual(one({ ...seen("ready"), opened: true }), EDIT("main", "opened"));
     assert.deepEqual(one({ ...seen("ready", { refused: "changed" }), opened: true }), EDIT("main", "opened"));

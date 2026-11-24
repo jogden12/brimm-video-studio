@@ -235,6 +235,19 @@ describe("opening a Reel Kit edit in the app", () => {
     assert.equal(readFileSync(join(w.dir, "public", "index.html"), "utf8"), "<html>the composition, as she changed it</html>\n");
   });
 
+  it("says a rendered edit changed in the app is to be exported from HyperFrames, never rendered again (final review C2)", async () => {
+    const w = world({ state: { state: "rendered" } });
+    assert.equal((await openIt(w)).code, 0);
+    assert.deepEqual((await reelkit(w, ["render", FOLDER, SLUG])).said, [RENDER_SAY.rendered], "unchanged, it is rendered already");
+    writeFileSync(join(w.dir, "public", "index.html"), "<html>the composition, changed after its render</html>\n");
+    const changed = RENDER_SAY.changed(NAME);
+    assert.equal(renderWhy(w.dir, readState(w.dir)), changed);
+    const render = await reelkit(w, ["render", FOLDER, SLUG]);
+    assert.deepEqual([render.code, render.said], [1, [changed]]);
+    assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`Reel 2 (lo-fi, version 1): ${changed}`]);
+    assert.deepEqual(w.t.started, [], "nothing started");
+  });
+
   it("starts a new version for further Reel Kit changes, leaving the changed one", async () => {
     const w = world();
     assert.equal((await openIt(w)).code, 0);

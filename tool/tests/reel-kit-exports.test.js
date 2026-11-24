@@ -62,15 +62,20 @@ function rkProject(w, name, { render = null, slug = SLUG2, text = "A MADE-UP REN
   return { dir, file };
 }
 
-/** A revise of the edit in `dir` after its render, as the worker leaves one: a card changed (public/ untouched) and the edit back at its
-    storyboard, waiting for her go. */
+/** A revise of the built edit in `dir`, never rendered (a rendered edit is not revised: further Reel Kit changes are a new edit), as the
+    worker leaves one: a card changed (public/ untouched) and the edit back at its storyboard, waiting for her go. */
 function revised(dir) {
   writeFileSync(join(dir, "cards", "c1.html"), "<html>the card, shorter</html>\n");
   utimesSync(join(dir, "cards", "c1.html"), new Date(ms(14, 40)), new Date(ms(14, 40)));
   writeState(dir, { ...readState(dir), state: "storyboard", job: "revise", step: "storyboard" });
 }
+/** A rendered edit in `dir` changed in the HyperFrames app after its render: a card changed, studio.json still saying rendered. */
+function changedInTheApp(dir) {
+  writeFileSync(join(dir, "cards", "c1.html"), "<html>the card, shorter</html>\n");
+  utimesSync(join(dir, "cards", "c1.html"), new Date(ms(14, 40)), new Date(ms(14, 40)));
+}
 
-const STALE = (said) => `${said}'s Reel Kit edit changed after it was rendered, so that render is not taken.`;
+const STALE = (said) => `${said}'s Reel Kit edit was changed in HyperFrames after it was rendered, so that render is not taken.`;
 
 describe("a Reel Kit edit's exports", () => {
   it("finds a Reel Kit render as the part's recorded export", () => {
@@ -221,16 +226,16 @@ describe("fix round 1: a Reel Kit part is judged by its edit, and told in its ow
   it("takes a Studio render only while the edit is the one it rendered, and the edit says rendered", () => {
     const w = keep(world({ projects: ["main"] }));
     const record = { ...w.found.record, app: { toolchain: PIN.version, projects: [entry("main"), rkEntry("reel 2", RK2)] } };
-    // A revise after the render: a card changed, public/ untouched, the edit back at its storyboard.
+    // Changed in the app after the render: a card changed, public/ untouched, studio.json still rendered. It is the app's now: exported there.
     const { dir } = rkProject(w, RK2, { render: [14, 3, 12] });
-    revised(dir);
+    changedInTheApp(dir);
     const looked = reelPart(w, record);
     assert.equal(looked.parts.find((p) => p.key === "reel 2"), undefined, "nothing is taken for Reel 2");
-    assert.deepEqual(looked.asks, [`${STALE("Reel 2")} Say "render it" once its edit is built again ${SEE}, or say to leave it out of this hand-off.`]);
-    // Still marked rendered, but changed since (in the app, say): not taken either.
-    writeState(dir, { ...readState(dir), state: "rendered" });
-    assert.ok(reelPart(w, record).asks[0].startsWith(STALE("Reel 2")));
-    // Back as it was rendered, but no longer marked rendered (a revise that changed nothing, waiting for her go): not taken.
+    assert.deepEqual(looked.asks, [`${STALE("Reel 2")} Export it from HyperFrames on This Mac, as MP4, or say to leave it out of this hand-off.`]);
+    // Its render no longer the edit's and no longer marked rendered (a state no command leaves now): not taken, and said to render once built.
+    writeState(dir, { ...readState(dir), state: "storyboard" });
+    assert.deepEqual(reelPart(w, record).asks, [`Reel 2's Reel Kit edit changed after it was rendered, so that render is not taken. Say "render it" once its edit is built again ${SEE}, or say to leave it out of this hand-off.`]);
+    // Back as it was rendered, but no longer marked rendered (a state no command leaves now): not taken.
     writeFileSync(join(dir, "cards", "c1.html"), "<html>a card</html>\n");
     writeState(dir, { ...readState(dir), state: "storyboard" });
     assert.equal(reelPart(w, record).parts.find((p) => p.key === "reel 2"), undefined);
@@ -242,10 +247,10 @@ describe("fix round 1: a Reel Kit part is judged by its edit, and told in its ow
     assert.equal(reelPart(w, record).parts.find((p) => p.key === "reel 2"), undefined);
   });
 
-  it("asks instead of taking a render from before a revise, through finish … reels", async () => {
+  it("asks instead of taking a render from before a change in the app, through finish … reels", async () => {
     const w = keep(await finishedWorld({ projects: ["reel 2"], over: { app: { toolchain: PIN.version, projects: [rkEntry("reel 2", RK2)] } } }));
     const { dir } = rkProject(w, RK2, { render: [14, 3, 12] });
-    revised(dir);
+    changedInTheApp(dir);
     const had = linesOf(w).length;
     assert.equal(await finishEpisode(w.t.ctx, { ...w.found, record: reread(w.found) }, { reels: true, yes: true }), 0, w.t.said());
     const lines = linesOf(w).slice(had);

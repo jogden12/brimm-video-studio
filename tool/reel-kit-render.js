@@ -36,7 +36,7 @@ import { thisCheckout } from "./filing.js";
 import { bashNeeds, bothSpellings, realOf as placeOf } from "./places.js";
 import { binDir, kitDir, reelKitEnv, reelKitHome, venvPython } from "./reel-kit.js";
 import { reelKitReady } from "./reel-kit-install.js";
-import { compositionFingerprint, readCapped, readState, writeState } from "./reel-kit-project.js";
+import { changedInApp, compositionFingerprint, readCapped, readState, writeState } from "./reel-kit-project.js";
 import { freshTmp, killGroup, macLock, macWorkerFile, processStart, settingsFileOf, stopLeftOver, sweepProject, workerTmp } from "./reel-kit-worker.js";
 import { holdersOf, stopHolders, writeWhole } from "./reel-kit-worker-own.js";
 import { OWN_NAMES, foldName, workerSandbox } from "./reel-kit-worker-tools.js";
@@ -92,7 +92,8 @@ export function renderingBy(state, alive = isRunning, startOf = processStart) {
     name as the app shows it; one whose fingerprint can't be made (a link inside) is refused too, as is one with none recorded. */
 export function renderWhy(dir, state) {
   if (!isObject(state)) return RENDER_SAY.unread;
-  if (state.state === "rendered") return RENDER_SAY.rendered;
+  // A rendered edit is rendered already, unless it was changed in the app since: then it is the app's, exported there (renderedChanged).
+  if (state.state === "rendered") return renderedChanged(dir, state) || RENDER_SAY.rendered;
   if (state.state !== "ready" || typeof state.fingerprint !== "string" || !/^sha256-[0-9a-f]{64}$/.test(state.fingerprint)) return RENDER_SAY.notBuilt;
   try {
     if (!lstatSync(join(dir, "edit.py")).isFile()) return RENDER_SAY.odd;
@@ -107,6 +108,14 @@ export function renderWhy(dir, state) {
   }
   if (now === state.fingerprint) return "";
   return RENDER_SAY.changed(typeof state.name === "string" && state.name.trim() !== "" ? state.name : "This edit");
+}
+
+/** For a rendered edit in `dir` (its studio.json `state`) whose composition is no longer the one finalize recorded (changed in the HyperFrames
+    app after its render: reel-kit-project.js changedInApp), RENDER_SAY.changed, which says to export it from HyperFrames on This Mac; else "".
+    Never Reel Kit again: a rendered edit is not revised, and further Reel Kit changes are a new edit. */
+export function renderedChanged(dir, state) {
+  if (!isObject(state) || state.state !== "rendered") return "";
+  return changedInApp(dir, state) === "changed" ? RENDER_SAY.changed(typeof state.name === "string" && state.name.trim() !== "" ? state.name : "This edit") : "";
 }
 
 // --- Where it runs ---

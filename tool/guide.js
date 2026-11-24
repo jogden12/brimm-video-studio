@@ -468,6 +468,8 @@ function kitState(key, entry, seen) {
     if (last && typeof last === "object" && typeof last.why === "string" && last.why !== "") return kitFact(key, "render-failed", { qa: last.qa === "failed" });
     return kitFact(key, "ready");
   }
+  // Rendered, then changed in the app (edit.js gives why a render would refuse it, as for a ready one): the app's, to export there.
+  if (status.state === "rendered" && typeof seen.refused === "string" && seen.refused !== "") return kitFact(key, "opened");
   return AS_THEY_ARE.has(status.state) ? kitFact(key, status.state) : kitFact(key, "unread");
 }
 
