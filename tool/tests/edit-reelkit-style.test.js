@@ -416,6 +416,21 @@ describe("carrying her style onto a new starting style", () => {
     assert.deepEqual(filesOf(join(w.her, name, ".base")), filesOf(w.shipped), "a copy kept holds the base it was made from, with .made-from");
   });
 
+  it("makes her .base/ the new starting style whole: a file the new one dropped goes from it, so it matches .made-from again", async () => {
+    const w = world();
+    // The starting style she was made from had a file the new one drops.
+    const dropped = readdirSync(w.shipped).find((name) => name !== "style.json" && statSync(join(w.shipped, name)).isFile());
+    assert.ok(dropped, "the starting style has a file besides style.json");
+    assert.ok(existsSync(join(w.her, ".base", dropped)));
+    rmSync(join(w.shipped, dropped));
+    ship(w, (doc) => (doc.end_card = true));
+    const carried = await style(w, ["carry", "yes"]);
+    assert.equal(carried.code, 0, carried.said.join("\n"));
+    assert.ok(!existsSync(join(w.her, ".base", dropped)), "the dropped file is gone from her base");
+    assert.deepEqual(filesOf(join(w.her, ".base")), filesOf(w.shipped));
+    assert.equal(readFileSync(join(w.her, ".made-from"), "utf8").trim(), folderFingerprint(join(w.her, ".base")));
+  });
+
   it("takes the new value of a key she never changed, keeps one she changed, and adds one the new base adds", async () => {
     const w = world();
     editHers(w, (doc) => (doc.captions.lofi.size = 70));

@@ -18,7 +18,7 @@ import { chmodSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync, open
 import { createHash } from "node:crypto";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { binDir, folderFingerprint, hfCli, hfDir, kitDir, npxShim, reelKitEnv, reelKitHome } from "./reel-kit.js";
+import { binDir, folderFingerprint, hfCli, hfDir, kitDir, leftover, npxShim, reelKitEnv, reelKitHome } from "./reel-kit.js";
 import { PIN as HF_PIN } from "./hyperframes.js";
 import { sha256Of } from "./setup/install.js";
 import { workFolder } from "./settings.js";
@@ -177,7 +177,8 @@ const kit = {
   },
   async make(ctx) {
     const made = fresh(ctx, ctx.paths.kit, { folder: false });
-    cpSync(ctx.drop.kit, made, { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true });
+    // Finder's leftovers are not the kit's (its fingerprint leaves them out): never copied.
+    cpSync(ctx.drop.kit, made, { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true, filter: (src) => !leftover(basename(src)) });
     // A download can change between being read and being copied: what is copied must be what was read.
     let print = "";
     try {

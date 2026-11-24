@@ -10,7 +10,7 @@
 //
 // Nothing here reaches the network or starts a program by itself: `programs` are given (absolute paths: Studio's node, npm, ffmpeg
 // and ffprobe from findPrograms, curl, /bin/sh, tar, and ditto as `unzip`), `run` starts them and `fetch` downloads, by default
-// `curl -fsSL -o <dest> <url>` through setup/install.js runProgram. Tests give stand-ins for all of them.
+// `curl -fsSL --proto =https --proto-redir =https -o <dest> <url>` through setup/install.js runProgram. Tests give stand-ins for all of them.
 import { lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { runningRun } from "./detached.js";
@@ -73,9 +73,10 @@ export async function runCaptured(program, args, { env, signal } = {}) {
   return { code, out };
 }
 
-/** The fetch an install uses unless it is given another: `curl -fsSL -o <dest> <url>`, in an environment of its own. `{ code }`. */
+/** The fetch an install uses unless it is given another: `curl -fsSL --proto =https --proto-redir =https -o <dest> <url>` (https alone,
+    a redirect too), in an environment of its own. `{ code }`. */
 export const curlFetch = ({ curl, home }) => (url, dest, { signal } = {}) =>
-  runCaptured(curl, ["-fsSL", "-o", dest, url], { env: { HOME: home, PATH: "/usr/bin:/bin", LANG: "en_US.UTF-8" }, signal });
+  runCaptured(curl, ["-fsSL", "--proto", "=https", "--proto-redir", "=https", "-o", dest, url], { env: { HOME: home, PATH: "/usr/bin:/bin", LANG: "en_US.UTF-8" }, signal });
 
 /** The context a stage is given. `programs` is null when only planning. */
 const contextOf = ({ home, drop, pin, programs = null, run, fetch, signal }) => ({

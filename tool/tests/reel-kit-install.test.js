@@ -395,6 +395,18 @@ describe("runInstall", () => {
     assert.deepEqual(leftovers(workFolder(w.home)), []);
   });
 
+  it("copies the kit without Finder's leftovers, which its fingerprint leaves out too", async () => {
+    const w = world();
+    writeFileSync(join(w.drop.kit, ".DS_Store"), "Finder");
+    writeFileSync(join(w.drop.kit, "pipeline", "._common.py"), "AppleDouble");
+    assert.equal(folderFingerprint(w.drop.kit), w.drop.fingerprint);
+    const done = await w.install();
+    assert.equal(done.ok, true, done.lines.join("\n"));
+    assert.ok(!existsSync(join(kitDir(w.home), ".DS_Store")));
+    assert.ok(!existsSync(join(kitDir(w.home), "pipeline", "._common.py")));
+    assert.ok(existsSync(join(kitDir(w.home), "pipeline", "common.py")));
+  });
+
   it("writes .setup-version only after READY", async () => {
     const w = world();
     writeFileSync(join(w.home, "setup-not-ready"), "");
@@ -660,13 +672,13 @@ describe("reelKitReady: whether jobs may run on this Mac's Reel Kit", () => {
 });
 
 describe("curlFetch", () => {
-  it("fetches with curl -fsSL -o <dest> <url>, and nothing else", async () => {
+  it("fetches with curl -fsSL over https alone, redirects too, -o <dest> <url>, and nothing else", async () => {
     const w = world();
     const dest = join(w.root, "got");
     const fetch = curlFetch({ curl: w.programs.curl, home: w.home });
     const r = await fetch("https://example.invalid/a", dest);
     assert.equal(r.code, 0);
-    assert.deepEqual(JSON.parse(readFileSync(join(w.bin, "curl.log"), "utf8")), ["-fsSL", "-o", dest, "https://example.invalid/a"]);
+    assert.deepEqual(JSON.parse(readFileSync(join(w.bin, "curl.log"), "utf8")), ["-fsSL", "--proto", "=https", "--proto-redir", "=https", "-o", dest, "https://example.invalid/a"]);
     assert.equal(readFileSync(dest, "utf8"), "curl got https://example.invalid/a");
     assert.equal(dirname(dest), w.root);
   });

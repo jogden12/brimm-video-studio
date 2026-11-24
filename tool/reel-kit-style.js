@@ -877,9 +877,34 @@ export function carryPlan({ settings, shipped = SHIPPED_PACK }) {
   return { style, take, brought, kept, base: "kept" };
 }
 
+/** Take out of her pack's `.base/` (`dir`) every file and folder the starting style `want` (walkPack's { files, dirs }) has not, a link
+    as a link, so that it is that style whole; each removal asked of `guard()` first. */
+function pruneBase(dir, want, guard) {
+  const files = new Set(want.files);
+  const dirs = new Set(want.dirs);
+  const walk = (abs, rel) => {
+    for (const name of readdirSync(abs)) {
+      const path = join(abs, name);
+      const relPath = rel ? `${rel}/${name}` : name;
+      const kind = lstatSync(path);
+      if (kind.isDirectory() && !kind.isSymbolicLink()) {
+        walk(path, relPath);
+        if (!dirs.has(relPath)) {
+          guard();
+          rmSync(path, { recursive: true, force: true });
+        }
+      } else if (!files.has(relPath)) {
+        guard();
+        rmSync(path, { force: true });
+      }
+    }
+  };
+  if (kindOf(dir) === "folder") walk(dir, "");
+}
+
 /** Carry her pack onto the base shipped now (carryPlan), on her yes. Her pack as it will be is made whole on this Mac's own disk and
     checked (packFault) before anything is kept or written; then a copy of her pack is kept (backupPack); then the new base's files she
-    never changed, her merged style.json, the new base as `.base/`, and `.made-from` its fingerprint, each put in by dropbox.js's rule:
+    never changed, her merged style.json, the new base as `.base/` (whole: what the new base no longer has is taken out, pruneBase), and `.made-from` its fingerprint, each put in by dropbox.js's rule:
     her base and `.made-from` move to the new one only once the carry is written, so a carry cut short is carried again. Gives
     { backup, brought, keptYours, base }: the copy kept, carryPlan's lines, and whether her pack had a base; throws in her words. */
 export function carryPack({ settings, home = homedir(), shipped = SHIPPED_PACK, now = new Date(), dropbox = {}, log = () => {} }) {
@@ -888,6 +913,7 @@ export function carryPack({ settings, home = homedir(), shipped = SHIPPED_PACK, 
   const work = workOf(home);
   let order;
   let dirs;
+  let baseFiles;
   try {
     const { files } = walkPack(her);
     copyLocal(her, work, files.filter((f) => f !== "style.json" && !notHers(f)));
@@ -907,7 +933,8 @@ export function carryPack({ settings, home = homedir(), shipped = SHIPPED_PACK, 
     if (fault) throw new Refused(fault);
     const parents = new Set(plan.take.flatMap((f) => f.split("/").slice(0, -1).map((_, i, parts) => parts.slice(0, i + 1).join("/"))));
     dirs = [...[...parents].sort(), BASE, ...base.dirs.map((d) => `${BASE}/${d}`)];
-    order = [...plan.take, "style.json", ...base.files.map((f) => `${BASE}/${f}`), MADE_FROM];
+    order = [...plan.take, "style.json", ...base.files.map((f) => `${BASE}/${f}`)];
+    baseFiles = base;
   } catch (e) {
     rmSync(work, { recursive: true, force: true });
     throw new Error(lineOf(e, log, settings.root));
@@ -919,6 +946,10 @@ export function carryPack({ settings, home = homedir(), shipped = SHIPPED_PACK, 
         if (kindOf(her) !== "folder") throw new Refused(NOT_FOLDER);
       });
       putIn({ work, dest: her, dirs, files: order, guard, put: { dirs: [], files: [] }, makeDest: false, replace: true, dropbox });
+      // Her .base/ is the new starting style whole: what the new one no longer has goes, so its fingerprint is .made-from's again.
+      // Only then .made-from: a carry cut short before it is carried again.
+      pruneBase(join(her, BASE), baseFiles, guard);
+      putIn({ work, dest: her, dirs: [], files: [MADE_FROM], guard, put: { dirs: [], files: [] }, makeDest: false, replace: true, dropbox });
     } catch (e) {
       throw new Error(`${lineOf(e, log, settings.root)} How it was is kept as ${backup}.`);
     }

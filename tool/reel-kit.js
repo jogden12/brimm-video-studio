@@ -100,7 +100,8 @@ export const LINK_INSIDE = "REEL_KIT_LINK_INSIDE";
 export const ODD_INSIDE = "REEL_KIT_ODD_INSIDE";
 
 /** Whether a name is Finder's or a copy's leftover, which no fingerprint counts. */
-const leftover = (name) => name === ".DS_Store" || name.startsWith("._");
+/** Whether a name is one of Finder's leftovers (`.DS_Store`, `._*`), which a fingerprint leaves out and a kit's copy never takes. */
+export const leftover = (name) => name === ".DS_Store" || name.startsWith("._");
 
 /** The SHA-256 of a file, read a block at a time. */
 function fileSha256(path) {
