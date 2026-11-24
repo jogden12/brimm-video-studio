@@ -17,7 +17,7 @@ import { HELD, NOT_FOR_SESSION, gateFor, heldGateFor, namesNoEpisode } from "../
 import { kitDir, reelKitHome, venvPython } from "../reel-kit.js";
 import { markReady } from "./reel-kit-ready.js";
 import { installLockFile, installUnfinishedFile } from "../reel-kit-install.js";
-import { EDIT_SAY, NOTE_MOST, notesFile } from "../reel-kit-commands.js";
+import { EDIT_SAY, FOR_CLAUDE, NOTE_MOST, notesFile } from "../reel-kit-commands.js";
 import { compositionFingerprint, entryOf, readState, writeState } from "../reel-kit-project.js";
 import { RENDER_SAY } from "../reel-kit-render.js";
 import { macLock, queueFile, queuedOf } from "../reel-kit-worker.js";
@@ -77,10 +77,11 @@ function world({ record = {}, edits = [] } = {}) {
 }
 
 /** Run `reelkit <words…>` on the made-up Mac: { code, said }. `reelKit` is what a test gives in place of this Mac's own. */
+/** Run `reelkit <words…>`: { code, said, forClaude }, `said` her lines and `forClaude` the lines for her chat alone (FOR_CLAUDE). */
 async function reelkit(w, words, { reelKit = {}, env = {} } = {}) {
-  const said = [];
-  const code = await editMain(["reelkit", ...words], { ...w.t.ctx.deps, env, reelKit, say: (line) => said.push(line) });
-  return { code, said };
+  const all = [];
+  const code = await editMain(["reelkit", ...words], { ...w.t.ctx.deps, env, reelKit, say: (line) => all.push(line) });
+  return { code, said: all.filter((line) => !line.startsWith(FOR_CLAUDE)), forClaude: all.filter((line) => line.startsWith(FOR_CLAUDE)) };
 }
 /** Run any command of edit.js on the made-up Mac. */
 async function on(w, ...argv) {
@@ -189,7 +190,7 @@ describe("starting an edit", () => {
     for (const p of projects) assert.deepEqual([p.from, p.workingCopy, p.on], [FROM, COPY, "Mac Studio"]);
     assert.deepEqual(queuedOf(w.t.home, ID, w.t.ctx.deps.alive), []);
     const after = await reelkit(w, ["status", FOLDER]);
-    assert.deepEqual(after.said, ["Reel 1 (lo-fi, version 1): its storyboard is made.", "Reel 2 (lo-fi, version 1): its storyboard is made."]);
+    assert.deepEqual(after.said, ["Reel 1 (lo-fi, version 1): its storyboard is made: say \"show me the storyboard\" to see it.", "Reel 2 (lo-fi, version 1): its storyboard is made: say \"show me the storyboard\" to see it."]);
   });
 
   it("marks the Reel picked as its edit's entry is written, so a reading again or a kind corrected keeps it (final review C4)", async () => {
@@ -271,6 +272,16 @@ describe("final review B1: a start only on Reel Kit set up as the pin says", () 
 });
 
 describe("following an edit", () => {
+  it("gives her chat each made edit's id on a line of its own, after its line, never in her words (final review C7)", async () => {
+    const w = world({ edits: [{ n: 2, state: { state: "storyboard", step: "storyboard" } }, { n: 1, state: { state: "ready", step: "ready" } }] });
+    const all = [];
+    assert.equal(await editMain(["reelkit", "status", FOLDER], { ...w.t.ctx.deps, say: (line) => all.push(line) }), 0);
+    const at = (n) => all.findIndex((line) => line.startsWith(`Reel ${n} (`));
+    for (const n of [1, 2]) assert.equal(all[at(n) + 1], `${FOR_CLAUDE}${slugOf(n)}`, all.join("\n"));
+    assert.equal(all.filter((line) => line.startsWith(FOR_CLAUDE)).length, 2);
+    for (const line of all.filter((l) => !l.startsWith(FOR_CLAUDE))) assert.ok(!line.includes(slugOf(1)) && !line.includes(slugOf(2)), line);
+  });
+
   it("prints NEEDS in Reel Kit's words and opens the folder for them", async () => {
     const needs = [{ beat: "p06", text: "NEEDS: a screen recording of the pricing page, 5 seconds, no cursor." }, { beat: "p09", text: "NEEDS: five seconds of the empty room." }];
     const w = world({ edits: [{ n: 2, mode: "hifi", state: { state: "working", job: "edit", step: "beats", pid: process.pid, needs, minutesLeft: 7 } }, { n: 1, mode: "lofi", state: { state: "storyboard", step: "storyboard" } }] });
@@ -281,7 +292,7 @@ describe("following an edit", () => {
       `  p06: ${needs[0].text}`,
       `  p09: ${needs[1].text}`,
       "Drop it in the folder that just opened.",
-      "Reel 1 (lo-fi, version 1): its storyboard is made."
+      "Reel 1 (lo-fi, version 1): its storyboard is made: say \"show me the storyboard\" to see it."
     ]);
     for (const line of r.said.filter((l) => !l.startsWith("  "))) assert.doesNotMatch(line, PLAIN, line);
     // The edit's own from-you/ folder, made and opened in Finder: never the drop folder.

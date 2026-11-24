@@ -720,7 +720,7 @@ describe("reelkit storyboard", () => {
     const revise = await reelkit(w, ["revise", FOLDER, SLUG]);
     assert.deepEqual([revise.code, revise.said], [1, [EDIT_SAY.noNotes]]);
     const status = await reelkit(w, ["status", FOLDER]);
-    assert.deepEqual(status.said, [`Reel 2 (lo-fi, version 1): ${EDIT_SAY.pageGo}`]);
+    assert.deepEqual(status.said, [`Reel 2 (lo-fi, version 1): ${EDIT_SAY.pageGo}`, `${FOR_CLAUDE}${SLUG}`]);
     // One local page at a time: a second start stops the first.
     const first = JSON.parse(readFileSync(join(w.t.home, "Library", "Application Support", "BRIMM Video", "storyboard-local.json"), "utf8")).pid;
     const again = await reelkit(w, ["storyboard", FOLDER, SLUG, "local"]);

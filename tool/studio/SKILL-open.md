@@ -208,7 +208,7 @@ More on these rows. Each rule starts with the row it belongs to:
 ## A Reel Kit edit
 
 A recording with Sallie on camera can go to Reel Kit after its card, beside the HyperFrames project. For a Reel Kit edit, her "render it", "carry on" and "open it in HyperFrames" are the rows below.
-<edit> names one edit: the id `episodes` gives its episode, then main or reel-2, then -v and the version `reelkit status "<episode>"` says, as 1a2b3c-reel-2-v1.
+<edit> names one edit: the id on its `For Claude: <edit>` line, under its line of `reelkit status "<episode>"`, as 1a2b3c-reel-2-v1. Never say it to her.
 
 | She says | Run |
 |---|---|
@@ -216,8 +216,8 @@ A recording with Sallie on camera can go to Reel Kit after its card, beside the 
 | "How are the Reel Kit edits going?" | `reelkit status "<episode>"`: tell her each line. What Reel Kit needs from her is in its own words: say it as printed, and that she drops it in the folder that opened in Finder |
 | "Show me the storyboard" | `reelkit storyboard "<episode>" <edit>`. The rest is in the rules for this row, below. |
 | "My notes are in" | Read the comments of the edit's page with ArtifactComments. The rest is in the rules for this row, below. |
-| "Looks good: render it" / "Looks good, render it" / "Go" | `reelkit go "<episode>" <edit>`: it is built to render, in the background |
-| "Make the changes" | `reelkit revise "<episode>" <edit>`: its next storyboard, made from her notes |
+| "Looks good: render it" / "Looks good, render it" / "Go" | First do what "My notes are in" does. Then `reelkit go "<episode>" <edit>`: it is built to render, in the background |
+| "Make the changes" | First do what "My notes are in" does. Then `reelkit revise "<episode>" <edit>`: its next storyboard, made from her notes |
 | "Carry on with the edit" / "Carry on" | `reelkit resume "<episode>" <edit>`: an edit that stopped picks up from its step |
 | "Render it" | `reelkit render "<episode>" <edit>`: one way out. Once it is rendered, her "hand it off" is the "Hand it off" row |
 | "Open this edit in HyperFrames" / "open it in HyperFrames", of a built edit | `reelkit app "<episode>" <edit>`: the other way out. Reel Kit changes it no more, and she exports it there |
@@ -225,7 +225,7 @@ A recording with Sallie on camera can go to Reel Kit after its card, beside the 
 | "Change my style: …" / "Yes", to its new board / "Carry on with my style" | `reelkit style change "<what she asked>"` / `reelkit style yes` / `reelkit style resume` |
 | "My earlier styles" / "Go back to <name>" | `reelkit style back` / `reelkit style back "<copy>"`, the name as printed |
 | "Carry my style over" | `reelkit style carry`: tell her what it would change, and only on her yes `reelkit style carry yes` |
-| A Reel Kit download dropped in the chat | `reelkit install "<download>"`: tell her its steps, and that nothing is installed until Jason says yes; never add a yes to it. "How is Reel Kit's setup going?": `reelkit status` |
+| A Reel Kit download dropped in the chat / "How is the Reel Kit setup going?" | `reelkit install "<download>"`: tell her its steps, and that nothing is installed until Jason says yes; never add a yes to it / `reelkit status` |
 
 - "Show me the storyboard": First Read the file its For Claude line names, whole; then publish with the Artifact tool exactly the input that line gives, nothing added or changed. Never publish a page it did not print, and never share a page.
 - "Show me the storyboard": If a publish fails, run `reelkit storyboard "<episode>" <edit> local`: Reel Kit's own page opens on this Mac. Tell her what it says.

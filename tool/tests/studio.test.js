@@ -1857,7 +1857,8 @@ describe("her skill learns Reel Kit, in both locks (plan Task 16)", () => {
     const PHRASES = {
       "how are the Reel Kit edits going?": "status", "make the changes": "revise", "looks good, render it": "go", "Looks good: render it": "go", go: "go",
       "carry on with the edit": "resume", "carry on": "resume", "render it": "render", "open it in HyperFrames": "app",
-      "show my style": "style show", "carry my style over": "style carry", "carry on with my style": "style resume"
+      "show my style": "style show", "carry my style over": "style carry", "carry on with my style": "style resume",
+      "show me the storyboard": "storyboard", "how is the Reel Kit setup going?": "status"
     };
     const said = `${source("guide.js")}\n${source("reel-kit-commands.js")}\n${source("reel-kit-worker.js")}\n${source("reel-kit-style-chat.js")}`.toLowerCase();
     for (const [phrase, word] of Object.entries(PHRASES)) {
@@ -1867,6 +1868,17 @@ describe("her skill learns Reel Kit, in both locks (plan Task 16)", () => {
         assert.ok(row, `${name}: no row for "${phrase}"`);
         assert.match(row, new RegExp(`\`reelkit ${word}[ \`]`), `${name}: "${phrase}" runs no reelkit ${word}: ${row}`);
       }
+    }
+  });
+  it("reads her comments on the page before making the changes or going, as \"My notes are in\" does (final review C6)", () => {
+    for (const [name, text] of Object.entries(SKILLS)) {
+      for (const phrase of ["Make the changes", "Go"]) {
+        const row = rowSaying(text, phrase);
+        assert.ok(row, `${name}: no row for "${phrase}"`);
+        assert.match(row, /First do what "My notes are in" does/, `${name}: "${phrase}" reads no comments first: ${row}`);
+      }
+      // Her chat finds the edit's id on its own line of status, never in her words.
+      assert.match(kitOf(text), /`For Claude: <edit>` line/, name);
     }
   });
   it("says in the front door, in the repo and in her folder, that a recording with Sallie on camera can go to Reel Kit after its card", () => {

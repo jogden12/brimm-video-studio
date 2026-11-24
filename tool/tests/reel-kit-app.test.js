@@ -105,8 +105,10 @@ function world({ record = {}, state = {}, open = "opened", app = "writes", plist
 
 /** Run `reelkit <words…>` on the made-up Mac: { code, said }, every line she reads checked plain. */
 async function reelkit(w, words, { reelKit = {}, env = {} } = {}) {
-  const said = [];
-  const code = await editMain(["reelkit", ...words], { ...w.t.ctx.deps, env, reelKit: { plutil: w.plutil.run, ...reelKit }, say: (line) => said.push(line) });
+  const all = [];
+  const code = await editMain(["reelkit", ...words], { ...w.t.ctx.deps, env, reelKit: { plutil: w.plutil.run, ...reelKit }, say: (line) => all.push(line) });
+  // Her lines alone: a line for her chat (an edit's id after its status line) is not hers.
+  const said = all.filter((line) => !line.startsWith("For Claude: "));
   for (const line of said) assert.doesNotMatch(line, PLAIN, line);
   return { code, said };
 }

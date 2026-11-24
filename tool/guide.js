@@ -507,7 +507,7 @@ const FOLLOW_EDIT = 'Say "how are the Reel Kit edits going?" to follow it.';
 /** Her one next step for a Reel Kit edit, by its state: `handOff` is what she says to hand it off ("hand it off" for a raw video and an iPhone
     clip, "hand off the Reels" for a finished video's Reels), and `app` whether this Mac's settings have the app on (nothing opens a project on one
     that has it off). Being made or rendered, she asks how it is going; stopped, she carries it on; at its storyboard, she leaves notes in the side
-    panel and says to make the changes or to render it; built, she renders it or opens it in HyperFrames; open there, she exports it from the app
+    panel (her "show me the storyboard" puts it there) and says to make the changes or to render it; built, she renders it or opens it in HyperFrames; open there, she exports it from the app
     and hands it off; rendered, she hands it off. Where nothing is hers to try, as Studio's status says, she asks Jason. */
 function kitStep(edit, handOff, app) {
   const its = edit.key === "main" ? "Its" : `Reel ${edit.key.slice(5)}'s`;
@@ -523,7 +523,7 @@ function kitStep(edit, handOff, app) {
       return toDo(stage, edit.usage === true
         ? `Your Claude usage ran out, so ${lower} stopped${at}. Once it's back, say "carry on with the edit".`
         : `${name} stopped${at} before it was done. Say "carry on with the edit".`);
-    case "storyboard": return toDo(stage, `${its} Reel Kit storyboard is ready. Look at it in the side panel and leave your notes there. Then say "make the changes", or "looks good, render it" if it is right.`);
+    case "storyboard": return toDo(stage, `${its} Reel Kit storyboard is ready. Say "show me the storyboard" to see it in the side panel and leave your notes there, then "make the changes", or "looks good, render it" if it is right.`);
     case "ready": return toDo(stage, app ? `${name} is built. Say "render it", or "open it in HyperFrames" to change it there.` : `${name} is built. Say "render it".`);
     case "opened": return toDo(stage, `${name} is open in HyperFrames. When you are done there, export it on This Mac, as MP4, then say "${handOff}".`);
     case "refused": return toDo(stage, `${name} isn't as Reel Kit left it, so it can't be rendered: ask Jason.`);

@@ -24,7 +24,7 @@ const COPY = { bytes: 16, seconds: 23.423, fps: 30 };
 const rkEntry = (over = {}) => ({ ...entryOf({ key: "main", name: RK_MAIN, mode: "hifi", version: 1, at: AT, machine: "Mac Studio", fromSuggestion: null, from: FROM, workingCopy: COPY }), ...over });
 
 const STEPS = {
-  storyboard: 'Its Reel Kit storyboard is ready. Look at it in the side panel and leave your notes there. Then say "make the changes", or "looks good, render it" if it is right.',
+  storyboard: 'Its Reel Kit storyboard is ready. Say "show me the storyboard" to see it in the side panel and leave your notes there, then "make the changes", or "looks good, render it" if it is right.',
   ready: 'Its Reel Kit edit is built. Say "render it", or "open it in HyperFrames" to change it there.',
   rendered: 'Its Reel Kit edit is rendered. Say "hand it off" and I will check it.',
   opened: 'Its Reel Kit edit is open in HyperFrames. When you are done there, export it on This Mac, as MP4, then say "hand it off".'

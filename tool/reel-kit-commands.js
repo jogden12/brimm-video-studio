@@ -366,7 +366,7 @@ export const EDIT_SAY = Object.freeze({
   none: "This video has no Reel Kit edits yet.",
   waiting: "waiting for its turn.",
   working: (step, left) => `being made, at ${step || "its start"}${left ? `: about ${left} minute${left === 1 ? "" : "s"} left, by Reel Kit's own guess` : ""}.`,
-  storyboard: "its storyboard is made.",
+  storyboard: `its storyboard is made: say "show me the storyboard" to see it.`,
   pageGo: `its storyboard is made, and you said go on its page: say "go" to have it built.`,
   ready: "it is built and ready to render.",
   failed: "it couldn't be made: ask Jason.",
@@ -684,6 +684,8 @@ async function editStatus(ctx, words, h) {
     const state = edit.dir === null ? null : readState(edit.dir);
     const shown = status && status.state === "storyboard" ? { ...status, pageGo: wentAhead(edit.dir) } : status;
     ctx.say(`${editSaid(edit.key, edit.mode, edit.version)}: ${renderingNow(ctx, state) ? EDIT_SAY.renderingNow : stateLine(shown, state, edit.dir)}`);
+    // For her chat alone: the edit's id, which every other edit word names it by (her skill's <edit>).
+    if (edit.slug !== "") ctx.say(`${FOR_CLAUDE}${edit.slug}`);
     const needs = (status?.needs ?? []).filter((n) => n && typeof n.text === "string" && typeof n.beat === "string");
     if (!needs.length) continue;
     for (const need of needs) ctx.say(`  ${need.beat}: ${need.text}`);
