@@ -208,6 +208,10 @@ export function opsText(handoff, step, again, note, local = false) {
       script whose footage is being made into one video (PR H5b) has `joining`, true while the run that does it (join.js) is at work, and its
       step is `joining`; and `joinFailed`, true when that run's last end was a failure and the plan is still a plan, and its step is `join-failed`.
       Once the run has made the plan its video, it is no planned episode: it has the stages of a raw or a short video.
+    - `reelKit` (plan Task 20), its Reel Kit edits as reelKitEdits reads them, [] or absent when it has none: [{ key, state, step, usage, qa }],
+      `key` "main" or "reel <n>", `state` one of REEL_KIT_STATES. A raw video's or an iPhone clip's are said before its hand-off (kitBeforeHandOff:
+      the main video first, then its Reels, then "hand it off"); a finished video's Reels after its hand-off, ahead of the page's steps, and a
+      rendered one that is not in the hand-off yet is said among `reelsExported` as rendered. A finished video's main video is not edited here.
     - `session`, for a session, and null for anything else: { choice, teachingsOn, undecided, emptyOwed }. `choice` is null until
       she chooses, then "asked" (its teachings) or "transcript only"; `teachingsOn`, when this Mac can read teachings;
       `undecided`, how many of its items she has still to keep, drop or change; `emptyOwed`, when it was a session after all and
@@ -407,9 +411,131 @@ const reelsWaiting = (facts) => (facts.kind === "finished" && !facts.gated && !f
 /** The step for the Reels exported and not in the hand-off (plan PR 16): which they are, and what she says to add them to it. While the
     finish that handed off the Reels before them only waits for its late check (`checking`), that command is stopped until the check is
     made (edit.js stoppedWords), so she is told to say it after the time Studio checks Dropbox's copies (`checking.at`). */
-function reelsStep(reels, checking) {
+function reelsStep(reels, checking, rendered = new Set()) {
   const after = checking ? ` after ${checking.at}` : "";
-  return toDo("reels-exported", `You have exported ${listed(reels.map((n) => `Reel ${n}`))} from HyperFrames. Say "hand off the Reels"${after} to add ${reels.length === 1 ? "it" : "them"} to the hand-off.`);
+  // A Reel whose Reel Kit edit is rendered (plan Task 20) is rendered, not exported from HyperFrames; one opened in the app and exported there is exported.
+  const named = (numbers) => listed(numbers.map((n) => `Reel ${n}`));
+  const fromApp = reels.filter((n) => !rendered.has(n));
+  const made = reels.filter((n) => rendered.has(n));
+  const exported = fromApp.length ? `You have exported ${named(fromApp)} from HyperFrames` : "";
+  const madeWords = made.length ? `${named(made)} ${made.length === 1 ? "is" : "are"} rendered` : "";
+  const said = exported && madeWords ? `${exported}, and ${madeWords}` : exported || madeWords;
+  return toDo("reels-exported", `${said}. Say "hand off the Reels"${after} to add ${reels.length === 1 ? "it" : "them"} to the hand-off.`);
+}
+
+// --- A Reel Kit edit (plan Task 20) ---
+
+/** The states of a Reel Kit edit as the guide reads them (reelKitEdits): the worker's (reel-kit-worker.js statusOf: queued, working, stopped,
+    storyboard, ready, failed), Studio's render (`rendering` while it runs, `rendered` once done, and of a ready one `refused` where the render's own
+    check refuses it, reel-kit-render.js renderWhy, and `render-failed` where its last render kept nothing), `opened` once the app has opened it
+    (Task 17), and `unread` where none can be read. */
+export const REEL_KIT_STATES = Object.freeze(["queued", "working", "rendering", "stopped", "storyboard", "ready", "opened", "refused", "render-failed", "rendered", "failed", "unread"]);
+/** What the record's list of projects says of a Reel Kit edit, and of one kept for an earlier kind: reel-kit-project.js MAKER and app.js KEPT,
+    which a test holds these to. They are said here, not imported, so that guide.js, which app.js imports, imports neither app.js nor Reel Kit's
+    modules (an import cycle). */
+const REEL_KIT_MAKER = "reel-kit";
+const KEPT_FOR_KIND = "kept for an earlier kind";
+const PART_KEY = /^(?:main|reel [1-9]\d*)$/;
+/** The worker's own states that are the guide's as they are. */
+const AS_THEY_ARE = new Set(["queued", "working", "storyboard", "rendered", "failed", "opened"]);
+/** A part's order: the main video first, then the Reels by number. */
+const partOrder = (key) => (key === "main" ? 0 : Number(key.slice(5)));
+
+/** One edit as the guide reads it: its part, its state, and for a stopped one its step and whether her Claude usage ran out (`usage`), for a
+    render that failed whether Reel Kit's own checks failed it (`qa`). */
+const kitFact = (key, state, more = {}) => ({ key, state, step: "", usage: false, qa: false, ...more });
+
+/** The state of the edit `entry` (its record's entry) from what was seen of it (`seen`: { status, state, rendering, refused }, the worker's
+    statusOf of its folder, its studio.json as read, whether a run renders it now, reel-kit-render.js renderingBy, and for a ready one why a render
+    would refuse it, renderWhy, "" when it would not). An edit opened in the app (its entry's state, or a time it opened, or its studio.json) is
+    `opened` from ready on, but a render done is rendered. */
+function kitState(key, entry, seen) {
+  const status = seen && typeof seen === "object" ? seen.status : null;
+  if (seen && seen.rendering === true) return kitFact(key, "rendering");
+  if (!status || typeof status !== "object" || typeof status.state !== "string") return kitFact(key, "unread");
+  const opened = entry.state === "opened" || (Array.isArray(entry.opened) && entry.opened.length > 0);
+  if (status.state === "stopped") return kitFact(key, "stopped", { step: typeof status.step === "string" ? status.step : "", usage: status.why === "usage" });
+  if (status.state === "ready") {
+    if (opened) return kitFact(key, "opened");
+    if (typeof seen.refused === "string" && seen.refused !== "") return kitFact(key, "refused");
+    const last = seen.state && typeof seen.state === "object" ? seen.state.lastRender : null;
+    if (last && typeof last === "object" && typeof last.why === "string" && last.why !== "") return kitFact(key, "render-failed", { qa: last.qa === "failed" });
+    return kitFact(key, "ready");
+  }
+  return AS_THEY_ARE.has(status.state) ? kitFact(key, status.state) : kitFact(key, "unread");
+}
+
+/** A video's Reel Kit edits as the guide reads them (VideoFacts `reelKit`), from its `record` and `look`, which edit.js gives: `look(entry)` is
+    what was seen of an edit's folder on this Mac ({ status, state, rendering, refused }: kitState). For each part ("main", "reel <n>") the newest
+    version of its edits that is not kept for an earlier kind; and for each part in `queued` (the keys of the jobs in the queue whose projects are
+    not made yet, reel-kit-worker.js queuedOf) a queued edit in its place. In the parts' order: the main video, then the Reels by number. */
+export function reelKitEdits(record, look, queued = []) {
+  const projects = record && typeof record === "object" && record.app && Array.isArray(record.app.projects) ? record.app.projects : [];
+  const newest = new Map();
+  for (const p of projects) {
+    if (!p || typeof p !== "object" || p.maker !== REEL_KIT_MAKER || p.state === KEPT_FOR_KIND || typeof p.key !== "string" || !PART_KEY.test(p.key)) continue;
+    const version = Number.isInteger(p.version) ? p.version : 0;
+    const had = newest.get(p.key);
+    if (!had || version > (Number.isInteger(had.version) ? had.version : 0)) newest.set(p.key, p);
+  }
+  const edits = new Map([...newest].map(([key, entry]) => [key, kitState(key, entry, look(entry))]));
+  for (const key of Array.isArray(queued) ? queued : []) if (typeof key === "string" && PART_KEY.test(key)) edits.set(key, kitFact(key, "queued"));
+  return [...edits.values()].sort((a, b) => partOrder(a.key) - partOrder(b.key));
+}
+
+/** The facts' Reel Kit edits that the guide can say: of a part, in one of the states. A state it cannot tell is unread. */
+const kitEditsOf = (facts) =>
+  (Array.isArray(facts.reelKit) ? facts.reelKit : [])
+    .filter((e) => e && typeof e === "object" && typeof e.key === "string" && PART_KEY.test(e.key))
+    .map((e) => (REEL_KIT_STATES.includes(e.state) ? e : { ...e, state: "unread" }));
+
+/** The phrase she says to follow her Reel Kit edits (reel-kit-commands.js FOLLOW, said of one). */
+const FOLLOW_EDIT = 'Say "how are the Reel Kit edits going?" to follow it.';
+
+/** Her one next step for a Reel Kit edit, by its state: `handOff` is what she says to hand it off ("hand it off" for a raw video and an iPhone
+    clip, "hand off the Reels" for a finished video's Reels), and `app` whether this Mac's settings have the app on (nothing opens a project on one
+    that has it off). Being made or rendered, she asks how it is going; stopped, she carries it on; at its storyboard, she leaves notes in the side
+    panel and says to make the changes or to render it; built, she renders it or opens it in HyperFrames; open there, she exports it from the app
+    and hands it off; rendered, she hands it off. Where nothing is hers to try, as Studio's status says, she asks Jason. */
+function kitStep(edit, handOff, app) {
+  const its = edit.key === "main" ? "Its" : `Reel ${edit.key.slice(5)}'s`;
+  const name = `${its} Reel Kit edit`;
+  const lower = `${edit.key === "main" ? "its" : its} Reel Kit edit`;
+  const stage = `reel-kit-${edit.state}`;
+  const at = typeof edit.step === "string" && edit.step !== "" ? ` at ${edit.step}` : "";
+  switch (edit.state) {
+    case "queued": return toDo(stage, `${name} is in the queue to be made. ${FOLLOW_EDIT}`);
+    case "working": return toDo(stage, `${name} is being made. ${FOLLOW_EDIT}`);
+    case "rendering": return toDo(stage, `${name} is being rendered. ${FOLLOW_EDIT}`);
+    case "stopped":
+      return toDo(stage, edit.usage === true
+        ? `Your Claude usage ran out, so ${lower} stopped${at}. Once it's back, say "carry on with the edit".`
+        : `${name} stopped${at} before it was done. Say "carry on with the edit".`);
+    case "storyboard": return toDo(stage, `${its} Reel Kit storyboard is ready. Look at it in the side panel and leave your notes there. Then say "make the changes", or "looks good, render it" if it is right.`);
+    case "ready": return toDo(stage, app ? `${name} is built. Say "render it", or "open it in HyperFrames" to change it there.` : `${name} is built. Say "render it".`);
+    case "opened": return toDo(stage, `${name} is open in HyperFrames. When you are done there, export it on This Mac, as MP4, then say "${handOff}".`);
+    case "refused": return toDo(stage, `${name} isn't as Reel Kit left it, so it can't be rendered: ask Jason.`);
+    case "render-failed": return toDo(stage, `${name} is built, but its last render ${edit.qa === true ? "didn't pass Reel Kit's own checks" : "didn't finish"}, so nothing was kept: ask Jason.`);
+    case "rendered": return toDo(stage, `${name} is rendered. Say "${handOff}" and I will check it.`);
+    case "failed": return toDo(stage, `${name} couldn't be made: ask Jason.`);
+    default: return toDo("reel-kit-unread", `What ${lower} is at can't be read on this Mac: ask Jason.`);
+  }
+}
+
+/** The step of a raw video or an iPhone clip with a Reel Kit edit, before its hand-off, or null when it has none. `own` is the step its main video
+    has without Reel Kit (HyperFrames', or the clip's offer). Its main video first: its Reel Kit edit's step until it is rendered, or, with none, its
+    own step until it is exported. Then its Reel Kit Reels, each settled before the hand-off, which takes the Reels with the main video (`finish`).
+    Then the hand-off: the main video's rendered edit, or its export. */
+function kitBeforeHandOff(facts, own) {
+  const edits = kitEditsOf(facts);
+  if (!edits.length) return null;
+  const main = edits.find((e) => e.key === "main");
+  if (main && main.state !== "rendered") return kitStep(main, "hand it off", facts.app);
+  const mine = main ? null : own();
+  if (mine && mine.stage !== "exported") return mine;
+  const reel = edits.find((e) => e.key !== "main" && e.state !== "rendered");
+  if (reel) return kitStep(reel, "hand it off", facts.app);
+  return main ? kitStep(main, "hand it off", facts.app) : mine;
 }
 
 /** What is said of a plan whose footage is being made into one video (PR H5b), and of one whose run to do it ended in a failure. */
@@ -468,7 +594,11 @@ function videoNext(facts, notes, now) {
     // only waits for its late check (`checking`) it is no finish at work as far as she is concerned: the stage is the Reels', said for after the check,
     // which that command is stopped until.
     const reels = reelsWaiting(facts);
-    if (reels.length) return facts.finishRunning && !facts.checking ? toDo("finish-running", FINISH_RUNNING) : reelsStep(reels, facts.checking);
+    const kit = reelsOfKit(facts);
+    if (reels.length) return facts.finishRunning && !facts.checking ? toDo("finish-running", FINISH_RUNNING) : reelsStep(reels, facts.checking, new Set(kit.filter((e) => e.state === "rendered").map((e) => Number(e.key.slice(5)))));
+    // A finished video's Reel in Reel Kit (plan Task 20), not rendered yet: its step, ahead of the page's, and handed off as its other Reels are.
+    const reel = kit.find((e) => e.state !== "rendered");
+    if (reel) return kitStep(reel, "hand off the Reels", facts.app);
     return opsStep(facts, notes, now) || { done: true };
   }
   // The gate holds it as a session whose mark is not cleared, though its kind is another (a Dropbox conflict or a hand edit leaves one): `app`
@@ -481,20 +611,32 @@ function videoNext(facts, notes, now) {
     return toDo("reading", 'Claude is reading it. A notice comes when it is done; then say "what did Claude find?".');
   }
   if (!facts.offersAnswered) return toDo("spellings", 'Claude has read it. Say "what did Claude find?", then answer the spellings card.');
-  // An explainer (PR H6) is made in HyperFrames and never handed off as it is: after its spellings its step is the app's.
-  if (clip && facts.explainer) return appStep(facts);
-  if (raw) {
-    if (facts.placeholder) return toDo("name", 'It needs its name before it is finished. Say "call it", then the name.');
-    return appStep(facts);
+  if (raw && facts.placeholder) return toDo("name", 'It needs its name before it is finished. Say "call it", then the name.');
+  // A raw video or an iPhone clip with a Reel Kit edit (plan Task 20): its edits' steps, around its main video's own, before the hand-off. A Reel Kit
+  // part is never sent to HyperFrames' steps, which `app` refuses for it.
+  if (raw || clip) {
+    const kit = kitBeforeHandOff(facts, () => mainStep(facts, raw));
+    if (kit) return kit;
+    return mainStep(facts, raw);
   }
-  // An iPhone clip's hand-off is not written by the spellings card: she opens it in HyperFrames and exports it, or hands it off as it is.
-  // Once the app has opened its project it is edited there; before, the video for the app is made first, on a Mac set up for the app, while
-  // no project is here: a video at work beside a project is not the main video's (a Reel's holds the same lock), as for a raw video (appStep;
-  // plan PR 17, the review of PR 10, M3).
-  if (clip) return facts.way === "hyperframes" ? appStep(facts) : facts.app && facts.copy && !facts.project ? copyStep(facts.copy, facts.local === true) : clipStep(facts);
   if (!facts.v2) return toDo("waits-v2", WAITS_V2);
   return toDo("handoff-owed", 'Its hand-off is not written yet. Say "show me the spellings" and answer them again.');
 }
+
+/** The step of a raw video's or an iPhone clip's main video, its spellings answered and no hand-off yet, as HyperFrames has it.
+    An explainer (PR H6) is made in HyperFrames and never handed off as it is: after its spellings its step is the app's. A raw video is edited in
+    HyperFrames (appStep). An iPhone clip's hand-off is not written by the spellings card: she opens it in HyperFrames and exports it, or hands it
+    off as it is. Once the app has opened its project it is edited there; before, the video for the app is made first, on a Mac set up for the app,
+    while no project is here: a video at work beside a project is not the main video's (a Reel's holds the same lock), as for a raw video (appStep;
+    plan PR 17, the review of PR 10, M3). */
+function mainStep(facts, raw) {
+  if (raw || facts.explainer) return appStep(facts);
+  return facts.way === "hyperframes" ? appStep(facts) : facts.app && facts.copy && !facts.project ? copyStep(facts.copy, facts.local === true) : clipStep(facts);
+}
+
+/** A finished video's Reels in Reel Kit (plan Task 20), after its hand-off: none where the gate holds it or the other Mac has it open, as for its
+    Reels exported (reelsWaiting). A finished video's main video is not edited here, so an edit of it is none. */
+const reelsOfKit = (facts) => (facts.kind === "finished" && !facts.gated && !facts.elsewhere ? kitEditsOf(facts).filter((e) => e.key !== "main") : []);
 
 /** The next step for an iPhone clip, its spellings answered and no hand-off yet (plan PR 7, F5; review, minor 2). A clip she opens in
     HyperFrames and exports is handed off in either version of the hand-off, so on a Mac that hands off version 1 only handing it off as it is
