@@ -97,7 +97,7 @@ import { checkingNow, problemFlagged } from "./finish-check.js";
 import { endedSinceYes, endedWithoutHandoff } from "./finish-ended.js";
 import { handoffIn, videoSeconds } from "./finish-time.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, downloadsOnce, exportsFound, exportsUnreadable, lookForExports, readRegular } from "./exports.js";
-import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
+import { mainWordsSaid, projectWords, projectWordsIn, reelTitleAsk } from "./on-screen.js";
 import { videoClock } from "./video-clock.js";
 import { timelineAt } from "./clock.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
@@ -127,7 +127,7 @@ import { DOWNLOADS_SAY_MS, LOOK_ASKED, LOOK_AT_WORK, UNSEEN_MS, accessLine, bloc
 import { askDialog } from "./dialog.js";
 import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, byReelKit, clipFolders, clipTrouble, clearOpensAfterSpellings, copyAtWork, copyIsMade, footageFailed, guidanceOf, isMain as inUse, mainState, markOpensAfterSpellings, opensAfterSpellingsOf, mediaOf, notWholeYet, openByItself, openInApp, plainName, projectOnAnotherMac, waitsForSpellings, whenReadyLockOf } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, byReelKit, projectDirOf, clipFolders, clipTrouble, clearOpensAfterSpellings, copyAtWork, copyIsMade, footageFailed, guidanceOf, isMain as inUse, mainState, markOpensAfterSpellings, opensAfterSpellingsOf, mediaOf, notWholeYet, openByItself, openInApp, plainName, projectOnAnotherMac, waitsForSpellings, whenReadyLockOf } from "./app.js";
 import { VOICEOVER, projectCues } from "./project.js";
 import { openVoiceProject, voiceProjectWhy } from "./explainer.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelNotWholeYet, reelStretch, reelWhy } from "./app-reel.js";
@@ -2426,15 +2426,25 @@ const capital = (text) => text[0].toUpperCase() + text.slice(1);
 function finishWay(ctx, record) {
   const kind = recordKind(record);
   const projects = (record.app?.projects ?? []).filter((p) => p.state !== PROJECT_KEPT);
-  if ((kind === "raw" || (kind === "short video" && hasFinalCut(record))) && projects.some(inUse)) return "hyperframes";
-  if (isClip(record)) return projects.some((p) => inUse(p) && Array.isArray(p.opened) && p.opened.length > 0) ? "hyperframes" : "clip";
+  // The main video's Reel Kit edit (app.js byReelKit, which inUse leaves out) is its project too: it is finished from its render, never opened.
+  const mainEdit = (p) => byReelKit(p) && p.key === "main";
+  if ((kind === "raw" || (kind === "short video" && hasFinalCut(record))) && projects.some((p) => inUse(p) || mainEdit(p))) return "hyperframes";
+  if (isClip(record)) return projects.some((p) => (inUse(p) && Array.isArray(p.opened) && p.opened.length > 0) || mainEdit(p)) ? "hyperframes" : "clip";
   if (!hasFinalCut(record)) return "finished";
   return "unopened";
 }
 
-/** The Reels of the record that `app … reel N` made a project for (plan PR 5): { reel: n } for each Reel project not kept for an earlier
-    kind. Such a Reel is finished from its project's export, wherever the main video was edited. */
+/** The Reels of the record that `app … reel N` made a project for (plan PR 5), or that have a Reel Kit edit (`maker: "reel-kit"`, plan Task 15:
+    that Reel's project, finished from its render): { reel: n } for each Reel project not kept for an earlier kind. Such a Reel is finished
+    from its project's export, wherever the main video was edited. */
 const reelProjectsOf = (record) => (record.app?.projects ?? []).filter((p) => p.state !== PROJECT_KEPT && /^reel [1-9]\d*$/.test(p.key)).map((p) => ({ reel: Number(p.key.slice(5)) }));
+
+/** The words on the picture of the project a part of a finish takes (on-screen.js projectWords): a Reel Kit edit's in its public/, where
+    its composition is (reel-kit-project.js projectDirOf), and a HyperFrames project's in its own folder (projectWordsIn). */
+function partWords(work, record, part) {
+  const edit = (record.app?.projects ?? []).find((p) => byReelKit(p) && p.key === part.key && p.name === part.project && p.state !== PROJECT_KEPT);
+  return edit && plainName(edit.name) ? projectWords(projectDirOf(work, edit)) : projectWordsIn(work, part.project);
+}
 
 /** What `finish "<episode>" reels` needs before it looks for a Reel's export (plan PR 9; architecture 4.3 and 8.7), from the record and
     the hand-off on file: why it may not go on, { why }, in plain words; or { onFile, base }, the hand-off the next revision is made
@@ -2598,7 +2608,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   const work = episodeWork(ctx.home, found.name);
   const main = looked.parts.find((p) => p.key === "main");
   if (main && v2) {
-    const read = main.video ? projectWordsIn(work, main.project) : { here: true, words: [] };
+    const read = main.video ? partWords(work, record, main) : { here: true, words: [] };
     const said = mainWordsSaid({ found: read.words, here: read.here, incomplete: read.incomplete, given: answers.onScreen, none: answers.noOnScreen, yes: answers.yes, taking: Boolean(main.video), shown: sameLines(shownWords(work), read.words.map((word) => word.text)) });
     if (said.refusal) return refuse(ctx, said.refusal);
     if (said.line) lines.push(said.line);
@@ -2620,7 +2630,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
     }
     const opening = suggestionOpening(ctx, found, part.fromSuggestion);
     // What the Reel's picture holds is a proposal for its title, which she confirms as she gives any title (plan PR 8).
-    looked.asks.push(reelTitleAsk({ n: part.reel, found: part.project ? projectWordsIn(work, part.project).words : [], opening }));
+    looked.asks.push(reelTitleAsk({ n: part.reel, found: part.project ? partWords(work, record, part).words : [], opening }));
   }
   for (const line of [...lines, ...looked.stops, ...stops, ...looked.asks]) ctx.say(line);
   // An explainer in a HeyGen voice (PR H6) is told what YouTube asks of it, ending what the finish found.

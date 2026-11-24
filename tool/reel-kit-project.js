@@ -26,7 +26,7 @@
 // What she reads holds no path, no flag and no name of a command.
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { KEPT, copyOf, fromOf, plainName } from "./app.js";
+import { KEPT, copyOf, fromOf, plainName, projectDirOf } from "./app.js";
 import { isPart, isPlannedRecord, kindOf, localStamp, shownName } from "./episode.js";
 import { mayGoIn } from "./footage.js";
 import { HELD, NOT_FOR_SESSION, gateFor, gated } from "./gate.js";
@@ -273,10 +273,8 @@ export function compositionFingerprint(dir) {
   return manifestFingerprint(files);
 }
 
-/** The folder of the project the record's `entry` names in the episode's work folder `work`, where its exports are recorded: a Reel
-    Kit edit's public/ (`maker: "reel-kit"`), where the app writes its own renders/ records and Studio writes a render's (Decision 7),
-    and a HyperFrames project's own folder. */
-export const projectDirOf = (work, entry) => (isReelKit(entry) ? join(work, entry.name, "public") : join(work, entry.name));
+/** The folder of the project the record's `entry` names, where its exports are recorded (app.js projectDirOf, Decision 7). */
+export { projectDirOf };
 
 // --- Whether an edit may start ---
 

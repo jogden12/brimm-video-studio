@@ -11,7 +11,7 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { tokens } from "./shared/text.js";
-import { KEPT, isMain } from "./app.js";
+import { KEPT, byReelKit, isMain, projectDirOf } from "./app.js";
 import { historyTail } from "./app-history.js";
 import { isDay } from "./episode.js";
 import { turnsOf } from "./hyperframes.js";
@@ -450,7 +450,8 @@ export function downloadsOnce({ home, exports = null, readdir = readdirSync }) {
 }
 
 /** What `finish` reads of the disk to look for HyperFrames' exports (plan PR 7): for the main project in use and each Reel project of
-    the record (not a project kept for an earlier kind, and not one of a Reel the record says is dropped), whether its folder is on this Mac, when it last changed (projectChange), the
+    the record (not a project kept for an earlier kind, and not one of a Reel the record says is dropped; a part with no HyperFrames project
+    takes its Reel Kit edit, the newest version, as its project, plan Task 15, its records read from its public/ by projectDirOf), whether its folder is on this Mac, when it last changed (projectChange), the
     files its records name and the renders in its renders/ that none does; and the videos in Downloads and in the exports folder this Mac picked. `home` is this Mac's home,
     `name` the episode's folder name. Gives { input, unreadable, exportsUnreadable }: `input` is what lookForExports is given, `unreadable` is true when this Mac will
     not let Downloads be read, and `exportsUnreadable` is true when it will not let the picked exports folder be read. `exports` is the exports folder this Mac picked (settings.js exportsFolderOf): when it is not Downloads, by their
@@ -463,14 +464,22 @@ export function exportsFound({ home, exports = null, name, record, zone = LOCAL_
   const picked = typeof exports === "string" && exports !== "" && !sameFolder(exports, downloads) ? exports : null;
   const work = episodeWork(home, name);
   const projects = Array.isArray(record.app && record.app.projects) ? record.app.projects : [];
-  const main = projects.find(isMain);
+  // A part's project is its HyperFrames project in use, or else its Reel Kit edit (app.js byReelKit, which isMain leaves out so that
+  // `app` never takes one for its own), the newest version when there are more: an edit is that part's project, never a HyperFrames
+  // one to make or open, and its exports are read from its public/ (reel-kit-project.js projectDirOf).
+  const inUse = projects.filter((p) => p && p.state !== KEPT);
+  const editOf = (key) => inUse.filter((p) => byReelKit(p) && p.key === key).reduce((best, p) => (best === null || Number(p.version) > Number(best.version) ? p : best), null);
+  const main = projects.find(isMain) ?? editOf("main");
   // A Reel dropped after its project was made (`reel drop`) is no part of a finish: it is not asked for, and an export of it left in
   // Downloads is not handed off, which would make the Reel finished again. A project whose Reel the record does not hold at all stays
   // a part, so that finish can stop on it.
   const dropped = new Set((Array.isArray(record.reels) ? record.reels : []).filter((r) => r && r.status === "dropped").map((r) => `reel ${r.n}`));
-  const reels = projects.filter((p) => p.state !== KEPT && /^reel [1-9]\d*$/.test(p.key) && !dropped.has(p.key)).sort((a, b) => Number(a.key.slice(5)) - Number(b.key.slice(5)));
+  const isReel = (p) => /^reel [1-9]\d*$/.test(p.key) && !dropped.has(p.key);
+  const made = inUse.filter((p) => isReel(p) && !byReelKit(p));
+  const edits = [...new Set(inUse.filter((p) => isReel(p) && byReelKit(p) && !made.some((m) => m.key === p.key)).map((p) => p.key))].map(editOf);
+  const reels = [...made, ...edits].sort((a, b) => Number(a.key.slice(5)) - Number(b.key.slice(5)));
   const parts = [...(main ? [{ project: main, key: "main", label: "the main video" }] : []), ...reels.map((p) => ({ project: p, key: p.key, label: `Reel ${p.key.slice(5)}`, reel: Number(p.key.slice(5)) }))].map(({ project, key, label, reel }) => {
-    const dir = plainName(project.name) ? join(work, project.name) : "";
+    const dir = plainName(project.name) ? projectDirOf(work, project) : "";
     const here = dir !== "" && isFolder(dir);
     return {
       key, label, ...(reel ? { reel } : {}), project: project.name, ...(here ? { dir } : {}), fromSuggestion: project.fromSuggestion ?? null, here, mac: project.on,
