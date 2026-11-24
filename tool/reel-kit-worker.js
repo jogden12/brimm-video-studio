@@ -94,8 +94,9 @@ export function openedTimes(home, slug) {
     return [];
   }
 }
-/** Whether Studio has opened the project `slug` in the app: anything at its mark's place says so, even a mark that can't be read, so
-    that a worker never runs on a project the app may have. A slug that is none throws. */
+/** Whether Studio has opened the project `slug` in the app. It fails closed, so that a worker never runs on a project the app may
+    have: anything at its mark's place says so, even a mark that can't be read, and so does a mark that can't be looked at (any error but
+    "not there") and a slug that is none (its mark's place can't be named). Never throws. */
 export function wasOpened(home, slug) {
   try {
     lstatSync(openedFile(home, slug));

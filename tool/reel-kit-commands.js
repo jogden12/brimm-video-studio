@@ -385,6 +385,7 @@ export const EDIT_SAY = Object.freeze({
   appOdd: "Its project isn't as Reel Kit left it, so it wasn't opened in HyperFrames: ask Jason.",
   appFound: "Something in its project wasn't Reel Kit's or Studio's, so it was set aside and nothing was opened: ask Jason.",
   appNotes: "Its notes for HyperFrames couldn't be written, so it wasn't opened: ask Jason.",
+  appRendering: `It is being rendered right now, so it wasn't opened in HyperFrames: say it again once it is rendered. Say "how are the Reel Kit edits going?" to follow it.`,
   openedNoChange: (name) => `${name} was opened in HyperFrames, so Reel Kit won't change it: further Reel Kit changes go into a new edit of the same part, and this one stays as it is.`
 });
 
@@ -761,12 +762,15 @@ async function reviseCommand(ctx, words, h) {
 }
 
 /** Why Reel Kit may no longer change the edit (plan Task 17), in her words, or "": changed since finalize (in the app, or by anything else),
-    in the render's own line (RENDER_SAY.changed); or opened in the HyperFrames app by Studio (the worker's wasOpened), which is the
-    app's from then on, changed or not. Either way further Reel Kit changes are a new version of the part (`start`). */
+    in the render's own line (RENDER_SAY.changed), or holding what no fingerprint is made of (a link), in renderWhy's line for that
+    (RENDER_SAY.odd); or opened in the HyperFrames app by Studio (the worker's wasOpened), which is the app's from then on, changed or
+    not. Either way further Reel Kit changes are a new version of the part (`start`). */
 function keptInApp(ctx, edit) {
   const state = readState(edit.dir);
   const name = typeof state?.name === "string" && state.name.trim() !== "" ? state.name : "This edit";
-  if (changedInApp(edit.dir, state)) return RENDER_SAY.changed(name);
+  const change = changedInApp(edit.dir, state);
+  if (change === "odd") return RENDER_SAY.odd;
+  if (change === "changed") return RENDER_SAY.changed(name);
   return edit.slug !== "" && wasOpened(ctx.home, edit.slug) ? EDIT_SAY.openedNoChange(name) : "";
 }
 
@@ -978,10 +982,13 @@ function ownPublic(dir) {
   }
 }
 
-/** The app's version as this Mac's copies say it (app-version.js readAppVersion, plutil given five seconds each), noted as the last one
-    seen (noteAppVersion), once per open: { seen, line }, `line` the one she reads when it changed since the last one seen, or "". A
-    version that can't be read or noted says nothing and stops nothing. */
-function appVersionNow(ctx) {
+/** The app's version as this Mac's copies say it (app-version.js readAppVersion, plutil given five seconds each), once per open, and
+    the line she reads about it: { seen, line }. `was` is the version this very project was last opened with (its studio.json `app`),
+    "" at its first open: the line says the app was updated since this project was last opened only when `was` and the version now are
+    both known and differ, so it is never said at a project's first open, nor of another project's open. The Mac's own record of the
+    last version seen (noteAppVersion) is kept as well, once per open, and its answer is not the line's. A version that can't be read or
+    noted says nothing and stops nothing. */
+function appVersionNow(ctx, was) {
   let seen = { version: "", build: "", copies: [] };
   try {
     seen = readAppVersion({ home: ctx.home, ...(kitOf(ctx).plutil ? { run: kitOf(ctx).plutil } : {}) });
@@ -989,26 +996,29 @@ function appVersionNow(ctx) {
     return { seen, line: "" };
   }
   try {
-    const noted = noteAppVersion(ctx.home, seen);
-    return { seen, line: noted.changed ? appVersionLine({ was: noted.was, now: seen.version, copies: seen.copies }) : "" };
+    noteAppVersion(ctx.home, seen);
   } catch {
-    return { seen, line: "" };
+    // The Mac's record waits for the next open; the project's own is what the line is said from.
   }
+  const changed = typeof was === "string" && was !== "" && seen.version !== "" && was !== seen.version;
+  return { seen, line: changed ? appVersionLine({ was, now: seen.version, copies: seen.copies }) : "" };
 }
 
 /** `reelkit app "<episode>" <slug>`: the edit opened in the HyperFrames app, on its public/, Reel Kit's HyperFrames project. In this order:
     - the episode through the gate (edit.js), then appWhy again: never a session, cleared or not, nor any record the gate holds (Decision
       9: the app transcribes every video it opens, in the cloud);
     - only an edit finalize left ready (after her go), or rendered; one queued, at work, stopped, failed or at its storyboard is refused in
-      its own line; changed since in the app, it opens all the same: it is hers to go on with there;
+      its own line; changed since in the app, it opens all the same: it is hers to go on with there; while a render of it runs
+      (renderingBy), nothing is opened, in one line (EDIT_SAY.appRendering);
     - a Mac set up for the app (settings.js appOf) with the pinned command line (hyperframes.js cliPath), and a public/ of the project's own;
     - the look over the project for Studio's own names (the worker's sweepProject), immediately before the app is asked: each Studio did
       not note is set aside, its lines in `<slug>.app.log`, and the app is not asked (EDIT_SAY.appFound). The app's own public/.claude/
       is let be once Studio has opened the project (`opened`, the worker's wasOpened), and never before;
-    - public/CLAUDE.md and public/AGENTS.md written whole (reelKitNotes), each noted as Studio's (noteOwnFile);
+    - public/CLAUDE.md and public/AGENTS.md written whole (reelKitNotes), each noted as Studio's (noteOwnFile): in a project Studio has
+      opened, also over the app's agent's own changes to them, which the look lets be (reel-kit-worker-own.js appsOwn);
     - the app asked by the pinned command line's `open` (app.js openOnly), which says what came of it, and the buttons line;
     - once it opened: Studio's mark (markOpened, out of the project), where to export when this Mac picked a folder, the app's version
-      read and noted once (appVersionNow) with its line when it changed, the version in studio.json (`app`: { version, build, opened }),
+      read and noted once (appVersionNow) with its line when it differs from the one this project was last opened with, the version in studio.json (`app`: { version, build, opened }),
       and the record's entry with the time it opened and its state `opened` (from `made`, never back). Resolves 0 when the app opened and
       the record was written, 1 otherwise. */
 async function appCommand(ctx, words, h) {
@@ -1026,6 +1036,8 @@ async function appCommand(ctx, words, h) {
   if (status.state === "stopped") return refuse(ctx, stoppedLine(status));
   if (status.state === "failed") return refuse(ctx, EDIT_SAY.failed);
   if (status.state !== "ready" && status.state !== "rendered") return refuse(ctx, EDIT_SAY.appNotBuilt);
+  // Its render reads the project while it runs, and brings its file in at the end: the app waits until it is done.
+  if (renderingNow(ctx, readState(edit.dir))) return refuse(ctx, EDIT_SAY.appRendering);
   if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
   const given = ctx.deps?.app ?? {};
   const cli = given.cli ?? cliPath(ctx.home);
@@ -1067,7 +1079,7 @@ async function appCommand(ctx, words, h) {
   }
   const into = exportsWords(ctx.settings, ctx.home);
   if (into) ctx.say(`Export it on This Mac, into ${into}.`);
-  const { seen, line } = appVersionNow(ctx);
+  const { seen, line } = appVersionNow(ctx, typeof state.app?.version === "string" ? state.app.version : "");
   if (line) ctx.say(line);
   try {
     const was = readState(edit.dir) ?? state;

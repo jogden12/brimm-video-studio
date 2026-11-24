@@ -8,7 +8,7 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HELP, editMain } from "../edit.js";
@@ -37,6 +37,9 @@ const nameOf = (v) => `Pricing- what to charge- reel 2 3fa9c1 Reel Kit v${v}`;
 const slugOf = (v) => `3fa9c1-reel-2-v${v}`;
 const NAME = nameOf(1);
 const SLUG = slugOf(1);
+/** A second edit of the episode, of Reel 1, for what one project's open says of another's. */
+const ONE_NAME = "Pricing- what to charge- reel 1 3fa9c1 Reel Kit v1";
+const ONE_SLUG = "3fa9c1-reel-1-v1";
 const WAITING = "This video is waiting for its answer: say what it is first.";
 const LEFT_SAID = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
 const OPEN = "It's open in HyperFrames.";
@@ -60,9 +63,10 @@ function plutilOf(plists) {
 /** The made-up episode, answered as a raw wide recording unless `record` says otherwise, with a Reel Kit edit of Reel 2 that finalize
     left ready (`state` laid over its studio.json), this Mac set up for the app, and the stand-in told to open (`open`) and, with `app`
     "writes", to write what the app writes. HyperFrames' Info.plist says 0.9.4 unless `plists` says otherwise. */
-function world({ record = {}, state = {}, open = "opened", app = "writes", plists = { [SYSTEM]: { CFBundleShortVersionString: "0.9.4", CFBundleVersion: "941" } }, setUp = true } = {}) {
+function world({ record = {}, state = {}, open = "opened", app = "writes", plists = { [SYSTEM]: { CFBundleShortVersionString: "0.9.4", CFBundleVersion: "941" } }, setUp = true, reelOne = false } = {}) {
   const entry = entryOf({ key: "reel 2", name: NAME, mode: "lofi", version: 1, at: "2026-11-23T10:00:00-06:00", machine: "Mac Studio", fromSuggestion: 2, from: FROM, workingCopy: COPY });
-  const { t, found } = episode({ ...RAW, answer: { ...ANSWERED, seen: "wide, 0:23, no retakes" }, version: 4, app: { toolchain: "0.8.208", projects: [entry] }, ...record });
+  const one = entryOf({ key: "reel 1", name: ONE_NAME, mode: "hifi", version: 1, at: "2026-11-23T10:00:00-06:00", machine: "Mac Studio", fromSuggestion: 1, from: FROM, workingCopy: COPY });
+  const { t, found } = episode({ ...RAW, answer: { ...ANSWERED, seen: "wide, 0:23, no retakes" }, version: 4, app: { toolchain: "0.8.208", projects: reelOne ? [entry, one] : [entry] }, ...record });
   done.push(t);
   mkdirSync(join(kitDir(t.home), "pipeline"), { recursive: true });
   writeFileSync(join(kitDir(t.home), "pipeline", "new.py"), "# made up\n");
@@ -78,16 +82,18 @@ function world({ record = {}, state = {}, open = "opened", app = "writes", plist
   t.ctx.deps.alive = (pid) => live.has(pid) || pid === process.pid;
   const dirOf = (v) => join(episodeWork(t.home, FOLDER), nameOf(v));
   const dir = dirOf(1);
-  for (const folder of ["public/media", "cards/c1", "fx/f1", "work", "source", "storyboard", "renders"]) mkdirSync(join(dir, folder), { recursive: true });
-  writeFileSync(join(dir, "source", "clip.mp4"), "THE 4K COPY");
-  writeFileSync(join(dir, "edit.py"), `TITLE = "Know your costs"\nSTYLE = "lofi"\n`);
-  writeFileSync(join(dir, "public", "index.html"), "<html>the composition</html>\n");
-  writeFileSync(join(dir, "cards", "c1", "index.html"), "<html>a card</html>\n");
-  writeFileSync(join(dir, "fx", "f1", "fx.js"), "// an effect\n");
-  writeState(dir, {
-    slug: SLUG, key: "reel 2", mode: "lofi", version: 1, title: "Know your costs", name: NAME, state: "ready", job: "finalize", step: "ready",
-    approved: { at: "2026-11-23T10:00:00.000Z" }, fingerprint: compositionFingerprint(dir), ...state
-  });
+  /** An edit finalize left ready in the folder `at`. */
+  const made = (at, fields) => {
+    for (const folder of ["public/media", "cards/c1", "fx/f1", "work", "source", "storyboard", "renders"]) mkdirSync(join(at, folder), { recursive: true });
+    writeFileSync(join(at, "source", "clip.mp4"), "THE 4K COPY");
+    writeFileSync(join(at, "edit.py"), `TITLE = "${fields.title}"\nSTYLE = "${fields.mode}"\n`);
+    writeFileSync(join(at, "public", "index.html"), "<html>the composition</html>\n");
+    writeFileSync(join(at, "cards", "c1", "index.html"), "<html>a card</html>\n");
+    writeFileSync(join(at, "fx", "f1", "fx.js"), "// an effect\n");
+    writeState(at, { version: 1, state: "ready", job: "finalize", step: "ready", approved: { at: "2026-11-23T10:00:00.000Z" }, ...fields, fingerprint: compositionFingerprint(at) });
+  };
+  made(dir, { slug: SLUG, key: "reel 2", mode: "lofi", title: "Know your costs", name: NAME, ...state });
+  if (reelOne) made(join(episodeWork(t.home, FOLDER), ONE_NAME), { slug: ONE_SLUG, key: "reel 1", mode: "hifi", title: "The opening", name: ONE_NAME });
   if (setUp) writeSettings(t.home, { app: "hyperframes" });
   writeFileSync(join(t.home, "hyperframes-stand-in.json"), JSON.stringify({ open, app }));
   t.ctx.deps.app = { cli: HF, node: process.execPath };
@@ -371,5 +377,63 @@ describe("the app's version (plan Task 18)", () => {
     const throws = world();
     const r2 = await openIt(throws, { reelKit: { plutil: () => { throw new Error("plutil broke"); } } });
     assert.equal(r2.code, 0, r2.said.join("\n"));
+  });
+});
+
+describe("fix round 1", () => {
+  const UPDATED = "HyperFrames was updated since this project was last opened (0.9.4 to 0.9.5): check that it plays before you change it.";
+  const updatedLines = (r) => r.said.filter((line) => line.startsWith("HyperFrames was updated"));
+
+  it("says the app was updated only for a project last opened with another version, and never at a project's first open", async () => {
+    const w = world({ reelOne: true });
+    const openA = () => reelkit(w, ["app", FOLDER, SLUG]);
+    const openB = () => reelkit(w, ["app", FOLDER, ONE_SLUG]);
+    assert.deepEqual(updatedLines(await openA()), [], "A's first open");
+    w.plutil.plists[SYSTEM] = { CFBundleShortVersionString: "0.9.5", CFBundleVersion: "950" };
+    const b = await openB();
+    assert.equal(b.code, 0, b.said.join("\n"));
+    assert.deepEqual(updatedLines(b), [], "B was never opened before: nothing was updated since");
+    assert.deepEqual(updatedLines(await openA()), [UPDATED], "A was last opened at 0.9.4");
+    assert.deepEqual(updatedLines(await openA()), [], "said once for A");
+    assert.deepEqual(updatedLines(await openB()), [], "B was last opened at 0.9.5");
+    // The Mac's own record of the last version seen is kept all the same.
+    assert.equal(JSON.parse(readFileSync(appVersionFile(w.t.home), "utf8")).version, "0.9.5");
+  });
+
+  it("refuses a rebuild of an edit that holds a link, as its render is refused", async () => {
+    const w = world();
+    mkdirSync(join(w.t.dir, "elsewhere"), { recursive: true });
+    symlinkSync(join(w.t.dir, "elsewhere"), join(w.dir, "public", "elsewhere"));
+    writeFileSync(notesFile(w.dir), JSON.stringify([{ beat: "p02", text: "Shorter.", at: "2026-11-23T11:00:00.000Z" }]));
+    assert.deepEqual(Object.values(await reelkit(w, ["revise", FOLDER, SLUG])), [1, [RENDER_SAY.odd]]);
+    assert.deepEqual(Object.values(await reelkit(w, ["render", FOLDER, SLUG])), [1, [RENDER_SAY.odd]]);
+    assert.deepEqual(w.t.started, []);
+  });
+
+  it("opens nothing while the edit is being rendered, in one line", async () => {
+    const w = world({ state: { rendering: { pid: process.pid, at: "2026-11-23T11:00:00.000Z" } } });
+    const r = await openIt(w);
+    assert.equal(r.code, 1, r.said.join("\n"));
+    assert.equal(r.said.length, 1);
+    assert.equal(r.said[0], EDIT_SAY.appRendering);
+    assert.deepEqual(hfRuns(w), []);
+    assert.equal(existsSync(join(w.dir, "public", "CLAUDE.md")), false);
+  });
+
+  it("writes its notes again when the app's agent changed them in an opened project, and still refuses anything else", async () => {
+    const w = world();
+    assert.equal((await openIt(w)).code, 0);
+    const notes = readFileSync(join(w.dir, "public", "CLAUDE.md"), "utf8");
+    writeFileSync(join(w.dir, "public", "CLAUDE.md"), `${notes}\n- She likes the warm look.\n`);
+    writeFileSync(join(w.dir, "public", "AGENTS.md"), "the agent's own words\n");
+    const again = await openIt(w);
+    assert.equal(again.code, 0, again.said.join("\n"));
+    for (const name of ["CLAUDE.md", "AGENTS.md"]) assert.equal(readFileSync(join(w.dir, "public", name), "utf8"), notes, name);
+    assert.equal(existsSync(asideDir(w.t.home, SLUG)), false, "nothing set aside");
+    assert.deepEqual(sweepProject(w.t.home, SLUG, w.dir, { opened: true }).planted, [], "noted again as Studio's");
+    // Any other of Studio's own names is still refused, opened or not.
+    writeFileSync(join(w.dir, "public", "CLAUDE.local.md"), "planted\n");
+    assert.deepEqual(Object.values(await openIt(w)), [1, [EDIT_SAY.appFound]]);
+    assert.equal(hfRuns(w).length, 2);
   });
 });

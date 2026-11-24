@@ -282,19 +282,20 @@ export function compositionFingerprint(dir) {
     and a HyperFrames project's own folder. */
 export const projectDirOf = (work, entry) => (isReelKit(entry) ? join(work, entry.name, "public") : join(work, entry.name));
 
-/** Whether the composition in the project `dir` is no longer the one recorded in its studio.json `state` (`fingerprint`, when finalize
-    ended ready): changed in HyperFrames since, or holding what no fingerprint is made of (a link), which counts as changed, as a gate errs
-    toward refusing. Only an edit finalize left `ready`, or `rendered` since, is judged: the fingerprint is that one's, and a revise
-    started from it changes the composition itself on the way to its next storyboard, keeping the old fingerprint until its next
-    finalize. An edit with no fingerprint recorded (not built yet) has not changed either. `reelkit revise` refuses one that has, in the
-    render's own line (reel-kit-render.js RENDER_SAY.changed), as renderWhy refuses its render (plan Task 17). */
+/** How the composition in the project `dir` stands against the one recorded in its studio.json `state` (`fingerprint`, when finalize
+    ended ready): "changed" when it is no longer that one (changed in HyperFrames since), "odd" when no fingerprint can be made of it
+    (a link, or anything neither a file nor a folder), and "" when it is still that one. Only an edit finalize left `ready`, or
+    `rendered` since, is judged: the fingerprint is that one's, and a revise started from it changes the composition itself on the way
+    to its next storyboard, keeping the old fingerprint until its next finalize. An edit with no fingerprint recorded (not built yet)
+    gives "" too. `reelkit revise` refuses "changed" and "odd" in the render's own lines (reel-kit-render.js RENDER_SAY.changed and
+    RENDER_SAY.odd), as renderWhy refuses its render (plan Task 17). */
 export function changedInApp(dir, state) {
-  if (!isObject(state) || (state.state !== "ready" && state.state !== "rendered")) return false;
-  if (typeof state.fingerprint !== "string" || !/^sha256-[0-9a-f]{64}$/.test(state.fingerprint)) return false;
+  if (!isObject(state) || (state.state !== "ready" && state.state !== "rendered")) return "";
+  if (typeof state.fingerprint !== "string" || !/^sha256-[0-9a-f]{64}$/.test(state.fingerprint)) return "";
   try {
-    return compositionFingerprint(dir) !== state.fingerprint;
+    return compositionFingerprint(dir) === state.fingerprint ? "" : "changed";
   } catch {
-    return true;
+    return "odd";
   }
 }
 

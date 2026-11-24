@@ -1,5 +1,6 @@
-// The HyperFrames app's version, read from its Info.plist, and the one line `reelkit app` says when it changed since the last time
-// one was seen. The app updates itself about six times a day, and a Reel Kit project is edited against one version of it.
+// The HyperFrames app's version, read from its Info.plist, the Mac's record of the last one seen, and the one line `reelkit app` says
+// when it differs from the one a project was last opened with (reel-kit-commands.js). The app updates itself about six times a day,
+// and a Reel Kit project is edited against one version of it.
 // Two copies of the app may be on a Mac (/Applications and ~/Applications); the first is /Applications, which macOS prefers.
 // The plist is read by /usr/bin/plutil, which tests stand in (`run`). The last version seen is kept in
 // Application Support, written whole (a temp file, then a rename).
