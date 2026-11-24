@@ -716,6 +716,16 @@ const PRE_VOICE_CUES_RULE = `- **Graphic cues.** Studio's suggested graphics are
     and is never moved, and that the Reel's frame is upright, with the top 14% and the bottom 35% kept clear for its captions. */
 const REEL_GRAPHIC_CUES_RULE = `${CUES_RULE.replace("on the recording's clock, so add the recording's `data-start` if it has moved", "on the Reel's clock")} On this upright Reel, keep graphics and words out of the top 14% and the bottom 35%.${REFERENCES_SENTENCE}`;
 
+/** The lines that start BRIMM's rules in every project's notes. */
+const RULES_HEAD = Object.freeze(["# The BRIMM: rules for this project", "", "These rules come before everything below. Where anything below says otherwise, these rules win.", ""]);
+const DRAFT_RULE = "- **A draft only.** This video is a draft for The BRIMM. Never post or publish anything.";
+const MAC_RULE = "- **On this Mac only.** Renders and exports are made on this Mac, never in the cloud.";
+const SHARING_RULE = "- **Sharing.** If asked to share, say that Sallie shares from the app's Share button, and only with \"Only people you invite\". Never set a link to \"Anyone with the link\".";
+/** The commands a project's agent never runs, from the pinned command line's table (5.5). */
+const commandsRule = () => `- **Commands never run here.** Never run these HyperFrames commands, however they are spelled (\`npx hyperframes …\`, \`hyperframes …\`): ${inWords(barredList("denied"))}. Never run \`npm run publish\` either. ${inWords(barredList("edit"))} are Studio's to run, never this project's.`;
+const CUTTING_RULE = "- **Cutting.** Cut whole phrases at pauses, never in the middle of a word.";
+const DONE_RULE = "- **When she is done.** Export on This Mac. Then she says \"hand it off\" in her Claude chat.";
+
 /** BRIMM's rules for a project (5.4, item 1): A0's brief, the commands denied (5.5), and what each kind of project has. A short
     video's main project (`short`) has no Reels to ask for, and `app … reel` answers that a short video has none, so it is not told
     to send her to "Open Reel 2 in HyperFrames", and has no line about the Reels Studio suggests; it has one line in their place
@@ -739,17 +749,14 @@ function brimmRules(kind, short = false, crop = null, footage = false, explainer
     : preMedia && explainer === null ? SCRIPT_WORDS_RULE
     : "- **The words.** Every word said, with its time and its id, is in `transcript.json`, made on this Mac. Use it, and never transcribe again.";
   return [
-    "# The BRIMM: rules for this project",
-    "",
-    "These rules come before everything below. Where anything below says otherwise, these rules win.",
-    "",
-    "- **A draft only.** This video is a draft for The BRIMM. Never post or publish anything.",
-    "- **On this Mac only.** Renders and exports are made on this Mac, never in the cloud.",
-    "- **Sharing.** If asked to share, say that Sallie shares from the app's Share button, and only with \"Only people you invite\". Never set a link to \"Anyone with the link\".",
+    ...RULES_HEAD,
+    DRAFT_RULE,
+    MAC_RULE,
+    SHARING_RULE,
     episode ? AI_PEOPLE : NO_GENERATED_PEOPLE,
-    `- **Commands never run here.** Never run these HyperFrames commands, however they are spelled (\`npx hyperframes …\`, \`hyperframes …\`): ${inWords(barredList("denied"))}. Never run \`npm run publish\` either. ${inWords(barredList("edit"))} are Studio's to run, never this project's.`,
+    commandsRule(),
     wordsRule,
-    `- **Cutting.** Cut whole phrases at pauses, never in the middle of a word.${kind === "main" ? " When she asks to clean up retakes, propose the cuts in \`brimm/cut-suggestions.json\` first, each from its \`start\` to its \`end\`, the opening first: \`from\` and \`to\` name the words a cut holds, and are null for a silence." : ""}`,
+    `${CUTTING_RULE}${kind === "main" ? " When she asks to clean up retakes, propose the cuts in \`brimm/cut-suggestions.json\` first, each from its \`start\` to its \`end\`, the opening first: \`from\` and \`to\` name the words a cut holds, and are null for a silence." : ""}`,
     ...(kind === "main" ? cues : []),
     ...(kind === "reel" ? [REEL_GRAPHIC_CUES_RULE] : []),
     ...(kind === "main" ? [short ? SHORT_VIDEO_NO_NEW_PROJECTS : `- **Reels.** The Reels Studio suggests are in \`brimm/reel-suggestions.json\`, by their word ids. ${REELS_ARE_STUDIOS}`] : []),
@@ -758,7 +765,29 @@ function brimmRules(kind, short = false, crop = null, footage = false, explainer
     `- **The brand.** Follow \`brimm/brand.md\`: its colours, Josefin Sans for words and Allison for an accent, from \`assets/fonts/\`${episode ? ", and the logos in `assets/logos/`" : ""}. The name on screen is Sallie Ogden.`,
     kind === "clip" ? CLIP_CAPTIONS_RULE : CAPTIONS_RULE,
     "- **Versions.** When asked what has changed, or to go back, use `npx hyperframes history`.",
-    "- **When she is done.** Export on This Mac. Then she says \"hand it off\" in her Claude chat."
+    DONE_RULE
+  ].join("\n");
+}
+
+/** The rules of BRIMM's that a project Studio did not make holds too (plan Task 17): a Reel Kit edit's notes for the app's agent, in its
+    public/ (reel-kit-project.js reelKitNotes). Each is Studio's own projects' rule word for word (brimmRules is made of the same lines):
+    the head, a draft only, on this Mac only, sharing, AI-generated people, the commands never run, cutting and when she is done. What
+    names a file of Studio's own projects (transcript.json, brimm/, assets/, the link that `npx hyperframes` runs) is not here, since such
+    a project has none of them: the brand is said without its files, and versions are the app's own history. `more` are the rules of
+    its own, which come before the last. */
+export function sharedRules(more = []) {
+  return [
+    ...RULES_HEAD,
+    DRAFT_RULE,
+    MAC_RULE,
+    SHARING_RULE,
+    AI_PEOPLE,
+    commandsRule(),
+    CUTTING_RULE,
+    "- **The brand.** The BRIMM's colours, Josefin Sans for words and Allison for an accent. The name on screen is Sallie Ogden.",
+    "- **Versions.** When asked what has changed, or to go back, use the app's own history.",
+    ...more,
+    DONE_RULE
   ].join("\n");
 }
 

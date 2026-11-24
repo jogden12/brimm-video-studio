@@ -76,6 +76,24 @@ describe("app-version", () => {
     assert.doesNotMatch(appVersionLine({ was: "0.9.4", now: "0.9.5", copies: same.copies }), /two copies/);
   });
 
+  it("reads the copy in your Applications folder when it is the only one", () => {
+    const run = plutil({ [USER]: { CFBundleShortVersionString: "0.9.3", CFBundleVersion: "930" } });
+    const seen = readAppVersion({ home: HOME, run });
+    assert.deepEqual(seen, { version: "0.9.3", build: "930", copies: [{ path: USER, version: "0.9.3", build: "930" }] });
+    assert.deepEqual(run.calls.map((call) => call.at(-1)), [SYSTEM, USER], "/Applications is asked first");
+    assert.equal(appVersionLine({ was: "0.9.2", now: seen.version, copies: seen.copies }),
+      "HyperFrames was updated since this project was last opened (0.9.2 to 0.9.3): check that it plays before you change it.");
+  });
+
+  it("gives plutil five seconds for each copy", () => {
+    const options = [];
+    readAppVersion({ home: HOME, run: (cmd, args, given) => {
+      options.push(given);
+      return { status: 1, stdout: "", stderr: "" };
+    } });
+    assert.deepEqual(options, [{ encoding: "utf8", timeout: 5000 }, { encoding: "utf8", timeout: 5000 }]);
+  });
+
   it("reads nothing and says nothing when no app is there", () => {
     const seen = readAppVersion({ home: HOME, run: plutil({}) });
     assert.deepEqual(seen, { version: "", build: "", copies: [] });

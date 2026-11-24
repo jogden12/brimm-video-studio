@@ -57,12 +57,13 @@ export function readState(dir) {
 /** The folders of a project that, with its edit.py, are the composition Reel Kit renders. */
 const COMPOSITION = Object.freeze(["fx", "cards", "public"]);
 /** What is left out of public/, at its top, by name as the Mac's disk folds it: HyperFrames' snapshots and renders, the app's own
-    folder (its transcripts and history) and the notes for its agent. None of them is the composition. */
-const NOT_COMPOSITION = Object.freeze(["snapshots", "renders", ".hyperframes", "CLAUDE.md", "AGENTS.md"]);
+    folder (its transcripts and history), the notes for its agent and its agent's own settings (`.claude/`, where it writes its
+    settings.local.json once the app has the project open: plan Task 17, Review Focus 3). None of them is the composition. */
+const NOT_COMPOSITION = Object.freeze(["snapshots", "renders", ".hyperframes", "CLAUDE.md", "AGENTS.md", ".claude"]);
 
 /** The fingerprint of the composition in the project `dir`, "sha256-<hex>": the SHA-256 of the sorted manifest of `(path, sha256)`
     (reel-kit.js manifestFingerprint, as a dropped Reel Kit's is made) of its edit.py, and every file under fx/, cards/ and public/,
-    leaving out public/'s snapshots/, renders/, .hyperframes/, CLAUDE.md and AGENTS.md (in any spelling the disk takes for them), and
+    leaving out public/'s snapshots/, renders/, .hyperframes/, CLAUDE.md, AGENTS.md and .claude/ (in any spelling the disk takes for them), and
     `.DS_Store` and `._*` anywhere. A link anywhere it looks (edit.py itself, one of the three folders, or inside them), or anything
     that is neither a file nor a folder, throws (the error's `code` reel-kit.js LINK_INSIDE or ODD_INSIDE): no fingerprint is made of
     what a link leads to, so a caller fails closed. A folder that is not there is left out, as is an edit.py that is not. */

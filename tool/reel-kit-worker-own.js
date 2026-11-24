@@ -21,11 +21,14 @@
 // running (`stopHolders` names what holds the project open and stops none of it) could still swap a folder for a link. What was moved
 // is looked at once more where it landed, and said loudly when it is not what was found.
 //
-// For Task 17 (`reelkit app`, which opens the HyperFrames app on a project's public/): run the look (reel-kit-worker.js sweepProject)
-// immediately before opening the app, and open nothing when it finds anything; call `noteOwnFile` after each write of
-// public/CLAUDE.md and public/AGENTS.md (a write changes the file's inode or change time, so one not noted again is set aside at the
-// next look); and decide how the app's own writes under public/.claude/ are treated, since as it stands the next look sets that
-// folder aside whole and fails that run (Studio did not write it).
+// The HyperFrames app on a project's public/ (plan Task 17, `reelkit app`): the look (reel-kit-worker.js sweepProject) is run
+// immediately before the app is asked, and a find opens nothing; Studio notes public/CLAUDE.md and public/AGENTS.md (`noteOwnFile`)
+// after each write of them. The app's own agent writes public/.claude/ (its settings.local.json), which Studio did not write. A
+// project Studio has opened in the app is never run by the worker again (reel-kit-worker.js runJob refuses it: further Reel Kit changes
+// are a new version), so nothing of the worker's can be in it after that; the look made before a later open leaves that one folder
+// alone (`appsOwn`), and the notes public/CLAUDE.md and public/AGENTS.md as plain files, which the app's agent may have changed and
+// which are written and noted again right after, and only for a project Studio itself marked opened (reel-kit-worker.js markOpened,
+// out of the project). Every other look, and any look of a project not marked, sets them aside as before.
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -192,8 +195,9 @@ const whyLeft = (e) => (e.code === "EXDEV" ? "Studio's set-aside folder is on an
     disk: never a copy and a delete), it is left where it is and said to be still in the project. What landed is looked at again, and
     said loudly when it is not what was found. Gives { planted, left }: the paths found, and those of them not moved. A project that
     can't be looked over gives UNSEEN in both, with a line of its own. Never throws, never copies, deletes or writes over anything.
-    `entries` and `rename` are ownEntries and renameSync (a test's, to change the tree between the steps). */
-export function sweepOwn({ file, dir, aside, said, log = () => {}, entries = ownEntries, rename = renameSync }) {
+    `leave(rel, { kind })` says an entry found is let be, as `appsOwn` lets the app's own .claude folder be in a project Studio opened in
+    the app: none by default. `entries` and `rename` are ownEntries and renameSync (a test's, to change the tree between the steps). */
+export function sweepOwn({ file, dir, aside, said, log = () => {}, entries = ownEntries, rename = renameSync, leave = () => false }) {
   try {
     const real = realpathSync.native(dir);
     const found = entries(real);
@@ -209,7 +213,7 @@ export function sweepOwn({ file, dir, aside, said, log = () => {}, entries = own
       const facts = factsOf(join(real, rel));
       return facts !== null && FACTS.every((key) => facts[key] === entry[key]) && facts.dev === saw.dev && facts.ino === saw.ino;
     };
-    const planted = [...found.keys()].filter((rel) => !studios(rel)).sort();
+    const planted = [...found.keys()].filter((rel) => !studios(rel) && !leave(rel, found.get(rel))).sort();
     // What is under a folder that is itself moved goes with it.
     const tops = planted.filter((rel) => !planted.some((other) => rel.startsWith(`${other}/`)));
     const left = [];
@@ -244,6 +248,18 @@ export function sweepOwn({ file, dir, aside, said, log = () => {}, entries = own
     log(`${said}, the project could not be looked over (${e.code || e.message}).`);
     return { planted: [UNSEEN], left: [UNSEEN] };
   }
+}
+
+/** Whether an entry the look found is the HyperFrames app's own in a project Studio opened in it, and so let be (plan Task 17): the
+    folder `.claude` straight in the project's `public/` (the app's agent writes its settings.local.json there), as the Mac's disk folds
+    both names, and what is under it; and Studio's own notes there, `public/CLAUDE.md` and `public/AGENTS.md` spelled exactly so, as plain
+    files, which the app's agent may have changed and `reelkit app` writes again and notes again right after the look. Only a folder for
+    `.claude` and only a plain file for the notes: a link, or any other spelling or kind, is set aside. */
+export function appsOwn(rel, saw) {
+  if ((rel === "public/CLAUDE.md" || rel === "public/AGENTS.md") && saw?.kind === "file") return true;
+  const parts = rel.split("/");
+  if (parts.length < 2 || foldName(parts[0]) !== "public" || foldName(parts[1]) !== ".claude") return false;
+  return parts.length > 2 || saw?.kind === "folder";
 }
 
 /** The processes that hold one of `dirs` open, as `lsof -t +D <dir>` lists them (a working folder there, or any open file under it):

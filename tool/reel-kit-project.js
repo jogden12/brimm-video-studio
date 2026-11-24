@@ -21,7 +21,10 @@
 //   - scaffold: the project made, as a step of the queued job;
 //   - compositionFingerprint: what the edit is as Reel Kit built it (Decision 6), recorded when finalize ends ready and after each
 //     render, so that a render refuses an edit changed in HyperFrames since (reel-kit-render.js renderWhy; plan Task 14);
-//   - projectDirOf: where a project's exports are recorded, public/ for a Reel Kit edit (Decision 7).
+//   - projectDirOf: where a project's exports are recorded, public/ for a Reel Kit edit (Decision 7);
+//   - changedInApp: whether the composition is no longer what finalize recorded, so that `reelkit revise` refuses it (plan Task 17);
+//   - REEL_KIT_LINE, reelKitNotes, appWhy: an edit opened in the HyperFrames app (plan Task 17, `reelkit app`): the notes for the app's
+//     agent in its public/, and why an episode's edit may not be opened there (any record the gate holds, any session).
 //
 // What she reads holds no path, no flag and no name of a command.
 import { lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -30,7 +33,7 @@ import { KEPT, copyOf, fromOf, plainName, projectDirOf } from "./app.js";
 import { isPart, isPlannedRecord, kindOf, localStamp, shownName } from "./episode.js";
 import { mayGoIn } from "./footage.js";
 import { HELD, NOT_FOR_SESSION, gateFor, gated } from "./gate.js";
-import { projectName } from "./project.js";
+import { projectName, sharedRules } from "./project.js";
 import { kitDir, reelKitEnv, reelKitHome, venvPython } from "./reel-kit.js";
 import { compositionFingerprint, readCapped, readState, stateFile } from "./reel-kit-state.js";
 import { runCaptured } from "./reel-kit-install.js";
@@ -202,10 +205,67 @@ export { projectDirOf };
 /** studio.json and the composition's fingerprint, kept in reel-kit-state.js so that exports.js reads them with no import cycle. */
 export { compositionFingerprint, readCapped, readState, stateFile };
 
+/** How the composition in the project `dir` stands against the one recorded in its studio.json `state` (`fingerprint`, when finalize
+    ended ready): "changed" when it is no longer that one (changed in HyperFrames since), "odd" when no fingerprint can be made of it
+    (a link, or anything neither a file nor a folder), and "" when it is still that one. Only an edit finalize left `ready`, or
+    `rendered` since, is judged: the fingerprint is that one's, and a revise started from it changes the composition itself on the way
+    to its next storyboard, keeping the old fingerprint until its next finalize. An edit with no fingerprint recorded (not built yet)
+    gives "" too. `reelkit revise` refuses "changed" and "odd" in the render's own lines (reel-kit-render.js RENDER_SAY.changed and
+    RENDER_SAY.odd), as renderWhy refuses its render (plan Task 17). */
+export function changedInApp(dir, state) {
+  if (!isObject(state) || (state.state !== "ready" && state.state !== "rendered")) return "";
+  if (typeof state.fingerprint !== "string" || !/^sha256-[0-9a-f]{64}$/.test(state.fingerprint)) return "";
+  try {
+    return compositionFingerprint(dir) === state.fingerprint ? "" : "changed";
+  } catch {
+    return "odd";
+  }
+}
+
+// --- In the HyperFrames app (plan Task 17) ---
+
+/** The line a Reel Kit edit's notes for the app's agent add to BRIMM's rules (spec section 7), word for word. */
+export const REEL_KIT_LINE = "This project was made by Reel Kit: leave its timeline and its fx/ and cards/ folders as they are unless Sallie asks.";
+/** Each mode as the notes name it. */
+const MODE_NAMED = Object.freeze({ hifi: "hi-fi", lofi: "lo-fi", showcase: "showcase" });
+
+/** The notes for the HyperFrames app's agent in a Reel Kit edit's public/, the text of both its CLAUDE.md and its AGENTS.md: BRIMM's rules
+    as Studio's own projects have them (project.js sharedRules, word for word, but what names a file only Studio's own projects hold),
+    with REEL_KIT_LINE among them, then what the project is: the edit of its part (`key`), in its `mode`, its `version`, and its `name`,
+    which HyperFrames names an export after. */
+export function reelKitNotes({ key, name, mode, version }) {
+  const part = partOf(key);
+  if (!part) throw new Error(`reelKitNotes: ${JSON.stringify(key)} is not "main" or "reel <n>"`);
+  return `${[
+    sharedRules([`- **Reel Kit.** ${REEL_KIT_LINE}`]),
+    "",
+    "# This project",
+    "",
+    `- **What it is:** a Reel Kit edit of ${part === "main" ? "the main video" : `Reel ${part.reel}`} of an episode of The BRIMM, in Reel Kit's ${MODE_NAMED[mode] ?? "own"} mode${Number.isInteger(version) ? `, version ${version}` : ""}.`,
+    `- **Its name:** ${name}. HyperFrames names an export after it.`
+  ].join("\n")}\n`;
+}
+
+/** Why an edit of the episode with `record` may not be opened in the HyperFrames app, in her words, or "" (plan Task 17, Decision 9), as
+    startWhy refuses a start: a part of a planned video, a video held as a session (`held`, which must be given, true or false), any
+    record the gate holds (gate.js gated) and a planned video, in the gate's words, and any session, cleared or not. A session never
+    reaches the app: the app transcribes every video it opens in the cloud. What the edit itself is (built, on this Mac) is the
+    command's to say. */
+export function appWhy({ record, held }) {
+  if (typeof held !== "boolean") throw new Error("appWhy: `held` must be said, true or false, so that a video held as a session is never let through by its absence");
+  if (!isObject(record)) return "That video can't be read: ask Jason.";
+  if (isPart(record)) return PART_FOOTAGE;
+  if (held) return HELD;
+  if (gated(record) || isPlannedRecord(record)) return gateFor(APP_GATE_COMMAND, record) || NOT_FOR_SESSION;
+  if (kindOf(record) === "session") return NOT_FOR_SESSION;
+  return "";
+}
+
 // --- Whether an edit may start ---
 
 /** The gate's words for a record it holds: a command named in none of its lists is refused for every record it gates (gate.js gateFor). */
 const GATE_COMMAND = "reelkit start";
+const APP_GATE_COMMAND = "reelkit app";
 const PART_FOOTAGE = "This is footage for a planned video: Reel Kit edits the video it goes into, not its footage.";
 const CLIENT_WAITS = "This footage shows a client, and waits for their agreement: it goes into no edit until then.";
 const busy = (part) => `${saidOf(part)} has a Reel Kit edit waiting or being made already.`;

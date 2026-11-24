@@ -40,6 +40,14 @@
 //   reelkit render "<episode>" <slug>      the render of an edit finalize left ready (plan Task 14): reel-kit-render.js renderWhy first (one
 //                                          changed in HyperFrames since is hers to export from the app), then detached, marked `rendering`
 //                                          with the pid of the run it started before her chat is answered.
+//   reelkit app "<episode>" <slug>         (plan Task 17, with Task 18's version line) an edit finalize left ready, or rendered, opened in the
+//                                          HyperFrames app on its public/ (app.js openOnly), after the look over the project for Studio's own
+//                                          names (the worker's sweepProject: a find opens nothing), with BRIMM's notes for the app's agent
+//                                          written there (reel-kit-project.js reelKitNotes) and noted as Studio's (noteOwnFile). Once it
+//                                          opened: Studio's mark that it did (the worker's markOpened), the record's entry `opened`, and the
+//                                          app's version in studio.json, with one line when it changed since the last one seen (app-version.js).
+//                                          From then on the worker never runs it again: further Reel Kit changes are a new version, by `start`;
+//                                          `revise` is refused for it, and for any edit changed since finalize, in the render's own line.
 //   reelkit --now <folder> start|revise|finalize|resume|render …
 //                                          the detached half of each (in no help), which runs the worker's runJob, or the render's
 //                                          renderReelKit under the same Mac-wide worker lock. Refused under Claude Code.
@@ -54,20 +62,21 @@
 // of renderReelKit) or renderReelKit's own `sandboxExec` and `trash`.
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { closeSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import { KEPT, byReelKit } from "./app.js";
+import { KEPT, NOT_SET_UP as APP_NOT_SET_UP, byReelKit, openOnly } from "./app.js";
+import { appVersionLine, noteAppVersion, readAppVersion } from "./app-version.js";
 import { localStamp } from "./episode.js";
-import { PIN as HF_PIN } from "./hyperframes.js";
+import { PIN as HF_PIN, cliPath } from "./hyperframes.js";
 import { kitDir, reelKitEnv, venvPython } from "./reel-kit.js";
 import { studioFolder } from "./studio.js";
 import { pageOf, publishInput, stagePage } from "./storyboard-opening.js";
 import { styleCommand, styleNow } from "./reel-kit-style-chat.js";
-import { MODES, entryOf, modeLeans, modeOf as modeNamed, projectFolderOf, readCapped, readState, scaffold, slugOf, startWhy, writeState } from "./reel-kit-project.js";
-import { JOBS, dequeue, enqueue, processStart, queuedOf, runJob, statusOf, stoppedLine } from "./reel-kit-worker.js";
-import { renderReelKit, renderWhy, renderingBy } from "./reel-kit-render.js";
+import { MODES, appWhy, changedInApp, entryOf, modeLeans, modeOf as modeNamed, projectFolderOf, readCapped, readState, reelKitNotes, scaffold, slugOf, startWhy, writeState } from "./reel-kit-project.js";
+import { JOBS, dequeue, enqueue, markOpened, noteOwnFile, processStart, queuedOf, runJob, statusOf, stoppedLine, sweepProject, wasOpened } from "./reel-kit-worker.js";
+import { RENDER_SAY, renderReelKit, renderWhy, renderingBy } from "./reel-kit-render.js";
 import { writeWhole as writeFileWhole } from "./reel-kit-worker-own.js";
-import { episodeWork } from "./settings.js";
+import { appOf, episodeWork, exportsWords } from "./settings.js";
 import { PIN, pinFrom } from "./reel-kit.js";
 import { readDrop } from "./reel-kit-drop.js";
 import { installPlan, runInstall, takeAwayScratch } from "./reel-kit-install.js";
@@ -371,7 +380,14 @@ export const EDIT_SAY = Object.freeze({
   renderBroke: "it is built, but its last render didn't finish, so nothing was kept as an export: ask Jason.",
   renderUnrecorded: "it is built, and its last render finished, but its record couldn't be written, so nothing was kept as an export: ask Jason.",
   renderOdd: "it is built, but its last render didn't come out as Reel Kit makes one, so nothing was kept as an export: ask Jason.",
-  renderPlanted: "it is built, but something that isn't Reel Kit's was found in its project, so it wasn't rendered: ask Jason."
+  renderPlanted: "it is built, but something that isn't Reel Kit's was found in its project, so it wasn't rendered: ask Jason.",
+  appNotBuilt: `It isn't built yet, so it can't open in HyperFrames: say "go" when its storyboard is right.`,
+  appNoCommandLine: "HyperFrames' command line isn't on this Mac yet: ask Jason.",
+  appOdd: "Its project isn't as Reel Kit left it, so it wasn't opened in HyperFrames: ask Jason.",
+  appFound: "Something in its project wasn't Reel Kit's or Studio's, so it was set aside and nothing was opened: ask Jason.",
+  appNotes: "Its notes for HyperFrames couldn't be written, so it wasn't opened: ask Jason.",
+  appRendering: `It is being rendered right now, so it wasn't opened in HyperFrames: say it again once it is rendered. Say "how are the Reel Kit edits going?" to follow it.`,
+  openedNoChange: (name) => `${name} was opened in HyperFrames, so Reel Kit won't change it: further Reel Kit changes go into a new edit of the same part, and this one stays as it is.`
 });
 
 /** The most of a note she may say: Reel Kit's own storyboard page (serve.py) takes no more. */
@@ -734,6 +750,8 @@ async function reviseCommand(ctx, words, h) {
   // Its render is building from this very edit: a revise now would be taken for the render's, or the render's for it.
   if (renderingNow(ctx, readState(edit.dir))) return refuse(ctx, EDIT_SAY.renderBusy);
   if (status?.state !== "storyboard" && status?.state !== "ready") return refuse(ctx, notWaiting(status));
+  const kept = keptInApp(ctx, edit);
+  if (kept) return refuse(ctx, kept);
   const notes = readNotes(edit.dir);
   if (notes === null) return refuse(ctx, EDIT_SAY.notesUnread);
   const used = readState(edit.dir)?.notesUsed;
@@ -743,6 +761,19 @@ async function reviseCommand(ctx, words, h) {
   markQueued(ctx, edit.dir, "revise", pid, JOBS.revise[0]);
   ctx.say(EDIT_SAY.revising(editSaid(edit.key, edit.mode, edit.version), since.length));
   return 0;
+}
+
+/** Why Reel Kit may no longer change the edit (plan Task 17), in her words, or "": changed since finalize (in the app, or by anything else),
+    in the render's own line (RENDER_SAY.changed), or holding what no fingerprint is made of (a link), in renderWhy's line for that
+    (RENDER_SAY.odd); or opened in the HyperFrames app by Studio (the worker's wasOpened), which is the app's from then on, changed or
+    not. Either way further Reel Kit changes are a new version of the part (`start`). */
+function keptInApp(ctx, edit) {
+  const state = readState(edit.dir);
+  const name = typeof state?.name === "string" && state.name.trim() !== "" ? state.name : "This edit";
+  const change = changedInApp(edit.dir, state);
+  if (change === "odd") return RENDER_SAY.odd;
+  if (change === "changed") return RENDER_SAY.changed(name);
+  return edit.slug !== "" && wasOpened(ctx.home, edit.slug) ? EDIT_SAY.openedNoChange(name) : "";
 }
 
 /** `reelkit resume "<episode>" <slug>`: a stopped job started again from its step. */
@@ -936,6 +967,140 @@ async function renderNow(ctx, { found, record }, [slug, ...more], h) {
   return ended.ok ? 0 : 1;
 }
 
+// --- Her edit in the HyperFrames app (plan Task 17, and Task 18's version line) ---
+
+/** Where the look before an open says what it found, beside the worker's own records: the lines hold paths, so they are never hers. */
+const appLogFile = (home, slug) => join(home, "Library", "Application Support", "BRIMM Video", "reel-kit-worker", `${slug}.app.log`);
+/** The notes for the app's agent, in the edit's public/. */
+const NOTES = Object.freeze(["public/CLAUDE.md", "public/AGENTS.md"]);
+
+/** Whether `public/` is a folder of the project's own, reached by no link: the app is asked for it, and the notes are written in it. */
+function ownPublic(dir) {
+  try {
+    const at = join(dir, "public");
+    return lstatSync(at).isDirectory() && realpathSync.native(at) === join(realpathSync.native(dir), "public");
+  } catch {
+    return false;
+  }
+}
+
+/** The app's version as this Mac's copies say it (app-version.js readAppVersion, plutil given five seconds each), once per open, and
+    the line she reads about it: { seen, line }. `was` is the version this very project was last opened with (its studio.json `app`),
+    "" at its first open: the line says the app was updated since this project was last opened only when `was` and the version now are
+    both known and differ, so it is never said at a project's first open, nor of another project's open. The Mac's own record of the
+    last version seen (noteAppVersion) is kept as well, once per open, and its answer is not the line's. A version that can't be read or
+    noted says nothing and stops nothing. */
+function appVersionNow(ctx, was) {
+  let seen = { version: "", build: "", copies: [] };
+  try {
+    seen = readAppVersion({ home: ctx.home, ...(kitOf(ctx).plutil ? { run: kitOf(ctx).plutil } : {}) });
+  } catch {
+    return { seen, line: "" };
+  }
+  try {
+    noteAppVersion(ctx.home, seen);
+  } catch {
+    // The Mac's record waits for the next open; the project's own is what the line is said from.
+  }
+  const changed = typeof was === "string" && was !== "" && seen.version !== "" && was !== seen.version;
+  return { seen, line: changed ? appVersionLine({ was, now: seen.version, copies: seen.copies }) : "" };
+}
+
+/** `reelkit app "<episode>" <slug>`: the edit opened in the HyperFrames app, on its public/, Reel Kit's HyperFrames project. In this order:
+    - the episode through the gate (edit.js), then appWhy again: never a session, cleared or not, nor any record the gate holds (Decision
+      9: the app transcribes every video it opens, in the cloud);
+    - only an edit finalize left ready (after her go), or rendered; one queued, at work, stopped, failed or at its storyboard is refused in
+      its own line; changed since in the app, it opens all the same: it is hers to go on with there; while a render of it runs
+      (renderingBy), nothing is opened, in one line (EDIT_SAY.appRendering);
+    - a Mac set up for the app (settings.js appOf) with the pinned command line (hyperframes.js cliPath), and a public/ of the project's own;
+    - the look over the project for Studio's own names (the worker's sweepProject), immediately before the app is asked: each Studio did
+      not note is set aside, its lines in `<slug>.app.log`, and the app is not asked (EDIT_SAY.appFound). The app's own public/.claude/
+      is let be once Studio has opened the project (`opened`, the worker's wasOpened), and never before;
+    - public/CLAUDE.md and public/AGENTS.md written whole (reelKitNotes), each noted as Studio's (noteOwnFile): in a project Studio has
+      opened, also over the app's agent's own changes to them, which the look lets be (reel-kit-worker-own.js appsOwn);
+    - the app asked by the pinned command line's `open` (app.js openOnly), which says what came of it, and the buttons line;
+    - once it opened: Studio's mark (markOpened, out of the project), where to export when this Mac picked a folder, the app's version
+      read and noted once (appVersionNow) with its line when it differs from the one this project was last opened with, the version in studio.json (`app`: { version, build, opened }),
+      and the record's entry with the time it opened and its state `opened` (from `made`, never back). Resolves 0 when the app opened and
+      the record was written, 1 otherwise. */
+async function appCommand(ctx, words, h) {
+  if (words.length !== 2) {
+    ctx.say(h.help);
+    return 2;
+  }
+  const got = editFor(ctx, words, h);
+  if (got.code !== undefined) return got.code;
+  const { found, record, edit, status } = got;
+  const why = appWhy({ record, held: Boolean(found.held) });
+  if (why) return refuse(ctx, why);
+  if (status === null) return refuse(ctx, EDIT_SAY.notHere);
+  if (isBusy(status)) return refuse(ctx, EDIT_SAY.busy);
+  if (status.state === "stopped") return refuse(ctx, stoppedLine(status));
+  if (status.state === "failed") return refuse(ctx, EDIT_SAY.failed);
+  if (status.state !== "ready" && status.state !== "rendered") return refuse(ctx, EDIT_SAY.appNotBuilt);
+  // Its render reads the project while it runs, and brings its file in at the end: the app waits until it is done.
+  if (renderingNow(ctx, readState(edit.dir))) return refuse(ctx, EDIT_SAY.appRendering);
+  if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
+  const given = ctx.deps?.app ?? {};
+  const cli = given.cli ?? cliPath(ctx.home);
+  if (!existsSync(cli)) return refuse(ctx, EDIT_SAY.appNoCommandLine);
+  if (edit.slug === "" || !ownPublic(edit.dir)) return refuse(ctx, EDIT_SAY.appOdd);
+
+  const lines = [];
+  const look = sweepProject(ctx.home, edit.slug, edit.dir, { said: `Before ${edit.slug} was opened in HyperFrames`, log: (line) => lines.push(line), opened: wasOpened(ctx.home, edit.slug) });
+  if (lines.length) {
+    try {
+      mkdirSync(dirname(appLogFile(ctx.home, edit.slug)), { recursive: true });
+      appendFileSync(appLogFile(ctx.home, edit.slug), lines.map((line) => `${new Date(ctx.now()).toISOString()} ${line}\n`).join(""));
+    } catch {
+      // What was set aside is in its place for Jason all the same.
+    }
+  }
+  if (look.planted.length) return refuse(ctx, EDIT_SAY.appFound);
+
+  const state = readState(edit.dir) ?? {};
+  try {
+    const notes = reelKitNotes({ key: edit.key, name: edit.entry.name, mode: edit.mode, version: edit.version });
+    for (const rel of NOTES) {
+      writeFileWhole(join(edit.dir, ...rel.split("/")), notes);
+      noteOwnFile(ctx.home, edit.slug, edit.dir, rel);
+    }
+  } catch {
+    return refuse(ctx, EDIT_SAY.appNotes);
+  }
+
+  const env = ctx.deps?.env || process.env;
+  const read = openOnly(ctx, { record, dir: join(edit.dir, "public") }, { cli, env, ...(given.spawn ? { spawn: given.spawn } : {}), ...(given.node ? { node: given.node } : {}), ...(given.chat ? { chat: given.chat } : {}) });
+  if (!read.opened) return 1;
+  const now = new Date(ctx.now());
+  try {
+    markOpened(ctx.home, edit.slug, now.toISOString());
+  } catch {
+    // The record says it opened. Without the mark a later worker run on it fails closed at its first look, which sets aside the app's
+    // public/.claude/ as not Studio's, and the next open is refused until that is done.
+  }
+  const into = exportsWords(ctx.settings, ctx.home);
+  if (into) ctx.say(`Export it on This Mac, into ${into}.`);
+  const { seen, line } = appVersionNow(ctx, typeof state.app?.version === "string" ? state.app.version : "");
+  if (line) ctx.say(line);
+  try {
+    const was = readState(edit.dir) ?? state;
+    const opened = Array.isArray(was.app?.opened) ? was.app.opened : [];
+    writeState(edit.dir, { ...was, app: { version: seen.version, build: seen.build, opened: [...opened, now.toISOString()] } });
+  } catch {
+    // The version is said and kept as the last one seen; the project's record of it waits for the next open.
+  }
+  // The record is read again: a job's entry may have been written meanwhile.
+  const fresh = h.episodeFor({ ...ctx, say: () => {} }, [found.name], { newerEnds: 1 });
+  if (!fresh.found) return refuse(ctx, EDIT_SAY.notWritten);
+  const projects = Array.isArray(fresh.record.app?.projects) ? fresh.record.app.projects : [];
+  const at = localStamp(now);
+  const updated = projects.map((p) => (p === null || typeof p !== "object" || !byReelKit(p) || p.key !== edit.key || p.version !== edit.version ? p : {
+    ...p, opened: [...(Array.isArray(p.opened) ? p.opened : []), at], handover: Boolean(p.handover) || read.handedOver, state: p.state === "made" ? "opened" : p.state
+  }));
+  return (await h.save(ctx, { ...fresh.found, record: fresh.record }, { ...fresh.record, app: { ...fresh.record.app, projects: updated } }, "")) === 0 ? 0 : 1;
+}
+
 /** What runJob is given, from a test's stand-ins (ctx.deps.reelKit) where it gives them, and the run's log. */
 function jobDeps(ctx, more = {}) {
   const kit = kitOf(ctx);
@@ -1004,6 +1169,12 @@ async function editNow(ctx, { found, record }, job, [slug, ...more], h) {
     ctx.say(h.help);
     return 2;
   }
+  // An edit changed since finalize, or opened in the app, is never changed by Reel Kit again: nothing is written or run.
+  const kept = keptInApp(ctx, edit);
+  if (kept) {
+    ctx.say(`Reel Kit's ${job} of ${slug} was not run: ${kept}`);
+    return 1;
+  }
   const state = readState(edit.dir) ?? {};
   const approved = state.approved !== null && typeof state.approved === "object";
   if ((job === "finalize" || (job === "resume" && state.job === "finalize")) && !approved) {
@@ -1055,7 +1226,7 @@ export async function reelkitCommand(ctx, rest = [], { help = "", episodeFor, sa
   if (word === "install") return installCommand(ctx, more, help);
   if (word === "status" && more.length === 0) return statusCommand(ctx);
   if (word === "--now" && more[0] === "install") return installNow(ctx, more.slice(1), help);
-  const episodeWords = { start: startCommand, status: editStatus, note: noteCommand, go: goCommand, revise: reviseCommand, resume: resumeCommand, render: renderCommand, storyboard: storyboardCommand };
+  const episodeWords = { start: startCommand, status: editStatus, note: noteCommand, go: goCommand, revise: reviseCommand, resume: resumeCommand, render: renderCommand, storyboard: storyboardCommand, app: appCommand };
   if (typeof episodeFor === "function" && typeof save === "function") {
     if (word === "--now") return jobNow(ctx, more, h);
     if (Object.hasOwn(episodeWords, word) && more.length && !more[0].startsWith("--")) return episodeWords[word](ctx, more, h);

@@ -1,5 +1,6 @@
-// The HyperFrames app's version, read from its Info.plist, and the one line `reelkit app` says when it changed since the last time
-// one was seen. The app updates itself about six times a day, and a Reel Kit project is edited against one version of it.
+// The HyperFrames app's version, read from its Info.plist, the Mac's record of the last one seen, and the one line `reelkit app` says
+// when it differs from the one a project was last opened with (reel-kit-commands.js). The app updates itself about six times a day,
+// and a Reel Kit project is edited against one version of it.
 // Two copies of the app may be on a Mac (/Applications and ~/Applications); the first is /Applications, which macOS prefers.
 // The plist is read by /usr/bin/plutil, which tests stand in (`run`). The last version seen is kept in
 // Application Support, written whole (a temp file, then a rename).
@@ -8,6 +9,8 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 
 const PLIST = "HyperFrames.app/Contents/Info.plist";
+/** How long plutil may take for one copy: a reading that hangs never holds up `reelkit app`. */
+const PLUTIL_MS = 5000;
 
 /** The two places the app may be, /Applications first. */
 export const appPlists = (home) => [join("/Applications", PLIST), join(home, "Applications", PLIST)];
@@ -21,7 +24,7 @@ export function readAppVersion({ home, run = spawnSync } = {}) {
   const copies = [];
   for (const path of appPlists(home)) {
     try {
-      const r = run("/usr/bin/plutil", ["-convert", "json", "-o", "-", path], { encoding: "utf8" });
+      const r = run("/usr/bin/plutil", ["-convert", "json", "-o", "-", path], { encoding: "utf8", timeout: PLUTIL_MS });
       if (!r || r.status !== 0) continue;
       const plist = JSON.parse(String(r.stdout));
       const version = plist?.CFBundleShortVersionString, build = plist?.CFBundleVersion;
