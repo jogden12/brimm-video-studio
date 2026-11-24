@@ -130,7 +130,9 @@ const TODAY_ASKED = {
   plan: [[], ["new"], ["new", "Too many SKUs"], ["new", "Why SKUs", "--explainer", "--voice", "heygen"], [FOLDER], [NAME], [FOLDER, "drop"], [FOLDER, "set", "--line", "x"], [FOLDER, "script"], ["Pricing"], ["nothing fits this"]],
   // Footage for a planned video, new with the HyperFrames-led path (PR H5a): there is no output of today's to pin, and tests/edit-footage.test.js pins its words. The walk
   // below runs it for a video waiting for its answer and for a session, where the gate answers.
-  footage: []
+  footage: [],
+  // Reel Kit's setup on this Mac (plan Task 6): it names no episode. tests/edit-reelkit-install.test.js pins its words.
+  reelkit: [["status"], []]
 };
 
 /** What every command of TODAY_ASKED says on today's Mac with its import set to `setting`, each on a Mac of its own, by
@@ -1276,7 +1278,10 @@ describe("the walk: every command, for a video imported lightly from a file name
     refs: [[], ["look", "blue carousel"], ["use", label, "blue carousel"], ["use", label, "blue carousel", "reel", "1"], ["use", "nothing fits this", "blue carousel"], ["use"]],
     plan: [["new", label], ["new", "Why", "--explainer"], [label], [label, "drop"], [label, "set", "--line", "x"], [label, "script"], [label, "agreed", label], [label, "join"], [label, "join", label], ["nothing fits this"], []],
     // Footage for a planned video (PR H5a): no plan is there, so it says so for a video waiting; the gate refuses a session.
-    footage: [[label, "Too many SKUs", "talking", "--client", "no"], [label, "Too many SKUs", "b-roll", "--client", "yes", "--shot", "2"], [label, "none"], []]
+    footage: [[label, "Too many SKUs", "talking", "--client", "no"], [label, "Too many SKUs", "b-roll", "--client", "yes", "--shot", "2"], [label, "none"], []],
+    // Reel Kit's setup on this Mac (plan Task 6) names no episode: a label is not where a download is. Its edits (plan Task 11) name one,
+    // and the gate answers for a video waiting and a session.
+    reelkit: [["status"], ["install", label], [], ["status", label], ["start", label, "reel", "1", "--mode", "lofi"], ["note", label, "x", "p01", "Shorter."], ["go", label, "x"]]
   });
   it("has every command's words, so a command added later is walked", () => {
     for (const name of COMMAND_NAMES) assert.ok(name in walkWords(LABEL), `${name}: give it its words in walkWords`);

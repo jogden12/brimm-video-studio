@@ -109,6 +109,14 @@ Lessons from the repo's review notes, the 5 Nov team review, the Mac app reviews
   - **Source:** `docs/superpowers/notes/2026-10-26-lock-k0-findings.md`. **Times:** 13.
 - **Lesson:** A narrow `denyRead` of the tool's folders needs `allowRead` for its temp folder, shell snapshots and app data, or every `cat` and `node` fails; heredocs stay broken, so use the Write tool.
   - **Source:** lock K0 findings (2026-10-26). **Times:** 1.
+- **Lesson:** The Reel Kit worker's own file tools (Read, Write, Edit, Glob, Grep) run outside Claude Code's sandbox: only the PreToolUse hook's real-path check holds them, and a Glob or Grep pattern is not judged by real path. Keep the hook's table the limit for them, and never widen a file rule on the sandbox's word.
+  - **Why:** The sandbox wraps commands only; final review A of Reel Kit in Studio (2026-11-23) named it a known limit.
+  - **Source:** Reel Kit in Studio final review A. **Times:** 1.
+- **Lesson:** A process a worker starts with `setsid` (or anything that leaves its process group) survives the group kill: `killGroup` stops only the group, and `stopHolders` names holders in the log but stops none.
+  - **Why:** Known limit from final review A of Reel Kit in Studio (2026-11-23); the per-step checks (ownEntries, sweepOwn) are what is left.
+  - **Source:** Reel Kit in Studio final review A. **Times:** 1.
+- **Lesson:** Never put a headless run's allow rules on its command line (`--allowedTools`): in `-p` a settings file that fails its check is passed over silently, and the command-line allow list then holds without the file's sandbox and hook. Allow rules live only in the settings file; deny rules may go on both.
+  - **Source:** Reel Kit in Studio final review A1 (2026-11-23). **Times:** 1.
 - **Lesson:** Words withdrawn from BRIMM Ops are cleared in every copy (the second backup place, and Dropbox's version history by hand), and the withdraw tool says loudly when it stopped early.
   - **Why:** It returned early with no local `backups/` and exited 0 when the second place was unset; Dropbox keeps old versions 30 to 180 days. Fixed in the Ops round.
   - **Source:** review-changes ledger (2026-11-05/06). **Times:** 4.
@@ -121,6 +129,12 @@ Lessons from the repo's review notes, the 5 Nov team review, the Mac app reviews
 - **Lesson:** Open any file another program or Dropbox writes the safe way: refuse links and named pipes, open non-blocking, `fstat` type and size before reading.
   - **Why:** Pipes or swapped-in links in a project, Downloads or history hung `guide`, `finish` and the words reader, or read past caps. Fixed with one shared helper.
   - **Source:** build-plan ledger, PRs 8, 10, 11, 15, 16 (2026-10-29). **Times:** 5.
+- **Lesson:** Match a file name the way the Mac's disk does, not with `toLowerCase`: fold with `normalize("NFKC").toUpperCase().toLowerCase()` for a name not made yet, and for one on the disk compare device and inode with the plain spelling's `lstat`.
+  - **Why:** APFS folds by Unicode's full case folding: `AGENTſ.md` (long s) opens `AGENTS.md` and `ﬆudio.json` opens `studio.json`, so the Reel Kit worker's guard and the look over its project both missed them.
+  - **Source:** Reel Kit in Studio, Task 10, fix round 6 (2026-11-23). **Times:** 1.
+- **Lesson:** Code that moves or deletes outside a sandbox, in a folder sandboxed code wrote, checks each step against the last (real path, device, inode) just before it acts, and first stops whatever still holds the folder open.
+  - **Why:** A process that left the worker's process group could swap a project folder for a link between the walk and the `rename`, and steer the move to a folder in the home. Node has no `renameat`, so a small window stays.
+  - **Source:** Reel Kit in Studio, Task 10, fix round 6 (2026-11-23). **Times:** 1.
 - **Lesson:** Before deleting her files, re-check the path at the delete, compare by device and inode, recurse only into real folders, and refuse when the folder may hold the only copy.
   - **Why:** On the case-insensitive disk a folder named two ways lost a session clip's media; a project swapped for a link led `rm` into a decoy.
   - **Source:** build-plan ledger, PR 15 (2026-10-29). **Times:** 3.

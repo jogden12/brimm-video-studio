@@ -9,6 +9,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { studioFiles, writeStudio, guardDecision, studioFolder } from "../studio.js";
+import { OPENING_REFUSED } from "../storyboard-opening.js";
 import { COMMAND_NAMES, HELP, LOCK_CHANGED, editMain, wordsLine } from "../edit.js";
 import { HELD_NARROWED, HELD_REFUSED } from "../held.js";
 import { UNTRUSTED } from "../loosened.js";
@@ -16,6 +17,7 @@ import { REPAIR } from "../build.js";
 import { updateLine } from "../update-check.js";
 import { NO_RECEIPT, cardOf } from "../receipts.js";
 import { EDITS } from "../sessions.js";
+import { MODE_ASK } from "../reel-kit-project.js";
 import { episodeAs, FOLDER as FOLDER_NAME } from "./episodes.js";
 import { episode } from "./phase4.js";
 import { CHECKOUT, NODE, EDIT, ALLOWED, NODE_CASES, UNQUOTABLE_NODES, UNQUOTABLE_CHECKOUTS, spellingsOf, APP_NODE, OWN, REFUSED as NOT_OWN, NODE_FAULT, CHECKOUT_FAULT, strictStartsOf, tailRefusals } from "./guard-cases.js";
@@ -149,7 +151,8 @@ describe("her folder's settings", () => {
   it("guard every tool with the hook, run without a shell so the paths' spaces and apostrophes stay whole, and block a call when the hook cannot run", () => {
     const s = JSON.parse(studioFiles({ checkout: "/Users/o'hara/Claude Code/BRIMM video", node: NODE, folder: "/Users/o'hara/BRIMM Video Studio" })[".claude/settings.json"]);
     assert.deepEqual(s.hooks, {
-      PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: ["/Users/o'hara/Claude Code/BRIMM video/tool/studio/guard.sh", NODE, "/Users/o'hara/BRIMM Video Studio"], onFailure: "block" }] }]
+      PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: ["/Users/o'hara/Claude Code/BRIMM video/tool/studio/guard.sh", NODE, "/Users/o'hara/BRIMM Video Studio"], onFailure: "block" }] }],
+      PostToolUse: [{ matcher: "Artifact", hooks: [{ type: "command", command: "/bin/sh", args: ["/Users/o'hara/Claude Code/BRIMM video/tool/studio/published.sh", NODE, "/Users/o'hara/BRIMM Video Studio"] }] }]
     });
   });
   it("names node in double quotes in the skill and the allow rule for a node whose path has spaces, and gives the hook that path as it is", () => {
@@ -946,6 +949,17 @@ describe("the guard", () => {
     for (const t of ["Glob", "Grep", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Monitor", "Artifact", "Workflow", "RemoteTrigger", "SendMessage", "Agent", "LSP",
       "mcp__gmail__send_message", "mcp__terminal__run_in_terminal", "mcp__ccd_directory__change_directory", "mcp__computer-use__app_click", "SomethingNew", undefined]) assert.equal(tool(t), "deny", t);
     assert.equal(guardDecision({ tool_name: "Write", tool_input: {} }, { checkout: CHECKOUT, node: NODE }).reason, "In this folder Claude runs only BRIMM Video Studio's own commands. Ask Jason for anything else.");
+  });
+});
+
+describe("the guard and the narrow opening (storyboard-opening.js)", () => {
+  it("asks the opening first for Artifact and ArtifactComments, and refuses them in plain words where no page is staged", () => {
+    for (const [name, input] of [["Artifact", {}], ["Artifact", { action: "list" }], ["Artifact", { file_path: `${FOLDER}/Storyboards/x/v1/index.html` }], ["ArtifactComments", { action: "read", url: "https://claude.ai/artifact/x" }]]) {
+      assert.deepEqual(guardDecision({ tool_name: name, tool_input: input }, { checkout: CHECKOUT, node: NODE, folder: FOLDER }), { decision: "deny", reason: OPENING_REFUSED }, name);
+      assert.deepEqual(guardDecision({ tool_name: name, tool_input: input }, { checkout: CHECKOUT, node: NODE }), { decision: "deny", reason: OPENING_REFUSED }, `${name}, no folder`);
+    }
+    assert.equal(guardDecision({ tool_name: "Artifact", tool_input: { action: "quickstart", intent: "other", design_systems: false } }, { checkout: CHECKOUT, node: NODE, folder: FOLDER }).decision, "allow");
+    assert.deepEqual(guardDecision({ tool_name: "ArtifactData", tool_input: { action: "list" } }, { checkout: CHECKOUT, node: NODE, folder: FOLDER }), NOT_OWN);
   });
 });
 
@@ -1754,4 +1768,124 @@ describe("her skill's words for the local working folder, in both locks (Phase 3
       });
     });
   }
+});
+
+describe("her skill learns Reel Kit, in both locks (plan Task 16)", () => {
+  // Her chat starts a Reel Kit edit, follows it, shows its storyboard in the side panel, passes her notes on, takes her go, and takes it out by a
+  // render or the HyperFrames app; it shows and changes her style, and passes a dropped Reel Kit download to its install plan. Every one of these
+  // is a `reelkit` word edit.js has, said in one compact section that is the same in both locks, and both skills stay under 270 lines.
+  const SKILLS = Object.fromEntries(["SKILL.md", "SKILL-open.md"].map((name) => [name, readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8")]));
+  const SECTION = "## A Reel Kit edit";
+  const kitOf = (text) => sectionOf(text, SECTION);
+  /** The `reelkit` words HELP has: each usage line's first word, and style's own words. */
+  const WORDS = new Set([...HELP.matchAll(/^ {2}node edit\.js reelkit (\S+)/gm)].map((m) => m[1]));
+  const STYLE_WORDS = new Set([...HELP.matchAll(/^ {2}node edit\.js reelkit style (\S+)/gm)].map((m) => m[1]));
+  const kitSpans = (text) => commandsIn(text).filter((span) => span.startsWith("reelkit "));
+  /** The section's table row whose first cell holds `"<phrase>"`, read without regard to capitals. */
+  const rowSaying = (text, phrase) => kitOf(text).split("\n").find((line) => line.startsWith("| ") && line.slice(2).split(" | ")[0].toLowerCase().includes(`"${phrase.toLowerCase()}"`));
+  const source = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+
+  it("names only reelkit words edit.js has", () => {
+    assert.ok(WORDS.size >= 11 && STYLE_WORDS.size >= 6, [...WORDS, ...STYLE_WORDS].join(" "));
+    for (const [name, text] of Object.entries(SKILLS)) {
+      const spans = kitSpans(text);
+      for (const span of spans) {
+        const [, word, more] = span.split(" ");
+        assert.ok(WORDS.has(word), `${name} runs "${span}", and edit.js has no reelkit ${word}`);
+        if (word === "style") assert.ok(STYLE_WORDS.has(more), `${name} runs "${span}", and edit.js has no reelkit style ${more}`);
+        assert.ok(!span.includes("--now") && !span.includes("--yes"), `${name}: ${span}`);
+      }
+      const used = new Set(spans.map((span) => span.split(" ")[1]));
+      for (const word of ["install", "status", "start", "note", "go", "revise", "resume", "storyboard", "render", "app", "style"]) assert.ok(used.has(word), `${name} never runs reelkit ${word}`);
+      const style = new Set(spans.filter((span) => span.startsWith("reelkit style ")).map((span) => span.split(" ")[2]));
+      for (const word of ["show", "change", "yes", "back", "diff", "carry", "resume"]) assert.ok(style.has(word), `${name} never runs reelkit style ${word}`);
+      // `reelkit published` is gone: the hook records the URL from the publish's own result.
+      assert.doesNotMatch(text, /reelkit published/, name);
+      // Every reelkit word is in its own section.
+      for (const span of spans) assert.ok(kitOf(text).includes(span), `${name}: ${span} is outside ${SECTION}`);
+    }
+  });
+  it("keeps both skills under 270 lines with the Reel Kit rows in", () => {
+    for (const [name, text] of Object.entries(SKILLS)) {
+      assert.ok(text.split("\n").length < 270, `${name}: ${text.split("\n").length} lines`);
+      assert.ok(kitSpans(kitOf(text)).length >= 18, name);
+    }
+    assert.equal(kitOf(SKILLS["SKILL-open.md"]), kitOf(SKILLS["SKILL.md"]), "the section is the same in both locks");
+  });
+  it("tells her chat to read a staged page before it publishes it", () => {
+    for (const [name, text] of Object.entries(SKILLS)) {
+      const rules = rulesOf(text, '"Show me the storyboard"');
+      const read = rules.find((rule) => rule.includes("Read the file its For Claude line names, whole"));
+      assert.ok(read, name);
+      assert.ok(read.indexOf("Read the file") < read.indexOf("publish"), read);
+      assert.ok(read.includes("exactly the input that line gives"), read);
+      // The For Claude line reelkit storyboard prints says the same: read its file_path whole, then publish it as given.
+      assert.match(source("reel-kit-commands.js"), /publish it with the Artifact tool exactly as this gives it, after reading its file_path whole/);
+      const local = rules.find((rule) => rule.startsWith("If a publish fails"));
+      assert.ok(local && local.includes('`reelkit storyboard "<episode>" <edit> local`'), name);
+      // Her style's board goes to the side panel the same way.
+      assert.ok(rowSaying(text, "Show my style").includes("published as a storyboard's is"), name);
+    }
+  });
+  it("never tells her chat to share a page", () => {
+    for (const [name, text] of Object.entries(SKILLS)) {
+      const kit = kitOf(text);
+      assert.ok(kit.includes("never share a page"), name);
+      for (const m of kit.matchAll(/share/gi)) assert.match(kit.slice(Math.max(0, m.index - 6), m.index), /never $/i, `${name}: ${kit.slice(m.index - 40, m.index + 20)}`);
+    }
+  });
+  it("always asks the mode, says the lean Studio gives, and passes each note on with a reply of exactly On it.", () => {
+    for (const [name, text] of Object.entries(SKILLS)) {
+      const start = rowSaying(text, "Make a Reel Kit edit");
+      assert.ok(start.includes(`"${MODE_ASK}", every time`), start);
+      assert.ok(start.includes('`reelkit start "<episode>" main --mode hifi`'), start);
+      assert.ok(start.includes("leans to"), start);
+      const notes = rulesOf(text, '"My notes are in"').join(" ");
+      assert.ok(rowSaying(text, "My notes are in").includes("ArtifactComments"), name);
+      assert.ok(notes.includes('`reelkit note "<episode>" <edit> <beat> "<note>"`'), notes);
+      assert.ok(notes.includes("reply exactly `On it.`"), notes);
+      assert.ok(notes.includes('A comment "Looks good" on beat all is her go: run `reelkit go "<episode>" <edit>`'), notes);
+      // What Reel Kit needs from her is said in its own words, and dropped in the folder Studio opened.
+      const status = rowSaying(text, "How are the Reel Kit edits going?");
+      assert.ok(status.includes("in its own words") && status.includes("the folder that opened in Finder"), status);
+      // A dropped download gets only its plan: nothing installs without Jason's yes.
+      const drop = kitOf(text).split("\n").find((line) => line.startsWith("| A Reel Kit download"));
+      assert.ok(drop.includes('`reelkit install "<download>"`') && drop.includes("nothing is installed until Jason says yes"), drop);
+    }
+  });
+  it("maps each phrase the guide and Reel Kit tell her to say to its reelkit word", () => {
+    const PHRASES = {
+      "how are the Reel Kit edits going?": "status", "make the changes": "revise", "looks good, render it": "go", "Looks good: render it": "go", go: "go",
+      "carry on with the edit": "resume", "carry on": "resume", "render it": "render", "open it in HyperFrames": "app",
+      "show my style": "style show", "carry my style over": "style carry", "carry on with my style": "style resume",
+      "show me the storyboard": "storyboard", "how is the Reel Kit setup going?": "status"
+    };
+    const said = `${source("guide.js")}\n${source("reel-kit-commands.js")}\n${source("reel-kit-worker.js")}\n${source("reel-kit-style-chat.js")}`.toLowerCase();
+    for (const [phrase, word] of Object.entries(PHRASES)) {
+      assert.ok(said.includes(`"${phrase.toLowerCase()}"`), `nothing tells her to say "${phrase}"`);
+      for (const [name, text] of Object.entries(SKILLS)) {
+        const row = rowSaying(text, phrase);
+        assert.ok(row, `${name}: no row for "${phrase}"`);
+        assert.match(row, new RegExp(`\`reelkit ${word}[ \`]`), `${name}: "${phrase}" runs no reelkit ${word}: ${row}`);
+      }
+    }
+  });
+  it("reads her comments on the page before making the changes or going, as \"My notes are in\" does (final review C6)", () => {
+    for (const [name, text] of Object.entries(SKILLS)) {
+      for (const phrase of ["Make the changes", "Go"]) {
+        const row = rowSaying(text, phrase);
+        assert.ok(row, `${name}: no row for "${phrase}"`);
+        assert.match(row, /First do what "My notes are in" does/, `${name}: "${phrase}" reads no comments first: ${row}`);
+      }
+      // Her chat finds the edit's id on its own line of status, never in her words.
+      assert.match(kitOf(text), /`For Claude: <edit>` line/, name);
+    }
+  });
+  it("says in the front door, in the repo and in her folder, that a recording with Sallie on camera can go to Reel Kit after its card", () => {
+    const LINE = "with Sallie on camera can go to Reel Kit after its card, beside the HyperFrames project";
+    const repo = readFileSync(new URL("../../CLAUDE.md", import.meta.url), "utf8");
+    assert.ok(sectionOf(repo, "## The front door").includes(LINE), "repo CLAUDE.md");
+    for (const name of ["CLAUDE.md", "CLAUDE-open.md"]) assert.ok(readFileSync(new URL(`../studio/${name}`, import.meta.url), "utf8").includes(LINE), name);
+    for (const [name, text] of Object.entries(SKILLS)) assert.ok(kitOf(text).includes(LINE), name);
+  });
 });

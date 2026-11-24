@@ -43,7 +43,10 @@ describe("her folder's settings under the open lock", () => {
       disableAutoMode: "disable"
     });
     assert.equal(s.disableAllHooks, false);
-    assert.deepEqual(s.hooks, { PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [`${w.checkout}/tool/studio/guard.sh`, w.node, w.folder], onFailure: "block" }] }] });
+    assert.deepEqual(s.hooks, {
+      PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [`${w.checkout}/tool/studio/guard.sh`, w.node, w.folder], onFailure: "block" }] }],
+      PostToolUse: [{ matcher: "Artifact", hooks: [{ type: "command", command: "/bin/sh", args: [`${w.checkout}/tool/studio/published.sh`, w.node, w.folder] }] }]
+    });
     // Written strict, it makes no workshop.
     const home = realpathSync.native(mkdtempSync(join(tmpdir(), "brimm-strict-")));
     const folder = writeStudio(home, { checkout: w.checkout, node: w.node, lock: "strict", facts: { ...w.facts, home } });
@@ -156,7 +159,10 @@ describe("her folder's settings under the open lock", () => {
   it("runs the guard before every call and the receipt hook after every card, each given her folder", () => {
     assert.deepEqual(open().hooks, {
       PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [`${w.checkout}/tool/studio/guard.sh`, w.node, w.folder], onFailure: "block" }] }],
-      PostToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: "/bin/sh", args: [`${w.checkout}/tool/studio/receipt.sh`, w.node, w.folder] }] }]
+      PostToolUse: [
+        { matcher: "AskUserQuestion", hooks: [{ type: "command", command: "/bin/sh", args: [`${w.checkout}/tool/studio/receipt.sh`, w.node, w.folder] }] },
+        { matcher: "Artifact", hooks: [{ type: "command", command: "/bin/sh", args: [`${w.checkout}/tool/studio/published.sh`, w.node, w.folder] }] }
+      ]
     });
   });
   it("makes the workshop on this Mac's own disk, readable by her alone, and never adds it to the session", () => {
@@ -234,7 +240,7 @@ describe("what is changed in her folder's settings under the open lock (lockBrok
     assert.deepEqual(lockBroken(open(), { ...where(), lock: "open" }), ["node"]);
   });
   it("names each part of the open shape that is changed", () => {
-    for (const [change, key] of [[(s) => { s.sandbox.enabled = false; }, "sandbox"], [(s) => s.sandbox.filesystem.denyRead.pop(), "sandbox"], [(s) => s.sandbox.filesystem.allowRead.push("/Users"), "sandbox"], [(s) => s.sandbox.excludedCommands.push("python3 *"), "sandbox"], [(s) => s.sandbox.credentials.envVars.pop(), "sandbox"], [(s) => { s.sandbox.network.allowUnixSockets = ["/x"]; }, "sandbox"], [(s) => { s.sandbox.network.socksProxyPort = 1; }, "sandbox"], [(s) => s.permissions.deny.splice(s.permissions.deny.findIndex((r) => r.startsWith("Read(")), 1), "permissions"], [(s) => s.permissions.deny.push("mcp__visualize__*"), "permissions"], [(s) => s.permissions.allow.push("WebFetch"), "permissions"], [(s) => { s.permissions.additionalDirectories = ["/x"]; }, "permissions"], [(s) => { s.autoMemoryEnabled = true; }, "memory"], [(s) => { s.disableSkillShellExecution = false; }, "skill-shell"], [(s) => { delete s.hooks.PostToolUse; }, "receipt"]]) {
+    for (const [change, key] of [[(s) => { s.sandbox.enabled = false; }, "sandbox"], [(s) => s.sandbox.filesystem.denyRead.pop(), "sandbox"], [(s) => s.sandbox.filesystem.allowRead.push("/Users"), "sandbox"], [(s) => s.sandbox.excludedCommands.push("python3 *"), "sandbox"], [(s) => s.sandbox.credentials.envVars.pop(), "sandbox"], [(s) => { s.sandbox.network.allowUnixSockets = ["/x"]; }, "sandbox"], [(s) => { s.sandbox.network.socksProxyPort = 1; }, "sandbox"], [(s) => s.permissions.deny.splice(s.permissions.deny.findIndex((r) => r.startsWith("Read(")), 1), "permissions"], [(s) => s.permissions.deny.push("mcp__visualize__*"), "permissions"], [(s) => s.permissions.allow.push("WebFetch"), "permissions"], [(s) => { s.permissions.additionalDirectories = ["/x"]; }, "permissions"], [(s) => { s.autoMemoryEnabled = true; }, "memory"], [(s) => { s.disableSkillShellExecution = false; }, "skill-shell"], [(s) => { s.hooks.PostToolUse.shift(); }, "receipt"], [(s) => { s.hooks.PostToolUse.pop(); }, "published"]]) {
       const s = open(); change(s); assert.deepEqual(lockBroken(s, { ...where(), lock: "open", node: w.node }), [key], change.toString());
     }
     for (const [change, keys] of [

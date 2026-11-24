@@ -488,17 +488,19 @@ export function voiceCopyFacts(printed, bytes) {
   return { seconds: facts.duration, bytes, width: 1080, height: 1920, fps: 30, sound: true };
 }
 
-/** What a Reel's key looks like: the raw file's size, its time, and the two ends of the stretch, each in milliseconds. */
-const REEL_KEY = /^\d+-\d+-\d+-\d+$/;
+/** What a Reel's key looks like: the raw file's size, its time, and the two ends of the stretch, each in milliseconds, and "-4k" for a
+    copy of 4K. */
+const REEL_KEY = /^\d+-\d+-\d+-\d+(?:-4k)?$/;
 
 /** The key of a Reel's copy (architecture 4.3, plan PR 5), from the raw file's size and the time it was last written, as workCopyKey
     has them, and the two ends of the stretch it is made of, in seconds of the video, each to the millisecond: the same stretch of the
-    same file gives the same key, and another file or another stretch another. A Reel's copy is never of 4K. It is safe to be a
-    file's name. "" when the file or the stretch cannot be one. */
-export function reelCopyKey(file, stretch) {
+    same file gives the same key, and another file or another stretch another. The copy a HyperFrames Reel is made from is never of
+    4K; a Reel Kit edit's is (`fourK`, plan Task 9, Decision 3: Reel Kit crops two upright frames out of it), and has "-4k" after it,
+    so that neither is taken for the other. It is safe to be a file's name. "" when the file or the stretch cannot be one. */
+export function reelCopyKey(file, stretch, fourK = false) {
   const base = workCopyKey({ bytes: file && file.bytes, mtimeMs: file && file.mtimeMs });
   if (!base || !isStretch(stretch)) return "";
-  return `${base}-${Math.round(stretch.start * 1000)}-${Math.round(stretch.end * 1000)}`;
+  return `${base}-${Math.round(stretch.start * 1000)}-${Math.round(stretch.end * 1000)}${fourK ? "-4k" : ""}`;
 }
 
 /** Where Reel `n`'s copy goes, for the episode in `folder` on this Mac: { dir, video, facts, faces, cues }. They are in the folder of the
@@ -672,6 +674,8 @@ async function keepCues({ cues, stretch, paths, work, shown, write, rename, log 
     of the video:
     - its key and its files are the Reel's (reelCopyKey, reelCopyPaths), so that they are asked for and found by Reel and stretch,
       and the working copy's job never takes them away, nor theirs the working copy's;
+    - it is of 1080 for a HyperFrames Reel, and of 4K with `fourK` for a Reel Kit edit (plan Task 9, Decision 3): a key, a size and
+      limits of 4K, and it replaces only the same Reel's copies of 4K, as one of 1080 replaces only those of 1080;
     - the end of the stretch is held to the video's length, and a stretch with less than one picture of the video in it, or none,
       is refused: "Reel 2 is not in the video". The key is of the stretch as it was asked for;
     - the length it is made for, the limits it runs under and the length checked afterwards are the stretch's, and so is the room
@@ -733,7 +737,7 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
     // `video` is the identity (the key, the places, the size); `from`, when given, is the file this Mac holds of it, which is read instead (plan R1b).
     const source = typeof from === "string" && from ? from : video;
     if (!raw) return refuse("it isn't on this Mac", "the video is not there");
-    const key = reel ? reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, reel) : workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs, fourK: footage || voice ? false : fourK });
+    const key = reel ? reelCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs }, reel, fourK) : workCopyKey({ bytes: raw.size, mtimeMs: raw.mtimeMs, fourK: footage || voice ? false : fourK });
     if (!key) return refuse(voice ? "it could not be read as a sound" : "it could not be read as a video", "the video's size and time cannot be read");
     const paths = reel ? reelCopyPaths(home, folder, reel.n, key) : footage ? footageCopyPaths(home, folder, footage.shot, key) : voice ? voiceCopyPaths(home, folder, key) : workCopyPaths(home, folder, key);
     if (stat(paths.video) && stat(paths.facts)) {
@@ -808,13 +812,13 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
     // recording is stored with, whichever stretch of it is cut.
     const args = voice
       ? voiceCopyArgs(source, writing, { streams })
-      : workCopyArgs(source, writing, { facts, streams, colour, rate, fourK: reel || footage ? false : fourK, stored, ...(stretch ? { stretch } : {}), ...(footage ? { mute: true } : {}) });
+      : workCopyArgs(source, writing, { facts, streams, colour, rate, fourK: footage ? false : fourK, stored, ...(stretch ? { stretch } : {}), ...(footage ? { mute: true } : {}) });
     if (!args) return refuse(voice ? "it could not be read as a sound" : "it could not be read as a video");
     // ffmpeg says how far it has got, for the progress panel. Without a panel it is given nothing more.
     const watch = progress.encoding(seconds);
     let ended;
     try {
-      ended = await guarded(tools.ffmpeg, [...watch.args, ...args], workCopyLimits(seconds, reel ? false : fourK));
+      ended = await guarded(tools.ffmpeg, [...watch.args, ...args], workCopyLimits(seconds, footage || voice ? false : fourK));
     } finally {
       watch.stop();
     }
@@ -873,9 +877,10 @@ export async function makeWorkCopy({ home, folder, video, name, fourK = false, r
       log(`${shown}: the copies made before could not be looked at (${e.code || e.message}), so they are left.`);
     }
     // A Reel's copy replaces the same Reel's copies of other keys, and a working copy its own: each kind is known by its whole name.
-    // A Reel's are its video, its facts, its faces and its cues.
+    // A Reel's are its video, its facts, its faces and its cues. A Reel's copy of 4K (a Reel Kit edit's) replaces only its copies of 4K,
+    // and one of 1080 (a HyperFrames Reel's) only those of 1080, so that neither takes away the copy the other's project is made from.
     // A footage copy replaces the same shot's copies of other keys alone: its video and its facts.
-    const copyFile = reel ? new RegExp(`^reel-${reel.n}-(\\d+-\\d+-\\d+-\\d+)(?:\\.mp4|\\.json|\\.faces\\.json|\\.cues\\.json)$`) : footage ? new RegExp(`^footage-${footage.shot}-(\\d+-\\d+)(?:\\.mp4|\\.json)$`) : COPY_FILE;
+    const copyFile = reel ? new RegExp(`^reel-${reel.n}-(\\d+-\\d+-\\d+-\\d+${fourK ? "-4k" : ""})(?:\\.mp4|\\.json|\\.faces\\.json|\\.cues\\.json)$`) : footage ? new RegExp(`^footage-${footage.shot}-(\\d+-\\d+)(?:\\.mp4|\\.json)$`) : COPY_FILE;
     for (const entry of before) {
       const other = copyFile.exec(entry);
       if (!other || other[1] === key) continue;

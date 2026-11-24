@@ -2,6 +2,8 @@
 // the open lock, answered before Claude Code asks anyone, in whatever mode the chat is in. Its steps, in order:
 //   1. the lock loosened on this Mac: today's guard (guardDecision), saying the lock is changed;
 //   2. a chat that holds a session's words: today's guard, with Read of its own words folder, and only a session's commands;
+//   2b. Artifact and ArtifactComments: the narrow opening (storyboard-opening.js), its answer taken; refused in a held chat, and today's
+//      guard (which asks the opening too) while the lock is loosened;
 //   3. the never list (never.js): deny;
 //   4. Write and Edit: deny, always; then every path in the tool's input, by what it is (places.js): a gated place, or the
 //      workshop (Claude's own file tools do not act there): deny;
@@ -49,6 +51,7 @@ import { userInfo } from "node:os";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isConnector, neverCaught } from "./never.js";
+import { NARROW, openingDecision } from "./storyboard-opening.js";
 import { fetchWhy } from "./fetchable.js";
 import { claudeDirName, fold, gatedIndex, gatedPlaces, pathsIn, realOf, searchRoot } from "./places.js";
 import { SESSION_ID } from "./scan.js";
@@ -57,7 +60,7 @@ import { programHome } from "./home.js";
 import { LOCK_CHANGED, addedWhy, beyondWhy, environmentWhy, lockLoosened, skillFolders } from "./loosened.js";
 import { ALLOW_DEFAULT, OPEN_LOCK_CLAUDE, WORD, editStart, guardDecision, openSettingsOf, workshopFolder } from "./studio.js";
 import { TOOLS_WITH_RULES, effectiveLock, factsOf, readSettings, settingsFile, studioAllowOf, studioNodeOf } from "./settings.js";
-import { UNSCOPED, SESSION_TAUGHT } from "./gate.js";
+import { UNSCOPED, SESSION_TAUGHT, namesNoEpisode } from "./gate.js";
 import { argsOf, chainUp, claudeAbove, processTable, readProcesses } from "./chain.js";
 
 export const NEVER_REFUSED = "That is never done from this folder: nothing here posts, sends, publishes or shares, or works the screen, the browser or another session. Ask Jason.";
@@ -74,7 +77,8 @@ const LEFT_TO_CLAUDE_CODE = new Set(["AskUserQuestion", "TodoWrite", "TaskCreate
 /** The tools with a rule of their own, which no `tool` entry of the allowlist speaks for (settings.js refuses such an entry too). */
 const OWN_RULES = new Set([...TOOLS_WITH_RULES, ...LEFT_TO_CLAUDE_CODE]);
 
-/** The edit.js commands a chat that holds a session's words may run (R29): those a session runs, but `name` and `read`. */
+/** The edit.js commands a chat that holds a session's words may run (R29): those a session runs, but `name` and `read`; and of `reelkit`,
+    only its words that name no episode (gate.js namesNoEpisode: its setup and her style pack), never one that starts or follows an edit. */
 const HELD_COMMANDS = [...UNSCOPED, ...SESSION_TAUGHT].filter((command) => command !== "name" && command !== "read");
 
 /** The tools step 4 lets through once no path of theirs is in a gated place or the workshop. Write and Edit are not among them:
@@ -166,7 +170,7 @@ function bashDecision(command, background, cwd, ctx) {
 
 /** Today's guard's answer (studio.js guardDecision) to `input`, each refusal saying `reason`. */
 function todays(input, ctx, reason) {
-  const answer = guardDecision(input, { checkout: ctx.checkout, node: ctx.node, folder: ctx.folder, tmp: ctx.tmp, uid: ctx.uid });
+  const answer = guardDecision(input, { checkout: ctx.checkout, node: ctx.node, folder: ctx.folder, home: ctx.home, tmp: ctx.tmp, uid: ctx.uid });
   return answer.decision === "deny" ? deny(reason) : answer;
 }
 
@@ -191,10 +195,30 @@ function firstWord(command, ctx) {
   return word.startsWith('"') || word.startsWith("'") ? word.slice(1, -1) : word;
 }
 
+/** Every word after edit.js in a command today's guard allows, each with its quotes taken off; null when the command is not edit.js
+    followed only by words one space apart (WORD). */
+function wordsAfter(command, ctx) {
+  const start = editStart(ctx);
+  if (!start) return null;
+  const found = new RegExp(`^${start}((?: ${WORD})*)$`).exec(String(command));
+  if (!found) return null;
+  return (found[1].match(new RegExp(WORD, "g")) ?? []).map((word) => (word.startsWith('"') || word.startsWith("'") ? word.slice(1, -1) : word));
+}
+
+/** Whether a chat that holds a session's words may run the edit.js `command`: one of HELD_COMMANDS, or `reelkit` with words that name no
+    episode. */
+function heldMay(command, ctx) {
+  const first = firstWord(command, ctx);
+  if (HELD_COMMANDS.includes(first)) return true;
+  if (first !== "reelkit") return false;
+  const words = wordsAfter(command, ctx);
+  return words !== null && words[0] === "reelkit" && namesNoEpisode("reelkit", words.slice(1));
+}
+
 /** `answer`, today's guard's, narrowed for a chat that holds a session's words: edit.js only for the commands a session runs. */
 function narrowed(answer, input, ctx) {
   const command = isObject(input) && isObject(input.tool_input) ? input.tool_input.command : undefined;
-  if (answer.decision === "allow" && input.tool_name === "Bash" && !HELD_COMMANDS.includes(firstWord(command, ctx))) return deny(HELD_NARROWED);
+  if (answer.decision === "allow" && input.tool_name === "Bash" && !heldMay(command, ctx)) return deny(HELD_NARROWED);
   return answer;
 }
 
@@ -220,6 +244,13 @@ export async function openDecision(input, ctx) {
   const given = isObject(input) && isObject(input.tool_input) ? input.tool_input : {};
   const named = (type, what) => Array.isArray(ctx.allow) && ctx.allow.some((entry) => isObject(entry) && entry.type === type && entry.name === what);
 
+  // The narrow opening (storyboard-opening.js), before anything else for its two tools: never for a chat that holds a session's words (a
+  // session's frames never go to claude.ai: Decision 9), today's guard while the lock is loosened (which asks the opening too), else its answer.
+  if (NARROW.includes(name)) {
+    if (ctx.held) return deny(ctx.loosened ? LOCK_CHANGED : HELD_REFUSED);
+    if (ctx.loosened) return todays(input, ctx, LOCK_CHANGED);
+    return openingDecision(input, { home: ctx.home, folder: ctx.folder });
+  }
   if (ctx.loosened) return ctx.held ? narrowed(todays(input, ctx, LOCK_CHANGED), input, ctx) : todays(input, ctx, LOCK_CHANGED);
   if (!ctx.workshop) ctx = { ...ctx, workshop: workshopIndex(ctx.home) };
   if (ctx.held) return heldDecision(input, ctx);

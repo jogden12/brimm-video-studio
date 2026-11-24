@@ -165,7 +165,8 @@ const askedOf = (folder) => ({
   workcopy: ["--now", folder], open: [folder], app: [folder], bring: ["--now", folder], name: [folder, "A new name"], title: [folder], reel: ["drop", folder, "1"], reels: [folder, "--no-play"],
   ask: [folder], finish: [folder], show: [folder, "transcript"], resolve: [folder], spell: [folder], graphic: [folder, "ideas"],
   teachings: [folder], principles: [folder], ideas: [folder], free: [folder], refs: ["use", folder, "blue carousel"], plan: [folder],
-  footage: [folder, "Too many SKUs", "talking", "--client", "no"], join: ["--now", folder, "--parts", "e-20261020-a11111"]
+  footage: [folder, "Too many SKUs", "talking", "--client", "no"], join: ["--now", folder, "--parts", "e-20261020-a11111"],
+  reelkit: ["status", folder]
 });
 /** The commands that name an episode: every command but those that name none. */
 const SCOPED = COMMAND_NAMES.filter((name) => !UNSCOPED.includes(name));

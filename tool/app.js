@@ -209,9 +209,18 @@ const STAYS_OTHERWISE = "This video's chat stays here.";
     voice, for now. It holds no path, no flag and no name of a command. */
 const BUTTONS = "In HyperFrames, share only with people you invite, and export on This Mac: the Export dialog may start on Cloud. The BRIMM doesn't use AI avatars or an AI Sallie, her face or her voice, for now.";
 
-/** Whether a project of the record is the one in use for the main video: its key is "main", and it was not kept for an earlier kind.
-    edit.js `kind` asks it too, of a record that changes kind. */
-export const isMain = (project) => project.key === "main" && project.state !== KEPT;
+/** Whether a project of the record's list is a Reel Kit edit (reel-kit-project.js entryOf, `maker: "reel-kit"`): it is in the list beside
+    the HyperFrames projects, and nothing that makes, adopts or opens a HyperFrames project takes it for its own (plan Task 11). */
+export const byReelKit = (project) => project !== null && typeof project === "object" && project.maker === "reel-kit";
+
+/** The folder of the project the record's `entry` names in the episode's work folder `work`, where its exports are recorded: a Reel
+    Kit edit's public/ (byReelKit), where the app writes its own renders/ records and Studio writes a render's (plan Decision 7), and a
+    HyperFrames project's own folder. Here, not in reel-kit-project.js (which re-exports it), so that exports.js reads it with no cycle. */
+export const projectDirOf = (work, entry) => (byReelKit(entry) ? join(work, entry.name, "public") : join(work, entry.name));
+
+/** Whether a project of the record is the one in use for the main video: its key is "main", it was not kept for an earlier kind, and it is
+    a HyperFrames project, not a Reel Kit edit (byReelKit). edit.js `kind` asks it too, of a record that changes kind. */
+export const isMain = (project) => project.key === "main" && project.state !== KEPT && !byReelKit(project);
 
 /** Whether a name is one folder's name and leads nowhere else. A project's name comes from the record, which Dropbox and the other
     Mac write, and is joined to a folder here (by app-reel.js and app-history.js too, which look at a project, and by free.js, which
@@ -265,9 +274,10 @@ export function clipTrouble(work, clips, name) {
     start to finish. The project of this Mac is not asked about: when its folder is gone it is made again under its own name
     (openInApp). A project whose folder is here is opened, whichever Mac made it. A name that leads nowhere a folder is, is a folder
     that is not here. `ctx` is { home, machine }, `found` { name }, and `record` the episode's. `key` says which project: "main", the
-    main video's in use (isMain), or a Reel's, "reel 2" (plan PR 5), the record's entry of that key, in whatever state it is in. */
+    main video's in use (isMain), or a Reel's, "reel 2" (plan PR 5), the record's entry of that key, in whatever state it is in; a Reel Kit
+    edit's entry is never one (byReelKit). */
 export function projectOnAnotherMac(ctx, { found, record }, key = "main") {
-  const earlier = (record.app?.projects ?? []).find((p) => (key === "main" ? isMain(p) : p.key === key));
+  const earlier = (record.app?.projects ?? []).find((p) => !byReelKit(p) && (key === "main" ? isMain(p) : p.key === key));
   if (!earlier || typeof earlier.on !== "string" || earlier.on === "" || earlier.on === ctx.machine) return null;
   return plainName(earlier.name) && existsSync(join(episodeWork(ctx.home, found.name), earlier.name)) ? null : earlier.on;
 }
@@ -365,7 +375,7 @@ function readable(path) {
     A chat that is not found is held, and has no id here: she has no folder for Claude on this Mac, the id is not a chat's, or
     its transcript is not there or is not a file that can be read. handoverAllowed then says "no chat", and she is told that the
     chat could not be found, which is what is true of it; "held" is for a chat that is found and holds a session's words. */
-function chatOf(home, env) {
+export function chatOf(home, env) {
   const sessionId = typeof env.CLAUDE_CODE_SESSION_ID === "string" ? env.CLAUDE_CODE_SESSION_ID : "";
   const notFound = { sessionId: "", held: true };
   let transcriptPath;

@@ -741,7 +741,9 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     spell: [TITLE], graphic: [TITLE, "ideas"], teachings: [TITLE], principles: [TITLE], ideas: [TITLE],
     refs: ["use", TITLE, "blue carousel"],
     // A plan is no video, so it is no footage for a plan (PR H5a): the gate says it isn't made from its footage yet.
-    footage: [TITLE, "Another plan", "talking", "--client", "no"]
+    footage: [TITLE, "Another plan", "talking", "--client", "no"],
+    // Reel Kit edits a video's parts, never a plan's (plan Task 11): the gate says it isn't made from its footage yet.
+    reelkit: ["status", TITLE]
   };
   it("refuses every other command in the same words, ends with 1, and starts and writes nothing", async () => {
     const names = COMMAND_NAMES.filter((name) => !UNSCOPED.includes(name) && !["plan", "name", "join", "resolve"].includes(name));

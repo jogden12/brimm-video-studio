@@ -1,7 +1,5 @@
 {
   "tools": [
-    "Artifact",
-    "ArtifactComments",
     "ArtifactData",
     "RemoteTrigger",
     "EnterWorktree",
@@ -20,6 +18,10 @@
     "ReadMcpResource",
     "ReadMcpResourceDir",
     "ListMcpResources"
+  ],
+  "narrow": [
+    "Artifact",
+    "ArtifactComments"
   ],
   "servers": [
     "Claude_Browser",

@@ -2,7 +2,7 @@
 // cleared. It is pure: the command's name, the record and the command's words are all it is given, and it reads nothing.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, PLANNED, FOOTAGE, gateFor, heldGateFor, printWhy, gated } from "../gate.js";
+import { UNSCOPED, REELKIT_UNSCOPED, UNANSWERED, SESSION, SESSION_TAUGHT, PLANNED, FOOTAGE, gateFor, heldGateFor, namesNoEpisode, printWhy, gated } from "../gate.js";
 import { COMMAND_NAMES } from "../edit.js";
 import { newPlannedEpisode } from "../episode.js";
 
@@ -24,6 +24,8 @@ const OFF = { teachingsOn: false };
 describe("the gate's lists", () => {
   it("are the commands the design names, each list holding the one before it", () => {
     assert.deepEqual(UNSCOPED, ["episodes", "status", "behind", "update", "retry", "look", "guide"]);
+    // Of `reelkit`, only these words name no episode (plan Task 11): every other word of it names one and is gated.
+    assert.deepEqual(REELKIT_UNSCOPED, ["install", "status", "style"]);
     assert.deepEqual(UNANSWERED, ["kind", "leave", "which", "show", "resolve"]);
     assert.deepEqual(SESSION, [...UNANSWERED, "name"]);
     assert.deepEqual(SESSION_TAUGHT, [...SESSION, "teachings", "principles", "ideas", "finish", "reel", "render", "read"]);
@@ -192,6 +194,16 @@ describe("the gate walks every command", () => {
   });
   it("leaves the commands that name no episode alone, whatever the record", () => {
     for (const name of UNSCOPED) for (const record of [unanswered, session(), finished]) assert.equal(gateFor(name, record, OFF), "", name);
+    // And `reelkit`'s words that name none: its setup and her style pack. Its other words are gated as any command is.
+    for (const words of [["install", "/a"], ["--now", "install", "/a"], ["status"], ["style"]]) {
+      assert.equal(namesNoEpisode("reelkit", words), true, words.join(" "));
+      for (const record of [unanswered, session(), finished, PLAN]) assert.equal(gateFor("reelkit", record, OFF, words), "", words.join(" "));
+    }
+    for (const words of [["start", "Talk", "main"], ["status", "Talk"], ["note", "Talk"], ["go", "Talk"], ["revise", "Talk"], ["resume", "Talk"], ["--now", "2026-10-20 Talk (Mac Studio)", "start"]]) {
+      assert.equal(gateFor("reelkit", unanswered, ON, words), WAITING, words.join(" "));
+      assert.equal(gateFor("reelkit", session(), ON, words), NOT_FOR_SESSION, words.join(" "));
+      assert.equal(heldGateFor("reelkit", words), heldGateFor("open"), words.join(" "));
+    }
   });
   it("refuses a command added later and named in no list", () => {
     assert.notEqual(gateFor("somethingNew", { kind: null, answer: { state: "needs your answer" } }, {}), "");
@@ -247,8 +259,13 @@ describe("gateFor, a client or group session whose mark is not cleared", () => {
 
 describe("gateFor, a session whose mark is cleared, and the records of every other kind", () => {
   const cleared = { at: AT, on: "Mac Studio", to: "Sallie Ogden", confirmed: "dialog" };
-  it("lets a cleared session through every command, as the kind it is", () => {
-    for (const name of COMMAND_NAMES) assert.equal(gateFor(name, session({ session: { marked: AT, cleared } }), OFF), "", name);
+  it("lets a cleared session through every command, as the kind it is, but Reel Kit's", () => {
+    // Reel Kit is refused for every session, cleared or not (plan Decision 9: session clips are not built yet), but its words that name no episode.
+    for (const name of COMMAND_NAMES) assert.equal(gateFor(name, session({ session: { marked: AT, cleared } }), OFF), name === "reelkit" ? NOT_FOR_SESSION : "", name);
+    assert.equal(gateFor("reelkit", session({ session: { marked: AT, cleared } }), ON, ["start", "Session", "reel", "1", "--mode", "lofi"]), NOT_FOR_SESSION);
+    assert.equal(gateFor("reelkit", session({ session: { marked: AT, cleared } }), ON, ["status"]), "");
+    // A video once marked a session and cleared to another kind is no session: it goes on to the command.
+    assert.equal(gateFor("reelkit", { kind: "raw", session: { marked: AT, cleared } }, ON, ["start", "Talk", "main"]), "");
     assert.equal(gateFor("open", { kind: "session", session: { marked: AT, cleared } }, OFF), "");
   });
   it("counts a mark as cleared only when it holds the dialog's confirmation: nothing else clears it", () => {

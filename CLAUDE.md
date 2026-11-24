@@ -63,6 +63,7 @@ A session in Studio accepts any input: a full script, an idea with or without no
 - **An idea with notes** (a topic with bullet points or structured notes): ask what kind of video (a script she'll film, or an explainer), then guide her to flesh it out into a script or into cues and lines. Create the plan once she's ready.
 - **A bare idea** (a short thought): ask what kind of video, what it covers, and who it's for, then guide as above.
 - **A recording** (a file dropped in): this is the existing path; `kind` determines the route.
+- **Reel Kit**: a recording with Sallie on camera can go to Reel Kit after its card, beside the HyperFrames project: `reelkit start "<episode>" main|reel <n> --mode hifi|lofi|showcase`, the mode always asked (her skill's "A Reel Kit edit").
 - Cue string format: `"<kind> | <seconds> | <words> | <show>"` where kind is graphic, words, b-roll or screen. Shot string format: `"<kind> | <what>"` where kind is talking, screen or b-roll. Lines are plain paragraphs.
 - The classifier and parser are in `tool/front-door.js` (classifyText, parseScript, toCueString, toShotString) for reference and tests. A session uses its own reasoning to classify and parse, then calls `plan new` with the right flags.
 

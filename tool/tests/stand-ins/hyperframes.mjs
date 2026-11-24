@@ -8,14 +8,16 @@
 // `open` and `history` from `hyperframes-stand-in.json` in its HOME ({ "open": "opened", "not-installed" or "open-failed", and
 // "history": "empty", "entries", "far", "fails" or "garbled" }, "opened" and "empty" when there is none), and writes each run, its
 // arguments and the names of its environment, as a line of `hyperframes-stand-in.log` there. It hands the chat over, as the real
-// one does, only when the environment carries CLAUDE_CODE_SESSION_ID.
+// one does, only when the environment carries CLAUDE_CODE_SESSION_ID. With `"app": "writes"` there, an `open` that opens also writes into
+// the project what the app writes there once it has it open (plan Task 17, Review Focus 3): its own folder `.hyperframes/` (its cloud
+// transcript and its history), `snapshots/`, a record in `renders/`, and `.claude/settings.local.json`, which its agent writes.
 //   - `history` "empty" is an untouched project's, history-empty.json (the default);
 //   - "entries" is history-entries.json: its entries, the newest <n> of them, with the `_meta` the command line adds;
 //   - "far" is those entries with a time (`endedAt`) that is a number and no date can hold, as a Date goes no further than
 //     8.64e15 milliseconds either way: 1e20, -1e20, one past the edge, 1e300 and so on;
 //   - "fails" is a refusal as the command line prints one: `{ok: false, error, _meta}` on stdout, and exit 2;
 //   - "garbled" is an output that is not JSON, with exit 0.
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const json = (url) => JSON.parse(readFileSync(url, "utf8"));
@@ -41,6 +43,19 @@ function told() {
 const print = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 const is = (...expected) => args.length === expected.length && expected.every((word, i) => word === null || args[i] === word);
 
+/** What the app writes into a project it has open: never its composition. */
+function appWrites(project) {
+  const put = (rel, text) => {
+    mkdirSync(join(project, rel, ".."), { recursive: true });
+    writeFileSync(join(project, rel), text);
+  };
+  put(".hyperframes/transcripts/clip.json", `${JSON.stringify({ model: "scribe-v2", words: [] })}\n`);
+  put(".hyperframes/history.json", `${JSON.stringify({ entries: [] })}\n`);
+  put("snapshots/frame-0001.png", "a snapshot");
+  put("renders/preview_2026-11-23_10-00-00.meta.json", `${JSON.stringify({ status: "rendering" })}\n`);
+  put(".claude/settings.local.json", `${JSON.stringify({ permissions: { allow: ["Bash(npx hyperframes check)"] } })}\n`);
+}
+
 /** The exit status, once what the pinned version prints is printed. */
 function answer() {
   if (is("--version")) {
@@ -53,6 +68,7 @@ function answer() {
     if (open === "opened") {
       const chat = process.env.CLAUDE_CODE_SESSION_ID;
       print(chat ? { ...fixture("open-opened-handed-over.json"), project, handedOver: { engine: "claude", sessionId: chat } } : { ...fixture("open-opened.json"), project });
+      if (told().app === "writes") appWrites(project);
       return 0;
     }
     print({ ...fixture("open-not-installed.json"), project, reason: open });

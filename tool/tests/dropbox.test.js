@@ -595,3 +595,18 @@ describe("textWriter's onCopy, and sameBytes (L5)", () => {
     rmSync(bin, { recursive: true, force: true });
   });
 });
+
+describe("cloneFile off macOS", () => {
+  it("makes a plain copy where there is no macOS clone (the Linux CI), and never writes over a file there", () => {
+    const dir = mkdtempSync(join(tmpdir(), "clone-"));
+    try {
+      const from = join(dir, "a.txt");
+      writeFileSync(from, "whole");
+      cloneFile(from, join(dir, "b.txt"), "linux");
+      assert.equal(readFileSync(join(dir, "b.txt"), "utf8"), "whole");
+      assert.throws(() => cloneFile(from, join(dir, "b.txt"), "linux"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

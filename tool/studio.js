@@ -30,6 +30,7 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { neverDenyRules } from "./never.js";
+import { NARROW, openingDecision } from "./storyboard-opening.js";
 import { bothSpellings, gatedPlaces, readAllowed, realOf } from "./places.js";
 
 /** Her folder for Claude, in the home folder. */
@@ -64,7 +65,7 @@ const filled = (name, { checkout, node }) => readFileSync(new URL(`./studio/${na
     Code's /feedback command and its transcript-share survey are off (the two variables in `env`, as in each HyperFrames project's
     settings, hyperframes.js settingsFor): a session's words are a client's, and neither may offer them for sharing. Only this
     shape, the strict lock, writes them: the open lock (openSettingsOf) takes any `env` as a change (openBroken, "other"). */
-function settingsOf({ checkout, node, folder }) {
+export function settingsOf({ checkout, node, folder }) {
   return {
     permissions: {
       defaultMode: "default",
@@ -76,7 +77,9 @@ function settingsOf({ checkout, node, folder }) {
     env: { DISABLE_FEEDBACK_COMMAND: "1", CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1" },
     disableAllHooks: false,
     hooks: {
-      PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/guard.sh`, node, folder], onFailure: "block" }] }]
+      PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/guard.sh`, node, folder], onFailure: "block" }] }],
+      // The storyboard link's hook (storyboard-opening.js recordPublished): a staged storyboard's first URL, from the publish's own result.
+      PostToolUse: [{ matcher: "Artifact", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/published.sh`, node, folder] }] }]
     }
   };
 }
@@ -153,7 +156,7 @@ export function openSettingsOf({ checkout, node, folder, facts }) {
     disableAllHooks: false,
     hooks: {
       PreToolUse: settingsOf({ checkout, node, folder }).hooks.PreToolUse,
-      PostToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/receipt.sh`, node, folder] }] }]
+      PostToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: "/bin/sh", args: [`${checkout}/tool/studio/receipt.sh`, node, folder] }] }, ...settingsOf({ checkout, node, folder }).hooks.PostToolUse]
     }
   };
 }
@@ -189,7 +192,7 @@ export function lockBroken(settings, { checkout, folder, lock = "strict", facts,
     differs is named: "hooks", "guard", "bypass" and "auto" as for the strict lock (the guard's entry compared whole, its node among
     it); "sandbox" (the sandbox's settings, whole); "permissions" (allow, deny, the modes and anything added, such as a folder);
     "memory" (autoMemoryEnabled or autoDreamEnabled not false); "skill-shell" (disableSkillShellExecution not true); "receipt" (no
-    entry with the receipt hook after a card); "other-hooks" (a hook of any other event, such as SessionStart, or any hook beside the
+    entry with the receipt hook after a card); "published" (no entry with the storyboard link's hook after an Artifact call); "other-hooks" (a hook of any other event, such as SessionStart, or any hook beside the
     guard's and the receipt's); and "other" (any other key, such as env, statusLine, enabledPlugins or apiKeyHelper, or
     disableAllHooks not false). ["node"] alone when this Mac's settings name no node, so that nothing can be compared. */
 function openBroken(settings, { checkout, folder, facts, node }) {
@@ -212,11 +215,12 @@ function openBroken(settings, { checkout, folder, facts, node }) {
   if (s.autoMemoryEnabled !== false || s.autoDreamEnabled !== false) broken.push("memory");
   if (s.disableSkillShellExecution !== true) broken.push("skill-shell");
   if (!holds("PostToolUse")) broken.push("receipt");
+  if (!entries("PostToolUse").some((entry) => isDeepStrictEqual(entry, want.hooks.PostToolUse[1]))) broken.push("published");
   // A hook of another event, or more than the one each, is another hook; and so is any other difference in the hooks that the
   // guard's and the receipt's do not already name.
   const otherEvent = Object.keys(hooks).some((event) => !Object.hasOwn(want.hooks, event));
-  const unnamed = !isDeepStrictEqual(s.hooks, want.hooks) && !broken.includes("guard") && !broken.includes("receipt");
-  if (otherEvent || count("PreToolUse") > 1 || count("PostToolUse") > 1 || unnamed) broken.push("other-hooks");
+  const unnamed = !isDeepStrictEqual(s.hooks, want.hooks) && !broken.includes("guard") && !broken.includes("receipt") && !broken.includes("published");
+  if (otherEvent || count("PreToolUse") > 1 || count("PostToolUse") > want.hooks.PostToolUse.length || unnamed) broken.push("other-hooks");
   if (Object.keys(s).some((key) => !Object.hasOwn(want, key)) || (s.disableAllHooks !== false && s.disableAllHooks !== true)) broken.push("other");
   return broken;
 }
@@ -372,10 +376,14 @@ export function editStart({ checkout, node }, { quotedOnly = false } = {}) {
 /** What the guard answers to a tool call Claude Code is about to make, `input` as the PreToolUse hook is given it:
     { decision, reason }. "allow" for brimm-video's edit.js run from the checkout, followed only by words one space apart (WORD),
     and for her skill. The node may be spelled three ways (editStart): this Mac's node in double quotes, the word node, or a plain
-    path to node bare. "pass" for a tool left to Claude Code's own rules, which gives no answer, and for a read inside her
+    path to node bare. Artifact and ArtifactComments are the narrow opening's (storyboard-opening.js openingDecision), asked first, its
+    answer taken. "pass" for a tool left to Claude Code's own rules, which gives no answer, and for a read inside her
     folder, `folder`; and "deny" for everything else, any other read, any other skill and any tool added later among them. */
-export function guardDecision(input, { checkout, node, folder = "", tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp", uid = process.getuid() }) {
+export function guardDecision(input, { checkout, node, folder = "", home, tmp = process.env.CLAUDE_CODE_TMPDIR || "/tmp", uid = process.getuid() }) {
   const name = input && input.tool_name;
+  // The narrow opening answers first for its two tools (storyboard-opening.js): a storyboard Studio staged in her folder, its page and its
+  // comments, and nothing else. The home is the folder above hers, as for the open guard (R25).
+  if (NARROW.includes(name)) return openingDecision(input, { home: home ?? (folder ? dirname(folder) : ""), folder });
   if (LEFT_TO_CLAUDE_CODE.has(name)) return { decision: "pass", reason: "" };
   if (name === "Read") return readable(input, folder, tmp, uid) ? { decision: "pass", reason: "" } : { decision: "deny", reason: REFUSED };
   if (name === "Skill" && input.tool_input && input.tool_input.skill === SKILL) return { decision: "allow", reason: "her skill" };

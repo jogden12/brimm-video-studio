@@ -49,6 +49,19 @@
 //                                         "that's all the footage": the plan's talking parts joined, in the order of its script,
 //                                         into its video (join.js). The detached half, `join --now`, and the working copy's
 //                                         `workcopy --now … --footage`, are runs of its own and in no help
+//   node edit.js reelkit install "<download>" [--yes] | status
+//                                         a Reel Kit download dragged into her chat: the plan of its setup, or with --yes the setup,
+//                                         detached; and how it is going (reel-kit-commands.js)
+//   node edit.js reelkit start | status | note | go | revise | resume | render | storyboard | app "<episode>" …
+//                                         her Reel Kit edits of an episode's parts: started queued, followed, noted, approved, changed,
+//                                         carried on, rendered headless (reel-kit-render.js), their storyboards shown in the side
+//                                         panel through the lock's narrow opening (storyboard-opening.js) or on Reel Kit's local page,
+//                                         and opened in the HyperFrames app (reel-kit-commands.js). Their detached half, `reelkit --now`,
+//                                         is in no help
+//   node edit.js reelkit style show | change "<what she asked>" | yes | back ["<copy>"] | diff | carry [yes] | resume
+//                                         her Reel Kit style pack: shown in the side panel, changed by the worker's style job on a working
+//                                         copy and kept on her yes, gone back to, compared, carried onto a new starting style
+//                                         (reel-kit-style-chat.js). It names no episode
 //   node edit.js plan "<planned>" voice   "the HeyGen voice is done": the voice the app's agent made in a HeyGen explainer's
 //                                         project taken in as the plan's video (explainer.js). `app` opens that project
 //
@@ -68,11 +81,11 @@ import { isMain } from "./is-main.js";
 import { stamp, localDay } from "./shared/text.js";
 import { readEpisode, filesProblems, fileProblems, fileProblemWords, undone, writeEpisode, localStamp, acceptRev, shown as shownAt, claimed, heldElsewhere, heldText, conflictedCopies, conflictedOf, conflictedBy, recordFile, recordNumbers, otherNames, RECORD_DIR, isAnswered, isFromPlan, isPart, isPlannedRecord, shownName, currentReading, answerOf, kindOf as recordKind } from "./episode.js";
 import { appOf, effectiveLock, readSettings, teachingsOn, teachingsLapsed, lightImport, episodesFolder, workFolder, episodeWork, runsFolder, dropFolder, dropFolderOf, exportsFolderOf, exportsWords, folderWords, isLocal, studioAllowOf, importingFolderOf, statusFoldersOf, downloadsFolder, needsFilesAccess } from "./settings.js";
-import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, UNSCOPED, gateFor, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
+import { MATCHED_SESSION, SESSION as SESSION_COMMANDS, SESSION_TAUGHT, gateFor, namesNoEpisode, heldGateFor, printWhy, noFootageWhy, gated, leftAlone, sessionNotCleared, heldName, gatedName, gatedAsOf, withShortId } from "./gate.js";
 import { isSeenLine, isZoomName, namesOf, sessionLabel, sizeText, spokenMac, unlabelled, withoutNames } from "./kinds.js";
 import { aboutLeft, progressFolder, readRates, reporter } from "./progress.js";
 import { ORIGINALS_COMMAND, ORIGINALS_PROBLEM, ORIGINALS_RUNNING, ORIGINALS_SESSION, asSession as recordingHeld, listsOriginal } from "./originals.js";
-import { startDetached, startWhenReady, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
+import { spawnDetached, startDetached, startWhenReady, runDetached, runningCommand, runningRun, readResult, takeEpisodeLock, releaseEpisodeLock } from "./detached.js";
 import { cloneIn, isWhole, onSameDisk, readThrough, replaceIn, textWriter, LATE_CHECK_MS } from "./dropbox.js";
 import { fileSafe, timelineFile } from "./names.js";
 import { REELS_FILE, readReels, reelsText, uncropped, notMadeWords } from "./reel-candidates.js";
@@ -85,7 +98,7 @@ import { checkingNow, problemFlagged } from "./finish-check.js";
 import { endedSinceYes, endedWithoutHandoff } from "./finish-ended.js";
 import { handoffIn, videoSeconds } from "./finish-time.js";
 import { DOWNLOADS_UNREADABLE, NEVER_OPENED, downloadsOnce, exportsFound, exportsUnreadable, lookForExports, readRegular } from "./exports.js";
-import { mainWordsSaid, projectWordsIn, reelTitleAsk } from "./on-screen.js";
+import { mainWordsSaid, projectWords, projectWordsIn, reelTitleAsk } from "./on-screen.js";
 import { videoClock } from "./video-clock.js";
 import { timelineAt } from "./clock.js";
 import { spellingFault, withSpelling, respelledPart, respelledHandoff, respelledHandoffV2 } from "./spelling.js";
@@ -113,9 +126,9 @@ import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sess
 import { isRunning, lastLine, lockFile, runProgram } from "./run.js";
 import { DOWNLOADS_SAY_MS, LOOK_ASKED, LOOK_AT_WORK, UNSEEN_MS, accessLine, blocksDrop, saysInEpisodes, saysInOverview, stepLine, findingOf, lookerOf, placeWordsOf, readAccess, switchFor } from "./access.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_APP, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
+import { NOT_SET_UP, OPS_APP, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine, reelKitEdits } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
-import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, clipFolders, clipTrouble, clearOpensAfterSpellings, copyAtWork, copyIsMade, footageFailed, guidanceOf, isMain as inUse, mainState, markOpensAfterSpellings, opensAfterSpellingsOf, mediaOf, notWholeYet, openByItself, openInApp, plainName, projectOnAnotherMac, waitsForSpellings, whenReadyLockOf } from "./app.js";
+import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, byReelKit, projectDirOf, clipFolders, clipTrouble, clearOpensAfterSpellings, copyAtWork, copyIsMade, footageFailed, guidanceOf, isMain as inUse, mainState, markOpensAfterSpellings, opensAfterSpellingsOf, mediaOf, notWholeYet, openByItself, openInApp, plainName, projectOnAnotherMac, waitsForSpellings, whenReadyLockOf } from "./app.js";
 import { VOICEOVER, projectCues } from "./project.js";
 import { openVoiceProject, voiceProjectWhy } from "./explainer.js";
 import { REEL_COPY_KINDS, madeInApp, makeOneWords, notMadeYet, openReelInApp, openReelWords, reelAsked, reelNotWholeYet, reelStretch, reelWhy } from "./app-reel.js";
@@ -130,6 +143,10 @@ import { HAND_EDITED, scriptHandEdited } from "./plan-script.js";
 import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
+import { reelkitCommand } from "./reel-kit-commands.js";
+import { processStart, queuedFor, queuedOf, statusOf, wasOpened } from "./reel-kit-worker.js";
+import { projectFolderOf, readState, slugOf } from "./reel-kit-project.js";
+import { renderWhy, renderedChanged, renderingBy } from "./reel-kit-render.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
 import { ON_OTHER_MAC, ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, notWholeHere, onOtherMac, recordingAt, recordingStat, roleOf } from "./where.js";
 
@@ -384,7 +401,52 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         its answer again, with its cards
   node edit.js plan "<planned>" agreed "<video>"
                                         for footage that shows a client: notes, on a dialog on this Mac that only her click
-                                        answers, that the client agreed to being shown in it. Who agreed stays on this Mac`;
+                                        answers, that the client agreed to being shown in it. Who agreed stays on this Mac
+  node edit.js reelkit install "<download>" [--yes]
+                                        a Reel Kit download dragged into her chat: each step setting it up would take, and
+                                        that nothing is installed until Jason says yes. With --yes, said once Jason has said
+                                        yes, it is set up, detached, one setup at a time on this Mac. An installed Mac takes
+                                        only the Reel Kit Studio pins; the Mac Studio sets up another version beside the
+                                        one in use, and writes its pin for Jason's pull request (reel-kit-commands.js)
+  node edit.js reelkit status           how Reel Kit's setup on this Mac is going: at which step, done and what it did, or
+                                        why it stopped
+  node edit.js reelkit start "<episode>" main|reel <n> [reel <n> …] --mode hifi|lofi|showcase
+                                        a Reel Kit edit of each part, in the mode she picked (asked when not given), each
+                                        queued and made one at a time on this Mac, detached, up to its storyboard
+  node edit.js reelkit status "<episode>"
+                                        each Reel Kit edit of it: where it is, and what Reel Kit needs from her, with the
+                                        folder to drop it in opened in Finder
+  node edit.js reelkit note "<episode>" <edit> <beat>|all "<note>"
+                                        her note on a beat of an edit's storyboard, or on all of it, as she said it
+  node edit.js reelkit go "<episode>" <edit>
+                                        her go for an edit's storyboard: it is built to render, detached
+  node edit.js reelkit revise "<episode>" <edit>
+                                        an edit's next storyboard, made from her notes since the last one, detached
+  node edit.js reelkit resume "<episode>" <edit>
+                                        an edit that stopped, carried on from its step, detached
+  node edit.js reelkit render "<episode>" <edit>
+                                        an edit built to render after her go, rendered on this Mac, detached, one job at a
+                                        time; refused once it was changed in HyperFrames, which then exports it
+  node edit.js reelkit storyboard "<episode>" <edit> [local]
+                                        an edit's newest storyboard made ready in her folder, and the exact publish to the
+                                        side panel for her chat to make; with local, Reel Kit's own page on this Mac
+  node edit.js reelkit app "<episode>" <edit>
+                                        an edit built after her go, opened in the HyperFrames app with BRIMM's notes for its
+                                        agent, and a line when the app was updated since. Once opened there Reel Kit changes
+                                        it no more: a new edit of the part is its next version. Never a session
+  node edit.js reelkit style show       her Reel Kit style's main lines and its board made ready for the side panel; while a
+                                        change is made, how far it has got, and once made, its new board instead
+  node edit.js reelkit style change "<what she asked>"
+                                        a change to her style, as she said it: a copy of her style kept first, then Reel Kit
+                                        changes a copy of it and makes its new board, detached. Nothing is kept without her yes
+  node edit.js reelkit style yes        the change she has seen becomes her style; edits made before keep theirs
+  node edit.js reelkit style back ["<copy>"]
+                                        her earlier styles by name, or her style put back to one (how it was is kept first)
+  node edit.js reelkit style diff       how her style differs from the starting style
+  node edit.js reelkit style carry [yes]
+                                        once Jason ships a new starting style: what carrying hers onto it would add, and with
+                                        yes, it done
+  node edit.js reelkit style resume     a style change that stopped, carried on from its step`;
 
 /** The home folder commands work from: the one a test gives, else Studio's own (home.js: BRIMM_VIDEO_HOME, else HOME, else the Mac's own word for it). */
 const homeOf = (deps) => deps.home || studioHome();
@@ -483,7 +545,7 @@ const recordShaped = (r) => typeof r.id === "string" && Number.isInteger(r.versi
     name and folder are for the detached runs that leave a result, and are never said), or null when it may run. `said` is
     what the episode was asked for by. The records are all that findEpisode knows of an episode, and all that is read here
     (and the numbers of the files in its record folder). In this order:
-    - A command that names no episode (UNSCOPED), and a call with no command on ctx, are not gated.
+    - A command that names no episode (gate.js namesNoEpisode: UNSCOPED, and `reelkit`'s own such words), and a call with no command on ctx, are not gated.
     - A record of a layout newer than this code is refused for every command that names an episode, in the words episodeFor has
       always used for it, with `newer: true`, so that episodeFor ends the command with the code that command gives such a record.
     - A record file numbered above the one read, which Dropbox is still bringing over or this code rejects, may be a video corrected
@@ -497,7 +559,7 @@ const recordShaped = (r) => typeof r.id === "string" && Number.isInteger(r.versi
     - A video held as a session (`e.held`: one of its other versions is a session not cleared) runs only what gate.js heldGateFor
       lets run, the commands of a video not yet answered. */
 function gateOf(ctx, e, records, said, inForce) {
-  if (!ctx.asked || UNSCOPED.includes(ctx.asked.command)) return null;
+  if (!ctx.asked || namesNoEpisode(ctx.asked.command, ctx.asked.words)) return null;
   const refused = (why, more = {}) => ({ why, name: e.name, folder: e.folder, gate: true, ...more });
   if (e.read.newer) return refused(newerWhy(e.read.record, ctx.build), { newer: true });
   if (inForce && recordNumbers(e.folder)[0] > inForce.rev) return refused(PENDING_WHY);
@@ -511,7 +573,7 @@ function gateOf(ctx, e, records, said, inForce) {
   }
   // A video one of whose other versions is a session not cleared is held as a session (episodeAt's `held`): fail closed.
   if (e.held) {
-    const why = heldGateFor(ctx.asked.command);
+    const why = heldGateFor(ctx.asked.command, ctx.asked.words);
     if (why) return refused(why);
   }
   return null;
@@ -664,10 +726,10 @@ const cleanFor = (ctx, e) => {
 
 /** Have every line the command editMain is running says from here on hold nothing of the names of `e`, the gated episode it
     found (ctx.hidden, which contextFor's `say` reads): for a command that names an episode, since its own lines may name a file
-    or a folder of it on the way, as an error does. A command of UNSCOPED names each episode as it is to be named, and is left
+    or a folder of it on the way, as an error does. A command that names no episode (namesNoEpisode) names each episode as it is to be named, and is left
     alone. */
 function hideNames(ctx, e) {
-  if (!ctx.hidden || !ctx.asked || UNSCOPED.includes(ctx.asked.command) || !isGated(e)) return;
+  if (!ctx.hidden || !ctx.asked || namesNoEpisode(ctx.asked.command, ctx.asked.words) || !isGated(e)) return;
   const { names, keep } = secretsOf(ctx, e);
   ctx.hidden.names.push(...names);
   ctx.hidden.keep.push(...keep);
@@ -1174,9 +1236,10 @@ export async function episodes(ctx) {
   return 0;
 }
 
-/** Start a program detached from this one, and do not wait for it: what it prints goes into the tool's log. */
+/** Start a program detached from this one, and do not wait for it: what it prints goes into the tool's log. Gives its pid (spawnDetached),
+    so that a queue can name the run it started. */
 function startProgram(cmd, args) {
-  import("./detached.js").then(({ spawnDetached }) => spawnDetached(cmd, args));
+  return spawnDetached(cmd, args);
 }
 
 /** The episode a command is asked about, by what the person said, with its record: { found, record }, or { code } when the
@@ -1413,11 +1476,21 @@ const projectIsElsewhere = (name, on, of = "") => `The HyperFrames project of ${
     free.js has it; the review of PR 11, I4), or that cannot be told from one, or "": decided before anything is claimed or opened. `key` says
     which project ("main" or "reel 2"), and `of` how its words name it. Nothing of a session goes to HyperFrames by default. */
 function clipWords(ctx, { found, record }, key, of) {
-  const project = (record.app?.projects ?? []).find((p) => (key === "main" ? inUse(p) : p.key === key));
+  const project = (record.app?.projects ?? []).find((p) => !byReelKit(p) && (key === "main" ? inUse(p) : p.key === key));
   if (!project || !plainName(project.name)) return "";
   const work = episodeWork(ctx.home, found.name);
   return clipTrouble(work, clipFolders(work, record), project.name) ? `The folder for ${of} on this Mac is not as it was made, so it wasn't opened. Ask Jason.` : "";
 }
+
+/** Whether the record's part `key` ("main" or "reel <n>") is a Reel Kit edit (app.js byReelKit), not kept for an earlier kind: `app` opens
+    no HyperFrames project for it, and makes none (plan Task 11). */
+const reelKitEdit = (record, key) => (record.app?.projects ?? []).some((p) => byReelKit(p) && p.key === key && p.state !== PROJECT_KEPT);
+/** What `app` says of a part that is a Reel Kit edit: it leaves through Reel Kit's own way out (plan Task 17), never as a HyperFrames project
+    of Studio's own. `of` is "Reel 2 of " for a Reel. */
+const reelKitWay = (name, of = "") => `${of}${name} is a Reel Kit edit: it opens through Reel Kit, not as a HyperFrames project.`;
+/** What `app` says of a part whose Reel Kit job waits in the queue, its project not made yet (reel-kit-worker.js queuedFor): no HyperFrames
+    project is made beside it. */
+const reelKitWaits = (name, of = "") => `${of}${name} has a Reel Kit edit waiting to be made: it opens through Reel Kit, not as a HyperFrames project.`;
 
 /** What she says to open an episode in the app, which is what she is told to say again when the files are not here yet: `open
     <name> in HyperFrames`, the words that run `app`, and not `open <name>`, which runs open. */
@@ -1477,6 +1550,8 @@ export async function app(ctx, rest) {
   if (!got.found) return got.code;
   const { found } = got;
   if (recordKind(got.record) === "finished") return refuse(ctx, finishedHasNoProject(got.record.name.text));
+  if (reelKitEdit(got.record, "main")) return refuse(ctx, reelKitWay(got.record.name.text));
+  if (queuedFor(ctx.home, got.record.id, "main", ctx.alive)) return refuse(ctx, reelKitWaits(got.record.name.text));
   // A planned video (PR H6, bridge PR): any planned video with its package set may have a project, and no question or Reel is asked of a plan.
   const isPlan = isPlannedRecord(got.record);
   if (isPlan) {
@@ -1684,6 +1759,8 @@ async function appReel(ctx, asked) {
   const { n } = asked;
   if (isPlannedRecord(got.record)) return refuse(ctx, noFootageWhy(got.record));
   if (recordKind(got.record) === "short video") return refuse(ctx, NO_REELS);
+  if (reelKitEdit(got.record, `reel ${n}`)) return refuse(ctx, reelKitWay(name, `Reel ${n} of `));
+  if (queuedFor(ctx.home, got.record.id, `reel ${n}`, ctx.alive)) return refuse(ctx, reelKitWaits(name, `Reel ${n} of `));
   if (!appOf(ctx.settings)) return refuse(ctx, APP_NOT_SET_UP);
   const cli = ctx.deps.app?.cli ?? cliPath(ctx.home);
   if (!existsSync(cli)) return refuse(ctx, NO_COMMAND_LINE);
@@ -2356,15 +2433,27 @@ const capital = (text) => text[0].toUpperCase() + text.slice(1);
 function finishWay(ctx, record) {
   const kind = recordKind(record);
   const projects = (record.app?.projects ?? []).filter((p) => p.state !== PROJECT_KEPT);
-  if ((kind === "raw" || (kind === "short video" && hasFinalCut(record))) && projects.some(inUse)) return "hyperframes";
-  if (isClip(record)) return projects.some((p) => inUse(p) && Array.isArray(p.opened) && p.opened.length > 0) ? "hyperframes" : "clip";
+  // The main video's Reel Kit edit (app.js byReelKit, which inUse leaves out) is its project too: it is finished from its render, never opened.
+  // Its main video is upright: reel-kit-project.js startWhy refuses a Reel Kit edit of a wide main video (WIDE_MAIN), and finish checks the
+  // render's shape as it checks any export's.
+  const mainEdit = (p) => byReelKit(p) && p.key === "main";
+  if ((kind === "raw" || (kind === "short video" && hasFinalCut(record))) && projects.some((p) => inUse(p) || mainEdit(p))) return "hyperframes";
+  if (isClip(record)) return projects.some((p) => (inUse(p) && Array.isArray(p.opened) && p.opened.length > 0) || mainEdit(p)) ? "hyperframes" : "clip";
   if (!hasFinalCut(record)) return "finished";
   return "unopened";
 }
 
-/** The Reels of the record that `app … reel N` made a project for (plan PR 5): { reel: n } for each Reel project not kept for an earlier
-    kind. Such a Reel is finished from its project's export, wherever the main video was edited. */
+/** The Reels of the record that `app … reel N` made a project for (plan PR 5), or that have a Reel Kit edit (`maker: "reel-kit"`, plan Task 15:
+    that Reel's project, finished from its render): { reel: n } for each Reel project not kept for an earlier kind. Such a Reel is finished
+    from its project's export, wherever the main video was edited. */
 const reelProjectsOf = (record) => (record.app?.projects ?? []).filter((p) => p.state !== PROJECT_KEPT && /^reel [1-9]\d*$/.test(p.key)).map((p) => ({ reel: Number(p.key.slice(5)) }));
+
+/** The words on the picture of the project a part of a finish takes (on-screen.js projectWords): a Reel Kit edit's in its public/, where
+    its composition is (reel-kit-project.js projectDirOf), and a HyperFrames project's in its own folder (projectWordsIn). */
+function partWords(work, record, part) {
+  const edit = (record.app?.projects ?? []).find((p) => byReelKit(p) && p.key === part.key && p.name === part.project && p.state !== PROJECT_KEPT);
+  return edit && plainName(edit.name) ? projectWords(projectDirOf(work, edit)) : projectWordsIn(work, part.project);
+}
 
 /** What `finish "<episode>" reels` needs before it looks for a Reel's export (plan PR 9; architecture 4.3 and 8.7), from the record and
     the hand-off on file: why it may not go on, { why }, in plain words; or { onFile, base }, the hand-off the next revision is made
@@ -2528,7 +2617,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
   const work = episodeWork(ctx.home, found.name);
   const main = looked.parts.find((p) => p.key === "main");
   if (main && v2) {
-    const read = main.video ? projectWordsIn(work, main.project) : { here: true, words: [] };
+    const read = main.video ? partWords(work, record, main) : { here: true, words: [] };
     const said = mainWordsSaid({ found: read.words, here: read.here, incomplete: read.incomplete, given: answers.onScreen, none: answers.noOnScreen, yes: answers.yes, taking: Boolean(main.video), shown: sameLines(shownWords(work), read.words.map((word) => word.text)) });
     if (said.refusal) return refuse(ctx, said.refusal);
     if (said.line) lines.push(said.line);
@@ -2550,7 +2639,7 @@ export async function finishEpisode(ctx, found, answers = {}) {
     }
     const opening = suggestionOpening(ctx, found, part.fromSuggestion);
     // What the Reel's picture holds is a proposal for its title, which she confirms as she gives any title (plan PR 8).
-    looked.asks.push(reelTitleAsk({ n: part.reel, found: part.project ? projectWordsIn(work, part.project).words : [], opening }));
+    looked.asks.push(reelTitleAsk({ n: part.reel, found: part.project ? partWords(work, record, part).words : [], opening }));
   }
   for (const line of [...lines, ...looked.stops, ...stops, ...looked.asks]) ctx.say(line);
   // An explainer in a HeyGen voice (PR H6) is told what YouTube asks of it, ending what the finish found.
@@ -4315,8 +4404,10 @@ const everShownInFinalCut = (record) => [record.main, ...(Array.isArray(record.r
 
 /** Whether a video is edited in HyperFrames, by its record: `finish` goes the HyperFrames way for it (finishWay: a raw video with a main project in
     use, an iPhone clip whose main project the app has opened). What `spell` first says of such a video tells her what the app needs. A raw video with
-    a project for a Reel alone, or for none, is not edited in the app by this: the record does not say it is. */
-const editedInApp = (ctx, record) => finishWay(ctx, record) === "hyperframes";
+    a project for a Reel alone, or for none, is not edited in the app by this: the record does not say it is. Nor is one whose main video is a
+    Reel Kit edit (plan Task 15): Reel Kit renders it, and no assistant in HyperFrames drew its captions, so its Reel Kit edits are left out of
+    the record finishWay is asked of. */
+const editedInApp = (ctx, record) => finishWay(ctx, { ...record, app: { ...(record.app ?? {}), projects: (record.app?.projects ?? []).filter((p) => !byReelKit(p)) } }) === "hyperframes";
 
 /** What she is told of the captions already drawn into the pictures of a video edited in HyperFrames, when no sentence of the part that has them says it:
     a spelling is not pushed into a project, the app may be editing it (architecture 4.8). */
@@ -5406,10 +5497,12 @@ async function answerKind(ctx, found, plan, began) {
   const next = { ...base, kind: stored, answer };
   // A correction that changes the kind keeps the HyperFrames project made for the earlier kind, in the record that changes it
   // (architecture 4.8): the main project in use is marked as made for that kind, so `app` no longer takes it for the main one and
-  // makes a new one. Nothing on disk is moved or removed here, and the same kind again changes nothing.
+  // makes a new one. Nothing on disk is moved or removed here, and the same kind again changes nothing. A Reel Kit edit of the main
+  // video (app.js byReelKit, which inUse is not) is kept for the earlier kind the same way, so that no edit of it goes on as the new kind's.
   const kindWas = recordKind(base);
-  const keeps = kindWas !== null && kindWas !== stored && (base.app?.projects ?? []).some(inUse);
-  if (keeps) next.app = { ...base.app, projects: base.app.projects.map((p) => (inUse(p) ? { ...p, state: PROJECT_KEPT } : p)) };
+  const keptForKind = (p) => inUse(p) || (byReelKit(p) && p.key === "main" && p.state !== PROJECT_KEPT);
+  const keeps = kindWas !== null && kindWas !== stored && (base.app?.projects ?? []).some(keptForKind);
+  if (keeps) next.app = { ...base.app, projects: base.app.projects.map((p) => (keptForKind(p) ? { ...p, state: PROJECT_KEPT } : p)) };
   if (plan.clearSession) next.session = { ...base.session, cleared: { at, on: ctx.machine, to: stored, confirmed: "dialog" } };
   if (!handedOff(found.folder, base)) {
     // An answered video keeps the video it is a version of unless her answer names another, or none (--version-of none).
@@ -6687,6 +6780,9 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
     copy: way ? guideCopy(ctx, e, r, rates) : null,
     project: way && !handoff && !notes.finished[r.id] ? guideProject(ctx, e, r, downloads) : null,
     reelsExported: looksForReels ? guideReels(ctx, e, r, downloads) : [],
+    // Its Reel Kit edits (plan Task 20), read where the guide says them: a raw video's or an iPhone clip's before its hand-off, a finished video's
+    // Reels after it; nothing of a video the gate holds, one kept on another Mac, or one she has said is finished.
+    reelKit: !hidden && !there && !notes.finished[r.id] && (kind === "finished" ? Boolean(handoff) : way !== "" && !handoff) ? guideReelKit(ctx, e, r) : [],
     // A session kept on another Mac: its choice and whether its empty revision is owed are in its record; its teachings file is on that Mac, and is not
     // read here (an item it could not see counts as one undecided, as guideSession counts it).
     session: kind !== "session" ? null : there ? { choice: r.session?.teachings ?? null, teachingsOn: teachingsOn(ctx.settings, ctx.now()), undecided: 1, emptyOwed: revisionOwed(r) } : guideSession(ctx, e, r),
@@ -6694,6 +6790,32 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
     // For `guide tell` alone, which follows a video from its drop folder into Episodes by it: never said.
     source: r.video && typeof r.video.file === "string" ? { mac: r.imported && r.imported.on, file: r.video.file, bytes: r.video.bytes } : null
   };
+}
+
+/** What the guide reads of the record `r`'s Reel Kit edits (guide.js reelKitEdits): for each, its project's studio.json in the episode's work folder
+    (`e.name`), as the worker's statusOf and readState read it, whether a render of it runs now (reel-kit-render.js renderingBy), for a ready one why
+    a render would refuse it (renderWhy), and whether Studio's own mark says it opened the project in the HyperFrames app (the worker's wasOpened,
+    by the edit's slug); and the parts whose jobs wait in the queue, their projects not made yet (queuedOf). An edit whose folder or slug can't be
+    named, or that can't be read, is unread. */
+function guideReelKit(ctx, e, r) {
+  const startOf = ctx.deps?.reelKit?.startOf ?? processStart;
+  const look = (entry) => {
+    try {
+      const dir = projectFolderOf(ctx.home, e.name, entry.name);
+      const state = readState(dir);
+      const status = statusOf(dir, ctx.alive, startOf);
+      return { status, state, rendering: renderingBy(state, ctx.alive, startOf), refused: status?.state === "ready" ? renderWhy(dir, state) : status?.state === "rendered" ? renderedChanged(dir, state) : "", opened: wasOpened(ctx.home, slugOf(r, entry.key, entry.version)) };
+    } catch {
+      return null;
+    }
+  };
+  let queued = [];
+  try {
+    queued = queuedOf(ctx.home, r.id, ctx.alive).map((j) => j.key);
+  } catch {
+    queued = [];
+  }
+  return reelKitEdits(r, look, queued);
 }
 
 /** The runs this Mac's progress panel shows now (progress.js): each run's file in the panel's folder, whose process is alive. One
@@ -7049,7 +7171,7 @@ function refsProject(ctx, { found, record }, reel) {
   if (elsewhere) return no(projectIsElsewhere(name, elsewhere, of));
   const clip = clipWords(ctx, { found, record }, key, `${of}${name}`);
   if (clip) return no(clip);
-  const project = (record.app?.projects ?? []).find((p) => (reel === null ? inUse(p) : p.key === key));
+  const project = (record.app?.projects ?? []).find((p) => !byReelKit(p) && (reel === null ? inUse(p) : p.key === key));
   const dir = project && plainName(project.name) ? join(episodeWork(ctx.home, found.name), project.name) : "";
   if (dir && existsSync(dir)) return { dir, who: `${of}${name}` };
   return no((reel === null ? "" : reelWhy(ctx, found, record, reel)) || `Open it in HyperFrames first: say "${reel === null ? openInAppWords(name) : openReelWords(reel, name)}".`);
@@ -7203,7 +7325,7 @@ async function joinCommand(ctx, rest) {
 
 /** The commands, by the word a person's request is run with. `read` is a detached run's alone (`kind` and `teachings` start it),
     and so are `workcopy` (`kind` and `app` start it) and `join` (`plan … join` starts it): all three are in no help. */
-const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, bring, status, retry, look, name, title, reel, reels, ask, finish, show, behind: (ctx) => behind(ctx), update: updateCommand, resolve: resolveConflict, free, spell, graphic, teachings: teachingsCommand, principles, ideas, refs, plan, footage };
+const COMMANDS = { episodes: (ctx) => episodes(ctx), guide: guideCommand, kind: kindCommand, leave: leaveCommand, which: whichCommand, read, workcopy, join: joinCommand, open, app, bring, status, retry, look, name, title, reel, reels, ask, finish, show, behind: (ctx) => behind(ctx), update: updateCommand, resolve: resolveConflict, free, spell, graphic, teachings: teachingsCommand, principles, ideas, refs, plan, footage, reelkit: (ctx, rest) => reelkitCommand(ctx, rest, { help: HELP, episodeFor, save }) };
 /** The commands' names. Sallie's skill runs only these (tests/studio.test.js). */
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 

@@ -140,8 +140,14 @@ function realHomeOnly(h, itself, carved) {
     own program in the app's data. Each is the gated place's real path with the rest after it, never the real path of the whole:
     an open folder that is a link (Assets to Episodes, her temp folder to ~/.claude) would open where it leads. */
 export function readAllowed({ home, claudeHome = home, root, uid, tmp = "/private/tmp", folder }) {
+  return [join(realOf(root), "Assets"), ...bashNeeds({ home, claudeHome, uid, tmp, folder })];
+}
+
+/** The three places inside the gated places that Bash itself needs to read for a session in `folder` (C36): that folder's own subfolder of
+    Claude Code's temp folder, its shell snapshots and Claude Code's own program in the app's data. Her folder's sandbox (readAllowed) and the
+    Reel Kit worker's (reel-kit-worker-tools.js) open them. */
+export function bashNeeds({ home, claudeHome = home, uid, tmp = "/private/tmp", folder }) {
   return [
-    join(realOf(root), "Assets"),
     join(realOf(join(tmp, `claude-${uid}`)), claudeDirName(folder)),
     join(realOf(join(claudeHome, ".claude")), "shell-snapshots"),
     join(realOf(join(claudeHome, "Library", "Application Support", "Claude")), "claude-code"),

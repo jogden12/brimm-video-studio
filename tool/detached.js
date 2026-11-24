@@ -228,7 +228,7 @@ export async function runDetached({ home, folder, command, lock: own, keepAwake 
     into the tool's log, ~/Library/Logs/brimm-video.log (in Studio's own home, which BRIMM_VIDEO_HOME may name: home.js). It is started with this process's environment (`env`) but CLAUDECODE: a
     detached run prints to no chat, so it is not under Claude Code, and never marks a chat as holding a session's words (design
     2026-10-26, R8). Which run is detached is told by this, never by the word `--now`, which Claude can type. `spawn` is a test's
-    stand-in. */
+    stand-in. Gives the run's pid, or undefined when it could not be started. */
 export function spawnDetached(cmd, args, { spawn: start = spawn, env = process.env, log = join(studioHome(env), "Library", "Logs", "brimm-video.log") } = {}) {
   let out = "ignore";
   try {
@@ -242,6 +242,7 @@ export function spawnDetached(cmd, args, { spawn: start = spawn, env = process.e
   child.on("error", () => {});
   child.unref();
   if (typeof out === "number") closeSync(out);
+  return child.pid;
 }
 
 /** Start an edit.js command detached, on the episode `folder`, and return at once: the run is
@@ -250,9 +251,9 @@ export function spawnDetached(cmd, args, { spawn: start = spawn, env = process.e
     in filing.js), and never the one this Mac's settings name. The settings' checkout is where this Mac's launch agent and her
     folder's commands run from, and when they run it, it is this code. But a Mac that brimm-video set up names brimm-video's
     checkout, whose edit.js has no `workcopy`: it prints its help in the log and does nothing. `ctx.start` is how a program is
-    started detached (spawnDetached, unless a test gives another). */
+    started detached (spawnDetached, unless a test gives another). Gives what that gives: the run's pid, which a queue names it by. */
 export function startDetached(ctx, { command, folder, args = [] }) {
-  ctx.start(process.execPath, [join(thisCheckout(), "tool", "edit.js"), command, "--now", folder, ...args]);
+  return ctx.start(process.execPath, [join(thisCheckout(), "tool", "edit.js"), command, "--now", folder, ...args]);
 }
 
 /** The lock of an `app --when-ready` run (Phase 3, L7) for the episode `folder`: held as long as the run waits for the video for HyperFrames, which the

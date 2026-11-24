@@ -10,7 +10,7 @@
 // And a file that Dropbox is still bringing over to this Mac can show its full size with no data in it yet, so a file counts
 // as here only when its blocks on the disk cover its size, or the disk does not mark it dataless.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, constants, copyFileSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { compiledHelper, hasXcodeTools, helperCommand, helperSource } from "./helpers.js";
 import { lastLine } from "./run.js";
@@ -29,8 +29,14 @@ const SF_DATALESS = 0x40000000;
 let written = 0;
 
 /** Clone the file at `from` to `to` with /bin/cp -c, which calls clonefile(2). Throws, saying why in cp's words, when cp
-    fails or leaves no file there. On different disks cp makes a plain copy instead, so cloneIn checks that first. */
-export function cloneFile(from, to) {
+    fails or leaves no file there. On different disks cp makes a plain copy instead, so cloneIn checks that first. Studio runs only on
+    macOS; anywhere else (the Linux CI, `platform` given by a test) there is no clone, and a plain copy that never writes over a file
+    stands in. */
+export function cloneFile(from, to, platform = process.platform) {
+  if (platform !== "darwin") {
+    copyFileSync(from, to, constants.COPYFILE_EXCL);
+    return;
+  }
   const ran = spawnSync("/bin/cp", ["-c", from, to], { encoding: "utf8" });
   if (ran.status !== 0) throw new Error(ran.error ? ran.error.message : lastLine(ran.stderr));
   if (!existsSync(to)) throw new Error("there is no file of that name there after the clone");

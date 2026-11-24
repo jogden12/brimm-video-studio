@@ -1,0 +1,77 @@
+{
+  "version": "1.2.0",
+  "fingerprint": "sha256-a5327602a0ba74542c57d04ddc064673dcef5e4406fc48a99d55b236c4beb9bf",
+  "required": ["SKILL.md", "VERSION", "pipeline/", "setup/", "kit/", "fx/LIBRARY.md", "cards/LIBRARY.md"],
+  "license": "LICENSE",
+  "hyperframes": {
+    "version": "0.8.139",
+    "integrity": "sha512-6OQIBRa+ouCtI17mGuTwbq/x588nf0sygwsfxHGeKGF+axXSpwtzaJ8y5MD28zcvIK7Vr4Hh7gbfrZNRno91Gw=="
+  },
+  "gsap": {
+    "version": "3.15.0",
+    "url": "https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js",
+    "sha256": "92bb9a96476f983d212a2bc4f54c889039c1696dd4461d40a736860938570fbb"
+  },
+  "uv": {
+    "version": "0.12.8",
+    "url": "https://github.com/astral-sh/uv/releases/download/0.12.8/uv-aarch64-apple-darwin.tar.gz",
+    "sha256": "8ce083658dbff20143607ca7af8e0c1d64b6fd7bf03a5cdcb62bf3d47d991b5f"
+  },
+  "python": "3.12.14",
+  "locks": {
+    "main": { "file": "reel-kit/requirements-1.2.0.lock", "sha256": "69011fb8b5dde51c311dc74b38522421c0acb86a119351f35a3e9071b8b3d697" },
+    "mp": { "file": "reel-kit/requirements-mp-1.2.0.lock", "sha256": "9ec48577c9859eeb40d3b0f8ecf5d713c0c85d315fc3f7c903ff89bd778d1101" }
+  },
+  "models": [
+    {
+      "name": "depth_anything_v2_small.onnx",
+      "bytes": 99060839,
+      "sources": [
+        { "url": "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/4472b7362082ad9968fee890ca0f1e5aca36b93d/onnx/model.onnx", "sha256": "afb6a5c28f3b6bf1618c6e43f02073ef9dfdc70e937502d51603e57b0a1df10c" }
+      ]
+    },
+    {
+      "name": "face_landmarker.task",
+      "bytes": 3758596,
+      "sources": [
+        { "url": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff" }
+      ]
+    },
+    {
+      "name": "hand_landmarker.task",
+      "bytes": 7819105,
+      "sources": [
+        { "url": "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", "sha256": "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1" }
+      ]
+    },
+    {
+      "name": "pose_landmarker_full.task",
+      "bytes": 9398198,
+      "sources": [
+        { "url": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task", "sha256": "4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdcec4ad" },
+        { "url": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task", "sha256": "5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1" }
+      ]
+    }
+  ],
+  "whisper": {
+    "repo": "Systran/faster-whisper-medium",
+    "revision": "08e178d48790749d25932bbc082711ddcfdfbc4f",
+    "files": [
+      { "path": "config.json", "sha256": "3622a2ddc41ec0e0fd4e68c13c6830f03b90c38d89aaad184de02c8c642cf807" },
+      { "path": "model.bin", "sha256": "9b45e1009dcc4ab601eff815b61d80e60ce3fd8c74c1a14f4a282258286b51ae" },
+      { "path": "tokenizer.json", "sha256": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab" },
+      { "path": "vocabulary.txt", "sha256": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913" }
+    ]
+  },
+  "ffmpeg": {
+    "version": "9.0.2",
+    "ffmpeg": {
+      "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip",
+      "sha256": "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924"
+    },
+    "ffprobe": {
+      "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffprobe.zip",
+      "sha256": "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6"
+    }
+  }
+}

@@ -1076,8 +1076,9 @@ export async function finishNow(ctx, found, deps = {}) {
     // Each project this finish took an export of is finished in the record (a project kept for an earlier kind is none). A part this finish
     // keeps as the last one made it is not taken from its project now: a Reel the last finish finished with no project, left out by
     // --without, stays as it was in the hand-off, and its project is not finished.
-    const projectsDone = new Set(parts.filter((p) => p.app && !p.kept).map((p) => p.key));
-    const apps = record.app && Array.isArray(record.app.projects) && projectsDone.size ? { app: { ...record.app, projects: record.app.projects.map((p) => (projectsDone.has(p.key) && p.state !== PROJECT_KEPT ? { ...p, state: "finished" } : p)) } } : {};
+    // It is the project the part took, by its name: of two Reel Kit edits of one Reel, the one taken (exports.js exportsFound), never the other.
+    const projectsDone = new Map(parts.filter((p) => p.app && !p.kept).map((p) => [p.key, p.project]));
+    const apps = record.app && Array.isArray(record.app.projects) && projectsDone.size ? { app: { ...record.app, projects: record.app.projects.map((p) => (projectsDone.has(p.key) && projectsDone.get(p.key) === p.name && p.state !== PROJECT_KEPT ? { ...p, state: "finished" } : p)) } } : {};
     const nextRecord = {
       ...record,
       ...apps,

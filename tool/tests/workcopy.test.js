@@ -1698,6 +1698,55 @@ describe("a Reel's video, made from the recording", () => {
   });
 });
 
+describe("a Reel's video of 4K, for a Reel Kit edit (plan Task 9, Decision 3)", () => {
+  const REEL = { n: 2, start: 5, end: 12 };
+  const reelSetup = (script = {}) => setup({ copy: copyOf({ duration: "7.020000", picture: { codec_name: "h264", width: 3840, height: 2160 } }), ...script });
+  const rawOf = (t) => {
+    const raw = statSync(t.video);
+    return { bytes: raw.size, mtimeMs: raw.mtimeMs };
+  };
+  it("has a key and files of its own, with -4k after the stretch, so that it is never taken for the Reel's copy of 1080", () => {
+    const raw = { bytes: 3300000000, mtimeMs: 1760000000123.7 };
+    assert.equal(reelCopyKey(raw, { start: 312.4, end: 340.15 }, true), "3300000000-1760000000123-312400-340150-4k");
+    assert.equal(reelCopyKey(raw, { start: 312.4, end: 340.15 }, false), "3300000000-1760000000123-312400-340150");
+    const paths = reelCopyPaths("/home", "2026-10-27 Pricing talk", 2, "3300000000-1760000000123-312400-340150-4k");
+    assert.equal(basename(paths.video), "reel-2-3300000000-1760000000123-312400-340150-4k.mp4");
+    assert.throws(() => reelCopyPaths("/home", "2026-10-27 Pricing talk", 2, "3300000000-1760000000123-312400-340150-8k"), /key/);
+  });
+  it("cuts the stretch at 4K, under the limits of a copy of 4K", async (c) => {
+    const t = reelSetup();
+    c.after(t.done);
+    const result = await t.job({ name: "Pricing talk, Reel 2", reel: REEL, fourK: true });
+    assert.deepEqual([result.ok, result.failed], [true, []]);
+    const { args, limits } = t.guarded[0];
+    assert.deepEqual(limits, workCopyLimits(7, true));
+    assert.deepEqual([after(args, "-ss"), after(args, "-t")], ["5", "7"]);
+    assert.match(after(args, "-vf"), /,scale=3840:2160,/);
+    assert.equal(result.key, reelCopyKey(rawOf(t), REEL, true));
+    assert.deepEqual(result.paths, reelCopyPaths(t.home, t.folder, 2, reelCopyKey(rawOf(t), REEL, true)));
+    assert.equal(readFileSync(result.paths.video, "utf8"), "THE WORKING COPY");
+  });
+  it("leaves the same Reel's copy of 1080 alone, and replaces only its copies of 4K of other keys; a copy of 1080 leaves those of 4K alone", async (c) => {
+    const t = reelSetup();
+    c.after(t.done);
+    const of1080 = basename(reelCopyPaths(t.home, t.folder, 2, reelCopyKey(rawOf(t), REEL)).video);
+    const older4k = "reel-2-1-2-5000-12000-4k.mp4";
+    t.earlier(of1080);
+    t.earlier(older4k);
+    const made = await t.job({ name: "Pricing talk, Reel 2", reel: REEL, fourK: true });
+    assert.equal(made.ok, true);
+    assert.deepEqual(entries(made.paths.dir), [basename(made.paths.facts), basename(made.paths.video), of1080].sort());
+    const again = reelSetup({ copy: copyOf({ duration: "7.020000" }) });
+    c.after(again.done);
+    const old1080 = "reel-2-1-2-5000-12000.mp4";
+    again.earlier(older4k);
+    again.earlier(old1080);
+    const plain1080 = await again.job({ name: "Pricing talk, Reel 2", reel: REEL });
+    assert.equal(plain1080.ok, true);
+    assert.deepEqual(entries(plain1080.paths.dir), [basename(plain1080.paths.facts), basename(plain1080.paths.video), older4k].sort());
+  });
+});
+
 describe("the faces looked for in a Reel's video (architecture 4.3; plan PR 5)", () => {
   const REEL = { n: 2, start: 5, end: 12 };
   const BOX = { x: 0.41, y: 0.22, w: 0.18, h: 0.3 };

@@ -10,8 +10,24 @@
 // (switch.js), which are given the versions of a video (finish.js linksOf) to ask it with.
 import { isPlannedRecord, kindOf, shownName } from "./episode.js";
 
-/** The commands that name no episode: their output is built from labels alone, and is not gated here. */
+/** The commands that name no episode: their output is built from labels alone, and is not gated here. `reelkit` is not among them: only
+    some of its words name no episode (REELKIT_UNSCOPED, namesNoEpisode), and every other word of it names one and is gated. */
 export const UNSCOPED = ["episodes", "status", "behind", "update", "retry", "look", "guide"];
+/** The words of `reelkit` that name no episode (plan Tasks 6, 11 and 13): `install "<download>"` (and its detached half, `--now install`),
+    `status` with nothing after it, which says how Reel Kit's own setup on this Mac is going, and `style`, her style pack. Every other word
+    of it (`start`, `status "<episode>"`, `note`, `go`, `revise`, `resume`, `storyboard`, and the detached half `--now <folder> …`)
+    names an episode. */
+export const REELKIT_UNSCOPED = ["install", "status", "style"];
+
+/** Whether `command` with `words` names no episode, and so is not gated: a command of UNSCOPED, whatever its words, and `reelkit` with
+    words of REELKIT_UNSCOPED (`status` only alone, and never as a detached half). A detached half's `--now` is read past. */
+export function namesNoEpisode(command, words = []) {
+  if (UNSCOPED.includes(command)) return true;
+  if (command !== "reelkit" || !Array.isArray(words)) return false;
+  const said = words[0] === "--now" ? words.slice(1) : words;
+  if (said[0] === "status") return said.length === 1 && words[0] !== "--now";
+  return said[0] === "install" || said[0] === "style";
+}
 /** The commands that run for a video not yet answered: `kind` answers it, `leave` leaves it, `which` says which it is, `show`
     opens a copy of it on this Mac, and `resolve` sorts out its conflicted copies. */
 export const UNANSWERED = ["kind", "leave", "which", "show", "resolve"];
@@ -40,7 +56,8 @@ export const SESSION_TAUGHT = [...SESSION, "teachings", "principles", "ideas", "
 const WAITING = "This video is waiting for its answer: say what it is first.";
 /** What a video she left alone is refused in, by the gate and by askBlocked: it is not waiting for anything. */
 export const LEFT = "You said to leave this video: it is not for BRIMM Video Studio. To have it read, say what it is.";
-const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
+/** What a command that is not done for a session is refused in, by the gate and by Reel Kit (reel-kit-project.js startWhy, for any session). */
+export const NOT_FOR_SESSION = "This is a client or group session: that is not done for one.";
 /** Why a command is refused for a planned episode (isPlannedRecord), which is not made from its footage yet, naming the title she gave it: true
     whether it has footage or none (PR H5b). `leave` is answered by how to drop a plan instead: a plan is not left alone as a video is, it is
     dropped. */
@@ -143,7 +160,7 @@ const transcriptOnly = (words) => wordsOf(words).includes("--transcript-only");
 
 /** Why `command`, with `words`, may not run for the episode with this `record`: the plain words of why, or "" when it may.
     `said` is what the episode was asked for by (findEpisode's second argument), with which the words of a Reel are matched.
-    - A command that names no episode (UNSCOPED) is not gated.
+    - A command that names no episode (UNSCOPED, and `reelkit`'s words of REELKIT_UNSCOPED: namesNoEpisode) is not gated.
     - A planned episode (isPlannedRecord), only the commands of PLANNED; `leave` is told how to drop a plan, and any other is refused
       in words that say it is not made from its footage yet. A record that only claims to be planned is none, and is gated as follows.
     - A record with no kind, whatever its answer says (a video left alone as not for brimm-video included and a part, PR H5a), only the
@@ -153,13 +170,14 @@ const transcriptOnly = (words) => wordsOf(words).includes("--transcript-only");
       it goes to Claude; and, once the training gate is on (`teachingsOn`), those of SESSION_TAUGHT, refused until then in the
       words of the gate being off, or, when Jason's check of it has lapsed (`lapsed`), in words that say so. Of those, `reel` and
       `render` run only with the words of a Reel she has agreed on (reelWords).
-    - An answered record that is not a session, and a session whose mark is cleared, every command.
+    - An answered record that is not a session, and a session whose mark is cleared, every command; but `reelkit`, which is refused for
+      every session, cleared or not (plan Decision 9: session clips are not built yet).
     A command named in none of the lists is refused for a record that is gated at all. */
 export function gateFor(command, record, { teachingsOn = false, lapsed = false, said } = {}, words = []) {
-  if (UNSCOPED.includes(command)) return "";
+  if (namesNoEpisode(command, words)) return "";
   if (isPlannedRecord(record)) return PLANNED.includes(command) ? "" : command === "leave" ? TO_DROP(record) : NO_FOOTAGE(record);
   if (kindOf(record) === null) return UNANSWERED.includes(command) || FOOTAGE.includes(command) ? "" : leftAlone(record) ? LEFT : WAITING;
-  if (!sessionNotCleared(record)) return "";
+  if (!sessionNotCleared(record)) return command === "reelkit" && kindOf(record) === "session" ? NOT_FOR_SESSION : "";
   if (SESSION.includes(command)) return "";
   if (!SESSION_TAUGHT.includes(command)) return NOT_FOR_SESSION;
   if (command === "teachings" && transcriptOnly(words)) return "";
@@ -172,9 +190,10 @@ export function gateFor(command, record, { teachingsOn = false, lapsed = false, 
     versions (finish.js linksOf, sessionsBeside: its version set as the hand-off writers read it) is a client or group session whose
     mark is not cleared. It fails closed, as for a session: only the commands of UNANSWERED run, which answer it (`kind`, as a session
     too), say which it is, open a copy of it or sort out a conflict; every other is refused, in HELD's words, until it
-    is answered as a session itself or that mark is cleared. "" when it may run; a command that names no episode is not gated. */
-export function heldGateFor(command) {
-  if (UNSCOPED.includes(command) || UNANSWERED.includes(command)) return "";
+    is answered as a session itself or that mark is cleared. "" when it may run; a command that names no episode (namesNoEpisode, with
+    its `words`) is not gated. */
+export function heldGateFor(command, words = []) {
+  if (namesNoEpisode(command, words) || UNANSWERED.includes(command)) return "";
   return HELD;
 }
 

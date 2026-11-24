@@ -4,7 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { NEVER_WORDS, BUILT_IN_AGENTS, DRAWING, isConnector, isLocalExtension, neverCaught, neverDenyRules } from "../never.js";
+import { NARROW, NEVER_WORDS, BUILT_IN_AGENTS, DRAWING, isConnector, isLocalExtension, neverCaught, neverDenyRules } from "../never.js";
 
 describe("the never list", () => {
   it("holds the words, the built-in agents and the drawing tools the design names", () => {
@@ -61,6 +61,19 @@ describe("the never list", () => {
     for (const open of ["Bash","Read","Write","Edit","WebFetch","WebSearch","SendUserFile","PushNotification","Skill", ...DRAWING]) assert.ok(!caught.includes(open), open);
     for (const n of tools.filter((n) => /opusclip_(create_post_task|schedule_publish|share_project|create_upload_link)$/.test(n))) assert.ok(caught.includes(n), n);
     t.diagnostic(caught.join("\n"));
+  });
+  it("leaves Artifact out of the open lock's deny rules and in the never list's catch", () => {
+    // The narrow opening (storyboard-opening.js): the guard alone decides the two tools, in both locks; nothing else lets them through.
+    const { tools } = JSON.parse(readFileSync(new URL("./fixtures/code-tab-tools.json", import.meta.url), "utf8"));
+    const rules = neverDenyRules();
+    for (const name of ["Artifact", "ArtifactComments"]) {
+      assert.ok(tools.includes(name), name);
+      assert.equal(neverCaught(name), true, name);
+      assert.equal(neverCaught(name, { action: "publish" }), true, name);
+      assert.ok(!rules.includes(name), name);
+    }
+    assert.ok(tools.includes("ArtifactData") && neverCaught("ArtifactData") && rules.includes("ArtifactData"));
+    assert.deepEqual(NARROW, ["Artifact", "ArtifactComments"]);
   });
   it("denies in the settings every local MCP server of the fixture and the never tools by name, never the drawing tools, and never all of mcp__", () => {
     const { tools } = JSON.parse(readFileSync(new URL("./fixtures/code-tab-tools.json", import.meta.url), "utf8"));

@@ -23,6 +23,7 @@ const ALLOWED = [
   ["unedited.js", 'join(dir, "swift")', "findPrograms looking for swift; it starts nothing."],
   ["progress.js", 'once("swift", ', "The key of a log line."],
   ["build-helpers.js", '"swiftc"', "The build's own compile, which Studio never runs."],
+  ["reel-kit-stages.js", 'const LINKS = ["node", "ffmpeg", "ffprobe", "python3"]', "The names of the links in Reel Kit's tools/bin (python3 leads to uv's Python); it starts nothing."],
 ];
 
 /** tool/, the folder this test's folder is in. */

@@ -36,7 +36,7 @@
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
-import { changedSince, isMain, mediaOf, plainName } from "./app.js";
+import { byReelKit, changedSince, isMain, mediaOf, plainName } from "./app.js";
 import { runningCommand } from "./detached.js";
 import { heldText, shownName } from "./episode.js";
 import { sizeText } from "./kinds.js";
@@ -79,7 +79,7 @@ const folded = (name) => name.normalize("NFC").toLowerCase();
 /** The paths `free` names for the episode in `folder` on this Mac, from the record: { work, copies, projects, clips }, where `work`
     is the episode's own folder in BRIMM Video Work, `copies` its folder of copies, each of `projects` is { key, name, dir, video,
     stays, renders }: a project's folder, its renders, and its video (media/recording.mp4, or the explainer's media: mediaOf; none, null, when the
-    project holds no media), which is `video` (to be taken) for the main
+    project holds no media; a Reel Kit edit, app.js byReelKit, is never one: its renders/ is Studio's only copy of its render), which is `video` (to be taken) for the main
     project in use, the first `isMain` of the record as `app` opens it, and `stays` (to be left) for any other; and each of `clips`
     is { name, dir }, a session clip's folder, which `free` looks at but never names. Pure: nothing is looked at. A project is named
     once, however its name is spelled, and not when its name is not one plain folder name or is a session clip's. Throws for a folder
@@ -94,6 +94,8 @@ export function freePaths(home, folder, record) {
   const seen = new Set();
   const projects = [];
   for (const project of listed) {
+    // A Reel Kit edit is no HyperFrames project: its renders/ is Studio's only copy of its render, and nothing here makes it again.
+    if (byReelKit(project)) continue;
     if (!freeable(project) || !plainName(project.name) || clipNames.has(project.name) || seen.has(folded(project.name))) continue;
     seen.add(folded(project.name));
     const dir = join(work, project.name);
