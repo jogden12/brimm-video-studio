@@ -262,7 +262,8 @@ describe("the narrow opening: paths that try to leave the staged page (Review Fo
     const cases = [
       ["a folder made a link", (stage, w) => { renameSync(join(stage, "frames"), join(w.home, "frames")); symlinkSync(join(w.home, "frames"), join(stage, "frames")); }],
       ["a file edited in place", (stage) => writeFileSync(join(stage, "frames", "f002.jpg"), "bytes of frames/f00X.jpg")],
-      ["a file replaced by another", (stage) => { rmSync(join(stage, "frames", "f002.jpg")); writeFileSync(join(stage, "frames", "f002.jpg"), "bytes of frames/f002.jpg"); }],
+      // The old file is kept elsewhere, so that the one put in its place is another file: on Linux a freed inode is given again at once.
+      ["a file replaced by another", (stage, w) => { renameSync(join(stage, "frames", "f002.jpg"), join(w.home, "old-f002.jpg")); writeFileSync(join(stage, "frames", "f002.jpg"), "bytes of frames/f002.jpg"); }],
       ["the page made a link", (stage, w) => { writeFileSync(join(w.home, "page.html"), "x"); rmSync(join(stage, "index.html")); symlinkSync(join(w.home, "page.html"), join(stage, "index.html")); }],
       ["the stage made a link", (stage, w) => { renameSync(stage, join(w.home, "v1")); symlinkSync(join(w.home, "v1"), stage); }],
       ["a file taken away", (stage) => rmSync(join(stage, "fonts", "Josefin Sans.ttf"))]
