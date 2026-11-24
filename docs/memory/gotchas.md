@@ -263,3 +263,9 @@ Lessons from the repo's review notes, the 5 Nov team review, the Mac app reviews
 - **Lesson:** Keep the skill's rows short and cap them by characters, from one shared constant; each command on one line.
   - **Why:** The line cap was raised four times (to 270) and is repeated in three tests; a multi-line command was refused by the guard.
   - **Source:** every ledger; review-changes plan. **Times:** 8.
+- **Lesson:** In the Claude app's Code tab there is no `/status`: typing it autofills `/status-report`, a plugin's skill. Read Claude Code's version from `~/Library/Application Support/Claude/claude-code/` (the newest folder is the one the Code tab runs).
+  - **Why:** The strict-lock check's first step said to read `/status`; on the MacBook it offered the plugin instead.
+  - **Source:** MacBook travel setup, step 8, 2026-11-24. **Times:** 1.
+- **Lesson:** A by-hand step that shows a `node --test` summary pipes it through `tail -8`, not `tail -4`: the last four lines are cancelled, skipped, todo and duration, with no pass or fail.
+  - **Why:** BRIMM Ops' two runs on the MacBook came back without their counts and had to be run again.
+  - **Source:** MacBook travel setup, step 4, 2026-11-24. **Times:** 1.
