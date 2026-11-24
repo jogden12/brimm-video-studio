@@ -51,6 +51,8 @@ const VIDEO = {
   finished: (part, edits, over = {}) => ({ ...BASE, kind: "finished", handoff: HANDOFF, reelsExported: [], reelKit: edits, ...over })
 };
 const KEY = { main: "main", reel: "reel 2" };
+/** The states of a finished video's Reel Kit Reel that are hers to act on, which come before the BRIMM Ops page's steps after its hand-off. */
+const ACTS_AFTER = ["queued", "working", "rendering", "stopped", "storyboard", "ready", "opened"];
 const TAKEN = `On the BRIMM Ops page: ${opsText(HANDOFF, "taken", false, undefined)}`;
 
 describe("her next step for a Reel Kit edit", () => {
@@ -125,8 +127,9 @@ describe("her next step for a Reel Kit edit", () => {
                 assert.deepEqual(next, nextFor({ ...facts, reelKit: [] }, NONE, NOW), what);
                 continue;
               }
-              if (kind === "finished" && state === "rendered") {
-                // Rendered and in the hand-off already (no Reel waiting): the page's steps, as they are.
+              if (kind === "finished" && (state === "rendered" || !ACTS_AFTER.includes(state))) {
+                // Rendered and in the hand-off already (no Reel waiting), or in a state that is not hers to act on (Jason's: failed, refused, a
+                // render that failed, unread): the page's steps, as they are, so that her "done" on the page is never refused for it.
                 assert.deepEqual(shown(next), { stage: "ops", text: TAKEN }, what);
                 continue;
               }
@@ -182,6 +185,28 @@ describe("her next step for a Reel Kit edit", () => {
     // Her word that a video is finished stands: nothing of its edits is said after it.
     const finished = { ...NONE, finished: { [BASE.id]: "2026-10-24T09:00:00-05:00" } };
     for (const kind of ["raw", "clip", "finished"]) for (const part of ["main", "reel"]) assert.deepEqual(nextFor(VIDEO[kind](part, [EDIT(KEY[part], "storyboard")]), finished, NOW), { done: true });
+  });
+
+  it("after `finish … reels` hands a Reel Kit Reel off, gives the page's steps, and each in turn once noted (final review C1)", () => {
+    // What finish leaves: the Reel's entry finished, its project ready and opened in the app, its export in the hand-off.
+    const entry = { key: "reel 2", name: "Talk reel 2 Reel Kit v1", maker: MAKER, mode: "lofi", version: 1, madeAt: "", on: "Mac Studio", opened: ["2026-10-20 14:10"], handover: false, state: "finished", fromSuggestion: 2 };
+    const seen = { status: { state: "ready", step: "", needs: [], pid: null, why: "", minutesLeft: null }, state: { state: "ready" }, rendering: false, refused: "", opened: true };
+    const edits = reelKitEdits({ id: "e-1", reels: [{ n: 2, status: "finished" }], app: { projects: [entry] } }, () => seen);
+    assert.deepEqual(edits, []);
+    const facts = { ...BASE, kind: "finished", handoff: HANDOFF, reelsExported: [], reelKit: edits };
+    let notes = NONE;
+    const walked = [];
+    for (let i = 0; i < OPS.episode.length + 1; i++) {
+      const next = nextFor(facts, notes, NOW);
+      if (next.done) break;
+      assert.equal(next.stage, "ops", JSON.stringify(next));
+      walked.push(next.step);
+      notes = { ...notes, handoffs: { [HANDOFF.id]: { kind: "episode", step: next.step, revision: 1, at: "2026-10-24T09:00:00-05:00" } } };
+    }
+    assert.deepEqual(walked, OPS.episode, "every step of the page, in turn, none blocked by the Reel");
+    // A Reel she dropped from the list, and an edit of it, are no step of hers either.
+    const dropped = reelKitEdits({ id: "e-1", reels: [{ n: 3, status: "dropped" }], app: { projects: [{ ...entry, key: "reel 3", name: "Talk reel 3 Reel Kit v1", state: "made", opened: [] }] } }, () => ({ ...seen, opened: false, status: { ...seen.status, state: "stopped", step: "cut" } }));
+    assert.deepEqual(dropped, []);
   });
 
   it("says nothing of Reel Kit where the gate holds the video, the other Mac has it open, or a finish is at work", () => {
@@ -250,6 +275,14 @@ describe("what the guide reads of a video's Reel Kit edits (reelKitEdits)", () =
     assert.deepEqual(one({ status: null, state: null, rendering: false, refused: "" }), EDIT("main", "unread"));
     assert.deepEqual(one(seen("later")), EDIT("main", "unread"));
     assert.deepEqual(one(undefined), EDIT("main", "unread"));
+  });
+
+  it("leaves out an edit finish took (its entry finished), and a Reel the record says she dropped", () => {
+    const projects = [entry("reel 2", 1, { state: "finished" }), entry("reel 3", 1), entry("reel 4", 1), entry("main", 1, { state: "finished" })];
+    const r = { id: "e-1", reels: [{ n: 3, status: "dropped" }, { n: 4, status: "picked" }], app: { projects } };
+    assert.deepEqual(reelKitEdits(r, () => seen("ready")), [EDIT("reel 4", "ready")]);
+    // A queued job of a dropped Reel is no edit of hers either.
+    assert.deepEqual(reelKitEdits(r, () => seen("ready"), ["reel 3"]), [EDIT("reel 4", "ready")]);
   });
 
   it("counts a job queued for a part whose project is not made yet, in place of an older edit of it", () => {

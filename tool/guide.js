@@ -435,6 +435,11 @@ export const REEL_KIT_STATES = Object.freeze(["queued", "working", "rendering", 
     modules (an import cycle). */
 const REEL_KIT_MAKER = "reel-kit";
 const KEPT_FOR_KIND = "kept for an earlier kind";
+/** What `finish` sets an entry it took to (the record's own word). */
+const FINISHED = "finished";
+/** A finished video's Reel Kit Reel's states that are hers to act on: after its hand-off only these come before the BRIMM Ops page's steps,
+    so that one Jason must look at (failed, refused, a render that failed, unread) never holds the page's "done" back. */
+const ACTS_AFTER = new Set(["queued", "working", "rendering", "stopped", "storyboard", "ready", "opened"]);
 const PART_KEY = /^(?:main|reel [1-9]\d*)$/;
 /** The worker's own states that are the guide's as they are. */
 const AS_THEY_ARE = new Set(["queued", "working", "storyboard", "rendered", "failed", "opened"]);
@@ -468,19 +473,23 @@ function kitState(key, entry, seen) {
 
 /** A video's Reel Kit edits as the guide reads them (VideoFacts `reelKit`), from its `record` and `look`, which edit.js gives: `look(entry)` is
     what was seen of an edit's folder on this Mac ({ status, state, rendering, refused, opened }: kitState). For each part ("main", "reel <n>") the newest
-    version of its edits that is not kept for an earlier kind; and for each part in `queued` (the keys of the jobs in the queue whose projects are
+    version of its edits that is not kept for an earlier kind nor finished (taken by `finish`), of a part she has not dropped (a Reel whose
+    record's status is "dropped"); and for each part in `queued` (the keys of the jobs in the queue whose projects are
     not made yet, reel-kit-worker.js queuedOf) a queued edit in its place. In the parts' order: the main video, then the Reels by number. */
 export function reelKitEdits(record, look, queued = []) {
   const projects = record && typeof record === "object" && record.app && Array.isArray(record.app.projects) ? record.app.projects : [];
+  // A Reel she dropped from the list (its record's status) has no step of hers, nor has an edit finish took (its entry finished).
+  const reels = record && typeof record === "object" && Array.isArray(record.reels) ? record.reels : [];
+  const dropped = new Set(reels.filter((r) => r && typeof r === "object" && r.status === "dropped" && Number.isInteger(r.n)).map((r) => `reel ${r.n}`));
   const newest = new Map();
   for (const p of projects) {
-    if (!p || typeof p !== "object" || p.maker !== REEL_KIT_MAKER || p.state === KEPT_FOR_KIND || typeof p.key !== "string" || !PART_KEY.test(p.key)) continue;
+    if (!p || typeof p !== "object" || p.maker !== REEL_KIT_MAKER || p.state === KEPT_FOR_KIND || p.state === FINISHED || typeof p.key !== "string" || !PART_KEY.test(p.key) || dropped.has(p.key)) continue;
     const version = Number.isInteger(p.version) ? p.version : 0;
     const had = newest.get(p.key);
     if (!had || version > (Number.isInteger(had.version) ? had.version : 0)) newest.set(p.key, p);
   }
   const edits = new Map([...newest].map(([key, entry]) => [key, kitState(key, entry, look(entry))]));
-  for (const key of Array.isArray(queued) ? queued : []) if (typeof key === "string" && PART_KEY.test(key)) edits.set(key, kitFact(key, "queued"));
+  for (const key of Array.isArray(queued) ? queued : []) if (typeof key === "string" && PART_KEY.test(key) && !dropped.has(key)) edits.set(key, kitFact(key, "queued"));
   return [...edits.values()].sort((a, b) => partOrder(a.key) - partOrder(b.key));
 }
 
@@ -599,8 +608,9 @@ function videoNext(facts, notes, now) {
     const reels = reelsWaiting(facts);
     const kit = reelsOfKit(facts);
     if (reels.length) return facts.finishRunning && !facts.checking ? toDo("finish-running", FINISH_RUNNING) : reelsStep(reels, facts.checking, new Set(kit.filter((e) => e.state === "rendered").map((e) => Number(e.key.slice(5)))));
-    // A finished video's Reel in Reel Kit (plan Task 20), not rendered yet: its step, ahead of the page's, and handed off as its other Reels are.
-    const reel = kit.find((e) => e.state !== "rendered");
+    // A finished video's Reel in Reel Kit (plan Task 20), not rendered yet and in a state she can act on: its step, ahead of the page's, and
+    // handed off as its other Reels are. One for Jason (failed, refused, unread) does not hold the page's steps back.
+    const reel = kit.find((e) => ACTS_AFTER.has(e.state));
     if (reel) return kitStep(reel, "hand off the Reels", facts.app);
     return opsStep(facts, notes, now) || { done: true };
   }
