@@ -477,8 +477,11 @@ describe("the worker's tools", () => {
       "-p", "--model", "claude-opus-5-5", "--permission-mode", "dontAsk", "--strict-mcp-config", "--disable-slash-commands",
       "--setting-sources", "", "--settings", "/s/w.json", "--output-format", "stream-json", "--verbose", "--session-id"
     ]);
+    // The allow rules live only in the settings file: a settings file Claude Code passes over in -p then leaves dontAsk with nothing
+    // allowed (no sandbox, no hook, but nothing runs), never the command line's allow list without them. The deny rules stay on it too.
+    assert.ok(!args.includes("--allowedTools") && !args.includes("--allowed-tools"));
+    assert.ok(!args.some((arg) => arg.includes("Read(//p/**)") || arg.includes("ffmpeg")));
     // Each rule is one argument of its own, so a path with a space in it is never split.
-    assert.deepEqual(args.slice(args.indexOf("--allowedTools") + 1, args.indexOf("--disallowedTools")), ["Read(//p/**)", "Bash(\"/a b/ffmpeg\" *)"]);
     assert.deepEqual(args.slice(args.indexOf("--disallowedTools") + 1), ["WebFetch", "mcp__*"]);
     for (const never of ["--mcp-config", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--add-dir", "--plugin-dir", "--agents", "--tools"]) {
       assert.ok(!args.includes(never), never);
@@ -510,7 +513,8 @@ describe("the worker's tools", () => {
     const [run] = claude.runs();
     assert.equal(run.cwd, realpathSync(w.project));
     assert.deepEqual(run.args.slice(0, 11), ["-p", "--model", "claude-opus-5-5", "--permission-mode", "dontAsk", "--strict-mcp-config", "--disable-slash-commands", "--setting-sources", "", "--settings", file]);
-    assert.deepEqual(run.args.slice(run.args.indexOf("--allowedTools") + 1, run.args.indexOf("--disallowedTools")), lists.allowed);
+    assert.ok(!run.args.includes("--allowedTools"));
+    assert.deepEqual(run.args.slice(run.args.indexOf("--disallowedTools") + 1), lists.disallowed);
     // Its environment is Reel Kit's own, offline, with nothing of a test's or of Claude Code's chat in it.
     assert.equal(run.env.REEL_KIT_HOME, w.rkHome);
     assert.equal(run.env.HF_HUB_OFFLINE, "1");

@@ -1,8 +1,8 @@
 // What the Reel Kit worker may do (spec 2026-11-23 Reel Kit in Studio, section 4; plan Task 10, Decision 4).
 //
 // The worker is Studio's first headless Claude Code run with tools, so it is held four ways, each on its own (gotchas, "Claude Code's
-// sandbox is not a secret store: test each layer"): the permission lists it is started with (`--allowedTools`, `--disallowedTools`, and
-// the same lists in its settings file), the mode that refuses anything not on them without asking (`dontAsk`), a PreToolUse hook,
+// sandbox is not a secret store: test each layer"): the permission lists (the allow and deny lists in its settings file, and `--disallowedTools`
+// on the command line: never `--allowedTools`, so a settings file Claude Code passes over leaves nothing allowed), the mode that refuses anything not on them without asking (`dontAsk`), a PreToolUse hook,
 // tool/reel-kit/worker-guard.mjs, that answers every call by `workerDecision`, and Claude Code's own OS sandbox around every command
 // (workerSandbox): no network, writes only in the project and the run's temp folder, no reads of the gated places. The sandbox is the
 // real limit: every pipeline script runs the project's edit.py, which the worker writes, so a script the hook lets run can do whatever
@@ -103,8 +103,8 @@ function programsOf({ kit, rkHome, bin }) {
 
 /** The worker's tools for the project `project`, the kit `kit`, REEL_KIT_HOME `rkHome`, its tools/bin `bin` and the run's temp folder `tmp`
     (when given: its Edit() deny rules), `allowed` and `disallowed`,
-    Claude Code's permission rules as --allowedTools and --disallowedTools take them (and as the settings file's allow and deny lists hold
-    them), and `programs`, the exact spellings the hook's table checks a command against. One table for both: the hook (workerDecision) is
+    Claude Code's permission rules as the settings file's allow and deny lists hold them (only the deny list also goes on the command line,
+    as --disallowedTools), and `programs`, the exact spellings the hook's table checks a command against. One table for both: the hook (workerDecision) is
     built on this, never beside it. Glob and Grep are under the Read rules, as Claude Code judges them. */
 export function WORKER_TOOLS({ project, kit, rkHome, bin, tmp }) {
   for (const [name, path] of Object.entries({ project, kit, rkHome, bin })) {
@@ -546,7 +546,7 @@ export function workerSandbox({ checkout, project, kit, rkHome, facts, tmp }) {
     folder's guard: studio.js settingsOf); the permission lists of WORKER_TOOLS in the mode that refuses anything not on them without asking;
     the bypass and auto modes off; Claude Code's /feedback and its transcript-share survey off; the helper agents on the worker's model;
     memory, dreams and skills' shell off; hooks said to be on; and every command in Claude Code's sandbox (workerSandbox). Only keys Claude Code knows: in `-p` a settings file that fails its check is
-    passed over without a word, and the lists on the command line (workerArgs) still hold then. */
+    passed over without a word; the allow rules are only here (workerArgs gives only the deny list), so nothing is allowed then. */
 export function workerSettings({ checkout, node, project, kit, rkHome, bin, facts, tmp }) {
   const { allowed, disallowed } = WORKER_TOOLS({ project, kit, rkHome, bin, tmp });
   return {
@@ -567,13 +567,15 @@ export function workerSettings({ checkout, node, project, kit, rkHome, bin, fact
     allowed without asking, with no MCP server, no skill or slash command, no setting source but its own settings file (`--setting-sources ""`
     keeps out the user's, the project's and the local settings; `--settings` is loaded beside them, checked against `claude --help` 2.1.318),
     and its stream of events as JSON lines. `session` names a new session (`--session-id`, so it is known before the first event); `resume`
-    carries on an earlier one (`--resume`). The permission lists last, each rule one argument of its own, so a path with a space in it is
-    never split. The prompt goes in on standard input. */
-export function workerArgs({ settingsFile, allowed, disallowed, session, resume }) {
+    carries on an earlier one (`--resume`). The deny list last, each rule one argument of its own, so a path with a space in it is never
+    split. No allow list: the allow rules live only in the settings file, beside its sandbox and hook, so a settings file Claude Code
+    passes over in `-p` leaves dontAsk with nothing allowed (the job ends unfinished) rather than the allow rules without the sandbox.
+    The prompt goes in on standard input. */
+export function workerArgs({ settingsFile, disallowed, session, resume }) {
   return [
     "-p", "--model", WORKER_MODEL, "--permission-mode", "dontAsk", "--strict-mcp-config", "--disable-slash-commands", "--setting-sources", "",
     "--settings", settingsFile, "--output-format", "stream-json", "--verbose",
     ...(resume ? ["--resume", resume] : session ? ["--session-id", session] : []),
-    "--allowedTools", ...allowed, "--disallowedTools", ...disallowed
+    "--disallowedTools", ...disallowed
   ];
 }
