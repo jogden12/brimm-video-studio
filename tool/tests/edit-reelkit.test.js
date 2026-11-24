@@ -14,7 +14,9 @@ import { HELP, editMain } from "../edit.js";
 import { byReelKit, isMain, projectOnAnotherMac } from "../app.js";
 import { madeInApp } from "../app-reel.js";
 import { HELD, NOT_FOR_SESSION, gateFor, heldGateFor, namesNoEpisode } from "../gate.js";
-import { kitDir, venvPython } from "../reel-kit.js";
+import { kitDir, reelKitHome, venvPython } from "../reel-kit.js";
+import { markReady } from "./reel-kit-ready.js";
+import { installLockFile, installUnfinishedFile } from "../reel-kit-install.js";
 import { EDIT_SAY, NOTE_MOST, notesFile } from "../reel-kit-commands.js";
 import { compositionFingerprint, entryOf, readState, writeState } from "../reel-kit-project.js";
 import { RENDER_SAY } from "../reel-kit-render.js";
@@ -57,6 +59,7 @@ function world({ record = {}, edits = [] } = {}) {
   writeFileSync(join(kitDir(t.home), "pipeline", "new.py"), "# made up\n");
   mkdirSync(join(venvPython(t.home), ".."), { recursive: true });
   writeFileSync(venvPython(t.home), "#!/bin/sh\n");
+  markReady(t.home);
   const live = new Set();
   let next = 50000;
   t.ctx.deps.start = (cmd, args) => {
@@ -220,6 +223,25 @@ describe("starting an edit", () => {
     rmSync(venvPython(w.t.home));
     const r = await reelkit(w, ["start", FOLDER, "reel", "2", "--mode", "hifi"]);
     assert.deepEqual([r.code, r.said, w.t.started], [1, ["Reel Kit isn't set up on this Mac yet: ask Jason."], []]);
+  });
+});
+
+describe("final review B1: a start only on Reel Kit set up as the pin says", () => {
+  it("refuses a start with the pin's kit beside an old venv and check, after a killed install, and while one runs", async () => {
+    const w = world();
+    const rkh = reelKitHome(w.t.home);
+    writeFileSync(join(rkh, ".setup-version"), "1.1.0\n");
+    let r = await reelkit(w, ["start", FOLDER, "reel", "2", "--mode", "hifi"]);
+    assert.deepEqual([r.code, r.said, w.t.started], [1, [EDIT_SAY.notSetUp], []], "the check was of the old version");
+    markReady(w.t.home);
+    writeFileSync(installUnfinishedFile(w.t.home), "1.2.0\n");
+    r = await reelkit(w, ["start", FOLDER, "reel", "2", "--mode", "hifi"]);
+    assert.deepEqual([r.code, r.said, w.t.started], [1, [EDIT_SAY.notSetUp], []], "an install was killed half way");
+    rmSync(installUnfinishedFile(w.t.home));
+    assert.ok(takeEpisodeLock(installLockFile(w.t.home), "reelkit install", () => false).taken);
+    r = await reelkit(w, ["start", FOLDER, "reel", "2", "--mode", "hifi"]);
+    assert.deepEqual([r.code, r.said, w.t.started], [1, [EDIT_SAY.settingUp], []], "an install runs");
+    assert.doesNotMatch(EDIT_SAY.settingUp, /\/|--|reelkit|\.json/);
   });
 });
 

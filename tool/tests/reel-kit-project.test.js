@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { KEPT } from "../app.js";
 import { HELD, NOT_FOR_SESSION } from "../gate.js";
 import { kitDir, reelKitHome, venvPython } from "../reel-kit.js";
+import { markReady } from "./reel-kit-ready.js";
 import { enqueue } from "../reel-kit-worker.js";
 import {
   MODES, entryOf, linkProject, modeLeans, modeOf, projectFolderOf, readState, scaffold, slugOf, startWhy, stateFile, titleWhy, versionFor, writeState
@@ -55,6 +56,7 @@ function world({ record = {}, raw = { width: 3840, height: 2160 } } = {}) {
   mkdirSync(join(venvPython(t.home), ".."), { recursive: true });
   writeFileSync(venvPython(t.home), `#!/bin/sh\nREEL_KIT_STANDIN_LOG=${quote(log)} exec ${quote(process.execPath)} ${quote(STAND_IN)} "$@"\n`);
   chmodSync(venvPython(t.home), 0o755);
+  markReady(t.home);
   const video = join(found.folder, "Pricing talk.mp4");
   const guarded = [];
   const after = (args, flag) => args[args.indexOf(flag) + 1];

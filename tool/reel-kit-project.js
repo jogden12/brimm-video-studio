@@ -36,7 +36,7 @@ import { HELD, NOT_FOR_SESSION, gateFor, gated } from "./gate.js";
 import { projectName, sharedRules } from "./project.js";
 import { kitDir, reelKitEnv, reelKitHome, venvPython } from "./reel-kit.js";
 import { compositionFingerprint, readCapped, readState, stateFile } from "./reel-kit-state.js";
-import { runCaptured } from "./reel-kit-install.js";
+import { reelKitReady, runCaptured } from "./reel-kit-install.js";
 import { syncPack } from "./reel-kit-style.js";
 import { episodeWork } from "./settings.js";
 import { findPrograms } from "./unedited.js";
@@ -442,11 +442,8 @@ export async function scaffold(ctx, { found, record, key, mode, title, version: 
   const slug = slugOf(record, key, version);
   const newPy = join(kitDir(home), "pipeline", "new.py");
   const python = venvPython(home);
-  try {
-    if (!lstatSync(newPy).isFile() || !lstatSync(python).isFile()) return { why: NOT_SET_UP };
-  } catch {
-    return { why: NOT_SET_UP };
-  }
+  // Set up as the pin says, with no install running or left half way (reel-kit-install.js reelKitReady).
+  if (!reelKitReady(home, { alive: ctx.alive ?? isRunning })) return { why: NOT_SET_UP };
 
   const packed = sync({ settings: ctx.settings, home, log, ...(ctx.build ? { build: ctx.build } : {}) });
   if (packed) return { why: packed };

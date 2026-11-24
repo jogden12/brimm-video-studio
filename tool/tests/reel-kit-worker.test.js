@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { binDir, hfDir, kitDir, reelKitHome, venvPython } from "../reel-kit.js";
+import { markReady } from "./reel-kit-ready.js";
 import { compositionFingerprint, readState, writeState } from "../reel-kit-project.js";
 import { factsOf, workFolder } from "../settings.js";
 import { bashNeeds, bothSpellings, gatedPlaces, realOf as placeReal } from "../places.js";
@@ -49,6 +50,7 @@ function world() {
   const rkHome = reelKitHome(home);
   mkdirSync(dirname(venvPython(home)), { recursive: true });
   writeFileSync(venvPython(home), "#!/bin/sh\n");
+  markReady(home);
   const bin = binDir(home);
   mkdirSync(bin, { recursive: true });
   for (const name of ["ffmpeg", "ffprobe", "npx", "node", "python3"]) writeFileSync(join(bin, name), "#!/bin/sh\n");

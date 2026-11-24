@@ -35,6 +35,7 @@ import { releaseEpisodeLock, takeEpisodeLock } from "./detached.js";
 import { thisCheckout } from "./filing.js";
 import { bashNeeds, bothSpellings, realOf as placeOf } from "./places.js";
 import { binDir, kitDir, reelKitEnv, reelKitHome, venvPython } from "./reel-kit.js";
+import { reelKitReady } from "./reel-kit-install.js";
 import { compositionFingerprint, readCapped, readState, writeState } from "./reel-kit-project.js";
 import { freshTmp, killGroup, macLock, macWorkerFile, processStart, settingsFileOf, stopLeftOver, sweepProject, workerTmp } from "./reel-kit-worker.js";
 import { holdersOf, stopHolders, writeWhole } from "./reel-kit-worker-own.js";
@@ -64,6 +65,7 @@ export const RENDER_SAY = Object.freeze({
   odd: "Its project isn't as Reel Kit left it, so it wasn't rendered: ask Jason.",
   planted: "Something that isn't Reel Kit's was found in its project, so it wasn't rendered: ask Jason.",
   unread: "Its project can't be read, so it wasn't rendered: ask Jason.",
+  notSetUp: "Reel Kit isn't set up on this Mac as it should be, so it wasn't rendered: ask Jason.",
   busy: "It is being rendered already.",
   qaFailed: "Reel Kit's own checks of the render didn't pass, so nothing was kept as an export: ask Jason.",
   failed: "The render didn't finish, so nothing was kept as an export: ask Jason.",
@@ -579,6 +581,11 @@ export async function renderReelKit(ctx, { dir, entry }, deps = {}) {
     if (again) {
       mark({ rendering: undefined });
       return refuse(again);
+    }
+    // An install may have changed Reel Kit while the render waited (it holds this lock while it runs).
+    if (!reelKitReady(home, { alive })) {
+      mark({ rendering: undefined });
+      return refuse(RENDER_SAY.notSetUp);
     }
     // A courtesy: she is told to close the app first. The copy, not this look, keeps her edits from Reel Kit's build.
     const holding = othersHolding(dir, run);

@@ -12,6 +12,7 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { metaNameOf, metaOf } from "../exports.js";
 import { hfDir, kitDir, reelKitHome, venvPython } from "../reel-kit.js";
+import { markReady } from "./reel-kit-ready.js";
 import { compositionFingerprint, projectDirOf, readState, writeState } from "../reel-kit-project.js";
 import { MACH_SERVICES, RENDER_SAY, copyProject, renderProfile, renderReelKit, renderWhy, sweepCopies, writeMeta } from "../reel-kit-render.js";
 import { asideDir, macLock, noteOwnFile } from "../reel-kit-worker.js";
@@ -42,6 +43,7 @@ function world({ scenario = "" } = {}) {
   mkdirSync(join(venvPython(home), ".."), { recursive: true });
   writeFileSync(venvPython(home), `#!/bin/sh\nREEL_KIT_STANDIN_LOG=${q(log)} REEL_KIT_STANDIN=${q(scenario)} exec ${q(process.execPath)} ${q(REEL_KIT)} "$@"\n`);
   chmodSync(venvPython(home), 0o755);
+  markReady(home);
   const sandboxLog = join(home, "sandbox-exec.log");
   const sandboxExec = join(home, "sandbox-exec");
   writeFileSync(sandboxExec, `#!/bin/sh\nSANDBOX_EXEC_LOG=${q(sandboxLog)} exec ${q(process.execPath)} ${q(SANDBOX)} "$@"\n`);

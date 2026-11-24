@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { PIN, binDir, folderFingerprint, hfDir, kitDir, npxShim, hfCli, reelKitHome } from "../reel-kit.js";
 import { PIN as HF_PIN } from "../hyperframes.js";
 import { workFolder } from "../settings.js";
-import { INSTALL_WHY, STEP_IDS, curlFetch, installPlan, runInstall, takeAwayScratch } from "../reel-kit-install.js";
+import { INSTALL_WHY, STEP_IDS, curlFetch, installLockFile, installPlan, installUnfinishedFile, reelKitReady, runInstall, takeAwayScratch } from "../reel-kit-install.js";
 
 const TOOL = fileURLToPath(new URL("..", import.meta.url));
 const FIXTURE_KIT = fileURLToPath(new URL("./fixtures/reel-kit-1.2.0/kit", import.meta.url));
@@ -605,6 +605,57 @@ describe("beside the version in use, and after a killed run", () => {
     const w = world();
     const done = await runInstall({ home: w.home, drop: w.drop, plan: undefined, programs: w.programs, fetch: w.fetch });
     assert.deepEqual(done.lines, [INSTALL_WHY.noDrop]);
+  });
+});
+
+describe("reelKitReady: whether jobs may run on this Mac's Reel Kit", () => {
+  it("is ready after a whole install, and not while the pin's version, the venv's kit, or an install says otherwise", async () => {
+    const w = world();
+    assert.equal(reelKitReady(w.home), false, "nothing installed");
+    assert.equal((await w.install()).ok, true);
+    assert.equal(reelKitReady(w.home), true);
+    const rkh = reelKitHome(w.home);
+    // A kit of the pin's version beside a venv and a check of the old one (a pin bumped, the shared world not yet set up again).
+    writeFileSync(join(rkh, ".setup-version"), "1.1.0\n");
+    assert.equal(reelKitReady(w.home), false, "the check was of another version");
+    writeFileSync(join(rkh, ".setup-version"), `${PIN.version}\n`);
+    const pth = join(rkh, ".venv", "lib", "python3.12", "site-packages", "reel-kit.pth");
+    writeFileSync(pth, `${join(kitDir(w.home, "1.1.0"), "pipeline")}\n`);
+    assert.equal(reelKitReady(w.home), false, "the venv names another kit's pipeline");
+    writeFileSync(pth, `${join(kitDir(w.home), "pipeline")}\n`);
+    assert.equal(reelKitReady(w.home), true);
+    // An install running holds it: its lock, held by a live run.
+    mkdirSync(dirname(installLockFile(w.home)), { recursive: true });
+    writeFileSync(installLockFile(w.home), JSON.stringify({ pid: process.pid, command: "reelkit install" }));
+    assert.equal(reelKitReady(w.home), false, "an install is running");
+    assert.equal(reelKitReady(w.home, { alive: () => false }), true, "a lock its run left is no install");
+    rmSync(installLockFile(w.home));
+  });
+  it("is not ready while an install is half way, nor after one that was killed there", async () => {
+    const w = world();
+    assert.equal((await w.install()).ok, true);
+    assert.equal(reelKitReady(w.home), true);
+    // A second install, held at the models' download: kit and venvs are there, the check is not run yet.
+    let seen = null;
+    const fetch = async (url, dest) => {
+      if (seen === null && w.pin.models.some((m) => m.sources.some((s) => s.url === url))) seen = reelKitReady(w.home);
+      return w.fetch(url, dest);
+    };
+    rmSync(join(reelKitHome(w.home), "models"), { recursive: true });
+    const done = await w.install(undefined, { fetch });
+    assert.equal(done.ok, true, done.lines.join("\n"));
+    assert.equal(seen, false, "half way, it is not ready");
+    assert.equal(reelKitReady(w.home), true, "once whole, it is");
+    // One killed half way leaves its mark, and nothing runs until an install ends.
+    writeFileSync(installUnfinishedFile(w.home), "killed\n");
+    assert.equal(reelKitReady(w.home), false);
+    assert.equal((await w.install()).ok, true);
+    assert.ok(!existsSync(installUnfinishedFile(w.home)));
+    // A failed one put back whole takes its mark away too.
+    writeFileSync(join(w.home, "setup-not-ready"), "");
+    assert.equal((await w.install()).ok, false);
+    assert.ok(!existsSync(installUnfinishedFile(w.home)));
+    assert.equal(reelKitReady(w.home), true);
   });
 });
 

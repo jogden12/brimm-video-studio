@@ -73,13 +73,13 @@ import { studioFolder } from "./studio.js";
 import { pageOf, publishInput, stagePage } from "./storyboard-opening.js";
 import { styleCommand, styleNow } from "./reel-kit-style-chat.js";
 import { MODES, appWhy, changedInApp, entryOf, modeLeans, modeOf as modeNamed, projectFolderOf, readCapped, readState, reelKitNotes, scaffold, slugOf, startWhy, writeState } from "./reel-kit-project.js";
-import { JOBS, dequeue, enqueue, markOpened, noteOwnFile, processStart, queuedOf, runJob, statusOf, stoppedLine, sweepProject, wasOpened } from "./reel-kit-worker.js";
+import { JOBS, dequeue, enqueue, macLock, markOpened, noteOwnFile, processStart, queuedOf, runJob, statusOf, stoppedLine, sweepProject, wasOpened } from "./reel-kit-worker.js";
 import { RENDER_SAY, renderReelKit, renderWhy, renderingBy } from "./reel-kit-render.js";
 import { writeWhole as writeFileWhole } from "./reel-kit-worker-own.js";
 import { appOf, episodeWork, exportsWords } from "./settings.js";
 import { PIN, pinFrom } from "./reel-kit.js";
 import { readDrop } from "./reel-kit-drop.js";
-import { installPlan, runInstall, takeAwayScratch } from "./reel-kit-install.js";
+import { installLockFile, installPlan, reelKitReady, runInstall, takeAwayScratch } from "./reel-kit-install.js";
 import { isInstalled } from "./build.js";
 import { workFolder } from "./settings.js";
 import { releaseEpisodeLock, runningRun, startDetached, takeEpisodeLock } from "./detached.js";
@@ -102,6 +102,7 @@ export const INSTALL_SAY = Object.freeze({
   failed: (version) => `Reel Kit${v(version)} wasn't set up.`,
   leftOver: "A few of the old Reel Kit's files couldn't be tidied away: the next setup does it.",
   none: "Reel Kit hasn't been set up from a download on this Mac.",
+  busy: `Reel Kit is working on an edit on this Mac, so nothing was set up. Once it's done (say "how are the Reel Kit edits going?" to follow it), drag the download into this chat again.`,
   beside: (version, inUse) => `Reel Kit ${version} is installed beside ${inUse}. It is used once its pin is merged and its checks pass.`,
 });
 
@@ -110,8 +111,8 @@ const STARTING_MS = 60000;
 /** The command the install's lock and result name. */
 const INSTALL = "reelkit install";
 
-/** The lock an install holds while it runs: one for the whole Mac, beside the settings in Application Support. */
-export const installLockFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "reel-kit-install.lock");
+/** The lock an install holds while it runs (reel-kit-install.js). */
+export { installLockFile };
 /** The result an install leaves, which `reelkit status` reads. */
 export const installResultFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "reel-kit-install.result.json");
 /** Where a dev Mac writes the pin of a version it installed beside the one in use, for Jason's pull request. */
@@ -214,6 +215,11 @@ export async function installCommand(ctx, words, help) {
     ctx.say(INSTALL_SAY.already);
     return 1;
   }
+  // An install changes what a job runs on: never while one holds the Mac.
+  if (runningRun(ctx.home, "", ctx.alive, macLock(ctx.home))) {
+    ctx.say(INSTALL_SAY.busy);
+    return 1;
+  }
   writeInstallResult(ctx.home, { version: 1, command: INSTALL, state: "starting", kit: drop.version, started: ctx.now() });
   startDetached(ctx, { command: "reelkit", folder: "install", args: [path] });
   ctx.say(INSTALL_SAY.started(drop.version));
@@ -239,6 +245,7 @@ export async function installNow(ctx, words, help) {
   }
   const kit = kitOf(ctx);
   const started = ctx.now();
+  let mac = null;
   try {
     (kit.keepAwake ?? ctx.deps?.keepAwake ?? caffeinate)(process.pid);
     const { drop, plan, pin } = planFor(ctx, path);
@@ -250,6 +257,17 @@ export async function installNow(ctx, words, help) {
       ctx.say(plan.refused);
       return 1;
     }
+    // The Mac's worker lock, which every job and render holds: no job runs while the install changes what it runs on, and none is
+    // waited for (nothing is set up while one holds it).
+    mkdirSync(dirname(macLock(ctx.home)), { recursive: true });
+    const held = takeEpisodeLock(macLock(ctx.home), INSTALL, ctx.alive);
+    if (!held.taken) {
+      takeAwayScratch(ctx.home, drop);
+      writeInstallResult(ctx.home, { ...base, state: "failed", ended: ctx.now(), lines: [INSTALL_SAY.busy], credit: "", leftOver: [] });
+      ctx.say(INSTALL_SAY.busy);
+      return 1;
+    }
+    mac = held.text;
     writeInstallResult(ctx.home, { ...base, state: "at work", step: "" });
     const progress = ({ words: step, state }) => {
       if (state !== "running") return;
@@ -274,6 +292,7 @@ export async function installNow(ctx, words, help) {
     for (const line of lines) ctx.say(line);
     return done.ok ? 0 : 1;
   } finally {
+    if (mac !== null) releaseEpisodeLock(macLock(ctx.home), mac);
     releaseEpisodeLock(lock, took.text);
   }
 }
@@ -337,6 +356,7 @@ const FOLLOW = `Say "how are the Reel Kit edits going?" to follow them.`;
 /** What her edit words say, in her words: never a path, a flag or the name of a command. */
 export const EDIT_SAY = Object.freeze({
   notSetUp: "Reel Kit isn't set up on this Mac yet: ask Jason.",
+  settingUp: `Reel Kit is being set up on this Mac, so nothing of it runs until that is done. Say "how is the Reel Kit setup going?" to follow it.`,
   queued: (key, mode) => `${partSaid(key)} is in the queue for a ${MODE_SAID[mode]} Reel Kit edit.`,
   steps: `This Mac makes one Reel Kit edit at a time. Each goes through ${listed(JOBS.edit)}, then waits for you at its storyboard.`,
   leans: (lean, mode) => (lean === mode ? `${capital(MODE_SAID[lean])} suits this kind of video.` : `This kind of video leans to ${MODE_SAID[lean]}; this is ${MODE_SAID[mode]}, as you said.`),
@@ -513,13 +533,10 @@ function startWords(words) {
   return keys && keys.length ? { keys, mode } : null;
 }
 
-/** Whether Reel Kit's kit and its Python are on this Mac. */
-function kitHere(home) {
-  try {
-    return lstatSync(join(kitDir(home), "pipeline", "new.py")).isFile() && lstatSync(venvPython(home)).isFile();
-  } catch {
-    return false;
-  }
+/** "" when this Mac's Reel Kit may run a job (reel-kit-install.js reelKitReady), else her line: being set up, or not set up. */
+function notReady(ctx) {
+  if (reelKitReady(ctx.home, { alive: ctx.alive })) return "";
+  return installRunning(ctx) ? EDIT_SAY.settingUp : EDIT_SAY.notSetUp;
 }
 
 /** Start the detached half `reelkit --now <folder> <args…>`: the pid of the run it started, or undefined. */
@@ -555,8 +572,9 @@ async function startCommand(ctx, words, h) {
     for (const why of refused) ctx.say(why);
     return 1;
   }
-  if (!kitHere(ctx.home)) {
-    ctx.say(EDIT_SAY.notSetUp);
+  const unready = notReady(ctx);
+  if (unready) {
+    ctx.say(unready);
     return 1;
   }
   // Each part is put in the queue before its run is started (under this run's pid, then the run's own), so that a queue that can't be
@@ -857,8 +875,10 @@ async function localPage(ctx, edit) {
   const kit = kitOf(ctx);
   const python = venvPython(ctx.home);
   const serve = join(kitDir(ctx.home), "storyboard", "serve.py");
+  const unready = notReady(ctx);
+  if (unready) return refuse(ctx, unready);
   try {
-    if (!lstatSync(python).isFile() || !lstatSync(serve).isFile()) return refuse(ctx, EDIT_SAY.notSetUp);
+    if (!lstatSync(serve).isFile()) return refuse(ctx, EDIT_SAY.notSetUp);
   } catch {
     return refuse(ctx, EDIT_SAY.notSetUp);
   }
@@ -1209,6 +1229,9 @@ async function editNow(ctx, { found, record }, job, [slug, ...more], h) {
   }
   const spec = job === "revise" ? { dir: edit.dir, job: "revise", notes: [] } : job === "resume" ? { dir: edit.dir, resume: true } : { dir: edit.dir, job };
   const inLock = () => {
+    // An install may have changed Reel Kit while the job waited (it holds the Mac's lock while it runs, so not now).
+    const unready = notReady(ctx);
+    if (unready) return unready;
     const heard = [];
     const again = h.episodeFor({ ...ctx, say: (line) => heard.push(line) }, [found.name], { newerEnds: 1 });
     if (!again.found) return heard.at(-1) ?? EDIT_SAY.notWritten;
@@ -1253,7 +1276,7 @@ export async function reelkitCommand(ctx, rest = [], { help = "", episodeFor, sa
   const [word, ...more] = rest;
   const h = { help, episodeFor, save };
   // Her style names no episode: what reel-kit-style-chat.js needs of this file is given to it.
-  const style = { help, publishLine, notReady: () => (kitHere(ctx.home) ? "" : EDIT_SAY.notSetUp), jobDeps: () => jobDeps(ctx) };
+  const style = { help, publishLine, notReady: () => notReady(ctx), jobDeps: () => jobDeps(ctx) };
   if (word === "style") return styleCommand(ctx, more, style);
   if (word === "--now" && more[0] === "style") return styleNow(ctx, more.slice(1), style);
   if (word === "install") return installCommand(ctx, more, help);

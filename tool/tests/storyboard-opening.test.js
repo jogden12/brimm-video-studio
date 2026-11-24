@@ -24,6 +24,7 @@ import { OPS_PAGE } from "../guide.js";
 import { gatedIndex, gatedPlaces, realOf } from "../places.js";
 import { HELP, editMain } from "../edit.js";
 import { kitDir, venvPython } from "../reel-kit.js";
+import { markReady } from "./reel-kit-ready.js";
 import { EDIT_SAY, notesFile, readNotes, STORYBOARD_SAY } from "../reel-kit-commands.js";
 import { entryOf, writeState } from "../reel-kit-project.js";
 import { episodeWork } from "../settings.js";
@@ -625,6 +626,7 @@ function edited({ state = "storyboard", scenario = "" } = {}) {
   const log = join(t.dir, "reel-kit.log");
   writeFileSync(venvPython(t.home), `#!/bin/sh\nREEL_KIT_STANDIN='${scenario}' REEL_KIT_STANDIN_LOG='${log}' exec '${process.execPath}' '${STAND_IN}' "$@"\n`);
   chmodSync(venvPython(t.home), 0o755);
+  markReady(t.home);
   const dir = join(episodeWork(t.home, FOLDER), NAME_2);
   storyboardAt(dir);
   writeState(dir, { slug: SLUG, key: "reel 2", mode: "lofi", version: 1, title: "Know your costs", name: NAME_2, state, step: "storyboard" });

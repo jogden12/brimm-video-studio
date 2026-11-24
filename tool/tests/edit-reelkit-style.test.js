@@ -14,6 +14,7 @@ import { editMain } from "../edit.js";
 import { gateFor, heldGateFor, namesNoEpisode } from "../gate.js";
 import { HELD_NARROWED } from "../held.js";
 import { folderFingerprint, kitDir, reelKitHome, venvPython } from "../reel-kit.js";
+import { markReady } from "./reel-kit-ready.js";
 import { FOR_CLAUDE } from "../reel-kit-commands.js";
 import { readState } from "../reel-kit-project.js";
 import { SHIPPED_PACK, ensureHerPack, herPack, shippedMoved, syncPack } from "../reel-kit-style.js";
@@ -47,6 +48,7 @@ function world() {
   }
   mkdirSync(dirname(venvPython(t.home)), { recursive: true });
   writeFileSync(venvPython(t.home), "#!/bin/sh\n");
+  markReady(t.home);
   mkdirSync(join(reelKitHome(t.home), "tools", "bin"), { recursive: true });
   mkdirSync(studioFolder(t.home), { recursive: true });
   const shipped = join(t.dir, "shipped");

@@ -17,6 +17,7 @@ import { appVersionFile } from "../app-version.js";
 import { NOT_FOR_SESSION } from "../gate.js";
 import { projectFiles } from "../project.js";
 import { kitDir, venvPython } from "../reel-kit.js";
+import { markReady } from "./reel-kit-ready.js";
 import { EDIT_SAY, notesFile } from "../reel-kit-commands.js";
 import { REEL_KIT_LINE, compositionFingerprint, entryOf, readState, writeState } from "../reel-kit-project.js";
 import { RENDER_SAY, renderWhy } from "../reel-kit-render.js";
@@ -72,6 +73,7 @@ function world({ record = {}, state = {}, open = "opened", app = "writes", plist
   writeFileSync(join(kitDir(t.home), "pipeline", "new.py"), "# made up\n");
   mkdirSync(join(venvPython(t.home), ".."), { recursive: true });
   writeFileSync(venvPython(t.home), "#!/bin/sh\n");
+  markReady(t.home);
   const live = new Set();
   let next = 50000;
   t.ctx.deps.start = (cmd, args) => {

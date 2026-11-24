@@ -16,6 +16,7 @@ import { INSTALL_WHY, STEP_IDS } from "../reel-kit-install.js";
 import { INSTALL_SAY, installLockFile, installResultFile, newPinOf } from "../reel-kit-commands.js";
 import { workFolder } from "../settings.js";
 import { takeEpisodeLock } from "../detached.js";
+import { macLock } from "../reel-kit-worker.js";
 import { setup } from "./episodes.js";
 
 const FIXTURE_KIT = fileURLToPath(new URL("./fixtures/reel-kit-1.2.0/kit", import.meta.url));
@@ -260,6 +261,28 @@ describe("reelkit install", () => {
     const half = await reelkit(t, ["--now", "install", at], { deps: { alive: () => true }, reelKit: { programs: t.programs, fetch: t.fetch, keepAwake: () => {} } });
     assert.equal(half.code, 1);
     assert.ok(!existsSync(installResultFile(t.home)));
+  });
+
+  it("installs nothing while a Reel Kit job holds the Mac, and says so in one line", async () => {
+    const t = mac();
+    const { at } = download(t);
+    mkdirSync(join(macLock(t.home), ".."), { recursive: true });
+    const job = takeEpisodeLock(macLock(t.home), "reelkit edit", () => false);
+    assert.ok(job.taken);
+    // The lock above is this process's own, which is running.
+    const r = await reelkit(t, ["install", at, "--yes"], { deps: { alive: () => true } });
+    assert.deepEqual([r.code, r.said], [1, [INSTALL_SAY.busy]]);
+    assert.deepEqual(t.started, []);
+    for (const line of r.said) assert.doesNotMatch(line, PLAIN, line);
+    // The detached half, had it been started, finds the Mac held too: nothing is installed, and status says why.
+    const half = await reelkit(t, ["--now", "install", at], { deps: { alive: () => true }, reelKit: { programs: t.programs, fetch: t.fetch, keepAwake: () => {} } });
+    assert.equal(half.code, 1);
+    assert.ok(!existsSync(kitDir(t.home)));
+    const status = await reelkit(t, ["status"], { deps: { alive: () => true } });
+    assert.deepEqual(status.said, [INSTALL_SAY.failed("1.2.0"), INSTALL_SAY.busy]);
+    // Its lock is let go: the Mac's is the job's still.
+    assert.ok(!existsSync(installLockFile(t.home)));
+    assert.equal(readFileSync(macLock(t.home), "utf8"), job.text);
   });
 
   it("starts its detached half only for Studio, never for a chat", async () => {

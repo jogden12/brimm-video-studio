@@ -11,9 +11,11 @@
 // Nothing here reaches the network or starts a program by itself: `programs` are given (absolute paths: Studio's node, npm, ffmpeg
 // and ffprobe from findPrograms, curl, /bin/sh, tar, and ditto as `unzip`), `run` starts them and `fetch` downloads, by default
 // `curl -fsSL -o <dest> <url>` through setup/install.js runProgram. Tests give stand-ins for all of them.
-import { lstatSync, realpathSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { PIN, pinFrom } from "./reel-kit.js";
+import { lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { runningRun } from "./detached.js";
+import { PIN, kitDir, pinFrom, reelKitHome, venvPython } from "./reel-kit.js";
+import { isRunning } from "./run.js";
 import { runProgram } from "./setup/install.js";
 import { workFolder } from "./settings.js";
 import { INSTALL_WHY, STAGES, pathsOf } from "./reel-kit-stages.js";
@@ -24,6 +26,45 @@ export { INSTALL_WHY };
 export const STEP_IDS = Object.freeze(STAGES.map((s) => s.id));
 
 const HERE_ALREADY = ": here already";
+
+/** The lock an install holds while it runs: one for the whole Mac, beside the settings in Application Support. */
+export const installLockFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "reel-kit-install.lock");
+/** The mark an install of the version in use leaves while it changes the shared world (runInstall): written before its first stage,
+    taken away once it is whole or put back whole. One left there is an install killed half way: nothing is ready until an install ends. */
+export const installUnfinishedFile = (home) => join(home, "Library", "Application Support", "BRIMM Video", "reel-kit-install.unfinished");
+
+/** A file's text with its end trimmed, or null. */
+function textOf(path) {
+  try {
+    return readFileSync(path, "utf8").trimEnd();
+  } catch {
+    return null;
+  }
+}
+
+/** Whether this Mac's Reel Kit may run a job (spec section 2): the pin's kit is there with Reel Kit's Python, its own check ended READY for
+    the pin's version (`.setup-version`, which only that check writes), the venv's `reel-kit.pth` names this kit's pipeline (a pin bumped
+    with the old venv left is not set up), no install is running (its lock held by a live run) and none was left half way (its mark).
+    `alive` is how a run is known to be running. */
+export function reelKitReady(home, { alive = isRunning } = {}) {
+  try {
+    if (!lstatSync(join(kitDir(home), "pipeline", "new.py")).isFile()) return false;
+    // A venv's python is a link to the Python it was made from: what it leads to must be a file.
+    if (!statSync(venvPython(home)).isFile()) return false;
+  } catch {
+    return false;
+  }
+  if (textOf(join(reelKitHome(home), ".setup-version")) !== PIN.version) return false;
+  const minor = PIN.python.split(".").slice(0, 2).join(".");
+  if (textOf(join(reelKitHome(home), ".venv", "lib", `python${minor}`, "site-packages", "reel-kit.pth")) !== join(kitDir(home), "pipeline")) return false;
+  if (runningRun(home, "", alive, installLockFile(home)) !== null) return false;
+  try {
+    lstatSync(installUnfinishedFile(home));
+    return false;
+  } catch {
+    return true;
+  }
+}
 
 /** Runs a program to its end with setup/install.js runProgram, keeping what it printed: `{ code, out }`. */
 export async function runCaptured(program, args, { env, signal } = {}) {
@@ -105,6 +146,15 @@ export async function runInstall({ home, drop, plan, programs, run = runCaptured
   const lines = [];
   try {
     if (!plan || plan.refused || !drop?.ok) return { ok: false, lines: [plan?.refused || drop?.why || INSTALL_WHY.noDrop], credit: "", leftOver: [] };
+    // Installing the version in use changes the shared world jobs run on: marked unfinished until it is whole or put back whole.
+    const marks = !plan.beside;
+    if (marks) {
+      mkdirSync(dirname(installUnfinishedFile(home)), { recursive: true });
+      writeFileSync(installUnfinishedFile(home), `${drop.version}\n`);
+    }
+    const unmark = () => {
+      if (marks) rmSync(installUnfinishedFile(home), { force: true });
+    };
     const given = { sh: "/bin/sh", tar: "/usr/bin/tar", unzip: "/usr/bin/ditto", ...programs };
     const ctx = contextOf({ home, drop, pin: plan.pin, programs: given, run, fetch: fetch ?? curlFetch({ curl: given.curl, home }), signal });
     recoverAll(ctx, STAGES.flatMap((stage) => stage.targets(ctx)));
@@ -142,6 +192,7 @@ export async function runInstall({ home, drop, plan, programs, run = runCaptured
           }
         }
         lines.push(whole ? INSTALL_WHY.leftAsWas : INSTALL_WHY.notPutBack);
+        if (whole) unmark();
         return { ok: false, lines, credit: "", leftOver: [] };
       }
     }
@@ -152,6 +203,7 @@ export async function runInstall({ home, drop, plan, programs, run = runCaptured
     } catch {
       leftOver = ctx.journal.map(({ aside }) => aside).filter(Boolean);
     }
+    unmark();
     return { ok: true, lines, credit, leftOver };
   } finally {
     takeAwayScratch(home, drop);
