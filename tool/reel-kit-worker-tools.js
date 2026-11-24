@@ -31,7 +31,7 @@
 // Pure but for looking at the disk (real paths, whether a folder is there).
 import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { PIN, hfDir } from "./reel-kit.js";
+import { PIN, foldName, hfDir } from "./reel-kit.js";
 import { bashNeeds, bothSpellings, gatedPlaces, realOf as placeOf } from "./places.js";
 import { studioFolder } from "./studio.js";
 import { CLAUDE_MODEL } from "./unedited.js";
@@ -298,12 +298,8 @@ const isFolder = (real) => {
   }
 };
 
-/** A name folded as the Mac's disk folds one, near enough: APFS takes two names for one when they are equal under Unicode's full case
-    folding, so `AGENT\u017F.md` (a long s) opens AGENTS.md and `\uFB06udio.json` (an st ligature) opens studio.json, which a plain
-    toLowerCase misses. Compatibility composition, then capitals, then small letters: the long s, the ligatures and the Kelvin sign come
-    out as s, st and k. It takes a few names for Studio's that the disk would not (a dotless i), never the other way for these names;
-    a zero-width joiner or a Cyrillic letter stays what it is. */
-export const foldName = (name) => name.normalize("NFKC").toUpperCase().toLowerCase();
+/** A name folded as the Mac's disk folds one (reel-kit.js foldName, kept there so that it has no import of this module's). */
+export { foldName };
 const OWN_FOLDED = Object.freeze(OWN_NAMES.map(foldName));
 
 /** Whether a name is one of Studio's own, as the Mac's disk would fold it (foldName): the names a copy never brings into the project,

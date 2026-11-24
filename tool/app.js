@@ -213,6 +213,11 @@ const BUTTONS = "In HyperFrames, share only with people you invite, and export o
     the HyperFrames projects, and nothing that makes, adopts or opens a HyperFrames project takes it for its own (plan Task 11). */
 export const byReelKit = (project) => project !== null && typeof project === "object" && project.maker === "reel-kit";
 
+/** The folder of the project the record's `entry` names in the episode's work folder `work`, where its exports are recorded: a Reel
+    Kit edit's public/ (byReelKit), where the app writes its own renders/ records and Studio writes a render's (plan Decision 7), and a
+    HyperFrames project's own folder. Here, not in reel-kit-project.js (which re-exports it), so that exports.js reads it with no cycle. */
+export const projectDirOf = (work, entry) => (byReelKit(entry) ? join(work, entry.name, "public") : join(work, entry.name));
+
 /** Whether a project of the record is the one in use for the main video: its key is "main", it was not kept for an earlier kind, and it is
     a HyperFrames project, not a Reel Kit edit (byReelKit). edit.js `kind` asks it too, of a record that changes kind. */
 export const isMain = (project) => project.key === "main" && project.state !== KEPT && !byReelKit(project);
