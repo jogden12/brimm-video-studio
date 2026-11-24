@@ -2427,6 +2427,8 @@ function finishWay(ctx, record) {
   const kind = recordKind(record);
   const projects = (record.app?.projects ?? []).filter((p) => p.state !== PROJECT_KEPT);
   // The main video's Reel Kit edit (app.js byReelKit, which inUse leaves out) is its project too: it is finished from its render, never opened.
+  // Its main video is upright: reel-kit-project.js startWhy refuses a Reel Kit edit of a wide main video (WIDE_MAIN), and finish checks the
+  // render's shape as it checks any export's.
   const mainEdit = (p) => byReelKit(p) && p.key === "main";
   if ((kind === "raw" || (kind === "short video" && hasFinalCut(record))) && projects.some((p) => inUse(p) || mainEdit(p))) return "hyperframes";
   if (isClip(record)) return projects.some((p) => (inUse(p) && Array.isArray(p.opened) && p.opened.length > 0) || mainEdit(p)) ? "hyperframes" : "clip";
@@ -4395,8 +4397,10 @@ const everShownInFinalCut = (record) => [record.main, ...(Array.isArray(record.r
 
 /** Whether a video is edited in HyperFrames, by its record: `finish` goes the HyperFrames way for it (finishWay: a raw video with a main project in
     use, an iPhone clip whose main project the app has opened). What `spell` first says of such a video tells her what the app needs. A raw video with
-    a project for a Reel alone, or for none, is not edited in the app by this: the record does not say it is. */
-const editedInApp = (ctx, record) => finishWay(ctx, record) === "hyperframes";
+    a project for a Reel alone, or for none, is not edited in the app by this: the record does not say it is. Nor is one whose main video is a
+    Reel Kit edit (plan Task 15): Reel Kit renders it, and no assistant in HyperFrames drew its captions, so its Reel Kit edits are left out of
+    the record finishWay is asked of. */
+const editedInApp = (ctx, record) => finishWay(ctx, { ...record, app: { ...(record.app ?? {}), projects: (record.app?.projects ?? []).filter((p) => !byReelKit(p)) } }) === "hyperframes";
 
 /** What she is told of the captions already drawn into the pictures of a video edited in HyperFrames, when no sentence of the part that has them says it:
     a spelling is not pushed into a project, the app may be editing it (architecture 4.8). */

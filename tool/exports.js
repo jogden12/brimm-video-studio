@@ -15,6 +15,7 @@ import { KEPT, byReelKit, isMain, projectDirOf } from "./app.js";
 import { historyTail } from "./app-history.js";
 import { isDay } from "./episode.js";
 import { turnsOf } from "./hyperframes.js";
+import { compositionFingerprint, readState } from "./reel-kit-state.js";
 import { downloadsFolder, episodeWork, folderWords, sameFolder } from "./settings.js";
 import { isHdr } from "./workcopy.js";
 
@@ -184,8 +185,15 @@ const secondOf = (ms) => Math.floor(ms / 1000);
 const endingOf = (name) => ((/\.([A-Za-z0-9]+)$/.exec(String(name)) || [])[1] || "").toLowerCase();
 const taking = (file) => TAKEN_ENDINGS.includes(file.ending);
 
+/** What she says to have a Reel Kit edit rendered, and to see how far it has got (reel-kit-commands.js EDIT_SAY's words). */
+const SEE_EDITS = `(say "how are the Reel Kit edits going?" to see where it is)`;
+const RENDER_IT = `Say "render it" once its edit is built ${SEE_EDITS}`;
+const RENDER_AGAIN = `Say "render it" once its edit is built again ${SEE_EDITS}`;
+/** Where a Studio render of a Reel Kit edit is, as a part's file says it. */
+const STUDIO_RENDER = "Reel Kit's render";
+
 /** Where a file is, as a person is told it: the places an export can be found in. */
-const FROM = { Downloads: "from Downloads", "the exports folder": "from the exports folder", "another folder": "from another folder", renders: "HyperFrames' own render" };
+const FROM = { Downloads: "from Downloads", "the exports folder": "from the exports folder", "another folder": "from another folder", renders: "HyperFrames' own render", [STUDIO_RENDER]: "Reel Kit's render" };
 
 /** Files as a person is told them: by name. */
 function shown(files) {
@@ -251,6 +259,8 @@ export function lookForExports(input, answers = {}) {
   for (const part of input.parts) {
     const { key, label } = part;
     const Cap = capital(label);
+    // A Reel Kit edit's part (exportsFound `maker`): its own words, since it is rendered by Studio, not exported from HyperFrames.
+    const rk = part.maker === "reel-kit";
     const made = (video, line, over = {}) => out.push({ key, label, ...(part.reel ? { reel: part.reel } : {}), project: part.project, projects: [part.project], fromSuggestion: part.fromSuggestion, video, export: null, kept: false, noHandEdits: false, line, ...over });
     const keep = () => made(null, `${Cap}: kept as the last finish made it.`, { kept: true });
     const before = finished ? finished.parts[key] : undefined;
@@ -297,8 +307,18 @@ export function lookForExports(input, answers = {}) {
     if (!exports.length) {
       if (prior) {
         const changedSince = part.here && part.changed !== null && secondOf(part.changed) > secondOf(finishedAt);
-        if (changedSince && !final.includes(key)) asks.push(`${Cap}'s project changed in HyperFrames, at ${zone.text(part.changed)}, after the last hand-off. Export it again from HyperFrames on This Mac, or say the last hand-off is final.`);
+        if (changedSince && !final.includes(key)) asks.push(rk ? `${Cap}'s Reel Kit edit changed, at ${zone.text(part.changed)}, after the last hand-off. ${RENDER_AGAIN}, or say the last hand-off is final.` : `${Cap}'s project changed in HyperFrames, at ${zone.text(part.changed)}, after the last hand-off. Export it again from HyperFrames on This Mac, or say the last hand-off is final.`);
         else keep();
+        continue;
+      }
+      if (rk) {
+        // A Reel Kit edit is rendered by Studio, after her go: told to render it, and, when its render is of an edit no longer there, why
+        // that render is not taken.
+        const said = part.here && (part.stale || []).length ? `${Cap}'s Reel Kit edit changed after it was rendered, so that render is not taken. ${RENDER_AGAIN}` : `${Cap} has no Reel Kit render yet. ${RENDER_IT}`;
+        if (!part.here) stops.push(`${Cap}'s Reel Kit edit is on ${part.mac}, so its render is there. Finish it on that Mac.`);
+        else if (key !== "main") asks.push(`${said}, or say to leave it out of this hand-off.`);
+        else stops.push(`${said}, then say "hand it off" again.`);
+        passedOver();
         continue;
       }
       if (key !== "main") asks.push(`${Cap} has no export. Export it from HyperFrames on This Mac, or say to leave it out of this hand-off. If you exported it under another name, tell me its file name.`);
@@ -315,7 +335,7 @@ export function lookForExports(input, answers = {}) {
       asks.push(`For ${label} there are ${count(top.length)} exports that began at ${zone.text(top[0].began.ms)}: ${shown(top)}. Which is the final one?`);
       // Whichever she names is the one handed off: the part has an export, unless all began before the project last changed (known to the minute
       // alone, one is counted to the end of it, as below).
-      const latest = Math.max(...top.map((file) => (file.began.exact ? file.began.ms : file.began.ms + 59999)));
+      const latest = Math.max(...top.map((file) => (file.where === STUDIO_RENDER ? Infinity : file.began.exact ? file.began.ms : file.began.ms + 59999)));
       if (!(part.here && part.changed !== null && secondOf(part.changed) > secondOf(latest))) tied.push(key);
       passedOver();
       continue;
@@ -323,7 +343,12 @@ export function lookForExports(input, answers = {}) {
     const [export_] = top;
     // It must have begun after the project's last change, to the second; a start known only to the minute counts to the end of it.
     const upper = export_.began.exact ? export_.began.ms : export_.began.ms + 59999;
-    const older = part.here && part.changed !== null && secondOf(part.changed) > secondOf(upper);
+    // A Studio render of a Reel Kit edit is judged by its edit already (exportsFound: it is taken only while the edit is the one it rendered).
+    const older = export_.where !== STUDIO_RENDER && part.here && part.changed !== null && secondOf(part.changed) > secondOf(upper);
+    if (older && !final.includes(key) && rk) {
+      asks.push(`${Cap}'s newest export, ${export_.name}, began at ${zone.text(export_.began.ms)}, and its Reel Kit edit changed after that, at ${zone.text(part.changed)}. ${RENDER_AGAIN}, or export it again from HyperFrames on This Mac, or say that export is the final one.`);
+      continue;
+    }
     if (older && !final.includes(key)) {
       asks.push(`${Cap}'s newest export, ${export_.name}, began at ${zone.text(export_.began.ms)}, before you last changed it in HyperFrames, at ${zone.text(part.changed)}. Export it again from HyperFrames on This Mac, or say that export is the final one.`);
       continue;
@@ -333,9 +358,14 @@ export function lookForExports(input, answers = {}) {
       continue;
     }
     const where = FROM[export_.where];
+    if (export_.where === STUDIO_RENDER) {
+      made(videoOf(export_), `${Cap}: ${export_.name}, ${where}, made ${zone.text(export_.began.ms)}.`);
+      passedOver(export_);
+      continue;
+    }
     made(videoOf(export_), !part.here
       ? `${Cap}: ${export_.name}, ${where}. Its project is on ${part.mac}, so the export could not be checked against it.`
-      : `${Cap}: ${export_.name}, ${where}, exported ${zone.text(export_.began.ms)}.${older ? " HyperFrames changed after it, and you said it is final." : ""}`);
+      : `${Cap}: ${export_.name}, ${where}, exported ${zone.text(export_.began.ms)}.${older ? (rk ? " Its Reel Kit edit changed after it, and you said it is final." : " HyperFrames changed after it, and you said it is final.") : ""}`);
     passedOver(export_);
   }
   // A Reel the last finish finished that has no project in the record (it was finished in the Final Cut days) stays in the hand-off as
@@ -400,10 +430,14 @@ function videosIn(dir, readdir) {
   return { files, unreadable: false };
 }
 
-/** What a project's renders/ holds of exports: { recorded, renders }. `recorded` are the files its records name (each record that is
+/** What a project's renders/ holds of exports: { recorded, renders, stale }. `recorded` are the files its records name (each record that is
     complete, whose name gives the second the export began, and whose `exportedTo` is a video file that is there), each as
-    { name, dir, where, bytes, mtimeMs, began }; `renders` are the videos in renders/ that no record names. */
-function recordsIn(dir, downloads, zone, exports = null) {
+    { name, dir, where, bytes, mtimeMs, began }; `renders` are the videos in renders/ that no record names. For a Reel Kit edit (`edit`,
+    readEdit: its project's folder, its studio.json and its composition's fingerprint now), a record of Studio's render (its file straight in
+    the project's own renders/) is taken, `where` STUDIO_RENDER, only while the edit is the one it rendered (renderStands); one that is not
+    goes into `stale`, so that finish says the edit changed after it was rendered. Any other record (an export she made from the app) is as
+    a HyperFrames project's. */
+function recordsIn(dir, downloads, zone, exports = null, edit = null) {
   const folder = join(dir, "renders");
   let names = [];
   try {
@@ -412,6 +446,7 @@ function recordsIn(dir, downloads, zone, exports = null) {
     return { recorded: [], renders: [] };
   }
   const recorded = [];
+  const stale = [];
   const named = new Set();
   for (const name of names.filter((n) => n.endsWith(".meta.json"))) {
     const when = metaNameOf(name);
@@ -422,6 +457,11 @@ function recordsIn(dir, downloads, zone, exports = null) {
     named.add(resolve(told.exportedTo));
     if (!when || !ENDINGS.includes(endingOf(told.exportedTo)) || !isFile(told.exportedTo)) continue;
     const found = statSync(told.exportedTo);
+    if (edit && resolve(dirname(told.exportedTo)) === join(edit.dir, "renders")) {
+      const render = { name: basename(told.exportedTo), dir: join(edit.dir, "renders"), where: STUDIO_RENDER, bytes: found.size, mtimeMs: found.mtimeMs, began: beganAt(when, zone) };
+      (renderStands(edit, told.exportedTo) ? recorded : stale).push(render);
+      continue;
+    }
     const inDownloads = sameFolder(dirname(told.exportedTo), downloads);
     const inExports = !inDownloads && exports !== null && sameFolder(dirname(told.exportedTo), exports);
     recorded.push({ name: basename(told.exportedTo), dir: inDownloads ? downloads : inExports ? exports : dirname(told.exportedTo), where: inDownloads ? "Downloads" : inExports ? "the exports folder" : "another folder", bytes: found.size, mtimeMs: found.mtimeMs, began: beganAt(when, zone) });
@@ -432,7 +472,47 @@ function recordsIn(dir, downloads, zone, exports = null) {
     const found = statSync(join(folder, name));
     renders.push({ name, dir: folder, bytes: found.size, mtimeMs: found.mtimeMs });
   }
-  return { recorded, renders };
+  return { recorded, renders, ...(edit ? { stale } : {}) };
+}
+
+/** What exportsFound reads of a Reel Kit edit whose entry is `entry`, in the episode's work folder `work`: { dir, state, now }, its project's
+    folder, its studio.json (reel-kit-state.js readState, or null) and its composition's fingerprint now (compositionFingerprint, or null
+    when it can't be made: a link inside). */
+function readEdit(work, entry) {
+  const dir = join(work, entry.name);
+  let now = null;
+  try {
+    now = compositionFingerprint(dir);
+  } catch {
+    now = null;
+  }
+  return { dir, state: readState(dir), now };
+}
+
+/** Whether Studio's render `file` of the Reel Kit edit `edit` (readEdit) may be taken as its part's export: only while the edit says it is
+    rendered, and the render is one its studio.json lists (`renders`, by its file) with the fingerprint it ran on, the fingerprint of the
+    composition now (reel-kit-render.js renderReelKit records it). A render from before a revise, or of an edit changed since in the app,
+    is not: the edit is no longer what it shows. */
+function renderStands(edit, file) {
+  const { dir, state, now } = edit;
+  if (!state || state.state !== "rendered" || typeof now !== "string") return false;
+  const listed = (Array.isArray(state.renders) ? state.renders : []).find((r) => r && typeof r.file === "string" && join(dir, r.file) === resolve(file));
+  return Boolean(listed) && typeof listed.fingerprint === "string" && listed.fingerprint === now;
+}
+
+/** When a Reel Kit edit in `dir` last changed (lastChangeOf): the latest of its public/ (projectChange, with the app's history there), its
+    edit.py, fx/ and cards/, the whole composition (reel-kit-state.js compositionFingerprint), so that a revise that leaves public/ as it
+    was is a change too. null when nothing there counts. */
+function editChange(dir) {
+  const times = [projectChange(join(dir, "public")), projectChange(join(dir, "fx")), projectChange(join(dir, "cards"))];
+  try {
+    const edit = lstatSync(join(dir, "edit.py"));
+    if (edit.isFile()) times.push(edit.mtimeMs);
+  } catch {
+    // no edit.py
+  }
+  const known = times.filter((t) => Number.isFinite(t));
+  return known.length ? Math.max(...known) : null;
 }
 
 /** Downloads, listed the first time it is asked for and never again: what `exportsFound` is given as `listDownloads` by a caller that looks for
@@ -481,9 +561,11 @@ export function exportsFound({ home, exports = null, name, record, zone = LOCAL_
   const parts = [...(main ? [{ project: main, key: "main", label: "the main video" }] : []), ...reels.map((p) => ({ project: p, key: p.key, label: `Reel ${p.key.slice(5)}`, reel: Number(p.key.slice(5)) }))].map(({ project, key, label, reel }) => {
     const dir = plainName(project.name) ? projectDirOf(work, project) : "";
     const here = dir !== "" && isFolder(dir);
+    // A Reel Kit edit: its render judged by its edit, and its last change the whole composition's, not public/'s alone.
+    const edit = here && byReelKit(project) ? readEdit(work, project) : null;
     return {
-      key, label, ...(reel ? { reel } : {}), project: project.name, ...(here ? { dir } : {}), fromSuggestion: project.fromSuggestion ?? null, here, mac: project.on,
-      changed: here ? projectChange(dir) : null, ...(here ? recordsIn(dir, downloads, zone, picked) : { recorded: [], renders: [] })
+      key, label, ...(reel ? { reel } : {}), project: project.name, ...(byReelKit(project) ? { maker: project.maker } : {}), ...(here ? { dir } : {}), fromSuggestion: project.fromSuggestion ?? null, here, mac: project.on,
+      changed: here ? (edit ? editChange(edit.dir) : projectChange(dir)) : null, ...(here ? recordsIn(dir, downloads, zone, picked, edit) : { recorded: [], renders: [], ...(byReelKit(project) ? { stale: [] } : {}) })
     };
   });
   const seen = listDownloads ? listDownloads() : videosIn(downloads, readdir);

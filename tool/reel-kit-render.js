@@ -523,7 +523,8 @@ function othersHolding(dir, run) {
       recorded again: it stays as finalize recorded it, so an edit she made in the app while it rendered is refused at her next render as
       changed in HyperFrames;
     - a render that ended 0 and came back, and an edit still `ready`: the meta record (writeMeta), then `state: "rendered"`, `lastRender`
-      and the render added to `renders`; any other: nothing kept as an export, `lastRender` says why (`qa` when Reel Kit's QA failed,
+      and the render added to `renders` with the fingerprint it ran on (`state.fingerprint`, which its copy matched), by which exports.js
+      takes it only while the edit is still that one; any other: nothing kept as an export, `lastRender` says why (`qa` when Reel Kit's QA failed,
       `error`, `time`, `odd`, `record`, `own`, `planted`), the state left as it is, and she reads its line. The mark comes off, the copy is taken
       away and the lock is let go, whatever happened.
     `deps`: `sandboxExec` (SANDBOX_EXEC), `trash` (sweepCopies'), `run` (spawnSync: lsof and ps), `alive`, `startOf`, `wait`, `every` (ms
@@ -647,7 +648,7 @@ export async function renderReelKit(ctx, { dir, entry }, deps = {}) {
       return leave({ lastRender: { ...last, qa: "passed", why: "record" } }, RENDER_SAY.unrecorded);
     }
     const phone = join(dir, "renders", `${name}-phone.mp4`);
-    const renders = [...(Array.isArray(state.renders) ? state.renders : []), { name, file: `renders/${name}.mp4`, phone: plainFile(phone) ? `renders/${name}-phone.mp4` : null, at: last.at }];
+    const renders = [...(Array.isArray(state.renders) ? state.renders : []), { name, file: `renders/${name}.mp4`, phone: plainFile(phone) ? `renders/${name}-phone.mp4` : null, at: last.at, fingerprint: state.fingerprint }];
     mark({ state: "rendered", rendering: undefined, lastRender: { ...last, qa: "passed", why: "" }, renders });
     return { ok: true, file: final, why: "" };
   } catch (e) {

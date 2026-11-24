@@ -89,6 +89,13 @@ export const hfDir = (home, version = PIN.hyperframes.version) => {
 export const hfCli = (home, version = PIN.hyperframes.version) => join(hfDir(home, version), "node_modules", "hyperframes", "bin", "hyperframes.mjs");
 
 /** The `code` of folderFingerprint's throw for a link inside the folder, and for anything there that is neither a file nor a folder. */
+/** A name folded as the Mac's disk folds one, near enough: APFS takes two names for one when they are equal under Unicode's full case
+    folding, so `AGENT\u017F.md` (a long s) opens AGENTS.md and `\uFB06udio.json` (an st ligature) opens studio.json, which a plain
+    toLowerCase misses. Compatibility composition, then capitals, then small letters: the long s, the ligatures and the Kelvin sign come
+    out as s, st and k. It takes a few names for Studio's that the disk would not (a dotless i), never the other way for these names;
+    a zero-width joiner or a Cyrillic letter stays what it is. */
+export const foldName = (name) => name.normalize("NFKC").toUpperCase().toLowerCase();
+
 export const LINK_INSIDE = "REEL_KIT_LINK_INSIDE";
 export const ODD_INSIDE = "REEL_KIT_ODD_INSIDE";
 

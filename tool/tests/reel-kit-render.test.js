@@ -215,6 +215,8 @@ describe("the headless render", () => {
     assert.equal(state.fingerprint, before);
     assert.equal(compositionFingerprint(w.dir), before);
     assert.equal(state.rendering, undefined);
+    // Each render is listed with the fingerprint it ran on, which exports.js holds the edit to before it takes the render (Task 15, fix round 1).
+    assert.deepEqual(state.renders.map((r) => [r.name, r.file, r.fingerprint]), [[`${SLUG}-v1`, `renders/${SLUG}-v1.mp4`, before]]);
     // writeMeta alone, and a renders folder that is a link is never written through.
     const other = join(w.home, "other project");
     mkdirSync(join(other, "public"), { recursive: true });
