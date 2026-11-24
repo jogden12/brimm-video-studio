@@ -38,7 +38,7 @@ function words(key, state, { handOff = "hand it off", app = true, usage = false,
     "render-failed": `${edit} is built, but its last render ${qa ? "didn't pass Reel Kit's own checks" : "didn't finish"}, so nothing was kept: ask Jason.`,
     rendered: `${edit} is rendered. Say "${handOff}" and I will check it.`,
     failed: `${edit} couldn't be made: ask Jason.`,
-    unread: `What ${lower} is at can't be read on this Mac: ask Jason.`
+    unread: `I can't read how ${lower} is doing on this Mac: ask Jason.`
   }[state];
 }
 
@@ -239,6 +239,11 @@ describe("what the guide reads of a video's Reel Kit edits (reelKitEdits)", () =
     assert.deepEqual(one(seen("ready", { refused: "changed" }), { opened: ["2026-11-20T10:00:00Z"] }), EDIT("main", "opened"));
     assert.deepEqual(one(seen("opened")), EDIT("main", "opened"));
     assert.deepEqual(one(seen("rendered"), { state: "opened" }), EDIT("main", "rendered"));
+    // Studio's own mark that it opened the project in the app (reel-kit-worker.js wasOpened), when the record's entry was not written after the open.
+    assert.deepEqual(one({ ...seen("ready"), opened: true }), EDIT("main", "opened"));
+    assert.deepEqual(one({ ...seen("ready", { refused: "changed" }), opened: true }), EDIT("main", "opened"));
+    assert.deepEqual(one({ ...seen("rendered"), opened: true }), EDIT("main", "rendered"));
+    assert.deepEqual(one({ ...seen("ready"), opened: "yes" }), EDIT("main", "ready"), "only a mark seen, true, is one");
     // Being rendered, whatever studio.json says.
     assert.deepEqual(one(seen("ready", { rendering: true })), EDIT("main", "rendering"));
     // Nothing to read, or a state that is not one of Reel Kit's.
@@ -250,5 +255,22 @@ describe("what the guide reads of a video's Reel Kit edits (reelKitEdits)", () =
   it("counts a job queued for a part whose project is not made yet, in place of an older edit of it", () => {
     const projects = [entry("reel 2", 1)];
     assert.deepEqual(reelKitEdits(record(projects), () => seen("rendered"), ["reel 2", "main", "reel 0", "x"]), [EDIT("main", "queued"), EDIT("reel 2", "queued")]);
+  });
+});
+
+describe("a Reel Kit main video on a Mac that hands off version 1 only", () => {
+  it("says the wait for version 2 where it would say to hand off a rendered main video, as an iPhone clip handed off as it is waits", () => {
+    const WAITS = "Its hand-off is written once this Mac hands off version 2: ask Jason.";
+    for (const kind of ["raw", "clip"]) {
+      const rendered = nextFor(VIDEO[kind]("main", [EDIT("main", "rendered")], { v2: false }), NONE, NOW);
+      assert.deepEqual(shown(rendered), { stage: "waits-v2", text: WAITS }, kind);
+      // With its Reels rendered too, the hand-off is still the wait.
+      assert.equal(nextFor(VIDEO[kind]("main", [EDIT("main", "rendered"), EDIT("reel 2", "rendered")], { v2: false }), NONE, NOW).stage, "waits-v2", kind);
+      // Before its render, and for a Reel not rendered, the edit's own step: nothing there is a hand-off.
+      for (const state of ["storyboard", "ready", "opened"]) assert.equal(nextFor(VIDEO[kind]("main", [EDIT("main", state)], { v2: false }), NONE, NOW).stage, `reel-kit-${state}`, `${kind} ${state}`);
+      assert.equal(nextFor(VIDEO[kind]("main", [EDIT("main", "rendered"), EDIT("reel 2", "ready")], { v2: false }), NONE, NOW).stage, "reel-kit-ready", kind);
+      // On a Mac that hands off version 2, the hand-off.
+      assert.equal(nextFor(VIDEO[kind]("main", [EDIT("main", "rendered")]), NONE, NOW).text, words("main", "rendered"), kind);
+    }
   });
 });

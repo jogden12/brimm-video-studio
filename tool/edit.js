@@ -126,7 +126,7 @@ import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sess
 import { isRunning, lastLine, lockFile, runProgram } from "./run.js";
 import { DOWNLOADS_SAY_MS, LOOK_ASKED, LOOK_AT_WORK, UNSEEN_MS, accessLine, blocksDrop, saysInEpisodes, saysInOverview, stepLine, findingOf, lookerOf, placeWordsOf, readAccess, switchFor } from "./access.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine } from "./guide.js";
+import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine, reelKitEdits } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, byReelKit, projectDirOf, clipFolders, clipTrouble, clearOpensAfterSpellings, copyAtWork, copyIsMade, footageFailed, guidanceOf, isMain as inUse, mainState, markOpensAfterSpellings, opensAfterSpellingsOf, mediaOf, notWholeYet, openByItself, openInApp, plainName, projectOnAnotherMac, waitsForSpellings, whenReadyLockOf } from "./app.js";
 import { VOICEOVER, projectCues } from "./project.js";
@@ -144,7 +144,9 @@ import { SHOT_SAID } from "./sentences.js";
 import { footageAsked, footageCards, footageCounts, footageFor, labelOf as partLabelOf, partRefused, waitsForClient, partsOf as partsOfPlan, partsReader, planTitleOf } from "./footage.js";
 import { afterJoin, joinRun } from "./join.js";
 import { reelkitCommand } from "./reel-kit-commands.js";
-import { queuedFor } from "./reel-kit-worker.js";
+import { processStart, queuedFor, queuedOf, statusOf, wasOpened } from "./reel-kit-worker.js";
+import { projectFolderOf, readState, slugOf } from "./reel-kit-project.js";
+import { renderWhy, renderingBy } from "./reel-kit-render.js";
 import { footageToUse, footageWithheld, planProject } from "./plan-project.js";
 import { ON_OTHER_MAC, ORIGINALS_FOLDER, fileAt, filePlace, folderAt, keptOnAMac, notWholeHere, onOtherMac, recordingAt, recordingStat, roleOf } from "./where.js";
 
@@ -6778,6 +6780,9 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
     copy: way ? guideCopy(ctx, e, r, rates) : null,
     project: way && !handoff && !notes.finished[r.id] ? guideProject(ctx, e, r, downloads) : null,
     reelsExported: looksForReels ? guideReels(ctx, e, r, downloads) : [],
+    // Its Reel Kit edits (plan Task 20), read where the guide says them: a raw video's or an iPhone clip's before its hand-off, a finished video's
+    // Reels after it; nothing of a video the gate holds, one kept on another Mac, or one she has said is finished.
+    reelKit: !hidden && !there && !notes.finished[r.id] && (kind === "finished" ? Boolean(handoff) : way !== "" && !handoff) ? guideReelKit(ctx, e, r) : [],
     // A session kept on another Mac: its choice and whether its empty revision is owed are in its record; its teachings file is on that Mac, and is not
     // read here (an item it could not see counts as one undecided, as guideSession counts it).
     session: kind !== "session" ? null : there ? { choice: r.session?.teachings ?? null, teachingsOn: teachingsOn(ctx.settings, ctx.now()), undecided: 1, emptyOwed: revisionOwed(r) } : guideSession(ctx, e, r),
@@ -6785,6 +6790,32 @@ function guideFacts(ctx, e, links, rates, notes, downloads, footageIn) {
     // For `guide tell` alone, which follows a video from its drop folder into Episodes by it: never said.
     source: r.video && typeof r.video.file === "string" ? { mac: r.imported && r.imported.on, file: r.video.file, bytes: r.video.bytes } : null
   };
+}
+
+/** What the guide reads of the record `r`'s Reel Kit edits (guide.js reelKitEdits): for each, its project's studio.json in the episode's work folder
+    (`e.name`), as the worker's statusOf and readState read it, whether a render of it runs now (reel-kit-render.js renderingBy), for a ready one why
+    a render would refuse it (renderWhy), and whether Studio's own mark says it opened the project in the HyperFrames app (the worker's wasOpened,
+    by the edit's slug); and the parts whose jobs wait in the queue, their projects not made yet (queuedOf). An edit whose folder or slug can't be
+    named, or that can't be read, is unread. */
+function guideReelKit(ctx, e, r) {
+  const startOf = ctx.deps?.reelKit?.startOf ?? processStart;
+  const look = (entry) => {
+    try {
+      const dir = projectFolderOf(ctx.home, e.name, entry.name);
+      const state = readState(dir);
+      const status = statusOf(dir, ctx.alive, startOf);
+      return { status, state, rendering: renderingBy(state, ctx.alive, startOf), refused: status?.state === "ready" ? renderWhy(dir, state) : "", opened: wasOpened(ctx.home, slugOf(r, entry.key, entry.version)) };
+    } catch {
+      return null;
+    }
+  };
+  let queued = [];
+  try {
+    queued = queuedOf(ctx.home, r.id, ctx.alive).map((j) => j.key);
+  } catch {
+    queued = [];
+  }
+  return reelKitEdits(r, look, queued);
 }
 
 /** The runs this Mac's progress panel shows now (progress.js): each run's file in the panel's folder, whose process is alive. One

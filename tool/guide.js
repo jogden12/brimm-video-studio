@@ -445,15 +445,16 @@ const partOrder = (key) => (key === "main" ? 0 : Number(key.slice(5)));
     render that failed whether Reel Kit's own checks failed it (`qa`). */
 const kitFact = (key, state, more = {}) => ({ key, state, step: "", usage: false, qa: false, ...more });
 
-/** The state of the edit `entry` (its record's entry) from what was seen of it (`seen`: { status, state, rendering, refused }, the worker's
-    statusOf of its folder, its studio.json as read, whether a run renders it now, reel-kit-render.js renderingBy, and for a ready one why a render
-    would refuse it, renderWhy, "" when it would not). An edit opened in the app (its entry's state, or a time it opened, or its studio.json) is
-    `opened` from ready on, but a render done is rendered. */
+/** The state of the edit `entry` (its record's entry) from what was seen of it (`seen`: { status, state, rendering, refused, opened }, the worker's
+    statusOf of its folder, its studio.json as read, whether a run renders it now, reel-kit-render.js renderingBy, for a ready one why a render
+    would refuse it, renderWhy, "" when it would not, and whether Studio's own mark says it opened the project in the app, reel-kit-worker.js
+    wasOpened). An edit opened in the app (its entry's state, or a time it opened, or Studio's mark) is `opened` from ready on, but a render done
+    is rendered. */
 function kitState(key, entry, seen) {
   const status = seen && typeof seen === "object" ? seen.status : null;
   if (seen && seen.rendering === true) return kitFact(key, "rendering");
   if (!status || typeof status !== "object" || typeof status.state !== "string") return kitFact(key, "unread");
-  const opened = entry.state === "opened" || (Array.isArray(entry.opened) && entry.opened.length > 0);
+  const opened = entry.state === "opened" || (Array.isArray(entry.opened) && entry.opened.length > 0) || seen.opened === true;
   if (status.state === "stopped") return kitFact(key, "stopped", { step: typeof status.step === "string" ? status.step : "", usage: status.why === "usage" });
   if (status.state === "ready") {
     if (opened) return kitFact(key, "opened");
@@ -466,7 +467,7 @@ function kitState(key, entry, seen) {
 }
 
 /** A video's Reel Kit edits as the guide reads them (VideoFacts `reelKit`), from its `record` and `look`, which edit.js gives: `look(entry)` is
-    what was seen of an edit's folder on this Mac ({ status, state, rendering, refused }: kitState). For each part ("main", "reel <n>") the newest
+    what was seen of an edit's folder on this Mac ({ status, state, rendering, refused, opened }: kitState). For each part ("main", "reel <n>") the newest
     version of its edits that is not kept for an earlier kind; and for each part in `queued` (the keys of the jobs in the queue whose projects are
     not made yet, reel-kit-worker.js queuedOf) a queued edit in its place. In the parts' order: the main video, then the Reels by number. */
 export function reelKitEdits(record, look, queued = []) {
@@ -518,14 +519,15 @@ function kitStep(edit, handOff, app) {
     case "render-failed": return toDo(stage, `${name} is built, but its last render ${edit.qa === true ? "didn't pass Reel Kit's own checks" : "didn't finish"}, so nothing was kept: ask Jason.`);
     case "rendered": return toDo(stage, `${name} is rendered. Say "${handOff}" and I will check it.`);
     case "failed": return toDo(stage, `${name} couldn't be made: ask Jason.`);
-    default: return toDo("reel-kit-unread", `What ${lower} is at can't be read on this Mac: ask Jason.`);
+    default: return toDo("reel-kit-unread", `I can't read how ${lower} is doing on this Mac: ask Jason.`);
   }
 }
 
 /** The step of a raw video or an iPhone clip with a Reel Kit edit, before its hand-off, or null when it has none. `own` is the step its main video
     has without Reel Kit (HyperFrames', or the clip's offer). Its main video first: its Reel Kit edit's step until it is rendered, or, with none, its
     own step until it is exported. Then its Reel Kit Reels, each settled before the hand-off, which takes the Reels with the main video (`finish`).
-    Then the hand-off: the main video's rendered edit, or its export. */
+    Then the hand-off: the main video's rendered edit, or its export. On a Mac that hands off version 1 only, a rendered edit's hand-off
+    waits for version 2 (WAITS_V2), as an iPhone clip's hand-off as it is waits there (clipStep). */
 function kitBeforeHandOff(facts, own) {
   const edits = kitEditsOf(facts);
   if (!edits.length) return null;
@@ -535,7 +537,8 @@ function kitBeforeHandOff(facts, own) {
   if (mine && mine.stage !== "exported") return mine;
   const reel = edits.find((e) => e.key !== "main" && e.state !== "rendered");
   if (reel) return kitStep(reel, "hand it off", facts.app);
-  return main ? kitStep(main, "hand it off", facts.app) : mine;
+  if (!main) return mine;
+  return facts.v2 ? kitStep(main, "hand it off", facts.app) : toDo("waits-v2", WAITS_V2);
 }
 
 /** What is said of a plan whose footage is being made into one video (PR H5b), and of one whose run to do it ended in a failure. */
