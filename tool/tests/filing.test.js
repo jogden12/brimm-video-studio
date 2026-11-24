@@ -218,7 +218,9 @@ describe("which BRIMM Video Studio wrote a record", () => {
   it("is unknown, and git is not asked, where the folder has no .git of its own, as the app's copy of the code has none", () => {
     const asked = [];
     const spawn = (...a) => (asked.push(a), { status: 0, stdout: "abc1234\n" });
-    assert.equal(commitOf("/Applications/BRIMM Video Studio.app/Contents/Resources/studio", { spawn, exists: () => false }), "unknown");
+    // A made-up app's copy, never the real /Applications one: on a Mac with BRIMM Video Studio installed, buildOf reads its build.json.
+    const copy = join(mkdtempSync(join(tmpdir(), "brimm-filing-")), "BRIMM Video Studio.app", "Contents", "Resources", "studio");
+    assert.equal(commitOf(copy, { spawn, exists: () => false }), "unknown");
     assert.equal(commitOf(REPO, { spawn }), "unknown");
     assert.deepEqual(asked, []);
   });
