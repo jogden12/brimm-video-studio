@@ -2,7 +2,8 @@
 // headless and can't show a storyboard, so her chat publishes it to the side panel with the Artifact tool, and reads her comments on it
 // with ArtifactComments, under this opening and nothing wider, in both locks:
 //
-//   - Artifact: a publish (action left out, or "publish") of a page Studio staged, exactly as `reelkit storyboard` prints it (publishInput):
+//   - Artifact: a publish (action left out, or "publish") of a page Studio staged, exactly as `reelkit storyboard` prints it (publishInput;
+//     a first publish exactly that, a later one with its sources given relative to the stage or its words left out):
 //     its index.html by its real path with no link on the way, its files from its own stage and nothing else, the comments capability,
 //     and the URL recorded for it once it has one (never another, the kept BRIMM Ops page's among them). `open` of a recorded URL. The
 //     read-only `quickstart` the tool asks for before a new page, with intent "other" and no design systems. Nothing else: no read, list,
@@ -551,6 +552,11 @@ const PUBLISH_KEYS = ["action", "file_path", "files", "root", "url", "capabiliti
 /** What a publish of `page` with `given` is answered. */
 function publishOf(page, given) {
   if (!only(given, PUBLISH_KEYS)) return deny(PUBLISH_EXACTLY);
+  // A first publish makes the page: exactly as printed, so it has its frames and the comments capability.
+  if (page.url === null) {
+    const { action, ...rest } = given;
+    return isDeepStrictEqual(rest, publishInput(page)) && pageStill(page) ? allow("a storyboard BRIMM Video Studio staged") : deny(PUBLISH_EXACTLY);
+  }
   if (given.capabilities !== undefined && !isDeepStrictEqual(given.capabilities, CAPABILITIES)) return deny(PUBLISH_EXACTLY);
   if (page.url === null ? given.url !== undefined : plainUrl(given.url) !== page.url) return deny(PUBLISH_EXACTLY);
   for (const key of ["title", "description", "icon"]) if (given[key] !== undefined && given[key] !== page[key]) return deny(PUBLISH_EXACTLY);

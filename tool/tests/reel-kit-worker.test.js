@@ -14,7 +14,7 @@ import { binDir, hfDir, kitDir, reelKitHome, venvPython } from "../reel-kit.js";
 import { compositionFingerprint, readState, writeState } from "../reel-kit-project.js";
 import { factsOf, workFolder } from "../settings.js";
 import { bashNeeds, bothSpellings, gatedPlaces, realOf as placeReal } from "../places.js";
-import { studioFolder } from "../studio.js";
+import { ENVIRONMENT, studioFolder } from "../studio.js";
 import { CLAUDE_MODEL } from "../unedited.js";
 import {
   JOBS, OWN_NAMES, WORKER_MODEL, WORKER_TOOLS, enqueue, jobNotesFile, macLock, queuedOf, readWorkerStatus, workerStatusFile as statusFileOf, macWorkerFile, noteOwnFile, ownFile, processStart, queueFile, queuedFor, runJob, settingsFileOf, statusOf, usageLimited,
@@ -551,8 +551,11 @@ describe("the worker's tools", () => {
           ...[".venv", ".venv-mp", "tools", "models", "vendor", "style", "fx", "cards", "hf"].map((name) => real(join(w.rkHome, name))),
           ...bashNeeds({ ...facts, folder: w.project })
         ]
-      }
+      },
+      // The app's credentials are taken from every command, as her folder's open lock takes them (studio.js openSettingsOf).
+      credentials: { envVars: ENVIRONMENT.deny.map((name) => ({ name, mode: "deny" })) }
     });
+    assert.ok(settings.sandbox.credentials.envVars.some((e) => e.name === "ANTHROPIC_API_KEY" && e.mode === "deny"));
     // Reads are an allowlist inside the home: never REEL_KIT_HOME whole (its trials/ holds a key), another run's tmp/, or the rest of the home.
     const allowed = settings.sandbox.filesystem.allowRead;
     for (const never of [w.rkHome, join(w.rkHome, "trials"), join(w.rkHome, "tmp"), w.home, join(w.home, "Documents"), join(w.home, ".cache", "hyperframes"),
@@ -678,6 +681,17 @@ describe("the worker's status", () => {
     assert.equal(statusOf(w.project).step, "storyboard");
     // What scaffold wrote is kept.
     assert.equal(readState(w.project).slug, "abc123-reel-2-v1");
+  });
+
+  it("keeps the Claude Code version the worker said it started on, and logs when a run's differs from the last", async () => {
+    const w = world();
+    const lines = [];
+    await runJob(ctxOf(w), { dir: w.project, job: "edit" }, depsOf(w, standIn(w), { log: (line) => lines.push(line) }));
+    assert.equal(readState(w.project).claudeCode, "2.1.318");
+    assert.ok(!lines.some((line) => /Claude Code/.test(line)), lines.join("\n"));
+    await runJob(ctxOf(w), { dir: w.project, job: "revise" }, depsOf(w, standIn(w, "", { CLAUDE_WORKER_VERSION: "2.1.400" }), { log: (line) => lines.push(line) }));
+    assert.equal(readState(w.project).claudeCode, "2.1.400");
+    assert.ok(lines.some((line) => line.includes("2.1.318") && line.includes("2.1.400")), lines.join("\n"));
   });
 
   it("ignores a status file that is not the worker's in shape or size, with a line in the log", async () => {

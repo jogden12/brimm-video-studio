@@ -439,6 +439,13 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
           init = event;
           const why = startFault(event);
           if (why) return void stop(`it did not start as it was told (${why})`);
+          // The Claude Code it ran on, kept, and a line when it is not the one the last run said: its flags and events were checked on one.
+          const version = typeof event.claude_code_version === "string" && /^[0-9A-Za-z.+-]{1,40}$/.test(event.claude_code_version) ? event.claude_code_version : null;
+          const last = readState(dir)?.claudeCode;
+          if (version !== null && version !== last) {
+            if (typeof last === "string") log(`Reel Kit's worker for ${slug} ran on Claude Code ${version}; the last run was on ${last}.`);
+            mark({ claudeCode: version });
+          }
           if (typeof event.session_id === "string" && event.session_id !== session) {
             session = event.session_id;
             mark({ session });
@@ -539,12 +546,13 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
     noted, is moved to `asideDir`'s `<slug> set aside/<when>/`, out of the worker's reach, never deleted, and the run is
     `failed`, `why: "own"`; found before the worker starts, nothing is started. A project whose run is running is left as it is: { state, why: "running" }, but one marked queued by this very run (by its pid); one whose run died
     but whose `claude` still runs is queued, and that `claude` stopped once this job holds the Mac.
-    `deps`: `claude` (the program; findPrograms' by default), `scaffold` and `scaffoldDeps`, `alive`, `startOf` (processStart), `wait` (ms
+    `deps`: `claude` (the program; findPrograms' by default), `scaffold` and `scaffoldDeps`, `inLock` (a made project's last look, inside
+    the lock: "" or why the job is not run), `alive`, `startOf` (processStart), `wait` (ms
     to a promise), `every` (how often, in ms, the lock and the status file are looked at), `limit`, `grace`, `facts` (settings.js factsOf of
     ctx.settings by default), `log`, `run` (spawnSync: `lsof` and `ps`, for what holds the project open), and `started`, called with the `claude` pid once it runs (a test's, to throw there). `ctx`: `home`, `settings` (this Mac's: BRIMM Video's place for the sandbox), `checkout`, `node`, `base`. */
 export async function runJob(ctx, spec, deps = {}) {
   const {
-    claude = findPrograms().claude, scaffold: make = scaffold, scaffoldDeps = {}, alive = isRunning, startOf = processStart,
+    claude = findPrograms().claude, scaffold: make = scaffold, scaffoldDeps = {}, inLock, alive = isRunning, startOf = processStart,
     wait = (ms) => new Promise((r) => setTimeout(r, ms)), every = 2000, limit = WORKER_MS, grace = 5000, facts, log = () => {}, run = spawnSync
   } = deps;
   const home = ctx.home;
@@ -593,6 +601,16 @@ export async function runJob(ctx, spec, deps = {}) {
   }
   try {
     await stopLeftOver(home, { alive, startOf, grace, wait, log });
+    // A made project's job is judged again here, after however long it waited (`inLock`: "" to go on, or why not): nothing is run then,
+    // and the edit reads as stopped at the step it would have started from, so that "carry on" runs it once it may.
+    if (dir !== null && typeof inLock === "function") {
+      const why = await inLock();
+      if (why) {
+        log(`Reel Kit's ${job} of ${before.slug} was not run: ${why}`);
+        writeState(dir, { ...(readState(dir) ?? {}), state: "stopped", job, step: from, pid: process.pid, why: "refused", queuedAt: undefined });
+        return { state: "stopped", why: "refused", step: from, dir };
+      }
+    }
     let made = null;
     if (dir === null) {
       try {

@@ -732,6 +732,8 @@ async function goCommand(ctx, words, h) {
   } catch {
     return refuse(ctx, EDIT_SAY.notesUnread);
   }
+  // Her go is given: the local page, if it serves this edit, has done its work.
+  stopLocal(ctx, kitOf(ctx).startOf ?? processStart, edit.dir);
   const pid = startJob(ctx, found, ["finalize", edit.slug]);
   markQueued(ctx, edit.dir, "finalize", pid, JOBS.finalize[0]);
   ctx.say(EDIT_SAY.approved(editSaid(edit.key, edit.mode, edit.version)));
@@ -757,6 +759,8 @@ async function reviseCommand(ctx, words, h) {
   const used = readState(edit.dir)?.notesUsed;
   const since = notes.slice(Number.isInteger(used) && used >= 0 ? used : 0).filter(isChange);
   if (!since.length) return refuse(ctx, EDIT_SAY.noNotes);
+  // The storyboard is being made again: a local page of this one would show the old.
+  stopLocal(ctx, kitOf(ctx).startOf ?? processStart, edit.dir);
   const pid = startJob(ctx, found, ["revise", edit.slug]);
   markQueued(ctx, edit.dir, "revise", pid, JOBS.revise[0]);
   ctx.say(EDIT_SAY.revising(editSaid(edit.key, edit.mode, edit.version), since.length));
@@ -858,6 +862,9 @@ async function localPage(ctx, edit) {
   } catch {
     return refuse(ctx, EDIT_SAY.notSetUp);
   }
+  // serve.py serves <project>/storyboard/ and writes its notes.json whole: only a real folder there, reached by no link, and a notes file
+  // that is a plain file or none yet, so its writes land in the project and nowhere a link leads.
+  if (!plainStoryboard(edit.dir)) return refuse(ctx, STORYBOARD_SAY.localFailed);
   const startOf = kit.startOf ?? processStart;
   stopLocal(ctx, startOf);
   let pid;
@@ -903,8 +910,23 @@ async function localPage(ctx, edit) {
   return refuse(ctx, STORYBOARD_SAY.localFailed);
 }
 
-/** Stop the local page this Mac started last, when it is surely that process still (its pid and its start): nothing else is ever stopped. */
-function stopLocal(ctx, startOf) {
+/** Whether the edit `dir`'s storyboard/ is a real folder and its notes.json a plain file or not there yet. */
+function plainStoryboard(dir) {
+  try {
+    if (!lstatSync(join(dir, "storyboard")).isDirectory()) return false;
+  } catch {
+    return false;
+  }
+  try {
+    return lstatSync(notesFile(dir)).isFile();
+  } catch (error) {
+    return error?.code === "ENOENT";
+  }
+}
+
+/** Stop the local page this Mac started last, when it is surely that process still (its pid and its start): nothing else is ever stopped.
+    With `dir`, only when it serves that edit. */
+function stopLocal(ctx, startOf, dir) {
   let left;
   try {
     left = JSON.parse(readCapped(localFile(ctx.home), 64 * 1024) ?? "null");
@@ -912,6 +934,7 @@ function stopLocal(ctx, startOf) {
     left = null;
   }
   if (!left || !Number.isInteger(left.pid) || typeof left.start !== "string") return;
+  if (dir !== undefined && left.dir !== dir) return;
   if (!ctx.alive(left.pid) || startOf(left.pid) !== left.start) return;
   try {
     process.kill(left.pid, "SIGTERM");
@@ -1169,28 +1192,38 @@ async function editNow(ctx, { found, record }, job, [slug, ...more], h) {
     ctx.say(h.help);
     return 2;
   }
-  // An edit changed since finalize, or opened in the app, is never changed by Reel Kit again: nothing is written or run.
-  const kept = keptInApp(ctx, edit);
-  if (kept) {
-    ctx.say(`Reel Kit's ${job} of ${slug} was not run: ${kept}`);
+  // An edit changed since finalize, or opened in the app, is never changed by Reel Kit again: nothing is written or run. A finalize (or
+  // its resume) runs only after her go. Both are judged now and again inside the Mac's lock, after however long the job waited, with the
+  // episode found again through the gate (a video corrected to a session, or held, while it waited is never worked on).
+  const why = () => {
+    const kept = keptInApp(ctx, edit);
+    if (kept) return kept;
+    const state = readState(edit.dir) ?? {};
+    const approved = state.approved !== null && typeof state.approved === "object";
+    return (job === "finalize" || (job === "resume" && state.job === "finalize")) && !approved ? "she has not said go." : "";
+  };
+  const first = why();
+  if (first) {
+    ctx.say(`Reel Kit's ${job} of ${slug} was not run: ${first}`);
     return 1;
   }
-  const state = readState(edit.dir) ?? {};
-  const approved = state.approved !== null && typeof state.approved === "object";
-  if ((job === "finalize" || (job === "resume" && state.job === "finalize")) && !approved) {
-    ctx.say(`Reel Kit's ${slug} was not finalized: she has not said go.`);
-    return 1;
-  }
-  let spec;
-  if (job === "revise") {
+  const spec = job === "revise" ? { dir: edit.dir, job: "revise", notes: [] } : job === "resume" ? { dir: edit.dir, resume: true } : { dir: edit.dir, job };
+  const inLock = () => {
+    const heard = [];
+    const again = h.episodeFor({ ...ctx, say: (line) => heard.push(line) }, [found.name], { newerEnds: 1 });
+    if (!again.found) return heard.at(-1) ?? EDIT_SAY.notWritten;
+    if (!editsOf(ctx, again.found, again.record).some((e) => e.slug === slug && e.dir === edit.dir)) return EDIT_SAY.noSuchEdit;
+    const now = why();
+    if (now || job !== "revise") return now;
+    const state = readState(edit.dir) ?? {};
     const notes = readNotes(edit.dir) ?? [];
     const used = Number.isInteger(state.notesUsed) && state.notesUsed >= 0 ? state.notesUsed : 0;
-    const since = notes.slice(used).filter(isChange).map((n) => ({ beat: n.beat, text: n.text, ...(n.at === undefined ? {} : { at: n.at }) }));
+    spec.notes = notes.slice(used).filter(isChange).map((n) => ({ beat: n.beat, text: n.text, ...(n.at === undefined ? {} : { at: n.at }) }));
     // Her go was for the storyboard these notes change: the next one waits for hers again.
     writeState(edit.dir, { ...state, notesUsed: notes.length, approved: undefined });
-    spec = { dir: edit.dir, job: "revise", notes: since };
-  } else spec = job === "resume" ? { dir: edit.dir, resume: true } : { dir: edit.dir, job };
-  const ended = await runJob(ctx, spec, jobDeps(ctx));
+    return "";
+  };
+  const ended = await runJob(ctx, spec, jobDeps(ctx, { inLock }));
   ctx.say(`Reel Kit's ${job} of ${slug} ended ${ended.state}${ended.why ? ` (${ended.why})` : ""}.`);
   return ["storyboard", "ready"].includes(ended.state) ? 0 : 1;
 }

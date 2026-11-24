@@ -33,7 +33,7 @@ import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { PIN, foldName, hfDir } from "./reel-kit.js";
 import { bashNeeds, bothSpellings, gatedPlaces, realOf as placeOf } from "./places.js";
-import { studioFolder } from "./studio.js";
+import { ENVIRONMENT, studioFolder } from "./studio.js";
 import { CLAUDE_MODEL } from "./unedited.js";
 
 /** The model of the worker and of its card and FX helpers: Studio's pinned model. */
@@ -516,7 +516,8 @@ const HOME_READS = Object.freeze([".venv", ".venv-mp", "tools", "models", "vendo
     openSettingsOf); and only these are let back in, as the open lock's allowRead carves out of its denyRead: the project, the run's temp
     folder, the kit, Reel Kit's own HyperFrames, HyperFrames' Chrome (~/.cache/hyperframes/chrome alone: its history/ holds every
     HyperFrames project on the Mac; fonts/ and background-removal/ wait on RK21), REEL_KIT_HOME's HOME_READS and the three places
-    Bash itself needs (places.js bashNeeds). Whether HyperFrames' headless Chrome runs inside it is the by-hand spike RK21. */
+    Bash itself needs (places.js bashNeeds). The app's credentials (environment.json's deny list) are taken from every command, as the
+    open lock takes them. Whether HyperFrames' headless Chrome runs inside it is the by-hand spike RK21. */
 export function workerSandbox({ checkout, project, kit, rkHome, facts, tmp }) {
   if (!facts || typeof facts.home !== "string" || typeof facts.root !== "string") throw new Error("workerSandbox: this Mac's facts (settings.js factsOf) are needed");
   if (typeof tmp !== "string" || !isAbsolute(tmp)) throw new Error("workerSandbox: tmp must be a whole path");
@@ -537,7 +538,8 @@ export function workerSandbox({ checkout, project, kit, rkHome, facts, tmp }) {
         placeOf(project), placeOf(tmp), placeOf(kit), placeOf(hfDir(facts.home)), placeOf(join(facts.home, ".cache", "hyperframes", "chrome")),
         ...HOME_READS.map((name) => placeOf(join(rkHome, name))), ...bashNeeds({ ...facts, folder: project })
       ]
-    }
+    },
+    credentials: { envVars: ENVIRONMENT.deny.map((name) => ({ name, mode: "deny" })) }
   };
 }
 

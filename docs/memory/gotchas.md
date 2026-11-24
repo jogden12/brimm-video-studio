@@ -109,6 +109,14 @@ Lessons from the repo's review notes, the 5 Nov team review, the Mac app reviews
   - **Source:** `docs/superpowers/notes/2026-10-26-lock-k0-findings.md`. **Times:** 13.
 - **Lesson:** A narrow `denyRead` of the tool's folders needs `allowRead` for its temp folder, shell snapshots and app data, or every `cat` and `node` fails; heredocs stay broken, so use the Write tool.
   - **Source:** lock K0 findings (2026-10-26). **Times:** 1.
+- **Lesson:** The Reel Kit worker's own file tools (Read, Write, Edit, Glob, Grep) run outside Claude Code's sandbox: only the PreToolUse hook's real-path check holds them, and a Glob or Grep pattern is not judged by real path. Keep the hook's table the limit for them, and never widen a file rule on the sandbox's word.
+  - **Why:** The sandbox wraps commands only; final review A of Reel Kit in Studio (2026-11-23) named it a known limit.
+  - **Source:** Reel Kit in Studio final review A. **Times:** 1.
+- **Lesson:** A process a worker starts with `setsid` (or anything that leaves its process group) survives the group kill: `killGroup` stops only the group, and `stopHolders` names holders in the log but stops none.
+  - **Why:** Known limit from final review A of Reel Kit in Studio (2026-11-23); the per-step checks (ownEntries, sweepOwn) are what is left.
+  - **Source:** Reel Kit in Studio final review A. **Times:** 1.
+- **Lesson:** Never put a headless run's allow rules on its command line (`--allowedTools`): in `-p` a settings file that fails its check is passed over silently, and the command-line allow list then holds without the file's sandbox and hook. Allow rules live only in the settings file; deny rules may go on both.
+  - **Source:** Reel Kit in Studio final review A1 (2026-11-23). **Times:** 1.
 - **Lesson:** Words withdrawn from BRIMM Ops are cleared in every copy (the second backup place, and Dropbox's version history by hand), and the withdraw tool says loudly when it stopped early.
   - **Why:** It returned early with no local `backups/` and exited 0 when the second place was unset; Dropbox keeps old versions 30 to 180 days. Fixed in the Ops round.
   - **Source:** review-changes ledger (2026-11-05/06). **Times:** 4.

@@ -24,7 +24,7 @@ and your temporary folder (`TMPDIR`), never Studio's own files there, and nothin
 Reel Kit's own tools and HyperFrames. (By hand, RK21, before Studio's first real run: whether HyperFrames' headless browser runs inside
 this sandbox with only its `~/.cache/hyperframes/chrome` readable, or also needs `fonts/` or `background-removal/` there; and a
 real worker killed mid-step, with `ps -o pid,pgid,command` showing nothing of its process group left.) Studio looks over the project
-before and after every run, once it has stopped anything that still holds the project or your temporary folder open: one of Studio's
+before and after every run, once your process group has stopped (a process still holding the project open is noted, not stopped): one of Studio's
 own names anywhere in it, in any case or any letters the Mac's disk takes for the same name, that Studio did not write itself (it
 keeps its own list, where you can't reach it) is moved out of the project, to a place of Studio's you can't reach, and fails the run.
 

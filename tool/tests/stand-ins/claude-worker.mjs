@@ -84,7 +84,7 @@ function styleStep(step) {
 }
 
 emit({ type: "system", subtype: "init", cwd, model: after("--model"), permissionMode: scenario === "unsafe-init" ? "bypassPermissions" : after("--permission-mode"),
-  tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent"], mcp_servers: [] });
+  tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent"], mcp_servers: [], claude_code_version: process.env.CLAUDE_WORKER_VERSION || "2.1.318" });
 if (scenario === "hook") for (const call of JSON.parse(process.env.CLAUDE_WORKER_CALLS ?? "[]")) hook.push({ call: call.tool_name, decision: askHook(call) });
 
 for (const [i, step] of steps.entries()) {

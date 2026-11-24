@@ -464,6 +464,26 @@ describe("fix round 1: the queued job looks at the episode again, inside the Mac
     });
   }
 
+  it("runs no finalize when the video was corrected to a session while its job waited for the Mac", async () => {
+    const w = world({ edits: [{ n: 2, state: { state: "storyboard", step: "storyboard" } }] });
+    assert.equal((await reelkit(w, ["go", FOLDER, slugOf(2)])).code, 0);
+    const words = startedWords(w).at(-1);
+    assert.deepEqual(words, ["--now", FOLDER, "finalize", slugOf(2)]);
+    const held = takeEpisodeLock(macLock(w.t.home), "reelkit edit", () => true);
+    assert.ok(held.taken);
+    w.live.clear();
+    const half = reelkit(w, words, { reelKit: { claude: claudeOf(w), run, every: 20, wait: (ms) => new Promise((done) => setTimeout(done, Math.min(ms, 20))) } });
+    await until(() => readState(w.dirOf(2)).pid === process.pid, "the half waiting for the Mac");
+    rewrite(w, { kind: "session", answer: { ...ANSWERED, private: "yes" }, label: "Session, 2026-10-20", session: SESSION_MARK });
+    releaseEpisodeLock(macLock(w.t.home), held.text);
+    const ended = await half;
+    assert.equal(ended.code, 1, ended.said.join("\n"));
+    const state = readState(w.dirOf(2));
+    assert.notEqual(state.state, "ready", "the worker never ran");
+    assert.equal(state.worker, undefined, "no worker was started");
+    assert.equal(state.state, "stopped");
+  });
+
   it("refuses to open a part in HyperFrames while a Reel Kit job for it waits, in one line", async () => {
     const w = world();
     await reelkit(w, ["start", FOLDER, "reel", "2", "--mode", "lofi"]);

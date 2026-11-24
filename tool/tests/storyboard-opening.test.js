@@ -6,7 +6,7 @@
 // no test runs the real Artifact tools, Reel Kit's Python or a browser.
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, utimesSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, utimesSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -106,10 +106,23 @@ describe("the narrow opening: publishing a staged page, in both locks", () => {
     });
     assert.deepEqual(await w.both("Artifact", input), ALLOW);
     assert.deepEqual(await w.both("Artifact", { ...input, action: "publish" }), ALLOW);
-    // Sources relative to a root that is the stage itself; the files left out; the optional words left out.
+    // A first publish makes the page, so it is exactly the printed one: with no capabilities the page has no comments, and with
+    // index.html alone it has no frames. Sources relative to a root, or as { from }, the files or the words left out, are refused then.
+    const { title, description, icon, files, capabilities, ...bare } = input;
+    for (const other of [
+      { ...input, root: staged.stage, files: Object.fromEntries(FILES.map((rel) => [rel, rel])) },
+      { ...input, files: Object.fromEntries(FILES.map((rel) => [rel, { from: join(staged.stage, rel) }])) },
+      { ...bare, capabilities }, { ...input, capabilities: undefined }, { file_path: input.file_path, files, title, description, icon }, bare
+    ]) assert.deepEqual(await w.both("Artifact", JSON.parse(JSON.stringify(other))), DENY, JSON.stringify(other));
+  });
+  it("allows a later version's publish to its recorded URL with the sources given another way, or its words and files left out", async () => {
+    const w = lockWorld();
+    const staged = w.stage();
+    recordUrl(w.home, SLUG, URL_1);
+    const input = publish(w);
     assert.deepEqual(await w.both("Artifact", { ...input, root: staged.stage, files: Object.fromEntries(FILES.map((rel) => [rel, rel])) }), ALLOW);
     assert.deepEqual(await w.both("Artifact", { ...input, files: Object.fromEntries(FILES.map((rel) => [rel, { from: join(staged.stage, rel) }])) }), ALLOW);
-    const { title, description, icon, files, ...bare } = input;
+    const { title, description, icon, files, capabilities, ...bare } = input;
     assert.deepEqual(await w.both("Artifact", bare), ALLOW);
   });
   it("allows a later version only to the URL recorded for it", async () => {
@@ -714,6 +727,40 @@ describe("reelkit storyboard", () => {
     assert.notEqual(first, second);
     await waitFor(() => !running(first));
     process.kill(second, "SIGTERM");
+  });
+  it("serves no local page of a storyboard that is a link, or whose notes file is not a plain file", async () => {
+    const w = edited();
+    const elsewhere = join(w.t.dir, "elsewhere");
+    cpSync(join(w.dir, "storyboard"), elsewhere, { recursive: true });
+    rmSync(join(w.dir, "storyboard"), { recursive: true });
+    symlinkSync(elsewhere, join(w.dir, "storyboard"));
+    let r = await reelkit(w, ["storyboard", FOLDER, SLUG, "local"]);
+    assert.deepEqual([r.code, r.said], [1, [STORYBOARD_SAY.localFailed]]);
+    rmSync(join(w.dir, "storyboard"));
+    cpSync(elsewhere, join(w.dir, "storyboard"), { recursive: true });
+    rmSync(notesFile(w.dir), { force: true });
+    mkdirSync(notesFile(w.dir));
+    r = await reelkit(w, ["storyboard", FOLDER, SLUG, "local"]);
+    assert.deepEqual([r.code, r.said], [1, [STORYBOARD_SAY.localFailed]]);
+    rmSync(notesFile(w.dir), { recursive: true });
+    symlinkSync(join(elsewhere, "index.html"), notesFile(w.dir));
+    r = await reelkit(w, ["storyboard", FOLDER, SLUG, "local"]);
+    assert.deepEqual([r.code, r.said], [1, [STORYBOARD_SAY.localFailed]]);
+    assert.ok(!existsSync(w.log), "serve.py never ran");
+    assert.deepEqual(w.opened, []);
+  });
+  it("stops the edit's local page at go and at revise", async () => {
+    for (const ask of ["go", "revise"]) {
+      const w = edited();
+      if (ask === "revise") writeFileSync(notesFile(w.dir), JSON.stringify([...(readNotes(w.dir) ?? []), { beat: "p01", text: "Shorter.", at: "2026-11-23T10:05:00-06:00" }]));
+      const r = await reelkit(w, ["storyboard", FOLDER, SLUG, "local"]);
+      assert.equal(r.code, 0, r.said.join("\n"));
+      const pid = JSON.parse(readFileSync(join(w.t.home, "Library", "Application Support", "BRIMM Video", "storyboard-local.json"), "utf8")).pid;
+      assert.ok(running(pid));
+      const asked = await reelkit(w, [ask, FOLDER, SLUG]);
+      assert.equal(asked.code, 0, asked.said.join("\n"));
+      await waitFor(() => !running(pid));
+    }
   });
   it("says when the local page couldn't be opened, and opens no browser", async () => {
     const w = edited({ scenario: "fail" });
