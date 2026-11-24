@@ -300,6 +300,29 @@ describe("changing her style in chat", () => {
     assert.equal(readState(changeDir(w.t.home, ran.stamp)).state, "refused");
   });
 
+  it("keeps the change waiting when her pack can't be read at her yes", async () => {
+    const w = world();
+    assert.equal((await style(w, ["change", "Bigger captions."])).code, 0);
+    const ran = await runChange(w, { captions: { hifi: { size: 60 } } });
+    await style(w, ["show"]);
+    chmodSync(join(w.her, "STYLE.md"), 0);
+    const yes = await style(w, ["yes"]);
+    chmodSync(join(w.her, "STYLE.md"), 0o644);
+    assert.deepEqual([yes.code, yes.said], [1, [STYLE_SAY.herUnread]]);
+    assert.equal(readState(changeDir(w.t.home, ran.stamp)).state, "storyboard", "the change still waits");
+    assert.equal((await style(w, ["yes"])).code, 0);
+    assert.equal(readJson(join(w.her, "style.json")).captions.hifi.size, 60);
+  });
+
+  it("refuses a change when her pack changes while it is copied", async () => {
+    const w = world();
+    const r = await style(w, ["change", "Bigger captions."], { reelKit: { copied: () => editHers(w, (doc) => (doc.motion = "normal")) } });
+    assert.deepEqual([r.code, r.said], [1, [STYLE_SAY.changedWhileCopied]]);
+    assert.deepEqual(w.t.started, []);
+    assert.deepEqual(stamps(w), []);
+    assert.deepEqual(readdirSync(w.her).filter((n) => n.startsWith("before ")), [], "no copy is kept");
+  });
+
   it("puts only her style's own files into Dropbox on yes, none larger than a style's file may be", async () => {
     const w = world();
     assert.equal((await style(w, ["change", "Bigger captions."])).code, 0);
@@ -368,7 +391,7 @@ describe("changing her style in chat", () => {
 });
 
 describe("carrying her style onto a new starting style", () => {
-  it("keeps the starting style her pack was made from beside it, and nothing else reads it", async () => {
+  it("keeps the starting style her pack was made from beside it, and only copies of her pack and the carry read it", async () => {
     const w = world();
     assert.deepEqual(filesOf(join(w.her, ".base")), filesOf(w.shipped));
     assert.equal(syncPack({ settings: { root: w.t.root }, home: w.t.home, shipped: w.shipped, build: { mode: "dev" } }), "");
@@ -376,7 +399,7 @@ describe("carrying her style onto a new starting style", () => {
     assert.deepEqual((await style(w, ["diff"])).said, [STYLE_SAY.same]);
     assert.equal((await style(w, ["change", "Bigger captions."])).code, 0);
     const name = backupAt(w.t.now());
-    assert.ok(!existsSync(join(w.her, name, ".base")), "a copy kept holds no base");
+    assert.deepEqual(filesOf(join(w.her, name, ".base")), filesOf(w.shipped), "a copy kept holds the base it was made from, with .made-from");
     assert.ok(!existsSync(join(changeDir(w.t.home, w.t.started[0][1][5]), "style", ".base")), "the working copy holds no base");
   });
 
@@ -434,6 +457,57 @@ describe("carrying her style onto a new starting style", () => {
     assert.equal(now.end_card, true);
     assert.equal(now.motion, "calm", "a value can't be told from the old base's, so hers is kept");
     assert.ok(existsSync(join(w.her, ".base", "style.json")), "her pack keeps its base from now on");
+  });
+
+  it("keeps the base with a copy, so going back across a carry leaves the next carry whole", async () => {
+    const w = world();
+    ship(w, (doc) => {
+      doc.motion = "normal";
+      doc.end_card = true;
+    });
+    const carried = await style(w, ["carry", "yes"]);
+    assert.equal(carried.code, 0, carried.said.join("\n"));
+    const name = backupAt(w.t.now());
+    assert.ok(existsSync(join(w.her, name, ".base", "style.json")), "a copy kept holds the base it was made from");
+    w.t.ctx.deps.now = () => Date.parse("2026-10-21T09:30:00-05:00");
+    assert.equal((await style(w, ["back", name])).code, 0);
+    assert.equal(readJson(join(w.her, ".base", "style.json")).end_card, undefined, "going back puts the base back too");
+    assert.equal(readJson(join(w.her, "style.json")).motion, "calm");
+    // The next carry brings Jason's changes in again, three ways.
+    const again = await style(w, ["carry"]);
+    assert.deepEqual(again.said, [STYLE_SAY.carryWould, '  motion: "normal"', "  end_card: true", STYLE_SAY.carryAsk]);
+  });
+
+  it("trusts the base only when it is the one her pack says it was made from", async () => {
+    const w = world();
+    // An older Studio on her other Mac moved `.made-from` without the base.
+    rmSync(join(w.her, ".made-from"));
+    writeFileSync(join(w.her, ".made-from"), "sha256-0000000000000000000000000000000000000000000000000000000000000000\n");
+    ship(w, (doc) => {
+      doc.motion = "normal";
+      doc.end_card = true;
+    });
+    const carry = await style(w, ["carry"]);
+    assert.deepEqual(carry.said, [STYLE_SAY.baseUnchecked, STYLE_SAY.carryWould, "  end_card: true", STYLE_SAY.carryAsk]);
+    const yes = await style(w, ["carry", "yes"]);
+    assert.deepEqual(yes.said.slice(1), [STYLE_SAY.baseUnchecked, STYLE_SAY.broughtIn, "  end_card: true"], "her yes says the same");
+    assert.equal(readJson(join(w.her, "style.json")).motion, "calm");
+  });
+
+  it("keeps her change whole where the new base changes the shape around it, and names it", async () => {
+    const w = world();
+    editHers(w, (doc) => (doc.captions.lofi.size = 70));
+    ship(w, (doc) => (doc.captions.lofi = "off"));
+    const r = await style(w, ["carry"]);
+    assert.deepEqual(r.said, [STYLE_SAY.carryWouldKeep, '  captions.lofi: yours {"box":true,"size":70,"y":1318}, the new starting style\'s "off"', STYLE_SAY.carryAsk]);
+    assert.equal((await style(w, ["carry", "yes"])).code, 0);
+    assert.deepEqual(readJson(join(w.her, "style.json")).captions.lofi, { box: true, size: 70, y: 1318 });
+
+    const v = world();
+    editHers(v, (doc) => (doc.captions.lofi.size = 70));
+    ship(v, (doc) => (doc.captions.lofi = {}));
+    assert.equal((await style(v, ["carry", "yes"])).code, 0);
+    assert.deepEqual(readJson(join(v.her, "style.json")).captions.lofi, { box: true, size: 70, y: 1318 }, "an emptied object keeps hers whole");
   });
 
   it("checks her pack before it keeps a copy, so a half-synced pack is never kept as one", async () => {

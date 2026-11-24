@@ -87,6 +87,10 @@ export const STYLE_SAY = Object.freeze({
   keptYours: "Kept yours where you and Jason both changed it:",
   carryNothing: "The new starting style changes nothing you haven't changed yourself, so carrying it over only marks your style as made from it.",
   noBase: "Your style was made before Studio kept the starting style it came from, so only what the new one adds can be carried over: Jason's other changes can't be brought in for it.",
+  baseUnchecked: "The starting style your style was made from couldn't be checked, so only what the new one adds can be carried over: Jason's other changes can't be brought in for it.",
+  herUnread: "Your style in Dropbox can't be read whole just now (Dropbox may still be bringing it over), so the change is still waiting: say yes again in a few minutes.",
+  herUnread0: "Your style in Dropbox can't be read whole just now (Dropbox may still be bringing it over), so nothing was changed: say it again in a few minutes.",
+  changedWhileCopied: "Your style changed while it was being copied (Dropbox may still be bringing it over), so nothing was changed: say it again in a moment.",
   herChanged: `Your style has changed since this change was made (on your other Mac, or by going back), so it wasn't kept: say what you'd like changed again.`,
   herChangedWhy: "your style had changed since it was made.",
   carryAsk: `Say "yes, carry my style over" to do it.`,
@@ -317,12 +321,15 @@ async function change(ctx, more, h) {
     rmSync(dir, { recursive: true, force: true });
     return refuse(ctx, why);
   };
+  // Her pack as the copy came from it, looked at before and after the copy, which must be the same (a change built on a waiting one
+  // comes from what that one came from): her yes is refused when it is no longer the same.
+  const printBefore = building ? building.state.herPrint : packPrint(ctx.settings);
   const why = makeWorkingCopy({ settings: ctx.settings, to: changePack(dir), from: building ? changePack(building.dir) : null });
   if (why) return leave(why);
-  // Her pack as the copy came from it (a change built on a waiting one comes from what that one came from): her yes is refused when it
-  // is no longer the same.
-  const herPrint = building ? building.state.herPrint : packPrint(ctx.settings);
-  if (typeof herPrint !== "string") return leave(STYLE_SAY.notCopied);
+  kitOf(ctx).copied?.();
+  const herPrint = building ? printBefore : packPrint(ctx.settings);
+  if (typeof herPrint !== "string" || typeof printBefore !== "string") return leave(STYLE_SAY.herUnread0);
+  if (herPrint !== printBefore) return leave(STYLE_SAY.changedWhileCopied);
   let backup;
   try {
     backup = backupPack({ ...o, now: new Date(ctx.now()) });
@@ -372,8 +379,11 @@ async function yes(ctx, more, h) {
       markChange(ctx, now.dir, { state: "refused", why });
       return refuse(ctx, line ?? why);
     };
-    // Changed meanwhile (on the other Mac, or by going back): this change was made from what is no longer her pack.
-    if (packPrint(ctx.settings) !== now.state.herPrint) return notKept(STYLE_SAY.herChangedWhy, STYLE_SAY.herChanged);
+    // Changed meanwhile (on the other Mac, or by going back): this change was made from what is no longer her pack. A pack that can't be
+    // read whole just now (Dropbox still bringing it) leaves the change waiting.
+    const print = packPrint(ctx.settings);
+    if (print === null) return refuse(ctx, STYLE_SAY.herUnread);
+    if (print !== now.state.herPrint) return notKept(STYLE_SAY.herChangedWhy, STYLE_SAY.herChanged);
     try {
       adoptPack({ ...packOpts(ctx), from: pack });
     } catch (e) {
@@ -382,7 +392,7 @@ async function yes(ctx, more, h) {
         return refuse(ctx, STYLE_SAY.partly(now.state.backup));
       }
       // A change that breaks a brand rule after all (or is too large) is refused, and nothing of it is kept.
-      if (packFault(pack) || /larger than/.test(e.message)) return notKept(e.message);
+      if (e.keepNothing) return notKept(e.message);
       return refuse(ctx, e.message);
     }
     markChange(ctx, now.dir, { state: "kept", keptAt: new Date(ctx.now()).toISOString() });
@@ -435,9 +445,10 @@ async function diff(ctx, more, h) {
 }
 
 /** What a carry brings in and what it keeps of hers, as lines: before her yes (`done` false), what it would do, and after it, what it
-    did. A pack with no base says first that only what the new base adds can be carried. */
+    did. A pack with no base, or one whose base couldn't be checked, says first that only what the new base adds can be carried. */
 function sayCarry(ctx, { brought, kept, base }, done) {
-  if (!base) ctx.say(STYLE_SAY.noBase);
+  if (base === "none") ctx.say(STYLE_SAY.noBase);
+  if (base === "unchecked") ctx.say(STYLE_SAY.baseUnchecked);
   if (!brought.length && !kept.length) ctx.say(STYLE_SAY.carryNothing);
   if (brought.length) ctx.say(done ? STYLE_SAY.broughtIn : STYLE_SAY.carryWould);
   for (const line of brought) ctx.say(`  ${line}`);
@@ -475,7 +486,7 @@ async function carry(ctx, more, h) {
       return refuse(ctx, e.message);
     }
     ctx.say(STYLE_SAY.carried(done.backup));
-    sayCarry(ctx, { brought: done.brought, kept: done.keptYours, base: true }, true);
+    sayCarry(ctx, { brought: done.brought, kept: done.keptYours, base: done.base }, true);
     return 0;
   });
 }

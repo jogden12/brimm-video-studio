@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { cloneFile } from "../dropbox.js";
 import { folderFingerprint, reelKitHome } from "../reel-kit.js";
 import {
-  NOT_YET, SHIPPED_PACK, backupPack, ensureHerPack, herPack, packDiff, packFault, restorePack, shippedMoved, swapMarker, syncPack
+  NOT_YET, SHIPPED_PACK, backupPack, carryPlan, ensureHerPack, herPack, packDiff, packFault, restorePack, shippedMoved, swapMarker, syncPack
 } from "../reel-kit-style.js";
 
 const made = [];
@@ -393,5 +393,31 @@ describe("her Reel Kit style pack in Dropbox", () => {
     assert.equal(syncPack({ settings: w.settings, home: laptop, shipped: w.shipped, build: installed }), "");
     assert.equal(readJson(join(reelKitHome(laptop), "style-made.json")).from, folderFingerprint(w.shipped));
     assert.ok(existsSync(join(styleOf(laptop), "style.json")));
+  });
+
+  // The review's probe (plan Task 13, fix round 2): her pack, its base and a new base, each only a style.json.
+  describe("carrying three ways, as the review probed it", () => {
+    const plan = (old, hers, neu, { madeFrom = true } = {}) => {
+      const w = world();
+      const her = join(w.root, "Reel Kit style");
+      mkdirSync(join(her, ".base"), { recursive: true });
+      const shipped = join(w.base, "new-base");
+      mkdirSync(shipped);
+      writeFileSync(join(her, "style.json"), JSON.stringify(hers));
+      writeFileSync(join(her, ".base", "style.json"), JSON.stringify(old));
+      writeFileSync(join(shipped, "style.json"), JSON.stringify(neu));
+      if (madeFrom) writeFileSync(join(her, ".made-from"), `${folderFingerprint(join(her, ".base"))}\n`);
+      const p = carryPlan({ settings: w.settings, shipped });
+      return { style: p.style, brought: p.brought, kept: p.kept, base: p.base };
+    };
+    it("keeps hers whole where the new base turns an object she changed inside into a value", () => {
+      assert.deepEqual(plan({ x: { a: 1 } }, { x: { a: 2 } }, { x: "off" }), { style: { x: { a: 2 } }, brought: [], kept: ['x: yours {"a":2}, the new starting style\'s "off"'], base: "kept" });
+    });
+    it("keeps hers whole where the new base empties an object she changed inside", () => {
+      assert.deepEqual(plan({ x: { a: 1, b: 1 } }, { x: { a: 2, b: 1 } }, { x: {} }), { style: { x: { a: 2, b: 1 } }, brought: [], kept: ['x: yours {"a":2,"b":1}, the new starting style\'s {}'], base: "kept" });
+    });
+    it("never trusts a base that is not the one .made-from names", () => {
+      assert.deepEqual(plan({ m: "normal", end: true }, { m: "calm" }, { m: "normal", end: true }, { madeFrom: false }), { style: { m: "calm", end: true }, brought: ["end: true"], kept: [], base: "unchecked" });
+    });
   });
 });
