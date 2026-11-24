@@ -52,11 +52,12 @@
 //   node edit.js reelkit install "<download>" [--yes] | status
 //                                         a Reel Kit download dragged into her chat: the plan of its setup, or with --yes the setup,
 //                                         detached; and how it is going (reel-kit-commands.js)
-//   node edit.js reelkit start | status | note | go | revise | resume | render | storyboard "<episode>" …
+//   node edit.js reelkit start | status | note | go | revise | resume | render | storyboard | app "<episode>" …
 //                                         her Reel Kit edits of an episode's parts: started queued, followed, noted, approved, changed,
-//                                         carried on, rendered headless (reel-kit-render.js), and their storyboards shown in the side
-//                                         panel through the lock's narrow opening (storyboard-opening.js) or on Reel Kit's local page
-//                                         (reel-kit-commands.js). Their detached half, `reelkit --now`, is in no help
+//                                         carried on, rendered headless (reel-kit-render.js), their storyboards shown in the side
+//                                         panel through the lock's narrow opening (storyboard-opening.js) or on Reel Kit's local page,
+//                                         and opened in the HyperFrames app (reel-kit-commands.js). Their detached half, `reelkit --now`,
+//                                         is in no help
 //   node edit.js reelkit style show | change "<what she asked>" | yes | back ["<copy>"] | diff | carry [yes] | resume
 //                                         her Reel Kit style pack: shown in the side panel, changed by the worker's style job on a working
 //                                         copy and kept on her yes, gone back to, compared, carried onto a new starting style
@@ -427,6 +428,10 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js reelkit storyboard "<episode>" <edit> [local]
                                         an edit's newest storyboard made ready in her folder, and the exact publish to the
                                         side panel for her chat to make; with local, Reel Kit's own page on this Mac
+  node edit.js reelkit app "<episode>" <edit>
+                                        an edit built after her go, opened in the HyperFrames app with BRIMM's notes for its
+                                        agent, and a line when the app was updated since. Once opened there Reel Kit changes
+                                        it no more: a new edit of the part is its next version. Never a session
   node edit.js reelkit style show       her Reel Kit style's main lines and its board made ready for the side panel; while a
                                         change is made, how far it has got, and once made, its new board instead
   node edit.js reelkit style change "<what she asked>"

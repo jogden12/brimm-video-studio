@@ -27,7 +27,7 @@ import { binDir, kitDir, reelKitEnv, reelKitHome } from "./reel-kit.js";
 import { compositionFingerprint, readCapped, readState, scaffold, writeState } from "./reel-kit-project.js";
 import { factsOf } from "./settings.js";
 import { JOBS, JOB_ENDS, notesOf, startFault, usageLimited, workerPrompt } from "./reel-kit-worker-jobs.js";
-import { noteOwn, stopHolders, sweepOwn, writeWhole } from "./reel-kit-worker-own.js";
+import { appsOwn, noteOwn, stopHolders, sweepOwn, writeWhole } from "./reel-kit-worker-own.js";
 import { WORKER_TOOLS, workerArgs, workerSettings } from "./reel-kit-worker-tools.js";
 import { isRunning } from "./run.js";
 import { findPrograms } from "./unedited.js";
@@ -79,7 +79,33 @@ export const asideDir = (home, slug) => join(appSupport(home), "reel-kit-worker"
 /** Look the project `projectDir` over for Studio's own names and set aside what Studio did not note (reel-kit-worker-own.js sweepOwn, with
     this project's list and set-aside place): { planted, left }. `said` starts each line of `log`. For a run of the worker, and for
     Task 17's `reelkit app`, immediately before it opens the app. */
-export const sweepProject = (home, slug, projectDir, { said, log } = {}) => sweepOwn({ file: ownFile(home, slug), dir: projectDir, aside: asideDir(home, slug), said, log });
+export const sweepProject = (home, slug, projectDir, { said, log, opened = false } = {}) => sweepOwn({ file: ownFile(home, slug), dir: projectDir, aside: asideDir(home, slug), said, log, ...(opened ? { leave: appsOwn } : {}) });
+/** Studio's own mark that it opened the project `slug` in the HyperFrames app (plan Task 17, `reelkit app`): { opened: [ISO times] },
+    written whole beside the worker's settings, out of the worker's reach, and only once the app opened it. A project so marked is never
+    run by the worker again (runJob), and the look before a later open leaves the app's own public/.claude/ alone (sweepProject's
+    `opened`, reel-kit-worker-own.js appsOwn). */
+export const openedFile = (home, slug) => join(appSupport(home), "reel-kit-worker", `${settingsSlug(slug)}.opened.json`);
+/** The times Studio opened the project `slug` in the app, [] when none or when its mark can't be read. */
+export function openedTimes(home, slug) {
+  try {
+    const mark = JSON.parse(readCapped(openedFile(home, slug), 1 << 20) ?? "null");
+    return isObject(mark) && Array.isArray(mark.opened) ? mark.opened.filter((at) => typeof at === "string") : [];
+  } catch {
+    return [];
+  }
+}
+/** Whether Studio has opened the project `slug` in the app: anything at its mark's place says so, even a mark that can't be read, so
+    that a worker never runs on a project the app may have. A slug that is none throws. */
+export function wasOpened(home, slug) {
+  try {
+    lstatSync(openedFile(home, slug));
+    return true;
+  } catch (e) {
+    return e.code !== "ENOENT";
+  }
+}
+/** Mark that Studio opened the project `slug` in the app at `at` (an ISO time), keeping the times before. */
+export const markOpened = (home, slug, at) => writeWhole(openedFile(home, slug), `${JSON.stringify({ opened: [...openedTimes(home, slug), at] }, null, 2)}\n`);
 /** The record of the worker at work on this Mac, { pid, start, dir, at }: its `claude`, whose process group holds everything it started,
     so that a worker left running by a runner that died is found and stopped before the next one starts. */
 export const macWorkerFile = (home) => join(appSupport(home), "reel-kit-worker.json");
@@ -541,6 +567,9 @@ export async function runJob(ctx, spec, deps = {}) {
     const status = statusOf(dir, alive, startOf);
     if (status === null) return { state: "failed", why: "no project", step: "", dir };
     if (!hasSlug(before)) return { state: "failed", why: "no slug", step: status.step, dir };
+    // A project Studio opened in the HyperFrames app is the app's from then on (plan Task 17): nothing of the worker's runs in it again,
+    // and nothing of it is marked. Further Reel Kit changes are a new version.
+    if (wasOpened(home, before.slug)) return { state: status.state, why: "opened", step: status.step, dir };
     // A project marked queued by this very run (her chat's first half marks it with the pid of the run it starts) is this job's own.
     const runs = status.pid !== null && status.pid !== process.pid && alive(status.pid);
     if ((status.state === "working" || status.state === "queued") && runs) return { state: status.state, why: "running", step: status.step, dir };

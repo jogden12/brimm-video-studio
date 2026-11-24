@@ -8,6 +8,8 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 
 const PLIST = "HyperFrames.app/Contents/Info.plist";
+/** How long plutil may take for one copy: a reading that hangs never holds up `reelkit app`. */
+const PLUTIL_MS = 5000;
 
 /** The two places the app may be, /Applications first. */
 export const appPlists = (home) => [join("/Applications", PLIST), join(home, "Applications", PLIST)];
@@ -21,7 +23,7 @@ export function readAppVersion({ home, run = spawnSync } = {}) {
   const copies = [];
   for (const path of appPlists(home)) {
     try {
-      const r = run("/usr/bin/plutil", ["-convert", "json", "-o", "-", path], { encoding: "utf8" });
+      const r = run("/usr/bin/plutil", ["-convert", "json", "-o", "-", path], { encoding: "utf8", timeout: PLUTIL_MS });
       if (!r || r.status !== 0) continue;
       const plist = JSON.parse(String(r.stdout));
       const version = plist?.CFBundleShortVersionString, build = plist?.CFBundleVersion;
