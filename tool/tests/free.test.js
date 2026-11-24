@@ -184,6 +184,13 @@ describe("freePaths: the paths free names", () => {
     const projects = ["story 1", "reel 0", "reel", "main 2", "clip 0", "Main", ""].map((key, i) => entry(key, `Other ${i}`, RAW));
     assert.deepEqual(freePaths("/h", "F", record([...projects, entry("reel 12", REEL, RAW)])).projects.map((p) => p.name), [REEL]);
   });
+  it("names nothing of a Reel Kit edit: its renders/ is Studio's only copy of its render, and nothing makes it again (final review C5)", () => {
+    const kit = (key, name) => ({ ...entry(key, name, RAW), maker: "reel-kit", mode: "lofi", version: 1 });
+    const projects = [kit("main", "Pricing talk main 3fa9c1 Reel Kit v1"), entry("main", MAIN, RAW), kit("reel 2", "Pricing talk reel 2 3fa9c1 Reel Kit v1")];
+    const named = freePaths("/h", "F", record(projects)).projects;
+    assert.deepEqual(named.map((p) => p.name), [MAIN]);
+    assert.ok(!named.some((p) => p.renders.includes("Reel Kit")));
+  });
   it("names one project once, however often the record lists it", () => {
     assert.deepEqual(freePaths("/h", "F", record([entry("main", MAIN, RAW), entry("main", MAIN, RAW)])).projects.map((p) => p.name), [MAIN]);
   });
