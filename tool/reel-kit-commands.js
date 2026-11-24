@@ -396,6 +396,8 @@ export const EDIT_SAY = Object.freeze({
   rendering: (said) => `${said} is in the queue to render on this Mac. Say "how are the Reel Kit edits going?" to follow it.`,
   renderBusy: `It is in the queue to render already. Say "how are the Reel Kit edits going?" to follow it.`,
   renderNoRun: "Its render couldn't be started on this Mac: say it again, or ask Jason.",
+  jobNoRun: "It couldn't be started on this Mac: say it again, or ask Jason.",
+  oddNoChange: "Its project isn't as Reel Kit left it, so no changes were made: ask Jason.",
   renderingNow: "it is being rendered, or waiting for its turn to render.",
   rendered: "it is rendered.",
   renderFailed: "it is built, but its last render didn't pass Reel Kit's own checks, so nothing was kept as an export: ask Jason.",
@@ -757,6 +759,7 @@ async function goCommand(ctx, words, h) {
   // Her go is given: the local page, if it serves this edit, has done its work.
   stopLocal(ctx, kitOf(ctx).startOf ?? processStart, edit.dir);
   const pid = startJob(ctx, found, ["finalize", edit.slug]);
+  if (!Number.isInteger(pid)) return refuse(ctx, EDIT_SAY.jobNoRun);
   markQueued(ctx, edit.dir, "finalize", pid, JOBS.finalize[0]);
   ctx.say(EDIT_SAY.approved(editSaid(edit.key, edit.mode, edit.version)));
   return 0;
@@ -786,20 +789,22 @@ async function reviseCommand(ctx, words, h) {
   // The storyboard is being made again: a local page of this one would show the old.
   stopLocal(ctx, kitOf(ctx).startOf ?? processStart, edit.dir);
   const pid = startJob(ctx, found, ["revise", edit.slug]);
+  if (!Number.isInteger(pid)) return refuse(ctx, EDIT_SAY.jobNoRun);
   markQueued(ctx, edit.dir, "revise", pid, JOBS.revise[0]);
   ctx.say(EDIT_SAY.revising(editSaid(edit.key, edit.mode, edit.version), since.length));
   return 0;
 }
 
 /** Why Reel Kit may no longer change the edit (plan Task 17), in her words, or "": changed since finalize (in the app, or by anything else),
-    in the render's own line (RENDER_SAY.changed), or holding what no fingerprint is made of (a link), in renderWhy's line for that
-    (RENDER_SAY.odd); or opened in the HyperFrames app by Studio (the worker's wasOpened), which is the app's from then on, changed or
+    in the render's own line (RENDER_SAY.changed), or holding what no fingerprint is made of (a link), said as no changes made
+    (EDIT_SAY.oddNoChange); or opened in the HyperFrames app by Studio (the worker's wasOpened), which is the app's from then on, changed or
     not. Either way further Reel Kit changes are a new version of the part (`start`). */
 function keptInApp(ctx, edit) {
   const state = readState(edit.dir);
   const name = typeof state?.name === "string" && state.name.trim() !== "" ? state.name : "This edit";
   const change = changedInApp(edit.dir, state);
-  if (change === "odd") return RENDER_SAY.odd;
+  // In the words of a change she asked for: nothing was rendered, nor changed.
+  if (change === "odd") return EDIT_SAY.oddNoChange;
   if (change === "changed") return RENDER_SAY.changed(name);
   return edit.slug !== "" && wasOpened(ctx.home, edit.slug) ? EDIT_SAY.openedNoChange(name) : "";
 }
@@ -816,6 +821,7 @@ async function resumeCommand(ctx, words, h) {
   if (status === null) return refuse(ctx, EDIT_SAY.notHere);
   if (status.state !== "stopped") return refuse(ctx, isBusy(status) ? EDIT_SAY.busy : EDIT_SAY.notStopped);
   const pid = startJob(ctx, found, ["resume", edit.slug]);
+  if (!Number.isInteger(pid)) return refuse(ctx, EDIT_SAY.jobNoRun);
   markQueued(ctx, edit.dir, readState(edit.dir)?.job, pid);
   ctx.say(EDIT_SAY.resuming(editSaid(edit.key, edit.mode, edit.version)));
   return 0;

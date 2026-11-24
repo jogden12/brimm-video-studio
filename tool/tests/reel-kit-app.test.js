@@ -422,7 +422,9 @@ describe("fix round 1", () => {
     mkdirSync(join(w.t.dir, "elsewhere"), { recursive: true });
     symlinkSync(join(w.t.dir, "elsewhere"), join(w.dir, "public", "elsewhere"));
     writeFileSync(notesFile(w.dir), JSON.stringify([{ beat: "p02", text: "Shorter.", at: "2026-11-23T11:00:00.000Z" }]));
-    assert.deepEqual(Object.values(await reelkit(w, ["revise", FOLDER, SLUG])), [1, [RENDER_SAY.odd]]);
+    // Each in the words of what she asked: no changes made, or not rendered.
+    assert.deepEqual(Object.values(await reelkit(w, ["revise", FOLDER, SLUG])), [1, [EDIT_SAY.oddNoChange]]);
+    assert.equal(EDIT_SAY.oddNoChange, "Its project isn't as Reel Kit left it, so no changes were made: ask Jason.");
     assert.deepEqual(Object.values(await reelkit(w, ["render", FOLDER, SLUG])), [1, [RENDER_SAY.odd]]);
     assert.deepEqual(w.t.started, []);
   });

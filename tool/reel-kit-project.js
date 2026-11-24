@@ -69,6 +69,8 @@ export function modeOf(word) {
 export const MODE_ASK = "Hi-fi, lo-fi or showcase?";
 /** Reel Kit makes an upright video: a wide recording's main video is not one. */
 export const WIDE_MAIN = "Reel Kit makes upright videos only: choose a Reel of it.";
+/** A finished video's main video is edited already: `finish` takes its Reels alone, never an edit of it. */
+export const FINISHED_MAIN = "It is a finished video, so its main video isn't edited again: a Reel Kit edit can be made of one of its Reels.";
 
 /** Whether the import saw the recording upright (answer.seen, kinds.js seenLine): true for "upright", false for "wide", and null when the
     record does not say. */
@@ -296,7 +298,7 @@ function atWork(home, folder, entry, alive, startOf) {
     - any session, cleared or not (Decision 9): session clips are not built yet;
     - a Reel the record does not list;
     - no mode, or one that is not Reel Kit's (MODE_ASK): she picks it;
-    - the main video of a recording the import did not see upright (WIDE_MAIN): Reel Kit makes upright videos only, and a Reel of a wide
+    - the main video of a finished video (FINISHED_MAIN: finish takes its Reels alone), and of a recording the import did not see upright (WIDE_MAIN): Reel Kit makes upright videos only, and a Reel of a wide
       one is cropped upright;
     - a title Reel Kit's new.py can't take (titleWhy): a Reel's is its title in the record, the main video's is `title`, as scaffold is
       given it, so that it is refused before anything is queued;
@@ -317,6 +319,7 @@ export function startWhy({ record, key, mode, title, home, folder, held, planned
   if (!part) throw new Error(`startWhy: ${JSON.stringify(key)} is not "main" or "reel <n>"`);
   if (part !== "main" && !reelOf(record, part.reel)) return noSuchReel(part.reel, (Array.isArray(record.reels) ? record.reels : []).map((r) => r.n));
   if (!MODES.includes(mode)) return MODE_ASK;
+  if (part === "main" && kindOf(record) === "finished") return FINISHED_MAIN;
   if (part === "main" && seenUpright(record) !== true) return WIDE_MAIN;
   const titled = titleWhy(part === "main" ? title : reelOf(record, part.reel).title);
   if (titled) return titled;

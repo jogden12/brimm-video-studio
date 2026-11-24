@@ -460,6 +460,18 @@ describe("her go", () => {
     assert.equal(readState(w.dirOf(2)).state, "rendered");
   });
 
+  it("says so when go, the changes or carrying on couldn't be started, never that it is under way", async () => {
+    const w = world({ edits: [{ n: 2, state: { state: "storyboard", step: "storyboard" } }, { n: 1, state: { state: "stopped", job: "edit", step: "cut" } }] });
+    await reelkit(w, ["note", FOLDER, slugOf(2), "p02", "Shorter."]);
+    w.t.ctx.deps.start = () => undefined;
+    for (const [word, n] of [["go", 2], ["revise", 2], ["resume", 1]]) {
+      const r = await reelkit(w, [word, FOLDER, slugOf(n)]);
+      assert.deepEqual([r.code, r.said], [1, [EDIT_SAY.jobNoRun]], word);
+      assert.notEqual(readState(w.dirOf(n)).state, "queued", word);
+    }
+    assert.equal(EDIT_SAY.jobNoRun, "It couldn't be started on this Mac: say it again, or ask Jason.");
+  });
+
   it("carries on only a stopped edit", async () => {
     const w = world({ edits: [{ n: 2, state: { state: "storyboard" } }] });
     assert.deepEqual((await reelkit(w, ["resume", FOLDER, slugOf(2)])).said, [EDIT_SAY.notStopped]);

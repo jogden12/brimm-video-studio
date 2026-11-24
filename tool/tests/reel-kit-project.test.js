@@ -14,7 +14,7 @@ import { kitDir, reelKitHome, venvPython } from "../reel-kit.js";
 import { markReady } from "./reel-kit-ready.js";
 import { enqueue } from "../reel-kit-worker.js";
 import {
-  MODES, entryOf, linkProject, modeLeans, modeOf, projectFolderOf, readState, scaffold, slugOf, startWhy, stateFile, titleWhy, versionFor, writeState
+  FINISHED_MAIN, MODES, entryOf, linkProject, modeLeans, modeOf, projectFolderOf, readState, scaffold, slugOf, startWhy, stateFile, titleWhy, versionFor, writeState
 } from "../reel-kit-project.js";
 import { ensureHerPack, herPack } from "../reel-kit-style.js";
 import { dropFolderOf, episodeWork, workFolder } from "../settings.js";
@@ -137,6 +137,13 @@ describe("what Reel Kit refuses", () => {
     }
     // A Reel the record does not list.
     assert.equal(ask({ record: { ...RAW, reels: REELS }, key: "reel 9", mode: "lofi", home: "/nowhere", folder: FOLDER }), `There is no Reel 9. The Reels are ${REELS.map((r) => r.n).join(", ")}.`);
+  });
+
+  it("refuses the main video of a finished video, which finish never takes an edit of, in one line; its Reels are made", () => {
+    const finished = { ...RAW, kind: "finished", reels: REELS, answer: { ...ANSWERED, seen: "upright, 0:40" } };
+    assert.equal(ask({ record: finished, key: "main", mode: "hifi", home: "/nowhere", folder: FOLDER }), FINISHED_MAIN);
+    assert.equal(FINISHED_MAIN, "It is a finished video, so its main video isn't edited again: a Reel Kit edit can be made of one of its Reels.");
+    assert.equal(ask({ record: finished, key: "reel 2", mode: "hifi", home: "/nowhere", folder: FOLDER }), "");
   });
 
   it("refuses the main video of a wide recording", () => {
