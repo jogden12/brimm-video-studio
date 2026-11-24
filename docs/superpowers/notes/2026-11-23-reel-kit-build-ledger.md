@@ -103,3 +103,5 @@ Reel Kit 1.2.0 was installed on the Mac Studio on Jason's yes (`reelkit install 
 2. **Wrap only python/ffmpeg** (the ledger's first fallback): HyperFrames runs with no sandbox at all, guarded by the hook alone.
 3. **Accept the hook as a guardrail only** for the whole worker.
 Whichever is chosen, the render profile needs the three additions (a code change, test first) before any real render.
+
+**Jason chose 1 (2026-11-24):** Studio runs HyperFrames itself, outside Claude Code's sandbox, under its own `sandbox-exec` profile with the three additions; Python and ffmpeg stay in Claude Code's sandbox. To build, test first: the render profile's three additions; one Studio-owned HyperFrames wrapper named in the worker's `sandbox.excludedCommands`, under that profile, as the only way the worker reaches `check`, `lint`, `snapshot` and a card's `render`; the guard and WORKER.md naming it; and first of all, by hand, that `excludedCommands` applies with `allowUnsandboxedCommands: false`. Then the rest of RK21. No real Reel Kit edit or render runs before then.
