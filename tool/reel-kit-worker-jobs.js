@@ -3,7 +3,7 @@
 // notes as data), and the two readings of Claude Code's stream-json that decide how a run ended: usageLimited and startFault.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { WORKER_MODEL } from "./reel-kit-worker-tools.js";
+import { WORKER_MODEL, styleWrapperOf } from "./reel-kit-worker-tools.js";
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
@@ -58,6 +58,7 @@ export function workerPrompt({ job, project, kit, rkHome, bin, title = null, not
     `- KIT: "${kit}"`,
     ...(rkHome ? [`- PY: "${join(rkHome, ".venv", "bin", "python")}"`] : []),
     ...(bin ? [`- BIN: "${bin}"`] : []),
+    ...(job === "style" && rkHome ? [`- STYLE: "${styleWrapperOf(rkHome)}"`] : []),
     ...(typeof title === "string" ? [`- The Reel's title, word for word: ${JSON.stringify(title)}`] : []),
     "- Music: none.",
     "",

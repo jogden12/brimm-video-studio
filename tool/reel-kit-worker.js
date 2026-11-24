@@ -18,7 +18,7 @@
 // Task 17's `reelkit app` owes it is said there). Either fails the run, `why: "own"`.
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstatSync, mkdirSync, rmSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { releaseEpisodeLock, takeEpisodeLock } from "./detached.js";
@@ -28,7 +28,7 @@ import { compositionFingerprint, readCapped, readState, scaffold, writeState } f
 import { factsOf } from "./settings.js";
 import { JOBS, JOB_ENDS, notesOf, startFault, usageLimited, workerPrompt } from "./reel-kit-worker-jobs.js";
 import { appsOwn, noteOwn, stopHolders, sweepOwn, writeWhole } from "./reel-kit-worker-own.js";
-import { WORKER_TOOLS, workerArgs, workerSettings } from "./reel-kit-worker-tools.js";
+import { WORKER_TOOLS, styleWrapperOf, workerArgs, workerSettings } from "./reel-kit-worker-tools.js";
 import { isRunning } from "./run.js";
 import { findPrograms } from "./unedited.js";
 
@@ -355,6 +355,13 @@ async function work(ctx, { dir, job, notes, from, resume }, deps) {
   if (!resume) writeWhole(jobNotesFile(home, slug), `${JSON.stringify(given, null, 2)}\n`);
   const tmp = workerTmp(home, slug);
   freshTmp(tmp);
+  // A style job runs Reel Kit's style.py through Studio's offline wrapper: put there whole from this checkout, where the worker can read
+  // it and never write it (styleWrapperOf).
+  if (job === "style") {
+    const wrapper = styleWrapperOf(reelKitHome(home));
+    mkdirSync(dirname(wrapper), { recursive: true });
+    writeWhole(wrapper, readFileSync(join(ctx.checkout ?? thisCheckout(), "tool", "reel-kit", "style-offline.py"), "utf8"));
+  }
   const facts = deps.facts ?? factsOf(home, ctx.settings, {});
   const settingsFile = settingsFileOf(home, slug);
   writeWhole(settingsFile, `${JSON.stringify(workerSettings({ checkout: ctx.checkout ?? thisCheckout(), node: ctx.node ?? process.execPath, ...tools, facts, tmp }), null, 2)}\n`);

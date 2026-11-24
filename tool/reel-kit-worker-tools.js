@@ -24,7 +24,7 @@
 //     style, fx or cards, into the project, as Reel Kit's card brief starts a card; and `cd` into those folders. Each word that names a
 //     file must be inside the project (ffprobe may read the kit too).
 //   - In a style job alone (its project a working copy of her pack, under REEL_KIT_HOME's style-work/: styleJob), Reel Kit's own
-//     pipeline/style.py on the copy's style.json and onboarding/board.py with `--pack` the copy's style/, each in the shape its own help
+//     pipeline/style.py, through Studio's offline wrapper (styleWrapperOf), on the copy's style.json and onboarding/board.py with `--pack` the copy's style/, each in the shape its own help
 //     gives, and none of the edit's pipeline scripts; never onboarding/refs.py, which fetches links (yt-dlp).
 //   - Agent, for Reel Kit's card and FX builders only: a `general-purpose` agent in the same folder, in the foreground (said outright:
 //     `run_in_background: false`), on the worker's own model, whose calls come through this same hook.
@@ -83,6 +83,10 @@ const HF_WORDS = ["-y", `hyperframes@${PIN.hyperframes.version}`];
 export const NEVER_TOOLS = Object.freeze(["WebFetch", "WebSearch", "Artifact", "ArtifactComments", "ArtifactData", "mcp__*", "Skill", "NotebookEdit", "Monitor",
   "SendMessage", "RemoteTrigger", "CronCreate", "CronDelete", "CronList", "Workflow"]);
 
+/** Where Studio puts its offline run of Reel Kit's style.py (tool/reel-kit/style-offline.py) before a style job: in REEL_KIT_HOME's tools/,
+    which the worker's commands may read and nothing of the worker's may write. */
+export const styleWrapperOf = (rkHome) => join(rkHome, "tools", "studio", "style-offline.py");
+
 /** What the hook says to any call it refuses. */
 export const REFUSED = "Studio's Reel Kit worker does not do that: only what tool/reel-kit/WORKER.md lists, inside this project.";
 
@@ -93,7 +97,8 @@ function programsOf({ kit, rkHome, bin }) {
   return {
     python: join(rkHome, ".venv", "bin", "python"),
     script: (name) => join(kit, "pipeline", `${name}.py`),
-    style: join(kit, "pipeline", "style.py"),
+    // Reel Kit's style.py through Studio's offline wrapper (tool/reel-kit/style-offline.py, put here before a style job: styleWrapperOf).
+    style: styleWrapperOf(rkHome),
     board: join(kit, "onboarding", "board.py"),
     ffmpeg: join(bin, "ffmpeg"),
     ffprobe: join(bin, "ffprobe"),
@@ -410,7 +415,7 @@ function bashAnswer(command, cwd, ctx, roots) {
   if (spelled(first, CP, false)) return copyAnswer(words, cwdReal, roots);
   if (!first.quoted) return false;
   if (first.text === p.python && roots.style) {
-    // A style job: style.py on the copy's style.json, or board.py with --pack the copy's style/, exactly, and nothing else.
+    // A style job: style.py (Studio's offline wrapper of it) on the copy's style.json, or board.py with --pack the copy's style/, exactly, and nothing else.
     const pack = join(ctx.project, "style");
     if (!below(roots.project, realOf(pack))) return false;
     if (spelled(words[1], p.style, true)) return words.length === 3 && spelled(words[2], join(pack, "style.json"), true);

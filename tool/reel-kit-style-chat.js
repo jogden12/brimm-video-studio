@@ -6,12 +6,13 @@
 //                                          kind "style-board"), with the exact publish for her chat; or, while a change is under way, how far
 //                                          it has got, and once its board is made, that board staged instead (one page per change).
 //   reelkit style change "<what she asked>"
-//                                          a copy of her pack kept first (`before <date>`, backupPack), then a working copy of it made on this
+//                                          a working copy of her pack made on this
 //                                          Mac's own disk, `<REEL_KIT_HOME>/style-work/<stamp>/`, outside Dropbox, and the worker's `style` job
 //                                          started on it, detached: Reel Kit's own onboarding steps 4 and 5, her words given as data in the
 //                                          notes block. A change while one waits for her yes builds on that one. Refused, keeping and copying
 //                                          nothing, in a chat that holds a session's words on an open-lock Mac (held.js, app.js chatOf).
-//   reelkit style yes                      the change she has seen becomes her pack: checked again (packFault), then put into Dropbox by
+//   reelkit style yes                      the change she has seen becomes her pack: checked again (packFault), a copy of her pack as it was
+//                                          kept first (`before <date>`, backupPack, only here), then put into Dropbox by
 //                                          dropbox.js's rule, style.json last, under the Mac's Reel Kit lock, so an edit's syncPack never copies
 //                                          her pack while it is being written.
 //   reelkit style back ["<copy>"]          her `before …` copies by name, or her pack put back to one (restorePack, which keeps how it was).
@@ -53,7 +54,7 @@ const FOLLOW = `Say "show my style" to see how it's going.`;
 
 /** What `reelkit style` says, in her words. */
 export const STYLE_SAY = Object.freeze({
-  kept: (name) => `Your style as it is now is kept as "${name}", so you can go back to it.`,
+  kept: (name) => `How your style was before this change is kept as "${name}", so you can go back to it.`,
   builds: "This change builds on the one still waiting for your yes.",
   queued: `Your style change is in the queue. ${FOLLOW}`,
   resuming: `Your style change is in the queue to carry on. ${FOLLOW}`,
@@ -330,18 +331,11 @@ async function change(ctx, more, h) {
   const herPrint = building ? printBefore : packPrint(ctx.settings);
   if (typeof herPrint !== "string" || typeof printBefore !== "string") return leave(STYLE_SAY.herUnread0);
   if (herPrint !== printBefore) return leave(STYLE_SAY.changedWhileCopied);
-  let backup;
-  try {
-    backup = backupPack({ ...o, now: new Date(ctx.now()) });
-  } catch (e) {
-    return leave(e.message);
-  }
-  ctx.say(STYLE_SAY.kept(backup));
   const at = new Date(ctx.now()).toISOString();
   // Marked queued by this run first, so that a second ask is refused while the run it starts takes the mark for its own (runJob). A
   // waiting change it builds on is dropped only once this one has its board (styleNow).
   const state = {
-    slug: `style-${stamp}`, job: "style", kind: "style", ask: { text, at }, backup, from: building ? building.stamp : "her pack", buildsOn: building ? building.stamp : null,
+    slug: `style-${stamp}`, job: "style", kind: "style", ask: { text, at }, from: building ? building.stamp : "her pack", buildsOn: building ? building.stamp : null,
     herPrint, madeAt: at, state: "queued", step: "style", pid: process.pid, why: "", queuedAt: at
   };
   try {
@@ -384,12 +378,20 @@ async function yes(ctx, more, h) {
     const print = packPrint(ctx.settings);
     if (print === null) return refuse(ctx, STYLE_SAY.herUnread);
     if (print !== now.state.herPrint) return notKept(STYLE_SAY.herChangedWhy, STYLE_SAY.herChanged);
+    // Her pack as it is now is kept first, only here, just before it is changed: a change that never finishes leaves no copy in Dropbox.
+    let backup;
+    try {
+      backup = backupPack({ ...packOpts(ctx), now: new Date(ctx.now()) });
+    } catch (e) {
+      return refuse(ctx, e.message);
+    }
+    markChange(ctx, now.dir, { backup });
     try {
       adoptPack({ ...packOpts(ctx), from: pack });
     } catch (e) {
       if (e.wrote > 0) {
         markChange(ctx, now.dir, { state: "failed", why: "partly" });
-        return refuse(ctx, STYLE_SAY.partly(now.state.backup));
+        return refuse(ctx, STYLE_SAY.partly(backup));
       }
       // A change that breaks a brand rule after all (or is too large) is refused, and nothing of it is kept.
       if (e.keepNothing) return notKept(e.message);
@@ -398,6 +400,7 @@ async function yes(ctx, more, h) {
     markChange(ctx, now.dir, { state: "kept", keptAt: new Date(ctx.now()).toISOString() });
     rmSync(pack, { recursive: true, force: true });
     ctx.say(STYLE_SAY.changed);
+    ctx.say(STYLE_SAY.kept(backup));
     return 0;
   });
 }

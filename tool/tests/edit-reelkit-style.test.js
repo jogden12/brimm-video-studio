@@ -29,6 +29,7 @@ import { FOLDER } from "./episodes.js";
 import { setup } from "./episodes.js";
 
 const STAND_IN = fileURLToPath(new URL("./stand-ins/claude-worker.mjs", import.meta.url));
+const CHECKOUT = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 /** Nothing she reads holds a path, a flag or the name of a command. */
 const PLAIN = /\/|--|\bnpx\b|\bnode\b|edit\.js|reelkit|\.json\b/;
 
@@ -150,17 +151,17 @@ const herLines = (said) => said.filter((line) => !line.startsWith(FOR_CLAUDE));
 const publishOf = (said) => JSON.parse(said.find((line) => line.startsWith(FOR_CLAUDE)).replace(/^[^{]*/, ""));
 
 describe("changing her style in chat", () => {
-  it("keeps the old pack as before <date> before a change", async () => {
+  it("keeps no copy of her pack at a change: only her yes keeps the old pack, as before <date>", async () => {
     const w = world();
     const before = filesOf(w.her);
     const r = await style(w, ["change", "Make the captions a little bigger."]);
     assert.equal(r.code, 0, r.said.join("\n"));
     const name = backupAt(w.t.now());
-    assert.deepEqual(r.said, [STYLE_SAY.kept(name), STYLE_SAY.queued]);
+    assert.deepEqual(r.said, [STYLE_SAY.queued]);
     for (const line of r.said) assert.doesNotMatch(line, PLAIN, line);
-    // The copy is her pack as it was, whole, inside her pack, and her pack itself is not changed.
-    assert.deepEqual(filesOf(join(w.her, name)), before);
-    assert.deepEqual(filesOf(w.her), before);
+    // Nothing is written into her pack in Dropbox at a change: a change that never finishes leaves no copy behind.
+    assert.ok(!existsSync(join(w.her, name)));
+    assert.deepEqual(filesOf(w.her, { backups: true }), before);
     // One detached style job, on a working copy of her pack outside Dropbox: her files, with the brand's fonts for Reel Kit's scripts.
     assert.equal(w.t.started.length, 1);
     const [, args] = w.t.started[0];
@@ -173,15 +174,14 @@ describe("changing her style in chat", () => {
     assert.equal(state.slug, `style-${args[5]}`);
     assert.equal(state.job, "style");
     assert.equal(state.state, "queued");
-    assert.equal(state.backup, name);
+    assert.equal(state.backup, undefined);
     assert.equal(state.ask.text, "Make the captions a little bigger.");
     // While it is made, a second change waits: nothing more is kept or started.
     const again = await style(w, ["change", "And more sand."]);
     assert.deepEqual([again.code, again.said], [1, [STYLE_SAY.busy]]);
     assert.equal(w.t.started.length, 1);
-    // `back` names the copy, in plain words.
-    const back = await style(w, ["back"]);
-    assert.deepEqual(back.said, [STYLE_SAY.backups, `  ${name}`, STYLE_SAY.backHow]);
+    // `back` has no copy to name yet.
+    assert.deepEqual((await style(w, ["back"])).said, [STYLE_SAY.noBackups]);
   });
 
   it("refuses a change that names a font from neither Google Fonts nor Adobe Fonts, and keeps nothing", async () => {
@@ -242,9 +242,17 @@ describe("changing her style in chat", () => {
     releaseEpisodeLock(macLock(w.t.home), held.text);
     assert.deepEqual([busy.code, busy.said], [1, [STYLE_SAY.macBusy]]);
     assert.equal(readJson(join(w.her, "style.json")).captions.hifi.size, 54);
+    assert.deepEqual((await style(w, ["back"])).said, [STYLE_SAY.noBackups], "no copy kept while the Mac was held");
 
+    const was = filesOf(w.her);
     const yes = await style(w, ["yes"]);
-    assert.deepEqual([yes.code, yes.said], [0, [STYLE_SAY.changed]]);
+    const name = backupAt(w.t.now());
+    assert.deepEqual([yes.code, yes.said], [0, [STYLE_SAY.changed, STYLE_SAY.kept(name)]]);
+    for (const line of yes.said) assert.doesNotMatch(line, PLAIN, line);
+    // The copy is her pack as it was just before her yes, whole, inside her pack; `back` names it, in plain words.
+    assert.deepEqual(filesOf(join(w.her, name)), was);
+    assert.equal(readState(dir).backup, name);
+    assert.deepEqual((await style(w, ["back"])).said, [STYLE_SAY.backups, `  ${name}`, STYLE_SAY.backHow]);
     assert.equal(readJson(join(w.her, "style.json")).captions.hifi.size, 60);
     assert.equal(readFileSync(join(w.her, "board", "img", "hifi.jpg"), "utf8"), "a new board frame");
     // The fonts are not copied into Dropbox twice (the pack points at tool/brand/fonts), and the base she was made from is kept.
@@ -400,9 +408,12 @@ describe("carrying her style onto a new starting style", () => {
     assert.ok(!existsSync(join(reelKitHome(w.t.home), "style", ".base")), "Reel Kit's style holds no base");
     assert.deepEqual((await style(w, ["diff"])).said, [STYLE_SAY.same]);
     assert.equal((await style(w, ["change", "Bigger captions."])).code, 0);
+    assert.ok(!existsSync(join(changeDir(w.t.home, w.t.started[0][1][5]), "style", ".base")), "the working copy holds no base");
+    assert.equal((await runChange(w, { captions: { hifi: { size: 60 } } })).code, 0);
+    await style(w, ["show"]);
+    assert.equal((await style(w, ["yes"])).code, 0);
     const name = backupAt(w.t.now());
     assert.deepEqual(filesOf(join(w.her, name, ".base")), filesOf(w.shipped), "a copy kept holds the base it was made from, with .made-from");
-    assert.ok(!existsSync(join(changeDir(w.t.home, w.t.started[0][1][5]), "style", ".base")), "the working copy holds no base");
   });
 
   it("takes the new value of a key she never changed, keeps one she changed, and adds one the new base adds", async () => {
@@ -650,7 +661,8 @@ describe("the worker's style job", () => {
     const ctx = { project, kit: kitDir(w.t.home), rkHome: reelKitHome(w.t.home), bin: join(reelKitHome(w.t.home), "tools", "bin") };
     const q = (path) => `"${path}"`;
     const py = q(venvPython(w.t.home));
-    const styleCmd = `${py} ${q(join(ctx.kit, "pipeline", "style.py"))} ${q(join(project, "style", "style.json"))}`;
+    // style.py through Studio's offline wrapper (final review B2), never Reel Kit's own, which asks Google Fonts.
+    const styleCmd = `${py} ${q(join(ctx.rkHome, "tools", "studio", "style-offline.py"))} ${q(join(project, "style", "style.json"))}`;
     const boardCmd = `${py} ${q(join(ctx.kit, "onboarding", "board.py"))} --pack ${q(join(project, "style"))}`;
     const answer = (command, c = ctx) => workerDecision({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command }, cwd: c.project, session_id: "s" }, c).decision;
     assert.equal(answer(styleCmd), "pass");
@@ -659,7 +671,11 @@ describe("the worker's style job", () => {
     assert.ok(allowed.includes(`Bash(${styleCmd})`));
     assert.ok(allowed.includes(`Bash(${boardCmd})`));
     // Never refs.py (it fetches links), never another pack, never more words, and never in an edit's project.
+    assert.ok(!allowed.some((rule) => rule.includes(join("pipeline", "style.py"))), "only the wrapper for the style step");
     for (const command of [
+      `${py} ${q(join(ctx.kit, "pipeline", "style.py"))} ${q(join(project, "style", "style.json"))}`,
+      `${py} ${q(join(ctx.rkHome, "tools", "studio", "style-offline.py"))} ${q(join(reelKitHome(w.t.home), "style", "style.json"))}`,
+      `${py} ${q(join(ctx.rkHome, "tools", "studio", "style-offline.py"))} ${q(join(project, "style", "style.json"))} --out ${q(project)}`,
       `${py} ${q(join(ctx.kit, "onboarding", "refs.py"))} ${q(project)}`,
       `${py} ${q(join(ctx.kit, "pipeline", "style.py"))} ${q(join(reelKitHome(w.t.home), "style", "style.json"))}`,
       `${py} ${q(join(ctx.kit, "pipeline", "style.py"))} ${q(join(project, "style", "style.json"))} --out ${q(project)}`,
@@ -672,7 +688,26 @@ describe("the worker's style job", () => {
     const editCtx = { ...ctx, project: edit };
     assert.equal(answer(`${py} ${q(join(ctx.kit, "pipeline", "style.py"))} ${q(join(edit, "style", "style.json"))}`, editCtx), "deny");
     assert.equal(answer(`${py} ${q(join(ctx.kit, "onboarding", "board.py"))} --pack ${q(join(edit, "style"))}`, editCtx), "deny");
-    assert.ok(!WORKER_TOOLS(editCtx).allowed.some((rule) => rule.includes("onboarding/board.py") || rule.includes("pipeline/style.py")));
+    assert.equal(answer(`${py} ${q(join(ctx.rkHome, "tools", "studio", "style-offline.py"))} ${q(join(edit, "style", "style.json"))}`, editCtx), "deny");
+    assert.ok(!WORKER_TOOLS(editCtx).allowed.some((rule) => rule.includes("onboarding/board.py") || rule.includes("pipeline/style.py") || rule.includes("style-offline.py")));
+  });
+
+  it("puts Studio's offline style.py where the worker may read but not write it, before a style job, and names it in the prompt", async () => {
+    const w = world();
+    assert.equal((await style(w, ["change", "Make the captions a little bigger."])).code, 0);
+    assert.equal((await runChange(w, { captions: { hifi: { size: 60 } } })).code, 0);
+    const wrapper = join(reelKitHome(w.t.home), "tools", "studio", "style-offline.py");
+    const source = readFileSync(join(CHECKOUT, "tool", "reel-kit", "style-offline.py"), "utf8");
+    assert.equal(readFileSync(wrapper, "utf8"), source);
+    // It asks nothing of the network: Reel Kit's font fetch is replaced by the files already in the pack's fonts/, and a download refused.
+    assert.match(source, /style\._fetch_css = /);
+    assert.match(source, /urlretrieve/);
+    assert.doesNotMatch(source, /fonts\.googleapis\.com/);
+    const prompt = workerPrompt({ job: "style", project: "/p", kit: "/k", rkHome: "/r", bin: "/r/tools/bin" });
+    assert.match(prompt, /- STYLE: "\/r\/tools\/studio\/style-offline\.py"/);
+    assert.match(prompt, /"PY" "STYLE" "PROJECT\/style\/style\.json"/);
+    assert.doesNotMatch(prompt, /"KIT\/pipeline\/style\.py"/);
+    assert.doesNotMatch(workerPrompt({ job: "edit", project: "/p", kit: "/k", rkHome: "/r", bin: "/r/tools/bin" }), /- STYLE: /);
   });
 
   it("gives the worker her ask as data, in the notes block", () => {
