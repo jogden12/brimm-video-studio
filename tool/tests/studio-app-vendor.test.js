@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -135,11 +135,12 @@ describe("vendor.js", () => {
       assert.equal(sealFault(folder, pinFile), "node/bin/extra is not as it was sealed.");
 
       rmSync(join(folder, "node/bin/extra"));
-      rmSync(join(folder, "node/bin/nodejs"));
+      unlinkSync(join(folder, "node/bin/nodejs"));
       symlinkSync("elsewhere", join(folder, "node/bin/nodejs"));
       assert.equal(sealFault(folder, pinFile), "node/bin/nodejs is not as it was sealed.");
 
-      rmSync(join(folder, "node/bin/nodejs"));
+      // unlinkSync, not rmSync: Node 24.10 leaves a link to nothing in place under rmSync, so the next symlinkSync found it there.
+      unlinkSync(join(folder, "node/bin/nodejs"));
       symlinkSync("node", join(folder, "node/bin/nodejs"));
       assert.equal(sealFault(folder, pinFile), "");
       rmSync(join(folder, "node/bin/whisper-cli"));
