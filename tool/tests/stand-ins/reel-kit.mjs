@@ -24,7 +24,8 @@
 //     fails, so render.py does); and for render.py what a run might leave that is not its own (Task 14, fix round 1): `app-edit` (public/
 //     of the project itself, edit.py's SRC's, changed as the HyperFrames app would, while it renders), `plant` (cards/c1/Claude.md, one of Studio's own names), `renders-link`
 //     (renders/ made a link out of the project before it renders into it), `cli-meta` (a record of its own in public/renders/), `link` (a
-//     link in public/) and `restate` (the project's own studio.json taken to `queued`, as a job that took the edit would); later tasks add theirs
+//     link in public/) and `restate` (the project's own studio.json taken to `queued`, as a job that took the edit would), `deliver` (Reel Kit's two copies
+//     left in the copy's own source/, as a deliver would beside its clip) and `deliver-link` (a link there with such a name); later tasks add theirs
 //     (no-ready, usage-limit).
 import { spawnSync } from "node:child_process";
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -116,6 +117,16 @@ const SCRIPTS = {
       mkdirSync(out, { recursive: true });
       rmSync(join(project, "renders"), { recursive: true, force: true });
       symlinkSync(out, join(project, "renders"));
+    }
+    // A deliver that left its copies beside the copy's own source clip, in its source/ (fix round 3), and a link there with such a name.
+    if (scenes.has("deliver") || scenes.has("deliver-link")) {
+      const title = [...said("TITLE")].filter((ch) => !'/\\:*?"<>|'.includes(ch)).join("").trim() || "Video";
+      mkdirSync(join(project, "source"), { recursive: true });
+      if (scenes.has("deliver")) {
+        writeFileSync(join(project, "source", `${title} v1.mp4`), "A COPY");
+        writeFileSync(join(project, "source", `${title} v1 (phone).mp4`), "A PHONE COPY");
+      }
+      if (scenes.has("deliver-link")) symlinkSync(join(real, "source", "clip.mp4"), join(project, "source", `${title} v2.mp4`));
     }
     if (scenes.has("cli-meta")) {
       mkdirSync(join(pub, "renders"), { recursive: true });

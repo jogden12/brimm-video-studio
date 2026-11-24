@@ -18,11 +18,12 @@
 //     recorded (reel-kit-project.js compositionFingerprint); one changed in HyperFrames since is hers to export from the app;
 //   - renderProfile: the sandbox-exec profile's text;
 //   - renderReelKit: the render, the detached half's job, under the Mac-wide worker lock (reel-kit-worker.js macLock), so that a render and
-//     a worker never run at once: `PY <kit>/pipeline/render.py <the copy> <slug>-v<n> --no-deliver`, never without --no-deliver; then the
-//     copies Reel Kit's deliver would leave beside the source clip swept to the Trash (sweepCopies), and, when QA passed, the render
+//     a worker never run at once: `PY <kit>/pipeline/render.py <the copy> <slug>-v<n> --no-deliver`, never without --no-deliver, and only of
+//     a copy whose own fingerprint is the one finalize recorded; then the copies Reel Kit's deliver would leave beside the copy's source
+//     clip swept to the Trash (sweepCopies, never in the project's own source/), and, when QA passed, the render
 //     brought into the project's renders/, the meta record exports.js reads (writeMeta) and the state `rendered`. A QA that failed keeps
 //     nothing as an export, and says so. The copy is taken away;
-//   - sweepCopies: `<Title> v<n>.mp4` and `<Title> v<n> (phone).mp4` beside the source moved to the Trash, never deleted, refusing links;
+//   - sweepCopies: `<Title> v<n>.mp4` and `<Title> v<n> (phone).mp4` in the copy's source/ moved to the Trash, never deleted, refusing links;
 //   - writeMeta: `<project>/public/renders/<entry name>_<YYYY-MM-DD>_<HH-MM-SS>.meta.json` (Decision 7).
 //
 // What she reads holds no path, no flag and no name of a command.
@@ -61,6 +62,7 @@ export const RENDER_SAY = Object.freeze({
   notBuilt: `It isn't built to render yet: say "go" when its storyboard is right.`,
   rendered: "It is rendered already.",
   odd: "Its project isn't as Reel Kit left it, so it wasn't rendered: ask Jason.",
+  planted: "Something that isn't Reel Kit's was found in its project, so it wasn't rendered: ask Jason.",
   unread: "Its project can't be read, so it wasn't rendered: ask Jason.",
   busy: "It is being rendered already.",
   qaFailed: "Reel Kit's own checks of the render didn't pass, so nothing was kept as an export: ask Jason.",
@@ -251,12 +253,15 @@ function trashFile(path) {
   }
 }
 
-/** Sweep the copies a render's deliver would leave beside the source clip, in the project's `source/` (`sourceDir`): every
-    `<Title> v<n>.mp4` and `<Title> v<n> (phone).mp4` there, the title as Reel Kit names them and each name matched as the Mac's disk folds
-    it, is moved to the Trash (`trash`, macOS's own by default), never deleted, by the safe-delete rules: only a plain file, looked at again
-    just before its move and moved only while it is the same file (device and inode); a link or a folder with such a name is left, and
-    named in the log. A `sourceDir` that is a link, or not a folder, is never looked in: `refused`. { trashed, left, refused }, the names. */
-export function sweepCopies(sourceDir, title, { trash = trashFile, log = () => {} } = {}) {
+/** Sweep the copies a render's deliver would leave beside the source clip, in the `source/` of the render's copy of the project
+    (`sourceDir`; never the project's own, where a file of that name is hers): every `<Title> v<n>.mp4` and `<Title> v<n> (phone).mp4`
+    there, the title as Reel Kit names them and each name matched as the Mac's disk folds it, is moved to the Trash (`trash`, macOS's own
+    by default), never deleted, by the safe-delete rules: only a plain file, looked at again just before its move and moved only while it
+    is the same file (device and inode); a link or a folder with such a name is left, and named in the log. A name in `except` (the names
+    the copy held before the render ran: clones of her own files) is left alone. A `sourceDir` that is a link, or not a folder, is never
+    looked in: `refused`. { trashed, left, refused }, the names. */
+export function sweepCopies(sourceDir, title, { trash = trashFile, log = () => {}, except = [] } = {}) {
+  const before = new Set(except);
   let there;
   try {
     there = lstatSync(sourceDir);
@@ -268,7 +273,7 @@ export function sweepCopies(sourceDir, title, { trash = trashFile, log = () => {
   const trashed = [];
   const left = [];
   for (const name of readdirSync(sourceDir)) {
-    if (!copy.test(foldName(name))) continue;
+    if (before.has(name) || !copy.test(foldName(name))) continue;
     const path = join(sourceDir, name);
     try {
       const seen = lstatSync(path);
@@ -368,6 +373,15 @@ function nextRender(dir, slug, state) {
   return all.length ? Math.max(...all) + 1 : 1;
 }
 
+/** The names in the folder `path`, or none when it can't be read. */
+const namesIn = (path) => {
+  try {
+    return readdirSync(path);
+  } catch {
+    return [];
+  }
+};
+
 /** Whether `path` is a plain file. */
 const plainFile = (path) => {
   try {
@@ -425,7 +439,7 @@ async function runRender({ home, dir, name, profile, env, sandboxExec, limit, gr
     of Studio's own names (OWN_NAMES, as the Mac's disk folds a name, at any depth: studio.json, the notes for the app's agent, a
     .claude folder): the copy is the render's, and anything under one of those names found in it afterwards was put there by the render.
     The project's renders/ is not copied (an empty one is made): the render's file is all that comes back from it. */
-function copyProject(dir, clone) {
+export function copyProject(dir, clone) {
   const own = new Set(OWN_NAMES.map(foldName));
   cpSync(dir, clone, {
     recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false, mode: constants.COPYFILE_FICLONE,
@@ -496,27 +510,30 @@ function othersHolding(dir, run) {
       rendered, RENDER_SAY.open, each holder named in the log and left running (stopHolders): the app may read files into memory and hold
       none, so the copy is the guard;
     - the project is copied into the render's fresh temp folder (the worker's workerTmp of `<slug>.render`, as `project/`; copyProject:
-      APFS clones, without Studio's own names), the copy looked over for Studio's own names (sweepProject: a find fails it), its profile
+      APFS clones, without Studio's own names), the copy looked over for Studio's own names (sweepProject: a find refuses it,
+      RENDER_SAY.planted, `lastRender.why` "planted"), and the copy's own fingerprint compared with `state.fingerprint`: a copy that is not
+      the edit she approved (an app save between the look above and the copy) renders nothing, RENDER_SAY.changed; its profile
       (renderProfile: the copy and the temp folder written, the project only read, for edit.py's source clip) written beside the worker's
       settings, and Reel Kit's render.py run on the copy through sandbox-exec in Reel Kit's own environment (reel-kit.js reelKitEnv, TMPDIR
       the temp folder) as `<slug>-v<n>`, n the next render's number, always with --no-deliver;
     - after it, whatever it ended with: the copy looked over again for Studio's own names (any found set aside, and the render failed,
-      `state: "failed"`, `why: "own"`, RENDER_SAY.own, as the worker's run fails), the copies beside the project's source swept to the
-      Trash (sweepCopies), and only the render and its phone copy brought back into the project's renders/ (bringBack); what else the
+      `state: "failed"`, `why: "own"`, RENDER_SAY.own, as the worker's run fails), the copies a deliver left in the copy's source/ swept to
+      the Trash (sweepCopies; the project's own source/ is never looked in, and what the copy held there before the run is left), and only the render and its phone copy brought back into the project's renders/ (bringBack); what else the
       render made (its own records in public/renders/, a link) stays in the copy, which is then taken away. `state.fingerprint` is never
       recorded again: it stays as finalize recorded it, so an edit she made in the app while it rendered is refused at her next render as
       changed in HyperFrames;
     - a render that ended 0 and came back, and an edit still `ready`: the meta record (writeMeta), then `state: "rendered"`, `lastRender`
       and the render added to `renders`; any other: nothing kept as an export, `lastRender` says why (`qa` when Reel Kit's QA failed,
-      `error`, `time`, `odd`, `record`, `own`), the state left as it is, and she reads its line. The mark comes off, the copy is taken
+      `error`, `time`, `odd`, `record`, `own`, `planted`), the state left as it is, and she reads its line. The mark comes off, the copy is taken
       away and the lock is let go, whatever happened.
     `deps`: `sandboxExec` (SANDBOX_EXEC), `trash` (sweepCopies'), `run` (spawnSync: lsof and ps), `alive`, `startOf`, `wait`, `every` (ms
-    between looks at the lock), `limit`, `grace`, `facts` (settings.js factsOf of ctx.settings by default), `node` (Studio's), `log`.
+    between looks at the lock), `limit`, `grace`, `facts` (settings.js factsOf of ctx.settings by default), `node` (Studio's), `log`,
+    `copy` (copyProject; a test's, to change the copy between the steps).
     `ctx`: `home`, `settings`, `checkout`, `node`, `base`, `now`. */
 export async function renderReelKit(ctx, { dir, entry }, deps = {}) {
   const {
     sandboxExec = SANDBOX_EXEC, trash, run = spawnSync, alive = isRunning, startOf = processStart, wait = (ms) => new Promise((r) => setTimeout(r, ms)),
-    every = 2000, limit = RENDER_MS, grace = 5000, facts, node = ctx.node ?? process.execPath, log = () => {}
+    every = 2000, limit = RENDER_MS, grace = 5000, facts, node = ctx.node ?? process.execPath, log = () => {}, copy = copyProject
   } = deps;
   const home = ctx.home;
   const refuse = (why) => ({ ok: false, file: null, why });
@@ -572,11 +589,25 @@ export async function renderReelKit(ctx, { dir, entry }, deps = {}) {
     const name = `${slug}-v${nextRender(dir, slug, state)}`;
     const began = new Date(ctx.now ? ctx.now() : Date.now());
     freshTmp(tmp);
-    copyProject(dir, clone);
+    copy(dir, clone);
+    // What the copy holds before the render runs: anything under Studio's own names fails it (said as such in status), and so does a copy
+    // that is not the edit she approved (an app save between the look above and the copy), which renders nothing.
     if (sweepProject(home, slug, clone, { said: `Before Reel Kit's render of ${slug}`, log }).planted.length) {
-      mark({ rendering: undefined, lastRender: { at: began.toISOString(), name, qa: "", why: "odd" } });
-      return refuse(RENDER_SAY.odd);
+      mark({ rendering: undefined, lastRender: { at: began.toISOString(), name, qa: "", why: "planted" } });
+      return refuse(RENDER_SAY.planted);
     }
+    let copied = null;
+    try {
+      copied = compositionFingerprint(clone);
+    } catch {
+      copied = null;
+    }
+    if (copied !== state.fingerprint) {
+      log(`Reel Kit's ${slug} changed as it was copied for its render, so it was not rendered.`);
+      mark({ rendering: undefined });
+      return refuse(RENDER_SAY.changed(typeof state.name === "string" && state.name.trim() !== "" ? state.name : "This edit"));
+    }
+    const hers = namesIn(join(clone, "source"));
     const profile = renderProfileFile(home, slug);
     writeWhole(profile, renderProfile({
       checkout: ctx.checkout ?? thisCheckout(), project: clone, readOnly: [dir], kit: kitDir(home), rkHome: reelKitHome(home),
@@ -585,9 +616,10 @@ export async function renderReelKit(ctx, { dir, entry }, deps = {}) {
     const env = { ...reelKitEnv({ home, node, base: ctx.base ?? { HOME: home } }), TMPDIR: tmp };
     const ran = await runRender({ home, dir: clone, name, profile, env, sandboxExec, limit, grace, wait });
 
-    // What the render left: Studio's own names in its copy fail it; the copies beside the project's source go to the Trash.
+    // What the render left: Studio's own names in its copy fail it; the copies a deliver left beside the copy's source go to the Trash,
+    // and the project's own source/ is never looked in (a file of that name there is hers).
     const planted = sweepProject(home, slug, clone, { said: `After Reel Kit's render of ${slug}`, log }).planted;
-    const swept = sweepCopies(join(dir, "source"), state.title, { ...(trash ? { trash } : {}), log });
+    const swept = sweepCopies(join(clone, "source"), state.title, { ...(trash ? { trash } : {}), log, except: hers });
     if (swept.left.length || swept.refused) log(`Reel Kit's render of ${slug} left copies beside its source that couldn't be moved to the Trash.`);
     const last = { at: began.toISOString(), name };
     const leave = (fields, said) => {

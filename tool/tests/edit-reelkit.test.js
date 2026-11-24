@@ -604,4 +604,14 @@ describe("her render (plan Task 14)", () => {
     for (const line of [EDIT_SAY.renderFailed, EDIT_SAY.renderBroke, EDIT_SAY.renderUnrecorded, EDIT_SAY.renderOdd]) assert.match(line, /nothing was kept as an export/, line);
     assert.match(EDIT_SAY.renderUnrecorded, /render(ed)? (finished|was made)/i);
   });
+
+  it("fix round 3: says plainly that a render was refused for something found in its project before it ran", async () => {
+    const w = world({ edits: [{ n: 2 }] });
+    const dir = finalized(w);
+    writeState(dir, { ...readState(dir), lastRender: { at: "2026-11-23T10:00:00.000Z", name: `${slugOf(2)}-v1`, qa: "", why: "planted" } });
+    assert.deepEqual((await reelkit(w, ["status", FOLDER])).said, [`${SAID}: ${EDIT_SAY.renderPlanted}`]);
+    assert.ok(typeof EDIT_SAY.renderPlanted === "string" && EDIT_SAY.renderPlanted !== EDIT_SAY.renderOdd && EDIT_SAY.renderPlanted !== EDIT_SAY.renderBroke);
+    assert.match(EDIT_SAY.renderPlanted, /wasn't rendered/);
+    assert.doesNotMatch(EDIT_SAY.renderPlanted, /\/|--|\.py\b|\.json\b/);
+  });
 });

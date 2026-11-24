@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { metaNameOf, metaOf } from "../exports.js";
 import { hfDir, kitDir, reelKitHome, venvPython } from "../reel-kit.js";
 import { compositionFingerprint, projectDirOf, readState, writeState } from "../reel-kit-project.js";
-import { MACH_SERVICES, RENDER_SAY, renderProfile, renderReelKit, renderWhy, sweepCopies, writeMeta } from "../reel-kit-render.js";
+import { MACH_SERVICES, RENDER_SAY, copyProject, renderProfile, renderReelKit, renderWhy, sweepCopies, writeMeta } from "../reel-kit-render.js";
 import { asideDir, macLock, noteOwnFile } from "../reel-kit-worker.js";
 import { workerSandbox } from "../reel-kit-worker-tools.js";
 import { factsOf, workFolder } from "../settings.js";
@@ -160,21 +160,27 @@ describe("the headless render", () => {
   });
 
   it("leaves no copy beside the source clip", async () => {
-    const w = world();
+    // A render whose deliver left its copies in its copy's source/ (fix round 3: the project's own source/ is never swept), a link there
+    // with such a name, and her own files.
+    const w = world({ scenario: "deliver deliver-link" });
     const source = join(w.dir, "source");
-    // What a render without --no-deliver would have left (an earlier one, by hand), a link with such a name, and her own files.
-    writeFileSync(join(source, `${TITLE} v1.mp4`), "A COPY");
-    writeFileSync(join(source, `${TITLE} v1 (phone).mp4`), "A PHONE COPY");
     writeFileSync(join(w.outside, "hers.mp4"), "HERS");
-    symlinkSync(join(w.outside, "hers.mp4"), join(source, `${TITLE} v2.mp4`));
     writeFileSync(join(source, "notes.mp4"), "NOT A COPY");
-    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
+    const lines = [];
+    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, { ...w.deps, log: (line) => lines.push(line) });
     assert.equal(r.ok, true, r.why);
     assert.deepEqual(readdirSync(w.trash).sort(), [`${TITLE} v1 (phone).mp4`, `${TITLE} v1.mp4`]);
-    assert.deepEqual(readdirSync(source).sort(), [`${TITLE} v2.mp4`, "clip.mp4", "notes.mp4"], "the link was refused and left, never followed");
+    assert.ok(lines.some((line) => line.includes(`${TITLE} v2.mp4`)), "the link was refused and left, never followed");
+    assert.deepEqual(readdirSync(source).sort(), ["clip.mp4", "notes.mp4"]);
     assert.equal(readFileSync(join(w.outside, "hers.mp4"), "utf8"), "HERS");
     assert.equal(readFileSync(w.src, "utf8"), "THE 4K COPY");
     // sweepCopies alone: only the two names, only plain files, only to the Trash.
+    writeFileSync(join(source, `${TITLE} v1.mp4`), "A COPY");
+    writeFileSync(join(source, `${TITLE} v1 (phone).mp4`), "A PHONE COPY");
+    symlinkSync(join(w.outside, "hers.mp4"), join(source, `${TITLE} v2.mp4`));
+    assert.deepEqual(sweepCopies(source, TITLE, { trash: () => true, except: [`${TITLE} v1.mp4`, `${TITLE} v1 (phone).mp4`, `${TITLE} v2.mp4`] }), { trashed: [], left: [], refused: false }, "a name it is told to leave is left");
+    rmSync(join(source, `${TITLE} v1.mp4`));
+    rmSync(join(source, `${TITLE} v1 (phone).mp4`));
     writeFileSync(join(source, `${TITLE} v3.mp4`), "A COPY");
     mkdirSync(join(source, `${TITLE} v4.mp4`));
     const swept = sweepCopies(source, TITLE, { trash: w.deps.trash });
@@ -504,6 +510,59 @@ describe("fix round 1: what the render may not take for its own", () => {
     assert.deepEqual(r, { ok: false, file: null, why: RENDER_SAY.moved });
     assert.deepEqual(metas(w), []);
     assert.equal(readState(w.dir).state, "queued", "the job that took it is left its own state");
+  });
+
+  it("fix round 3: renders only the edit she approved, refusing a copy changed after the check", async () => {
+    // The app saves an edit to the project between the last look (renderWhy) and the copy: here, as lsof is asked whether anything holds it.
+    const w = world();
+    const before = readState(w.dir).fingerprint;
+    w.hold(() => {
+      writeFileSync(join(w.dir, "public", "index.html"), "<html>saved in the app just before the copy</html>\n");
+      return [];
+    });
+    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
+    assert.deepEqual(r, { ok: false, file: null, why: CHANGED });
+    assert.deepEqual(w.reelKitRuns(), [], "nothing was rendered");
+    assert.deepEqual(w.sandboxRuns(), []);
+    assert.deepEqual(metas(w), []);
+    assert.deepEqual(readdirSync(join(w.dir, "renders")), []);
+    assert.equal(readFileSync(join(w.dir, "public", "index.html"), "utf8"), "<html>saved in the app just before the copy</html>\n", "her edit is kept");
+    const state = readState(w.dir);
+    assert.deepEqual([state.state, state.fingerprint, state.rendering], ["ready", before, undefined]);
+    assert.ok(!existsSync(cloneOf(w)), "the copy is taken away");
+  });
+
+  it("fix round 3: sweeps the copies in the render's copy of source/, never the project's own", async () => {
+    // Her own files in the project's source/, named as Reel Kit's copies are, and a render whose deliver left its copies in its copy's source/.
+    const w = world({ scenario: "deliver" });
+    const source = join(w.dir, "source");
+    writeFileSync(join(source, `${TITLE} v7.mp4`), "HERS");
+    writeFileSync(join(source, `${TITLE} v7 (phone).mp4`), "HERS TOO");
+    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, w.deps);
+    assert.equal(r.ok, true, r.why);
+    assert.deepEqual(readdirSync(source).sort(), [`${TITLE} v7 (phone).mp4`, `${TITLE} v7.mp4`, "clip.mp4"], "the project's source/ is never swept");
+    assert.equal(readFileSync(join(source, `${TITLE} v7.mp4`), "utf8"), "HERS");
+    assert.ok(w.trashed.length > 0 && w.trashed.every((path) => path.startsWith(`${cloneOf(w)}/source/`)), "only the copy's source/ is swept");
+    assert.deepEqual(readdirSync(w.trash).sort(), [`${TITLE} v1 (phone).mp4`, `${TITLE} v1.mp4`], "only what the render left, never a clone of hers");
+  });
+
+  it("fix round 3: a find before the run is recorded as planted, not as an odd render", async () => {
+    // Something under one of Studio's own names turns up in the copy before the run (copyProject's own filter is the first guard).
+    const w = world();
+    const lines = [];
+    const copy = (dir, clone) => {
+      copyProject(dir, clone);
+      writeFileSync(join(clone, "fx", "f1", "CLAUDE.md"), "planted\n");
+    };
+    const r = await renderReelKit(w.ctx, { dir: w.dir, entry: w.entry }, { ...w.deps, copy, log: (line) => lines.push(line) });
+    assert.deepEqual(r, { ok: false, file: null, why: RENDER_SAY.planted });
+    assert.doesNotMatch(r.why, /\/|--|\.py\b|\.json\b/);
+    assert.notEqual(RENDER_SAY.planted, RENDER_SAY.odd);
+    assert.deepEqual(w.reelKitRuns(), [], "nothing was rendered");
+    const state = readState(w.dir);
+    assert.equal(state.lastRender?.why, "planted");
+    assert.equal(state.state, "ready");
+    assert.ok(asideFiles(w).includes("fx/f1/CLAUDE.md"));
   });
 
   it("says the render finished, but its record couldn't be written", () => {
