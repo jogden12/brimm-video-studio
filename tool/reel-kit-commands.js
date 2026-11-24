@@ -356,6 +356,7 @@ const FOLLOW = `Say "how are the Reel Kit edits going?" to follow them.`;
 /** What her edit words say, in her words: never a path, a flag or the name of a command. */
 export const EDIT_SAY = Object.freeze({
   notSetUp: "Reel Kit isn't set up on this Mac yet: ask Jason.",
+  renderedNew: (key) => `It is rendered: further Reel Kit changes go into a new edit of the same part. Say "make a Reel Kit edit of ${key === "main" ? "the main video" : `Reel ${key.slice(5)}`}".`,
   settingUp: `Reel Kit is being set up on this Mac, so nothing of it runs until that is done. Say "how is the Reel Kit setup going?" to follow it.`,
   queued: (key, mode) => `${partSaid(key)} is in the queue for a ${MODE_SAID[mode]} Reel Kit edit.`,
   steps: `This Mac makes one Reel Kit edit at a time. Each goes through ${listed(JOBS.edit)}, then waits for you at its storyboard.`,
@@ -769,6 +770,8 @@ async function reviseCommand(ctx, words, h) {
   const { found, edit, status } = got;
   // Its render is building from this very edit: a revise now would be taken for the render's, or the render's for it.
   if (renderingNow(ctx, readState(edit.dir))) return refuse(ctx, EDIT_SAY.renderBusy);
+  // A rendered edit is never changed by Reel Kit: further changes are a new edit of the same part (a new version, `start`).
+  if (status?.state === "rendered") return refuse(ctx, EDIT_SAY.renderedNew(edit.key));
   if (status?.state !== "storyboard" && status?.state !== "ready") return refuse(ctx, notWaiting(status));
   const kept = keptInApp(ctx, edit);
   if (kept) return refuse(ctx, kept);
@@ -1219,6 +1222,7 @@ async function editNow(ctx, { found, record }, job, [slug, ...more], h) {
     const kept = keptInApp(ctx, edit);
     if (kept) return kept;
     const state = readState(edit.dir) ?? {};
+    if (job === "revise" && state.state === "rendered") return EDIT_SAY.renderedNew(edit.key);
     const approved = state.approved !== null && typeof state.approved === "object";
     return (job === "finalize" || (job === "resume" && state.job === "finalize")) && !approved ? "she has not said go." : "";
   };

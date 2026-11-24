@@ -409,6 +409,21 @@ describe("her go", () => {
     assert.deepEqual((await reelkit(w, ["revise", FOLDER, slugOf(2)])).said, [EDIT_SAY.noNotes], "those notes are used");
   });
 
+  it("changes no rendered edit: further Reel Kit changes go into a new edit of the same part, in one line (final review C3)", async () => {
+    const w = world({ edits: [{ n: 2, state: { state: "rendered", step: "ready" } }] });
+    await reelkit(w, ["note", FOLDER, slugOf(2), "p02", "Shorter."]);
+    w.t.started.length = 0;
+    const r = await reelkit(w, ["revise", FOLDER, slugOf(2)]);
+    assert.deepEqual([r.code, r.said], [1, [EDIT_SAY.renderedNew("reel 2")]]);
+    assert.equal(EDIT_SAY.renderedNew("reel 2"), `It is rendered: further Reel Kit changes go into a new edit of the same part. Say "make a Reel Kit edit of Reel 2".`);
+    assert.equal(EDIT_SAY.renderedNew("main"), `It is rendered: further Reel Kit changes go into a new edit of the same part. Say "make a Reel Kit edit of the main video".`);
+    assert.deepEqual(w.t.started, []);
+    // The detached half refuses it too, and runs nothing.
+    const half = await reelkit(w, ["--now", FOLDER, "revise", slugOf(2)], { reelKit: { claude: claudeOf(w), run } });
+    assert.equal(half.code, 1);
+    assert.equal(readState(w.dirOf(2)).state, "rendered");
+  });
+
   it("carries on only a stopped edit", async () => {
     const w = world({ edits: [{ n: 2, state: { state: "storyboard" } }] });
     assert.deepEqual((await reelkit(w, ["resume", FOLDER, slugOf(2)])).said, [EDIT_SAY.notStopped]);
@@ -585,7 +600,10 @@ describe("her render (plan Task 14)", () => {
     assert.deepEqual([r.code, r.said], [1, [`${nameOf(2)} was changed in HyperFrames, so Reel Kit won't render it: export it from HyperFrames on This Mac.`]]);
     writeState(dir, { ...readState(dir), state: "storyboard" });
     assert.deepEqual((await reelkit(w, ["render", FOLDER, slugOf(2)])).said, [RENDER_SAY.notBuilt]);
+    // Rendered and changed in the app since: the app's, exported there (final review C2). Rendered as it is: rendered already.
     writeState(dir, { ...readState(dir), state: "rendered" });
+    assert.deepEqual((await reelkit(w, ["render", FOLDER, slugOf(2)])).said, [`${nameOf(2)} was changed in HyperFrames, so Reel Kit won't render it: export it from HyperFrames on This Mac.`]);
+    writeState(dir, { ...readState(dir), fingerprint: compositionFingerprint(dir) });
     assert.deepEqual((await reelkit(w, ["render", FOLDER, slugOf(2)])).said, [RENDER_SAY.rendered]);
     assert.deepEqual((await reelkit(w, ["render", FOLDER, "abc123-reel-9-v1"])).said, [EDIT_SAY.noSuchEdit]);
     assert.deepEqual(w.t.started, []);
