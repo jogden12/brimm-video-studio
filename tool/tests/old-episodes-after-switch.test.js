@@ -218,7 +218,7 @@ describe("an episode filed before the switch, on a Mac that has switched: its fi
 });
 
 describe("the guide's step after the page's \"taken\" step, on a Mac that has switched", () => {
-  const TAKE = 'On the BRIMM Ops page: Drag the hand-off onto Episodes. If the page says it is a new episode, press "Add the episode and take the hand-off". If it opens an episode, press "Take the hand-off". If the page already holds an older revision, press "Take revision N in place of revision M", with the numbers it shows.';
+  const TAKE = 'In BRIMM Ops: Find the video under "Waiting from Studio" and press its button, such as "Add the episode and take the hand-off". For a video BRIMM Ops already holds, it is "Take the hand-off" or "Take revision N in place of revision M". Dropping the hand-off onto Episodes still works.';
   const ONLINE = ' Once Dropbox shows the episode\'s folder is up to date, Control-click it in Finder and choose "Make online-only".';
   const FINISHED = { revision: 1, at: "2026-10-20T10:00:00-05:00", on: STUDIO, handoff: "final/Pricing talk.brimm-ops.json", parts: {} };
   /** The made-up episode with its hand-off in final/, as a finish writes one, on a Mac that has switched. `local` keeps the record on this Mac. */
@@ -255,9 +255,9 @@ describe("the guide's step after the page's \"taken\" step, on a Mac that has sw
   it("keeps the sentence in opsText for a raw hand-off with no local, and leaves it off with one, for every other step as today", async () => {
     const { opsText } = await import("../guide.js");
     const raw = { kind: "raw", revision: 1 };
-    assert.equal(opsText(raw, "taken", false, null), TAKE.replace("On the BRIMM Ops page: ", "") + ONLINE);
-    assert.equal(opsText(raw, "taken", false, null, false), TAKE.replace("On the BRIMM Ops page: ", "") + ONLINE);
-    assert.equal(opsText(raw, "taken", false, null, true), TAKE.replace("On the BRIMM Ops page: ", ""));
+    assert.equal(opsText(raw, "taken", false, null), TAKE.replace("In BRIMM Ops: ", "") + ONLINE);
+    assert.equal(opsText(raw, "taken", false, null, false), TAKE.replace("In BRIMM Ops: ", "") + ONLINE);
+    assert.equal(opsText(raw, "taken", false, null, true), TAKE.replace("In BRIMM Ops: ", ""));
     // Another kind's words, and another step's, are the same either way.
     for (const handoff of [{ kind: "finished", revision: 1 }, { kind: "short video", revision: 1 }]) assert.equal(opsText(handoff, "taken", false, null, true), opsText(handoff, "taken", false, null, false));
     assert.equal(opsText(raw, "kit", false, null, true), opsText(raw, "kit", false, null, false));

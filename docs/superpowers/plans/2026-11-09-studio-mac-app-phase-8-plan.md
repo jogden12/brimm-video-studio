@@ -1,5 +1,7 @@
 # Phase 8: the rollout (implementation plan)
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Jason's MacBook, then Sallie's laptop, run BRIMM Video Studio from the app and no longer from a git checkout. Each takeover is proved by hand: it keeps the Mac's name, settings and folders, and the Mac then takes an update from the feed. The old installer (`tool/move-app/`), its tests and the two old setup documents are retired, the three GitHub deploy keys are deleted, and CLAUDE.md, the README and the wiki say how a Mac is set up and updated now.

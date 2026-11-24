@@ -373,7 +373,7 @@ export function lookForExports(input, answers = {}) {
     passedOver(export_);
   }
   // A Reel the last finish finished that has no project in the record (it was finished in the Final Cut days) stays in the hand-off as
-  // that finish made it: leaving it out would take it off the page.
+  // that finish made it: leaving it out would take it out of BRIMM Ops.
   if (finished) {
     const known = new Set(input.parts.map((part) => part.key));
     const number = (key) => Number(key.slice(5));

@@ -35,7 +35,7 @@ const secret = /pricing/i;
 const CLICK = (label = SESSION_NAME) => `A dialog is open on this Mac for ${label}: click "Clear it" to clear its session mark, or Cancel.`;
 const NOT_CLEARED = "Not cleared: the session mark stays.";
 /** The spec's sentence, word for word; the dialog's text is the label on a line of its own, a blank line, and this. */
-const SENTENCE = "This was marked a client or group session. Clearing it lets Claude read its words and lets its transcript go to the BRIMM Ops page. Clear it?";
+const SENTENCE = "This was marked a client or group session. Clearing it lets Claude read its words and lets its transcript go to BRIMM Ops. Clear it?";
 const DIALOG = (label = SESSION_NAME) => `${label}\n\n${SENTENCE}`;
 const TOO_LONG = "Not cleared: the dialog was open too long for this to finish in time. Say it again, and click within a minute.";
 const LOG_FAILED = "The log on this Mac could not be written: the record holds the clearing.";

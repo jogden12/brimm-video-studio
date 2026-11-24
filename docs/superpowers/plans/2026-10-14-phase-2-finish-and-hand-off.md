@@ -1,5 +1,7 @@
 # Phase 2, finish and hand-off: implementation plan
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** At the end of an edit, Sallie (or Jason) says "finish the episode". brimm-video finds what Final Cut Shared and exported for the episode, asks what it must, and then, detached, transcribes each finished video again, cuts Story parts from the finished Reels, copies everything into the episode's `final/` folder by the Dropbox rule, and writes one hand-off file for BRIMM Ops. Before that, a title can be approved, Reels picked, and a picked Reel pushed to Final Cut as an upright project, so that the hand-off can hold finished Reels before phase 3.

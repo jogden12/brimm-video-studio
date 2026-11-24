@@ -28,7 +28,7 @@ const left = (n, why) => `Suggestion ${n} is left out of the hand-off: ${why}.`;
     - A suggestion that is found is { n, start, end, stretches: [{ start, end }], first, last, why, point }: its number, the one stretch of
       the export `inMain` puts its words in (which spans what lies between its parts), its own opening and closing words, spelled, and its
       reason and point, as they were.
-    - A suggestion with no stretch is passed over. One without its first words, last words, reason or point (the page needs all four), one
+    - A suggestion with no stretch is passed over. One without its first words, last words, reason or point (BRIMM Ops needs all four), one
       with no word of the recording in its stretches, and one whose words are not found in one stretch are left out, and `left` says so, in
       plain words, for each.
     The order and the numbers are the candidates'. What it is given is not changed. */

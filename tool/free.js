@@ -245,7 +245,7 @@ function holdsVideo(path, list) {
   return entries.some((entry) => !entry.isSymbolicLink() && (entry.isDirectory() ? holdsVideo(join(path, entry.name), list) : entry.isFile() && VIDEO.test(entry.name)));
 }
 
-/** Whether the episode in `folder` has been handed off to the BRIMM Ops page, for sure: its record says it was finished, or a hand-off
+/** Whether the episode in `folder` has been handed off to BRIMM Ops, for sure: its record says it was finished, or a hand-off
     (a .brimm-ops.json) is in its final/ or in its history/, at any depth. A folder that cannot be read is no hand-off that is known:
     finish.js handedOff takes a doubt as handed off, which is its safe side, and here a doubt is the one that takes nothing. */
 function handedOffForSure(folder, record) {

@@ -126,7 +126,7 @@ import { NO_RECEIPT, cardOf, expectedAnswers, notSessionCardOf, receiptWhy, sess
 import { isRunning, lastLine, lockFile, runProgram } from "./run.js";
 import { DOWNLOADS_SAY_MS, LOOK_ASKED, LOOK_AT_WORK, UNSEEN_MS, accessLine, blocksDrop, saysInEpisodes, saysInOverview, stepLine, findingOf, lookerOf, placeWordsOf, readAccess, switchFor } from "./access.js";
 import { askDialog } from "./dialog.js";
-import { NOT_SET_UP, OPS_PAGE, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine, reelKitEdits } from "./guide.js";
+import { NOT_SET_UP, OPS_APP, ZOOM_WORDS, WAIT_MS, POLL_MS, dropWords, dropUnreadable, noteAfter, nextFor, ordered, findIn, overviewLines, videoLines, signatureOf, readyIn, roughIn, copyIn, apart, COMING, TELL_MS, TELL_POLL_MS, trailOf, follow, told, stillLine, reelKitEdits } from "./guide.js";
 import { readGuideNotes, writeGuideNotes } from "./guide-note.js";
 import { NOT_SET_UP as APP_NOT_SET_UP, KEPT as PROJECT_KEPT, byReelKit, projectDirOf, clipFolders, clipTrouble, clearOpensAfterSpellings, copyAtWork, copyIsMade, footageFailed, guidanceOf, isMain as inUse, mainState, markOpensAfterSpellings, opensAfterSpellingsOf, mediaOf, notWholeYet, openByItself, openInApp, plainName, projectOnAnotherMac, waitsForSpellings, whenReadyLockOf } from "./app.js";
 import { VOICEOVER, projectCues } from "./project.js";
@@ -160,11 +160,11 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
   node edit.js guide ["<video>"]        the one next step for each video under way, in her words: a video waiting for her
                                         answer first, then the newest; this Mac's drop folder in Finder's words; and how
                                         many videos from before the switch are not guided. With a video, its next step,
-                                        and for a step on the BRIMM Ops page the step after it. A raw video and an iPhone
+                                        and for a step in BRIMM Ops the step after it. A raw video and an iPhone
                                         clip are followed through HyperFrames: while its video is made, how long is left;
                                         then to open it there; once it is open, when she last asked the app for something;
                                         and once it is exported, to hand it off. Once its finish has written the hand-off
-                                        it gives the BRIMM Ops page's step, with a line of when Studio checks Dropbox's
+                                        it gives BRIMM Ops' step, with a line of when Studio checks Dropbox's
                                         copies (a spelling and handing it off again wait until then),
                                         though the finish goes on checking them for a quarter of an hour; for a
                                         video kept on this Mac it gives no such line: the finish ends at the
@@ -180,13 +180,13 @@ export const HELP = `The command line for episodes on this Mac. Claude runs it f
                                         once footage is in, what it has so far, and which part is waiting for a client's
                                         agreement. Only on a Mac that does the light import: on any other, every form says
                                         to ask Jason
-  node edit.js guide drop [zoom] | page | wait
+  node edit.js guide drop [zoom] | ops | wait
                                         open this Mac's drop folder in Finder (with zoom, Zoom Video Transfer), open the
-                                        BRIMM Ops page in the default browser, or wait up to 90 seconds for a change in
+                                        BRIMM Ops app, or wait up to 90 seconds for a change in
                                         what the guide says: at once when no video is coming in, being imported, being
                                         read or having its video for HyperFrames made
   node edit.js guide "<video>" done <step> | finished | show | tell
-                                        note on this Mac that she did its step on the BRIMM Ops page (only the step that
+                                        note on this Mac that she did its step in BRIMM Ops (only the step that
                                         comes next), that she is done with the video, or show in Finder what its step needs.
                                         With tell, wait up to 60 minutes for its next point (ready, read by Claude, its
                                         video for HyperFrames made, its finish's hand-off written, or an import, a reading
@@ -1118,7 +1118,7 @@ function episodeLines(ctx, e, left, all, links) {
   return lines;
 }
 
-/** Whether the Mac an episode is kept on has steps of its own to take before the BRIMM Ops page's, which only it can take: a conflicted copy of
+/** Whether the Mac an episode is kept on has steps of its own to take before BRIMM Ops', which only it can take: a conflicted copy of
     its record is sorted out there, and a video held beside a session that is not cleared is settled there (guide.js nextFor puts both before the
     page's steps). Said by the records alone, so that the guide (guideFacts' `keeperFirst`) and `episodes` (stepThere) agree even once a hand-off is
     written (review R2-F1). */
@@ -1128,7 +1128,7 @@ const keeperFirst = (e) => e.read.code === "CONFLICTED" || Boolean(e.held && !ga
     by its records alone, so that `episodes` says "Carry on there." under it only where the guide does (review R1-F4). Never for a video she left
     alone (`left`), which has no step; always for a video waiting for her answer, which is answered there; for a session, while its empty
     revision is owed, and otherwise until a hand-off of its own is written, unless her choice is its transcript only; for any other video and a
-    plan, until its hand-off is written, after which the BRIMM Ops page's steps are hers on any Mac, except for an episode with a conflict or held beside a session (keeperFirst),
+    plan, until its hand-off is written, after which BRIMM Ops' steps are hers on any Mac, except for an episode with a conflict or held beside a session (keeperFirst),
     which keeps "Carry on there." even after a hand-off. Her notes on this Mac are not read: while
     the page's step for a session's empty revision is still hers, the guide says that step first, and the session's own steps there after it. */
 function stepThere(e, left) {
@@ -4290,7 +4290,7 @@ function notInFinalCut(ctx, found, record) {
   if (record.finished && Number.isInteger(record.finished.revision)) return `${name}'s hand-off is written already, as revision ${record.finished.revision}: a spelling changed writes its next revision.${recordKind(record) === "finished" && reelProjectsOf(record).length ? ' Its Reels are added after you export them from HyperFrames: say "hand off the Reels".' : ""}`;
   return `${name} is not edited here: its hand-off is written once its spellings are answered. Say "show me the spellings".`;
 }
-const handoffWritten = (revision, shown = true) => (shown ? `The hand-off is written as revision ${revision} and shown in Finder: drop it on the BRIMM Ops page.` : `The hand-off is written as revision ${revision}.`);
+const handoffWritten = (revision, shown = true) => (shown ? `The hand-off is written as revision ${revision} and shown in Finder. It waits in BRIMM Ops, under "Waiting from Studio".` : `The hand-off is written as revision ${revision}.`);
 /** Whether a video is edited here (the name is from the Final Cut days): a finished video is not, nor is an iPhone clip of the switch, a
     record that holds her `answer`. Today's import makes short videos too, answered by no one, and they are edited as an episode is. */
 const hasFinalCut = (record) => {
@@ -4389,7 +4389,7 @@ async function importHandoff(ctx, found, record, done, unhanded = "") {
   // video's Reels (stillWords): all are made in HyperFrames, and are handed off by "hand off the Reels". A Reel whose captions keep a spelling is told below.
   const drawn = (wrote.drawn || []).map((n) => ({ name: `Reel ${n}`, app: true }));
   if (wrote.same) ctx.say(`${done} The final transcripts and the hand-off are as they were.`);
-  else if (record.finished) ctx.say(`${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${wrote.revision}: drop it on the BRIMM Ops page again.${stillWords(drawn, "hand off the Reels")}${unhanded}`);
+  else if (record.finished) ctx.say(`${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${wrote.revision}: it waits in BRIMM Ops again, under "Waiting from Studio".${stillWords(drawn, "hand off the Reels")}${unhanded}`);
   else ctx.say(`${done}${wrote.left.map((line) => ` ${line}`).join("")} ${handoffWritten(wrote.revision, wrote.shown !== false)}${unhanded}`);
   // A Reel whose captions keep the spelling they were made with (a spelling cannot be put into them, or taken out) says so, and the way back.
   if (Array.isArray(wrote.kept) && wrote.kept.length) ctx.say(keepOldWords(wrote.kept));
@@ -4647,7 +4647,7 @@ async function saveSpellings(ctx, found, spellings, done, { set = {}, later = ""
     const drawn = parts.filter((p) => p.key !== "main" || !mainIsFullEpisode(record));
     const asked = drawn.length ? "" : ask;
     const still = `${stillWords(drawn)}${asked}`;
-    const code = await save(ctx, found, { ...record, files: { ...record.files, ...files }, finished: { ...withHeld(held), revision, at, on: ctx.machine } }, `${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${revision}: drop it on the BRIMM Ops page again.${still}${keptNote}${asked ? "" : unhanded}`);
+    const code = await save(ctx, found, { ...record, files: { ...record.files, ...files }, finished: { ...withHeld(held), revision, at, on: ctx.machine } }, `${done} The final transcripts are spelled so too, and the hand-off is made again as revision ${revision}: it waits in BRIMM Ops again, under "Waiting from Studio".${still}${keptNote}${asked ? "" : unhanded}`);
     if (code !== 0) {
       const lost = putBack();
       if (lost.length) ctx.say(`${listed(lost)} could not be put back as it was. Tell Jason: the episode needs him.`);
@@ -5049,7 +5049,7 @@ const SESSION_TARGET = "That video is a client or group session, so this new ver
 const CLEAR_BY_KIND = "A session mark is cleared by answering what the video really is: finished, raw or clip.";
 /** The sentence of the dialog that clears a session mark: its words are hers to read, and only her click on "Clear it" clears the
     mark. The dialog opens with the video's label on a line of its own and a blank line (clickedClear), so that she knows which. */
-const CLEAR_DIALOG = "This was marked a client or group session. Clearing it lets Claude read its words and lets its transcript go to the BRIMM Ops page. Clear it?";
+const CLEAR_DIALOG = "This was marked a client or group session. Clearing it lets Claude read its words and lets its transcript go to BRIMM Ops. Clear it?";
 /** How long the dialog that clears a session mark stays open, in milliseconds: then it is closed and nothing is cleared. A person
     who never answers must not hold the command until Claude Code ends it, with the video claimed. */
 export const DIALOG_MS = 60000;
@@ -5161,7 +5161,7 @@ function answerWhy(ctx, found, record, plan) {
     if (!record.session || typeof record.session !== "object" || Array.isArray(record.session)) return markUnreadable(name);
   } else if (was !== null && gated(record)) {
     if (stored !== "session") return MARK_STAYS;
-    // A video answered as a session after it was read as another kind owes the BRIMM Ops page its empty session revision until it
+    // A video answered as a session after it was read as another kind owes BRIMM Ops its empty session revision until it
     // is written (a gap in its versions, or this Mac handing off version 1, held it back): the same answer again writes it.
     if (!plan.again || !(revisionOwed(record) || sweepOwed(ctx, found, record))) return `${name} is a client or group session already.`;
     // The same answer alone writes it: another link now would not be the one it is owed under.
@@ -5226,13 +5226,13 @@ function answerWhy(ctx, found, record, plan) {
   const linked = was !== null ? record.versionOf || null : null;
   const keeps = was !== null && !plan.target && !plan.unlink;
   const after = plan.target ? plan.target.record.id : keeps ? linked : null;
-  // A video already handed off to the BRIMM Ops page keeps its place there: its id never changes across revisions (spec 8), so it
+  // A video already handed off to BRIMM Ops keeps its place there: its id never changes across revisions (spec 8), so it
   // is given no other version, and none (--version-of none) is refused it too, unless it is a version of none already.
   const handed = handedOff(found.folder, record);
   if (handed && ((plan.unlink && record.versionOf) || (plan.target && plan.target.record.id !== (record.versionOf || null)))) {
     const older = recordsHere(ctx).find((e) => e.record.id === record.versionOf);
     const place = record.versionOf ? `a version of ${older ? shownName(older.record) : `an episode (${String(record.versionOf).slice(-6)})`}` : "a video of its own";
-    return `${name} has already gone to the BRIMM Ops page as ${place}: ask Jason.`;
+    return `${name} has already gone to BRIMM Ops as ${place}: ask Jason.`;
   }
   // The version it keeps is checked as a target is, for an answer that is not a session: the video it names is no session, its
   // versions do not name each other, none of the versions of the video it starts from is a session (the one being cleared left
@@ -5251,7 +5251,7 @@ function answerWhy(ctx, found, record, plan) {
     // for it, or none, moves the id that later video went to the page under. Only a link that changes is refused, the link the
     // walk follows (the link of an unanswered video is not followed).
     const through = links.handedOffThrough(record.id).find((one) => one.record.id !== record.id);
-    if (through) return `${shownName(through.record)} has already gone to the BRIMM Ops page as a version of ${name}: ask Jason.`;
+    if (through) return `${shownName(through.record)} has already gone to BRIMM Ops as a version of ${name}: ask Jason.`;
   }
   const held = heldElsewhere(record, ctx.machine);
   if (held) return beingAnswered(name, held.by);
@@ -5437,7 +5437,7 @@ async function answerKind(ctx, found, plan, began) {
   const why = answerWhy(ctx, found, record, plan);
   if (why) return refuseAnswer(ctx, name, record, why);
   if (!receiptHeld(ctx, record, plan, name)) return 1;
-  // A session that owes the BRIMM Ops page its empty revision: the same answer again writes it, and nothing else.
+  // A session that owes BRIMM Ops its empty revision: the same answer again writes it, and nothing else.
   if (plan.owed) return emptyRevisionAgain(ctx, found, record);
   // (A video kept on this Mac has no other Mac to leave it for: its recording is in video/, or in Original files, which the reading brings down.)
   // A raw reading needs the video itself for the rough cut. On a Mac it is not whole on (the one that did not import it), that
@@ -5527,7 +5527,7 @@ async function answerKind(ctx, found, plan, began) {
     next.session = { marked: at, on: ctx.machine, teachings: null, cleared: null };
     next.name = { text: sessionLabel(record.video.recorded, taken), placeholder: false };
     next.editing = null;
-    // A video read as another kind, answered now as a session: its words have gone to Claude, and the BRIMM Ops page is given at once
+    // A video read as another kind, answered now as a session: its words have gone to Claude, and BRIMM Ops is given at once
     // an empty session revision, which redacts what it had (spec 2, "A session answered as something else"). It is judged with the
     // record as it is to be written, its last finish still on it for the version of the hand-off on file.
     if (aside) {
@@ -5671,23 +5671,23 @@ const asideFailed = (code) => `Nothing was changed: its earlier files could not 
 /** What is said of the files that stayed in final/ after a correction, by what each is (`whats`), never by name. */
 const stayedWords = (name, whats) => `${name}: ${listed(whats)} stayed in final/: ${whats.length === 1 ? "it" : "they"} could not be taken out. Tell Jason.`;
 /** The spec's words to her when a video read as another kind is answered as a session. */
-const WORDS_GONE = "Its words have already gone to Claude: drop the new revision on the BRIMM Ops page and tell Jason.";
+const WORDS_GONE = "Its words have already gone to Claude: take the new revision in BRIMM Ops and tell Jason.";
 /** Said after the words of an empty revision not written, when nothing stayed in final/. */
 const OUT_OF_SHARED = "Its files are out of the shared folder.";
 /** What is said of a session's empty revision (emptyRevisionOf), named by its label: written; waiting for an earlier version, or
     for versions that name each other (`gap`, as chainGap gives it); refused by handoffTarget for another reason (`why`, its words);
     held back by a hand-off of its own under another id (`id`); and on a Mac that hands off version 1. */
 const emptyWritten = (label, n, gone = true, shown = true) => (shown
-  ? `The empty session revision of ${label} is written as revision ${n} and shown in Finder${gone ? `. ${WORDS_GONE}` : ": drop it on the BRIMM Ops page."}`
+  ? `The empty session revision of ${label} is written as revision ${n} and shown in Finder${gone ? `. ${WORDS_GONE}` : ". It waits in BRIMM Ops, under \"Waiting from Studio\"."}`
   : `The empty session revision of ${label} is written as revision ${n}.${gone ? ` ${WORDS_GONE}` : ""}`);
 const emptyWaits = (label, gap) => (gap.reason === "loop" ? `The empty session revision of ${label} waits: its versions name each other: tell Jason.` : `The empty session revision of ${label} waits for its earlier version (${gap.id}), which is not on this Mac yet: tell Jason.`);
 const emptyRefused = (label, why) => `The empty session revision of ${label} is not written: ${String(why).replace(/ Nothing was written\.$/, "")}`;
-const emptyElsewhere = (label, id) => `The empty session revision of ${label} is not written: ${label} went to the BRIMM Ops page under ${id} too: ask Jason.`;
+const emptyElsewhere = (label, id) => `The empty session revision of ${label} is not written: ${label} went to BRIMM Ops under ${id} too: ask Jason.`;
 const emptyV1 = (label) => `The empty session revision of ${label} is written once this Mac hands off version 2: ask Jason.`;
 /** Why `--version-of` is refused on a session that owes its empty revision: the same answer alone writes it. */
 const owedLinked = (label) => `The empty session revision of ${label} is still owed: say it again without --version-of.`;
 
-/** Whether a session still owes the BRIMM Ops page its empty revision: `kind … session --again` marked it "owed" (session.emptyRevision)
+/** Whether a session still owes BRIMM Ops its empty revision: `kind … session --again` marked it "owed" (session.emptyRevision)
     when it could not write it, and no hand-off has been written for it since (record.finished: its own finish writes a session
     revision too). */
 const revisionOwed = (record) => record.session !== null && typeof record.session === "object" && record.session.emptyRevision === "owed" && !record.finished;
@@ -5984,7 +5984,7 @@ function sayEmpty(ctx, label, empty, stayed, shown = true) {
 }
 
 /** Show the file at `path`, of the video whose record is `record` and which is called `label`, in Finder, through this Mac's program
-    runner: a hand-off for her to drop on the BRIMM Ops page, or a video to post, which `clone` copies. On an open-lock Mac a copy of
+    runner: a hand-off for her to drop in BRIMM Ops, or a video to post, which `clone` copies. On an open-lock Mac a copy of
     it is shown (reveal.js revealed). False when that copy could not be made, and nothing was shown: the caller says cantOpen. */
 async function showInFinder(ctx, { record, label, path, clone }) {
   try {
@@ -6512,7 +6512,7 @@ async function finishSessionCommand(ctx, found) {
   }
   for (const d of done.dropped) ctx.say(`Taken out of the hand-off: ${d.field}: ${d.why}.`);
   const { principles: p, recurringPrinciples: r, reelsToFilm: f } = done.counts;
-  ctx.say(`${name}: its hand-off is written, revision ${done.revision}, with ${listed([counted(p, "principle"), counted(r, "recurring principle"), counted(f, "Reel idea")])} to film.${done.shown === false ? "" : " It is shown in Finder: drop it on the BRIMM Ops page."}`);
+  ctx.say(`${name}: its hand-off is written, revision ${done.revision}, with ${listed([counted(p, "principle"), counted(r, "recurring principle"), counted(f, "Reel idea")])} to film.${done.shown === false ? "" : " It is shown in Finder. It waits in BRIMM Ops, under \"Waiting from Studio\"."}`);
   // On an open-lock Mac a hand-off whose copy could not be made is not shown in Finder (reveal.js).
   if (done.shown === false) ctx.say(cantOpen(name));
   return 0;
@@ -6694,7 +6694,7 @@ function guideSession(ctx, e, r) {
     A planned episode (PR H4) has no video, no reading and no project to look at: it is named by its title and short id, found by those
     and by its folder, and its one fact is `planned`, { route, voice }, which gives it the guide's stage `film`.
     An episode kept on another Mac (keptOn; Phase 3, L2, D3) has `onOtherMac`, with that Mac in `mac`: it is changed only there, so the guide's
-    step for it is there until a hand-off is written, whose steps on the BRIMM Ops page she takes on any Mac, unless it has a conflict or is held
+    step for it is there until a hand-off is written, whose steps in BRIMM Ops she takes on any Mac, unless it has a conflict or is held
     beside a session (`keeperFirst`): then its step stays there after a hand-off too. Nothing of its own files, which
     are on that Mac, is read here (its reading's teachings, its project, its copy, its parts), and it is not said to be waiting for her answer, in
     a conflict or held as a session here: each of those is said and sorted out on that Mac. */
@@ -6919,7 +6919,7 @@ const ON_THE_CHECK = "You do not need to wait for it. A spelling and handing it 
     video in a drop folder, or an answered video, with what was read of it and its one next step, from her notes on this Mac
     (guide-note.js) and the time now. An episode with no record that can be read, one a newer brimm-video wrote, an archived one
     and one she left alone are passed over; one from before the switch, which has no answer, is counted in `old`, and not guided.
-    Of the versions of a video handed off under one id, the BRIMM Ops page's step is said once, for the one with the newest
+    Of the versions of a video handed off under one id, BRIMM Ops' step is said once, for the one with the newest
     hand-off: the highest revision, and of two at one revision the later written. Another is passed over when its own next step
     is that page's, or it has none; one whose step is brimm-video's or hers (held as a session, conflicted) stays. A video whose finish only waits for its late check (`facts.checking`) says after the guide's lines
     when Studio checks Dropbox's copies and what it then takes away, and that she need not wait for it (`also`). Her notes, the
@@ -6981,15 +6981,15 @@ function openFolder(ctx, folder, what, words, missing) {
   return 0;
 }
 
-/** `guide page`: the BRIMM Ops page (OPS_PAGE), opened in her default browser through this Mac's program runner. */
-async function openPage(ctx) {
-  const ran = await (ctx.deps.run || runProgram)("/usr/bin/open", [OPS_PAGE]);
-  if (ran.code !== 0) return refuse(ctx, "The BRIMM Ops page could not be opened. Say it again. If it says this again, tell Jason.");
-  ctx.say("Opened the BRIMM Ops page in your browser.");
+/** `guide ops`: the BRIMM Ops app (OPS_APP), opened through this Mac's program runner. */
+async function openOps(ctx) {
+  const ran = await (ctx.deps.run || runProgram)("/usr/bin/open", ["-a", OPS_APP]);
+  if (ran.code !== 0) return refuse(ctx, "BRIMM Ops could not be opened. Open it from your Applications folder. If it is not there, tell Jason.");
+  ctx.say("Opened BRIMM Ops.");
   return 0;
 }
 
-/** `guide "<video>" show`: what the video's next step on the BRIMM Ops page needs, shown in Finder (showInFinder). For `posted`
+/** `guide "<video>" show`: what the video's next step in BRIMM Ops needs, shown in Finder (showInFinder). For `posted`
     it is the video to post: a raw episode's Share in final/, which its hand-off names, and any other's the copy of the video she
     dropped. For any other step it is the hand-off. The chat is told only what it is, never its file's name, which may be a
     client's. A step that is not the page's has nothing to show; a file not on this Mac, or one its hand-off does not name, is
@@ -7028,13 +7028,13 @@ function noteGuide(ctx, change) {
   return 0;
 }
 
-/** `guide "<video>" done <step>`: her word that she did the video's next step on the BRIMM Ops page, noted on this Mac by its
+/** `guide "<video>" done <step>`: her word that she did the video's next step in BRIMM Ops, noted on this Mac by its
     hand-off's id (noteAfter). Only the step that comes next is taken: a video that is done, one whose next step is brimm-video's
     or hers, or another step is refused with the step that comes next, and her word is never said again. Once it is noted, the
     video is read again, and its next step said. */
 function noteDone(ctx, { facts, next }, step) {
   if (next.done) return refuse(ctx, `Not noted: ${facts.name} is done: nothing is left to do for it.`);
-  if (next.stage !== "ops") return refuse(ctx, `Not noted: ${facts.name} has no step on the BRIMM Ops page now. ${next.text}`);
+  if (next.stage !== "ops") return refuse(ctx, `Not noted: ${facts.name} has no step in BRIMM Ops now. ${next.text}`);
   if (step !== next.step) return refuse(ctx, `Not noted: the next step for ${facts.name} is ${next.step}. ${next.text}`);
   const handoff = facts.handoff;
   const at = localStamp(new Date(ctx.now()));
@@ -7117,13 +7117,13 @@ async function tellWhen(ctx, item) {
   return 0;
 }
 
-/** `guide ["<video>" [show | finished | tell | done <step>]]`, `guide drop [zoom]`, `guide page` and `guide wait`: the guide, on a Mac
+/** `guide ["<video>" [show | finished | tell | done <step>]]`, `guide drop [zoom]`, `guide ops` and `guide wait`: the guide, on a Mac
     that does the light import. On any other, every form says only to ask Jason (NOT_SET_UP), since there Claude reads every
     video as it lands. With no words, the overview: this Mac's drop folder in Finder's words, each video under way with its one
     next step, and how many videos from before the switch it does not guide. `drop` opens this Mac's drop folder in Finder, and
-    `drop zoom` Zoom Video Transfer, beside BRIMM Video; `page` opens the BRIMM Ops page; `wait` waits up to 90 seconds for a
+    `drop zoom` Zoom Video Transfer, beside BRIMM Video; `ops` opens the BRIMM Ops app; `wait` waits up to 90 seconds for a
     change in what the guide says, then says the overview: at once when no video is coming in, being imported or being read. With a video, by its name, its label or its id, its next step, and for
-    a step on the BRIMM Ops page the one after it; with `show`, what that step needs, in Finder; with `done <step>`, her note that
+    a step in BRIMM Ops the one after it; with `show`, what that step needs, in Finder; with `done <step>`, her note that
     she did that step, the one that comes next; with `finished`, her note that she is done with it; with `tell`, its next point,
     waited for up to 60 minutes and said in one line. Words that fit no video, or more than one, are refused, and never said
     again: they may hold a client's name. */
@@ -7132,7 +7132,7 @@ export async function guideCommand(ctx, rest) {
   const is = (...words) => rest.length === words.length && words.every((word, i) => rest[i] === word);
   if (is("drop")) return openFolder(ctx, dropFolderOf(ctx.settings, ctx.home), "your drop folder", dropWords(ctx.settings, ctx.machine, ctx.home), "Your drop folder is not there: ask Jason.");
   if (is("drop", "zoom")) return openFolder(ctx, join(dirname(ctx.root), "BRIMM VIDEO Transfer", "Zoom Video Transfer"), "Zoom Video Transfer", ZOOM_WORDS, "Zoom Video Transfer is not on this Mac: ask Jason.");
-  if (is("page")) return openPage(ctx);
+  if (is("ops")) return openOps(ctx);
   if (is("wait")) return waitForChange(ctx);
   // The form, after a video: "" for its next step, "show", "finished", "tell", or "done" with the step.
   const form = rest.length < 2 ? "" : rest.length === 2 && ["show", "finished", "tell"].includes(rest[1]) ? rest[1] : rest.length === 3 && rest[1] === "done" ? "done" : null;

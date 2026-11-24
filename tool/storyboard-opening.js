@@ -277,7 +277,7 @@ export const isArtifactUrl = (url) => typeof url === "string" && ARTIFACT_URL.te
 /** A URL as it is compared: with one slash at its end taken off. */
 const plainUrl = (url) => (typeof url === "string" && url.endsWith("/") ? url.slice(0, -1) : url);
 
-/** Studio's own pages on claude.ai, by their ids: never a storyboard's, whatever else is said. The kept BRIMM Ops page (guide.js OPS_PAGE),
+/** Studio's own pages on claude.ai, by their ids: never a storyboard's, whatever else is said. The kept BRIMM Ops page on claude.ai,
     her guide (the BRIMM Ops guide), the Studio and Mac App By-Hand Checks pages, and the other pages Studio's documents name. */
 export const STUDIO_PAGES = Object.freeze([
   "GCUQPLnSFWZe3VghyaKNtX", "Vu5JmADhftiEsPz4KYN4e4", "TmFpCY7GfR1KWw9hcftzrT", "VQVsatRKKwwYpzKW3GZPdA", "5Z8GNkqKe68PcNctRWNnMv",

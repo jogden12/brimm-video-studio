@@ -2,7 +2,7 @@
 // this design"): `kind "<video>" <other> --again` sets the earlier reading's files aside into history/ by the rule, and every file
 // in final/ with them, and the reading runs again with the new prompt; a raw video starts again from the rules' plan the first
 // reading kept in history/. Answered again as a session, the video gets at once an empty session revision of its hand-off, which
-// the BRIMM Ops page takes to redact what it had. `ask`, for a video she has answered, is `kind <its kind> --again`. Nothing here
+// BRIMM Ops takes to redact what it had. `ask`, for a video she has answered, is `kind <its kind> --again`. Nothing here
 // runs a real program or touches Dropbox: each test has a root and a home of its own, and Claude, ffprobe, ffmpeg, osascript,
 // open and QuickTime Player are stand-ins.
 import { describe, it } from "node:test";
@@ -132,7 +132,7 @@ const shownInFinder = (t) => t.calls.filter((c) => c.cmd === "/usr/bin/open").ma
 const STRETCH = /^\S+ /;
 
 // The words a person reads.
-const GONE = "Its words have already gone to Claude: drop the new revision on the BRIMM Ops page and tell Jason.";
+const GONE = "Its words have already gone to Claude: take the new revision in BRIMM Ops and tell Jason.";
 const OUT = "Its files are out of the shared folder.";
 const WAITS_FOR = (id) => `The empty session revision of ${SESSION_NAME} waits for its earlier version (${id}), which is not on this Mac yet: tell Jason. ${OUT}`;
 const LOOPS = `The empty session revision of ${SESSION_NAME} waits: its versions name each other: tell Jason. ${OUT}`;
@@ -140,7 +140,7 @@ const V1 = `The empty session revision of ${SESSION_NAME} is written once this M
 const WRITTEN = (n) => `The empty session revision of ${SESSION_NAME} is written as revision ${n} and shown in Finder. ${GONE}`;
 /** The same, of a video no reading of Claude's ran on (no reading in its record, none of a reading's files): its words did not go
     to Claude (final fix 12). */
-const UNREAD = (n) => `The empty session revision of ${SESSION_NAME} is written as revision ${n} and shown in Finder: drop it on the BRIMM Ops page.`;
+const UNREAD = (n) => `The empty session revision of ${SESSION_NAME} is written as revision ${n} and shown in Finder. It waits in BRIMM Ops, under "Waiting from Studio".`;
 /** What the mark and the empty revision say of the session's other version, held as a session until it is answered as one (final fix
     1): by its label and short id, or with no label by its short id. */
 const ALSO = (named) => `${SESSION_NAME} has another version, held as a client or group session until it is answered as one: answer ${named} as a session too.`;
@@ -514,7 +514,7 @@ describe("kind … session --again: the empty session revision", () => {
     });
     const r = await on(t.ctx.deps, "kind", NAME, "session", "--private", "yes", "--again");
     assert.equal(r.code, 0, r.text);
-    assert.ok(r.said.includes(`The empty session revision of ${SESSION_NAME} is not written: ${SESSION_NAME} went to the BRIMM Ops page under ${MOVED}, but its versions now lead to ${ID}: ask Jason. ${OUT}`), r.text);
+    assert.ok(r.said.includes(`The empty session revision of ${SESSION_NAME} is not written: ${SESSION_NAME} went to BRIMM Ops under ${MOVED}, but its versions now lead to ${ID}: ask Jason. ${OUT}`), r.text);
     assert.deepEqual([finalOf(found), reread(found).session.emptyRevision], [[], "owed"]);
     t.done();
   });
@@ -576,7 +576,7 @@ describe("kind … --again and the video a record is a version of (amendment b, 
     older(t);
     const found = episodeFor(t, { record: answered("raw", { versionOf: OLD, name: { text: NAME, placeholder: false }, finished: { revision: 1, at: AT, on: "Mac Studio" } }), files: LIGHT_FILES });
     const r = await on(t.ctx.deps, "kind", NAME, "finished", "--private", "no", "--again", "--version-of", "none");
-    assert.deepEqual([r.code, r.said], [1, [`${NAME} has already gone to the BRIMM Ops page as a version of ${OLD_NAME}: ask Jason.`]]);
+    assert.deepEqual([r.code, r.said], [1, [`${NAME} has already gone to BRIMM Ops as a version of ${OLD_NAME}: ask Jason.`]]);
     assert.deepEqual([reread(found).rev, reread(found).versionOf, t.started], [1, OLD, []]);
     t.done();
   });
@@ -609,7 +609,7 @@ describe("kind … --again and the video a record is a version of (amendment b, 
       files: { ...LIGHT_FILES, "final/Pricing talk.brimm-ops.json": JSON.stringify({ format: "brimm-video hand-off", version: 2, revision: 1, video: { id: MOVED } }) }
     });
     const r = await on(t.ctx.deps, "kind", NAME, "finished", "--private", "no", "--again");
-    assert.deepEqual([r.code, r.said], [1, [`${NAME} went to the BRIMM Ops page under ${MOVED}, but its versions now lead to ${OLD}: ask Jason. Nothing was written.`]]);
+    assert.deepEqual([r.code, r.said], [1, [`${NAME} went to BRIMM Ops under ${MOVED}, but its versions now lead to ${OLD}: ask Jason. Nothing was written.`]]);
     assert.equal(reread(found).rev, 1);
     t.done();
   });
@@ -779,7 +779,7 @@ describe("fix round 1: a final video stays where it is", () => {
 describe("fix round 1: the empty revision goes only where every hand-off of the video went", () => {
   const OLD = "e-20261010-a0a0a0";
   const older = (t) => episodeAs(t, { id: OLD, name: "2026-10-10 Older talk (Mac Studio)", record: { version: 3, kind: "finished", answer: ANSWERED, name: { text: "Older talk", placeholder: false } } });
-  const TOO = (id) => `The empty session revision of ${SESSION_NAME} is not written: ${SESSION_NAME} went to the BRIMM Ops page under ${id} too: ask Jason. ${OUT}`;
+  const TOO = (id) => `The empty session revision of ${SESSION_NAME} is not written: ${SESSION_NAME} went to BRIMM Ops under ${id} too: ask Jason. ${OUT}`;
   it("3. writes none, and marks it owed, when a hand-off of its own went under another id than its first version's", async () => {
     const t = setup();
     handoffVersion(t, 2);

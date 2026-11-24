@@ -1,5 +1,5 @@
 // A private session's names, and what she approves of it (spec 2026-10-22, sections 3 and 8). A session is a recording of Sallie with
-// a client or a group, so what its people are called must reach neither the principles brimm-video hands to the BRIMM Ops page nor
+// a client or a group, so what its people are called must reach neither the principles brimm-video hands to BRIMM Ops nor
 // her chat where the spec forbids it. Before the call, every speaker of a Zoom transcript but her is "Participant 1", "Participant 2"
 // and so on, and the map of who was who stays on the Mac. After the call, Claude's reply is checked field by field against the names
 // brimm-video can see: a text that holds one is left out, and so is each entry of a list that holds one, and the check says which,
@@ -440,7 +440,7 @@ export const undecided = (session) =>
       .map((item) => `${label} ${item.n} is not decided yet: keep it or drop it.`)
   );
 
-/** The keys of a principle that the page takes, in the order the hand-off has them, and the keys of a Reel idea to film that hold
+/** The keys of a principle that BRIMM Ops takes, in the order the hand-off has them, and the keys of a Reel idea to film that hold
     words. */
 const PRINCIPLE_KEYS = ["n", "name", "category", "description", "steps", "red_flags", "green_flags", "decision_criteria", "example_application", "verbatim_key_phrases"];
 const REEL_KEYS = ["n", "idea", "words", "why", "principle"];
@@ -455,8 +455,8 @@ const textsOf = (v) => list(v).filter((t) => typeof t === "string");
     { session: { principles, recurringPrinciples, reelsToFilm }, dropped }, or { why } while it cannot be handed over. Only what
     she approved is in it, ordered by `n`, and the name check is run on it again with `names`, as an edit she dictated may hold a
     name; `dropped` is what that check took out of what is in the file, as checkNames gives it, a text or an entry of a list. A
-    principle has the keys the page takes and never its `source_context` or its `approved`; a text the check took out is written
-    as an empty text, as the page reads a missing one, and a list keeps the entries it left, or is empty when it left none. A
+    principle has the keys BRIMM Ops takes and never its `source_context` or its `approved`; a text the check took out is written
+    as an empty text, as BRIMM Ops reads a missing one, and a list keeps the entries it left, or is empty when it left none. A
     Reel idea to film (kept, with `refilm` true) has its `principle` only when that principle is in the hand-off, and null
     otherwise. A kept idea that is not to be filmed is not in it: a Reel cut from the session is made, with the client's
     agreement, by a later phase. The lists are copies.

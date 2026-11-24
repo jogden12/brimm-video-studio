@@ -72,7 +72,7 @@ describe("spell, after a finish", () => {
     const { t, found } = finishedEpisode();
     t.ctx.deps.commit = "e72a170";
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Sallie", "Sally");
-    assert.equal(r.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again. If Reel 2 shows captions on screen, they keep the old spelling. Say "open it in HyperFrames" to edit it there, from the recording.');
+    assert.equal(r.text, '"Sallie" is spelled "Sally" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: it waits in BRIMM Ops again, under \"Waiting from Studio\". If Reel 2 shows captions on screen, they keep the old spelling. Say "open it in HyperFrames" to edit it there, from the recording.');
     for (const stem of [MAIN, REEL]) assert.match(text(found, `${stem}.srt`), /Thank you so much, Sally\./);
     assert.match(text(found, `${MAIN}.transcript.txt`), /Sally\./);
     assert.deepEqual(JSON.parse(text(found, `${MAIN}.words.json`)).words.map((w) => w.w), ["Sally."]);

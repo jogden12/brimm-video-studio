@@ -69,7 +69,7 @@ describe("finish, the part that looks and asks", () => {
 
 describe("finish, the part that looks and asks, with hand-off version 2", () => {
   const PLACEHOLDER = { text: "Pricing talk", placeholder: true };
-  it("starts a finish with no approved title: titles live on the BRIMM Ops page", async () => {
+  it("starts a finish with no approved title: titles live in BRIMM Ops", async () => {
     for (const title of [null, { text: "Price it right", from: "claude", approved: false }]) {
       const w = exported({ over: { title } });
       assert.equal(await finishEpisode(w.t.ctx, w.found, { yes: true }), 0, w.t.said());
@@ -112,7 +112,7 @@ describe("finish, the part that looks and asks, with hand-off version 2", () => 
 });
 
 // A video already handed off as version 2 is handed off as version 2 again, whatever the setting says now (a rollback, or the two
-// Macs not both switched yet): a version 1 hand-off written over it would move the BRIMM Ops page's id for the video. So the
+// Macs not both switched yet): a version 1 hand-off written over it would move BRIMM Ops' id for the video. So the
 // quick part asks for what version 2 needs, and refuses what version 2 refuses, by the hand-off on file.
 describe("finish, the part that looks and asks, for a video already handed off as version 2, with the setting at 1", () => {
   const FIRST = "e-20261010-7c1d2e";

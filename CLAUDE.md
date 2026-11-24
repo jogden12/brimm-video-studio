@@ -31,11 +31,11 @@ cd tool && ./install.sh --print "<folder>"   # what the installer would do. It c
 
 BRIMM Ops takes Studio's hand-off file. These carry over exactly. Change any of them only together with brimm-operations, in step.
 
-- The hand-off file: `tool/handoff-v2.js` (version 2) and `tool/handoff.js` (version 1, still read by the page), and their fixtures in `tool/tests/fixtures/`, which brimm-operations keeps copies of. Their tests and fixtures are the contract: change neither without changing both. `tool/tests/contract.test.js` pins the fixtures' hashes.
+- The hand-off file: `tool/handoff-v2.js` (version 2) and `tool/handoff.js` (version 1, still read by BRIMM Ops), and their fixtures in `tool/tests/fixtures/`, which brimm-operations keeps copies of. Their tests and fixtures are the contract: change neither without changing both. `tool/tests/contract.test.js` pins the fixtures' hashes.
 - The tool's name inside the hand-off stays `brimm-video <commit>` (`madeBy`): the contract names it. Renaming it is a contract change, so this project's new name appears in documents and package names, not there.
 - The copies from brimm-operations, each named in its first line and kept in step by hand: `tool/shared/`, `tool/lib.js` and `tool/run.js`.
-- The guide (`tool/guide.js`, `tool/guide-note.js`): Sallie's next step for each video, as far as the BRIMM Ops page's steps.
-- What goes in a hand-off: the final transcript (`.srt`), made on the Mac; the kind; each Reel's words and its on-screen title; a session's approved principles, with no client names, and never its transcript. The page writes the post text from these, and posts only the set she approves, through her scheduler.
+- The guide (`tool/guide.js`, `tool/guide-note.js`): Sallie's next step for each video, as far as BRIMM Ops' steps. BRIMM Ops is a Mac app since 2026-11-14: the steps and button words are brimm-operations' guide (`docs/guide/brimm-ops-guide.html` there), which also quotes what the guide here says, so change either only with the other.
+- What goes in a hand-off: the final transcript (`.srt`), made on the Mac; the kind; each Reel's words and its on-screen title; a session's approved principles, with no client names, and never its transcript. BRIMM Ops writes the post text from these, and posts only the set she approves, through her scheduler.
 
 ## Sessions (clients and groups)
 
@@ -49,7 +49,7 @@ BRIMM Ops takes Studio's hand-off file. These carry over exactly. Change any of 
 ## HeyGen and the HyperFrames app
 
 - HeyGen is on its lowest paid tier. The Script panel may transcribe videos meant for posting. Share is for invited people only. Never render in the cloud.
-- HeyGen's tools are open, and nothing blocks them on either Mac. Each project's notes warn before an AI avatar, lip-sync, or an AI-generated Sallie, her face or her voice, which The BRIMM doesn't use for now. A session clip's notes keep the old line: no session clip uses HeyGen's features. A stock HeyGen voice is fine, with YouTube's altered or synthetic label.
+- HeyGen's tools are open, and nothing blocks them on either Mac. Each project's notes warn before an AI avatar, lip-sync, or an AI-generated Sallie, her face or her voice, which The BRIMM doesn't use for now. A session clip's notes keep the old line: no session clip uses HeyGen's features. AI-generated voices are allowed for videos where Sallie is not on screen (explainers, tutorials, and similar types); a stock HeyGen voice is fine too. All AI-generated voices carry YouTube's altered or synthetic label.
 - The app's agent is Claude Code with Auto access, never Full.
 - Projects Studio makes live in `~/BRIMM Video Work`, never in Dropbox or a watched folder. The app's own projects folder is in Dropbox and is not watched.
 - HyperFrames telemetry is off. Never `publish`, `cloud`, `lambda` or `cloudrun`.

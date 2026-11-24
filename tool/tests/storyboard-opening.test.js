@@ -20,7 +20,8 @@ import { guardDecision, openSettingsOf, studioFolder, writeStudio } from "../stu
 import { openDecision } from "../open-lock.js";
 import { HELD_REFUSED } from "../held.js";
 import { LOCK_CHANGED, lockLoosened } from "../loosened.js";
-import { OPS_PAGE } from "../guide.js";
+/** The kept BRIMM Ops page on claude.ai (the first of storyboard-opening.js STUDIO_PAGES). */
+const OPS_PAGE = "https://claude.ai/artifact/GCUQPLnSFWZe3VghyaKNtX";
 import { gatedIndex, gatedPlaces, realOf } from "../places.js";
 import { HELP, editMain } from "../edit.js";
 import { kitDir, venvPython } from "../reel-kit.js";

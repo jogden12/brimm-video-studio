@@ -697,7 +697,7 @@ describe("read never quotes Claude's reply or the transcript in its log or its r
 });
 
 describe("read numbers its suggestions on from the highest number ever given to the video", () => {
-  /** A hand-off for the video `id`, as the BRIMM Ops page holds one: its suggestions' and Reels' numbers up to 4. */
+  /** A hand-off for the video `id`, as BRIMM Ops holds one: its suggestions' and Reels' numbers up to 4. */
   const handoff = (id) => ({ format: "brimm-ops handoff", version: 2, revision: 1, video: { id, kind: "finished" }, suggestions: [{ n: 1 }, { n: 2 }], reels: [{ n: 4, fromSuggestion: null }] });
   const lay = (folder, rel, value) => {
     mkdirSync(dirname(join(folder, rel)), { recursive: true });

@@ -287,20 +287,20 @@ describe("an episode kept on the Mac Studio, on another Mac (Jason's MacBook, on
       w.done();
     }
   });
-  it("has the guide take her step on the BRIMM Ops page there once a hand-off is written: the page is hers on any Mac", async () => {
+  it("has the guide take her step in BRIMM Ops there once a hand-off is written: the page is hers on any Mac", async () => {
     const w = world();
     try {
       handedOff(KEPT.raw.make(w));
       const r = await on(w.macbook, "guide", "Pricing talk");
       assert.equal(r.code, 0, r.text);
-      assert.match(r.said[0], /^Pricing talk \(3fa9c1\): On the BRIMM Ops page: Drag the hand-off onto Episodes\./);
+      assert.match(r.said[0], /^Pricing talk \(3fa9c1\): In BRIMM Ops: Find the video under "Waiting from Studio"/);
       assert.equal(r.said.at(-1), "Step: taken");
     } finally {
       w.done();
     }
   });
   it("is listed by `episodes` with only where it is once the guide's step for it is not there: handed off, left alone, or a session kept to its transcript", async () => {
-    // Review R1-F4. The guide gives a video handed off the BRIMM Ops page's steps, hers on any Mac, and a video she left alone and a session whose
+    // Review R1-F4. The guide gives a video handed off BRIMM Ops' steps, hers on any Mac, and a video she left alone and a session whose
     // choice is its transcript only no step at all: `episodes` says where each is, and never "Carry on there.", which is the guide's step alone.
     const w = world();
     try {
@@ -381,7 +381,7 @@ describe("a handed-off episode kept on the Mac Studio whose first steps are stil
       const step = `${KEPT.session.said} (${KEPT.session.short}): It is on the Mac Studio. Carry on there.`;
       const guide = await on(w.macbook, "guide", KEPT.session.said);
       assert.deepEqual([guide.code, guide.said], [0, [step]], guide.text);
-      assert.doesNotMatch(guide.text, /BRIMM Ops page|Take the/, guide.text);
+      assert.doesNotMatch(guide.text, /In BRIMM Ops|Take the/, guide.text);
       for (const argv of [["guide", KEPT.session.said, "show"], ["guide", KEPT.session.said, "done", "taken"]]) {
         const r = await on(w.macbook, ...argv);
         assert.equal(r.code, 1, argv.join(" ") + r.text);
@@ -393,7 +393,7 @@ describe("a handed-off episode kept on the Mac Studio whose first steps are stil
       w.done();
     }
   });
-  it("says only where a session handed off with its teachings is, as the guide gives the BRIMM Ops page's step", async () => {
+  it("says only where a session handed off with its teachings is, as the guide gives BRIMM Ops' step", async () => {
     const w = world();
     try {
       const found = KEPT.session.make(w);

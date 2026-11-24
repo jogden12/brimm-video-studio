@@ -1,5 +1,7 @@
 # BRIMM Video Studio: Final Cut retired (Phase 2 of the review changes), the build plan
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Studio no longer makes, reads or talks about Final Cut. The seven Final Cut commands, the full import, `release` with its snapshots and take-over, and about 4,000 lines of code (about 12,000 with their tests) go. `graphic "<episode>" ideas` stays, now with times on the video HyperFrames shows.

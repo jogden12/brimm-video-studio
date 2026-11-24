@@ -124,7 +124,7 @@ const LEFT3 = "Suggestion 3 is left out of the hand-off: it has no reason.";
 const BRINGING = (what) => `Dropbox is still bringing ${what} over: say it again in a minute.`;
 const OLD = "2026-10-20T14:00:00-05:00";
 const NEWER = "2026-10-21T10:00:00-05:00";
-const WRITTEN = (n) => `The hand-off is written as revision ${n} and shown in Finder: drop it on the BRIMM Ops page.`;
+const WRITTEN = (n) => `The hand-off is written as revision ${n} and shown in Finder. It waits in BRIMM Ops, under "Waiting from Studio".`;
 
 /** One of the contract's fixtures, which BRIMM Ops keeps a copy of. */
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/handoff-v2-${name}.json`, import.meta.url), "utf8"));
@@ -431,7 +431,7 @@ describe("a later spell, once the hand-off is written", () => {
     t.calls.length = 0;
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Ogdin" is spelled "Ogden" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again.');
+    assert.equal(r.text, '"Ogdin" is spelled "Ogden" now. The final transcripts are spelled so too, and the hand-off is made again as revision 2: it waits in BRIMM Ops again, under "Waiting from Studio".');
     const handoff = handoffIn(found);
     assert.deepEqual([handoff.revision, handoff.video.id, handoff.video.kind, handoffFaultV2(handoff)], [2, ID, "finished", ""]);
     assert.match(handoff.main.srt, /Thank you so much, Sallie Ogden\./);
@@ -448,7 +448,7 @@ describe("a later spell, once the hand-off is written", () => {
     assert.match(handoffIn(found).main.srt, /Ogden/);
     const r = await on(t.ctx.deps, "spell", FOLDER, "drop", "Ogdin");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, '"Ogdin" is as the transcriber writes it again. The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again.');
+    assert.equal(r.text, '"Ogdin" is as the transcriber writes it again. The final transcripts are spelled so too, and the hand-off is made again as revision 2: it waits in BRIMM Ops again, under "Waiting from Studio".');
     const handoff = handoffIn(found);
     assert.equal(handoff.revision, 2);
     assert.equal(handoff.main.srt, IMPORT_SRT);
@@ -493,7 +493,7 @@ describe("spell … add, with several pairs", () => {
     const rev = reread(found).rev;
     const r = await on(t.ctx.deps, "spell", FOLDER, "add", "Ogdin", "Ogden", "pricing", "Pricing", "costs", "Costs");
     assert.equal(r.code, 0, r.text);
-    assert.equal(r.text, 'Spelled now: "Ogdin" as "Ogden", "pricing" as "Pricing" and "costs" as "Costs". The final transcripts are spelled so too, and the hand-off is made again as revision 2: drop it on the BRIMM Ops page again.');
+    assert.equal(r.text, 'Spelled now: "Ogdin" as "Ogden", "pricing" as "Pricing" and "costs" as "Costs". The final transcripts are spelled so too, and the hand-off is made again as revision 2: it waits in BRIMM Ops again, under "Waiting from Studio".');
     assert.equal(reread(found).rev, rev + 1, "one record for the three");
     assert.deepEqual(reread(found).spellings, [["Ogdin", "Ogden"], ["pricing", "Pricing"], ["costs", "Costs"]]);
     assert.equal(handoffIn(found).revision, 2, "one revision for the three");

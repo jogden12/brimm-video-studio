@@ -36,13 +36,13 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
       // The exports folder this Mac was set up with is looked in too, as `finish` looks in it (Phase 3, L1b).
       "for the Reel projects alone (in Downloads, in the exports folder this Mac was set up with or by the records in the project's `renders/`)",
       "or two that began in one minute, which `finish` asks the final one of",
-      'it says which Reels are exported and to say "hand off the Reels", ahead of the BRIMM Ops page\'s steps and of done',
+      'it says which Reels are exported and to say "hand off the Reels", ahead of BRIMM Ops\' steps and of done',
       "A Reel open and not exported, one already in the hand-off, an export older than the project's last change and a Downloads folder, or exports folder, this Mac will not let be read are no such stage",
       // A Reel project on the other Mac: `finish` would take its export, and the guide does not look, for the reason it gives the main video (review F3).
       "A Reel project that is not on this Mac is not looked at either, though `finish … reels` would take its export from Downloads: as for the main video, the guide reads Downloads only for a project that is here, and `app` says what is on the other Mac.",
       // Where `finish` would go no further and a look that costs no other read can tell (review F1, F2a and F2c), and the two refusals it does not look for (F2b, F2d).
-      "Nor is it said where `finish … reels` would go no further and a look that costs no other read can tell: another run (a bring, a read or an ask) is at work on the episode, the other Mac has it open, the chain of its versions has a gap, Dropbox undid this Mac's last change to its record, the hand-off on file cannot be added to, or the record lacks the Reel; while a finish copies it says so instead, where a Reel waits (where none does it is the page's step, as at any other time, also while the finish only waits for its late check; and a Reel exported while it waits has the Reels' stage again, saying to say \"hand off the Reels\" after the time of the check",
-      "a hand-off that went to the page under another id and a Reel number another version of the video gave under the same id: `finish` says each in its own words, ending \"Ask Jason\", and the guide goes on saying the stage until he has settled it",
+      "Nor is it said where `finish … reels` would go no further and a look that costs no other read can tell: another run (a bring, a read or an ask) is at work on the episode, the other Mac has it open, the chain of its versions has a gap, Dropbox undid this Mac's last change to its record, the hand-off on file cannot be added to, or the record lacks the Reel; while a finish copies it says so instead, where a Reel waits (where none does it is BRIMM Ops' step, as at any other time, also while the finish only waits for its late check; and a Reel exported while it waits has the Reels' stage again, saying to say \"hand off the Reels\" after the time of the check",
+      "a hand-off that went to BRIMM Ops under another id and a Reel number another version of the video gave under the same id: `finish` says each in its own words, ending \"Ask Jason\", and the guide goes on saying the stage until he has settled it",
       // The hand-off is read as a regular file alone, on a Mac whose settings say version 2 (review F4 and F5).
       "Its hand-off is read as a regular file alone, so that a pipe where it should be is never waited for and a link there is read as unreadable, though `finish` follows one; this holds on a Mac whose settings say hand-off version 2: on any other, `writesV2For` first reads each hand-off of `final/` and `history/` with a plain read, as it does for every command that asks it.",
       // A video she set aside is read for nothing of its Reels (review F6 and F9).
@@ -55,7 +55,7 @@ describe("C. what pins the guide's Reels stage: the help, the README, the skills
   it("says in the README's paragraph on the Reels of a video her editor finished that the guide tells her to hand them off", () => {
     const paragraph = readme.split("\n").find((line) => line.startsWith("**The Reels of a video her editor finished**"));
     assert.ok(paragraph, "the README has the paragraph");
-    assert.ok(paragraph.includes('The guide tells her too: once a Reel of the video is exported from HyperFrames and is not in its hand-off, "what\'s next?" says so, ahead of the BRIMM Ops page\'s steps (plan PR 16).'));
+    assert.ok(paragraph.includes('The guide tells her too: once a Reel of the video is exported from HyperFrames and is not in its hand-off, "what\'s next?" says so, ahead of BRIMM Ops\' steps (plan PR 16).'));
   });
   it("has both skills run finish at once, not offer, for the Reels at that stage, in the very line of their section on the guide, and stay under 270 lines", () => {
     const run = 'Once it says she has exported it, or a Reel of a finished video, do not offer: run `finish` at once, as the "Hand it off" and "Hand off the Reels" rules say.';

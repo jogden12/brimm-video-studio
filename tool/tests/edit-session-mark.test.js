@@ -124,7 +124,7 @@ const LAPSED = "Teachings from sessions were turned on more than 90 days ago on 
 const READINGS_OFF = "Readings are off on this Mac: ask Jason.";
 const TRANSCRIPT_ONLY = `${LABEL}: its transcript stays on this Mac. Nothing goes to Claude.`;
 const CHECK = "BRIMM Video Studio took out the names it could see. Check these for anything about the client.";
-const FOR_HER = "(for you only: not sent to the page)";
+const FOR_HER = "(for you only: not sent to BRIMM Ops)";
 const V1_WAITS = "A session's hand-off is written once this Mac hands off version 2: ask Jason.";
 /** What `name` says of a session name holding `word`, a name brimm-video can see (fix round 2: the word that tripped it). */
 const NAME_HOLDS = (word) => `That name holds "${word}", a name BRIMM Video Studio can see in this session: give it another.`;
@@ -800,7 +800,7 @@ describe("finish, for a session: its own hand-off of what she approved", () => {
     assert.equal(record.files[HANDOFF], Buffer.byteLength(text));
     assert.equal(episodeFault(record), "");
     assert.deepEqual(t.calls.filter((c) => c.cmd === "/usr/bin/open").map((c) => c.args), [["-R", join(found.folder, HANDOFF)]]);
-    assert.deepEqual(r.said, [`${LABEL}: its hand-off is written, revision 1, with 2 principles, 1 recurring principle and 1 Reel idea to film. It is shown in Finder: drop it on the BRIMM Ops page.`]);
+    assert.deepEqual(r.said, [`${LABEL}: its hand-off is written, revision 1, with 2 principles, 1 recurring principle and 1 Reel idea to film. It is shown in Finder. It waits in BRIMM Ops, under "Waiting from Studio".`]);
     assert.doesNotMatch(r.text, SECRET);
     t.done();
   });

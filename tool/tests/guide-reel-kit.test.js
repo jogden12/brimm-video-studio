@@ -1,5 +1,5 @@
 // Her guide's next step for a Reel Kit edit (plan Task 20): the edit's storyboard, her go, and its way out (a headless render, or the
-// HyperFrames app), before the hand-off; the BRIMM Ops page's steps after the hand-off stay as they are. None of it needs a disk or a program:
+// HyperFrames app), before the hand-off; BRIMM Ops' steps after the hand-off stay as they are. None of it needs a disk or a program:
 // the facts are given as edit.js would read them (reelKitEdits, from the record and a look at each edit's studio.json).
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -51,9 +51,9 @@ const VIDEO = {
   finished: (part, edits, over = {}) => ({ ...BASE, kind: "finished", handoff: HANDOFF, reelsExported: [], reelKit: edits, ...over })
 };
 const KEY = { main: "main", reel: "reel 2" };
-/** The states of a finished video's Reel Kit Reel that are hers to act on, which come before the BRIMM Ops page's steps after its hand-off. */
+/** The states of a finished video's Reel Kit Reel that are hers to act on, which come before BRIMM Ops' steps after its hand-off. */
 const ACTS_AFTER = ["queued", "working", "rendering", "stopped", "storyboard", "ready", "opened"];
-const TAKEN = `On the BRIMM Ops page: ${opsText(HANDOFF, "taken", false, undefined)}`;
+const TAKEN = `In BRIMM Ops: ${opsText(HANDOFF, "taken", false, undefined)}`;
 
 describe("her next step for a Reel Kit edit", () => {
   it("gives one next step for each Reel Kit state: storyboard, go, render or app", () => {
@@ -90,7 +90,7 @@ describe("her next step for a Reel Kit edit", () => {
       [VIDEO.raw("main", [EDIT("main", "ready"), EDIT("reel 2", "storyboard")]), "reel-kit-ready", words("main", "ready")],
       [VIDEO.raw("main", [EDIT("main", "rendered"), EDIT("reel 2", "storyboard")]), "reel-kit-storyboard", words("reel 2", "storyboard")],
       [VIDEO.raw("main", [EDIT("main", "rendered"), EDIT("reel 2", "rendered")]), "reel-kit-rendered", words("main", "rendered")],
-      // A finished video's Reel, after its hand-off: ahead of the BRIMM Ops page's steps, and handed off with "hand off the Reels".
+      // A finished video's Reel, after its hand-off: ahead of BRIMM Ops' steps, and handed off with "hand off the Reels".
       [VIDEO.finished("reel", [EDIT("reel 2", "storyboard")]), "reel-kit-storyboard", words("reel 2", "storyboard")],
       [VIDEO.finished("reel", [EDIT("reel 2", "opened")]), "reel-kit-opened", words("reel 2", "opened", { handOff: "hand off the Reels" })],
       // Task 15's review: a Reel Kit render is rendered, not exported from HyperFrames.
@@ -158,7 +158,7 @@ describe("her next step for a Reel Kit edit", () => {
   });
 
   it("leaves the steps after the hand-off as they are", () => {
-    // The page's own words, for every step of every kind, taken again or not, kept on a Mac or not, from every note: as they were before Reel Kit.
+    // BRIMM Ops' own words, for every step of every kind, taken again or not, kept on a Mac or not, from every note: as they were before Reel Kit.
     const lines = [];
     for (const [kind, family] of [["finished", "episode"], ["raw", "episode"], ["short video", "short video"], ["session", "session"]]) {
       for (const step of OPS[family]) for (const again of [false, true]) for (const local of [false, true]) for (const noteStep of OPS[family]) {
@@ -167,7 +167,7 @@ describe("her next step for a Reel Kit edit", () => {
       }
     }
     assert.equal(lines.length, 252);
-    assert.equal(createHash("sha256").update(lines.join("\n")).digest("hex"), "488658984b6453de82280a6bd4f2f57e202257fe3bd73bc17553c40de65f0184");
+    assert.equal(createHash("sha256").update(lines.join("\n")).digest("hex"), "590ce23286caccc4647040996f8b52177f94f7cef1382b37737f71263494ad83"); // main's words since BRIMM Ops became a Mac app (#70)
     // A raw video and an iPhone clip with their hand-off written: whatever state a Reel Kit edit of theirs is in, the next step is the one it was.
     // A finished video whose Reel Kit edits are all rendered and in its hand-off: the same.
     const noted = (step) => ({ ...NONE, handoffs: { [HANDOFF.id]: { kind: "episode", step, revision: 1, at: "2026-10-24T09:00:00-05:00" } } });

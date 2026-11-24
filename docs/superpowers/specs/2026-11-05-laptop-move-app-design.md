@@ -1,5 +1,7 @@
 # Moving Sallie's laptop to Studio with one app (design)
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 5 November 2026. A draft for Jason's approval: nothing is built until he approves it. Branch `claude/studio-laptop-move-app`, from main fd5cd77.
 
 **Changed on 6 November: both MacBooks.** The app now also sets up Jason's MacBook, moved from brimm-video or set up fresh. See "Both MacBooks", below. Where this document says "her laptop", it means either MacBook, unless that section says otherwise.

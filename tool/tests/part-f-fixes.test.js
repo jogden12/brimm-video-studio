@@ -1,6 +1,6 @@
 // The fixes of Part F's whole-branch review, and of the coordinator's cross-check (final-fixes.md, items 1 to 21), each with the
 // test that failed before it. Everything edit.js prints goes into Sallie's Claude chat: a client or group session's words must
-// never reach the chat (but checked teachings), the shared final/ folder or the BRIMM Ops page.
+// never reach the chat (but checked teachings), the shared final/ folder or BRIMM Ops.
 // Nothing here runs a real program or touches Dropbox: each test has a root and a home of its own, and every program is a
 // stand-in. Every name in it is made up.
 import { describe, it } from "node:test";
@@ -163,7 +163,7 @@ function handedOff(t, { over = {}, files = {} } = {}) {
 }
 /** The session label `kind … session` gives the made-up video. */
 const SESSION_NAME = "Session, 2026-10-14";
-const GONE = "Its words have already gone to Claude: drop the new revision on the BRIMM Ops page and tell Jason.";
+const GONE = "Its words have already gone to Claude: take the new revision in BRIMM Ops and tell Jason.";
 
 describe("the empty session revision says its words went to Claude only when a reading of it ran (item 12)", () => {
   it("does not say so of a video no reading ran on", async () => {
@@ -171,7 +171,7 @@ describe("the empty session revision says its words went to Claude only when a r
     handedOff(t);
     const r = await on(t.ctx.deps, "kind", "Pricing talk", "session", "--private", "yes", "--again");
     assert.equal(r.code, 0, r.text);
-    assert.ok(r.said.includes(`The empty session revision of ${SESSION_NAME} is written as revision 2 and shown in Finder: drop it on the BRIMM Ops page.`), r.text);
+    assert.ok(r.said.includes(`The empty session revision of ${SESSION_NAME} is written as revision 2 and shown in Finder. It waits in BRIMM Ops, under "Waiting from Studio".`), r.text);
     assert.doesNotMatch(r.text, /gone to Claude/);
     t.done();
   });
@@ -619,7 +619,7 @@ describe("\"it was a session after all\" with a listed file of final/ that is no
     assert.equal(first.code, 0, first.text);
     assert.deepEqual(first.said, [
       `${SESSION_NAME}: marked a client or group session. Ask her whether she wants its teachings (principles and Reel ideas) or the transcript only.`,
-      `The empty session revision of ${SESSION_NAME} is written as revision 2 and shown in Finder: drop it on the BRIMM Ops page.`,
+      `The empty session revision of ${SESSION_NAME} is written as revision 2 and shown in Finder. It waits in BRIMM Ops, under "Waiting from Studio".`,
       `Dropbox is still bringing some of ${SESSION_NAME}'s earlier files over to this Mac: say your answer again in a minute, and they are set aside too.`
     ]);
     let record = reread(found);

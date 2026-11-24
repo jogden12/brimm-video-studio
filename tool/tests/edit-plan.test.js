@@ -805,7 +805,7 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     assert.deepEqual(said.slice(1, 3), [`  "Too many SKUs": planned on ${dayText(t)}, waiting for its footage (no shots yet), id ${SHORT}`, "    A file of this video is missing: teleprompter.txt. Dropbox may still be bringing it. Wait a few minutes and ask again. If it is still missing, tell Jason."]);
     t.done();
   });
-  it("gives the guide a step of its own for it: film it, before the BRIMM Ops page's steps and changing none of them", async () => {
+  it("gives the guide a step of its own for it: film it, before BRIMM Ops' steps and changing none of them", async () => {
     const t = setup();
     await planned(t);
     const FILM = "Film it to its shot list, then drop the files in your drop folder. To read the teleprompter script, say 'show me the script': it opens as a copy to read, and changes come through the chat.";
@@ -814,7 +814,7 @@ describe("a planned episode in Episodes, and the commands that are not plan", ()
     assert.deepEqual((await on(light(t), "guide", SHORT)).said, [`Too many SKUs (${SHORT}): ${FILM}`]);
     // Its step is not the page's: nothing is shown in Finder for it, and none is noted done.
     assert.deepEqual((await on(light(t), "guide", TITLE, "show")).said, [`There is nothing to show in Finder for Too many SKUs (${SHORT}) now.`]);
-    assert.deepEqual((await on(light(t), "guide", TITLE, "done", "taken")).said, [`Not noted: Too many SKUs (${SHORT}) has no step on the BRIMM Ops page now. ${FILM}`]);
+    assert.deepEqual((await on(light(t), "guide", TITLE, "done", "taken")).said, [`Not noted: Too many SKUs (${SHORT}) has no step in BRIMM Ops now. ${FILM}`]);
     t.done();
   });
   it("tells an explainer the step of its voice: recorded by her, or chosen in HyperFrames", async () => {

@@ -30,4 +30,4 @@ Moved to Studio on 2026-11-08 (check 80), set up fresh as "Jason's MacBook" by t
 ## Pages outside the repo
 
 - **The Studio By-Hand Checks page:** https://claude.ai/artifact/TmFpCY7GfR1KWw9hcftzrT. Every by-hand step for Jason is a numbered check there. Moving her laptop to Studio is checks 40 to 48 (the Mac Studio's own move, check 40, was done on 2026-11-03).
-- **Her guide is the BRIMM Ops guide:** https://claude.ai/artifact/Vu5JmADhftiEsPz4KYN4e4. The BRIMM Video Guide it replaced was retired on 2026-11-03: its link points to the BRIMM Ops guide.
+- **Her guide is the BRIMM Ops guide:** https://claude.ai/artifact/Vu5JmADhftiEsPz4KYN4e4, published from brimm-operations' `docs/guide/brimm-ops-guide.html`. **BRIMM Ops itself is a Mac app since 2026-11-14**, on both Macs; its old claude.ai page is kept read-only and cannot save. Its own setup and records: brimm-operations' README and `docs/wiki/`. The BRIMM Video Guide it replaced was retired on 2026-11-03: its link points to the BRIMM Ops guide.

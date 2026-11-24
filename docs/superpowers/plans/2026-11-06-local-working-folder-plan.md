@@ -1,5 +1,7 @@
 # BRIMM Video Studio: the local working folder (Phase 3 of the review changes), the build plan
 
+> **2026-11-23: BRIMM Ops is a Mac app since 2026-11-14**, not a claude.ai page; its old page is kept read-only and cannot save. Where this record says "the page" or "the BRIMM Ops page", read the BRIMM Ops app. This record is kept as it was written; the source of truth for BRIMM Ops is brimm-operations (`CLAUDE.md`, `docs/requirements.md`, and Sallie's guide, `docs/guide/brimm-ops-guide.html`), and for Studio, `docs/requirements.md` and `docs/wiki/` here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** She drops a video into the folder her Mac picked, and nothing waits for Dropbox. The recording and everything made from it stay on the Mac that took it in. At the hand-off, every recording she dropped for the video is copied into its episode's `Original files` folder in Dropbox, and leaves the Mac once Dropbox's check of that copy has passed and Dropbox reports it uploaded. The edited export, its transcript, the hand-off and the records go to Dropbox as today; Dropbox's checks run behind, and nothing waits for them. A session's recording never goes to Dropbox.

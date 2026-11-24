@@ -261,8 +261,8 @@ describe("handoffFaultV2, in plain words", () => {
   });
   it("refuses a title under video, for any kind, even a null one", () => {
     for (const make of [finished, raw, short, session]) {
-      assert.match(handoffFaultV2(changed(make, (h) => { h.video.title = "Price like you mean it"; })), /no title.*page/, make.name);
-      assert.match(handoffFaultV2(changed(make, (h) => { h.video.title = null; })), /no title.*page/, make.name);
+      assert.match(handoffFaultV2(changed(make, (h) => { h.video.title = "Price like you mean it"; })), /no title.*BRIMM Ops/, make.name);
+      assert.match(handoffFaultV2(changed(make, (h) => { h.video.title = null; })), /no title.*BRIMM Ops/, make.name);
     }
   });
   it("refuses a suggestion missing a part of it, each in its own words", () => {
