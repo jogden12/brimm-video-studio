@@ -344,7 +344,7 @@ function putReelVideoBack(ctx, { found, record, n, project, dir }, { rename }) {
 /** The record with Reel `n` marked picked, which is what `reel pick` did and what parts.js and the hand-off read: a Reel the list
     holds is picked unless it is finished (a finished Reel's project is opened, and it stays in the hand-off), and one it does not
     hold is added from `candidate`, the suggestion, when the project was made from one. */
-const picked = (n, candidate) => (next) => {
+export const picked = (n, candidate) => (next) => {
   const reels = Array.isArray(next.reels) ? next.reels : [];
   if (!reels.some((r) => r.n === n)) return candidate ? { ...next, reels: [...reels, { ...reelEntries([candidate])[0], status: "picked" }] } : next;
   return { ...next, reels: reels.map((r) => (r.n === n && r.status !== "finished" ? { ...r, status: "picked" } : r)) };

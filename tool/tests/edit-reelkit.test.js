@@ -192,6 +192,31 @@ describe("starting an edit", () => {
     assert.deepEqual(after.said, ["Reel 1 (lo-fi, version 1): its storyboard is made.", "Reel 2 (lo-fi, version 1): its storyboard is made."]);
   });
 
+  it("marks the Reel picked as its edit's entry is written, so a reading again or a kind corrected keeps it (final review C4)", async () => {
+    const w = world();
+    assert.equal(reread(w.found).reels.find((r) => r.n === 1).status, "candidate");
+    assert.equal((await reelkit(w, ["start", FOLDER, "reel", "1", "--mode", "lofi"])).code, 0);
+    const [words] = startedWords(w);
+    const scaffold = async (ctx, make) => {
+      mkdirSync(join(w.dirOf(1), "work"), { recursive: true });
+      writeState(w.dirOf(1), { slug: slugOf(1), key: make.key, mode: make.mode, version: 1, title: make.title, name: nameOf(1) });
+      return { dir: w.dirOf(1), slug: slugOf(1), name: nameOf(1), version: 1, from: FROM, workingCopy: COPY };
+    };
+    w.live.clear();
+    const ran = await reelkit(w, words, { reelKit: { scaffold, claude: claudeOf(w), run, every: 20, wait: (ms) => new Promise((done) => setTimeout(done, Math.min(ms, 20))) } });
+    assert.equal(ran.code, 0, ran.said.join("\n"));
+    const now = reread(w.found);
+    assert.equal(now.reels.find((r) => r.n === 1).status, "picked");
+    assert.deepEqual(now.reels.filter((r) => r.n !== 1).map((r) => r.status), reread(w.found).reels.filter((r) => r.n !== 1).map((r) => r.status), "only its own Reel");
+    assert.deepEqual(now.app.projects.map((p) => [p.key, p.fromSuggestion]), [["reel 1", 1]]);
+    // Its kind corrected: the Reel and the edit's entry stay, and the edit's reel 2 is still that Reel.
+    const r = await on(w, "kind", FOLDER, "finished", "--private", "no", "--again");
+    assert.equal(r.code, 0, r.said.join("\n"));
+    const after = reread(w.found);
+    assert.equal(after.reels.find((x) => x.n === 1)?.status, "picked");
+    assert.deepEqual(after.app.projects.map((p) => [p.key, p.state]), [["reel 1", "made"]]);
+  });
+
   it("passes startWhy whether the video is held as a session and the main video's title", async () => {
     // The main video of an upright recording, titled with a double quote: Reel Kit's new.py can't take it, so nothing is queued.
     const w = world({ record: { answer: { ...ANSWERED, seen: "upright, 0:40" }, name: { text: 'Pricing: "what" to charge', placeholder: false } } });

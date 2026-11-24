@@ -65,6 +65,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { KEPT, NOT_SET_UP as APP_NOT_SET_UP, byReelKit, openOnly } from "./app.js";
+import { picked } from "./app-reel.js";
 import { appVersionLine, noteAppVersion, readAppVersion } from "./app-version.js";
 import { localStamp } from "./episode.js";
 import { PIN as HF_PIN, cliPath } from "./hyperframes.js";
@@ -1191,7 +1192,10 @@ async function startNow(ctx, { found, record }, [key, mode, id, ...more], h) {
     const now = fresh.record;
     const entry = entryOf({ key, name: done.name, mode, version: done.version, at: localStamp(new Date(ctx.now())), machine: ctx.machine, fromSuggestion: reel ? reel.n : null, from: done.from, workingCopy: done.workingCopy });
     const app = { toolchain: now.app?.toolchain ?? HF_PIN.version, ...now.app, projects: [...(Array.isArray(now.app?.projects) ? now.app.projects : []), entry] };
-    if ((await h.save(ctx, { ...fresh.found, record: now }, { ...now, app }, "")) !== 0) return { why: EDIT_SAY.notWritten };
+    // The Reel is marked picked in the same save, as opening one in the app marks it (app-reel.js picked), so that a reading again or a
+    // kind corrected never replaces or removes the Reel this edit's `reel n` names.
+    const next = reel ? picked(reel.n)({ ...now, app }) : { ...now, app };
+    if ((await h.save(ctx, { ...fresh.found, record: now }, next, "")) !== 0) return { why: EDIT_SAY.notWritten };
     clearStart(ctx.home, found.name, key);
     return done;
   };
