@@ -1,6 +1,14 @@
 # Progress
 
-Where Studio stands. Last brought up to date on 2026-11-15 (main at b482897). Dated lines say what was true then; check `git log` and the By-Hand Checks page before relying on them.
+Where Studio stands. Last brought up to date on 2026-11-24 (main at 2570bf1); the sections below 2026-11-24's were written on 2026-11-15. Dated lines say what was true then; check `git log` and the By-Hand Checks page before relying on them.
+
+## 2026-11-24: where it stands before Jason travels
+
+- **Reel Kit in Studio is merged** (#71, 2570bf1). The Mac Studio's live checkout is at 2570bf1 and her folder there was re-written (`settings.js studio`) the same day.
+- **Reel Kit 1.2.0 is installed on the Mac Studio** (on Jason's yes; the first try stopped at the transcription model's download, the second finished and its own check passed).
+- **RK21's first run** found that HyperFrames' Chrome cannot run inside the worker's Claude Code sandbox, and that the render's profile needs loopback, a Mach port registration and `system-sched`. Its results and Jason's three choices are in `docs/superpowers/notes/2026-11-23-reel-kit-build-ledger.md`, "RK21, first run". No real Reel Kit edit or render runs on any Mac until he chooses and the change is built.
+- **Jason works from his MacBook for a few days** from 2026-11-25. Its steps are on the MacBook Travel Setup page (https://claude.ai/artifact/TELhEC4T5soWjVh2pjmHy2): a dev clone at `~/Claude Code/brimm-video-studio-dev` (the old installer's clone at `~/Claude Code/brimm-video-studio` is the way back and is left alone), BRIMM Ops' repo, Claude's memory copied over, Studio's update (check 34) and BRIMM Ops installed with the MacBook's own BRIMM Knowledge key. From that clone: tests only, and never `install.sh` without `--print`, `settings.js studio` or `reelkit install` (the app's own copy runs that Mac).
+- **Waits for the Mac Studio:** signing, notarizing and releasing builds of Studio and BRIMM Ops; pulling its live checkout; RK20 to RK23 and the rest of RK21. The test projects `~/BRIMM Video Work/RK21 spike` and `.reel-kit/tmp/rk21*` hold no footage and can go to the Trash once RK21 is done.
 
 ## Done
 
@@ -27,7 +35,7 @@ Where Studio stands. Last brought up to date on 2026-11-15 (main at b482897). Da
 - **BRIMM Ops named as the app** (2026-11-23, branch `claude/ops-is-an-app`): the guide, `edit.js`'s and `finish.js`'s messages and her two skills say "In BRIMM Ops:" and "Waiting from Studio" in the app's own words; `guide page` became `guide ops` (`open -a "BRIMM Ops"`, `OPS_APP` in `guide.js`); comments, README, CLAUDE.md, the wiki and the requirements name the app; dated records got a note under their title. BRIMM Ops' guide quotes Studio's old words in two hints: `docs/handoffs/2026-11-23-ops-guide-studio-wording.md` is for a BRIMM Ops session, to merge close together.
 - **Reel Kit in Studio**: design approved 2026-11-23 (`claude/reel-kit-design`, `docs/superpowers/specs/2026-11-23-reel-kit-in-studio-design.md`); its plan is being written in its own session. A/B tests for BRIMM Ops: `docs/handoffs/2026-11-23-ab-tests-for-brimm-ops.md` on that branch.
 
-- **Reel Kit in Studio is built** (2026-11-23) on the branch `claude/reel-kit-plan-289fd8`, to `docs/superpowers/plans/2026-11-23-reel-kit-in-studio-plan.md`: Tasks 1 to 18 and 20, each test first and reviewed, then a whole-branch review by three reviewers and one fix wave (suite 8,475 green). Task 19 (her laptop's setup) waits for the Phase 8 rollout to reach her laptop. Not pushed or merged. The controller's rulings, the parked items and the new by-hand checks RK20 to RK24 are in `docs/superpowers/notes/2026-11-23-reel-kit-build-ledger.md`. No real Reel Kit edit or render runs before RK21 (Chrome inside the sandbox) passes.
+- **Reel Kit in Studio is built** (2026-11-23) on the branch `claude/reel-kit-plan-289fd8`, to `docs/superpowers/plans/2026-11-23-reel-kit-in-studio-plan.md`: Tasks 1 to 18 and 20, each test first and reviewed, then a whole-branch review by three reviewers and one fix wave (suite 8,475 green). Task 19 (her laptop's setup) waits for the Phase 8 rollout to reach her laptop. Merged on 2026-11-24 as #71. The controller's rulings, the parked items and the new by-hand checks RK20 to RK24 are in `docs/superpowers/notes/2026-11-23-reel-kit-build-ledger.md`. No real Reel Kit edit or render runs before RK21 (Chrome inside the sandbox) passes.
 
 ## Next, and waiting on Jason
 
