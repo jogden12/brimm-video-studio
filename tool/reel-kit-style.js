@@ -13,6 +13,7 @@
 import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, renameSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { buildOf, isInstalled } from "./build.js";
 import { cloneIn, replaceIn } from "./dropbox.js";
@@ -33,6 +34,9 @@ const thisBuild = () => buildOf(dirname(TOOL));
 export const PACK_NAME = "Reel Kit style";
 /** The file in her pack that holds the shipped pack's fingerprint it was made from. */
 export const MADE_FROM = ".made-from";
+/** The folder in her pack that holds the shipped pack it was made from (no fonts), so that a carry onto a new one is a three-way merge.
+    Nothing reads it but the carry: syncPack, packDiff, packFault, her copies and the working copies leave it out (walkPack). */
+export const BASE = ".base";
 /** Her pack: `Reel Kit style` in BRIMM Video. */
 export const herPack = (settings) => join(settings.root, PACK_NAME);
 /** The style Reel Kit reads on this Mac. */
@@ -134,14 +138,14 @@ const kindOf = (path) => {
   }
 };
 
-/** Every folder and file in a pack, relative, `/`-joined, parents before what they hold. `before …` folders at its top, `.DS_Store`
-    and `._*` are left out. A link or anything that is neither a file nor a folder refuses the pack. */
+/** Every folder and file in a pack, relative, `/`-joined, parents before what they hold. `before …` folders and `.base` at its top,
+    `.DS_Store` and `._*` are left out. A link or anything that is neither a file nor a folder refuses the pack. */
 function walkPack(dir) {
   const dirs = [];
   const files = [];
   const walk = (abs, rel) => {
     for (const name of readdirSync(abs).sort()) {
-      if (leftover(name) || (rel === "" && isBackup(name))) continue;
+      if (leftover(name) || (rel === "" && (isBackup(name) || name === BASE))) continue;
       const r = rel ? `${rel}/${name}` : name;
       const kind = lstatSync(join(abs, name));
       if (kind.isSymbolicLink()) throw new Refused(`${nameIn(r)} is a link, and Studio copies only plain files and folders, so Reel Kit's style was left as it was.`);
@@ -272,8 +276,14 @@ export function ensureHerPack({ settings, home = homedir(), shipped = SHIPPED_PA
     }
     const from = folderFingerprint(pack);
     writeFileSync(join(pack, MADE_FROM), `${from}\n`);
-    const order = [...files.filter((f) => f !== "style.json"), MADE_FROM, ...files.filter((f) => f === "style.json")];
-    putIn({ work: pack, dest: her, dirs, files: order, guard: rootGuard(settings.root), put, dropbox });
+    // The base it is made from, beside it, for a carry onto a later one.
+    for (const f of files) {
+      mkdirSync(dirname(join(pack, BASE, f)), { recursive: true });
+      writeFileSync(join(pack, BASE, f), readFileSync(join(shipped, f)));
+    }
+    const base = files.map((f) => `${BASE}/${f}`);
+    const order = [...files.filter((f) => f !== "style.json"), ...base, MADE_FROM, ...files.filter((f) => f === "style.json")];
+    putIn({ work: pack, dest: her, dirs: [...dirs, BASE, ...dirs.map((d) => `${BASE}/${d}`)], files: order, guard: rootGuard(settings.root), put, dropbox });
     writeRecord(home, { madeAt: isoOf(now), from });
     return { made: true, why: "" };
   } catch (e) {
@@ -499,6 +509,9 @@ export function restorePack({ settings, name, home = homedir(), now = new Date()
   if (rootGone(settings.root)) throw new Error(NO_ROOT);
   const from = join(her, String(name ?? ""));
   if (!BACKUP.test(String(name ?? "")) || kindOf(from) !== "folder") throw new Error(`There is no copy called ${name} in Reel Kit style, so nothing was changed.`);
+  // A copy that is not whole is never put back, and nothing is kept for it.
+  const fault = packFault(from);
+  if (fault) throw new Error(`The copy called ${name} in Reel Kit style is not whole, so nothing was changed: ${fault}`);
   const kept = backupPack({ settings, home, now, dropbox, log });
   const work = workOf(home);
   const guard = rootGuard(settings.root, () => {
@@ -579,6 +592,30 @@ export function shippedMoved({ settings, shipped = SHIPPED_PACK } = {}) {
     in), the board's own fonts and board.py's scratch folder, and `.made-from`, which says the base her own pack was made from. */
 const notHers = (rel) => rel === MADE_FROM || ["fonts", "board/fonts", "board/_work"].some((d) => rel === d || rel.startsWith(`${d}/`));
 
+/** The files of a working copy that are a style's own, and go into her pack on her yes: STYLE.md, style.json, brand.css, any headshot, and
+    board/ but its fonts and board.py's scratch. Anything else the worker or Reel Kit left there stays out. */
+const styleFile = (rel) => TOP.includes(rel) || /^headshot\.[^/]+$/i.test(rel) || (rel.startsWith("board/") && !notHers(rel));
+/** The most of one file of hers a change puts in (a page's file is 15 MB at most), and of all of them. */
+const FILE_MOST = 16 << 20;
+const PACK_MOST = 64 << 20;
+
+/** Her pack's fingerprint as it is now: the SHA-256 of every file's relative path and SHA-256, `before …` copies and `.base` left out
+    (walkPack), each read the safe way; null when it can't be read whole. A change records it when its copy is made, and her yes is
+    refused when it is no longer the same. */
+export function packPrint(settings) {
+  try {
+    const her = herPack(settings);
+    const lines = walkPack(her).files.map((f) => {
+      const bytes = readSafe(join(her, f));
+      if (bytes === null) throw new Error("unread");
+      return `${createHash("sha256").update(bytes).digest("hex")}  ${f}\n`;
+    });
+    return createHash("sha256").update(lines.join("")).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
 /** Make the working copy of her pack that a style change runs on, at `to` (a folder of this Mac's own disk, not there yet): every file of her
     pack (never its `before …` copies), or of `from`, a change still waiting for her yes, each read the safe way; refused when it breaks a
     brand rule (packFault) as it is; then tool/brand/fonts' files that it names into its `fonts/`, where Reel Kit's style.py and board.py
@@ -612,8 +649,9 @@ class NotAdopted extends Error {
 
 /** Make the working copy `from` her pack: it is read again whole onto this Mac's own disk, checked there (packFault: what is checked is
     what is written), and its files put into her pack by dropbox.js's rule, each cloned in (a file of hers replaced, by replaceIn), the
-    folders made one by one, `style.json` last, with BRIMM Video's folder and her pack looked at again before each write. Never its font
-    files or `.made-from` (notHers). Files of hers it does not hold stay. Throws a NotAdopted in her words: `wrote` says how many files went
+    folders made one by one, `style.json` last, with BRIMM Video's folder and her pack looked at again before each write. Only a style's
+    own files go in (styleFile: STYLE.md, style.json, brand.css, any headshot and board/, never its font files or board.py's scratch), each
+    at most 16 MB and 64 MB in all. Files of hers it does not hold stay. Throws a NotAdopted in her words: `wrote` says how many files went
     in before it stopped (0: her pack is as it was). The backup of how it was is the caller's, made first. */
 export function adoptPack({ settings, home = homedir(), from, fonts = BRAND_FONTS, dropbox = {}, log = () => {} }) {
   const her = herPack(settings);
@@ -623,7 +661,14 @@ export function adoptPack({ settings, home = homedir(), from, fonts = BRAND_FONT
   const put = { dirs: [], files: [] };
   try {
     const { dirs, files } = walkPack(from);
-    const wanted = files.filter((f) => !notHers(f));
+    const wanted = files.filter(styleFile);
+    let total = 0;
+    for (const f of wanted) {
+      const size = lstatSync(join(from, f)).size;
+      if (size > FILE_MOST) throw new Refused(`${nameIn(f)} is larger than a file of a style may be, so Reel Kit's style was left as it was.`);
+      total += size;
+    }
+    if (total > PACK_MOST) throw new Refused("Reel Kit style would be larger than a style may be, so Reel Kit's style was left as it was.");
     copyLocal(from, work, wanted);
     const fault = packFault(work, { fonts });
     if (fault) throw new Refused(fault);
@@ -631,7 +676,7 @@ export function adoptPack({ settings, home = homedir(), from, fonts = BRAND_FONT
     const guard = rootGuard(settings.root, () => {
       if (kindOf(her) !== "folder") throw new Refused(NOT_FOLDER);
     });
-    putIn({ work, dest: her, dirs: dirs.filter((d) => !notHers(d)), files: order, guard, put, makeDest: false, replace: true, dropbox });
+    putIn({ work, dest: her, dirs: dirs.filter((d) => (d === "board" || d.startsWith("board/")) && !notHers(d)), files: order, guard, put, makeDest: false, replace: true, dropbox });
   } catch (e) {
     throw new NotAdopted(lineOf(e, log, settings.root), put.files.length);
   } finally {
@@ -715,9 +760,53 @@ export function withHerBoard({ settings, home = homedir(), fonts = BRAND_FONTS }
   }
 }
 
-/** A base's style.json with hers over it: an object is gone into key by key, and anything else (a value, a list) is hers wherever she has
-    it. `adds` gets each key of the base hers does not have, as a line: its dotted path and the value it brings. */
-function carried(base, hers, at, adds) {
+/** Every leaf of a style.json by dotted path, a list or an empty object being one leaf (a list is taken whole, never by its places). */
+function leafMap(value, at = "", out = new Map()) {
+  const plain = value !== null && typeof value === "object" && !Array.isArray(value);
+  if (!plain || Object.keys(value).length === 0) {
+    if (at) out.set(at, value);
+    return out;
+  }
+  for (const [k, v] of Object.entries(value)) leafMap(v, at ? `${at}.${k}` : k, out);
+  return out;
+}
+const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const shownOr = (v) => (v === undefined ? "none" : shown(v));
+/** Set the dotted path `path` of `doc` to `value`; a path through something that is not an object (hers and the base's disagree on its
+    shape) refuses the carry. */
+function setPath(doc, path, value) {
+  const parts = path.split(".");
+  let at = doc;
+  for (const part of parts.slice(0, -1)) {
+    if (at[part] === undefined) at[part] = {};
+    else if (at[part] === null || typeof at[part] !== "object" || Array.isArray(at[part])) throw new Refused(`Your style and the new starting style don't fit together at ${path}, so nothing was carried over: ask Jason.`);
+    at = at[part];
+  }
+  at[parts.at(-1)] = value;
+}
+
+/** The three-way merge of style.json, key by key (dotted paths): a key she never changed from her base (`old`) takes the new base's value,
+    or goes when the new base takes it out; a key she changed keeps hers; a key the new base adds is added; a key both changed keeps hers.
+    `brought` gets a line for each key the new base brings in, `kept` one for each key both changed, differently. */
+function mergeStyle(old, hers, neu, brought, kept) {
+  const o = leafMap(old);
+  const h = leafMap(hers);
+  const n = leafMap(neu);
+  const out = {};
+  for (const path of new Set([...h.keys(), ...n.keys(), ...o.keys()])) {
+    const [hv, ov, nv] = [h.get(path), o.get(path), n.get(path)];
+    const mine = !sameValue(hv, ov);
+    const theirs = !sameValue(nv, ov);
+    const value = mine ? hv : nv;
+    if (!mine && theirs) brought.push(nv === undefined ? `${path}: taken out` : `${path}: ${shown(nv)}`);
+    if (mine && theirs && !sameValue(hv, nv)) kept.push(`${path}: yours ${shownOr(hv)}, the new starting style's ${shownOr(nv)}`);
+    if (value !== undefined) setPath(out, path, value);
+  }
+  return out;
+}
+
+/** Her style.json with only the keys a new base adds (for a pack with no base kept: a value of hers can't be told from the old base's). */
+function addOnly(base, hers, at, brought) {
   const isPlain = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
   if (!isPlain(base) || !isPlain(hers)) return hers;
   const out = { ...hers };
@@ -725,52 +814,104 @@ function carried(base, hers, at, adds) {
     const path = at ? `${at}.${k}` : k;
     if (!Object.hasOwn(hers, k)) {
       out[k] = v;
-      adds.push(`${path}: ${shown(v)}`);
-    } else out[k] = carried(v, hers[k], path, adds);
+      brought.push(`${path}: ${shown(v)}`);
+    } else out[k] = addOnly(v, hers[k], path, brought);
   }
   return out;
 }
 
-/** What carrying her pack onto a new base shipped since it was made (shippedMoved) would do: { adds, style }, the lines of the base's keys
-    hers does not have yet, and her style.json with them added, her own values kept everywhere she has one. Her pack was made from a base
-    whose files are not kept, only its fingerprint (`.made-from`), so a value of hers can't be told from the old base's: every value she has
-    is kept. Throws, in her words, for a style.json of hers that does not read. */
+const sameBytes = (a, b) => (a === null ? b === null : b !== null && a.equals(b));
+
+/** What carrying her pack onto the base shipped now would do: { style, take, brought, kept, base }. `style` is her style.json merged
+    three ways with her base (`.base/style.json`) and the new one (mergeStyle); `take`, the other files of the new base to put in: each
+    whose copy in her pack is still her base's and that the new base changed; `brought` and `kept`, the lines of what is and isn't
+    carried (a file she changed that the new base changed too is kept, and named). `base` is false for a pack made before its base was
+    kept: then only the keys the new base adds are carried, and no file. Throws, in her words, for a style.json of hers that does not read. */
 export function carryPlan({ settings, shipped = SHIPPED_PACK }) {
-  let hers;
+  const her = herPack(settings);
+  const json = (dir) => {
+    try {
+      const doc = JSON.parse(textOf(join(dir, "style.json")));
+      return doc && typeof doc === "object" && !Array.isArray(doc) ? doc : null;
+    } catch {
+      return null;
+    }
+  };
+  const hers = json(her);
+  if (!hers) throw new Error("Your style.json in Reel Kit style does not read (Dropbox may still be bringing it over), so nothing was carried over.");
+  const neu = JSON.parse(readFileSync(join(shipped, "style.json"), "utf8"));
+  const baseDir = join(her, BASE);
+  const old = kindOf(baseDir) === "folder" ? json(baseDir) : null;
+  const brought = [];
+  const kept = [];
+  if (!old) return { style: addOnly(neu, hers, "", brought), take: [], brought, kept, base: false };
+  const style = mergeStyle(old, hers, neu, brought, kept);
+  const take = [];
+  let rels;
   try {
-    hers = JSON.parse(textOf(join(herPack(settings), "style.json")));
-  } catch {
-    hers = null;
+    rels = new Set([...walkPack(shipped).files, ...walkPack(baseDir).files].filter((f) => f !== "style.json"));
+  } catch (e) {
+    throw new Error(e instanceof Refused ? e.message : "Your style's starting style can't be read whole, so nothing was carried over: ask Jason.");
   }
-  if (!hers || typeof hers !== "object" || Array.isArray(hers)) throw new Error("Your style.json in Reel Kit style does not read (Dropbox may still be bringing it over), so nothing was carried over.");
-  const adds = [];
-  const style = carried(JSON.parse(readFileSync(join(shipped, "style.json"), "utf8")), hers, "", adds);
-  return { adds, style };
+  for (const f of [...rels].sort()) {
+    const [h, o, n] = [readSafe(join(her, f)), readSafe(join(baseDir, f)), readSafe(join(shipped, f))];
+    if (sameBytes(n, o)) continue;
+    if (sameBytes(h, o)) {
+      if (n !== null) {
+        take.push(f);
+        brought.push(nameIn(f));
+      }
+    } else if (!sameBytes(h, n)) kept.push(`${nameIn(f)} (the new starting style has another)`);
+  }
+  return { style, take, brought, kept, base: true };
 }
 
-/** Carry her pack onto the base shipped now (carryPlan), on her yes: a copy of her pack kept first (backupPack), then her style.json with
-    the base's new keys, then `.made-from` the base's fingerprint, each put in by dropbox.js's rule. style.json goes in before `.made-from`,
-    so a carry cut short is carried again. Gives the name of the copy kept; throws in her words. */
+/** Carry her pack onto the base shipped now (carryPlan), on her yes. Her pack as it will be is made whole on this Mac's own disk and
+    checked (packFault) before anything is kept or written; then a copy of her pack is kept (backupPack); then the new base's files she
+    never changed, her merged style.json, the new base as `.base/`, and `.made-from` its fingerprint, each put in by dropbox.js's rule:
+    her base and `.made-from` move to the new one only once the carry is written, so a carry cut short is carried again. Gives
+    { backup, brought, keptYours, base }: the copy kept, carryPlan's lines, and whether her pack had a base; throws in her words. */
 export function carryPack({ settings, home = homedir(), shipped = SHIPPED_PACK, now = new Date(), dropbox = {}, log = () => {} }) {
-  const { style } = carryPlan({ settings, shipped });
-  const kept = backupPack({ settings, home, now, dropbox, log });
+  const plan = carryPlan({ settings, shipped });
   const her = herPack(settings);
   const work = workOf(home);
+  let order;
+  let dirs;
   try {
-    // What is checked is her pack as it will be: her other files beside the new style.json.
     const { files } = walkPack(her);
-    copyLocal(her, work, files.filter((f) => f !== "style.json" && f !== MADE_FROM && !notHers(f)));
-    writeFileSync(join(work, "style.json"), `${JSON.stringify(style, null, 2)}\n`);
+    copyLocal(her, work, files.filter((f) => f !== "style.json" && !notHers(f)));
+    for (const f of plan.take) {
+      mkdirSync(dirname(join(work, f)), { recursive: true });
+      writeFileSync(join(work, f), readFileSync(join(shipped, f)));
+    }
+    writeFileSync(join(work, "style.json"), `${JSON.stringify(plan.style, null, 2)}\n`);
+    const base = walkPack(shipped);
+    for (const f of base.files) {
+      mkdirSync(dirname(join(work, BASE, f)), { recursive: true });
+      writeFileSync(join(work, BASE, f), readFileSync(join(shipped, f)));
+    }
     writeFileSync(join(work, MADE_FROM), `${folderFingerprint(shipped)}\n`);
+    // What is checked is her pack as it will be, before a copy of it is kept.
     const fault = packFault(work);
     if (fault) throw new Refused(fault);
-    const guard = rootGuard(settings.root, () => {
-      if (kindOf(her) !== "folder") throw new Refused(NOT_FOLDER);
-    });
-    putIn({ work, dest: her, dirs: [], files: ["style.json", MADE_FROM], guard, put: { dirs: [], files: [] }, makeDest: false, replace: true, dropbox });
-    return kept;
+    const parents = new Set(plan.take.flatMap((f) => f.split("/").slice(0, -1).map((_, i, parts) => parts.slice(0, i + 1).join("/"))));
+    dirs = [...[...parents].sort(), BASE, ...base.dirs.map((d) => `${BASE}/${d}`)];
+    order = [...plan.take, "style.json", ...base.files.map((f) => `${BASE}/${f}`), MADE_FROM];
   } catch (e) {
-    throw new Error(`${lineOf(e, log, settings.root)} How it was is kept as ${kept}.`);
+    rmSync(work, { recursive: true, force: true });
+    throw new Error(lineOf(e, log, settings.root));
+  }
+  try {
+    const backup = backupPack({ settings, home, now, dropbox, log });
+    try {
+      const guard = rootGuard(settings.root, () => {
+        if (kindOf(her) !== "folder") throw new Refused(NOT_FOLDER);
+      });
+      putIn({ work, dest: her, dirs, files: order, guard, put: { dirs: [], files: [] }, makeDest: false, replace: true, dropbox });
+    } catch (e) {
+      throw new Error(`${lineOf(e, log, settings.root)} How it was is kept as ${backup}.`);
+    }
+    return { backup, brought: plan.brought, keptYours: plan.kept, base: plan.base };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

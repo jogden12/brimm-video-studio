@@ -41,7 +41,7 @@ import { reelKitHome } from "./reel-kit.js";
 import { readState, writeState } from "./reel-kit-project.js";
 import {
   SHIPPED_PACK, adoptPack, backupPack, backupsOf, carryPack, carryPlan, ensureHerPack, herPack, makeWorkingCopy, packDiff, packFault, packLines,
-  restorePack, shippedMoved, withHerBoard
+  packPrint, restorePack, shippedMoved, withHerBoard
 } from "./reel-kit-style.js";
 import { STYLE_WORK } from "./reel-kit-worker-tools.js";
 import { macLock, processStart, runJob, statusOf } from "./reel-kit-worker.js";
@@ -81,9 +81,14 @@ export const STYLE_SAY = Object.freeze({
   differs: "How your style differs from the starting style:",
   newBase: `Jason has shipped a new starting style since yours was made. Say "carry my style over" to see what that would change.`,
   noNewBase: "Jason hasn't shipped a new starting style since yours was made, so there is nothing to carry over.",
-  carryAdds: "Carrying your style over to the new starting style would add:",
-  carryNothing: "The new starting style adds nothing your style doesn't have already.",
-  carryKeeps: "Your own choices stay as they are.",
+  carryWould: "Carrying your style over to the new starting style would bring in:",
+  carryWouldKeep: "It would keep yours where you and Jason both changed it:",
+  broughtIn: "Brought in from the new starting style:",
+  keptYours: "Kept yours where you and Jason both changed it:",
+  carryNothing: "The new starting style changes nothing you haven't changed yourself, so carrying it over only marks your style as made from it.",
+  noBase: "Your style was made before Studio kept the starting style it came from, so only what the new one adds can be carried over: Jason's other changes can't be brought in for it.",
+  herChanged: `Your style has changed since this change was made (on your other Mac, or by going back), so it wasn't kept: say what you'd like changed again.`,
+  herChangedWhy: "your style had changed since it was made.",
   carryAsk: `Say "yes, carry my style over" to do it.`,
   carried: (kept) => `Your style is carried over to the new starting style. How it was is kept as "${kept}".`,
   macBusy: "Reel Kit is making something on this Mac right now, so your style was left as it was: say it again once that's done.",
@@ -147,23 +152,38 @@ function newChange(home, ms) {
   throw new Error("newChange: no stamp is free");
 }
 
-/** The newest change on this Mac: { stamp, dir, state, status } (status the worker's statusOf: a run that died reads stopped), or null. */
-function latestChange(ctx) {
+/** The changes on this Mac, newest first, each { stamp, dir, state, status } (status the worker's statusOf: a run that died reads stopped). */
+function changesOf(ctx) {
   let names;
   try {
     names = readdirSync(changesDir(ctx.home)).filter((name) => STAMP.test(name)).sort(byStamp).reverse();
   } catch {
-    return null;
+    return [];
   }
-  for (const stamp of names) {
+  return names.flatMap((stamp) => {
     const dir = join(changesDir(ctx.home), stamp);
     const state = readState(dir);
-    if (state && state.job === "style" && typeof state.slug === "string") return { stamp, dir, state, status: statusOf(dir, ctx.alive, kitOf(ctx).startOf ?? processStart) };
-  }
-  return null;
+    return state && state.job === "style" && typeof state.slug === "string" ? [{ stamp, dir, state, status: statusOf(dir, ctx.alive, kitOf(ctx).startOf ?? processStart) }] : [];
+  });
 }
 
 const isBusy = (status) => status.state === "queued" || status.state === "working";
+/** Whether a change is still under way or waits for her: queued, at work, stopped, or its board made. */
+const isPending = (change) => isBusy(change.status) || change.status.state === "stopped" || change.status.state === "storyboard";
+/** The newest change still under way or waiting for her, or null: `show`, `yes`, `resume` and the next `change` speak of it. A change that
+    built on one waiting for her yes and was then refused leaves that one waiting. */
+const pendingChange = (ctx, all = changesOf(ctx)) => all.find(isPending) ?? null;
+
+/** Write a change's studio.json, saying in the log when it can't be: what she reads is said all the same. */
+function markChange(ctx, dir, fields) {
+  try {
+    writeState(dir, { ...(readState(dir) ?? {}), ...fields });
+    return true;
+  } catch (e) {
+    (kitOf(ctx).log ?? (() => {}))(`Reel Kit style: a change's studio.json could not be written: ${e.code || e.message}`);
+    return false;
+  }
+}
 
 /** What her pack's functions are given: this Mac's settings and home, the shipped pack (a test's copy), this checkout's build, dropbox.js's
     options. Nothing they log reaches her chat. */
@@ -232,19 +252,22 @@ function stageBoard(ctx, h, { from, slug, title }) {
 /** `show`: a change under way, or its board once made; otherwise her pack's main lines and its board. */
 async function show(ctx, more, h) {
   if (more.length) return help(ctx, h);
-  const latest = latestChange(ctx);
-  if (latest) {
-    const { state, step, why } = latest.status;
+  const all = changesOf(ctx);
+  const pending = pendingChange(ctx, all);
+  // How the newest change ended, when it is not the one still waiting: refused (with why) or failed.
+  const newest = all[0];
+  if (newest && newest !== pending) {
+    if (newest.status.state === "refused" && typeof newest.state.why === "string" && newest.state.why) ctx.say(STYLE_SAY.notKept(newest.state.why));
+    if (newest.status.state === "failed") ctx.say(STYLE_SAY.failed);
+  }
+  if (pending) {
+    const { state, step, why } = pending.status;
     if (state === "queued") return tell(ctx, STYLE_SAY.waiting);
     if (state === "working") return tell(ctx, STYLE_SAY.working(step));
     if (state === "stopped") return tell(ctx, STYLE_SAY.stopped(step, why === "usage"));
-    if (state === "storyboard") {
-      if (!stageBoard(ctx, h, { from: join(changePack(latest.dir), "board"), slug: latest.state.slug, title: "Your Reel Kit style, changed" })) return refuse(ctx, STYLE_SAY.notStaged);
-      ctx.say(STYLE_SAY.ready);
-      return 0;
-    }
-    if (state === "refused" && typeof latest.state.why === "string" && latest.state.why) ctx.say(STYLE_SAY.notKept(latest.state.why));
-    if (state === "failed") ctx.say(STYLE_SAY.failed);
+    if (!stageBoard(ctx, h, { from: join(changePack(pending.dir), "board"), slug: pending.state.slug, title: "Your Reel Kit style, changed" })) return refuse(ctx, STYLE_SAY.notStaged);
+    ctx.say(STYLE_SAY.ready);
+    return 0;
   }
   const o = packOpts(ctx);
   const ensured = ensureHerPack(o);
@@ -273,20 +296,16 @@ async function change(ctx, more, h) {
   if (chatHolds(ctx)) return refuse(ctx, HELD_NARROWED);
   const notReady = h.notReady();
   if (notReady) return refuse(ctx, notReady);
-  const latest = latestChange(ctx);
-  if (latest && isBusy(latest.status)) return refuse(ctx, STYLE_SAY.busy);
+  const pending = pendingChange(ctx);
+  if (pending && isBusy(pending.status)) return refuse(ctx, STYLE_SAY.busy);
   const o = packOpts(ctx);
   const ensured = ensureHerPack(o);
   if (ensured.why) return refuse(ctx, ensured.why);
-  const building = latest && latest.status.state === "storyboard" ? latest : null;
+  // Her pack is checked before anything is kept or copied: a half-synced pack is never kept as a copy to go back to.
+  const fault = packFault(herPack(ctx.settings));
+  if (fault) return refuse(ctx, fault);
+  const building = pending && pending.status.state === "storyboard" ? pending : null;
 
-  let backup;
-  try {
-    backup = backupPack({ ...o, now: new Date(ctx.now()) });
-  } catch (e) {
-    return refuse(ctx, e.message);
-  }
-  ctx.say(STYLE_SAY.kept(backup));
   let stamp;
   try {
     stamp = newChange(ctx.home, ctx.now());
@@ -294,69 +313,79 @@ async function change(ctx, more, h) {
     return refuse(ctx, STYLE_SAY.notCopied);
   }
   const dir = changeDir(ctx.home, stamp);
-  const why = makeWorkingCopy({ settings: ctx.settings, to: changePack(dir), from: building ? changePack(building.dir) : null });
-  if (why) {
+  const leave = (why) => {
     rmSync(dir, { recursive: true, force: true });
     return refuse(ctx, why);
+  };
+  const why = makeWorkingCopy({ settings: ctx.settings, to: changePack(dir), from: building ? changePack(building.dir) : null });
+  if (why) return leave(why);
+  // Her pack as the copy came from it (a change built on a waiting one comes from what that one came from): her yes is refused when it
+  // is no longer the same.
+  const herPrint = building ? building.state.herPrint : packPrint(ctx.settings);
+  if (typeof herPrint !== "string") return leave(STYLE_SAY.notCopied);
+  let backup;
+  try {
+    backup = backupPack({ ...o, now: new Date(ctx.now()) });
+  } catch (e) {
+    return leave(e.message);
   }
+  ctx.say(STYLE_SAY.kept(backup));
   const at = new Date(ctx.now()).toISOString();
-  // Marked queued by this run first, so that a second ask is refused while the run it starts takes the mark for its own (runJob).
-  const state = { slug: `style-${stamp}`, job: "style", kind: "style", ask: { text, at }, backup, from: building ? building.stamp : "her pack", madeAt: at, state: "queued", step: "style", pid: process.pid, why: "", queuedAt: at };
+  // Marked queued by this run first, so that a second ask is refused while the run it starts takes the mark for its own (runJob). A
+  // waiting change it builds on is dropped only once this one has its board (styleNow).
+  const state = {
+    slug: `style-${stamp}`, job: "style", kind: "style", ask: { text, at }, backup, from: building ? building.stamp : "her pack", buildsOn: building ? building.stamp : null,
+    herPrint, madeAt: at, state: "queued", step: "style", pid: process.pid, why: "", queuedAt: at
+  };
   try {
     writeState(dir, state);
-    if (building) writeState(building.dir, { ...(readState(building.dir) ?? building.state), state: "dropped", droppedFor: stamp });
   } catch {
-    rmSync(dir, { recursive: true, force: true });
-    return refuse(ctx, STYLE_SAY.notCopied);
+    return leave(STYLE_SAY.notCopied);
   }
+  // A stopped change this one does not build on is dropped: this one takes its place.
+  if (pending && pending.status.state === "stopped") markChange(ctx, pending.dir, { state: "dropped", droppedFor: stamp });
   const pid = startDetached(ctx, { command: "reelkit", folder: "style", args: ["change", stamp] });
   if (!Number.isInteger(pid)) {
-    try {
-      writeState(dir, { ...state, state: "failed", why: "not started", pid: null });
-    } catch {
-      // It reads as stopped once this run ends, then.
-    }
+    markChange(ctx, dir, { state: "failed", why: "not started", pid: null });
     return refuse(ctx, STYLE_SAY.notStarted);
   }
-  try {
-    writeState(dir, { ...(readState(dir) ?? state), pid });
-  } catch {
-    // The run marks it itself as it starts.
-  }
+  markChange(ctx, dir, { pid });
   if (building) ctx.say(STYLE_SAY.builds);
   ctx.say(STYLE_SAY.queued);
   return 0;
 }
 
-/** `yes`: the change she has seen made her pack, under the Mac's Reel Kit lock. */
+/** `yes`: the change she has seen made her pack, under the Mac's Reel Kit lock, once her pack is as it was when the change's copy was made. */
 async function yes(ctx, more, h) {
   if (more.length) return help(ctx, h);
-  const latest = latestChange(ctx);
-  if (!latest) return refuse(ctx, STYLE_SAY.noWaiting);
-  if (isBusy(latest.status)) return refuse(ctx, STYLE_SAY.busy);
-  if (latest.status.state === "stopped") return refuse(ctx, STYLE_SAY.stopped(latest.status.step, latest.status.why === "usage"));
-  if (latest.status.state !== "storyboard") return refuse(ctx, STYLE_SAY.noWaiting);
-  if (!pageOf(ctx.home, latest.state.slug)) return refuse(ctx, STYLE_SAY.notSeen);
+  const pending = pendingChange(ctx);
+  if (!pending) return refuse(ctx, STYLE_SAY.noWaiting);
+  if (isBusy(pending.status)) return refuse(ctx, STYLE_SAY.busy);
+  if (pending.status.state === "stopped") return refuse(ctx, STYLE_SAY.stopped(pending.status.step, pending.status.why === "usage"));
+  if (!pageOf(ctx.home, pending.state.slug)) return refuse(ctx, STYLE_SAY.notSeen);
   return underMacLock(ctx, async () => {
-    const now = latestChange(ctx);
-    if (!now || now.stamp !== latest.stamp || now.status.state !== "storyboard") return refuse(ctx, STYLE_SAY.noWaiting);
+    const now = pendingChange(ctx);
+    if (!now || now.stamp !== pending.stamp || now.status.state !== "storyboard") return refuse(ctx, STYLE_SAY.noWaiting);
     const pack = changePack(now.dir);
+    const notKept = (why, line) => {
+      rmSync(pack, { recursive: true, force: true });
+      markChange(ctx, now.dir, { state: "refused", why });
+      return refuse(ctx, line ?? why);
+    };
+    // Changed meanwhile (on the other Mac, or by going back): this change was made from what is no longer her pack.
+    if (packPrint(ctx.settings) !== now.state.herPrint) return notKept(STYLE_SAY.herChangedWhy, STYLE_SAY.herChanged);
     try {
       adoptPack({ ...packOpts(ctx), from: pack });
     } catch (e) {
       if (e.wrote > 0) {
-        writeState(now.dir, { ...now.state, state: "failed", why: "partly" });
+        markChange(ctx, now.dir, { state: "failed", why: "partly" });
         return refuse(ctx, STYLE_SAY.partly(now.state.backup));
       }
-      // A change that breaks a brand rule after all is refused, and nothing of it is kept.
-      const fault = packFault(pack);
-      if (fault) {
-        rmSync(pack, { recursive: true, force: true });
-        writeState(now.dir, { ...now.state, state: "refused", why: fault });
-      }
+      // A change that breaks a brand rule after all (or is too large) is refused, and nothing of it is kept.
+      if (packFault(pack) || /larger than/.test(e.message)) return notKept(e.message);
       return refuse(ctx, e.message);
     }
-    writeState(now.dir, { ...now.state, state: "kept", keptAt: new Date(ctx.now()).toISOString() });
+    markChange(ctx, now.dir, { state: "kept", keptAt: new Date(ctx.now()).toISOString() });
     rmSync(pack, { recursive: true, force: true });
     ctx.say(STYLE_SAY.changed);
     return 0;
@@ -405,6 +434,17 @@ async function diff(ctx, more, h) {
   return 0;
 }
 
+/** What a carry brings in and what it keeps of hers, as lines: before her yes (`done` false), what it would do, and after it, what it
+    did. A pack with no base says first that only what the new base adds can be carried. */
+function sayCarry(ctx, { brought, kept, base }, done) {
+  if (!base) ctx.say(STYLE_SAY.noBase);
+  if (!brought.length && !kept.length) ctx.say(STYLE_SAY.carryNothing);
+  if (brought.length) ctx.say(done ? STYLE_SAY.broughtIn : STYLE_SAY.carryWould);
+  for (const line of brought) ctx.say(`  ${line}`);
+  if (kept.length) ctx.say(done ? STYLE_SAY.keptYours : STYLE_SAY.carryWouldKeep);
+  for (const line of kept) ctx.say(`  ${line}`);
+}
+
 /** `carry [yes]`: what carrying her pack onto a new starting style would add, and with yes, it done. */
 async function carry(ctx, more, h) {
   const go = more.length === 1 && more[0] === "yes";
@@ -423,36 +463,32 @@ async function carry(ctx, more, h) {
     } catch (e) {
       return refuse(ctx, e.message);
     }
-    if (plan.adds.length) {
-      ctx.say(STYLE_SAY.carryAdds);
-      for (const line of plan.adds) ctx.say(`  ${line}`);
-    } else ctx.say(STYLE_SAY.carryNothing);
-    ctx.say(STYLE_SAY.carryKeeps);
+    sayCarry(ctx, plan, false);
     ctx.say(STYLE_SAY.carryAsk);
     return 0;
   }
   return underMacLock(ctx, async () => {
+    let done;
     try {
-      ctx.say(STYLE_SAY.carried(carryPack({ ...o, now: new Date(ctx.now()) })));
-      return 0;
+      done = carryPack({ ...o, now: new Date(ctx.now()) });
     } catch (e) {
       return refuse(ctx, e.message);
     }
+    ctx.say(STYLE_SAY.carried(done.backup));
+    sayCarry(ctx, { brought: done.brought, kept: done.keptYours, base: true }, true);
+    return 0;
   });
 }
 
 /** `resume`: a change that stopped, carried on from its step, detached. */
 async function resume(ctx, more, h) {
   if (more.length) return help(ctx, h);
-  const latest = latestChange(ctx);
+  const latest = pendingChange(ctx);
   if (!latest || latest.status.state !== "stopped") return refuse(ctx, latest && isBusy(latest.status) ? STYLE_SAY.busy : STYLE_SAY.notStopped);
   const pid = startDetached(ctx, { command: "reelkit", folder: "style", args: ["resume", latest.stamp] });
   if (!Number.isInteger(pid)) return refuse(ctx, STYLE_SAY.notStarted);
-  try {
-    writeState(latest.dir, { ...(readState(latest.dir) ?? latest.state), state: "queued", pid, why: "", queuedAt: new Date(ctx.now()).toISOString() });
-  } catch {
-    // The run marks it itself as it starts.
-  }
+  // The run marks it itself as it starts, when this can't.
+  markChange(ctx, latest.dir, { state: "queued", pid, why: "", queuedAt: new Date(ctx.now()).toISOString() });
   ctx.say(STYLE_SAY.resuming);
   return 0;
 }
@@ -507,6 +543,11 @@ export async function styleNow(ctx, words, h) {
   if (end === "storyboard") {
     const fault = lookAtChange(dir);
     if (fault) [end, why] = ["refused", fault];
+    else {
+      // Its board is made: the waiting change it built on is dropped now, and not before, so that one refused leaves it waiting.
+      const on = readState(dir)?.buildsOn;
+      if (typeof on === "string" && STAMP.test(on) && readState(changeDir(ctx.home, on))?.state === "storyboard") markChange(ctx, changeDir(ctx.home, on), { state: "dropped", droppedFor: stamp });
+    }
   }
   ctx.say(`Reel Kit's style change ${stamp} ended ${end}${why ? ` (${why})` : ""}.`);
   return end === "storyboard" ? 0 : 1;

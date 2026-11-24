@@ -31,12 +31,14 @@ function world({ withRoot = true } = {}) {
   return { base, home, root, settings: { root }, shipped };
 }
 
-/** Every file under `dir`, relative, with its bytes, `before …` folders left out when `backups` is false. */
-function filesOf(dir, { backups = true } = {}) {
+/** Every file under `dir`, relative, with its bytes, `before …` folders left out when `backups` is false, and the base her pack was made
+    from (`.base/`, plan Task 13) when `base` is false. */
+function filesOf(dir, { backups = true, base = false } = {}) {
   const out = {};
   const walk = (abs, rel) => {
     for (const name of readdirSync(abs).sort()) {
       if (!backups && rel === "" && name.startsWith("before ")) continue;
+      if (!base && rel === "" && name === ".base") continue;
       const path = join(abs, name);
       const r = rel ? `${rel}/${name}` : name;
       if (statSync(path).isDirectory()) walk(path, r);
@@ -67,6 +69,8 @@ describe("her Reel Kit style pack in Dropbox", () => {
     assert.equal(Buffer.from(hers[".made-from"], "base64").toString("utf8").trim(), fingerprint);
     delete hers[".made-from"];
     assert.deepEqual(hers, filesOf(w.shipped));
+    // And the base it was made from beside it, for a later carry (plan Task 13).
+    assert.deepEqual(filesOf(join(her, ".base")), filesOf(w.shipped));
     const record = readJson(join(reelKitHome(w.home), "style-made.json"));
     assert.equal(record.from, fingerprint);
     assert.equal(record.madeAt, "2026-11-23T10:00:00.000Z");
