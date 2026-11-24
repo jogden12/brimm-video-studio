@@ -1,6 +1,6 @@
 ---
 name: brimm-edit
-description: Use for anything about The BRIMM's videos and episodes: what is waiting, what to do with a new video and what comes next, step by step, what a new video is, what Claude found in it, client or group sessions and their teachings, opening an episode, what was done in HyperFrames and its versions, its name and title, Reels, finishing it, the reference folder of post styles, a script she has and the plan made from it, the footage dropped for it, conflicts, and how far something has got.
+description: Use for anything about The BRIMM's videos and episodes: what is waiting, what to do with a new video and what comes next, step by step, what a new video is, what Claude found in it, client or group sessions and their teachings, opening an episode, what was done in HyperFrames and its versions, its name and title, Reels, finishing it, the reference folder of post styles, a script she has and the plan made from it, the footage dropped for it, conflicts, Reel Kit edits and her Reel Kit style, and how far something has got.
 ---
 
 # brimm-edit
@@ -204,6 +204,33 @@ More on these rows. Each rule starts with the row it belongs to:
 - "The client agreed to Reel 2": Never ask who agreed in the chat: if she writes it there, never repeat it or pass it into a command, and tell her it goes in the dialog only.
 - "Clear the session mark": Before running it, tell her a dialog will open on her Mac: it shows the video's label first, then asks whether to clear its session mark, so she checks it is the video she means; she clicks "Clear it" herself, within a minute; Claude cannot press it, and Return presses Cancel.
 - "Clear the session mark": Its line that a dialog is open is printed before it waits for her click, so once it has returned the dialog has closed: never pass that line on, and tell her only how it ended, from what it printed after that line.
+
+## A Reel Kit edit
+
+A recording with Sallie on camera can go to Reel Kit after its card, beside the HyperFrames project. For a Reel Kit edit, her "render it", "carry on" and "open it in HyperFrames" are the rows below.
+<edit> names one edit: the id `episodes` gives its episode, then main or reel-2, then -v and the version `reelkit status "<episode>"` says, as 1a2b3c-reel-2-v1.
+
+| She says | Run |
+|---|---|
+| "Make a Reel Kit edit" (of the main video, or of Reel 2) | Ask her on one `AskUserQuestion`: "Hi-fi, lo-fi or showcase?", every time; never pick for her. Then `reelkit start "<episode>" main --mode hifi`, with reel 2 for main and lofi or showcase for hifi as she said, and tell her what it says, the mode its kind of video leans to among it |
+| "How are the Reel Kit edits going?" | `reelkit status "<episode>"`: tell her each line. What Reel Kit needs from her is in its own words: say it as printed, and that she drops it in the folder that opened in Finder |
+| "Show me the storyboard" | `reelkit storyboard "<episode>" <edit>`. The rest is in the rules for this row, below. |
+| "My notes are in" | Read the comments of the edit's page with ArtifactComments. The rest is in the rules for this row, below. |
+| "Looks good: render it" / "Looks good, render it" / "Go" | `reelkit go "<episode>" <edit>`: it is built to render, in the background |
+| "Make the changes" | `reelkit revise "<episode>" <edit>`: its next storyboard, made from her notes |
+| "Carry on with the edit" / "Carry on" | `reelkit resume "<episode>" <edit>`: an edit that stopped picks up from its step |
+| "Render it" | `reelkit render "<episode>" <edit>`: one way out. Once it is rendered, her "hand it off" is the "Hand it off" row |
+| "Open this edit in HyperFrames" / "open it in HyperFrames", of a built edit | `reelkit app "<episode>" <edit>`: the other way out. Reel Kit changes it no more, and she exports it there |
+| "Show my style" / "How is my style different?" | `reelkit style show`, its board published as a storyboard's is / `reelkit style diff` |
+| "Change my style: …" / "Yes", to its new board / "Carry on with my style" | `reelkit style change "<what she asked>"` / `reelkit style yes` / `reelkit style resume` |
+| "My earlier styles" / "Go back to <name>" | `reelkit style back` / `reelkit style back "<copy>"`, the name as printed |
+| "Carry my style over" | `reelkit style carry`: tell her what it would change, and only on her yes `reelkit style carry yes` |
+| A Reel Kit download dropped in the chat | `reelkit install "<download>"`: tell her its steps, and that nothing is installed until Jason says yes; never add a yes to it. "How is Reel Kit's setup going?": `reelkit status` |
+
+- "Show me the storyboard": First Read the file its For Claude line names, whole; then publish with the Artifact tool exactly the input that line gives, nothing added or changed. Never publish a page it did not print, and never share a page.
+- "Show me the storyboard": If a publish fails, run `reelkit storyboard "<episode>" <edit> local`: Reel Kit's own page opens on this Mac. Tell her what it says.
+- "My notes are in": Pass each comment to `reelkit note "<episode>" <edit> <beat> "<note>"`, her words as written, its beat p and a number, or all for the whole page; then reply exactly `On it.` and resolve it.
+- "My notes are in": A comment "Looks good" on beat all is her go: run `reelkit go "<episode>" <edit>` for it, never a note. Then tell her what it says.
 
 ## Not ready yet: say so, and what to do by hand
 
