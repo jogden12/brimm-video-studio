@@ -2,10 +2,6 @@
 
 Where Studio stands. Last brought up to date on 2026-11-24 (main at 2570bf1); the sections below 2026-11-24's were written on 2026-11-15. Dated lines say what was true then; check `git log` and the By-Hand Checks page before relying on them.
 
-## 2026-11-25: a version for Sallie's clients (a proposal)
-
-- **Proposed, nothing built:** a BRIMM-named Claude plugin for Sallie's clients, for Claude Code or Cowork on a Mac, using HyperFrames and Reel Kit (MIT). It makes a polished long-form video and clips from the client's own video, then a hand-off pack any AI can use, and a separate content cascade skill drafts from it. No sessions for now. Jason's decisions and the design: `docs/superpowers/specs/2026-11-25-brimm-video-studio-for-clients-design.md`. It belongs in a new repository Jason creates; Studio and the BRIMM Ops contract are untouched. Next: checks C1 to C6 (section 15), then the build order (section 16).
-
 ## 2026-11-24: where it stands before Jason travels
 
 - **Reel Kit in Studio is merged** (#71, 2570bf1). The Mac Studio's live checkout is at 2570bf1 and her folder there was re-written (`settings.js studio`) the same day.

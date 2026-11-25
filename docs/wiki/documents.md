@@ -12,7 +12,6 @@ Studio began as brimm-video: its history up to c666508, which is the tag `brimm-
 - **The design, accepted on 2026-10-27:** `docs/superpowers/specs/2026-10-27-brimm-video-with-the-hyperframes-app.md`.
 - **The architecture and the workflows:** `docs/superpowers/specs/2026-10-27-brimm-video-studio-architecture.md` (older than the code in places: `architecture.md` says where).
 - **The build plan:** `docs/superpowers/plans/2026-10-27-brimm-video-studio-build-plan.md`. Later plans and specs (the HyperFrames-led path, the local working folder, the import access notice, the Mac app) are beside it in `docs/superpowers/plans/` and `docs/superpowers/specs/`; findings and rulings in `docs/superpowers/notes/`.
-- **A version for Sallie's clients (a proposal, 2026-11-25):** `docs/superpowers/specs/2026-11-25-brimm-video-studio-for-clients-design.md`, to move to its own repository.
 - **The handoffs:** `docs/handoffs/`.
 - **How the tool works today and how it is set up:** `README.md`, "Unedited video" (and its "Episodes", "Finishing an episode" sections).
 - **Checklists and the rules a project carries:** `docs/phase-a0/` (`brief.md`, `settings.json`, the A0 checklist), `docs/phase-0/`, `docs/phase-4/`, `docs/phase-h0/`.
